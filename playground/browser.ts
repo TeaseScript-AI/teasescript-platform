@@ -196,7 +196,7 @@ function sourceEdited(saveDraft = true): void {
 
 function compileAndReset(): void {
   try {
-    const result = compileWorkspaceSource(elements.source.value);
+    const result = compileWorkspaceSource(elements.source.value, { wallClockMs: Date.now() });
     compiledRevision = result.plan === null ? null : sourceRevision;
     applyResult(result, true);
     setActionStatus(
@@ -389,6 +389,7 @@ function submitComposer(): void {
     interaction === null ||
     (interaction.interactionKind !== "text" &&
       interaction.interactionKind !== "number" &&
+      interaction.interactionKind !== "temporal" &&
       interaction.interactionKind !== "choice")
   ) {
     setPlayerFeedback("Free chat is unavailable while no scripted text answer is active.");
@@ -405,21 +406,25 @@ function submitComposer(): void {
   );
 }
 
-function activateButton(): void {
+/** Controls carry the action they were rendered for, so a stale control cannot answer a later interaction. */
+function activateButton(actionId: number): void {
   if (!runtimeIsCurrent()) return;
   // EVIDENCE: runtimeIsCurrent above synchronously proved both retained values are present and current.
   applyWorkspaceControl(
-    activateWorkspaceButton(plan as InstructionPlan, snapshot as RuntimeSnapshot),
+    activateWorkspaceButton(plan as InstructionPlan, snapshot as RuntimeSnapshot, actionId),
   );
 }
 
-function selectChoice(
-  selection: { kind: "label"; value: string | number } | { kind: "text"; value: string },
-): void {
+function selectChoice(actionId: number, optionIndex: number): void {
   if (!runtimeIsCurrent()) return;
   // EVIDENCE: runtimeIsCurrent above synchronously proved both retained values are present and current.
   applyWorkspaceControl(
-    selectWorkspaceChoice(plan as InstructionPlan, snapshot as RuntimeSnapshot, selection),
+    selectWorkspaceChoice(
+      plan as InstructionPlan,
+      snapshot as RuntimeSnapshot,
+      actionId,
+      optionIndex,
+    ),
   );
 }
 
@@ -525,6 +530,7 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
     interaction !== null &&
     (interaction.interactionKind === "text" ||
       interaction.interactionKind === "number" ||
+      interaction.interactionKind === "temporal" ||
       interaction.interactionKind === "choice");
   elements.composerInput.disabled =
     !current || (interaction === null && presentation.pacingGate === null);
@@ -547,8 +553,10 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = interaction.ui.buttonLabel;
-    button.setAttribute("aria-label", accessibleName);
-    button.addEventListener("click", activateButton);
+    // The visible label names the button; the localized default only stands in for a blank label.
+    if (interaction.ui.buttonLabel.trim() === "") button.setAttribute("aria-label", accessibleName);
+    const actionId = interaction.actionId;
+    button.addEventListener("click", () => activateButton(actionId));
     elements.interactionControls.append(button);
     elements.composerInput.setAttribute("aria-label", "Chat composer");
     elements.composerHelp.textContent = "Activate the scripted button above to continue.";
@@ -559,7 +567,8 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
   elements.composerInput.setAttribute("aria-label", accessibleName);
   if (interaction.ui.kind === "text" || interaction.ui.kind === "number") {
     elements.composerInput.placeholder = interaction.ui.hint ?? "";
-    elements.composerInput.inputMode = interaction.ui.kind === "number" ? "decimal" : "text";
+    elements.composerInput.inputMode =
+      interaction.ui.kind !== "number" ? "text" : interaction.ui.integer ? "numeric" : "decimal";
     elements.composerHelp.textContent =
       interaction.ui.kind === "number"
         ? "Enter the scripted number answer. Engine validation is shown above."
@@ -567,13 +576,28 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
     focusNewInteraction(interaction.actionId, elements.composerInput);
     return;
   }
+  // The Player shows a date or time control; here the ISO text it submits is typed.
+  if (interaction.ui.kind === "temporal") {
+    elements.composerInput.placeholder = interaction.ui.hint ?? "";
+    elements.composerInput.inputMode = "text";
+    elements.composerHelp.textContent = `Enter the ${
+      interaction.ui.temporalKind === "date"
+        ? "date as ISO text, such as 2026-10-04"
+        : interaction.ui.temporalKind === "time"
+          ? "time as ISO text, such as 14:30"
+          : "date and time as ISO text, such as 2026-10-04T18:00"
+    }${interaction.ui.prefill === undefined ? "" : `; the default is ${interaction.ui.prefill}`}.`;
+    focusNewInteraction(interaction.actionId, elements.composerInput);
+    return;
+  }
 
-  renderChoiceControls(accessibleName, interaction.ui);
+  renderChoiceControls(interaction.actionId, accessibleName, interaction.ui);
   elements.composerHelp.textContent = "Type one exact visible option or select a rendered control.";
   focusNewInteraction(interaction.actionId, elements.composerInput);
 }
 
 function renderChoiceControls(
+  actionId: number,
   accessibleName: string,
   choice: Extract<
     NonNullable<WorkspacePlayerPresentation["activeInteraction"]>["ui"],
@@ -602,11 +626,7 @@ function renderChoiceControls(
     if (option.text.length === 0)
       button.setAttribute("aria-label", `${accessibleName} ${index + 1}`);
     button.addEventListener("click", () => {
-      selectChoice(
-        option.label === null
-          ? { kind: "text", value: option.text }
-          : { kind: "label", value: option.label },
-      );
+      selectChoice(actionId, index);
     });
     buttons.append(button);
     const selectOption = document.createElement("option");
@@ -617,13 +637,9 @@ function renderChoiceControls(
     select.append(selectOption);
   });
   select.addEventListener("change", () => {
-    const option = choice.options[Number(select.value) - 1];
-    if (option === undefined) return;
-    selectChoice(
-      option.label === null
-        ? { kind: "text", value: option.text }
-        : { kind: "label", value: option.label },
-    );
+    const index = Number(select.value) - 1;
+    if (choice.options[index] === undefined) return;
+    selectChoice(actionId, index);
   });
   group.append(legend, buttons, select);
   elements.interactionControls.append(group);

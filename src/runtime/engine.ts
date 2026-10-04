@@ -1,15 +1,21 @@
+import { exactDurationMilliseconds } from "./temporal-operations.js";
 import { resolveMessagePresentation } from "./message-presentation.js";
 import type { MessagePresentation } from "../message-presentation.js";
-import type {
-  DelayDisplay,
-  DurationUnitPlan,
-  Instruction,
-  InstructionPlan,
-  InteractionUiPayload,
-  PlanSourceLocation,
-  PreparedInteractionUiPayload,
+import type { TemporalContext } from "../temporal.js";
+import {
+  type DelayDisplay,
+  type DurationUnitPlan,
+  type Instruction,
+  type InstructionPlan,
+  type InteractionTemporalKind,
+  type InteractionUiPayload,
+  type PlanSourceLocation,
+  type PreparedInteractionUiPayload,
+  mainRootEnd,
+  mainSourceSpan,
 } from "../plan/model.js";
 import { parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
+import { isBlankTextAnswer, numberAnswerText, temporalAnswerText } from "../interaction-answers.js";
 import {
   boundedInteractionUtf8ByteLength,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
@@ -60,7 +66,6 @@ import {
   WRITE_KEY_MESSAGE,
   writeScriptStorage,
 } from "./script-storage.js";
-import type { XorShift32State } from "./random.js";
 import {
   cloneCapturedSerializableValue,
   createCapturedSerializableList,
@@ -79,6 +84,7 @@ import {
   type RuntimeLoopFrameSnapshot,
   type RuntimeCallFrameSnapshot,
   type RuntimeTemporarySnapshot,
+  currentTemporalContext,
 } from "./state.js";
 import type {
   RuntimeCaptureActionSnapshot,
@@ -91,6 +97,7 @@ import type {
   RuntimeStorageWriteActionSnapshot,
 } from "./actions/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
+import { buttonTimeoutMilliseconds } from "./actions/interaction.js";
 import {
   calculatePacingDeadlineMs,
   calculateSmartPacingDurationMs,
@@ -113,7 +120,12 @@ import {
 import { cloneMedia, type RuntimeMediaRepeatSnapshot } from "./media.js";
 import { executionRunnable, processDueWork } from "./operations/observe-time.js";
 import { cloneTimer } from "./timers.js";
+import { assertValueType } from "./value-types.js";
 import {
+  describeRuntimeValue,
+  isDate,
+  isDateTime,
+  isDict,
   isDuration,
   isList,
   isObject,
@@ -121,7 +133,11 @@ import {
   isSet,
   isMediaHandle,
   isSpeakerReference,
+  isTime,
 } from "./value-predicates.js";
+import { fieldText } from "./value-text.js";
+import { expandChoiceOptions } from "./choice-options.js";
+import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { DURATION_UNIT_MILLISECONDS } from "../duration.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
@@ -180,7 +196,7 @@ function executeInstructionBoundary(
     return 1;
   }
   if (snapshot.status === "waiting") return 0;
-  if (snapshot.nextInstruction === plan.rootEndInstruction && snapshot.callFrames.length === 0) {
+  if (snapshot.nextInstruction === mainRootEnd(plan) && snapshot.callFrames.length === 0) {
     // A settled terminal action's commit window closes here; expiry blocks queued before the end still run first.
     if (snapshot.terminalContinuationHandoff !== null && snapshot.pendingTimerHandlers.length > 0) {
       snapshot.terminalContinuationHandoff = null;
@@ -212,7 +228,7 @@ function executeInstructionBoundary(
     if (
       snapshot.status === "running" &&
       snapshot.callFrames.length === 0 &&
-      snapshot.nextInstruction === plan.rootEndInstruction &&
+      snapshot.nextInstruction === mainRootEnd(plan) &&
       // Blocks queued before the script ends still run first, also behind a terminal commit window.
       !timerHandlerDispatchable(snapshot) &&
       !(snapshot.terminalContinuationHandoff !== null && snapshot.pendingTimerHandlers.length > 0)
@@ -397,9 +413,12 @@ function executePlannedInstruction(
           instruction.span,
         );
       }
+      const value = evaluator.evaluate(instruction.value);
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
       currentFrame(snapshot).bindings.push({
         name: instruction.name,
-        value: cloneCapturedSerializableValue(evaluator.evaluate(instruction.value)),
+        value: cloneCapturedSerializableValue(value),
       });
       advance(snapshot);
       return;
@@ -416,10 +435,14 @@ function executePlannedInstruction(
       evaluator.validateAssignmentTarget(instruction.target);
       advance(snapshot);
       return;
-    case "assign":
-      evaluator.assign(instruction.target, evaluator.evaluate(instruction.value));
+    case "assign": {
+      const value = evaluator.evaluate(instruction.value);
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
+      evaluator.assign(instruction.target, value);
       advance(snapshot);
       return;
+    }
     case "validateCallReceiver":
       evaluator.validateCallReceiver(
         evaluator.evaluate(instruction.receiver),
@@ -488,7 +511,7 @@ function executePlannedInstruction(
       setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
-        evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span),
+        evaluator.sayText(evaluator.evaluate(instruction.value), instruction.value.span),
       );
       advance(snapshot);
       return;
@@ -571,15 +594,13 @@ function executePlannedInstruction(
     case "enterFunctionBody":
       enterFunctionBody(plan, instruction.functionId, snapshot, instruction.span);
       return;
-    case "returnValue":
-      returnFromFunction(
-        plan,
-        snapshot,
-        evaluator.evaluate(instruction.value),
-        instruction.span,
-        events,
-      );
+    case "returnValue": {
+      const value = evaluator.evaluate(instruction.value);
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
+      returnFromFunction(plan, snapshot, value, instruction.span, events);
       return;
+    }
     case "returnVoid":
       returnFromFunction(plan, snapshot, null, instruction.span, events);
       return;
@@ -693,11 +714,24 @@ function executePlannedInstruction(
         ? materializeInteractionUi(
             instruction.preparedUi,
             snapshot.temporaries,
-            snapshot.rng,
-            evaluator,
+            currentTemporalContext(snapshot),
             instruction.span,
           )
-        : { ui: instruction.ui, stagedWrites: [] as const, rngState: snapshot.rng.state };
+        : { ui: instruction.ui, stagedWrites: [] as const };
+      const timeoutMs =
+        prepared &&
+        instruction.preparedUi.kind === "button" &&
+        instruction.preparedUi.timeoutTemporary !== undefined
+          ? buttonTimeoutMs(
+              readTemporary(
+                snapshot.temporaries,
+                instruction.preparedUi.timeoutTemporary,
+                instruction.span,
+              ),
+              snapshot,
+              instruction.span,
+            )
+          : null;
       const backgroundGate = snapshot.backgroundActions.find(
         (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
       );
@@ -725,9 +759,11 @@ function executePlannedInstruction(
         target: instruction.target,
         speakerId: speaker?.id ?? null,
         ui: cloneInteractionUi(materialized.ui),
+        createdAtMs: snapshot.currentSessionTimeMs,
+        timeoutMs,
         requestEventSequence: sequence,
       });
-      commitInteractionMaterialization(snapshot, materialized.stagedWrites, materialized.rngState);
+      commitInteractionMaterialization(snapshot, materialized.stagedWrites);
       const committedSequence = takeSequence(snapshot);
       if (committedSequence !== sequence) {
         throw new Error("Interaction event-sequence staging drifted unexpectedly.");
@@ -860,20 +896,14 @@ interface MaterializedInteractionUi {
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
   }[];
-  readonly rngState: number;
 }
 
 function materializeInteractionUi(
   prepared: PreparedInteractionUiPayload,
   temporaries: RuntimeTemporarySnapshot[],
-  canonicalRng: XorShift32State,
-  evaluator: Evaluator,
+  temporalContext: TemporalContext,
   span: SourceSpan,
 ): MaterializedInteractionUi {
-  const stagedRng: XorShift32State = {
-    algorithm: canonicalRng.algorithm,
-    state: canonicalRng.state,
-  };
   const stagedWrites: Array<{
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
@@ -886,7 +916,7 @@ function materializeInteractionUi(
   };
   const readText = (temporaryId: number): string => {
     const temporary = read(temporaryId);
-    const text = evaluator.visibleTextWithRng(temporary.value, span, stagedRng);
+    const text = fieldText(temporary.value, span, temporalContext);
     stagedWrites.push({ temporaryId: temporary.id, value: text });
     return text;
   };
@@ -909,81 +939,53 @@ function materializeInteractionUi(
       accessibleName: prepared.accessibleName,
     };
   } else if (prepared.kind === "text" || prepared.kind === "number") {
+    const hint = prepared.hintTemporary === null ? null : readText(prepared.hintTemporary);
+    let prefill: string | undefined;
+    const integer = prepared.kind === "number" && prepared.integer === true;
+    if (prepared.prefillTemporary !== undefined) {
+      const temporary = read(prepared.prefillTemporary);
+      prefill = interactionPrefill(integer ? "integer" : prepared.kind, temporary.value, span);
+      stagedWrites.push({ temporaryId: temporary.id, value: prefill });
+    }
     ui = {
       kind: prepared.kind,
-      hint: prepared.hintTemporary === null ? null : readText(prepared.hintTemporary),
+      hint,
+      ...(prefill === undefined ? {} : { prefill }),
+      ...(integer ? { integer: true as const } : {}),
+      accessibleName: prepared.accessibleName,
+    };
+  } else if (prepared.kind === "temporal") {
+    const hint = prepared.hintTemporary === null ? null : readText(prepared.hintTemporary);
+    let prefill: string | undefined;
+    if (prepared.prefillTemporary !== undefined) {
+      const temporary = read(prepared.prefillTemporary);
+      prefill = temporalPrefill(prepared.temporalKind, temporary.value, span);
+      stagedWrites.push({ temporaryId: temporary.id, value: prefill });
+    }
+    ui = {
+      kind: "temporal",
+      temporalKind: prepared.temporalKind,
+      hint,
+      ...(prefill === undefined ? {} : { prefill }),
       accessibleName: prepared.accessibleName,
     };
   } else {
     const source = read(prepared.optionsTemporary);
-    if (!isList(source.value) || source.value.items.length !== prepared.optionCount) {
+    if (!isList(source.value) || source.value.items.length !== prepared.values.length) {
       throw fault(
         "TSR052",
-        "Prepared choice options do not match the canonical option count.",
-        span,
-      );
-    }
-    const presentations = source.value.items.map((value) => {
-      if (!isObject(value)) return { text: evaluator.visibleTextWithRng(value, span, stagedRng) };
-      if (
-        value.properties.some(
-          (property) => property.name !== "text" && property.name !== "background",
-        )
-      )
-        throw fault("TSR052", "Choice options support text and background only.", span);
-      const textValue = getSerializableProperty(value, "text");
-      if (textValue === undefined) throw fault("TSR052", "A choice object requires text.", span);
-      const text = evaluator.visibleTextWithRng(textValue, span, stagedRng);
-      const background = getSerializableProperty(value, "background");
-      return {
-        text,
-        ...(background === undefined ? {} : { background: backgroundColor(background) }),
-      };
-    });
-    const labels = prepared.labelType === "none" ? null : prepared.labels;
-    if (
-      prepared.labelType !== "none" &&
-      (labels === null || labels.length !== presentations.length)
-    ) {
-      throw fault(
-        "TSR052",
-        "Prepared choice labels do not match the canonical option count.",
+        "Prepared choice options do not match the authored option count.",
         span,
       );
     }
     ui = {
       kind: "choice",
-      labelType: prepared.labelType,
-      options: presentations.map((presentation, index) => ({
-        ...presentation,
-        label: labels?.[index] ?? null,
-      })),
+      options: expandChoiceOptions(source.value.items, prepared.values, temporalContext, span),
       accessibleName: prepared.accessibleName,
     };
-    stagedWrites.push({
-      temporaryId: source.id,
-      value: createCapturedSerializableList(
-        presentations.map((presentation) =>
-          presentation.background === undefined
-            ? presentation.text
-            : createCapturedSerializableObject([
-                { name: "text", value: presentation.text },
-                { name: "background", value: presentation.background },
-              ]),
-        ),
-      ),
-    });
   }
 
   assertInteractionUiLimits(ui, span);
-  if (ui.kind === "choice" && ui.labelType === "none") {
-    const visible = new Set<string>();
-    for (const option of ui.options) {
-      if (visible.has(option.text))
-        throw fault("TSR052", "Unlabelled choice text must evaluate to unique strings.", span);
-      visible.add(option.text);
-    }
-  }
   return Object.freeze({
     ui,
     stagedWrites: Object.freeze(
@@ -994,8 +996,73 @@ function materializeInteractionUi(
         }),
       ),
     ),
-    rngState: stagedRng.state,
   });
+}
+
+/** The prefill text of a default answer, which must be an answer the field accepts. */
+function interactionPrefill(
+  kind: "text" | "number" | "integer",
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): string {
+  if (kind === "integer") {
+    // A non-whole default is an error, never rounded.
+    if (typeof value !== "number" || !Number.isSafeInteger(value))
+      throw fault(
+        "TSR052",
+        "The default answer of askInteger must be a whole number. Round it with floor(...), round(...), or ceil(...), or ask without 'default:'.",
+        span,
+      );
+    return numberAnswerText(value);
+  }
+  if (kind === "number") {
+    if (typeof value !== "number" || !Number.isFinite(value))
+      throw fault(
+        "TSR052",
+        "The default answer of askNumber must be a finite number. Ask without 'default:' when there is no number to offer.",
+        span,
+      );
+    return numberAnswerText(value);
+  }
+  if (typeof value !== "string")
+    throw fault(
+      "TSR052",
+      "The default answer of askText must be text. Write the value as text with interpolation: 'default: \"${...}\"'.",
+      span,
+    );
+  if (isBlankTextAnswer(value))
+    throw fault(
+      "TSR052",
+      "The default answer of askText must contain a non-whitespace character. Ask without 'default:' when there is no answer to offer.",
+      span,
+    );
+  return value;
+}
+
+/** The ISO prefill text of a date or time default answer, which must be of the kind the field asks for. */
+function temporalPrefill(
+  kind: InteractionTemporalKind,
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): string {
+  const answer =
+    kind === "date"
+      ? isDate(value) && value
+      : kind === "time"
+        ? isTime(value) && value
+        : isDateTime(value) && value;
+  if (answer !== false) return temporalAnswerText(answer);
+  const [command, noun, conversion] =
+    kind === "date"
+      ? ["askDate", "a date", "toDate"]
+      : kind === "time"
+        ? ["askTime", "a time", "toTime"]
+        : ["askDateTime", "a date and time", "toDateTime"];
+  throw fault(
+    "TSR052",
+    `The default answer of ${command} must be ${noun}, not ${describeRuntimeValue(value)}.${typeof value === "string" ? ` Convert the text with ${conversion}(...).` : ""}`,
+    span,
+  );
 }
 
 function commitInteractionMaterialization(
@@ -1004,7 +1071,6 @@ function commitInteractionMaterialization(
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
   }[],
-  rngState: number,
 ): void {
   for (const staged of stagedWrites) {
     const temporary = snapshot.temporaries.find((item) => item.id === staged.temporaryId);
@@ -1015,19 +1081,20 @@ function commitInteractionMaterialization(
     }
     temporary.value = cloneCapturedSerializableValue(staged.value);
   }
-  snapshot.rng.state = rngState;
 }
 
 function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): void {
   const strings: string[] = [];
   if (ui.accessibleName.kind === "text") strings.push(ui.accessibleName.text);
   if (ui.kind === "button") strings.push(ui.buttonLabel);
-  else if (ui.kind === "text" || ui.kind === "number") {
+  else if (ui.kind !== "choice") {
     if (ui.hint !== null) strings.push(ui.hint);
+    if (ui.prefill !== undefined) strings.push(ui.prefill);
   } else {
     for (const option of ui.options) {
       strings.push(option.text);
-      if (typeof option.label === "string") strings.push(option.label);
+      if (typeof option.value === "string" && option.value !== option.text)
+        strings.push(option.value);
     }
   }
   let aggregate = 0;
@@ -1059,6 +1126,14 @@ function enterFunction(
       cloneCapturedSerializableValue(evaluator.evaluate(argument.value)),
     ]),
   );
+  // Parameters are bound only after every argument is evaluated, so the arguments are checked then too.
+  for (const argument of instruction.arguments)
+    if (argument.typeCheck !== undefined)
+      assertValueType(
+        supplied.get(argument.parameterName)!,
+        argument.typeCheck,
+        argument.value.span,
+      );
   if (snapshot.callFrames.length >= snapshot.maxCallDepth) {
     throw fault(
       "TSR047",
@@ -1189,12 +1264,10 @@ function bindDefaultParameter(
   if (parameter === undefined || !parameter.hasDefault) {
     throw fault("TSR048", "Default-parameter metadata is inconsistent.", instruction.span);
   }
-  declareFunctionBinding(
-    snapshot,
-    parameter.name,
-    evaluator.evaluate(instruction.value),
-    instruction.span,
-  );
+  const value = evaluator.evaluate(instruction.value);
+  if (instruction.typeCheck !== undefined)
+    assertValueType(value, instruction.typeCheck, instruction.value.span);
+  declareFunctionBinding(snapshot, parameter.name, value, instruction.span);
   frame.parameterState.parameterIndex += 1;
   advance(snapshot);
 }
@@ -1324,11 +1397,15 @@ function executeLoopStart(
         callFrameId: currentCallFrameId(snapshot),
       };
     } else {
-      const source = evaluator.evaluate(instruction.expression);
+      const evaluated = evaluator.evaluate(instruction.expression);
+      // A loop over a dict goes through its keys as they are when the loop starts.
+      const source = isDict(evaluated)
+        ? createCapturedSerializableList(evaluated.entries.map((entry) => entry.key))
+        : evaluated;
       if (!isList(source) && !isSet(source) && !isRange(source)) {
         throw fault(
           "TSR044",
-          "for requires a list, set, or range source.",
+          "for requires a list, set, dict, or range source.",
           instruction.expression.span,
         );
       }
@@ -1484,10 +1561,10 @@ function cloneInteractionUi(
   if (ui.kind === "choice") {
     const options = ui.options.map((option) => ({
       text: option.text,
-      label: option.label,
+      value: cloneInteractionChoiceValue(option.value),
       ...(option.background === undefined ? {} : { background: option.background }),
     }));
-    return { kind: "choice", labelType: ui.labelType, options, accessibleName };
+    return { kind: "choice", options, accessibleName };
   }
   if (ui.kind === "button")
     return {
@@ -1496,7 +1573,21 @@ function cloneInteractionUi(
       ...(ui.background === undefined ? {} : { background: ui.background }),
       accessibleName,
     };
-  return { kind: ui.kind, hint: ui.hint, accessibleName };
+  if (ui.kind === "temporal")
+    return {
+      kind: "temporal",
+      temporalKind: ui.temporalKind,
+      hint: ui.hint,
+      ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
+      accessibleName,
+    };
+  return {
+    kind: ui.kind,
+    hint: ui.hint,
+    ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
+    ...(ui.kind === "number" && ui.integer === true ? { integer: true as const } : {}),
+    accessibleName,
+  };
 }
 
 function cloneInteractionAction(
@@ -1516,8 +1607,40 @@ function cloneInteractionAction(
     target: action.target,
     speakerId: action.speakerId,
     ui: cloneInteractionUi(action.ui),
+    createdAtMs: action.createdAtMs,
+    timeoutMs: action.timeoutMs,
     requestEventSequence: action.requestEventSequence,
   };
+}
+
+/**
+ * A `showButton` timeout in milliseconds: a number of seconds or an elapsed duration greater than zero whose deadline
+ * is a representable later scene time.
+ */
+function buttonTimeoutMs(
+  value: SerializableRuntimeValue,
+  snapshot: RuntimeSnapshot,
+  span: SourceSpan,
+): number {
+  // A calendar duration has no fixed length (V30 §35).
+  if (isDuration(value)) exactDurationMilliseconds(value, "A showButton timeout", span);
+  const timeoutMs = buttonTimeoutMilliseconds(value);
+  if (timeoutMs === null) {
+    throw fault(
+      "TSR050",
+      "The showButton timeout must be a number of seconds or a duration greater than zero, such as 'timeout: 5' or 'timeout: 500 ms'.",
+      span,
+    );
+  }
+  const deadlineMs = snapshot.currentSessionTimeMs + timeoutMs;
+  if (!isValidSessionTime(deadlineMs) || deadlineMs <= snapshot.currentSessionTimeMs) {
+    throw fault(
+      "TSR050",
+      "The showButton timeout is outside the supported session-time range.",
+      span,
+    );
+  }
+  return timeoutMs;
 }
 
 function currentCallFrameId(snapshot: RuntimeSnapshot): number | null {
@@ -1545,7 +1668,7 @@ function executeSayAtomically(
   evaluator: Evaluator,
   events: InterpreterEvent[],
 ): void {
-  const stagedSnapshot = cloneCapturedRuntimeSnapshot(snapshot);
+  const stagedSnapshot = stagingClone(snapshot);
   const stagedEvents: InterpreterEvent[] = [];
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
 
@@ -1567,10 +1690,20 @@ function validateTerminalCompletionCapacityAfterSay(
   if (
     snapshot.status !== "running" ||
     snapshot.callFrames.length !== 0 ||
-    snapshot.nextInstruction !== plan.rootEndInstruction
+    snapshot.nextInstruction !== mainRootEnd(plan)
   )
     return;
   assertEventSequenceCapacity(snapshot, requiredEventSequencesForRootCompletion(snapshot), span);
+}
+
+/**
+ * A private clone for atomic staging. Retained settlements are replaced, never changed in place, so the clone shares
+ * the current one instead of copying its recorded UI for every staged output.
+ */
+function stagingClone(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+  const staged = cloneCapturedRuntimeSnapshot({ ...snapshot, lastSettlement: null });
+  staged.lastSettlement = snapshot.lastSettlement;
+  return staged;
 }
 
 function executeSpeakerAtomically(
@@ -1579,7 +1712,7 @@ function executeSpeakerAtomically(
   events: InterpreterEvent[],
   operation: (stagedSnapshot: RuntimeSnapshot, stagedEvaluator: Evaluator) => void,
 ): void {
-  const stagedSnapshot = cloneCapturedRuntimeSnapshot(snapshot);
+  const stagedSnapshot = stagingClone(snapshot);
   const stagedEvents: InterpreterEvent[] = [];
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
 
@@ -1648,7 +1781,7 @@ function executeSay(
   );
   const authoredText =
     instruction.textTemporary === undefined
-      ? evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span)
+      ? evaluator.sayText(evaluator.evaluate(instruction.value), instruction.value.span)
       : preparedSayText(snapshot.temporaries, instruction.textTemporary, instruction.span);
   const content = parseMessageMarkup(authoredText);
   const text = content.visibleText;
@@ -1882,7 +2015,7 @@ function requiredEventSequencesForRootCompletion(snapshot: RuntimeSnapshot): num
 
 /** Completion is attributed to the script's last root instruction, however execution reached the end. */
 function rootCompletionSpan(plan: InstructionPlan): SourceSpan {
-  return plan.instructions[plan.rootEndInstruction - 1]?.span ?? plan.sourceSpan;
+  return plan.instructions[mainRootEnd(plan) - 1]?.span ?? mainSourceSpan(plan);
 }
 
 function createCompleteEvent(snapshot: RuntimeSnapshot, span: SourceSpan): CompleteEvent {
@@ -1919,7 +2052,7 @@ function failForBudget(
   snapshot: RuntimeSnapshot,
   events: InterpreterEvent[],
 ): void {
-  const span = plan.instructions[snapshot.nextInstruction]?.span ?? plan.sourceSpan;
+  const span = plan.instructions[snapshot.nextInstruction]?.span ?? mainSourceSpan(plan);
   failSnapshot(
     snapshot,
     { code: "TSR037", message: "Runtime instruction budget exceeded.", span: copySpan(span) },
@@ -1952,7 +2085,10 @@ export function timerDurationMs(
     range === null || range.start < 0
       ? value
       : evaluator.randomIntegerInRange(range, span, "timer");
-  const amount = isDuration(drawn) && unit === null ? drawn.milliseconds : drawn;
+  const amount =
+    isDuration(drawn) && unit === null
+      ? exactDurationMilliseconds(drawn, command === "timer" ? "A timer" : "wait", span)
+      : drawn;
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
     throw fault(
       "TSR050",
@@ -2003,6 +2139,12 @@ function commandName(command: "wait" | "timer"): string {
 }
 
 export function timerLabel(value: SerializableRuntimeValue, span: SourceSpan): string {
+  if (isList(value))
+    throw fault(
+      "TSR050",
+      'A list cannot be a timer label. Select one element with "${list}" or list.random.',
+      span,
+    );
   if (typeof value !== "string") throw fault("TSR050", "A timer label must be a string.", span);
   return value;
 }
@@ -2219,7 +2361,7 @@ function mediaMilliseconds(
   span: SourceSpan,
 ): number {
   const milliseconds = isDuration(value)
-    ? value.milliseconds
+    ? exactDurationMilliseconds(value, subject, span)
     : typeof value === "number"
       ? value * 1_000
       : Number.NaN;
@@ -2251,8 +2393,10 @@ function mediaRepeat(
   }
   if (value === true) return { kind: "indefinite" };
   if (value === false) return { kind: "once" };
-  if (isDuration(value) && Number.isFinite(value.milliseconds) && value.milliseconds > 0) {
-    return { kind: "budget", milliseconds: value.milliseconds };
+  if (isDuration(value)) {
+    // A calendar duration has no fixed length (V30 §35), whatever its exact part.
+    const milliseconds = exactDurationMilliseconds(value, "A repeat budget", repeat.value.span);
+    if (Number.isFinite(milliseconds) && milliseconds > 0) return { kind: "budget", milliseconds };
   }
   throw fault(
     "TSR050",

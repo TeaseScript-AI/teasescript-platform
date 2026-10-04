@@ -23,6 +23,7 @@ import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
+  playerTemporalContext,
   playerRuntimeDeadlines,
   playerRuntimeForeground,
   playerRuntimeMedia,
@@ -229,7 +230,7 @@ exit
   );
 });
 
-test("runtime adapter preserves unlabelled choice order and rendered-selection semantics", () => {
+test("runtime adapter preserves choice order and rendered-selection semantics", () => {
   let session = createPlayerRuntimeSession(
     'let choice = choose "First", "Second"\nsay choice, instant',
   );
@@ -249,6 +250,24 @@ test("runtime adapter preserves unlabelled choice order and rendered-selection s
   );
 });
 
+test("runtime adapter selects the rendered button even when two buttons return the same value", () => {
+  const session = createPlayerRuntimeSession(
+    'let options = [{ text: "A", value: 1 }, { text: "B", value: 1 }]\nlet choice = choose options\nsay [choice], instant',
+  );
+  const foreground = playerRuntimeForeground(session);
+  if (foreground?.kind !== "choose") throw new Error("Expected choice presentation.");
+  assert.deepEqual(
+    foreground.options.map((option) => option.label),
+    ["A", "B"],
+  );
+  const selected = selectPlayerRuntimeChoice(session, foreground.options[1]!.id);
+  assert.equal(selected?.outcome.kind, "completed");
+  assert.deepEqual(
+    selected!.session.transcriptEntries.map((entry) => entry.text),
+    ["B", "[1]"],
+  );
+});
+
 test("runtime adapter routes pacing skip and explicit time through canonical operations", () => {
   let session = createPlayerRuntimeSession(
     'say unskippable "First", 10\nsay skippable "Second", 10\nwait 20 s',
@@ -260,8 +279,11 @@ test("runtime adapter routes pacing skip and explicit time through canonical ope
   assert.equal(rejected?.outcome.kind, "invalidPayload");
   assert.deepEqual(rejected?.session.snapshot, beforeRejectedSkip);
 
+  const beforeObservation = structuredClone(session.snapshot);
   const observed = observePlayerRuntimeTime(session, firstGate!.deadlineMs);
   assert.equal(observed.outcome.kind, "observed");
+  // The observation continues execution on a new snapshot; the published one stays as it was.
+  assert.deepEqual(session.snapshot, beforeObservation);
   session = observed.session;
   assert.deepEqual(
     session.transcriptEntries.map((entry) => entry.text),
@@ -704,7 +726,7 @@ test("runtime adapter ignores unknown and stale storage action IDs", () => {
 
 test("runtime adapter leaves writes reached after interaction and time observation pending", () => {
   let session = createPlayerRuntimeSession(
-    'showButton "Continue"\nsave 2 as "answered"\nwait 1 s\nsave 3 as "observed"\ndelete "answered"\nlet answer = load "answered" default "deleted"\nsay answer, instant\nexit',
+    'showButton "Continue"\nsave 2 as "answered"\nwait 1 s\nsave 3 as "observed"\ndelete "answered"\nlet answer = load "answered", default: "deleted"\nsay answer, instant\nexit',
     { persistentScriptStorage: true },
   );
   assert.equal(pendingPlayerRuntimeStorageWrite(session.snapshot), null);
@@ -745,4 +767,33 @@ test("runtime adapter leaves writes reached after interaction and time observati
   assert.equal(pendingPlayerRuntimeStorageWrite(session.snapshot), null);
   assert.deepEqual(session.snapshot.scriptStorage, [{ key: "observed", value: 3 }]);
   assert.equal(session.transcriptEntries.at(-1)?.text, "deleted");
+});
+
+test("a session records the account's zone and presentation, falling back to the browser's", () => {
+  const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const account = playerTemporalContext({ timeZone: "Asia/Tokyo", locale: "en-US" });
+  assert.equal(account.zone.name, "Asia/Tokyo");
+  assert.equal(account.presentation.hourCycle, "h12");
+  // A zone this browser does not know falls back to the browser's own zone and language.
+  assert.equal(playerTemporalContext({ timeZone: "Mars/Olympus_Mons" }).zone.name, browserZone);
+
+  const session = createPlayerRuntimeSession('say toDateTime("2026-10-04T18:30")', {
+    temporalContext: account,
+  });
+  assert.deepEqual(session.snapshot.temporalCaptures[0]?.context, account);
+  assert.equal(
+    session.events.find((event) => event.kind === "say")?.text,
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
+      numberingSystem: "latn",
+      calendar: "gregory",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    })
+      .format(Date.UTC(2026, 9, 4, 18, 30))
+      .replace(/[\u00a0\u202f]/gu, " "),
+  );
 });

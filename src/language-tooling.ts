@@ -4,14 +4,15 @@ import type {
   MediaParts,
   Program,
   SayStatement,
-  ShowButtonStatement,
+  ShowButtonParts,
   Statement,
   TimerParts,
 } from "./ast.js";
 import { compileSource } from "./compiler.js";
-import { mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
+import { mediaHandlerBlocks, mediaOperands, showButtonOptions } from "./expression-children.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
+import { TEASESCRIPT_PROTECTED_NAMES } from "./protected-names.js";
 import {
   createSourcePosition,
   createSourceSpan,
@@ -39,7 +40,7 @@ export interface LanguageCompletionItem {
 }
 
 export interface LanguageContextHelp {
-  readonly command: "showButton" | "askText" | "askNumber" | "choose" | "say";
+  readonly command: CompactCommand;
   readonly summary: string;
   readonly syntax: string;
 }
@@ -70,31 +71,55 @@ const HELP = Object.freeze({
   showButton: Object.freeze({
     command: "showButton" as const,
     summary:
-      "Shows one foreground button and waits for activation. It does not produce a useful script result and has no timeout/cancellation result in the current compact form.",
-    syntax: "showButton [as speaker] label",
+      "Shows one foreground button and waits for activation. An optional timeout, in seconds or as a duration such as 500 ms, removes the button without a chat message when it is reached. As a value, it returns the elapsed waiting time as a duration, which equals the timeout when the timeout is reached.",
+    syntax: "showButton [as speaker] label [, background: colour] [, timeout: duration]",
   }),
   askText: Object.freeze({
     command: "askText" as const,
     summary:
-      "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The optional hint is UI guidance, not transcript text.",
-    syntax: "askText [as speaker] [hint]",
+      "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The optional hint is UI guidance, not transcript text. An optional default answer prefills the field; submitting it unchanged returns it.",
+    syntax: "askText [as speaker] [hint | hint, default: answer | default: answer]",
   }),
   askNumber: Object.freeze({
     command: "askNumber" as const,
     summary:
-      "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript.",
-    syntax: "askNumber [as speaker] [hint]",
+      "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript. An optional default number prefills the field.",
+    syntax: "askNumber [as speaker] [hint | hint, default: number | default: number]",
+  }),
+  askInteger: Object.freeze({
+    command: "askInteger" as const,
+    summary:
+      "Waits for a whole number: an optional sign and digits, with surrounding whitespace trimmed. Decimals, exponents, and values outside the safe integer range are rejected and asked again. Returns an integer. An optional default whole number prefills the field.",
+    syntax: "askInteger [as speaker] [hint | hint, default: integer | default: integer]",
+  }),
+  askDate: Object.freeze({
+    command: "askDate" as const,
+    summary:
+      "Waits for a date from the Player's date control, which submits ISO text such as 2026-10-04. Returns a date. An optional default date prefills the control.",
+    syntax: "askDate [as speaker] [hint | hint, default: date | default: date]",
+  }),
+  askTime: Object.freeze({
+    command: "askTime" as const,
+    summary:
+      "Waits for a time of day from the Player's time control, which submits ISO text such as 14:30. Returns a time. An optional default time prefills the control.",
+    syntax: "askTime [as speaker] [hint | hint, default: time | default: time]",
+  }),
+  askDateTime: Object.freeze({
+    command: "askDateTime" as const,
+    summary:
+      "Waits for a local date and time from the Player's control, which submits ISO text such as 2026-10-04T18:00. Returns a datetime; a time that the player's zone skips is still a valid local value. An optional default prefills the control.",
+    syntax: "askDateTime [as speaker] [hint | hint, default: datetime | default: datetime]",
   }),
   choose: Object.freeze({
     command: "choose" as const,
     summary:
-      "Waits for one choice. Options may be unlabelled or consistently identifier-labelled or number-labelled; labelled results use the exact label value.",
-    syntax: "choose [as speaker] [label:] option, [label:] option, ...",
+      "Waits for one choice and returns the selected button's value: the value written before ':', or else the option itself with its own type. A list option gives one button per element; an element may be a { value?, text, background? } object.",
+    syntax: "choose [as speaker] [value:] option, [value:] option, ...",
   }),
   say: Object.freeze({
     command: "say" as const,
     summary:
-      "Emits visible chat text. Current pacing supports smart pacing by default, an exact non-negative seconds expression including 0, or instant; skip policy may be skippable or unskippable.",
+      "Emits visible chat text; a list, set, dict, or object shows in literal notation without markup. Current pacing supports smart pacing by default, an exact non-negative seconds expression including 0, or instant; skip policy may be skippable or unskippable.",
     syntax:
       "say [as speaker] [bubble(options)|prose(options)] [skippable|unskippable] text [, pacing|instant]",
   }),
@@ -135,8 +160,13 @@ export function languageCompletions(
   }
 
   if (isExpressionCompletionContext(last, lineTokens)) {
+    items.push(command("showButton", "Compact foreground button interaction"));
     items.push(command("askText", "Compact text-input expression"));
     items.push(command("askNumber", "Compact numeric-input expression"));
+    items.push(command("askInteger", "Compact whole-number input expression"));
+    items.push(command("askDate", "Compact date input expression"));
+    items.push(command("askTime", "Compact time input expression"));
+    items.push(command("askDateTime", "Compact date and time input expression"));
     items.push(command("choose", "Compact choice expression"));
     items.push(
       Object.freeze({
@@ -325,8 +355,27 @@ function isExpressionCompletionContext(
   );
 }
 
-type CompactCommand = "showButton" | "askText" | "askNumber" | "choose" | "say";
+type CompactCommand =
+  | "showButton"
+  | "askText"
+  | "askNumber"
+  | "askInteger"
+  | "askDate"
+  | "askTime"
+  | "askDateTime"
+  | "choose"
+  | "say";
 type CompactStage = "afterCommand" | "afterAs" | "afterComma" | "other";
+
+const INTERACTION_COMMANDS = {
+  text: "askText",
+  number: "askNumber",
+  integer: "askInteger",
+  date: "askDate",
+  time: "askTime",
+  datetime: "askDateTime",
+  choice: "choose",
+} as const satisfies Record<string, CompactCommand>;
 
 function compactCommandContext(
   tokens: readonly Token[],
@@ -352,6 +401,10 @@ function tokenToCompactCommand(token: Token): CompactCommand | null {
     token.lexeme === "showButton" ||
     token.lexeme === "askText" ||
     token.lexeme === "askNumber" ||
+    token.lexeme === "askInteger" ||
+    token.lexeme === "askDate" ||
+    token.lexeme === "askTime" ||
+    token.lexeme === "askDateTime" ||
     token.lexeme === "choose"
   ) {
     return token.lexeme;
@@ -359,9 +412,14 @@ function tokenToCompactCommand(token: Token): CompactCommand | null {
   return null;
 }
 
+const protectedNames: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);
+
+/** Declared speaker names; a protected name such as `set` is an invalid declaration, not a suggestion. */
 function declaredSpeakers(source: string): readonly string[] {
   const speakers = compileSource(source).program.statements.flatMap((statement) =>
-    statement.kind === "speakerDeclaration" ? [statement.name.name] : [],
+    statement.kind === "speakerDeclaration" && !protectedNames.has(statement.name.name)
+      ? [statement.name.name]
+      : [],
   );
   return Object.freeze([...new Set(speakers)]);
 }
@@ -379,12 +437,7 @@ function locateCompactCommand(
     },
     interaction(node) {
       if (!containsOffset(node.span, offset)) return;
-      const command =
-        node.interactionKind === "text"
-          ? "askText"
-          : node.interactionKind === "number"
-            ? "askNumber"
-            : "choose";
+      const command = INTERACTION_COMMANDS[node.interactionKind];
       best = { command, range: node.commandSpan };
     },
     say(node) {
@@ -414,12 +467,28 @@ function locateCompactCommand(
       token.kind !== TokenKind.Newline &&
       token.kind !== TokenKind.EndOfFile,
   );
-  const contextual = compactCommandContext(tokensAfterLastNewline(before));
-  if (contextual === null) return null;
-  const token = [...before]
-    .reverse()
-    .find((candidate) => tokenToCompactCommand(candidate) === contextual.command);
-  return token === undefined ? null : { command: contextual.command, range: token.span };
+  return nearestOpenCompactCommand(tokensAfterLastNewline(before));
+}
+
+/**
+ * The nearest command that no later closing delimiter has ended, found in one backward pass: a closing delimiter whose
+ * opener lies before a command ends that command.
+ */
+function nearestOpenCompactCommand(
+  tokens: readonly Token[],
+): { command: CompactCommand; range: LanguageRange } | null {
+  let unmatchedClosers = 0;
+  for (let index = tokens.length - 1; index >= 0; index -= 1) {
+    const token = tokens[index]!;
+    if (CLOSING_DELIMITERS.has(token.kind)) unmatchedClosers += 1;
+    else if (OPENING_DELIMITERS.has(token.kind))
+      unmatchedClosers = Math.max(0, unmatchedClosers - 1);
+    else if (unmatchedClosers === 0) {
+      const command = tokenToCompactCommand(token);
+      if (command !== null) return { command, range: token.span };
+    }
+  }
+  return null;
 }
 
 function containsOffset(span: SourceSpan, offset: number): boolean {
@@ -429,16 +498,33 @@ function containsOffset(span: SourceSpan, offset: number): boolean {
 function signatureParameters(command: CompactCommand): readonly string[] {
   switch (command) {
     case "showButton":
-      return Object.freeze(["speaker", "label"]);
+      return Object.freeze(["speaker", "label", "background", "timeout"]);
     case "askText":
     case "askNumber":
-      return Object.freeze(["speaker", "hint"]);
+    case "askInteger":
+    case "askDate":
+    case "askTime":
+    case "askDateTime":
+      return Object.freeze(["speaker", "hint", "default"]);
     case "choose":
       return Object.freeze(["speaker", "options"]);
     case "say":
       return Object.freeze(["speaker", "skip policy", "text", "pacing"]);
   }
 }
+
+const OPENING_DELIMITERS: ReadonlySet<TokenKind> = new Set([
+  TokenKind.LeftParenthesis,
+  TokenKind.LeftBracket,
+  TokenKind.LeftBrace,
+  TokenKind.InterpolationStart,
+]);
+const CLOSING_DELIMITERS: ReadonlySet<TokenKind> = new Set([
+  TokenKind.RightParenthesis,
+  TokenKind.RightBracket,
+  TokenKind.RightBrace,
+  TokenKind.InterpolationEnd,
+]);
 
 function activeParameterFor(
   source: string,
@@ -459,27 +545,52 @@ function activeParameterFor(
     (tail.length === asIndex + 1 || (tail.length === asIndex + 2 && !cursorAfterLastToken))
   )
     return 0;
+  if (
+    command === "askText" ||
+    command === "askNumber" ||
+    command === "askInteger" ||
+    command === "askDate" ||
+    command === "askTime" ||
+    command === "askDateTime" ||
+    command === "showButton"
+  ) {
+    // The last named option before the cursor is the active parameter. A delimiter that closes one opened before the
+    // command ends the command, so later options belong to the enclosing construct.
+    let active = 1;
+    let depth = 0;
+    for (const [index, token] of tail.entries()) {
+      if (OPENING_DELIMITERS.has(token.kind)) depth += 1;
+      else if (CLOSING_DELIMITERS.has(token.kind)) {
+        if (depth === 0) break;
+        depth -= 1;
+      } else if (
+        depth === 0 &&
+        token.kind === TokenKind.Identifier &&
+        tail[index + 1]?.kind === TokenKind.Colon
+      )
+        active = namedOptionParameter(command, token.lexeme) ?? active;
+    }
+    return active;
+  }
   if (command !== "say") return 1;
 
   let depth = 0;
   for (const token of tail) {
-    if (
-      token.kind === TokenKind.LeftParenthesis ||
-      token.kind === TokenKind.LeftBracket ||
-      token.kind === TokenKind.LeftBrace
-    ) {
+    if (OPENING_DELIMITERS.has(token.kind)) {
       depth += 1;
-    } else if (
-      token.kind === TokenKind.RightParenthesis ||
-      token.kind === TokenKind.RightBracket ||
-      token.kind === TokenKind.RightBrace
-    ) {
+    } else if (CLOSING_DELIMITERS.has(token.kind)) {
       depth = Math.max(0, depth - 1);
     } else if (token.kind === TokenKind.Comma && depth === 0) {
       return 3;
     }
   }
   return last !== undefined && tokenIsSayModifier(last) && !cursorAfterLastToken ? 1 : 2;
+}
+
+/** The signature parameter of a named compact option, such as `timeout:` of `showButton`. */
+function namedOptionParameter(command: CompactCommand, name: string): number | null {
+  if (command === "showButton") return name === "background" ? 2 : name === "timeout" ? 3 : null;
+  return name === "default" ? 2 : null;
 }
 
 function lineStarts(source: string): readonly number[] {
@@ -515,7 +626,7 @@ function positionAtOffset(
 }
 
 interface Visitor {
-  readonly showButton: (node: ShowButtonStatement) => void;
+  readonly showButton: (node: ShowButtonParts) => void;
   readonly interaction: (node: InteractionExpression) => void;
   readonly say: (node: SayStatement) => void;
 }
@@ -545,10 +656,7 @@ function visitProgram(program: Program, visitor: Visitor): void {
 function visitStatement(statement: Statement, visitor: Visitor, children: VisitItem[]): void {
   switch (statement.kind) {
     case "showButtonStatement":
-      visitor.showButton(statement);
-      children.push({ kind: "expression", node: statement.label });
-      if (statement.background !== null)
-        children.push({ kind: "expression", node: statement.background });
+      visitShowButton(statement, visitor, children);
       return;
     case "sayStatement":
       visitor.say(statement);
@@ -581,6 +689,15 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
           children.push({ kind: "statement", node: child });
       else if (statement.elseBlock !== null)
         children.push({ kind: "statement", node: statement.elseBlock });
+      return;
+    case "switchStatement":
+      children.push({ kind: "expression", node: statement.subject });
+      for (const switchCase of statement.cases)
+        for (const child of switchCase.body.statements)
+          children.push({ kind: "statement", node: child });
+      if (statement.defaultBlock !== null)
+        for (const child of statement.defaultBlock.statements)
+          children.push({ kind: "statement", node: child });
       return;
     case "repeatStatement":
       children.push({ kind: "expression", node: statement.count });
@@ -649,13 +766,25 @@ function visitMedia(parts: MediaParts, children: VisitItem[]): void {
     for (const child of block.statements) children.push({ kind: "statement", node: child });
 }
 
+function visitShowButton(parts: ShowButtonParts, visitor: Visitor, children: VisitItem[]): void {
+  visitor.showButton(parts);
+  children.push({ kind: "expression", node: parts.label });
+  for (const option of showButtonOptions(parts))
+    children.push({ kind: "expression", node: option.value });
+}
+
 function visitExpression(expression: Expression, visitor: Visitor, children: VisitItem[]): void {
   switch (expression.kind) {
+    case "showButtonExpression":
+      visitShowButton(expression, visitor, children);
+      return;
     case "interactionExpression":
       visitor.interaction(expression);
       if (expression.hint !== null) children.push({ kind: "expression", node: expression.hint });
+      if (expression.defaultValue !== null)
+        children.push({ kind: "expression", node: expression.defaultValue });
       for (const option of expression.options)
-        children.push({ kind: "expression", node: option.value });
+        children.push({ kind: "expression", node: option.expression });
       return;
     case "parenthesizedExpression":
       children.push({ kind: "expression", node: expression.expression });
@@ -669,6 +798,12 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
     case "objectLiteral":
       for (const property of expression.properties)
         children.push({ kind: "expression", node: property.value });
+      return;
+    case "dictLiteral":
+      for (const entry of expression.entries) {
+        children.push({ kind: "expression", node: entry.key });
+        children.push({ kind: "expression", node: entry.value });
+      }
       return;
     case "propertyAccessExpression":
       children.push({ kind: "expression", node: expression.object });
@@ -704,6 +839,9 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
     case "playMediaExpression":
       visitMedia(expression, children);
       return;
+    case "typeTestExpression":
+      children.push({ kind: "expression", node: expression.value });
+      return;
     case "loadExpression":
       children.push({ kind: "expression", node: expression.key });
       if (expression.defaultValue !== null)
@@ -738,7 +876,7 @@ function whitespaceEdit(
   edits.push({ start, end, newText: desired });
 }
 
-function formatShowButton(source: string, node: ShowButtonStatement, edits: OffsetEdit[]): void {
+function formatShowButton(source: string, node: ShowButtonParts, edits: OffsetEdit[]): void {
   let cursor = node.commandSpan.end.offset;
   if (node.asSpan !== null && node.speaker !== null) {
     whitespaceEdit(source, cursor, node.asSpan.start.offset, " ", edits);
@@ -763,10 +901,10 @@ function formatInteraction(source: string, node: InteractionExpression, edits: O
   if (first !== undefined) whitespaceEdit(source, cursor, first.span.start.offset, " ", edits);
   for (let index = 0; index < node.options.length; index += 1) {
     const option = node.options[index]!;
-    if (option.label !== null && option.colonSpan !== null) {
+    if (option.value !== null && option.colonSpan !== null) {
       whitespaceEdit(
         source,
-        option.label.span.end.offset,
+        option.value.span.end.offset,
         option.colonSpan.start.offset,
         "",
         edits,
@@ -774,7 +912,7 @@ function formatInteraction(source: string, node: InteractionExpression, edits: O
       whitespaceEdit(
         source,
         option.colonSpan.end.offset,
-        option.value.span.start.offset,
+        option.expression.span.start.offset,
         " ",
         edits,
       );
@@ -782,7 +920,7 @@ function formatInteraction(source: string, node: InteractionExpression, edits: O
     if (option.separatorSpan !== null) {
       whitespaceEdit(
         source,
-        option.value.span.end.offset,
+        option.expression.span.end.offset,
         option.separatorSpan.start.offset,
         "",
         edits,

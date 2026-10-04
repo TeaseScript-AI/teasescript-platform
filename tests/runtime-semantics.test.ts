@@ -65,12 +65,12 @@ test("list elements and object fields copy composite values when each is evaluat
   const result = executeSource(
     [
       "let source = [1]",
-      "let list = [source, source.add(2)]",
-      "let object = { first: source, second: source.add(3) }",
+      "let copies = [source, source.add(2)]",
+      "let record = { first: source, second: source.add(3) }",
       "source.add(4)",
       "capture(source)",
-      "capture(list)",
-      "capture(object.first)",
+      "capture(copies)",
+      "capture(record.first)",
     ],
     { capture: captureInto(captured) },
   );
@@ -165,62 +165,11 @@ test("copies sets independently for declaration and assignment", () => {
   assert.deepEqual(captured, [[1, 2], [1, 2, 3], [2]]);
 });
 
-test("rejects list, object, and set values in set literals at the semantic boundary", () => {
-  const cases = [
-    ["let values = set[[1]]", "[1]"],
-    ["let values = set[{ value: 1 }]", "{ value: 1 }"],
-    ["let values = set[set[1]]", "set[1]"],
-  ] as const;
-
-  for (const [source, elementText] of cases) {
-    const start = source.indexOf(elementText);
-    const result = compileSource(source);
-    const diagnostic = result.semanticDiagnostics.find((candidate) => candidate.code === "TSV006");
-    assert.notEqual(diagnostic, undefined);
-    assert.deepEqual(
-      diagnostic === undefined ? null : [diagnostic.span.start.offset, diagnostic.span.end.offset],
-      [start, start + elementText.length],
-    );
-  }
-});
-
-test("set literals reject each value before evaluating the next element", () => {
-  let marked = false;
-  const source = "let values = set[bad(), mark()]";
-  const bad: RuntimeBuiltinFunction = () => ({ kind: "list", items: [] });
-  const mark: RuntimeBuiltinFunction = () => {
-    marked = true;
-    return 1;
-  };
-  const result = executeSource([source], { bad, mark });
-
-  assert.deepEqual(
-    result.errors.map((error) => [error.code, error.span.start.offset, error.span.end.offset]),
-    [["TSR032", source.indexOf("bad()"), source.indexOf("bad()") + "bad()".length]],
-  );
-  assert.equal(marked, false);
-});
-
-test("rejects composite values through set add, contains, and list toSet", () => {
-  for (const source of [
-    "let values = set[]\nvalues.add([1])",
-    "let values = set[1]\nlet found = values.contains([1])",
-    "let source = [{ value: 1 }]\nlet values = source.toSet()",
-    "let source = [set[1]]\nlet values = source.toSet()",
-  ]) {
-    const result = executeSource(source);
-    assert.deepEqual(
-      result.errors.map((error) => error.code),
-      ["TSR032"],
-    );
-  }
-});
-
 test("uses scalar equality for set uniqueness and retains insertion order", () => {
   const captured: unknown[] = [];
   const result = executeSource(
     [
-      'let values = set["a", "a", true, true, 1, 1.0, null, null, false]',
+      'let values: (string | boolean | number | null) set = set["a", "a", true, true, 1, 1.0, null, null, false]',
       "capture(values.toList())",
     ],
     { capture: captureInto(captured) },
@@ -386,24 +335,15 @@ test("removes only the first matching list value and present-value removals do n
   );
 });
 
-test("set remove of an absent value and removeFirst or removeLast on an empty list are no-ops", () => {
+test("set remove of an absent value is a no-op", () => {
   const captured: unknown[] = [];
   const result = executeSource(
-    [
-      "let setValue = set[1]",
-      "setValue.remove(2)",
-      "let emptyList = []",
-      "emptyList.removeFirst()",
-      "emptyList.removeLast()",
-      "capture(setValue.toList())",
-      "capture(emptyList)",
-      "exit",
-    ],
+    ["let setValue = set[1]", "setValue.remove(2)", "capture(setValue.toList())", "exit"],
     { capture: captureInto(captured) },
   );
 
-  assert.deepEqual(captured, [[1], []]);
-  // Unlike list remove(value), these no-ops report neither an error nor a warning.
+  assert.deepEqual(captured, [[1]]);
+  // Unlike list remove(value), this no-op reports neither an error nor a warning.
   assert.deepEqual(
     result.events.map((event) => event.kind),
     ["exit"],
@@ -460,14 +400,9 @@ function toNative(value: SerializableRuntimeValue): NativeValue {
     return value.items.map(toNative);
   }
   if (value.kind === "speakerReference") return value.identifier;
-  if (
-    value.kind === "range" ||
-    value.kind === "duration" ||
-    value.kind === "timerHandle" ||
-    value.kind === "mediaHandle"
-  ) {
-    return { ...value };
-  }
+  if (value.kind === "dict")
+    return Object.fromEntries(value.entries.map(({ key, value: item }) => [key, toNative(item)]));
+  if (value.kind !== "object") return { ...value };
   return Object.fromEntries(
     value.properties.map(({ name, value: item }) => [name, toNative(item)]),
   );

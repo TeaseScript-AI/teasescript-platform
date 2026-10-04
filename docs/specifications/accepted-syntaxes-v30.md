@@ -39,11 +39,12 @@ This table is generated from the current section order.
 - [32. Switch statements](#32-switch-statements)
 - [33. Browser API: file, folder, camera, and URL references](#33-browser-api-file-folder-camera-and-url-references)
 - [34. Runtime warnings and recoverable values](#34-runtime-warnings-and-recoverable-values)
-- [35. Date, time, durations, and Unix time](#35-date-time-durations-and-unix-time)
+- [35. Date, time, durations, and timestamps](#35-date-time-durations-and-timestamps)
 - [36. Scheduling](#36-scheduling)
 - [37. Dynamic speaker terms](#37-dynamic-speaker-terms)
 - [38. Keywords and protected built-ins](#38-keywords-and-protected-built-ins)
 - [39. Rejected and reserved syntax](#39-rejected-and-reserved-syntax)
+- [40. Dictionaries](#40-dictionaries)
 - [Remaining open decisions](#remaining-open-decisions)
 
 ## Status legend
@@ -360,15 +361,28 @@ let average = total / count
 let remainder = amount % 2
 ```
 
-Division returns a `number` when necessary:
+Dividing numbers always returns a `number`, also when the result is whole. Storing it where an `integer` is required needs
+explicit rounding ([§13](#13-explicit-types)):
 
 ```text
-5 / 2 // 2.5
+5 / 2                                 // 2.5
+let shares: integer = 10 / 5          // compile error: a quotient is a number
+let shares: integer = floor(10 / 5)   // valid
 ```
+
+Arithmetic applies to numbers, and to durations as described in [§35](#35-date-time-durations-and-timestamps). It never
+converts text or booleans: `"a" + "b"` is a compile error, and text is joined with interpolation, as in
+`"${first}${second}"`.
+
+A calculation whose result is too large to represent, or that divides by zero, has no result. When the compiler can
+see every operand of that step, as in `1e308 * 10` or `1e300 s * 1e10`, it is a compile error that names the step,
+anywhere in an expression. A division or remainder by a zero the compiler can see, such as `x / 0` or `x % (2 - 2)`,
+fails for every `x`, so it is a compile error even when `x` is known only when the script runs. Any other step with an
+operand that is known only then is checked when it runs, and fails with a runtime error.
 
 ### Randomness
 
-All random operations use one deterministic session RNG. This includes list `.random`, automatic visible-text list selection, random ranges, script globs, and the built-in random functions.
+All random operations use one deterministic session RNG. This includes list `.random`, list selection in `${...}` interpolation, random ranges, script globs, and the built-in random functions.
 
 ```text
 let value = random()
@@ -438,7 +452,7 @@ Expression precedence from strongest to weakest:
 4. `*`, `/`, `%`
 5. `+`, `-`
 6. Ranges `..` and `..=`
-7. Comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`
+7. Comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, and type tests `is`, `is not` ([§13](#13-explicit-types))
 8. `not`
 9. `and`
 10. `or`
@@ -550,6 +564,8 @@ Rules:
 - Use `else if` as two words.
 - `{}` are required for blocks.
 - Indentation is recommended but not syntactically significant.
+- A condition, like an operand of `and`, `or`, and `not`, is `true` or `false`. There is no truthiness: `if count` is
+  a compile error that suggests a comparison such as `count > 0`.
 
 ## 8. Strings and interpolation
 **Status:** Accepted
@@ -574,15 +590,15 @@ say """
 
 Backticks have no delimiter role. A raw backtick inside either quoted form is ordinary text.
 
-When an eligible list is interpolated into a string, the engine selects one random element for that evaluation:
+When a list is interpolated into a string, the engine selects one random element for that evaluation:
 
 ```text
 let greetings = ["Hello", "Hi", "Welcome"]
 say "${greetings}, ${playerName}"
 ```
 
-This automatic selection is limited to approved visible-text contexts. It is not a general list-to-string conversion.
-The complete rules are defined under [Lists](#16-lists).
+Only `${...}` interpolation selects from a list; it is not a general list-to-string conversion. The complete rules are
+defined under [Lists](#16-lists).
 
 ### String escape sequences
 
@@ -673,6 +689,52 @@ delimiter trims nothing. Additional blank lines remain after the two structural 
 `"""\n\n\n"""` has the value `"\n"`. Inside block content, one or two unescaped `"` characters are text; the first
 unescaped `"""` closes the block. Escaping one quote can break a would-be delimiter.
 
+### Text operations
+
+Strings are immutable: every operation returns a new value and leaves the original unchanged. `length` is a property;
+the other operations are methods:
+
+```text
+let name = "  ada lovelace  "
+let clean = name.trim()            // "ada lovelace"
+say clean.uppercaseFirst()         // Ada lovelace
+say clean.length                   // 12
+if clean.startsWith("ada") {
+    say clean.uppercase()          // ADA LOVELACE
+}
+let parts = "red,green,blue".split(",")   // ["red", "green", "blue"]
+say toString(7).padStart(3, "0")          // 007
+```
+
+| Operation | Result |
+| --- | --- |
+| `text.length` | the number of characters, counted as Unicode code points |
+| `text.contains(part)` | `true` when `part` occurs in `text` |
+| `text.startsWith(part)`, `text.endsWith(part)` | `true` when `text` starts or ends with `part` |
+| `text.indexOf(part)`, `text.lastIndexOf(part)` | the position of the first or last occurrence of `part`, or `-1` |
+| `text.substring(start)`, `text.substring(start, end)` | the characters from `start` up to, but not including, `end`; without `end`, up to the end of the text |
+| `text.split(separator)` | a `string[]` of the parts between separators, keeping empty parts; `split("")` returns the single characters |
+| `text.replace(search, replacement)` | the text with every occurrence of `search` replaced |
+| `text.trim()`, `text.trimStart()`, `text.trimEnd()` | the text without whitespace at both ends, at the start, or at the end |
+| `text.uppercase()`, `text.lowercase()` | the text in upper or lower case |
+| `text.uppercaseFirst()` | the text with its first character in upper case and the rest unchanged |
+| `text.repeat(count)` | the text repeated `count` times |
+| `text.padStart(length, fill)`, `text.padEnd(length, fill)` | the text with `fill` repeated before or after it up to `length` characters; a text that is already long enough is unchanged |
+
+Rules:
+
+- Positions and lengths count code points from `0`, like list indexes. A position is an integer from `0` through the
+  length, and `end` may not be before `start`. A `count` or padding `length` is an integer of `0` or more.
+- Searching and replacing compare text literally and case-sensitively. A `replace` search and a padding `fill` must be
+  non-empty.
+- Case conversion uses the locale-independent full Unicode mapping: `"Straße".uppercase()` is `"STRASSE"`. It is not
+  case folding and is not reversible: `"ß".uppercase().lowercase()` is `"ss"`. Composed and decomposed forms of the same
+  visible text are different text, and `split("")` returns code points, so a flag emoji gives two parts.
+- Arguments are positional. Misuse the compiler can see is a compile error: an unknown member, a member of a value
+  that has none (`count.uppercase()` on a number), a wrong number of arguments, an argument of the wrong known type, a
+  visibly negative, out-of-range, or empty argument, or an assignment such as `text.length = 0`. A value the compiler
+  cannot know is checked when the operation runs, and an invalid one raises a runtime error.
+
 ## 9. Commands
 **Status:** Accepted
 
@@ -687,7 +749,8 @@ wait 2
 playAudio "door.mp3"
 ```
 
-For `say`, an eligible list expression selects one random text value. Other commands do not gain this behavior unless their API explicitly defines the argument as a visible-text field.
+`say` shows a list, set, dict, or object in code-like notation; only `${...}` interpolation selects one random element
+from a list ([§16](#16-lists)).
 
 Only engine-provided built-ins use command syntax. User-defined behavior uses normal functions.
 
@@ -725,6 +788,13 @@ moveTo(
 )
 ```
 
+Positional arguments may be followed by named arguments:
+
+```text
+moveTo(10, y: 20)
+let amount = toNumber(text, default: 0)
+```
+
 Rules:
 
 - Positional arguments fill parameters from left to right.
@@ -732,7 +802,9 @@ Rules:
 - Trailing parameters with defaults may be omitted.
 - To skip an earlier parameter while setting a later one, use named arguments.
 - Named arguments use `name: value`.
-- Positional and named arguments may not be mixed in one call.
+- Positional arguments come first; named arguments may follow them. A positional argument after a named one is an
+  error: `moveTo(x: 10, 20)`.
+- A parameter receives at most one value: naming a parameter that a positional argument already fills is an error.
 - A grammar keyword may still be used as an API field label when it appears in the unambiguous `name:` position of a named argument, object property, or engine configuration block. This permits accepted labels such as `default:`, `repeat:`, and account-operation labels such as `save:` without permitting those words as variable or function identifiers.
 
 ## 11. Function definitions
@@ -750,7 +822,7 @@ With parameters:
 
 ```text
 function openDoor(doorName) {
-    say `The ${doorName} opens`
+    say "The ${doorName} opens"
 }
 ```
 
@@ -772,6 +844,14 @@ Rules:
 - Parameters are comma-separated.
 - Default values use `name = value`.
 - Required parameters must come before parameters with defaults.
+- An annotated parameter keeps its type; every argument and default must fit it.
+- A parameter with a default but no annotation takes the default's type by the same rule as `let`
+  ([§12](#12-variable-declarations)): with `times = 1`, `times` is an `integer`, and a call that passes `0.5` is a compile
+  error that suggests `times: number = 1`. Only an assignment in the body can make it a `number`, by the §12 rule for
+  non-whole numbers. What a default leaves open stays unknown: `null` gives an unknown type, and `[]` a list of
+  elements of unknown type.
+- A parameter without an annotation or a default has an unknown type. Its arguments are not checked, because a
+  parameter's type is never inferred from its call sites.
 
 ## 12. Variable declarations
 **Status:** Accepted
@@ -812,6 +892,66 @@ let score = 10
 score = "high"
 ```
 
+The first value decides an inferred type:
+
+```text
+let best = null       // best takes the type of its first non-null value
+best = "Ada"          // best is now string?
+best = 5              // compile error: best holds text (string) since line 2
+
+let picks = []        // picks takes its element type from its first element
+picks.add(3)          // picks is now integer[]
+picks.add("three")    // compile error
+```
+
+- A variable that starts as `null` takes the type of its first non-null value and may still hold `null`. The compiler
+  infers no other combination of types.
+- A variable without a type whose type is `integer` is a `number` when any of its assignments can store a non-whole
+  number, wherever that assignment is. The elements and properties inside such a variable widen by the same rule. A
+  declared type, such as `integer`, `integer[]`, or `integer set`, stays strict, and an integer-only use of a widened
+  value, such as a list index, `removeAt`, or a repeat count, is a compile error:
+
+  ```text
+  let speed = 1
+  speed = speed * 1.5   // speed is a number, also on the lines above
+  let count = 0
+  count += 1            // count stays an integer
+  let i = 0
+  i = i / 2             // i is a number, so items[i] is a compile error
+  let prices = [1, 2]
+  prices.add(2.5)       // prices is a number[]
+  ```
+
+- An empty list or set takes its element type from the first element added or assigned. In a list or set literal,
+  integers and numbers together are numbers, and `null` elements make the element type optional.
+- "First" follows checking order: top-level statements in source order, then function bodies that were not yet
+  needed, then timer and media blocks. The message for a later contradiction names the line of the first value.
+- A value whose type the compiler cannot know, such as untyped storage, host data, or a parameter of unknown type,
+  decides nothing and is not rejected at compile time.
+
+### Global variables
+
+`global` declares a variable that all files of a package share
+([ADR 0022](../decisions/0022-multi-file-scripts.md)):
+
+```text
+global strictness = 2
+global level = load "level", default: 1
+global answer: string? = null
+```
+
+Rules:
+
+- A global may be declared anywhere in any file, including inside `if`, loops, and functions.
+- It is visible in all files. Its name is unique in the project, and no other name may shadow it.
+- Declarations are collected at compile time. Globals are initialized once at session start, before the story runs,
+  whether or not the surrounding block ever runs: `main.tease` first, then the other files in path order, each in
+  source order. Reaching the declaration later does nothing.
+- An initializer may use literals, earlier globals, side-effect-free operators, and `load … , default:`. It may not use
+  local values, interactions, calls, or random numbers, or read a global initialized after it.
+- Types follow the `let` rules above, across all files. Values are checkpointed and live for the session; `save` and
+  `load` keep a value beyond it.
+
 ## 13. Explicit types
 **Status:** Accepted
 
@@ -833,10 +973,123 @@ number
 date
 time
 datetime
+timestamp
 duration
 ```
 
-Lists and optional values continue to use `type[]` and `type?`.
+The other type names are `null`; `list`, `set`, `dict`, and `object` for any list, set, dict, or object; and the
+program-control types `range`, `speaker`, `timer` (a timer handle), `media` (a media handle), and `script` (a script
+reference, [§29](#29-script-files-and-paths)). A type is a type name
+or one of these forms ([ADR 0021](../decisions/0021-static-types.md)):
+
+```text
+integer[]            // a list of integers
+integer set          // a set of integers
+integer dict         // a dict of integers by text key (§40)
+integer?             // an integer or null: integer | null
+integer | string     // an integer or text
+(integer | string)[] // a list whose elements are integers or text
+integer | string[]   // an integer, or a list of text
+integer?[]           // a list of integers or nulls
+integer[]?           // a list of integers, or null
+```
+
+`[]`, `set`, `dict`, and `?` follow a type and bind tighter than `|`; parentheses group. A set may hold any value a list
+may hold, so `integer[] set` is a set of lists of integers ([§16](#16-lists)).
+
+### Union types
+
+A union `A | B` holds a value of either type. Unions may be used wherever a type is allowed: variables, list and set
+elements, dict values, parameters, and return types. The compiler never infers a union; mixing types without a declared
+union is an error whose message names the union form:
+
+```text
+let reward: integer | string = 10
+reward = "a long break"                        // valid
+let values: (string | number)[] = ["Level", 2]  // valid
+let mixed = ["Level", 2]                       // compile error: declare (string | number)[]
+```
+
+An operation on a union is allowed when every member supports it with a compatible result. `==`, `!=`, and storing into
+an equal or wider union always work; `${...}` and text fields need every member to be a value they can show
+([§16](#16-lists)). Otherwise the error names the test the author needs:
+
+```text
+let points = reward + 1
+// 'reward' may be text (string). Check it first: if reward is integer { ... }
+```
+
+### Type tests and narrowing
+
+`value is T` tests a value against any type `T`; `value is not T` is its negation. `is` binds like the comparison
+operators, so `x is integer and x > 3` needs no parentheses, and type tests do not chain.
+
+```text
+if reward is integer {
+    say "You earned ${reward} points"
+} else {
+    say "You earned ${reward}"
+}
+```
+
+- `x is T` is true exactly when the value may be stored in a place of type `T`. `is number` is also true for integers,
+  and `is integer` is true for any whole number, including `2.0`. A collection test with an element type checks every
+  element; `[] is integer[]` is true. `is date`, `is time`, and `is datetime` are false for every current value.
+- A test works on every value, including untyped storage, host data, and parameters of unknown type. The operand is
+  evaluated once, and the test has no side effects.
+- `x is "happy"` is a compile error: `is` checks a type, and `==` compares values.
+- The compiler warns about a test that is provably always true or always false, such as `5 is number`.
+
+After a test, the compiler knows the narrower type:
+
+- in the branches of `if`/`else`, in the right operand of `and` and `or`, and in the body of `while`;
+- in the case blocks and the `default` of a `switch` ([§32](#32-switch-statements));
+- after an `if` whose branch ends with `return`, `exit`, `break`, or `continue`;
+- `x != null` and `x == null` narrow like `x is not null` and `x is null`.
+
+```text
+let saved = load "level"
+if saved is not integer {
+    exit
+}
+let level: integer = saved   // valid: saved is an integer here
+```
+
+- An assignment narrows the variable to the assigned value's type: directly after `let reward: integer | string = 10`,
+  `reward` is an `integer`.
+- Tests can overlap: an `else` branch keeps only what the test provably excludes, so a `number` that fails
+  `is integer` is still a `number`.
+- Only plain variables narrow; `door.locked` and `items[0]` do not.
+- A function call, `wait`, interaction, `say`, timer, media command, storage write, or timer or media property write
+  may let a function or block run, so it cancels narrowing for every top-level variable that a function or block
+  assigns. A loop's start forgets what the loop body may change, and a function or block body does not inherit
+  narrowing from the code around it.
+
+### Implicit conversions
+
+`integer` to `number` is the only implicit type conversion: an integer may be stored where a number is expected, and
+arithmetic on an integer and a number gives a number. Literal spelling decides the numeric type: `2` is an `integer`,
+while `2.0`, `.5`, and `1e3` are `number` values. A variable without a type that one of its assignments gives a
+non-whole number is a `number`, and so are its elements and properties ([§12](#12-variable-declarations)); a declared
+type is not widened.
+
+```text
+let ratio: number = 3                 // valid
+let count: integer = 2.0              // compile error: 2.0 is a number
+let count: integer = 10 / 4           // compile error: a quotient is a number
+let count: integer = floor(10 / 4)    // valid
+```
+
+Every other change of type is explicit:
+
+- Text and numbers never convert into each other. A number becomes text through interpolation, as in `"${count}"`.
+- Booleans and numbers never convert into each other.
+- A number never becomes an `integer` by itself; `round`, `floor`, or `ceil` makes it whole.
+- A duration needs a unit: `let pause: duration = 5`, `pause = 10`, and `pause + 5` are compile errors that suggest
+  `5 s`. A bare number counts as seconds only in commands that expect a time: `wait`, `timer`, the `showButton`
+  timeout, and media positions.
+
+Values become visible text in `${...}` and `say` as described in [§8](#8-strings-and-interpolation).
 
 ### Type conversion
 
@@ -850,7 +1103,10 @@ toBoolean(value)
 toDate(value)
 toTime(value)
 toDateTime(value)
+toTimestamp(value)
 ```
+
+The date and time conversions read strict ISO text; see [§35](#35-date-time-durations-and-timestamps).
 
 A conversion that cannot succeed raises a runtime error. A caller may provide an explicit fallback:
 
@@ -858,22 +1114,69 @@ A conversion that cannot succeed raises a runtime error. A caller may provide an
 let amount = toNumber(text, default: 0)
 ```
 
-When the compiler can prove that a conversion is invalid, it reports a compile error instead:
+When the compiler can prove that a conversion is invalid, it reports a compile error instead, also when a `default:`
+is given:
 
 ```text
 toNumber("hello") // compile error
 ```
 
-Values obtained from input, storage, files, network data, or another runtime expression are not known during compilation and are validated at runtime.
+Values obtained from input, storage, files, network data, or another runtime expression are not known during
+compilation and are validated at runtime. When such a value is stored in a variable, list or set element, dict value,
+object property, parameter, or function result whose type is known, the runtime checks the value before storing it; a
+value that does not fit is runtime error `TSR058`, which names the place and the value. An `integer` place takes any
+whole number, including a stored `2.0`, because the runtime does not keep a number's spelling. A list, set, or dict
+fits when every element or value fits, and an object fits when each known property that it has fits.
+
+`toString`, `toNumber`, `toInteger`, and `toBoolean` convert these values:
+
+| Conversion | Converts | Result |
+| --- | --- | --- |
+| `toString(value)` | text, numbers, `true` and `false`, `null`, durations, and date and time values | the same text as `"${value}"` |
+| `toNumber(value)` | numbers, and number text | a `number` |
+| `toInteger(value)` | numbers, and number text | an `integer` |
+| `toBoolean(value)` | `true` and `false`, and the text `"true"` or `"false"` | a `boolean` |
+
+- Number text is what `askNumber` accepts: an optional sign, digits with an optional decimal point, and an optional
+  exponent, such as `2.5`, `-3`, `.5`, or `1e3`. Surrounding whitespace is ignored, also around `"true"` and `"false"`.
+  Other text, such as `"2,5"`, `"ten"`, or a number too large to represent, cannot be converted.
+- No other value can be converted: `toNumber(true)` and `toBoolean(1)` are errors, and a list is combined into text with
+  [`join`](#16-lists).
+- A `default:` value must have the conversion's result type; an `integer` may be the default of `toNumber`.
 
 `toInteger` discards the fractional part toward zero:
 
 ```text
-toInteger(2.7)   // 2
-toInteger(-2.7)  // -2
+toInteger(2.7)    // 2
+toInteger(-2.7)   // -2
+toInteger("2.7")  // 2
 ```
 
-Use `round`, `floor`, or `ceil` when that rounding intent is required explicitly.
+Use `round`, `floor`, or `ceil` when that rounding intent is required explicitly. Each takes one number and returns an
+`integer`. `round` returns the nearest whole number; a value exactly halfway between two whole numbers rounds away from
+zero. `floor` rounds toward negative infinity and `ceil` toward positive infinity, so they have no tie case:
+
+```text
+round(2.4)   // 2
+round(2.5)   // 3
+round(-2.5)  // -3
+round(0.5)   // 1
+round(-0.5)  // -1
+floor(-2.5)  // -3
+ceil(-2.5)   // -2
+```
+
+`min(...)` and `max(...)` return the smallest or largest of two or more values, which are all numbers, all durations
+of one family, or all date and time values of one kind ([§35](#35-date-time-durations-and-timestamps)). The result is
+an `integer` when every argument is an `integer`, a `number` otherwise, and for durations and date and time values the
+chosen value itself. Mixing numbers, durations, duration families, or temporal kinds, other values, `null`, and named
+arguments are compile errors when the types show them, and runtime errors otherwise:
+
+```text
+let minutes = min(20, 5 + punishments)
+let pause = max(1 minute, remaining)
+let boundedLevel = max(1, min(level, 10))
+```
 
 ## 14. Scope
 **Status:** Accepted
@@ -895,6 +1198,7 @@ Rules:
 - A nested block may not redeclare a name visible from an outer scope.
 - A nested block may modify a visible outer variable.
 - Separate sibling blocks may declare the same local name.
+- Top-level variables belong to their file. A global ([§12](#global-variables)) is visible in all files.
 
 ```text
 if firstCondition {
@@ -923,6 +1227,29 @@ Properties use dot access:
 ```text
 say door.name
 door.locked = false
+```
+
+Properties have fixed names, so an object is not indexed: `door[name]` is a compile error that points to a dict for
+lookup by a name known only at runtime ([§40](#40-dictionaries)), and `door["name"]` to `door.name`.
+
+A property keeps the type of its first value, like a variable ([§12](#12-variable-declarations)); an `integer`
+property becomes a `number` when one of its assignments can store a non-whole number. Assignment may add a property,
+which then keeps its type:
+
+```text
+door.locked = "yes"    // compile error: locked holds true or false (boolean)
+door.color = "red"     // adds color, which holds text (string) from now on
+```
+
+When an object is stored in a place that already holds an object, such as an element of a list of objects, the
+properties they share must have the same types.
+
+Two objects are equal (`==`) when they have the same property names with equal values, in any property order. A
+property set to `null` differs from a missing property:
+
+```text
+{ name: "door", locked: true } == { locked: true, name: "door" }  // true
+{ name: "door" } == { name: "door", locked: null }                // false
 ```
 
 Custom structured type declarations are not required in the initial language. Advanced developers may extend the engine through TypeScript libraries.
@@ -955,12 +1282,30 @@ List methods:
 ```text
 items.add("sword")
 items.remove("key")
+items.removeAt(1)
 items.removeFirst()
 items.removeLast()
 items.clear()
 items.sort()
+items.shuffle()
 items.contains("map")
+items.join(", ")
+items.intersection(other)
+items.union(other)
+items.difference(other)
 ```
+
+`removeAt`, `removeFirst`, and `removeLast` return the removed element; the result may be ignored:
+
+```text
+let next = tasks.removeAt(0)
+let newest = tasks.removeLast()
+```
+
+`items.join(separator)` returns the elements as text, separated by the text `separator`, which defaults to `", "`:
+`["pet", "puppy"].join()` is `"pet, puppy"`. Use `${items.join()}` to show every element where `${items}` selects one.
+Elements may be text, numbers, `true` or `false`, `null`, durations, and date and time values, shown as `${...}` shows
+them; any other element raises an error.
 
 List properties:
 
@@ -978,55 +1323,84 @@ let chosenName = player.petNames.random
 let stranger = speakers.random
 ```
 
-### Automatic random selection in visible text
+### Lists in text
 
-When a list is used in an approved visible-text context, the engine automatically selects one random element for that evaluation.
-
-Accepted contexts include:
-
-```text
-say player.petNames
-say `${player.petNames}`
-```
-
-Other visible-text fields may opt into the same behavior when their API documentation explicitly says so.
-
-Automatic text selection accepts list elements of these types:
+Interpolation is the only place where a list turns into one random element. Each `${...}` evaluation selects one
+element with the deterministic session RNG:
 
 ```text
-string
-integer
-number
+say "Good ${player.petNames}"
+say "Come closer, ${player.petNames}"
 ```
 
-Those types may be mixed in one text-selection list:
+The two evaluations may choose different elements. Replay and debugging reproduce the same session sequence.
+
+An interpolated list may contain any value that `${...}` shows on its own: text, numbers, `true` and `false`, `null`,
+durations, and date and time values. A list holds one element type ([§12](#12-variable-declarations)), and integers and
+numbers together are numbers. The selected element is shown as that value would be:
 
 ```text
-let values = [
-    "Level",
-    2,
-    3.5
-]
+let waits = [30 seconds, 90 seconds]
 
-say values
+say "Wait ${waits}"  // for example "Wait 1 min 30 s"
 ```
 
-A selected `integer` or `number` is converted to text for that visible-text use.
-
-Each evaluation selects again:
+A list that holds values of different types needs a declared union element type ([§13](#13-explicit-types)):
 
 ```text
-say `Good ${player.petNames}`
-say `Come closer, ${player.petNames}`
+let values: (string | number | duration)[] = ["Level", 2, 3.5, 90 seconds]
+
+say "Current: ${values}"  // for example "Current: 1 min 30 s"
 ```
 
-The two evaluations may choose different elements. Selection uses the deterministic session RNG, so replay and debugging can reproduce the same session sequence.
+The whole list is checked before the selection, so a list that also contains a list, a set, an object, or a media or
+resource reference is rejected whichever element would have been selected. Object lists remain valid lists; select from
+them explicitly:
+
+```text
+let stranger = speakers.random
+```
+
+`say` is also a debugging aid for whole values. Like Python's `print`, it shows text, numbers, `true` and `false`,
+`null`, durations, and date and time values as it does on their own, and every other value in a code-like notation:
+
+```text
+let petNames = ["pet", "puppy", "toy"]
+say petNames                   // ["pet", "puppy", "toy"]
+say "Good ${petNames}"         // one random element
+say [2.5, 3, null]             // [2.5, 3, null]
+say [["a"], ["b"]]             // [["a"], ["b"]]
+say [{ name: "Bo", age: 3 }]   // [{ name: "Bo", age: 3 }]
+say { name: "Bo" }             // { name: "Bo" }
+say dict{ collar: "leather" }  // dict{ "collar": "leather" }
+say ["He said \"hi\""]         // ["He said \"hi\""]
+say []                         // []
+say [90 seconds]               // [1 min 30 s]
+say 1..=5                      // 1..=5
+say mistress                   // <speaker mistress>
+say music                      // <media "music.mp3", playing at 12 s>
+say beat                       // <timer "Beat", 7 s left>
+```
+
+In this notation, text is quoted with the string escapes of [§8](#8-strings-and-interpolation), durations use their
+short form, a set shows like a list, an object shows its properties in order, a dict shows its quoted keys and values in
+order, and a range shows as written. A speaker shows its identifier. A media handle shows its file and state:
+`playing at` or `paused at` its position, `stopped`, or `finished`. A timer handle shows its label when it has one and
+its state: the time left (after `paused,` when paused), `stopped`, or `finished`. Handles show the state at the moment
+`say` runs. Message markup is not applied to the notation.
+
+Other text fields, such as a button label, an input hint, the `text` of a choice object, a timer label, or a speaker's
+name or title, do not select from a list. A list there is a compile error when the compiler can see it, such as a list
+literal or a variable that holds a list, and a runtime error otherwise; the message points to `"${list}"` and
+`list.random`. Another value a text field cannot show, such as an object or a range, is likewise a compile error when
+the compiler can see it. A list as a whole `choose` option instead gives
+one button per element ([§19](#19-choices)).
 
 To choose a specific element, use its index:
 
 ```text
 say player.petNames[0]
-say `Today I will call you ${player.petNames[1]}`
+say "Today I will call you ${player.petNames[1]}"
 ```
 
 To reuse one random choice, select it explicitly and store the resulting value:
@@ -1034,8 +1408,8 @@ To reuse one random choice, select it explicitly and store the resulting value:
 ```text
 let chosenName = player.petNames.random
 
-say `From now on, you are my ${chosenName}`
-say `Come here, ${chosenName}`
+say "From now on, you are my ${chosenName}"
+say "Come here, ${chosenName}"
 ```
 
 Normal assignment does not perform random selection:
@@ -1053,10 +1427,11 @@ copiedNames.add("new")
 
 `originalNames` remains unchanged.
 
-Automatic random selection is deliberately not a general list-to-string conversion. It does not apply implicitly to paths, storage keys, URLs, media references, resource references, ordinary type inference, or other program-control values:
+Interpolation is deliberately not a general list-to-string conversion. Paths, storage keys, URLs, media references,
+resource references, ordinary type inference, and other program-control values never select from a list:
 
 ```text
-run scriptPaths
+goto (scriptTargets)
 load storageKeys
 openUrl(urls)
 playVideo videos
@@ -1064,32 +1439,59 @@ playVideo videos
 
 Those examples require an explicit element or `.random` where the receiving API permits the selected element type.
 
-Automatic visible-text selection also does not accept lists containing:
-
-```text
-boolean
-null
-objects
-nested lists
-media references
-resource references
-```
-
-Object lists remain valid, but selection from them must be explicit:
-
-```text
-let stranger = speakers.random
-```
-
 Runtime behavior:
 
-- An invalid index raises a runtime error rather than returning `null`.
-- Automatic visible-text selection from an empty list raises a runtime error because no element can be selected.
-- The empty-list error identifies the list expression and explains that the visible-text context requires at least one eligible element.
+- An invalid index raises a runtime error rather than returning `null`. The compiler reports an index that it can see
+  is negative or not a whole number, such as `items[-1]` or `items.removeAt(0.5)`.
+- Interpolating an empty list raises a runtime error because no element can be selected.
+- The empty-list error identifies the interpolated expression and explains that interpolation needs at least one
+  element to select from.
+- A value `${...}` cannot show, or a list literal inside it that is empty or holds such a value, is a compile error
+  when the compiler can see it.
+- Two lists are equal (`==`) when they have the same length and equal elements in the same order; two sets are equal
+  when they have the same members in any order; two ranges are equal when they are written with the same bounds and
+  the same inclusiveness, so `1..=2 != 1..3` although both produce `1` and `2`. Values of different kinds, such as a
+  list and a set, are never equal. List `contains(value)` and `remove(value)` use this equality, so they also find
+  objects and nested lists; `remove(value)` removes the first equal element.
+- A set may hold any value a list may hold: text, numbers, `true` and `false`, `null`, durations, date and time values
+  ([§35](#35-date-time-durations-and-timestamps)), lists, objects, dicts, sets, ranges, speakers, and timer and media
+  handles. Collections nest in every direction, such as sets of lists, sets in dicts, and lists in lists. A set keeps
+  the first of members that are equal (`==`), in insertion order, so `set[[1, 2], [1, 2]]` has one member, and its
+  `contains(value)` and `remove(value)` use the same equality. A member is copied when it is added, and `.first`,
+  `.last`, `.random`, and a `for` loop give copies, so changing one does not change the set.
+- The operands of `==` and `!=` are read when they are evaluated, left to right, so a change made while evaluating the
+  right operand does not affect the left one: `items == [items.removeAt(0)]` is `true` for `items = [1]`.
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
-- `removeFirst()` and `removeLast()` on an empty list, and set `remove(value)` of an absent value, are no-ops: the
-  collection stays unchanged and execution continues without an error or warning.
+- `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
+  raises the same runtime error as indexing.
+- `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`.
+- `add(value)`, `remove(value)`, `clear()`, `sort()`, and `shuffle()` return `null`. Set `remove(value)` of an absent
+  value is a no-op: the set stays unchanged and execution continues without an error or warning.
 - Mutating methods change the existing list.
+- `sort()` orders a list in place, ascending and stable. Its elements must all be numbers (integers and numbers
+  together), all text, all durations of one family, or all dates, all times, all datetimes, or all timestamps
+  ([§35](#35-date-time-durations-and-timestamps)); text is ordered by Unicode code point, independently of locale, so
+  `"B"` sorts before `"a"`. Other or mixed elements are a compile error when the element type shows them, and a runtime
+  error otherwise.
+- `shuffle()` puts a list in a uniformly random order in place with the deterministic session RNG. The number of random
+  draws depends only on the length, so replay and checkpoint resume reproduce the order; a list of fewer than two
+  elements draws nothing.
+- Sets keep their insertion order and have no `sort()` or `shuffle()`; copy a set into a list with `toList()` first.
+- `intersection(other)`, `union(other)`, and `difference(other)` return a new collection of the receiver's kind and
+  leave both operands unchanged. `other` may be a list or a set. The result holds each element once, in the receiver's
+  order: `intersection` keeps the elements also in `other`, `difference` the elements not in `other`, and `union` all
+  elements followed by the new elements of `other` in its order. Elements compare with `==`. `union` holds the element
+  types of both, as a list literal of both would; `intersection` and `difference` keep the receiver's element type:
+
+```text
+let mine = ["collar", "gag", "cuffs"]
+let yours = ["cuffs", "collar", "rope"]
+
+mine.intersection(yours)  // ["collar", "cuffs"]
+mine.union(yours)         // ["collar", "gag", "cuffs", "rope"]
+mine.difference(yours)    // ["gag"]
+```
+
 - Recoverable index and empty-selection errors follow the runtime recovery rules described later in this document.
 
 ## 17. Return statements
@@ -1130,6 +1532,15 @@ function calculateDamage(
 
 `void` is not required for functions without a returned value.
 
+A function's result type comes from its `return` values, so callers keep it like any other value
+([§12](#12-variable-declarations)). Integers and numbers together give a `number`. Returns of different types are a
+compile error that names both. A function that can end without returning a value, by reaching its end or through a
+bare `return`, returns `null` there, so its result may be `null`. A returned value of unknown type, such as an
+unannotated parameter, makes the result unknown; the other returned values must still agree.
+
+With a return-type annotation, every returned value must fit the annotation, and a function that can end without a
+value needs an optional result type such as `number?`.
+
 ## 18. Null and optional values
 **Status:** Accepted
 
@@ -1145,9 +1556,10 @@ Explicit optional type syntax:
 let file: string? = chooseFile()
 ```
 
-The `:` introduces the explicit type; `?` means the value may also be `null`.
+The `:` introduces the explicit type; `?` means the value may also be `null`: `string?` is the union
+`string | null` ([§13](#13-explicit-types)).
 
-Advanced authors may check explicitly:
+Advanced authors may check explicitly; the check narrows `file` to `string` inside the block:
 
 ```text
 if file != null {
@@ -1155,54 +1567,78 @@ if file != null {
 }
 ```
 
-Potentially nullable use without an explicit check follows the compiler-warning and runtime-recovery rules in the next section.
+Using a possibly null value where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
+error. The message names the check to write: `if n != null { ... }`, inside which `n` is an `integer`. A loaded value
+can instead get a default, as in `load "level", default: 1`.
 
 ## 19. Choices
 **Status:** Accepted
 
-`choose` returns the selected label directly.
-
-Named choices:
-
-```text
-let action = choose "What do you do?" {
-    open: "Open the door"
-    leave: "Walk away"
-}
-```
-
-The result is the selected label:
+`choose` shows one button per option and returns the value of the selected button. A button shows its text; its value
+is what `choose` returns. Options are comma-separated; the interaction itself (presentation, typed answers,
+transcript) is defined in [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#choose).
 
 ```text
+let action = choose open: "Open the door", leave: "Walk away"
+
 if action == "open" {
     openDoor()
 }
 ```
 
-Numeric labels are allowed:
+An option may have a value written before `:`. An identifier returns text and a numeric literal returns its number, an
+`integer` or a `number` as written. An option without a written value returns itself, with its own type:
 
 ```text
-let action = choose "What do you do?" {
-    1: "Open the door"
-    2: "Walk away"
-}
+let answer = choose back: "Back", "Spanking", "Lines"   // "back", "Spanking", or "Lines"
+let rounds = choose 5, 10                               // 5 or 10, an integer
 ```
 
-When no explicit label is supplied, the visible text itself is returned:
+A list used as an option gives one button per element, in order; a set gives one button per member, in insertion order,
+in the same way. An element is a value, or a choice object `{ value?, text, background? }`: the button shows `text`,
+returns `value` (or the `text` value when `value` is omitted), and uses `background` as its colour
+([§37](#authored-colours)). A choice object may also be a whole option. A value written before a list or set option is
+the value of every button from it:
 
 ```text
-let action = choose "What do you do?" [
-    "Open the door",
-    "Walk away"
-]
+let offenses = [{ value: "spank", text: "Spanking" }, { text: "Corner" }]
+let answer = choose back: "Back", offenses   // "back", "spank", or "Corner"
+let n = choose [5, 10, 15]                   // n is an integer
+let door = choose win: "Open a door", lose: ["Open a door", "Open a door"]   // 3 buttons; the last two return "lose"
 ```
 
 Rules:
 
-- A choice may use labeled entries or unlabeled entries.
-- Labeled and unlabeled entries may not be mixed in one `choose`.
-- A labeled choice returns the selected label.
-- An unlabeled choice returns the selected visible text.
+- A button shows its option, or its choice object's `text`, as `${...}` shows it: text, a number, `true` or `false`,
+  `null`, a duration, or a date or time value.
+- Options with and without a written value may be mixed.
+- When all values have the same type, the result has that type; integers and numbers together are numbers.
+- Values of different types, such as text and numbers, give a union ([§13](#13-explicit-types)). Only a place declared
+  with a union type keeps such a result; storing it where its type would be inferred, as in an unannotated `let`, is a
+  compile error that names the union to declare:
+
+  ```text
+  let rounds: integer | string = choose "None", [5, 10]   // "None", 5, or 10
+  let other = choose "None", [5, 10]                      // compile error: declare 'let other: string | integer'
+  ```
+
+- When the source shows every button's value, the result is known to be one of them until the variable is assigned
+  again or a call or suspension may change it ([ADR 0021](../decisions/0021-static-types.md) rule 5.5), and comparing
+  it with a value that no button returns, also as a literal `case` value ([§32](#32-switch-statements)), is a compiler
+  warning:
+
+  ```text
+  let answer = choose "spank", "lines"
+  if answer == "Open" { ... }   // warning: 'answer' is always "spank" or "lines" here
+  ```
+
+- The elements of a list option are values or choice objects, not lists or sets.
+- A choice object has `text`, and optionally `value` and `background`. It has no `value` property when a value is
+  written before its option's `:`, also as an element of a list or set option.
+- An empty list or set contributes no buttons. A `choose` without any button is an error: a compile error when it is
+  visible in the source, such as `choose []`, and a runtime error otherwise.
+- Buttons may repeat a value or a text: `choose win: "Open a door", lose: "Open a door", lose: "Open a door"` shows
+  three buttons. A selected button is identified by its position, so each returns its own value.
 - `choose` does not return a result object.
 
 ## 20. Input functions
@@ -1258,6 +1694,7 @@ Supported options:
 - `allowAutocorrect`: `boolean`
 - `allowSpellcheck`: `boolean`
 - `scope`: `"input"` or `"teasePlayer"`
+- `default`: `string`; see [Default answers](#default-answers)
 
 Rules:
 
@@ -1300,7 +1737,10 @@ It only completes when every field contains a valid number and returns `number[]
 let count = askInteger("Enter a whole number")
 ```
 
-`askInteger(...)` only completes when a valid whole number has been entered and returns `integer`.
+`askInteger(...)` only completes when a valid whole number has been entered and returns `integer`. The compact form
+`askInteger [as speaker] [hint] [, default: integer]` is implemented as the whole-number counterpart of `askNumber`
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askinteger)): an answer is an optional sign and
+digits within the safe integer range.
 
 ### Multiple integer inputs
 
@@ -1373,6 +1813,50 @@ askDateTime(...)  // datetime
 ```
 
 These inputs use structured date and time controls and do not return unparsed free text. Like the other blocking `ask...` functions, they only complete with a valid value.
+
+The compact forms `askDate`, `askTime`, and `askDateTime [as speaker] [hint] [, default: value]` are implemented
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)). The control
+submits strict ISO text ([§35](#35-date-time-durations-and-timestamps)); a local time that the player's zone skips is a
+valid answer. The transcript shows the answer in the player's presentation. The Player's date and date-and-time
+controls cover the years 0001 through 9999, as the browser's native controls do; a default in year 0000 is shown and
+edited as ISO text instead. The value domain stays 0000 through 9999 for conversions, defaults, and text answers.
+
+### Default answers
+
+Every single-field input accepts an optional named `default:` answer that prefills its field:
+
+```text
+let name = askText("What is your name?", default: "Ada")
+let minutes = askNumber("Corner time?", default: cornerBase + playerLevel)
+let count = askInteger("How many?", default: 10)
+let answer = askBoolean("Continue?", default: true)
+let day = askDate("Which date?", default: getDate())
+```
+
+| Function | `default:` value |
+|---|---|
+| `askText(...)`, `askTyping(...)` | `string` with a non-whitespace character |
+| `askNumber(...)` | `number` or `integer` |
+| `askInteger(...)` | `integer` |
+| `askBoolean(...)` | `boolean` |
+| `askDate(...)`, `askTime(...)`, `askDateTime(...)` | `date`, `time`, and `datetime` respectively |
+
+Rules:
+
+- The input opens with the default as its editable answer, and the player still submits explicitly. A submitted
+  default is an ordinary answer: its result, validation, and transcript text are those of the same answer entered by
+  hand.
+- Clearing the field never falls back to the default; a blank answer is rejected and asked again.
+- The default must be an answer the input accepts. There is no implicit conversion except `integer` to `number`: write
+  `default: "${count}"` to offer a number as text. A non-whole `askInteger` default is an error, never rounded.
+- The compiler rejects a default that it knows is invalid, and its error names the fix. Any other default is checked
+  when the input opens; an invalid one is a runtime error, and the input does not open.
+- `askTyping` applies its `allow...` restrictions to the prefilled text as to typed text.
+- Restoring a checkpoint shows the original default again; edits the player had not submitted are dropped.
+- `choose` has no preselected option: a choice is an explicit decision, and a choice button completes when activated.
+  An author can style the preferred option instead, for example with `background:`. File, folder, image, video, and
+  audio pickers have no prefill because a browser cannot preset a file input. Multi-field inputs keep their
+  `defaults:` lists.
 
 ### File input
 
@@ -1552,6 +2036,9 @@ Default invalid messages:
 | `askNumbers(...)` | `"That is wrong. Every value must be a number."` |
 | `askInteger(...)` | `"That is wrong. I asked for a whole number."` |
 | `askIntegers(...)` | `"That is wrong. Every value must be a whole number."` |
+| `askDate(...)` | `"That is wrong. I asked for a date."` |
+| `askTime(...)` | `"That is wrong. I asked for a time."` |
+| `askDateTime(...)` | `"That is wrong. I asked for a date and time."` |
 | `askFile(...)` | `"That file is not valid."` |
 | `askFiles(...)` | `"One or more files are not valid."` |
 | `askFolder(...)` | `"That folder is not valid."` |
@@ -1578,7 +2065,7 @@ The developer instruction controls tone and wording. It does not need to repeat 
 
 ### General input rules
 
-- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askBoolean(...)`, `askBooleans(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`.
+- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askDate(...)`, `askTime(...)`, `askDateTime(...)`, `askBoolean(...)`, `askBooleans(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`.
 - Input functions complete only after valid input has been supplied.
 - Cancelling a file, folder, camera, microphone, image, audio, or video picker does not complete the input request.
 - `askInteger(...)` and `askIntegers(...)` reject decimal values.
@@ -1594,43 +2081,36 @@ The developer instruction controls tone and wording. It does not need to repeat 
 - `askAudio(...)` defaults to `allowMicrophone: true` and `allowFile: true`.
 
 ## 21. Blocking button
-**Status:** Accepted
+**Status:** Accepted (compact form: Owner decision on #531, 2026-10-04)
 
-`showButton` displays a button and blocks normal script execution until the user clicks it or an optional timeout is reached.
-
-The return value may be ignored:
-
-```text
-showButton("Continue")
-```
-
-The elapsed waiting time may also be stored:
+`showButton` displays a button and blocks normal script execution until the user clicks it or an optional timeout is
+reached. It uses the compact form of [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#showbutton),
+including `as speaker` and `background:`:
 
 ```text
-let elapsed = showButton("Continue")
-```
-
-With an optional timeout, positional or named syntax may be used:
-
-```text
-showButton("Continue", 5)
-```
-
-```text
-let elapsed = showButton(
-    text: "Continue",
-    timeout: 5
-)
+showButton "Continue"
+showButton "Continue", timeout: 5
+let elapsed = showButton "Continue", timeout: 30 s
+if elapsed < 2 s {
+    say "That was quick."
+}
 ```
 
 Rules:
 
-- `timeout` is optional.
+- `timeout` is optional. A bare number counts seconds, as for `wait` and `timer` ([§27](#27-timers)); an elapsed
+  duration such as `500 ms` or `2 min` may also be used. `5` and `5 s` are the same timeout.
 - Without a timeout, the command waits until the user clicks.
-- With a timeout, execution continues after the click or when the timeout is reached.
-- The function returns the actual elapsed waiting time.
+- With a timeout, execution continues after the click or when the timeout is reached. A reached timeout removes the
+  button without a chat message.
+- The command returns the elapsed waiting time as a `duration` ([§35](#35-date-time-durations-and-timestamps)),
+  measured in scene time like timers ([§27](#time)). When the timeout is reached, the returned duration equals the
+  timeout; a timeout of `5` returns `5 s`.
 - If the caller does not need the elapsed time, the return value may be ignored.
-- When the timeout is reached, the returned value equals the timeout.
+- A zero, negative, or non-numeric timeout, or one with a calendar unit, is an error. The compiler rejects a timeout
+  it can see is invalid; any other is checked when the button would appear, and an invalid one is a runtime error.
+- The parenthesized forms `showButton("Continue", 5)` and `showButton(text: "Continue", timeout: 5)` are deferred
+  until parenthesized interaction calls are needed.
 - `showButton` belongs to the core language/runtime API, not specifically to the browser-picker API.
 
 ## 22. Stage image, audio, and video
@@ -1685,9 +2165,10 @@ let music = playAudio(
 ```
 
 `file` is required and evaluates to a reference string or `null`; `async` is the literal `true` or `false`. `startAt`,
-`endAt`, `at`, and `beforeEnd` accept non-negative durations or numbers of seconds. `startAt` and `endAt` default to the
-start and end of the file and define the active playback range; a supplied `endAt` must be later than `startAt`, and
-the effective end is limited to the source duration. `volume` is a number from `0` through `1` and defaults to `1`.
+`endAt`, `at`, and `beforeEnd` accept non-negative exact durations or numbers of seconds. `startAt` and `endAt` default
+to the start and end of the file and define the active playback range; a supplied `endAt` must be later than
+`startAt`, and the effective end is limited to the source duration. `volume` is a number from `0` through `1` and
+defaults to `1`.
 Arguments evaluate in source order, followed by the cue positions in block order.
 
 Repeat:
@@ -1697,8 +2178,9 @@ Repeat:
 - `repeat: 60 s` repeats for 60 seconds of active playback and may end mid-pass;
 - `repeat: false`, or no repeat, plays one pass.
 
-A count is a whole number of at least one and a duration is greater than zero. A plain number such as `repeat: 3` is
-an error; write `3 times` or a duration. Blocking media may use a count or a duration but not indefinite repetition.
+A count is a whole number of at least one and a duration is exact and greater than zero. A plain number such as
+`repeat: 3` is an error; write `3 times` or a duration. Blocking media may use a count or a duration but not
+indefinite repetition.
 
 On the ordinary story path, `showImage`, `hideImage`, `playAudio`, `playVideo`, and statement-level media handle
 operations such as `music.pause()` or `music.position = 2 min` wait until the previous message's pacing has completed or
@@ -1722,13 +2204,13 @@ say "${music.elapsed} of ${music.duration}"
 - `position` is the playhead in the source; `remaining` is the time to the effective end of the current pass;
   `duration` is the source duration; `elapsed` is the active playback time since the start across all passes, excluding
   pauses and Player stalls; `volume` is the script volume.
-- Assignable properties are `position` and `remaining` (`=`, `+=`, `-=`, with durations) and `volume`. `duration`,
+- Assignable properties are `position` and `remaining` (`=`, `+=`, `-=`, with exact durations) and `volume`. `duration`,
   `elapsed`, and `state` are read-only. Media that could not be loaded reads `null` for `duration` and `remaining`.
 - `state` is `running`, `paused`, `finished`, or `stopped`. Idempotent calls, other operations on settled media, and
   developer warning `TSW010` follow the timer handle rules.
 - An assignment to `position` or `remaining` is a seek. It is clamped to the active range and does not fire cues it
   jumps across; a cue exactly at a new position before the end fires once playback proceeds from it. A seek to the end
-  of the range fires the cues there and completes the current pass at once, like a timer's `remaining = 0`, also while
+  of the range fires the cues there and completes the current pass at once, like a timer's `remaining = 0 s`, also while
   paused, where the next pass stays paused. Seeks do not change `elapsed`.
 - After media finishes or stops, `position` and `elapsed` keep their final values; `remaining` is zero if the source
   loaded and `null` otherwise.
@@ -1776,7 +2258,8 @@ playAudio async repeat "music/beat.mp3" {
 - When the Player cannot load a source, or the source leaves an empty playback range, the runtime reports developer
   warning `TSW013`, the media becomes `stopped` without cues or `finish`, and the script continues. A `null` file plays
   nothing, continues at once, and reports `TSW011`.
-- `exit` and the end of the script stop all media; the last Stage image stays.
+- `exit` and the end of the session stop all media; the last Stage image stays. `goto`, `call`, and `end` do not stop
+  media.
 - Checkpoint and restore preserve the Stage image and media state; playback resumes from the persisted position, and
   time without a running Player does not advance media. Restore does not imply cross-device handoff.
 
@@ -1953,6 +2436,9 @@ for item in items {
 }
 ```
 
+`for` goes through the elements of a list or set, the keys of a dict ([§40](#40-dictionaries)), or the whole numbers of
+a range, as they were when the loop started: changing the source inside the loop does not change what the loop visits.
+
 ```text
 while player.health > 0 {
     wait 1
@@ -2012,11 +2498,11 @@ save playerName as "player.name"
 `save value as key` evaluates the value first, then the key. It creates the key when absent and replaces its value
 when present. Saving `null` removes the key, like `delete`; stored top-level values are never `null`.
 
-`default` is optional:
+The fallback `, default:` is optional:
 
 ```text
 let playerName = load "player.name"              // null when the key is absent
-let score: number = load "player.score" default 0
+let score: number = load "player.score", default: 0
 ```
 
 `load` evaluates its key first. When the key exists, it returns the stored value with its stored TeaseScript type
@@ -2024,19 +2510,24 @@ without evaluating the default. When absent, it evaluates and returns the defaul
 `load` never writes: the default is not stored. Only `save` creates or changes a stored value. An explicit target
 type may determine the intended numeric type of a literal default, as in the `number` example above.
 
-Key, value, and default operands are full expressions; `as` and `default` delimit their operands. Group a `load`
-before combining its result with another expression:
+Key, value, and default operands are full expressions. `as` ends the value of `save`. A `, default:` belongs to the
+nearest construct before it that takes one: a `load`, the default answer of an ask, or a labelled option of a compact
+`choose`. Group the inner construct to give the fallback to `load`, as in `load (askText "Key?"), default: "none"` or
+`load (choose a: "x", b: "y"), default: "z"`; without the parentheses, the choice gets a third option labelled
+`default`. Inside `()`, `[]`, and object literals, where a line break does not end an expression, the comma may also
+start the next line. Group a `load` before combining its result with another expression:
 
 ```text
 (load "k") == null
-(load "a" default 0) + 1
+(load "a", default: 0) + 1
 ```
 
 Without parentheses, `load "k" == null` uses `"k" == null` as the key, which is not a string. Group a nested `load`
-used as a key too. A compact interaction inside an operand ends at the enclosing `as` or `default`, and inside a
-`save` value `as` belongs to `save`: `save askText as "name"` asks and stores the answer, while an interaction with
-its own speaker clause is grouped, as in `save (askText as mistress "Name?") as "name"`. A default may suspend, such as `load "name" default askText "Your name?"`; it starts only when
-the key is absent and can resume across checkpoint restore.
+used as a key too. A compact interaction inside a `save` value ends at the `as`, which belongs to `save`:
+`save askText as "name"` asks and stores the answer, while an interaction with its own speaker clause is grouped, as in
+`save (askText as mistress "Name?") as "name"`. A default may suspend, such as
+`load "name", default: askText "Your name?"`; it starts only when the key is absent and can resume across checkpoint
+restore. The earlier form without the comma and colon, `load "k" default 0`, is a compile error that names the fix.
 
 Delete a value:
 
@@ -2056,7 +2547,9 @@ Rules:
 
 - The engine preserves the stored TeaseScript type; scripts do not serialize every value to plain text manually.
 - The physical database representation is an implementation detail and may use typed columns, tagged JSON, or another typed serialization.
-- A stored value whose type is incompatible with the receiving explicit type raises runtime error `TSR056`.
+- A loaded value must fit the type of the place that receives it ([§13](#13-explicit-types)), or runtime error
+  `TSR058` is raised. This applies to the stored value, the default, and `null` for a missing key, so
+  `let level: integer = load "level"` needs `integer?` or a default when the key may be missing.
 - Persistent plain data is storable. Timer handles, media handles, and speaker references exist only in the current
   session and cannot be saved, including when nested inside lists or objects (`TSR055`). Nested `null` is allowed.
 - Saving and loading copy data: later changes to the saved variable or a loaded value do not change storage.
@@ -2069,12 +2562,10 @@ Rules:
 - Dots and slashes inside a key are naming conventions only.
 - The complete string is treated as one key.
 
-Storage currently supports strings, finite numbers, booleans, lists, objects, sets, ranges, and durations, including
-nested `null`. Wider persistent-data support is not yet implemented; this subset is not a permanent language limit.
-Persisted-value type checking is partially implemented: it currently checks only the stored value in a direct
-`let x: T = load ...` initializer (parentheses around `load` are allowed), not defaults, assignments, arguments, or
-returns. Full `integer`/`number` type preservation is not yet implemented because the runtime represents both as one
-number. Replacement-value recovery under [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
+Storage currently supports strings, finite numbers, booleans, lists, objects, sets, dicts, ranges, durations, and date
+and time values, including nested `null`. Wider persistent-data support is not yet implemented; this subset is not a
+permanent language limit. The compiler rejects a default whose type is known and does not match. Replacement-value
+recovery under [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
 
 Examples:
 
@@ -2103,9 +2594,12 @@ goto tooLate
 
 Rules:
 
-- Labels are local to the current script.
-- `goto` may not jump into a deeper block or function scope.
-- Unknown labels are compile errors.
+- A label stands only in a file's outer scope, not inside `if`, loops, functions, or handlers. A `goto` may appear
+  anywhere.
+- Labels are local to their file; `goto label` moves within the current file. [§29](#29-script-files-and-paths)
+  defines `goto` to another file.
+- Unknown labels and duplicate labels in one file are compile errors.
+- A `goto` discards the current function, loop, and block continuations.
 - A `goto` triggered by an event aborts the current execution path and does not return.
 
 ## 27. Timers
@@ -2129,7 +2623,7 @@ comes first, then the presentation, the duration, an optional string-literal lab
 modifiers mean visible and blocking. `async`, `visible`, `mystery`, and `hidden` are recognized only directly after
 `timer`; write `timer (hidden)` to use a variable of that name as the duration.
 
-A duration is a bare number of seconds, a [§35](#35-date-time-durations-and-unix-time) elapsed duration such as
+A duration is a bare number of seconds, a [§35](#35-date-time-durations-and-timestamps) elapsed duration such as
 `500 ms` or `2 min`, or a number followed by a trailing unit as for `wait` (`timer n ms`). A range such as `5..10` or
 `5..=10` counts whole seconds and is drawn once per round from the session RNG after the timer's operands are
 evaluated. Ranges with other units, such as `5..10 min`, are not implemented yet. `timer 0` and `wait 0` continue
@@ -2191,11 +2685,10 @@ of the wrong type are rejected.
 - `repeat: true` starts another round when a round expires. A repeating range draws a new duration for each round;
   every round must last longer than zero. Rounds that expire during one late time observation keep their original
   schedule and each run the expiry block once.
-- Every timer stops on `exit` and when the script ends.
-- For future `goto`, `end`, `run`, and `call` transfers, non-persistent timers are removed and persistent timers
-  remain active.
+- Every timer stops on `exit` and when the session ends.
+- On `goto`, `end`, and `call` transfers, non-persistent timers are removed and persistent timers remain active.
 
-The current runtime stores `persist` but it has no effect: `goto`, `end`, `run`, and `call` are not implemented.
+The current runtime stores `persist` but it has no effect: `goto`, `end`, and `call` are not implemented.
 
 ### Expiry blocks
 
@@ -2249,6 +2742,10 @@ running while a live Player is minimized or in the background; when the Player i
 including on another device, the gap does not consume timer time and the timer continues with its saved remaining
 time. A script plays the same however late or often the Player observes time: everything happens at its own moment
 in scene time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
+
+Scene time is measured in milliseconds, including fractional milliseconds, up to 2^53 − 1, about 285,000 years. A `wait`, timer, or `showButton` timeout
+longer than that can never end; the compiler rejects one it can see, such as `wait 1e15`, and any other is a runtime
+error.
 
 ## 28. Permanent buttons
 **Status:** Accepted
@@ -2310,67 +2807,115 @@ let secondButton = showPermanentButton "Unknown" {
 
 Cleanup:
 
-- A non-persistent button is removed on `goto`, `end`, `run`, `call`, or `exit`.
-- A persistent button survives `goto`, `end`, `run`, and `call`.
+- A non-persistent button is removed on `goto`, `end`, `call`, or `exit`.
+- A persistent button survives `goto`, `end`, and `call`.
 - Every permanent button disappears on `exit`.
 
 ## 29. Script files and paths
-**Status:** Accepted
+**Status:** Accepted ([ADR 0022](../decisions/0022-multi-file-scripts.md))
 
-Script files use the `.tease` extension. The fixed project entry file is:
+A package consists of one or more `.tease` files. The fixed entry file is `main.tease`; a session starts at its top.
+Paths are relative to the package root and separate folders with `/`.
+
+Go to another file, from its top or at a label:
 
 ```text
-main.tease
+goto "punishments/strict.tease"
+goto "punishments/strict.tease" start
 ```
 
-Specific script:
+Call another file, from its top or at a label; execution continues after the `call` when that file reaches `end`:
 
 ```text
-run "punishments/strict.tease"
 call "corner-time/short.tease"
+call "corner-time/short.tease" start
 ```
 
-Random matching script selected through a glob pattern:
+A glob pattern picks one matching file at random:
 
 ```text
-run "punishments/*.tease"
+goto "punishments/*.tease"
+goto "punishments/*.tease" start    // only files that have label start
 call "corner-time/*.tease"
+```
+
+A computed target needs the explicit conversion `script(path, label:)`:
+
+```text
+goto script("rooms/${room}.tease")
+goto script("rooms/${room}.tease", label: "start")
+let next = script("rooms/hall.tease")
+goto (next)
 ```
 
 Rules:
 
-- `run` abandons the current execution path, starts the selected script, and does not return.
-- `call` saves the current location, starts the selected script, and returns to the next statement after the called script reaches `end`.
-- A glob that matches no files is a compile or load error.
-- The explicit `random` keyword is not used; a glob pattern performs random matching-file selection.
-- `goto` only moves within the current file and is not a script-file change.
+- `goto` to another file replaces the current file and does not return. Pending `call` returns remain; the current
+  function, loop, and block continuations are discarded.
+- `call` keeps the current position, including an enclosing function or loop, and resumes after the `call` when the
+  called file reaches `end`.
+- A path that leaves the package, a missing file, and a missing label are compile errors.
+- In a glob, `*` stands for any characters within one folder or file name. Globs are expanded at compile time. With a
+  label, the pick is among the matched files that have it. A glob that matches no file, or no file with the label, is a
+  compile error.
+- Each time a glob target runs, one draw from the session random generator picks the file. Restoring a checkpoint
+  never draws again.
+- `script(path)` returns a `script` reference to a file, and `script(path, label: name)` one to a label in it. Plain
+  text is not a jump target. References can be stored in variables, lists, dicts, and globals; a variable as a target is
+  grouped, as in `goto (next)`. A missing file or label is a compile error when the compiler knows the path and label,
+  and otherwise a runtime error.
+- Functions and labels are local to their file.
+- There is no `run` and no automatic selection of a next file; the script states every transfer.
 
 ## 30. Script endings
-**Status:** Accepted
+**Status:** Accepted ([ADR 0022](../decisions/0022-multi-file-scripts.md))
 
-Normal end of the current script file:
+End the current file and return to the file that called it:
 
 ```text
 end
 ```
 
-Complete end of the active tease/session:
+Finish the session:
 
 ```text
 exit
 ```
 
+Set the destination for an `end` without a caller, with the same targets as `goto` ([§29](#29-script-files-and-paths)):
+
+```text
+fallback "menu.tease"
+fallback "menu.tease" start
+if chapter > 3 { fallback script("chapters/${chapter}.tease", label: "recap") }
+```
+
 Behavior:
 
-- In a script entered through `call`, `end` returns to the caller.
-- In a script entered through `run`, `end` returns control to the engine's active script-selection flow, which may select another matching script.
-- `exit` terminates the entire active tease/session, including from a called script or function, and never returns.
-- A script file may contain multiple reachable `end` or `exit` statements.
+- `exit` is the only normal way to finish the session, and it is always required, in `main.tease` too. It works
+  anywhere, including in a called file or a function, and never returns. A project with no reachable `exit` does not
+  compile.
+- `end` ends the current file, also from inside a function or block, and returns to the file that `call`ed it.
+- Reaching `end` with no caller continues at the fallback destination when one is set, and is an error otherwise. The
+  fallback is never implicit.
+- `fallback` may run any number of times, anywhere, including inside `if`; the latest one executed wins. It is session
+  state and is checkpointed. `fallback none` clears it again.
+- A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. Branches that all
+  end or transfer need nothing after them:
+
+```text
+if passed {
+    goto "rewards/praise.tease"
+} else {
+    exit
+}
+```
+
+- A file may contain multiple reachable `end` or `exit` statements.
 - `finish` is not used as an alternative to `end`.
 
 Static analysis should warn, but not necessarily fail compilation, when:
 
-- no reachable `end`, `run`, `goto`, or `exit` exists on a path;
 - statements are unreachable;
 - an `exit` is declared but unreachable.
 
@@ -2416,7 +2961,7 @@ Permission handling and unsupported environments are runtime implementation deta
 
 ```text
 switch action {
-    case "open" {
+    case "open", "unlock" {
         openDoor()
     }
 
@@ -2433,11 +2978,45 @@ switch action {
 Rules:
 
 - Parentheses around the switched expression are optional.
+- The switched expression is evaluated once. The cases are then tested in source order, and only the first matching
+  case runs. Cases do not fall through, and `break` is not used to end a case.
 - Every `case` uses a required block.
-- `break` is not used.
-- Cases do not fall through.
-- `default` is optional.
-- Cases may use literal values or ranges.
+- A `case` lists one or more values separated by commas and matches when any of them matches.
+- A case value is a literal (text without `${...}`, a number or duration with an optional sign, `true`, `false`, or
+  `null`), a declared speaker, or a range with a number literal on each side. A literal or speaker matches when the
+  switched value `==` it.
+- A range matches a number within its bounds (§6): `1..5` matches `1 <= value < 5` and `1..=5` matches
+  `1 <= value <= 5`, including numbers that are not whole, such as `4.5`. A value that is not a number, such as `null`,
+  never matches a range.
+- A type case, `case is T` or `case is not T`, tests the switched value like `value is T` ([§13](#13-explicit-types)).
+  It tests one type; a union covers several, as in `case is integer | string`. A case has either values or a type test.
+- When the switched value is a plain variable, it narrows as in an `if`/`else if` chain: the block of `case is T` knows
+  the type `T`, the block of `case is not T` what remains without `T`, and a `case null` block knows `null`. Every later
+  case and `default` know only what the cases above did not take.
+
+```text
+function describe(answer: integer | string?) {
+    switch answer {
+        case null { say "No answer" }
+        case is integer { say "Number ${answer + 1}" }
+        default { say "Text of length ${answer.length}" }    // answer is a string here
+    }
+}
+```
+
+- `default` is optional. It comes after the last case, runs when no case matches, and appears at most once.
+- `return`, `break`, and `continue` inside a case block behave as inside an `if` block; `break` and `continue` apply to
+  the enclosing loop.
+- Compile errors:
+  - a case value that is not one of the forms above, such as a range with a computed bound (use `if` instead);
+  - a range that contains no numbers: `5..5` excludes its end (write `case 5` or `5..=5`), and a reversed range such as
+    `5..1` counts down (write `1..5` or `1..=5`);
+  - a case value that repeats or overlaps an earlier case value (§6), such as `2` after `2.0` or after `1..5`;
+  - a case value whose type can never match the switched value's known type, such as `case "x"` on an `integer`, or a
+    range on text.
+- Compile warnings: a case that can never match because of what the switched value can hold, such as a type case that
+  no value left by the cases above passes, `case 5` after `case is integer`, or `case "maybe"` on a `choose` that only
+  returns `"yes"` or `"no"`.
 
 ## 33. Browser API: file, folder, camera, and URL references
 **Status:** Accepted
@@ -2490,10 +3069,9 @@ it; a well-formed string, including one returned by `load`, grants no access by 
 ## 34. Runtime warnings and recoverable values
 **Status:** Accepted
 
-Potentially nullable results produce compiler warnings when used without an explicit check, but they are not automatically hard compile errors.
-
-Nullable-result compiler warnings are accepted future behavior and not yet implemented. Media commands accept `null`
-references at runtime; see the fallback below.
+Using a possibly null value without an explicit check, where its non-null type is required, is a compile error
+([§18](#18-null-and-optional-values)). Commands that accept `null` themselves, such as media commands, still take it;
+see the fallback below.
 
 Compatible built-ins may apply a safe fallback. For example, `showImage null` clears the Stage image, reports developer warning `TSW011` with the source location, and continues ([§22](#22-stage-image-audio-and-video)).
 
@@ -2512,7 +3090,7 @@ A valid string reference may replace the missing value.
 ### Invalid number from stored or external data
 
 ```text
-let duration: number = load "settings.duration" default 0
+let duration: number = load "settings.duration", default: 0
 ```
 
 A valid number may replace an invalid stored value.
@@ -2525,13 +3103,13 @@ let item = items[99]
 
 A replacement value may be supplied for `item`.
 
-### Empty list in visible-text selection
+### Empty list in interpolation
 
 ```text
-say `${names}`
+say "${names}"
 ```
 
-When `names` is empty, execution reports that no eligible text value can be selected. A replacement text value may be supplied when runtime recovery is enabled.
+When `names` is empty, execution reports that no element can be selected. A replacement text value may be supplied when runtime recovery is enabled.
 
 Recovered errors should record:
 
@@ -2544,165 +3122,167 @@ Recovered errors should record:
 
 Recovery is not offered for structural errors such as malformed syntax, unknown functions, invalid labels, or internal engine exceptions. The exact recovery interface and whether recovery is enabled are runtime implementation details, not syntax.
 
-## 35. Date, time, durations, and Unix time
-**Status:** Accepted direction; exact elapsed durations implemented
+## 35. Date, time, durations, and timestamps
+**Status:** Accepted (#532). Implemented: `date`, `time`, `datetime`, and `timestamp` values, their conversions,
+fields, comparison, arithmetic, presentation, collections, and storage, the current-time getters, calendar durations,
+and date and time input ([§20](#date-and-time-input)).
 
-TeaseScript has separate `date`, `time`, `datetime`, and `duration` types. The current runtime implements elapsed
-duration literals and values using `ms`, `s`, `min`, and `h`, including their singular and plural long forms.
-Calendar durations, date/time APIs, technical conversions, and locale-aware presentation remain deferred.
-Until calendar durations are implemented, a calendar unit fails compilation instead of being read as another value.
+TeaseScript has two kinds of time:
 
-Current values:
+| Type | Meaning |
+| --- | --- |
+| `date` | A local calendar date without a zone, such as `2026-10-04` |
+| `time` | A local clock time without a zone, such as `14:30` |
+| `datetime` | A local date and clock time without a zone. It follows the player: tomorrow 18:00 stays 18:00 wherever the player is, also after saving, loading, and travel |
+| `timestamp` | A fixed moment in UTC, like Unix time |
+| `duration` | Months, calendar days, and exact milliseconds |
+
+Use local values for "what clock time" and "which day", and `timestamp` for "how long ago" and "how much time
+passed". Unlike SQL, where `timestamp` names a local value, a TeaseScript `timestamp` is always an exact moment.
+
+### Current values
 
 ```text
-let today: date = getDate()
-let currentTime: time = getTime()
-let now: datetime = getDateTime()
+let today = getDate()
+let now = getTime()
+let dinner = toDateTime(getDate() + 1 day, toTime("18:00"))
+let started = getTimestamp()
 ```
 
-`getDateTime()` uses the effective player timezone from the account, with the device timezone as a fallback when no account timezone is available.
+`getDate()`, `getTime()`, and `getDateTime()` return the player's current local values; `getTimestamp()` returns the
+current moment. Within one start or continue, `getTimestamp()` never goes backwards. Local values can: after the
+autumn daylight-saving change, or after travelling west. The engine reads no clock and no host time-zone or locale
+data: the Player records the player's zone and presentation as session data (see
+[`RUNTIME.md`](../RUNTIME.md#date-and-time-context)).
 
-Available fields include:
+### Construction and conversion
+
+Temporal values are written as strict ISO text with a four-digit year; there are no date literals and no locale
+parsing:
+
+```text
+toDate("2026-10-04")
+toTime("14:30")                         // also "14:30:15" and "14:30:15.250"
+toDateTime("2026-10-04T18:00")
+toTimestamp("2026-10-04T12:30:00Z")     // also an offset, such as "2026-10-04T14:30:00+02:00"
+```
+
+Local text has no offset; timestamp text requires `Z` or an offset. Fractions have one to three digits. Text that is
+known at compile time and is not a valid value is a compile error, also when a `default:` is given; other text follows
+the [§13](#13-explicit-types) conversion rules.
+
+| Conversion | Converts |
+| --- | --- |
+| `toDate(value)` | date text, a `date`, or the date of a `datetime` |
+| `toTime(value)` | time text, a `time`, or the clock time of a `datetime` |
+| `toDateTime(value)` | datetime text or a `datetime` |
+| `toDateTime(date, time)` | a `date` and a `time` combined |
+| `toTimestamp(value)` | timestamp text or a `timestamp` |
+
+Local values and timestamps convert through the player's current zone:
+
+```text
+let deadline = dinner.toTimestamp()
+let local = started.toDateTime()
+```
+
+A local time that the spring daylight-saving change skips moves forward by the gap; a local time that the autumn
+change repeats takes the earlier moment. A `date` or `time` alone cannot become a timestamp.
+
+### Fields
 
 ```text
 today.year
 today.month
 today.day
-today.weekday
-today.weekdayNumber
+today.weekday           // "Saturday"
+today.weekdayNumber     // Monday is 1, Sunday is 7
 
-currentTime.hour
-currentTime.minute
-currentTime.second
-currentTime.millisecond
-
-now.year
-now.month
-now.day
 now.hour
 now.minute
 now.second
 now.millisecond
-now.weekday
-now.weekdayNumber
 ```
 
-`weekday` returns the English weekday name. `weekdayNumber` uses ISO numbering where Monday is `1` and Sunday is `7`.
+A `datetime` has all of these fields. `weekday` is the English weekday name; comparing it with text that is not an
+English weekday name gives a compile warning. Values hold whole milliseconds.
 
-### Duration literals
+### Durations
 
-Exact elapsed suffixes are `ms`/`millisecond`/`milliseconds`, `s`/`second`/`seconds`,
-`min`/`minute`/`minutes`, and `h`/`hour`/`hours`. The calendar examples below describe deferred accepted
-direction:
+| Kind | Units | Meaning |
+| --- | --- | --- |
+| Exact | `ms`/`millisecond`/`milliseconds`, `s`/`second`/`seconds`, `min`/`minute`/`minutes`, `h`/`hour`/`hours` | Elapsed time; `24 h` is always 24 elapsed hours |
+| Calendar | `d`/`day`/`days`, `w`/`week`/`weeks`, `mo`/`month`/`months`, `y`/`year`/`years` | The same local clock time that many days, weeks, months, or years later, never a fixed number of hours |
 
-```text
-500 milliseconds
-30 seconds
-10 minutes
-2 hours
-1 day
-3 weeks
-1 month
+Both long forms are accepted for any number: `1 seconds` and `2 day`. `m` is not a unit, because it would be ambiguous
+between minutes and months. A week is 7 days and a year is 12 months. Adding months or years to a day that the target
+month lacks gives that month's last day: January 31 plus one month is February 28, or 29 in a leap year, and
+February 29 plus one year is February 28. Months and days are whole after normalizing: `0.5 years` is 6 months, while
+`1.5 days`, `1.5 weeks`, and `1 month * 1.5` are errors, at compile time when the values are known. Exact time keeps
+fractions.
 
-500 ms
-30 s
-10 min
-2 h
-1 d
-3 w
-1 mo
-```
+A duration keeps months, days, and exact time apart, so `1 week == 7 days` but `1 day != 24 h`. Durations order and
+divide within one family: exact with exact, days and weeks with days and weeks, months and years with months and years.
+`1 week >= 7 days` is true and `18 months / 1 year` is `1.5`; `1 day >= 24 h` and `1 month >= 30 days` are errors. Zero
+belongs to every family, and dividing by any zero duration is an error. `duration.days` is the whole number of days of a
+duration made only of days and weeks, and `duration.months` the whole number of months of one made only of months and
+years: `(getDate() - locked).days`.
 
-`m` is not used because it would be ambiguous between minutes and months. Duration units may be combined:
-
-```text
-let punishmentDuration = 1 day + 6 hours + 30 minutes
-```
-
-Elapsed-time units are exact:
-
-```text
-milliseconds
-seconds
-minutes
-hours
-```
-
-Calendar units preserve local clock time where possible:
-
-```text
-days
-weeks
-months
-```
-
-Consequently, `24 hours` is always exactly 24 elapsed hours, while `1 day` means the same local clock time on the next calendar day and may span 23, 24, or 25 elapsed hours around daylight-saving transitions.
-
-When adding a calendar month to a date whose day does not exist in the target month, use that month's last day. For
-example, January 31 plus one month is February 28, or February 29 in a leap year.
+`wait`, timers, the `showButton` timeout, media positions and repeat budgets, and assignments to timer and media
+`remaining`, `position`, and `repeatDuration` accept exact durations only; a known calendar duration there is a compile
+error, and any other one a runtime error.
 
 ### Arithmetic and comparison
 
-Supported operations:
+| Operation | Result |
+| --- | --- |
+| `date ± calendar duration` | Calendar arithmetic; `date ± exact duration` is an error |
+| `datetime ± calendar duration` | The same local clock time that many days, weeks, months, or years later |
+| `datetime ± exact duration` | Elapsed time through the player's current zone |
+| `timestamp ± exact duration` | Elapsed time; a calendar duration is an error |
+| `date - date` | Whole calendar days, such as `5 days` |
+| `datetime - datetime` | The elapsed exact duration through the player's current zone |
+| `timestamp - timestamp` | The elapsed exact duration |
 
-```text
-datetime + duration -> datetime
-datetime - duration -> datetime
-datetime - datetime -> duration
-duration + duration -> duration
-duration - duration -> duration
-duration * number -> duration
-duration / number -> duration
-duration / duration -> number
-```
+A composed duration applies its months, then its days, then its exact time; source grouping is preserved. Across the
+spring daylight-saving night, `dinner + 24 h` is 19:00 the next day while `dinner + 1 day` is 18:00. Exact time added to
+a temporal value is rounded to whole milliseconds, with ties away from zero; `wait` and timers keep fractional
+milliseconds. Arithmetic on `time` is not available.
 
-Elapsed duration values support `==`, `!=`, `<`, `<=`, `>`, and `>=` across compatible units:
-`90 seconds > 1 minute` is true.
+A `date` orders by calendar, a `time` by clock (without wrapping at midnight), a `datetime` by calendar and clock, and a
+`timestamp` by moment. `sort()`, `min`, and `max` use the same order for values of one kind. Ordering or arithmetic
+across temporal kinds is an error, and `==` between different kinds is `false`. Known invalid combinations are compile
+errors; others are runtime errors.
 
-Date/time values also support those comparisons; `datetime` comparisons use the represented exact moment.
+Local comparisons can reverse after the autumn daylight-saving change or after travelling west, and a day counter counts
+calendar-date boundaries. `datetime - datetime` measures through the current zone, so `(dinner + 24 h) - dinner` is
+`23 h` when `dinner + 24 h` falls in the repeated autumn hour. Measure elapsed time with `timestamp`.
 
 ### Display and technical conversion
 
-Current elapsed duration values use deterministic English visible-text formatting; `90 seconds` displays as
-`1 min 30 s`. Locale-aware duration formatting is deferred. Locale- and timezone-aware date/time presentation
-remains accepted future direction:
+`say`, `${...}`, and `toString` show every temporal value, including a timestamp, in the player's numeric local form:
+date field order, separators, and 12- or 24-hour clock follow the player's locale, such as `4-10-2026, 18:30` in Dutch
+and `10/4/2026, 6:30 PM` in US English. The exact punctuation follows the engine's locale data. Seconds appear only when
+they are not zero, milliseconds never (`toISO()` keeps them), and no month or weekday names appear. `formatDate()`,
+`formatTime()`, and `formatDateTime()` return the same text for part or all of a value. Durations display as `1 h 2 min
+3.5 s`.
+
+Inside a list, set, or object, temporal values use a fixed notation: `<date 2026-10-04>`, `<time 14:30>`,
+`<datetime 2026-10-04 14:30>`, and `<timestamp 2026-10-04T12:30:00Z>`.
 
 ```text
-say `Your punishment ends ${chastityEnd}.`
-say `You still have ${remaining} remaining.`
+dinner.toISO()             // "2026-10-04T18:00", without an offset
+started.toISO()            // "2026-10-04T12:30:00Z", in UTC
+started.toSeconds()        // Unix seconds, rounded down
+started.toMilliseconds()   // Unix milliseconds
 ```
 
-The following explicit presentation methods are deferred; their accepted return type is `string`:
+There is no construction from a Unix number, because seconds and milliseconds would be ambiguous.
 
-```text
-chastityEnd.formatDate()
-chastityEnd.formatTime()
-chastityEnd.formatDateTime()
-remaining.format()
-```
+### Collections and storage
 
-Technical conversions:
-
-```text
-let localIso = chastityEnd.toISO()
-let utcIso = chastityEnd.toUTC()
-let timestamp = chastityEnd.toSeconds()
-let timestampMs = chastityEnd.toMilliseconds()
-```
-
-Current Unix time:
-
-```text
-let timestamp = getSeconds()
-let timestampMs = getMilliseconds()
-```
-
-Unix values are integers counted from `1970-01-01T00:00:00Z`.
-
-### Storage
-
-`date`, `time`, `datetime`, and `duration` values use ordinary typed storage. The engine preserves their type, exact moment or duration semantics, and relevant timezone information. The physical UTC, Unix-millisecond, tagged-JSON, or database representation is an implementation detail.
-
+Temporal values and durations can be list and set elements; a set compares kind and value. Typed storage keeps each
+kind distinct from the others and from text: local values without an offset, timestamps as moments in UTC.
 
 ## 36. Scheduling
 **Status:** Wanted capability; final syntax, authority, and Player UI deferred
@@ -2754,14 +3334,14 @@ Ordinary `say` uses the current default speaker:
 
 ```text
 say "Kneel."
-say `Good morning, ${player.alias}.`
+say "Good morning, ${player.alias}."
 ```
 
 Use one explicit speaker for one message:
 
 ```text
 say as mistressVera "Kneel."
-say as mistressVera `You will obey your ${speaker.title}.`
+say as mistressVera "You will obey your ${speaker.title}."
 ```
 
 During the second message, `speaker` resolves to `mistressVera`. `say as` does not change the default speaker after that message.
@@ -2769,7 +3349,7 @@ During the second message, `speaker` resolves to `mistressVera`. `say as` does n
 A speaker can refer to another speaker explicitly:
 
 ```text
-say as cashier `Please speak to ${mistressVera.shortTitle} ${mistressVera.lastName}.`
+say as cashier "Please speak to ${mistressVera.shortTitle} ${mistressVera.lastName}."
 ```
 
 Set the current default speaker with the same `speaker` keyword followed by an existing speaker reference:
@@ -2778,7 +3358,7 @@ Set the current default speaker with the same `speaker` keyword followed by an e
 speaker mistressVera
 ```
 
-This does not redeclare the speaker. The parser distinguishes `speaker identifier { ... }` from `speaker identifier` through the following token. The default speaker is session state: it survives `goto`, `end`, `run`, and `call`, remains active until changed again, and is cleared by `exit`.
+This does not redeclare the speaker. The parser distinguishes `speaker identifier { ... }` from `speaker identifier` through the following token. The default speaker is session state: it survives `goto`, `end`, and `call`, remains active until changed again, and is cleared by `exit`.
 
 ### Names, titles, and presentation
 
@@ -2914,7 +3494,10 @@ degradingNames
 lovingNames
 ```
 
-The engine supplies a default list for each player field. The player may customize these account-wide defaults. If a built-in list has nevertheless been emptied, its visible-text fallback is the literal category label: `"pet name"`, `"degrading name"`, or `"loving name"`. This special fallback does not change the general empty-list runtime-error rule for ordinary lists.
+The engine supplies a default list for each player field. The player may customize these account-wide defaults. The
+player's settings require at least one name in each list, and the Player and engine validate this where a profile
+enters them; no profile input exists yet, so the validation arrives with it. There is no fallback text: a list that a
+script empties follows the ordinary empty-list rules.
 
 ```text
 player.petNames
@@ -2922,18 +3505,18 @@ player.degradingNames
 player.lovingNames
 ```
 
-In an approved visible-text context, a list automatically returns one random eligible element according to the list rules:
+Interpolation selects one random element according to the list rules:
 
 ```text
-say `Come here, ${player.petNames}.`
-say `Good ${player.lovingNames}.`
-say `You are such a ${player.degradingNames}.`
+say "Come here, ${player.petNames}."
+say "Good ${player.lovingNames}."
+say "You are such a ${player.degradingNames}."
 ```
 
 Every evaluation may select a different element. Use an index for a specific value:
 
 ```text
-say `Today I will call you ${player.petNames[0]}.`
+say "Today I will call you ${player.petNames[0]}."
 ```
 
 Use `.random` and store the result when the same selection must be reused:
@@ -2941,8 +3524,8 @@ Use `.random` and store the result when the same selection must be reused:
 ```text
 let chosenName = player.petNames.random
 
-say `From now on, you are ${chosenName}.`
-say `Come here, ${chosenName}.`
+say "From now on, you are ${chosenName}."
+say "Come here, ${chosenName}."
 ```
 
 The lists are editable like ordinary lists:
@@ -2976,8 +3559,8 @@ Setting `gender` fills the default values of the derived terms below:
 Examples:
 
 ```text
-say `You are a good ${player.boyGirl}.`
-say `${mistressVera.heShe} is waiting for you.`
+say "You are a good ${player.boyGirl}."
+say "${mistressVera.heShe} is waiting for you."
 ```
 
 Every derived term is independently editable:
@@ -3015,13 +3598,13 @@ The confirmed anatomical and arousal terms are:
 Examples:
 
 ```text
-say `Touch your ${player.cockPussy}.`
-say `${player.strokeRub} your ${player.cockClit}.`
-say `Focus on your ${player.glansClitoris}.`
-say `Gently tap your ${player.ballsLabia}.`
-say `Pull back your ${player.foreskinClitoralHood}.`
-say `Touch your ${player.nippleBreast}.`
-say `Keep going until you are ${player.hardWet}.`
+say "Touch your ${player.cockPussy}."
+say "${player.strokeRub} your ${player.cockClit}."
+say "Focus on your ${player.glansClitoris}."
+say "Gently tap your ${player.ballsLabia}."
+say "Pull back your ${player.foreskinClitoralHood}."
+say "Touch your ${player.nippleBreast}."
+say "Keep going until you are ${player.hardWet}."
 ```
 
 Terms that normally remain the same do not need artificial dynamic pairs. Examples include:
@@ -3053,12 +3636,12 @@ Actions and anatomical targets remain separate so the same terms can be recombin
 Examples:
 
 ```text
-say `${player.strokeRub} your ${player.cockClit}.`
-say `Keep ${player.strokingRubbing} your ${player.cockClit}.`
-say `${player.wankRub} your ${player.cockClit}.`
-say `You ${player.strokedRubbed} a lot today.`
-say `You ${player.wankedRubbed} earlier.`
-say `You are my ${player.strokerMasturbator}.`
+say "${player.strokeRub} your ${player.cockClit}."
+say "Keep ${player.strokingRubbing} your ${player.cockClit}."
+say "${player.wankRub} your ${player.cockClit}."
+say "You ${player.strokedRubbed} a lot today."
+say "You ${player.wankedRubbed} earlier."
+say "You are my ${player.strokerMasturbator}."
 ```
 
 The generic words `masturbate`, `masturbating`, and `masturbated` need no dynamic replacement when the same wording is suitable for every player. `strokerMasturbator` follows the same gender-default and explicit-override rules as the other dynamic speaker terms.
@@ -3439,6 +4022,7 @@ continue
 and
 or
 not
+set
 true
 false
 null
@@ -3448,13 +4032,15 @@ say
 as
 label
 goto
-run
 call
 end
 exit
+fallback
+global
 save
 load
 delete
+is
 ```
 
 The same keyword may have more than one grammar form when the next token makes the form unambiguous. For example, `speaker identifier { ... }` declares a speaker, while `speaker identifier` sets the default speaker. A parser distinguishes these forms through normal lookahead; this is not an implementation problem.
@@ -3473,8 +4059,18 @@ number
 date
 time
 datetime
+timestamp
 duration
+list
+dict
+object
+range
+media
+script
 ```
+
+The type names `null`, `set`, `speaker`, and `timer` are protected as grammar keywords or engine names. `dict` also
+starts a dict literal when `{` follows it ([§40](#40-dictionaries)).
 
 ### Protected engine names
 
@@ -3485,6 +4081,11 @@ player
 random
 randomInteger
 chance
+round
+floor
+ceil
+min
+max
 toString
 toNumber
 toInteger
@@ -3492,11 +4093,11 @@ toBoolean
 toDate
 toTime
 toDateTime
+toTimestamp
 getDate
 getTime
 getDateTime
-getSeconds
-getMilliseconds
+getTimestamp
 schedule
 cancelSchedule
 askText
@@ -3630,6 +4231,60 @@ They are not currently executable syntax. Media and timers are controlled throug
 ### Reserved for later design
 
 `available when` is reserved for future requirements or suitability metadata and is not executable syntax.
+
+## 40. Dictionaries
+**Status:** Accepted (#536)
+
+A dict is a lookup table from text keys to values of one type, for names known only when the script runs. An object
+([§15](#15-objects)) is one thing with fixed properties, each with its own type.
+
+```text
+let spare = "spare"
+let toys = dict{ collar: "leather collar", "soft cuffs": "wrist cuffs", [spare]: "spare gag" }
+let counts: integer dict = dict{}
+
+say toys[name]                          // a missing key is an error
+toys[name] = "ball gag"                 // adds the key, or replaces its value in place
+if toys.contains(name) { ... }          // whether the key exists
+let old = toys.remove(name)             // the removed value; a missing key is an error
+toys.clear()
+let n = counts.get(name, default: 0)    // the value, or the default when the key is missing
+toys.length                             // the number of entries
+toys.keys                               // a new list of the keys, in entry order
+toys.values                             // a new list of the values, in the same order
+for name in toys { ... }                // the keys
+```
+
+- **Keys** are text. In a literal, `collar:` is the key `"collar"`, quoted text is any key, and `[expr]:` computes one.
+  Entries are evaluated in source order, each key before its value. A key that is not text, such as a number, is a
+  compile error when the compiler can see it and runtime error `TSR062` otherwise; write a number key as text, as in
+  `toys["${id}"]`.
+- **Duplicate keys:** a key the literal shows twice, also through computed keys whose text is known, is a compile
+  error. Equal keys known only at runtime let the later entry replace the earlier one in its position.
+- **Order:** entries keep insertion order. Assigning to an existing key keeps its position; a new key comes last.
+- **Value type:** values share one type by the rules for list elements ([§12](#12-variable-declarations)), so integers
+  and numbers together are numbers, an empty dict takes the type of its first value, and an integer dict without a
+  written type widens to numbers. Values of different types need a declared union, such as `(integer | string) dict`.
+  `T dict` is written like `T[]` and `T set`, and `dict` alone holds any values ([§13](#13-explicit-types)).
+- **Missing keys:** reading or removing a key that the dict does not have is runtime error `TSR061`, which names the
+  check, such as `Dictionary has no key "collar". Check toys.contains(name) first.` A missing key is visible to the
+  compiler only for a literal dict, so `dict{ a: 1 }["b"]` is a compile error; for any other dict, check
+  `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key; its `default:`
+  is required and must fit the value type like a value stored in the dict, also when the script runs (`TSR058`), and
+  its result has the value type. Like any argument, the default is evaluated before the lookup.
+- **Iteration:** `for key in toys` goes through the keys as they were when the loop started
+  ([§23](#23-loops)), so changing the dict inside the loop is safe. There is no two-variable `for`.
+- **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an
+  object are never equal.
+- **Text:** `say` shows a dict as `dict{ "collar": "leather collar" }` ([§16](#lists-in-text)). `${toys}` is an error
+  that names the fix: select one value with `toys[key]`, or show every value with `toys.values.join()`. A dict is not a
+  text field, a set element, or a `choose` option.
+- **Copies and storage:** dicts are copied like lists ([ADR 0014](../decisions/0014-core-runtime-value-semantics.md)),
+  and `keys` and `values` are new lists. Storage ([§25](#25-persistent-storage-and-keys)) and checkpoints keep a dict
+  with its entry order.
+- **Type tests:** `is dict` and `is T dict` test the value; `is T dict` checks every value.
+
+Deferred: keys other than text, merging dicts, a two-variable `for`, and sorted dicts.
 
 ## Remaining open decisions
 The accepted core syntax is consolidated in this document. Remaining work is primarily detailed API payloads and engine/account behavior.

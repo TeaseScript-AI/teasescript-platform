@@ -185,16 +185,16 @@ say answer, instant
   assert.equal(session.transcriptEntries.at(-1)?.text, "1");
 });
 
-test("option objects retain static and dynamic unlabelled uniqueness rules", () => {
-  assert.equal(
-    compileSource('let answer = choose { text: "Same", background: "red" }, "Same"').plan,
-    null,
+test("option objects may return the same value as other options", () => {
+  assert.deepEqual(
+    compileSource('let answer = choose { text: "Same", background: "red" }, "Same"').diagnostics,
+    [],
   );
   const session = createPlayerRuntimeSession(
     'let text = "Same"\nlet answer = choose { text: text, background: "red" }, "Same"',
   );
-  assert.equal(session.snapshot.status, "failed");
-  assert.equal(playerRuntimeForeground(session), null);
+  assert.equal(session.snapshot.status, "waiting");
+  assert.equal(playerRuntimeForeground(session)?.kind, "choose");
   const plain = createPlayerRuntimeSession('let answer = choose { text: "Plain" }, "Other"');
   assert.equal(plain.snapshot.status, "waiting");
   assert.deepEqual(

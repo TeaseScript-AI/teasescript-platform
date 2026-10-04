@@ -19,11 +19,13 @@ import {
 import type { SerializableRuntimeObject } from "../src/runtime/serializable-values.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
-type Mutable<T> = T extends readonly (infer Item)[]
-  ? Array<Mutable<Item>>
-  : T extends object
-    ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
-    : T;
+type Mutable<T> = T extends readonly [infer First, infer Second]
+  ? [Mutable<First>, Mutable<Second>]
+  : T extends readonly (infer Item)[]
+    ? Array<Mutable<Item>>
+    : T extends object
+      ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
+      : T;
 
 function checkpointSnapshot(
   compiled: ReturnType<typeof plan>,
@@ -191,7 +193,7 @@ test("branch-local and nested explicit exits reject forged retained pacing work"
     assert.equal(pacing?.kind, "chatPacingGate");
     const exited = run(compiled, created.snapshot);
     assert.equal(exited.snapshot.status, "halted");
-    assert.notEqual(exited.snapshot.nextInstruction, compiled.rootEndInstruction);
+    assert.notEqual(exited.snapshot.nextInstruction, compiled.files[0]!.rootEndInstruction);
     assert.equal(validateRuntimeSnapshot(exited.snapshot, compiled).valid, true);
 
     const forged = checkpointSnapshot(compiled, exited.snapshot);

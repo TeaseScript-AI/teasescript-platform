@@ -1,4 +1,4 @@
-import type { InstructionPlan } from "../../plan/model.js";
+import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimeChatPacingGateActionSnapshot,
@@ -33,7 +33,7 @@ export function settleBackgroundPacingGate(
     releasedPreparedOutputInstruction: null,
   });
   snapshot.lastSettlement = settlement;
-  const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
+  const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   events.push(
     Object.freeze({
       kind: "actionCompleted",

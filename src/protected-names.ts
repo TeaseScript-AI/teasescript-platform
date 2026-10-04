@@ -17,6 +17,7 @@ const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
   "and",
   "or",
   "not",
+  "set",
   "true",
   "false",
   "null",
@@ -26,13 +27,15 @@ const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
   "as",
   "label",
   "goto",
-  "run",
   "call",
   "end",
   "exit",
+  "fallback",
+  "global",
   "save",
   "load",
   "delete",
+  "is",
 ] as const);
 
 const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
@@ -43,7 +46,14 @@ const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
   "date",
   "time",
   "datetime",
+  "timestamp",
   "duration",
+  "list",
+  "dict",
+  "object",
+  "range",
+  "media",
+  "script",
 ] as const);
 
 const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
@@ -51,6 +61,11 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "random",
   "randomInteger",
   "chance",
+  "round",
+  "floor",
+  "ceil",
+  "min",
+  "max",
   "toString",
   "toNumber",
   "toInteger",
@@ -58,11 +73,11 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "toDate",
   "toTime",
   "toDateTime",
+  "toTimestamp",
   "getDate",
   "getTime",
   "getDateTime",
-  "getSeconds",
-  "getMilliseconds",
+  "getTimestamp",
   "schedule",
   "cancelSchedule",
   "askText",
@@ -105,7 +120,28 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "getPlayerHistory",
 ] as const);
 
-export const CORE_RUNTIME_BUILTINS = Object.freeze(["random", "chance", "randomInteger"] as const);
+export const CORE_RUNTIME_BUILTINS = Object.freeze([
+  "random",
+  "chance",
+  "randomInteger",
+  "toString",
+  "toNumber",
+  "toInteger",
+  "toBoolean",
+  "round",
+  "floor",
+  "ceil",
+  "min",
+  "max",
+  "toDate",
+  "toTime",
+  "toDateTime",
+  "toTimestamp",
+  "getDate",
+  "getTime",
+  "getDateTime",
+  "getTimestamp",
+] as const);
 
 /** Temporary direct-call bridge for implemented Platform Standard Library helpers. */
 export const PLATFORM_STANDARD_LIBRARY_PRELUDE = Object.freeze(["escapeMarkup"] as const);

@@ -7,11 +7,14 @@ The complete accepted syntax baseline is `specifications/accepted-syntaxes-v30.m
 Accepted post-V30 additions:
 
 - ADR 0013 defines `set[...]`, `type set`, insertion order, uniqueness, methods/properties, and non-indexability.
-- ADR 0014 defines recursive value-copy behavior, scalar-only sets, empty collection errors, and speaker display-name fallback.
+- ADR 0014 defines recursive value-copy behavior, set members and their copies, empty collection errors, and speaker display-name fallback.
 - ADR 0015 defines the serializable instruction-plan/runtime/checkpoint architecture used to execute the implemented syntax.
 - ADR 0016 defines the shared resumable pending-action contract and selects blocking `wait` as its first implementation slice.
 - ADR 0017 defines the accepted boundary between official syntax, the public Standard Library, package libraries, privileged platform adapters, and deterministic engine primitives.
 - ADR 0018 defines the accepted first Standard Library POC contract for `showButton`, `askText`, `askNumber`, `choose`, and `say` smart autoplay.
+- ADR 0021 defines static types: enforcement, implicit conversions, union types, type tests, and narrowing.
+- ADR 0022 defines multi-file scripts: `goto` and `call` across files, globs, `script(...)` references, globals, and
+  explicit endings with `end` and `exit`.
 - `specifications/message-markup.md` defines the accepted constrained presentation markup for authored Standard-chat
   `say` output and the `escapeMarkup()` literal-insertion helper.
 
@@ -74,7 +77,7 @@ The accepted boundary does not itself change accepted V30 forms such as `wait 2`
 
 ADR 0018 selects direct Standard Library names with no import and no first-POC opt-out or shadowing.
 
-The current compiler implements the four compact interaction forms in this section through explicit versioned
+The current compiler implements the compact interaction forms in this section through explicit versioned
 interaction instructions and the canonical resumable runtime. The broader parenthesized V30 APIs and their advanced
 parameters remain deferred; this slice does not treat compact syntax as a runtime library call. A parenthesized
 interaction-call spelling is never interpreted as compact syntax; until those APIs are implemented, the parser reports
@@ -85,18 +88,32 @@ it with focused diagnostic `TSP032`. An `as speaker` clause placed after the pay
 ```tease
 showButton "Continue"
 showButton as mistress "Ready"
+let elapsed = showButton "Continue", timeout: 30 s
 
 let text = askText
 let text = askText as mistress "Type your answer"
+let name = askText "Your name?", default: "Ada"
 
 let amount = askNumber
 let amount = askNumber as mistress "Enter a number"
+let minutes = askNumber default: 10
+let count = askInteger "How many?", default: 3
+
+let day = askDate "Which day?"
+let start = askTime as mistress "What time?", default: toTime("20:00")
+let moment = askDateTime "When are you free?"
 ```
 
-For `askText` and `askNumber`, the optional string is Standard UI field text or a hint. It is not automatically spoken into the transcript. The normal question is a preceding `say`.
+For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional string is Standard UI field text or a hint. It is not automatically spoken
+into the transcript. The normal question is a preceding `say`. An optional `default:` answer prefills the field; the
+player still submits it, and a cleared field does not fall back to it. See
+[default answers](specifications/accepted-syntaxes-v30.md#default-answers).
 
-All four basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
-`askNumber` returns `number`; the first `showButton` slice has no useful script return value and no timeout.
+All basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
+`askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers; `askDate`, `askTime`, and
+`askDateTime` return `date`, `time`, and `datetime` from the Player's date and time controls. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
+optional `timeout:` ends the wait without a chat message; see
+[blocking button](specifications/accepted-syntaxes-v30.md#21-blocking-button).
 Timer interrupts may suspend an interaction; handler `exit` discards its instruction without producing a result
 or binding. See [timer semantics](specifications/accepted-syntaxes-v30.md#27-timers).
 
@@ -106,30 +123,27 @@ or binding. See [timer semantics](specifications/accepted-syntaxes-v30.md#27-tim
 
 ### Compact choices
 
-Unlabelled choices return visible text:
+`choose` returns the value of the selected button. A value may be written before an option's `:`; an option without
+one returns itself, with its own type. A list or set option gives one button per element:
 
 ```tease
 let result = choose "Bratty", "Very submissive"
-let result = choose as mistress "Bratty", "Very submissive"
-```
-
-Labelled choices return the authored label:
-
-```tease
-let result = choose bratty: "Bratty", submissive: "Very submissive"
 let result = choose as mistress first: "Mystery", second: "Mystery"
 let result = choose 1: "Open the door", 2: "Walk away"
+let rounds = choose 5, 10, 15
+let offenses = [{ value: "spank", text: "Spanking" }, { text: "Corner" }]
+let answer = choose back: "Back", offenses
 ```
 
-The compact form keeps every option in one statement and separates options with commas. Labelled and unlabelled options may not be mixed. Identifier labels and finite numeric-literal labels are accepted, but one `choose` may not mix the two label types. Identifier labels return `string`; numeric labels return `number`. Labels must be unique. Repeated visible text is allowed only for labelled choices; an unlabelled duplicate is a compile error.
+The compact form keeps every option in one statement and separates options with commas. Options with and without a written value may be mixed; until union types arrive (#504), one `choose` may not mix identifier and numeric values before `:`. Buttons may repeat values and visible text. [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices) defines the complete option rules.
 
 `choose` is the author-facing construct. `choice` is the internal interaction/action noun.
 
 Existing downstream interaction and validation guards remain boundary-local technical constraints; compact `choose` does not promote them into a TeaseScript source-capacity promise.
 
-Selecting a labelled button or dropdown entry supplies its label to the engine; selecting an unlabelled entry supplies its visible text. The engine validates the selection and derives the canonical visible player-transcript text from the active choice. Manually typed input uses exact, unambiguous visible-text matching.
+Selecting a button or dropdown entry supplies its position to the engine. The engine validates the selection and derives the returned value and the canonical visible player-transcript text from the active choice. Manually typed input uses exact, unambiguous visible-text matching.
 
-This compact form supersedes the V30 split between `{...}` labelled bodies and `[...]` unlabelled bodies. The question itself is normally emitted with `say`.
+This compact form supersedes the V30 split between `{...}` bodies with values and `[...]` bodies without. The question itself is normally emitted with `say`.
 
 ### Dynamic choice presentation
 
@@ -188,22 +202,22 @@ nesting, recovery, and link rules.
 
 ### Bounded-data boundary
 
-ADR 0018 does not assign separate author-facing character limits to text answers, hints, buttons, or choice labels. Interaction definitions and completions remain subject to justified current platform constraints for strings, collections, messages, plans, snapshots, checkpoints, nesting, and validation work.
+ADR 0018 does not assign separate author-facing character limits to text answers, hints, buttons, or choice texts. Interaction definitions and completions remain subject to justified current platform constraints for strings, collections, messages, plans, snapshots, checkpoints, nesting, and validation work.
 
 Over-limit data is rejected deterministically without truncation or partial state mutation. The editor may warn earlier about impractically long labels or large choice sets.
 
 ### First-POC source compatibility boundary
 
-The broader parenthesized V30 input functions are not rejected merely because compact forms are implemented first. Their advanced options require a later compatibility and API decision.
-
-V30 `showButton` timeout and elapsed-time return remain accepted future capability but are not included in the first POC slice.
+The broader parenthesized V30 input functions and `showButton` forms are not rejected merely because compact forms are implemented first. Their advanced options require a later compatibility and API decision.
 
 The exact syntax for detailed result objects, advanced accessibility overrides, a speaker-aware typing indicator, custom `choose` field hints, any justified platform guards that later prove necessary, and constrained LLM answer interpretation remains deferred.
 
 ## Currently implemented language subset
 
-The repository includes core values, variables, assignments including `+=`/`-=`, speakers, output, collections,
-expressions, comments, ranges, deterministic random built-ins, conditionals, loops, and loop control.
+The repository includes core values, variables, assignments including `+=`/`-=`, speakers, output, collections
+including dicts ([§40](specifications/accepted-syntaxes-v30.md#40-dictionaries)), expressions, comments, ranges,
+deterministic random built-ins, the `round`, `floor`, and `ceil` built-ins, conditionals including `switch`, loops, and
+loop control.
 
 Implemented script storage includes `save`, `load` with an optional lazy default, and `delete`, with a checkpointed
 session view and host-acknowledged atomic writes. Accepted semantics and current type-checking limits are defined in
@@ -211,11 +225,12 @@ specification [§25](specifications/accepted-syntaxes-v30.md#25-persistent-stora
 in [Runtime](RUNTIME.md#script-storage). The Player keeps script storage in browser local storage
 ([data boundary](DATA-AND-API.md#script-storage-in-the-browser)).
 
-Implemented timing includes exact elapsed duration literals/values, cross-unit comparisons, blocking `wait`/`timer`,
-and asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and
-checkpoint restore. Accepted forms and current limits are defined in specification
+Implemented timing includes exact and calendar duration literals/values, cross-unit comparisons, date, time, datetime,
+and timestamp values with strict ISO conversion and the player's numeric presentation, blocking `wait`/`timer`, and
+asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and checkpoint
+restore. Accepted forms and current limits are defined in specification
 [§27](specifications/accepted-syntaxes-v30.md#27-timers) and
-[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-unix-time).
+[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps).
 
 Implemented media includes the persistent Stage image (`showImage`, `hideImage`), blocking and asynchronous
 `playAudio`/`playVideo` with playback ranges, repetition, volume, handles, seeks, timeline cues, the self-handle binding,
@@ -227,16 +242,33 @@ The current function subset includes:
 
 - top-level function declarations;
 - required and trailing-default parameters;
-- positional and named calls;
+- positional and named calls, including positional arguments followed by named ones;
 - earlier-parameter references in defaults, while later-parameter references are rejected;
 - value, bare, and implicit `return`;
 - forward calls, nested calls, direct recursion, and mutual recursion;
 - lexical function scope with package-global access;
 - deep-copy ordinary arguments/returns and speaker-reference identity preservation.
 
-Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented yet. Until function-signature
-types are checked, a typed function signature parses but does not compile, so its declared types are never silently
-ignored.
+Implemented value operations include the V30 §8 text operations, list `join`, `sort`, and `shuffle`, the
+`intersection`, `union`, and `difference` of lists and sets, the §13 conversions `toString`, `toNumber`, `toInteger`,
+and `toBoolean` with `default:`, `round`, `floor`, and `ceil`, and `min` and `max`. When the receiver or
+argument type is known, misuse is compile error `TSV043`, or `TSV020`/`TSV022` for argument counts and names; other
+values are checked when the operation runs.
+
+A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021: variables,
+list and set elements, dict values, object properties, parameters, and function results keep one type, including types
+decided by a first non-null value, a first element, a parameter default, or a function's returns; an inferred `integer`
+variable, element, or property is a `number` when one of its assignments can store a non-whole number; `integer` to
+`number` is the only implicit conversion; operators, conditions, indexes, members, and command operands get values of
+types they support, and on a union every member must support them; union types, type names, and `is` type tests are
+available, and tests, `!= null`, and assignments narrow plain variables; using a possibly null value where its non-null
+type is required is a compile error that names the check. A mismatch is `TSV041`, an unsupported operand `TSV043`,
+returns of different types, list elements of different types, or a `choose` of different value types outside a declared
+union `TSV044`, and a provably constant type test or comparison warning `TSV046`. When a value the compiler cannot know,
+such as untyped storage, host data, or an unknown parameter, is stored in a place whose type is at least partly known,
+the plan carries that type and the runtime checks the value before storing it (`TSR058`).
+
+The wider V30 Standard Library/runtime APIs are not implemented yet.
 
 The current source/compiler implements authored presentation options and the ADR 0018 `say` pacing and skip forms while
 preserving existing `say`/

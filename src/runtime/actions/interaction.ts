@@ -1,14 +1,39 @@
+import { cloneInteractionChoiceValue } from "../../choice-values.js";
+import {
+  isBlankTextAnswer,
+  isIntegerAnswerText,
+  isNumberAnswerText,
+  temporalAnswer,
+} from "../../interaction-answers.js";
 import { interactionStringFits } from "../../interaction-limits.js";
+import type { InteractionChoiceOption, InteractionChoiceValue } from "../../plan/model.js";
+import { presentDate, presentDateTime, presentTime, type TemporalContext } from "../../temporal.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
 import type { RuntimeInteractionActionSnapshot } from "./model.js";
 
+/**
+ * The milliseconds of a `showButton` timeout: a number of seconds or an elapsed duration that is finite and greater
+ * than zero. Returns `null` for any other value.
+ */
+export function buttonTimeoutMilliseconds(value: unknown): number | null {
+  const milliseconds =
+    typeof value === "number"
+      ? value * 1_000
+      : isPlainRecord(value) && value.kind === "duration" && typeof value.milliseconds === "number"
+        ? value.milliseconds
+        : Number.NaN;
+  return milliseconds > 0 && Number.isFinite(milliseconds) ? milliseconds : null;
+}
+
 export type ResolvedInteraction =
-  | { readonly ok: true; readonly result: string | number | null; readonly transcriptText: string }
+  | { readonly ok: true; readonly result: InteractionChoiceValue; readonly transcriptText: string }
   | { readonly ok: false; readonly message: string };
 
+/** `context` is the player's presentation now, which shows a date or time answer in the transcript. */
 export function resolveInteractionCompletion(
   action: RuntimeInteractionActionSnapshot,
   payload: unknown,
+  context: TemporalContext,
 ): ResolvedInteraction {
   if (!isPlainRecord(payload)) {
     return { ok: false, message: "Interaction completion payload must be an object." };
@@ -30,10 +55,29 @@ export function resolveInteractionCompletion(
       };
     }
     const normalized = payload.submittedText.replace(/\r\n?/gu, "\n");
-    if (/^\s*$/u.test(normalized)) {
+    if (isBlankTextAnswer(normalized)) {
       return { ok: false, message: "Text completion must contain a non-whitespace character." };
     }
     return { ok: true, result: normalized, transcriptText: normalized };
+  }
+  // `askInteger` accepts only whole-number notation within the safe integer range, on one line like `askNumber`.
+  if (action.ui.kind === "number" && action.ui.integer === true) {
+    if (
+      payload.kind !== "submittedText" ||
+      typeof payload.submittedText !== "string" ||
+      !completionStringFits(payload.submittedText)
+    )
+      return {
+        ok: false,
+        message: "Number completion requires text within the shared UTF-8 byte limit.",
+      };
+    const submitted = payload.submittedText.trim();
+    const parsed = Number(submitted);
+    return !/[\r\n\u2028\u2029]/u.test(payload.submittedText) &&
+      isIntegerAnswerText(submitted) &&
+      Number.isSafeInteger(parsed)
+      ? { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted }
+      : { ok: false, message: "That is wrong. I asked for a whole number." };
   }
   if (action.interactionKind === "number") {
     if (
@@ -48,7 +92,7 @@ export function resolveInteractionCompletion(
       };
     }
     const submitted = payload.submittedText.trim();
-    if (!/^[+-]?(?:(?:\d+(?:\.\d*)?)|(?:\.\d+))(?:[eE][+-]?\d+)?$/u.test(submitted)) {
+    if (!isNumberAnswerText(submitted)) {
       return {
         ok: false,
         message: "Number completion is not an accepted decimal or scientific number.",
@@ -60,49 +104,74 @@ export function resolveInteractionCompletion(
     }
     return { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted };
   }
+  // A date or time control submits strict ISO text; the transcript shows the answer as `say` would.
+  if (action.ui.kind === "temporal") {
+    if (
+      payload.kind !== "submittedText" ||
+      typeof payload.submittedText !== "string" ||
+      !completionStringFits(payload.submittedText)
+    )
+      return {
+        ok: false,
+        message: "Date and time completion requires text within the shared UTF-8 byte limit.",
+      };
+    const answer = temporalAnswer(action.ui.temporalKind, payload.submittedText);
+    if (answer === undefined)
+      return {
+        ok: false,
+        message: `That is wrong. I asked for ${
+          action.ui.temporalKind === "date"
+            ? "a date"
+            : action.ui.temporalKind === "time"
+              ? "a time"
+              : "a date and time"
+        }.`,
+      };
+    const transcriptText =
+      answer.kind === "date"
+        ? presentDate(context.presentation, answer)
+        : answer.kind === "time"
+          ? presentTime(context.presentation, answer)
+          : presentDateTime(context.presentation, answer);
+    return { ok: true, result: answer, transcriptText };
+  }
   if (action.ui.kind !== "choice") {
     return { ok: false, message: "Choice action payload is malformed." };
   }
-  let matches: readonly { readonly text: string; readonly label: string | number | null }[] = [];
+  const options = action.ui.options;
+  let selected: InteractionChoiceOption;
   if (
     payload.kind === "submittedText" &&
     typeof payload.submittedText === "string" &&
     completionStringFits(payload.submittedText)
   ) {
-    matches = action.ui.options.filter((option) => option.text === payload.submittedText);
+    const matches = options.filter((option) => option.text === payload.submittedText);
     if (matches.length !== 1) {
       return {
         ok: false,
         message:
           matches.length === 0
             ? "Choice text is not available."
-            : "Choice text is ambiguous; select a labelled control.",
+            : "Choice text is ambiguous; select a rendered control.",
       };
     }
+    selected = matches[0]!;
   } else if (
-    payload.kind === "selectedLabel" &&
-    action.ui.labelType !== "none" &&
-    (typeof payload.selectedLabel === "string" || typeof payload.selectedLabel === "number")
+    payload.kind === "selectedOption" &&
+    typeof payload.optionIndex === "number" &&
+    Number.isSafeInteger(payload.optionIndex) &&
+    payload.optionIndex >= 0 &&
+    payload.optionIndex < options.length
   ) {
-    if (typeof payload.selectedLabel === "string" && !completionStringFits(payload.selectedLabel)) {
-      return { ok: false, message: "Choice label exceeds the shared UTF-8 byte limit." };
-    }
-    matches = action.ui.options.filter((option) => option.label === payload.selectedLabel);
-  } else if (
-    payload.kind === "selectedText" &&
-    action.ui.labelType === "none" &&
-    typeof payload.selectedText === "string" &&
-    completionStringFits(payload.selectedText)
-  ) {
-    matches = action.ui.options.filter((option) => option.text === payload.selectedText);
+    selected = options[payload.optionIndex]!;
   } else {
-    return { ok: false, message: "Choice completion payload does not match the choice domain." };
+    return { ok: false, message: "Choice completion payload does not match the offered options." };
   }
-  if (matches.length !== 1) {
-    return { ok: false, message: "Choice selection is not available." };
-  }
-  const selected = matches[0]!;
-  return { ok: true, result: selected.label ?? selected.text, transcriptText: selected.text };
+  return {
+    ok: true,
+    result: cloneInteractionChoiceValue(selected.value),
+    transcriptText: selected.text,
+  };
 }
 
 function completionStringFits(value: string): boolean {

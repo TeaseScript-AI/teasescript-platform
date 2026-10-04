@@ -37,13 +37,28 @@ test("completion exposes accepted compact commands and takePhoto", () => {
   const statement = labels("");
   for (const expected of ["say", "showButton"]) assert.ok(statement.includes(expected), expected);
   const expression = labels("let answer = ");
-  for (const expected of ["askText", "askNumber", "choose", "takePhoto"])
+  for (const expected of [
+    "askText",
+    "askNumber",
+    "askInteger",
+    "askDate",
+    "askTime",
+    "askDateTime",
+    "choose",
+    "showButton",
+    "takePhoto",
+  ])
     assert.ok(expression.includes(expected), expected);
 });
 
 test("completion exposes optional speaker and current say modifiers", () => {
   const speakers = labels('speaker mistress { name: "Mistress" }\nlet answer = askText as');
   assert.ok(speakers.includes("mistress"));
+  const protectedSpeaker = labels(
+    'speaker set { name: "Set" }\nspeaker mistress { name: "Mistress" }\nsay as',
+  );
+  assert.ok(protectedSpeaker.includes("mistress"));
+  assert.ok(!protectedSpeaker.includes("set"));
   const say = labels("say");
   assert.ok(say.includes("as"));
   assert.ok(say.includes("skippable"));
@@ -63,8 +78,27 @@ test("context, hover, and signature help select the compact command and its slot
     end: languagePositionAt(document, start + "askText".length),
   });
   const signature = languageSignatureHelp(document, position);
-  assert.deepEqual(signature?.parameters, ["speaker", "hint"]);
+  assert.deepEqual(signature?.parameters, ["speaker", "hint", "default"]);
   assert.equal(signature?.activeParameter, 1);
+});
+
+test("editor help and formatting cover showButton used as a value with a timeout", () => {
+  const source = 'let elapsed = showButton   as   mistress "Go", timeout: 5';
+  const document = createLanguageDocument(
+    "file:///main.tease",
+    `speaker mistress { name: "Mistress" }\n${source}`,
+  );
+  const start = document.text.indexOf("showButton");
+  const hover = languageHover(document, languagePositionAt(document, document.text.indexOf("5")));
+  assert.deepEqual(hover?.range, {
+    start: languagePositionAt(document, start),
+    end: languagePositionAt(document, start + "showButton".length),
+  });
+  assert.ok(hover?.contents.some((line) => line.includes("timeout: duration")));
+  assert.match(
+    formatLanguageDocument(document).text,
+    /let elapsed = showButton as mistress "Go", timeout: 5/u,
+  );
 });
 
 const DEEP_SAY = 'say   "deep"  ,instant';
@@ -180,7 +214,24 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot("askText as mistress"), "speaker");
   assert.equal(activeSlot("askText as mistress "), "hint");
   assert.equal(activeSlot("askNumber as mistress "), "hint");
+  assert.equal(activeSlot('askText "Name?", default: '), "default");
+  assert.equal(activeSlot("askNumber default: "), "default");
+  assert.equal(activeSlot('askInteger "How many?", default: '), "default");
+  assert.equal(activeSlot('askDateTime "When?", default: '), "default");
+  assert.equal(activeSlot('askText { default: "Name?" }.default'), "hint");
+  assert.equal(activeSlot('let answer = askText "${askNumber default: 3}"'), "hint");
   assert.equal(activeSlot("showButton as mistress "), "label");
+  assert.equal(activeSlot('showButton "Go", timeout: '), "timeout");
+  assert.equal(
+    activeSlot('let elapsed = showButton "Go", background: "gold", timeout: 5'),
+    "timeout",
+  );
+  assert.equal(activeSlot('showButton "Go", timeout: 5, background: '), "background");
+  assert.equal(activeSlot('let e = { x: (showButton "A"), timeout: 3'), null);
+  assert.equal(
+    activeSlot('showButton "A", timeout: (askNumber "Seconds"), background: '),
+    "background",
+  );
   assert.equal(activeSlot("choose as mistress "), "options");
   assert.equal(activeSlot('say ["Hello", "there"]'), "text");
 });

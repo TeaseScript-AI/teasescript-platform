@@ -29,10 +29,16 @@ export { parse, type ParseResult } from "./parser.js";
 export {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
+  compileProject,
   compileSource,
   type CompilationResult,
   type CompileOptions,
+  type ProjectCompilationResult,
+  type ProjectDiagnostic,
+  type ProjectFileCompilation,
+  type ProjectSourceFile,
 } from "./compiler.js";
+export { MAIN_FILE_PATH } from "./project-paths.js";
 export {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
@@ -49,8 +55,9 @@ export {
   type InteractionChoiceOption,
   type InteractionAccessibleName,
   type PreparedInteractionUiPayload,
-  type PreparedInteractionChoiceLabel,
+  type PreparedInteractionChoiceValue,
   type InstructionPlan,
+  type PlanFile,
   type PlanSourceLocation,
   type LoopControlInstruction,
   type LoopStartInstruction,
@@ -138,6 +145,11 @@ export {
 export type { CapturedMediaAdmission } from "./runtime/actions/capture.js";
 export { observeTime, type MediaProgressReport } from "./runtime/operations/observe-time.js";
 export {
+  recordContinueCapture,
+  type ContinueCaptureOutcome,
+} from "./runtime/operations/continue-capture.js";
+export type { RuntimeTemporalCapture } from "./runtime/temporal-captures.js";
+export {
   reportMediaLoad,
   type MediaLoadReport,
   type MediaReportOutcome,
@@ -207,6 +219,7 @@ export type {
   RuntimeStorageWriteActionSnapshot,
   RuntimeStorageWriteSettlementSnapshot,
 } from "./runtime/actions/model.js";
+export { interactionDeadlineMs } from "./runtime/actions/model.js";
 export {
   DEFAULT_PLAYGROUND_SEED,
   createXorShift32State,
@@ -225,10 +238,23 @@ export {
   type SerializableRuntimeProperty,
   type SerializableRuntimeScalar,
   type SerializableRuntimeSet,
+  type SerializableRuntimeDict,
+  type SerializableRuntimeDictEntry,
   type SerializableRuntimeValue,
   type SerializableSpeakerReference,
   type SerializableMediaHandle,
+  type SerializableRuntimeDate,
+  type SerializableRuntimeDateTime,
+  type SerializableRuntimeTime,
+  type SerializableRuntimeTimestamp,
 } from "./runtime/serializable-values.js";
+export {
+  DEFAULT_TEMPORAL_CONTEXT,
+  type PresentationSettings,
+  type TemporalContext,
+  type ZoneRules,
+} from "./temporal.js";
+export { captureTemporalContext } from "./temporal-capture.js";
 export {
   combineSourceSpans,
   createSourcePosition,
@@ -275,6 +301,9 @@ export type {
   ScalarTypeName,
   SayStatement,
   ShowButtonStatement,
+  SwitchCase,
+  SwitchStatement,
+  SwitchTypeTest,
   WaitStatement,
   TimerStatement,
   ShowImageStatement,
@@ -287,6 +316,8 @@ export type {
   PlayMediaExpression,
   PlayMediaStatement,
   SetLiteral,
+  DictEntry,
+  DictLiteral,
   SpeakerDeclaration,
   SpeakerProperty,
   SpeakerSetterStatement,
@@ -297,6 +328,11 @@ export type {
   StringPart,
   StringText,
   TypeAnnotation,
+  TypeName,
+  NamedType,
+  CollectionType,
+  OptionalType,
+  UnionType,
   UnaryExpression,
   WhileStatement,
 } from "./ast.js";

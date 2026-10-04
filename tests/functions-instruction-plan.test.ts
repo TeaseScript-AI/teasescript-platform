@@ -40,7 +40,7 @@ test("embeds synchronous call arguments without preparation instructions", () =>
       "combine(1, 2, 3)",
     ].join("\n"),
   );
-  const root = compiled.instructions.slice(0, compiled.rootEndInstruction);
+  const root = compiled.instructions.slice(0, compiled.files[0]!.rootEndInstruction);
   const call = root.find((instruction) => instruction.kind === "callFunction");
   assert.equal(call?.kind, "callFunction");
   if (call?.kind !== "callFunction") return;

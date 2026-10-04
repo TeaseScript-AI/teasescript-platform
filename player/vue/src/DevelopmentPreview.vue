@@ -4,7 +4,11 @@ import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
 import type { PlayerTimerKind } from "../../model.js";
-import { createPlayerRuntimeSession, playerRuntimeForeground } from "../../runtime-adapter.js";
+import {
+  createPlayerRuntimeSession,
+  playerRuntimeForeground,
+  playerTemporalContext,
+} from "../../runtime-adapter.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
@@ -61,16 +65,20 @@ const player = usePlayerSession({
     capturedMedia: { repository: props.capturedMediaRepository ?? null },
   }),
 });
+const startOptions = () => ({ temporalContext: playerTemporalContext(), wallClockMs: Date.now() });
 if (cameraScenario)
   void player
     .loadScriptStorage()
     .then(() =>
       player.prepare(() =>
-        createPlayerRuntimeSession(cameraScenarioSource, player.scriptStorageOptions()),
+        createPlayerRuntimeSession(cameraScenarioSource, {
+          ...player.scriptStorageOptions(),
+          ...startOptions(),
+        }),
       ),
     );
 else if (viewfinderScenario) {
-  player.prepare(() => createPlayerRuntimeSession(viewfinderScenarioSource));
+  player.prepare(() => createPlayerRuntimeSession(viewfinderScenarioSource, startOptions()));
   // Shown while the script waits on its photo button, until the language can request the viewfinder itself.
   watch(
     () => {
@@ -80,7 +88,7 @@ else if (viewfinderScenario) {
     },
     (shown) => player.showViewfinder(shown),
   );
-} else player.prepare(() => createPlayerRuntimeSession(openingScenario));
+} else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptions()));
 </script>
 
 <template>

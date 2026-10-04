@@ -1,4 +1,7 @@
+import { isStoredDurationRecord } from "../duration.js";
 import { isNormalizedOpaqueColor } from "../color.js";
+import { isInteractionChoiceValue } from "../choice-values.js";
+import { isValidInteractionPrefill } from "../interaction-answers.js";
 import {
   boundedInteractionUtf8ByteLength,
   interactionStringHasNonWhitespace,
@@ -6,8 +9,10 @@ import {
   MAX_INTERACTION_OPTION_ENTRIES,
 } from "../interaction-limits.js";
 import { recordValidationTestWork } from "../validation-testing.js";
+import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "../project-paths.js";
 import { INSTRUCTION_PLAN_FORMAT, INSTRUCTION_PLAN_VERSION } from "./model.js";
 import {
+  type PlanFileBoundaries,
   analyzeInstructionStream,
   collectFunctionIds,
   expressionMayReferenceTemporary,
@@ -58,7 +63,6 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
   }
   // After the revision checks, so another revision's fields report that revision as unsupported first.
   rejectUnknownFields(value, PLAN_FIELDS, "$", errors);
-  validateSpan(value.sourceSpan, "$.sourceSpan", errors);
   const temporaryCount = nonNegativeSafeInteger(value.temporaryCount) ? value.temporaryCount : -1;
   if (temporaryCount < 0) {
     errors.push(
@@ -72,17 +76,7 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
   if (!Array.isArray(value.instructions)) {
     errors.push(planError("TSC002", "Instructions must be an array.", "$.instructions"));
   } else {
-    const rootEndInstruction = validInstructionBoundary(
-      value.rootEndInstruction,
-      value.instructions.length,
-    )
-      ? value.rootEndInstruction
-      : null;
-    if (rootEndInstruction === null) {
-      errors.push(
-        planError("TSC002", "Root execution boundary is invalid.", "$.rootEndInstruction"),
-      );
-    }
+    const files = validatePlanFiles(value.files, value.instructions.length, errors);
     const functionIds = collectFunctionIds(value.functions);
     for (let index = 0; index < value.instructions.length; index += 1) {
       validateInstruction(
@@ -95,22 +89,90 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
         errors,
       );
     }
-    analyzeInstructionStream(value.instructions, value.functions, rootEndInstruction, errors);
+    analyzeInstructionStream(value.instructions, value.functions, files, errors);
   }
   return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
 }
 
-const PLAN_FIELDS = [
-  "format",
-  "version",
-  "sourceSpan",
-  "rootEndInstruction",
-  "temporaryCount",
-  "functions",
-  "instructions",
-];
+const PLAN_FIELDS = ["format", "version", "files", "temporaryCount", "functions", "instructions"];
 
 const PROPERTY_FIELDS = ["name", "value", "span"];
+
+const FILE_FIELDS = [
+  "path",
+  "sourceSpan",
+  "startInstruction",
+  "rootEndInstruction",
+  "endInstruction",
+];
+
+/**
+ * Checks the file table: `main.tease` first, the other package paths in order, and blocks that cover the instruction
+ * stream one after another. Returns the boundaries for the stream analyses, or `null` when they are unusable.
+ */
+function validatePlanFiles(
+  value: unknown,
+  instructionCount: number,
+  errors: PlanValidationError[],
+): PlanFileBoundaries[] | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    errors.push(planError("TSC002", "Plan files must be a non-empty array.", "$.files"));
+    return null;
+  }
+  const boundaries: PlanFileBoundaries[] = [];
+  let expectedStart = 0;
+  let previousPath: string | null = null;
+  value.forEach((file: unknown, fileIndex) => {
+    const path = `$.files[${fileIndex}]`;
+    if (!isRecord(file)) {
+      errors.push(planError("TSC002", "Plan file must be an object.", path));
+      expectedStart = -1;
+      return;
+    }
+    rejectUnknownFields(file, FILE_FIELDS, path, errors);
+    validateSpan(file.sourceSpan, `${path}.sourceSpan`, errors);
+    if (
+      typeof file.path !== "string" ||
+      packagePathProblem(file.path) !== null ||
+      (fileIndex === 0
+        ? file.path !== MAIN_FILE_PATH
+        : previousPath === null || compareProjectPaths(previousPath, file.path) >= 0)
+    ) {
+      errors.push(
+        planError(
+          "TSC002",
+          "Plan file paths must be package paths: main.tease first, then the others in order.",
+          `${path}.path`,
+        ),
+      );
+    }
+    previousPath = typeof file.path === "string" ? file.path : null;
+    const { startInstruction: start, rootEndInstruction: rootEnd, endInstruction: end } = file;
+    if (
+      !validInstructionBoundary(start, instructionCount) ||
+      !validInstructionBoundary(rootEnd, instructionCount) ||
+      !validInstructionBoundary(end, instructionCount) ||
+      start !== expectedStart ||
+      rootEnd < start ||
+      end < rootEnd
+    ) {
+      errors.push(planError("TSC002", "Plan file instruction range is impossible.", path));
+      expectedStart = -1;
+      return;
+    }
+    boundaries.push({ startInstruction: start, rootEndInstruction: rootEnd, endInstruction: end });
+    expectedStart = end;
+  });
+  if (expectedStart !== instructionCount) {
+    if (expectedStart >= 0) {
+      errors.push(
+        planError("TSC002", "Plan files do not cover the instruction stream.", "$.files"),
+      );
+    }
+    return null;
+  }
+  return boundaries;
+}
 
 /** Fields of instruction kinds whose case in validateInstruction does not already require exact keys. */
 const INSTRUCTION_FIELDS = fieldsByKind([
@@ -120,10 +182,10 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["enterScope"],
   ["leaveScope"],
   ["exit"],
-  ["declareBinding", "name", "value"],
+  ["declareBinding", "name", "value", "typeCheck"],
   ["prepareReference", "expression", "destinationTemporary"],
   ["validateAssignmentTarget", "target"],
-  ["assign", "target", "value"],
+  ["assign", "target", "value", "typeCheck"],
   ["validateCallReceiver", "receiver", "method"],
   ["evaluate", "expression"],
   ["jumpIfFalse", "condition", "target"],
@@ -137,9 +199,9 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["bindSuppliedParameter", "functionId", "parameterIndex"],
   ["beginFunctionDefaults", "functionId"],
   ["prepareParameterDefault", "functionId", "parameterIndex", "target"],
-  ["bindDefaultParameter", "functionId", "parameterIndex", "value"],
+  ["bindDefaultParameter", "functionId", "parameterIndex", "value", "typeCheck"],
   ["enterFunctionBody", "functionId"],
-  ["returnValue", "value"],
+  ["returnValue", "value", "typeCheck"],
   ["returnVoid"],
   [
     "say",
@@ -174,12 +236,14 @@ const EXPRESSION_FIELDS = fieldsByKind([
   ["list", "elements"],
   ["set", "elements"],
   ["object", "properties"],
+  ["dict", "entries"],
   ["group", "expression"],
   ["template", "parts"],
   ["property", "object", "name"],
   ["index", "object", "index"],
-  ["call", "callee", "arguments"],
+  ["call", "callee", "arguments", "typeCheck"],
   ["unary", "operator", "operand"],
+  ["typeTest", "value", "type", "negated"],
   ["binary", "operator", "left", "right"],
   ["range", "start", "end", "inclusive"],
 ]);
@@ -229,6 +293,7 @@ function validateInstruction(
     case "declareBinding":
       requireString(value.name, `${path}.name`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateOptionalTypeCheck(value, path, errors);
       return;
     case "prepareReference":
       validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);
@@ -247,6 +312,7 @@ function validateInstruction(
       validateExpression(value.target, `${path}.target`, errors, true, temporaryCount);
       validatePreparedAssignmentTarget(value.target, `${path}.target`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateOptionalTypeCheck(value, path, errors);
       return;
     case "validateCallReceiver":
       validateExpression(value.receiver, `${path}.receiver`, errors, false, temporaryCount);
@@ -448,9 +514,11 @@ function validateInstruction(
       validateFunctionId(value.functionId, `${path}.functionId`, functionIds, errors);
       requireNonNegativeInteger(value.parameterIndex, `${path}.parameterIndex`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateOptionalTypeCheck(value, path, errors);
       return;
     case "returnValue":
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateOptionalTypeCheck(value, path, errors);
       return;
     case "returnVoid":
       return;
@@ -758,20 +826,25 @@ function validateInteractionInstruction(
     errors.push(planError("TSC002", "Interaction instruction contains unsupported fields.", path));
   }
   const kind = value.interactionKind;
-  if (!isOneOf(kind, ["button", "text", "number", "choice"])) {
+  if (!isOneOf(kind, ["button", "text", "number", "choice", "temporal"])) {
     errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
   }
   if (value.target !== "standardChat")
     errors.push(planError("TSC002", "Interaction target is invalid.", `${path}.target`));
 
   const ui = prepared ? value.preparedUi : value.ui;
-  const labelType = isRecord(ui) && ui.kind === "choice" ? ui.labelType : undefined;
   const expected =
     kind === "button"
-      ? "none"
-      : kind === "number" || (kind === "choice" && labelType === "number")
+      ? value.destinationTemporary === null
+        ? "none"
+        : "duration"
+      : kind === "number"
         ? "number"
-        : "string";
+        : kind === "choice"
+          ? "choice"
+          : kind === "temporal"
+            ? "temporal"
+            : "string";
   if (value.expectedResult !== expected) {
     errors.push(
       planError(
@@ -781,17 +854,7 @@ function validateInteractionInstruction(
       ),
     );
   }
-  if (kind === "button") {
-    if (value.destinationTemporary !== null) {
-      errors.push(
-        planError(
-          "TSC002",
-          "Button interaction must not have a result destination.",
-          `${path}.destinationTemporary`,
-        ),
-      );
-    }
-  } else {
+  if (kind !== "button" || value.destinationTemporary !== null) {
     validateTemporaryId(
       value.destinationTemporary,
       `${path}.destinationTemporary`,
@@ -840,10 +903,21 @@ function validateStaticInteractionUi(
   const uiKeys =
     kind === "button"
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in ui ? ["background"] : [])]
-      : kind === "text" || kind === "number"
-        ? ["kind", "hint", "accessibleName"]
-        : ["kind", "labelType", "options", "accessibleName"];
-  if (!hasExactKeys(ui, uiKeys)) {
+      : kind === "text" || kind === "number" || kind === "temporal"
+        ? [
+            "kind",
+            "hint",
+            "accessibleName",
+            ...("prefill" in ui ? ["prefill"] : []),
+            ...(kind === "number" && "integer" in ui ? ["integer"] : []),
+            ...(kind === "temporal" ? ["temporalKind"] : []),
+          ]
+        : ["kind", "options", "accessibleName"];
+  if (
+    !hasExactKeys(ui, uiKeys) ||
+    ("integer" in ui && ui.integer !== true) ||
+    (kind === "temporal" && !isOneOf(ui.temporalKind, ["date", "time", "datetime"]))
+  ) {
     errors.push(planError("TSC002", "Interaction UI payload contains unsupported fields.", path));
   }
   let aggregate = 0;
@@ -898,14 +972,27 @@ function validateStaticInteractionUi(
     if ("background" in ui && !isNormalizedOpaqueColor(ui.background))
       errors.push(planError("TSC002", "Invalid opaque button background.", `${path}.background`));
   }
-  if (kind === "text" || kind === "number") {
+  if (kind === "text" || kind === "number" || kind === "temporal") {
     if (ui.hint !== null) countString(ui.hint, `${path}.hint`);
+    const temporalKind = ui.temporalKind;
+    const answerKind =
+      temporalKind === "date" || temporalKind === "time" || temporalKind === "datetime"
+        ? temporalKind
+        : ui.integer === true
+          ? "integer"
+          : kind === "number"
+            ? "number"
+            : "text";
+    if (
+      "prefill" in ui &&
+      countString(ui.prefill, `${path}.prefill`) &&
+      !isValidInteractionPrefill(answerKind, ui.prefill)
+    )
+      errors.push(
+        planError("TSC002", "Interaction prefill is not a valid answer.", `${path}.prefill`),
+      );
   }
   if (kind === "choice") {
-    const labelType = ui.labelType;
-    if (!isOneOf(labelType, ["none", "identifier", "number"])) {
-      errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
-    }
     if (
       !Array.isArray(ui.options) ||
       ui.options.length === 0 ||
@@ -919,8 +1006,6 @@ function validateStaticInteractionUi(
         ),
       );
     } else {
-      const labels = new Set<string | number>();
-      const visible = new Set<string>();
       for (let index = 0; index < ui.options.length; index += 1) {
         const option = ui.options[index];
         const optionPath = `${path}.options[${index}]`;
@@ -931,7 +1016,7 @@ function validateStaticInteractionUi(
         if (
           !hasExactKeys(option, [
             "text",
-            "label",
+            "value",
             ...("background" in option ? ["background"] : []),
           ])
         ) {
@@ -943,47 +1028,16 @@ function validateStaticInteractionUi(
           errors.push(
             planError("TSC002", "Invalid opaque choice background.", `${optionPath}.background`),
           );
-        const textValid = countString(option.text, `${optionPath}.text`);
-        const label = option.label;
-        const validLabel =
-          labelType === "none"
-            ? label === null
-            : labelType === "identifier"
-              ? typeof label === "string" &&
-                countString(label, `${optionPath}.label`) &&
-                (measurementExhausted || /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label))
-              : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
-        if (!validLabel) {
+        countString(option.text, `${optionPath}.text`);
+        const value = option.value;
+        if (!isInteractionChoiceValue(value)) {
           errors.push(
-            planError(
-              "TSC002",
-              "Choice option label does not match the choice label type.",
-              `${optionPath}.label`,
-            ),
+            planError("TSC002", "Choice option value is invalid.", `${optionPath}.value`),
           );
+          continue;
         }
-        if (
-          !measurementExhausted &&
-          validLabel &&
-          (typeof label === "string" || typeof label === "number")
-        ) {
-          if (labels.has(label)) {
-            errors.push(
-              planError("TSC002", "Choice labels must be unique.", `${optionPath}.label`),
-            );
-          }
-          labels.add(label);
-        }
-        if (!measurementExhausted && textValid && labelType === "none") {
-          // EVIDENCE: validation: textValid records the option text string check above.
-          if (visible.has(option.text as string)) {
-            errors.push(
-              planError("TSC002", "Unlabelled choice text must be unique.", `${optionPath}.text`),
-            );
-          }
-          // EVIDENCE: validation: textValid records the option text string check above.
-          visible.add(option.text as string);
-        }
+        if (typeof value === "string" && value !== option.text)
+          countString(value, `${optionPath}.value`);
       }
     }
   }
@@ -1011,11 +1065,23 @@ function validatePreparedInteractionUi(
           "buttonLabelTemporary",
           "accessibleName",
           ...("backgroundTemporary" in ui ? ["backgroundTemporary"] : []),
+          ...("timeoutTemporary" in ui ? ["timeoutTemporary"] : []),
         ]
-      : kind === "text" || kind === "number"
-        ? ["kind", "hintTemporary", "accessibleName"]
-        : ["kind", "labelType", "optionsTemporary", "optionCount", "labels", "accessibleName"];
-  if (!hasExactKeys(ui, keys)) {
+      : kind === "text" || kind === "number" || kind === "temporal"
+        ? [
+            "kind",
+            "hintTemporary",
+            "accessibleName",
+            ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
+            ...(kind === "number" && "integer" in ui ? ["integer"] : []),
+            ...(kind === "temporal" ? ["temporalKind"] : []),
+          ]
+        : ["kind", "optionsTemporary", "values", "accessibleName"];
+  if (
+    !hasExactKeys(ui, keys) ||
+    ("integer" in ui && ui.integer !== true) ||
+    (kind === "temporal" && !isOneOf(ui.temporalKind, ["date", "time", "datetime"]))
+  ) {
     errors.push(
       planError("TSC002", "Prepared interaction UI payload contains unsupported fields.", path),
     );
@@ -1087,63 +1153,41 @@ function validatePreparedInteractionUi(
     addTemporary(ui.buttonLabelTemporary, `${path}.buttonLabelTemporary`);
     if ("backgroundTemporary" in ui)
       addTemporary(ui.backgroundTemporary, `${path}.backgroundTemporary`);
+    if ("timeoutTemporary" in ui) addTemporary(ui.timeoutTemporary, `${path}.timeoutTemporary`);
     return;
   }
-  if (kind === "text" || kind === "number") {
+  if (kind === "text" || kind === "number" || kind === "temporal") {
     if (ui.hintTemporary !== null) addTemporary(ui.hintTemporary, `${path}.hintTemporary`);
+    if ("prefillTemporary" in ui) addTemporary(ui.prefillTemporary, `${path}.prefillTemporary`);
     return;
   }
   if (kind !== "choice") return;
-  if (!isOneOf(ui.labelType, ["none", "identifier", "number"])) {
-    errors.push(planError("TSC002", "Choice label type is invalid.", `${path}.labelType`));
-  }
   addTemporary(ui.optionsTemporary, `${path}.optionsTemporary`);
-  // EVIDENCE: validation: the first condition checks optionCount with Number.isSafeInteger before the lower-bound comparison.
-  // EVIDENCE: validation: the first condition checks optionCount with Number.isSafeInteger before the upper-bound comparison.
   if (
-    !Number.isSafeInteger(ui.optionCount) ||
-    (ui.optionCount as number) < 1 ||
-    (ui.optionCount as number) > MAX_INTERACTION_OPTION_ENTRIES
+    !Array.isArray(ui.values) ||
+    ui.values.length === 0 ||
+    ui.values.length > MAX_INTERACTION_OPTION_ENTRIES
   ) {
     errors.push(
       planError(
         "TSC002",
-        "Prepared choice option count exceeds the shared collection boundary or is empty.",
-        `${path}.optionCount`,
+        "Prepared choice values exceed the shared collection boundary or are empty.",
+        `${path}.values`,
       ),
     );
-  }
-  if (ui.labelType === "none") {
-    if (ui.labels !== null) {
-      errors.push(
-        planError("TSC002", "Unlabelled prepared choice must not carry labels.", `${path}.labels`),
-      );
-    }
     return;
   }
-  if (!Array.isArray(ui.labels) || ui.labels.length !== ui.optionCount) {
-    errors.push(
-      planError("TSC002", "Prepared choice labels must match the option count.", `${path}.labels`),
-    );
-    return;
-  }
-  const labels = new Set<string | number>();
-  for (let index = 0; index < ui.labels.length; index += 1) {
-    const label = ui.labels[index];
-    const labelPath = `${path}.labels[${index}]`;
+  for (let index = 0; index < ui.values.length; index += 1) {
+    const value = ui.values[index];
+    if (value === null) continue;
+    const valuePath = `${path}.values[${index}]`;
     const valid =
-      ui.labelType === "identifier"
-        ? countString(label, labelPath) && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(label)
-        : typeof label === "number" && Number.isFinite(label) && !Object.is(label, -0);
+      typeof value === "string"
+        ? countString(value, valuePath) && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(value)
+        : typeof value === "number" && Number.isFinite(value) && !Object.is(value, -0);
     if (!valid) {
-      errors.push(
-        planError("TSC002", "Prepared choice label does not match the label type.", labelPath),
-      );
+      errors.push(planError("TSC002", "Prepared choice value is invalid.", valuePath));
     }
-    if ((typeof label === "string" || typeof label === "number") && labels.has(label)) {
-      errors.push(planError("TSC002", "Prepared choice labels must be unique.", labelPath));
-    }
-    if (typeof label === "string" || typeof label === "number") labels.add(label);
   }
 }
 
@@ -1209,7 +1253,7 @@ function validateInteractionAccessibleName(
 
 type ExpressionValidationWork =
   | { value: unknown; path: string; assignmentTarget: boolean }
-  | { kind: "property"; value: unknown; path: string }
+  | { kind: "property" | "entry"; value: unknown; path: string }
   | {
       kind: "span" | "string" | "inclusive" | "parts" | "arguments" | "part" | "argument";
       value: unknown;
@@ -1259,7 +1303,9 @@ function validateExpression(
               ? "Template part must be an object."
               : current.kind === "argument"
                 ? "Argument must be an object."
-                : "Property must be an object.",
+                : current.kind === "entry"
+                  ? "Dict entry must be an object."
+                  : "Property must be an object.",
             current.path,
           ),
         );
@@ -1295,6 +1341,19 @@ function validateExpression(
           path: `${current.path}.value`,
           assignmentTarget: false,
         });
+      } else if (current.kind === "entry") {
+        rejectUnknownFields(current.value, ["key", "value", "span"], current.path, errors);
+        pending.push({ kind: "span", value: current.value.span, path: `${current.path}.span` });
+        pending.push({
+          value: current.value.value,
+          path: `${current.path}.value`,
+          assignmentTarget: false,
+        });
+        pending.push({
+          value: current.value.key,
+          path: `${current.path}.key`,
+          assignmentTarget: false,
+        });
       } else {
         rejectUnknownFields(current.value, PROPERTY_FIELDS, current.path, errors);
         requireString(current.value.name, `${current.path}.name`, errors);
@@ -1318,24 +1377,116 @@ function validateExpression(
   }
 }
 
-function validStorageType(value: unknown): boolean {
-  return (
-    value === null ||
-    (isRecord(value) &&
-      hasExactKeys(value, ["name", "collection"]) &&
-      isOneOf(value.name, [
-        "string",
-        "boolean",
-        "integer",
-        "number",
-        "date",
-        "time",
-        "datetime",
-        "duration",
-      ]) &&
-      (value.collection === null || isOneOf(value.collection, ["list", "set"])))
-  );
+/** Validates the optional `typeCheck` of a receiving instruction, call argument, or `add` call. */
+function validateOptionalTypeCheck(
+  owner: Record<string, unknown>,
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (!("typeCheck" in owner)) return;
+  const check = owner.typeCheck;
+  const checkPath = `${path}.typeCheck`;
+  if (!isRecord(check)) {
+    errors.push(planError("TSC002", "A type check must be an object.", checkPath));
+    return;
+  }
+  rejectUnknownFields(check, ["type", "place"], checkPath, errors);
+  requireString(check.place, `${checkPath}.place`, errors);
+  validateTypePlan(check.type, `${checkPath}.type`, errors);
 }
+
+/** Validates a type of a runtime type check or a type test, iteratively for deep types. */
+function validateTypePlan(root: unknown, rootPath: string, errors: PlanValidationError[]): void {
+  const pending: { readonly value: unknown; readonly path: string }[] = [
+    { value: root, path: rootPath },
+  ];
+  while (pending.length > 0) {
+    const { value: type, path: typePath } = pending.pop()!;
+    if (!isRecord(type)) {
+      errors.push(planError("TSC002", "A type must be an object.", typePath));
+      continue;
+    }
+    switch (type.kind) {
+      case "list":
+      case "set":
+      case "dict":
+        rejectUnknownFields(type, ["kind", "element"], typePath, errors);
+        if (type.element !== null)
+          pending.push({ value: type.element, path: `${typePath}.element` });
+        break;
+      case "object": {
+        rejectUnknownFields(type, ["kind", "properties"], typePath, errors);
+        if (!Array.isArray(type.properties)) {
+          errors.push(
+            planError(
+              "TSC002",
+              "Object type properties must be an array.",
+              `${typePath}.properties`,
+            ),
+          );
+          break;
+        }
+        const names = new Set<unknown>();
+        type.properties.forEach((property: unknown, index) => {
+          const propertyPath = `${typePath}.properties[${index}]`;
+          if (!isRecord(property)) {
+            errors.push(
+              planError("TSC002", "An object type property must be an object.", propertyPath),
+            );
+            return;
+          }
+          rejectUnknownFields(property, ["name", "type"], propertyPath, errors);
+          requireString(property.name, `${propertyPath}.name`, errors);
+          if (names.has(property.name))
+            errors.push(
+              planError(
+                "TSC002",
+                "Object type property names must be unique.",
+                `${propertyPath}.name`,
+              ),
+            );
+          names.add(property.name);
+          pending.push({ value: property.type, path: `${propertyPath}.type` });
+        });
+        break;
+      }
+      case "union":
+        rejectUnknownFields(type, ["kind", "members"], typePath, errors);
+        if (!Array.isArray(type.members) || type.members.length === 0) {
+          errors.push(
+            planError("TSC002", "A union type needs at least one member.", `${typePath}.members`),
+          );
+          break;
+        }
+        type.members.forEach((member: unknown, index) =>
+          pending.push({ value: member, path: `${typePath}.members[${index}]` }),
+        );
+        break;
+      default:
+        if (isOneOf(type.kind, TYPE_PLAN_NAMES))
+          rejectUnknownFields(type, ["kind"], typePath, errors);
+        else errors.push(planError("TSC002", "Unknown type kind.", `${typePath}.kind`));
+    }
+  }
+}
+
+const TYPE_PLAN_NAMES = [
+  "string",
+  "boolean",
+  "integer",
+  "number",
+  "duration",
+  "date",
+  "time",
+  "datetime",
+  "timestamp",
+  "never",
+  "null",
+  "range",
+  "speaker",
+  "timer",
+  "media",
+];
 
 function validateExpressionNode(
   value: unknown,
@@ -1364,11 +1515,7 @@ function validateExpressionNode(
       }
       return;
     case "duration":
-      if (
-        !hasExactKeys(value, ["kind", "milliseconds", "span"]) ||
-        typeof value.milliseconds !== "number" ||
-        !Number.isFinite(value.milliseconds)
-      ) {
+      if (!isStoredDurationRecord(value, ["span"])) {
         errors.push(planError("TSC002", "Duration literal plan is invalid.", path));
       }
       return;
@@ -1406,6 +1553,17 @@ function validateExpressionNode(
             path: `${path}.properties[${index}]`,
           });
       return;
+    case "dict":
+      if (!Array.isArray(value.entries))
+        errors.push(planError("TSC002", "Dict entries must be an array.", `${path}.entries`));
+      else
+        for (let index = value.entries.length - 1; index >= 0; index -= 1)
+          pending.push({
+            kind: "entry",
+            value: value.entries[index],
+            path: `${path}.entries[${index}]`,
+          });
+      return;
     case "group":
       pending.push({
         value: value.expression,
@@ -1436,8 +1594,38 @@ function validateExpressionNode(
           planError("TSC002", "takePhoto() must be lowered to a capture instruction.", path),
         );
       }
+      validateOptionalTypeCheck(value, path, errors);
+      if (
+        "typeCheck" in value &&
+        !(
+          isRecord(value.callee) &&
+          value.callee.kind === "property" &&
+          Array.isArray(value.arguments) &&
+          ((value.callee.name === "add" && value.arguments.length === 1) ||
+            (value.callee.name === "get" &&
+              value.arguments.length === 2 &&
+              isRecord(value.arguments[1]) &&
+              value.arguments[1].kind === "named" &&
+              value.arguments[1].name === "default"))
+        )
+      )
+        errors.push(
+          planError(
+            "TSC002",
+            "Only a list or set 'add' call with one argument, or a dict 'get' call with a 'default:', checks a type.",
+            `${path}.typeCheck`,
+          ),
+        );
       pending.push({ kind: "arguments", value: value.arguments, path: `${path}.arguments` });
       pending.push({ value: value.callee, path: `${path}.callee`, assignmentTarget: false });
+      return;
+    case "typeTest":
+      if (typeof value.negated !== "boolean")
+        errors.push(
+          planError("TSC002", "A type test needs a boolean 'negated'.", `${path}.negated`),
+        );
+      validateTypePlan(value.type, `${path}.type`, errors);
+      pending.push({ value: value.value, path: `${path}.value`, assignmentTarget: false });
       return;
     case "unary":
       if (!isOneOf(value.operator, ["+", "-", "not"])) {
@@ -1460,10 +1648,7 @@ function validateExpressionNode(
       pending.push({ value: value.start, path: `${path}.start`, assignmentTarget: false });
       return;
     case "storageLoad":
-      if (
-        !hasExactKeys(value, ["kind", "key", "default", "expectedType", "span"]) ||
-        !validStorageType(value.expectedType)
-      ) {
+      if (!hasExactKeys(value, ["kind", "key", "default", "span"])) {
         errors.push(planError("TSC002", "Storage-load expression has an invalid shape.", path));
       }
       if (value.default !== null) {
@@ -1557,7 +1742,8 @@ function validateCallArguments(
       errors.push(planError("TSC002", "Function argument must be an object.", argumentPath));
       return;
     }
-    if (!hasExactKeys(argument, ["parameterName", "value", "span"])) {
+    const fields = ["parameterName", "value", "span"];
+    if (!hasExactKeys(argument, "typeCheck" in argument ? [...fields, "typeCheck"] : fields)) {
       errors.push(
         planError("TSC002", "Function argument contains unsupported fields.", argumentPath),
       );
@@ -1565,6 +1751,7 @@ function validateCallArguments(
     requireString(argument.parameterName, `${argumentPath}.parameterName`, errors);
     validateExpression(argument.value, `${argumentPath}.value`, errors, false, temporaryCount);
     validateSpan(argument.span, `${argumentPath}.span`, errors);
+    validateOptionalTypeCheck(argument, argumentPath, errors);
   });
 }
 
@@ -1685,6 +1872,7 @@ const binaryOperators = new Set([
   ">=",
   "and",
   "or",
+  "in",
 ]);
 
 function invalidPlan(

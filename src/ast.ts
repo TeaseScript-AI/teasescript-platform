@@ -22,6 +22,7 @@ export type Statement =
   | LetStatement
   | AssignmentStatement
   | IfStatement
+  | SwitchStatement
   | RepeatStatement
   | ForStatement
   | WhileStatement
@@ -67,14 +68,29 @@ export interface SayStatement {
   readonly span: SourceSpan;
 }
 
-export interface ShowButtonStatement {
-  readonly kind: "showButtonStatement";
+/**
+ * Shared data of `showButton [as speaker] label [, background: colour] [, timeout: duration]`. The options may appear
+ * in either order and evaluate in source order.
+ */
+export interface ShowButtonParts {
   readonly commandSpan: SourceSpan;
   readonly asSpan: SourceSpan | null;
   readonly speaker: Identifier | null;
   readonly label: Expression;
   readonly background: Expression | null;
+  /** A number of seconds or an elapsed duration after which the button disappears. */
+  readonly timeout: Expression | null;
   readonly span: SourceSpan;
+}
+
+/** A button whose elapsed-time result is ignored. */
+export interface ShowButtonStatement extends ShowButtonParts {
+  readonly kind: "showButtonStatement";
+}
+
+/** A button used as a value; it evaluates to the elapsed waiting time as a `duration`. */
+export interface ShowButtonExpression extends ShowButtonParts {
+  readonly kind: "showButtonExpression";
 }
 
 /** A compiler-owned blocking delay. A missing unit means seconds. */
@@ -201,7 +217,7 @@ export interface DeleteStatement {
   readonly span: SourceSpan;
 }
 
-/** `load <key> [default <value>]`: the stored value, else the default (evaluated only then), else `null`. */
+/** `load <key>[, default: <value>]`: the stored value, else the default (evaluated only then), else `null`. */
 export interface LoadExpression {
   readonly kind: "loadExpression";
   readonly key: Expression;
@@ -223,13 +239,57 @@ export interface LetStatement {
 }
 
 export type ScalarTypeName =
-  "string" | "boolean" | "integer" | "number" | "date" | "time" | "datetime" | "duration";
+  | "string"
+  | "boolean"
+  | "integer"
+  | "number"
+  | "date"
+  | "time"
+  | "datetime"
+  | "timestamp"
+  | "duration";
 
-export interface TypeAnnotation {
-  readonly kind: "typeAnnotation";
-  readonly name: ScalarTypeName;
-  readonly collection: "list" | "set" | null;
-  readonly optional: boolean;
+/**
+ * A type name: a scalar type, `null`, any `list`, `set`, `dict`, or `object`, or a program-control type (ADR 0021).
+ */
+export type TypeName =
+  | ScalarTypeName
+  | "null"
+  | "list"
+  | "set"
+  | "dict"
+  | "object"
+  | "range"
+  | "speaker"
+  | "timer"
+  | "media";
+
+/** A written type: a name, `T[]`, `T set`, `T dict`, `T?`, or a union `A | B`. Parentheses only group. */
+export type TypeAnnotation = NamedType | CollectionType | OptionalType | UnionType;
+
+export interface NamedType {
+  readonly kind: "namedType";
+  readonly name: TypeName;
+  readonly span: SourceSpan;
+}
+
+/** `T[]`, `T set`, or `T dict`, whose values are of type `T`. */
+export interface CollectionType {
+  readonly kind: "listType" | "setType" | "dictType";
+  readonly element: TypeAnnotation;
+  readonly span: SourceSpan;
+}
+
+/** `T?`, which means `T | null`. */
+export interface OptionalType {
+  readonly kind: "optionalType";
+  readonly value: TypeAnnotation;
+  readonly span: SourceSpan;
+}
+
+export interface UnionType {
+  readonly kind: "unionType";
+  readonly members: readonly TypeAnnotation[];
   readonly span: SourceSpan;
 }
 
@@ -249,6 +309,34 @@ export interface IfStatement {
   readonly condition: Expression;
   readonly thenBlock: Block;
   readonly elseBlock: Block | IfStatement | null;
+  readonly span: SourceSpan;
+}
+
+export interface SwitchStatement {
+  readonly kind: "switchStatement";
+  readonly subject: Expression;
+  readonly cases: readonly SwitchCase[];
+  readonly defaultBlock: Block | null;
+  readonly span: SourceSpan;
+}
+
+/**
+ * One `case`: either its literal values and number ranges, any of which selects the block, or one type test, as in
+ * `case is integer`, with no values.
+ */
+export interface SwitchCase {
+  readonly kind: "switchCase";
+  readonly values: readonly Expression[];
+  readonly typeTest: SwitchTypeTest | null;
+  readonly body: Block;
+  readonly span: SourceSpan;
+}
+
+/** `is T` or `is not T` after `case`, testing the switched value like `value is T`. */
+export interface SwitchTypeTest {
+  readonly kind: "switchTypeTest";
+  readonly type: TypeAnnotation;
+  readonly negated: boolean;
   readonly span: SourceSpan;
 }
 
@@ -323,6 +411,7 @@ export type Expression =
   | ListLiteral
   | ObjectLiteral
   | SetLiteral
+  | DictLiteral
   | ParenthesizedExpression
   | PropertyAccessExpression
   | IndexExpression
@@ -331,26 +420,40 @@ export type Expression =
   | BinaryExpression
   | RangeExpression
   | InteractionExpression
+  | ShowButtonExpression
   | TimerExpression
   | PlayMediaExpression
-  | LoadExpression;
+  | LoadExpression
+  | TypeTestExpression;
+
+/** `value is T` or `value is not T`: whether the value may be stored in a place of type `T` (ADR 0021). */
+export interface TypeTestExpression {
+  readonly kind: "typeTestExpression";
+  readonly value: Expression;
+  readonly type: TypeAnnotation;
+  readonly negated: boolean;
+  readonly span: SourceSpan;
+}
 
 export interface InteractionExpression {
   readonly kind: "interactionExpression";
-  readonly interactionKind: "text" | "number" | "choice";
+  readonly interactionKind: "text" | "number" | "integer" | "date" | "time" | "datetime" | "choice";
   readonly commandSpan: SourceSpan;
   readonly asSpan: SourceSpan | null;
   readonly speaker: Identifier | null;
   readonly hint: Expression | null;
+  /** The `default:` answer that prefills an `askText` or `askNumber` field. */
+  readonly defaultValue: Expression | null;
   readonly options: readonly InteractionChoiceOption[];
   readonly span: SourceSpan;
 }
 
+/** One compact `choose` option: an optional authored value before `:`, then its expression. */
 export interface InteractionChoiceOption {
   readonly kind: "interactionChoiceOption";
-  readonly label: Identifier | NumberLiteral | null;
+  readonly value: Identifier | NumberLiteral | null;
   readonly colonSpan: SourceSpan | null;
-  readonly value: Expression;
+  readonly expression: Expression;
   readonly separatorSpan: SourceSpan | null;
   readonly span: SourceSpan;
 }
@@ -389,11 +492,14 @@ export interface NumberLiteral {
 
 export type DurationUnit = "ms" | "s" | "min" | "h";
 
+/** Calendar units: days, weeks, months, and years (V30 §35). They only appear in duration literals. */
+export type CalendarDurationUnit = "d" | "w" | "mo" | "y";
+
 /** A V30 exact elapsed-duration literal such as `30 s` or `2 minutes`. */
 export interface DurationLiteral {
   readonly kind: "durationLiteral";
   readonly amount: NumberLiteral;
-  readonly unit: DurationUnit;
+  readonly unit: DurationUnit | CalendarDurationUnit;
   readonly unitSpan: SourceSpan;
   readonly span: SourceSpan;
 }
@@ -445,6 +551,21 @@ export interface SetLiteral {
   readonly span: SourceSpan;
 }
 
+/** `dict{ name: value, "any text": value, [key]: value }`; every key is an expression that gives text. */
+export interface DictLiteral {
+  readonly kind: "dictLiteral";
+  readonly entries: readonly DictEntry[];
+  readonly span: SourceSpan;
+}
+
+/** One entry of a dict literal. A written name such as `collar:` is its text, as if quoted. */
+export interface DictEntry {
+  readonly kind: "dictEntry";
+  readonly key: Expression;
+  readonly value: Expression;
+  readonly span: SourceSpan;
+}
+
 export interface ParenthesizedExpression {
   readonly kind: "parenthesizedExpression";
   readonly expression: Expression;
@@ -469,7 +590,8 @@ export interface CallExpression {
   readonly kind: "callExpression";
   readonly callee: Expression;
   readonly arguments: readonly CallArgument[];
-  readonly argumentStyle: "none" | "positional" | "named";
+  /** `mixed`: positional arguments followed by named ones. */
+  readonly argumentStyle: "none" | "positional" | "named" | "mixed";
   readonly span: SourceSpan;
 }
 

@@ -35,8 +35,7 @@ A camera/media decision must still define:
 The [accepted V30 baseline](../specifications/accepted-syntaxes-v30.md) defines mandatory `askImage(...)` and nullable
 direct `takePhoto(...)`; this planning does not redefine their names or return contracts. The remaining Player design
 must decide source selection, preview, countdown, accept/retake, validation, retry, and recovery behavior, including
-after a denied permission. A
-rejected preview candidate is not runtime-visible.
+after a denied permission. A rejected preview candidate is not runtime-visible.
 
 `takePhoto(...)` captures silently from the camera stream the Player opened at session start, without a source question,
 preview, or interactive acceptance flow ([`SECURITY.md`](../SECURITY.md)). Its camera options, transcript behavior, and

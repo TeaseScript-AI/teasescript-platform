@@ -8,7 +8,10 @@ import type {
   AssignmentTarget,
   Block,
   CallArgument,
+  DurationUnit,
   Identifier,
+  InteractionChoiceOption,
+  ShowButtonParts,
   TimerParts,
   Expression,
   MediaParts,
@@ -23,10 +26,27 @@ import {
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
-import { staticNumber, staticVisibleText } from "./static-evaluation.js";
+import {
+  findVisibleOverflows,
+  staticChoiceValue,
+  staticNumber,
+  staticQuantity,
+  staticVisibleText,
+} from "./static-evaluation.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
-import { expressionChildren, mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
-import { durationLiteralMilliseconds } from "./duration.js";
+import {
+  expressionChildren,
+  mediaHandlerBlocks,
+  mediaOperands,
+  showButtonOptions,
+} from "./expression-children.js";
+import {
+  DURATION_UNIT_MILLISECONDS,
+  durationLiteralParts,
+  durationParts,
+  isExactDuration,
+} from "./duration.js";
+import { validateSwitchCases } from "./switch-cases.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -76,7 +96,6 @@ const semanticCode = {
   unknownAssignment: "TSV003",
   invalidAssignment: "TSV004",
   unknownSpeaker: "TSV005",
-  invalidSetElement: "TSV006",
   duplicateProperty: "TSV007",
   invalidLoopControl: "TSV008",
   chainedRange: "TSV009",
@@ -91,16 +110,13 @@ const semanticCode = {
   unknownFunction: "TSV018",
   nonCallable: "TSV019",
   argumentCount: "TSV020",
-  mixedArguments: "TSV021",
   unknownNamedArgument: "TSV022",
   duplicateNamedArgument: "TSV023",
   missingNamedArgument: "TSV024",
   laterParameterDefault: "TSV025",
   functionAssignment: "TSV026",
-  unsupportedFunctionAnnotation: "TSV027",
   functionValue: "TSV028",
   invalidInteractionChoice: "TSV029",
-  duplicateInteractionChoice: "TSV030",
   unsupportedBlockingContext: "TSV032",
   invalidTimer: "TSV033",
   invalidTimerHandleMember: "TSV034",
@@ -108,6 +124,14 @@ const semanticCode = {
   invalidMedia: "TSV036",
   invalidMediaHandleMember: "TSV037",
   invalidStorageKey: "TSV038",
+  invalidListIndex: "TSV045",
+  visibleOverflow: "TSV050",
+} as const;
+
+const OVERFLOW_MESSAGES = {
+  zero: "This divides by zero, so it has no result. Divide by a value other than zero.",
+  number: "This calculation gives a number too large to represent. Use smaller values.",
+  duration: "This calculation gives a duration too long to represent. Use a shorter duration.",
 } as const;
 
 export function validateSemantics(
@@ -169,7 +193,17 @@ class SemanticValidator {
   public constructor(options: SemanticValidationOptions) {
     this.#invalidConfiguredNames = Object.freeze(
       [...(options.globals ?? []), ...(options.builtins ?? [])].filter((name) =>
-        ["showButton", "askText", "askNumber", "choose", "takePhoto"].includes(name),
+        [
+          "showButton",
+          "askText",
+          "askNumber",
+          "askInteger",
+          "askDate",
+          "askTime",
+          "askDateTime",
+          "choose",
+          "takePhoto",
+        ].includes(name),
       ),
     );
     this.#builtins = new Set([
@@ -221,6 +255,8 @@ class SemanticValidator {
     for (let index = 0; index < this.#pendingHandlers.length; index += 1) {
       this.#validateHandler(this.#pendingHandlers[index]!);
     }
+    for (const overflow of findVisibleOverflows(program))
+      this.#report(semanticCode.visibleOverflow, OVERFLOW_MESSAGES[overflow.cause], overflow.span);
   }
 
   /**
@@ -326,6 +362,16 @@ class SemanticValidator {
           "A timer range must contain at least one whole second.",
           duration.span,
         );
+      } else if (
+        start !== undefined &&
+        !(start * DURATION_UNIT_MILLISECONDS.s <= Number.MAX_SAFE_INTEGER)
+      ) {
+        // Every draw is at least the lower bound.
+        this.#report(
+          semanticCode.invalidRepeatCount,
+          "This timer is too long for scene time to reach. Use a shorter duration.",
+          duration.span,
+        );
       }
     } else {
       const known =
@@ -336,6 +382,12 @@ class SemanticValidator {
           timer.repeat
             ? "A repeating timer duration must be greater than zero."
             : "Timer duration must not be negative.",
+          timer.duration.span,
+        );
+      } else if (beyondSceneTime(timer.duration, timer.unit)) {
+        this.#report(
+          semanticCode.invalidRepeatCount,
+          "This timer is too long for scene time to reach. Use a shorter duration.",
           timer.duration.span,
         );
       }
@@ -390,7 +442,9 @@ class SemanticValidator {
           repeat.value.span,
         );
       } else if (kind === "durationLiteral") {
-        if (!(staticDurationMs(repeat.value)! > 0)) {
+        // A calendar duration has no fixed length; the type check reports it as such (V30 §35).
+        const milliseconds = staticDurationMs(repeat.value);
+        if (milliseconds !== undefined && !(milliseconds > 0)) {
           this.#report(
             semanticCode.invalidMedia,
             "A repeat duration must be greater than zero.",
@@ -682,15 +736,9 @@ class SemanticValidator {
         }
         return;
       }
-      case "showButtonStatement": {
-        const contextualSpeaker = this.#interactionSpeaker(statement.speaker, scope);
-        this.#validateExpression(statement.label, scope, contextualSpeaker);
-        if (statement.background !== null) {
-          this.#validateExpression(statement.background, scope, contextualSpeaker);
-          this.#validateButtonBackground(statement.background);
-        }
+      case "showButtonStatement":
+        yield* compileChild(this.#validateShowButtonTask(statement, scope));
         return;
-      }
       case "waitStatement": {
         this.#validateExpression(statement.duration, scope, null);
         if (
@@ -708,6 +756,12 @@ class SemanticValidator {
           this.#report(
             semanticCode.invalidRepeatCount,
             "Wait duration must not be negative.",
+            statement.duration.span,
+          );
+        } else if (beyondSceneTime(statement.duration, statement.unit)) {
+          this.#report(
+            semanticCode.invalidRepeatCount,
+            "This wait is too long for scene time to reach. Use a shorter duration.",
             statement.duration.span,
           );
         }
@@ -770,6 +824,20 @@ class SemanticValidator {
           } else {
             yield* compileChild(this.#validateBlock(statement.elseBlock, scope, loopDepth));
           }
+        }
+        return;
+      case "switchStatement":
+        this.#validateExpression(statement.subject, scope, null);
+        validateSwitchCases(
+          statement,
+          (name) => scope.resolve(name)?.kind === "speaker",
+          (code, message, span) => this.#report(code, message, span),
+        );
+        for (const switchCase of statement.cases) {
+          yield* compileChild(this.#validateBlock(switchCase.body, scope, loopDepth));
+        }
+        if (statement.defaultBlock !== null) {
+          yield* compileChild(this.#validateBlock(statement.defaultBlock, scope, loopDepth));
         }
         return;
       case "repeatStatement":
@@ -863,13 +931,6 @@ class SemanticValidator {
   }
 
   #validateFunction(declaration: FunctionDeclaration): void {
-    if (declaration.returnTypeAnnotation !== null) {
-      this.#report(
-        semanticCode.unsupportedFunctionAnnotation,
-        "Function return-type annotations are parsed but not implemented in this milestone.",
-        declaration.returnTypeAnnotation.span,
-      );
-    }
     const names = new Set<string>();
     let sawDefault = false;
     const bodyScope = new SemanticScope(this.#root);
@@ -883,13 +944,6 @@ class SemanticValidator {
         );
       }
       names.add(parameter.name.name);
-      if (parameter.typeAnnotation !== null) {
-        this.#report(
-          semanticCode.unsupportedFunctionAnnotation,
-          "Function parameter annotations are parsed but not implemented in this milestone.",
-          parameter.typeAnnotation.span,
-        );
-      }
       if (parameter.defaultValue === null && sawDefault) {
         this.#report(
           semanticCode.requiredAfterDefault,
@@ -978,7 +1032,19 @@ class SemanticValidator {
     this.#validateExpression(target.object, scope, null);
     if (target.kind === "indexExpression") {
       this.#validateExpression(target.index, scope, null);
+      this.#validateListIndex(target.index);
     }
+  }
+
+  /** Reports a list index the compiler can see is negative; the type check reports one that is not a whole number. */
+  #validateListIndex(index: Expression): void {
+    const known = staticNumber(index);
+    if (known !== undefined && known < 0)
+      this.#report(
+        semanticCode.invalidListIndex,
+        "A list index cannot be negative. The first element is at index 0, and the last at length - 1.",
+        index.span,
+      );
   }
 
   #validateExpression(
@@ -1017,10 +1083,17 @@ class SemanticValidator {
         const contextualSpeaker = this.#interactionSpeaker(expression.speaker, scope);
         if (expression.interactionKind === "choice") {
           yield* compileChild(this.#validateChoiceTask(expression, scope, contextualSpeaker));
-        } else if (expression.hint !== null) {
-          yield* compileChild(
-            this.#validateExpressionTask(expression.hint, scope, contextualSpeaker),
-          );
+        } else {
+          if (expression.hint !== null) {
+            yield* compileChild(
+              this.#validateExpressionTask(expression.hint, scope, contextualSpeaker),
+            );
+          }
+          if (expression.defaultValue !== null) {
+            yield* compileChild(
+              this.#validateExpressionTask(expression.defaultValue, scope, contextualSpeaker),
+            );
+          }
         }
         return;
       }
@@ -1060,11 +1133,33 @@ class SemanticValidator {
           this.#validateCollectionExpressionTask(expression, scope, contextualSpeaker),
         );
         return;
+      case "dictLiteral": {
+        // Keys the source shows must differ; keys known only at runtime replace earlier entries instead.
+        const keys = new Set<string>();
+        for (const entry of expression.entries) {
+          yield* compileChild(this.#validateExpressionTask(entry.key, scope, contextualSpeaker));
+          const key = staticChoiceValue(entry.key)?.value;
+          if (typeof key === "string") {
+            if (keys.has(key))
+              this.#report(
+                semanticCode.duplicateProperty,
+                `Duplicate dict key ${JSON.stringify(key)}. Each key appears once; remove one of the entries.`,
+                entry.key.span,
+              );
+            keys.add(key);
+          }
+          yield* compileChild(this.#validateExpressionTask(entry.value, scope, contextualSpeaker));
+        }
+        return;
+      }
       case "propertyAccessExpression":
         yield* compileChild(
           this.#validateExpressionTask(expression.object, scope, contextualSpeaker),
         );
         this.#validateTimerHandleMember(expression.object, expression.property, scope, "read");
+        return;
+      case "showButtonExpression":
+        yield* compileChild(this.#validateShowButtonTask(expression, scope));
         return;
       case "timerExpression":
         this.#validateTimer(expression, scope, true);
@@ -1090,8 +1185,17 @@ class SemanticValidator {
         yield* compileChild(
           this.#validateExpressionTask(expression.index, scope, contextualSpeaker),
         );
+        this.#validateListIndex(expression.index);
         return;
-      case "callExpression":
+      case "callExpression": {
+        const authorFunction =
+          expression.callee.kind === "identifier" &&
+          scope.resolve(expression.callee.name)?.kind === "function" &&
+          this.#functions.has(expression.callee.name);
+        // Only an author function's parameters are known here; for every other callee a repeated name is still an error.
+        if (!authorFunction) this.#validateDistinctNamedArguments(expression);
+        // Grouping a method does not detach it from its receiver: `(text.trim)()` calls `text.trim()`.
+        const method = unwrapParentheses(expression.callee);
         if (expression.callee.kind === "identifier") {
           const name = expression.callee.name;
           const binding = scope.resolve(name);
@@ -1107,7 +1211,7 @@ class SemanticValidator {
           } else if (declaration !== undefined && binding?.kind === "function") {
             this.#validateFunctionCall(expression, declaration);
           } else if (this.#builtins.has(name)) {
-            // Injected and core built-ins validate their values at runtime.
+            // The type check checks the arguments of the core built-ins it knows.
           } else if (binding !== undefined) {
             this.#report(
               semanticCode.nonCallable,
@@ -1121,13 +1225,13 @@ class SemanticValidator {
               expression.callee.span,
             );
           }
-        } else if (expression.callee.kind === "propertyAccessExpression") {
+        } else if (method.kind === "propertyAccessExpression") {
           yield* compileChild(
-            this.#validateExpressionTask(expression.callee.object, scope, contextualSpeaker),
+            this.#validateExpressionTask(method.object, scope, contextualSpeaker),
           );
           this.#validateTimerHandleMember(
-            expression.callee.object,
-            expression.callee.property,
+            method.object,
+            method.property,
             scope,
             "call",
             undefined,
@@ -1143,6 +1247,13 @@ class SemanticValidator {
             this.#validateExpressionTask(argument.value, scope, contextualSpeaker),
           );
         }
+        if (
+          method.kind === "propertyAccessExpression" &&
+          method.property.name === "removeAt" &&
+          expression.arguments.length === 1 &&
+          expression.arguments[0]!.kind === "positionalArgument"
+        )
+          this.#validateListIndex(expression.arguments[0]!.value);
         if (
           expression.callee.kind === "identifier" &&
           expression.callee.name === "randomInteger" &&
@@ -1161,6 +1272,7 @@ class SemanticValidator {
           }
         }
         return;
+      }
       case "binaryExpression": {
         yield* compileChild(
           this.#validateExpressionTask(expression.left, scope, contextualSpeaker),
@@ -1206,6 +1318,11 @@ class SemanticValidator {
           );
         }
         return;
+      case "typeTestExpression":
+        yield* compileChild(
+          this.#validateExpressionTask(expression.value, scope, contextualSpeaker),
+        );
+        return;
     }
     expression satisfies never;
   }
@@ -1226,7 +1343,40 @@ class SemanticValidator {
         : null;
   }
 
+  /** Validates the operands of a statement or expression `showButton` in source order. */
+  *#validateShowButtonTask(parts: ShowButtonParts, scope: SemanticScope): CompileTask<void> {
+    const contextualSpeaker = this.#interactionSpeaker(parts.speaker, scope);
+    yield* compileChild(this.#validateExpressionTask(parts.label, scope, contextualSpeaker));
+    for (const option of showButtonOptions(parts)) {
+      yield* compileChild(this.#validateExpressionTask(option.value, scope, contextualSpeaker));
+      if (option.name === "background") this.#validateButtonBackground(option.value);
+      else this.#validateButtonTimeout(option.value);
+    }
+  }
+
+  /**
+   * When the compiler can fully evaluate a timeout, it reports every failure the runtime would hit: a value of zero or
+   * less, or one scene time cannot reach; an overflowing step is a visible-overflow error like anywhere else. The type
+   * checker requires a number or a duration, and the runtime checks the values the compiler cannot know.
+   */
+  #validateButtonTimeout(expression: Expression): void {
+    const milliseconds = knownMilliseconds(expression, null);
+    if (milliseconds !== undefined && milliseconds <= 0)
+      this.#report(
+        semanticCode.invalidRepeatCount,
+        "The showButton timeout must be greater than zero. Remove 'timeout:' to wait for the click without a time limit.",
+        expression.span,
+      );
+    else if (beyondSceneTime(expression, null))
+      this.#report(
+        semanticCode.invalidRepeatCount,
+        "The showButton timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
+        expression.span,
+      );
+  }
+
   #validateButtonBackground(expression: Expression): void {
+    // The type checker checks that the colour is text; a known text must name an opaque colour.
     const text = staticVisibleText(expression);
     if (text !== undefined && normalizeOpaqueColor(text) === null)
       this.#report(
@@ -1249,77 +1399,59 @@ class SemanticValidator {
       );
       return;
     }
-    const labelled = expression.options.map((option) => option.label !== null);
-    if (labelled.some(Boolean) && labelled.some((value) => !value)) {
-      this.#report(
-        semanticCode.invalidInteractionChoice,
-        "Labelled and unlabelled choice options may not be mixed.",
-        expression.span,
-      );
-    }
-    const labelKinds = new Set(
-      expression.options.flatMap((option) => (option.label === null ? [] : [option.label.kind])),
-    );
-    if (labelKinds.size > 1) {
-      this.#report(
-        semanticCode.invalidInteractionChoice,
-        "Identifier and numeric choice labels may not be mixed.",
-        expression.span,
-      );
-    }
-    const labels = new Set<string>();
-    const visible = new Map<string, SourceSpan>();
+    // The type checker checks what each button shows and returns, and how many buttons a choice has. Values of
+    // different types, such as an identifier and a number before ':', make a union (#511 C2).
+    let empty = true;
     for (const option of expression.options) {
-      yield* compileChild(this.#validateExpressionTask(option.value, scope, contextualSpeaker));
-      let value = option.value;
-      while (value.kind === "parenthesizedExpression") value = value.expression;
-      if (value.kind === "objectLiteral") {
-        if (!value.properties.some((property) => property.name.name === "text"))
-          this.#report(
-            semanticCode.invalidInteractionChoice,
-            "A choice object requires text.",
-            value.span,
-          );
-        for (const property of value.properties) {
-          if (property.name.name === "background") this.#validateButtonBackground(property.value);
-          else if (property.name.name !== "text")
-            this.#report(
-              semanticCode.invalidInteractionChoice,
-              "Choice options support text and background only.",
-              property.name.span,
-            );
-        }
+      yield* compileChild(
+        this.#validateExpressionTask(option.expression, scope, contextualSpeaker),
+      );
+      const content = unwrapParentheses(option.expression);
+      if (content.kind !== "listLiteral" && content.kind !== "setLiteral") {
+        empty = false;
+        this.#validateChoiceObject(content, option.value);
+        continue;
       }
-      if (option.label !== null) {
-        const key =
-          option.label.kind === "identifier"
-            ? `identifier:${option.label.name}`
-            : `number:${Object.is(option.label.value, -0) ? 0 : option.label.value}`;
-        if (labels.has(key)) {
-          this.#report(
-            semanticCode.duplicateInteractionChoice,
-            "Choice labels must be unique.",
-            option.label.span,
-          );
-        }
-        labels.add(key);
-      } else {
-        const textExpression =
-          value.kind === "objectLiteral"
-            ? value.properties.find((property) => property.name.name === "text")?.value
-            : value;
-        const text = textExpression === undefined ? undefined : staticVisibleText(textExpression);
-        if (text !== undefined) {
-          if (visible.has(text)) {
-            this.#report(
-              semanticCode.duplicateInteractionChoice,
-              "Unlabelled choice text must be unique.",
-              option.value.span,
-            );
-          }
-          visible.set(text, option.value.span);
-        }
-      }
+      if (content.elements.length > 0) empty = false;
+      for (const element of content.elements)
+        this.#validateChoiceObject(unwrapParentheses(element), option.value);
+    }
+    if (empty)
+      this.#report(
+        semanticCode.invalidInteractionChoice,
+        "A choice needs at least one button, but its option lists are empty.",
+        expression.span,
+      );
+  }
+
+  /**
+   * Checks the properties of a choice object that gives one button. `value` is the value written before the option's
+   * `:`, which every button of a list or set option returns.
+   */
+  #validateChoiceObject(entry: Expression, value: InteractionChoiceOption["value"]): void {
+    if (entry.kind !== "objectLiteral") return;
+    if (!entry.properties.some((property) => property.name.name === "text"))
+      this.#report(
+        semanticCode.invalidInteractionChoice,
+        "A choice object requires text.",
+        entry.span,
+      );
+    for (const property of entry.properties) {
+      const name = property.name.name;
+      if (name === "background") this.#validateButtonBackground(property.value);
+      else if (name === "text") continue;
+      else if (name === "value" && value !== null)
+        this.#report(
+          semanticCode.invalidInteractionChoice,
+          "This choice option has two values, one before ':' and one in its value property. Keep one.",
+          property.name.span,
+        );
+      else if (name !== "value")
+        this.#report(
+          semanticCode.invalidInteractionChoice,
+          "Choice objects support value, text, and background only.",
+          property.name.span,
+        );
     }
   }
 
@@ -1342,17 +1474,14 @@ class SemanticValidator {
       }
       return;
     }
-    for (const element of root.elements) {
+    for (const element of root.elements)
       yield* compileChild(this.#validateExpressionTask(element, scope, contextualSpeaker));
-      if (root.kind === "setLiteral" && isDefinitelyComposite(element, scope))
-        this.#report(
-          semanticCode.invalidSetElement,
-          "Sets may contain only string, boolean, integer, number, or null values.",
-          element.span,
-        );
-    }
   }
 
+  /**
+   * Positional arguments fill parameters from left to right; named arguments that follow them fill parameters by name.
+   * Each parameter receives at most one value, and every parameter without a default needs one.
+   */
   #validateFunctionCall(
     expression: Extract<Expression, { kind: "callExpression" }>,
     declaration: FunctionDeclaration,
@@ -1361,55 +1490,79 @@ class SemanticValidator {
       (argument) => argument.kind === "positionalArgument",
     );
     const named = expression.arguments.filter((argument) => argument.kind === "namedArgument");
-    if (positional.length > 0 && named.length > 0) {
+    const functionName = declaration.name.name;
+    const parameterNames = declaration.parameters.map((parameter) => parameter.name.name);
+    const required = declaration.parameters.filter(
+      (parameter) => parameter.defaultValue === null,
+    ).length;
+    if (positional.length > parameterNames.length) {
       this.#report(
-        semanticCode.mixedArguments,
-        "Positional and named arguments may not be mixed in one call.",
+        semanticCode.argumentCount,
+        `Function '${functionName}' takes ${argumentRange(required, parameterNames)}, received ${positional.length} positional argument${positional.length === 1 ? "" : "s"}. Remove the extra positional arguments.`,
         expression.span,
       );
       return;
     }
-    const required = declaration.parameters.filter(
-      (parameter) => parameter.defaultValue === null,
-    ).length;
     if (named.length === 0) {
-      if (positional.length < required || positional.length > declaration.parameters.length) {
+      if (positional.length < required)
         this.#report(
           semanticCode.argumentCount,
-          `Function '${declaration.name.name}' expects ${required} through ${declaration.parameters.length} positional argument(s), received ${positional.length}.`,
+          `Function '${functionName}' takes ${argumentRange(required, parameterNames)}, received ${positional.length}. Add the missing arguments.`,
           expression.span,
         );
-      }
       return;
     }
-    const parameters = new Map(
-      declaration.parameters.map((parameter) => [parameter.name.name, parameter]),
-    );
-    const supplied = new Set<string>();
+    const indexes = new Map(parameterNames.map((name, index) => [name, index]));
+    const supplied = new Set(parameterNames.slice(0, positional.length));
     for (const argument of named) {
-      if (!parameters.has(argument.name.name)) {
+      const name = argument.name.name;
+      const index = indexes.get(name);
+      if (index === undefined) {
         this.#report(
           semanticCode.unknownNamedArgument,
-          `Unknown argument '${argument.name.name}' for function '${declaration.name.name}'.`,
+          `Function '${functionName}' has no parameter '${name}'. ${parameterNames.length === 0 ? "It takes no arguments." : `Its parameters are ${parameterNames.join(", ")}.`}`,
           argument.name.span,
         );
-      } else if (supplied.has(argument.name.name)) {
+      } else if (index < positional.length) {
         this.#report(
           semanticCode.duplicateNamedArgument,
-          `Duplicate named argument '${argument.name.name}'.`,
+          `Parameter '${name}' already receives positional argument ${index + 1}. Remove one of the two.`,
+          argument.name.span,
+        );
+      } else if (supplied.has(name)) {
+        this.#report(
+          semanticCode.duplicateNamedArgument,
+          `Argument '${name}' is given twice. Remove one of them.`,
           argument.name.span,
         );
       }
-      supplied.add(argument.name.name);
+      supplied.add(name);
     }
     for (const parameter of declaration.parameters) {
       if (parameter.defaultValue === null && !supplied.has(parameter.name.name)) {
         this.#report(
           semanticCode.missingNamedArgument,
-          `Missing required named argument '${parameter.name.name}'.`,
+          `Function '${functionName}' needs a value for '${parameter.name.name}'. Add it by position or as '${parameter.name.name}: ...'.`,
           expression.span,
         );
       }
+    }
+  }
+
+  /** Reports a parameter name given twice in a call whose parameters only the callee knows. */
+  #validateDistinctNamedArguments(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+  ): void {
+    const names = new Set<string>();
+    for (const argument of expression.arguments) {
+      if (argument.kind !== "namedArgument") continue;
+      if (names.has(argument.name.name))
+        this.#report(
+          semanticCode.duplicateNamedArgument,
+          `Argument '${argument.name.name}' is given twice. Remove one of them.`,
+          argument.name.span,
+        );
+      names.add(argument.name.name);
     }
   }
 
@@ -1431,7 +1584,7 @@ class SemanticValidator {
     if (this.#protectedNames.has(name)) {
       this.#report(
         semanticCode.duplicateDeclaration,
-        `Declaration '${name}' conflicts with a protected TeaseScript name.`,
+        `Declaration '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Value'.`,
         span,
       );
       return false;
@@ -1465,6 +1618,16 @@ function literalKind(expression: Expression): Expression["kind"] {
   return current.kind;
 }
 
+/** "2 arguments (a, b)" or "1 to 3 arguments (a, b, c)", naming the parameters so the author sees what is expected. */
+function argumentRange(required: number, parameterNames: readonly string[]): string {
+  const total = parameterNames.length;
+  const count =
+    required === total
+      ? `${total} argument${total === 1 ? "" : "s"}`
+      : `${required} to ${total} arguments`;
+  return total === 0 ? "no arguments" : `${count} (${parameterNames.join(", ")})`;
+}
+
 /** The handle kind statically held by a variable initialized from `expression`. */
 function handleKind(expression: Expression): "timer" | "media" | null {
   expression = unwrapParentheses(expression);
@@ -1490,7 +1653,13 @@ function staticDurationMs(expression: Expression): number | undefined {
     if (current.operator === "-") sign = -sign;
     current = unwrapParentheses(current.operand);
   }
-  if (current.kind === "durationLiteral") return sign * durationLiteralMilliseconds(current);
+  if (current.kind === "durationLiteral") {
+    // A calendar duration has no fixed length, so it gives no media position.
+    const parts = durationLiteralParts(current);
+    return typeof parts === "string" || !isExactDuration(parts)
+      ? undefined
+      : sign * parts.milliseconds;
+  }
   const seconds = staticNumber(expression);
   return seconds === undefined ? undefined : seconds * 1_000;
 }
@@ -1518,6 +1687,7 @@ function isDefinitelyNonDuration(expression: Expression): boolean {
     kind === "listLiteral" ||
     kind === "setLiteral" ||
     kind === "objectLiteral" ||
+    kind === "dictLiteral" ||
     kind === "rangeExpression"
   );
 }
@@ -1532,7 +1702,9 @@ function isDefinitelyNonFileReference(expression: Expression): boolean {
     kind === "listLiteral" ||
     kind === "setLiteral" ||
     kind === "objectLiteral" ||
+    kind === "dictLiteral" ||
     kind === "rangeExpression" ||
+    kind === "showButtonExpression" ||
     kind === "timerExpression" ||
     kind === "playMediaExpression" ||
     kind === "unaryExpression"
@@ -1549,8 +1721,27 @@ function isDefinitelyNonText(expression: Expression): boolean {
     expression.kind === "listLiteral" ||
     expression.kind === "setLiteral" ||
     expression.kind === "objectLiteral" ||
+    expression.kind === "dictLiteral" ||
     expression.kind === "rangeExpression"
   );
+}
+
+/**
+ * The milliseconds of a known wait, timer, or timeout duration: a number counts seconds, or `unit`, and a duration its
+ * own milliseconds. `undefined` when the value is not known or not a finite quantity.
+ */
+function knownMilliseconds(expression: Expression, unit: DurationUnit | null): number | undefined {
+  const known = staticQuantity(expression);
+  if (known === undefined) return undefined;
+  if (typeof known === "number") return known * DURATION_UNIT_MILLISECONDS[unit ?? "s"];
+  // A duration with a trailing unit is a type error of its own, and a calendar duration has no fixed length.
+  return unit === null && isExactDuration(durationParts(known)) ? known.milliseconds : undefined;
+}
+
+/** Scene time is at most `Number.MAX_SAFE_INTEGER` milliseconds, so a known longer duration can never be reached. */
+function beyondSceneTime(expression: Expression, unit: DurationUnit | null): boolean {
+  const milliseconds = knownMilliseconds(expression, unit);
+  return milliseconds !== undefined && !(milliseconds <= Number.MAX_SAFE_INTEGER);
 }
 
 function isKnownInteger(expression: Expression): boolean {
@@ -1566,13 +1757,17 @@ function findFirstInteraction(
   expression: Expression,
 ): Extract<
   Expression,
-  { kind: "interactionExpression" | "playMediaExpression" | "callExpression" }
+  {
+    kind:
+      "interactionExpression" | "showButtonExpression" | "playMediaExpression" | "callExpression";
+  }
 > | null {
   const work = [expression];
   while (work.length) {
     const current = work.pop()!;
     if (
       current.kind === "interactionExpression" ||
+      current.kind === "showButtonExpression" ||
       current.kind === "playMediaExpression" ||
       (current.kind === "callExpression" && isTakePhotoCall(current))
     )
@@ -1591,9 +1786,11 @@ function unwrapParentheses(expression: Expression): Expression {
 function isDefinitelyNonNumeric(expression: Expression): boolean {
   expression = unwrapParentheses(expression);
   if (expression.kind === "interactionExpression") {
-    if (expression.interactionKind === "number") return false;
+    if (expression.interactionKind === "number" || expression.interactionKind === "integer")
+      return false;
     if (expression.interactionKind !== "choice") return true;
-    return expression.options[0]?.label?.kind !== "numberLiteral";
+    // A choice returns the type its values share, which the type checker knows.
+    return false;
   }
   return (
     expression.kind === "stringLiteral" ||
@@ -1602,8 +1799,10 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "listLiteral" ||
     expression.kind === "setLiteral" ||
     expression.kind === "objectLiteral" ||
+    expression.kind === "dictLiteral" ||
     expression.kind === "rangeExpression" ||
     expression.kind === "durationLiteral" ||
+    expression.kind === "showButtonExpression" ||
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression"
   );
@@ -1635,8 +1834,10 @@ function isDefinitelyNonString(expression: Expression): boolean {
     expression.kind === "listLiteral" ||
     expression.kind === "setLiteral" ||
     expression.kind === "objectLiteral" ||
+    expression.kind === "dictLiteral" ||
     expression.kind === "rangeExpression" ||
     expression.kind === "unaryExpression" ||
+    expression.kind === "showButtonExpression" ||
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression"
   );
@@ -1650,20 +1851,9 @@ function isDefinitelyNonIterable(expression: Expression): boolean {
     expression.kind === "nullLiteral" ||
     expression.kind === "numberLiteral" ||
     expression.kind === "objectLiteral" ||
-    expression.kind === "interactionExpression"
+    expression.kind === "interactionExpression" ||
+    expression.kind === "showButtonExpression"
   );
-}
-
-function isDefinitelyComposite(expression: Expression, scope: SemanticScope): boolean {
-  expression = unwrapParentheses(expression);
-  if (
-    expression.kind === "listLiteral" ||
-    expression.kind === "objectLiteral" ||
-    expression.kind === "setLiteral"
-  ) {
-    return true;
-  }
-  return expression.kind === "identifier" && scope.resolve(expression.name)?.kind === "speaker";
 }
 
 function visitExpression(
@@ -1679,9 +1869,16 @@ function visitExpression(
         ? [
             ...(current.speaker === null ? [] : [current.speaker]),
             ...(current.hint === null ? [] : [current.hint]),
-            ...current.options.map((option) => option.value),
+            ...(current.defaultValue === null ? [] : [current.defaultValue]),
+            ...current.options.map((option) => option.expression),
           ]
-        : expressionChildren(current);
+        : current.kind === "showButtonExpression"
+          ? [
+              ...(current.speaker === null ? [] : [current.speaker]),
+              current.label,
+              ...showButtonOptions(current).map((option) => option.value),
+            ]
+          : expressionChildren(current);
     for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
   }
 }

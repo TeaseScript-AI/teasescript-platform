@@ -62,15 +62,6 @@ test("accepts nested lexical access and sibling-local reuse", () => {
   assert.notEqual(result.plan, null);
 });
 
-test("detects definitely invalid set elements without full type checking", () => {
-  const result = compileSource("let values = set[[1], { value: 2 }, set[3]]");
-
-  assert.deepEqual(
-    result.semanticDiagnostics.map((item) => item.code),
-    ["TSV006", "TSV006", "TSV006"],
-  );
-});
-
 test("keeps parser and semantic diagnostics distinct", () => {
   const parserFailure = compileSource("let = 1");
   assert.ok(parserFailure.parserDiagnostics.length > 0);
@@ -156,8 +147,8 @@ test("reports each invalid builtin value once in deterministic source order", ()
 test("preserves direct builtin calls in every supported nested context", () => {
   const result = compileSource(
     [
-      "let values = [random(), chance(50), randomInteger(1..=6), customBuiltin()]",
-      "let objectValue = { core: random(), injected: customBuiltin() }",
+      "let values = [random(), randomInteger(1..=6), customBuiltin()]",
+      "let objectValue = { core: random(), coin: chance(50), injected: customBuiltin() }",
       'say "${random()}:${customBuiltin()}"',
       "function sample(core = random(), injected = customBuiltin()) {",
       "  return core",
@@ -208,4 +199,34 @@ test("preserves existing function, unknown-name, callable, and protected-name di
     protectedInjected.semanticDiagnostics.map((diagnostic) => diagnostic.code),
     ["TSV001"],
   );
+});
+
+test("reports a declaration named after the set keyword as a protected name", () => {
+  for (const source of [
+    "let set = 1",
+    "for set in [1] {\n}",
+    "function set {\n}",
+    "function pick(set) {\n    return 1\n}",
+    'speaker set {\n    name: "Set"\n}',
+  ]) {
+    const result = compileSource(source);
+    const start = source.indexOf("set");
+    assert.deepEqual(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.message,
+        diagnostic.span.start.offset,
+        diagnostic.span.end.offset,
+      ]),
+      [
+        [
+          "TSV001",
+          "Declaration 'set' conflicts with a protected TeaseScript name. Choose another name, such as 'setValue'.",
+          start,
+          start + 3,
+        ],
+      ],
+      source,
+    );
+  }
 });

@@ -13,10 +13,16 @@ import {
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
 // Ordinary source whose compiled plan contains every instruction and expression shape the compiler emits for it,
-// plus function definitions, parameters, speaker and object properties, template parts, positional and named builtin
-// arguments, and static and prepared interaction payloads.
+// plus function definitions, parameters, speaker and object properties, dict entries, template parts, positional and
+// named builtin arguments, static and prepared interaction payloads, and runtime type checks of host values at each kind
+// of place.
 const REPRESENTATIVE_SOURCE = [
   "function helper(value = 1) { return value }",
+  "function typed(count: integer = capture(1)) { return count }",
+  "function ranked(first: boolean): integer {",
+  "  if first { return 1 }",
+  "  return capture(2)",
+  "}",
   'speaker vera { title: "Mistress" }',
   "speaker mira { title: helper() }",
   "speaker vera",
@@ -25,6 +31,13 @@ const REPRESENTATIVE_SOURCE = [
   'let record = { name: "x", nested: [0] }',
   "values.add(helper(2))",
   "record.nested[0] = helper()",
+  'let table = dict{ a: helper(), ["b"]: 2 }',
+  "table[capture(7)] = capture(8)",
+  "let typedTable: integer dict = capture(9)",
+  "let maybe: integer? = capture(3)",
+  "record = capture(4)",
+  "tags.add(capture(5))",
+  "let rank = typed(capture(6)) + ranked(false)",
   "let flag = values.length > 0 and not false",
   "let interval = 1..=3",
   "let product = (1 + 2) * -3",
@@ -132,6 +145,7 @@ test("current-version plans reject an added field on each object shape of a comp
     "list",
     "set",
     "object",
+    "dict",
     "template",
     "property",
     "index",
@@ -175,7 +189,7 @@ test("current-version plans reject an added field on each object shape of a comp
     [
       "declareBinding",
       "condition",
-      { kind: "literal", value: true, span: compiled.plan!.sourceSpan },
+      { kind: "literal", value: true, span: compiled.plan!.files[0]!.sourceSpan },
     ],
     ["literal", "name", "value"],
   ] as const) {

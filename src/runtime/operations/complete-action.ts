@@ -1,10 +1,15 @@
-import type { InstructionPlan } from "../../plan/model.js";
+import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
 import { captureExternalData } from "../../external-data-capture.js";
-import { type RuntimeInteractionResultHandoffSnapshot, type RuntimeSnapshot } from "../state.js";
+import {
+  currentTemporalContext,
+  type RuntimeInteractionResultHandoffSnapshot,
+  type RuntimeSnapshot,
+} from "../state.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimeCaptureActionSnapshot,
   RuntimeChatPacingGateActionSnapshot,
+  RuntimeInteractionActionSettlementSnapshot,
   RuntimeInteractionActionSnapshot,
   RuntimeStorageWriteActionSnapshot,
 } from "../actions/model.js";
@@ -184,7 +189,7 @@ function completePacingGate(
     current.preparedSayOutput = action.preparedOutput;
     current.nextInstruction = action.preparedOutput.owningInstruction;
   }
-  const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
+  const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   const completionEvent: ActionCompletedEvent = Object.freeze({
     kind: "actionCompleted",
     sequence: completionEventSequence,
@@ -229,7 +234,7 @@ function completeStorageWrite(
   }
   const outcome = payload.kind;
   assertEventSequenceCapacity(current, outcome === "failed" ? 2 : 1);
-  const span = copySpan(plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan);
+  const span = copySpan(plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan));
   const events: InterpreterEvent[] = [];
   if (outcome === "stored") {
     writeScriptStorage(current, action.key, action.value);
@@ -289,7 +294,7 @@ function completeCapture(
   }
   assertEventSequenceCapacity(current, resolved.unavailableReason === null ? 1 : 2);
   setTemporary(current.temporaries, action.destinationTemporary, resolved.result);
-  const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
+  const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   const events: InterpreterEvent[] = [];
   let warningSequence: number | null = null;
   if (resolved.unavailableReason !== null) {
@@ -359,7 +364,8 @@ function completeInteraction(
       receivedInteractionKind === "button" ||
       receivedInteractionKind === "text" ||
       receivedInteractionKind === "number" ||
-      receivedInteractionKind === "choice"
+      receivedInteractionKind === "choice" ||
+      receivedInteractionKind === "temporal"
         ? `interaction:${receivedInteractionKind}`
         : "<invalid>";
     return pendingResult(current, [], {
@@ -369,50 +375,36 @@ function completeInteraction(
       receivedActionKind,
     });
   }
-  const resolved = resolveInteractionCompletion(action, request.payload);
+  const resolved = resolveInteractionCompletion(
+    action,
+    request.payload,
+    currentTemporalContext(current),
+  );
   if (!resolved.ok) {
     return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
   }
   assertEventSequenceCapacity(current, 2);
-  if (action.destinationTemporary !== null && resolved.result !== null) {
-    setTemporary(current.temporaries, action.destinationTemporary, resolved.result);
-  }
   const transcriptSequence = takeSequence(current, 2);
   const completionSequence = takeSequence(current, 2);
-  const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
-    actionId: action.actionId,
-    actionKind: "interaction",
-    interactionKind: action.interactionKind,
+  // A button used as a value yields the scene time it waited; it never exceeds the timeout.
+  const result =
+    action.expectedResult === "duration"
+      ? Object.freeze({
+          kind: "duration" as const,
+          milliseconds: Math.min(
+            current.currentSessionTimeMs - action.createdAtMs,
+            action.timeoutMs ?? Infinity,
+          ),
+        })
+      : resolved.result;
+  const settlement = commitInteractionSettlement(plan, current, action, {
     settlementKind: "completed",
-    owningInstruction: action.owningInstruction,
-    continuationInstruction: action.continuationInstruction,
-    ownerCallFrameId: action.ownerCallFrameId,
-    destinationTemporary: action.destinationTemporary,
-    requestEventSequence: action.requestEventSequence,
     transcriptEventSequence: transcriptSequence,
     completionEventSequence: completionSequence,
-    result: resolved.result,
+    result,
     transcriptText: resolved.transcriptText,
   });
-  const handoff: RuntimeInteractionResultHandoffSnapshot | null =
-    action.destinationTemporary === null || resolved.result === null
-      ? null
-      : Object.freeze({
-          actionKind: "interaction",
-          actionId: action.actionId,
-          owningInstruction: action.owningInstruction,
-          continuationInstruction: action.continuationInstruction,
-          ownerCallFrameId: action.ownerCallFrameId,
-          destinationTemporary: action.destinationTemporary,
-          result: resolved.result,
-        });
-  current.foregroundAction = null;
-  current.lastSettlement = settlement;
-  current.interactionResultHandoff = handoff;
-  current.terminalContinuationHandoff = terminalContinuationHandoffFor(plan, action);
-  current.status = "running";
-  current.nextInstruction = action.continuationInstruction;
-  const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
+  const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   const events: InterpreterEvent[] = [
     Object.freeze({
       kind: "playerTranscript",
@@ -430,4 +422,94 @@ function completeInteraction(
     } satisfies ActionCompletedEvent),
   ];
   return pendingResult(current, events, { kind: "completed", settlement });
+}
+
+/**
+ * A button reaches its timeout during time observation. It completes normally without a player transcript, and a
+ * button used as a value yields exactly its timeout.
+ */
+export function timeOutButton(
+  plan: InstructionPlan,
+  current: RuntimeSnapshot,
+  action: RuntimeInteractionActionSnapshot,
+  events: InterpreterEvent[],
+): void {
+  if (action.timeoutMs === null) throw new Error("Only a button with a timeout can time out.");
+  const completionSequence = takeSequence(current, 2);
+  const settlement = commitInteractionSettlement(plan, current, action, {
+    settlementKind: "timedOut",
+    transcriptEventSequence: null,
+    completionEventSequence: completionSequence,
+    result:
+      action.expectedResult === "duration"
+        ? Object.freeze({ kind: "duration" as const, milliseconds: action.timeoutMs })
+        : null,
+    transcriptText: null,
+  });
+  events.push(
+    Object.freeze({
+      kind: "actionCompleted",
+      sequence: completionSequence,
+      settlement,
+      span: copySpan(plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan)),
+    } satisfies ActionCompletedEvent),
+  );
+}
+
+/**
+ * Settles the foreground interaction: writes its result to the destination temporary with the single-use handoff,
+ * retains the settlement for replay, and makes the continuation eligible for a later runtime entry.
+ */
+function commitInteractionSettlement(
+  plan: InstructionPlan,
+  current: RuntimeSnapshot,
+  action: RuntimeInteractionActionSnapshot,
+  outcome: Pick<
+    RuntimeInteractionActionSettlementSnapshot,
+    | "settlementKind"
+    | "transcriptEventSequence"
+    | "completionEventSequence"
+    | "result"
+    | "transcriptText"
+  >,
+): RuntimeInteractionActionSettlementSnapshot {
+  const result = outcome.result;
+  if (action.destinationTemporary !== null) {
+    setTemporary(current.temporaries, action.destinationTemporary, result);
+  }
+  const settlement: RuntimeInteractionActionSettlementSnapshot = Object.freeze({
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: action.interactionKind,
+    settlementKind: outcome.settlementKind,
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    ownerCallFrameId: action.ownerCallFrameId,
+    destinationTemporary: action.destinationTemporary,
+    requestEventSequence: action.requestEventSequence,
+    transcriptEventSequence: outcome.transcriptEventSequence,
+    completionEventSequence: outcome.completionEventSequence,
+    result,
+    transcriptText: outcome.transcriptText,
+    ui: action.ui,
+  });
+  const handoff: RuntimeInteractionResultHandoffSnapshot | null =
+    action.destinationTemporary === null
+      ? null
+      : Object.freeze({
+          actionKind: "interaction",
+          actionId: action.actionId,
+          owningInstruction: action.owningInstruction,
+          continuationInstruction: action.continuationInstruction,
+          ownerCallFrameId: action.ownerCallFrameId,
+          destinationTemporary: action.destinationTemporary,
+          result,
+        });
+  current.foregroundAction = null;
+  current.lastSettlement = settlement;
+  current.interactionResultHandoff = handoff;
+  current.terminalContinuationHandoff = terminalContinuationHandoffFor(plan, action);
+  current.status = "running";
+  current.nextInstruction = action.continuationInstruction;
+  return settlement;
 }
