@@ -72,7 +72,7 @@ implemented):
 | `list.remove(index)`, `list.remove(value)` | `list.removeAt(index)`, also as a value; `list.remove(value)` with structural equality (#517) |
 | Groovy string methods (`size()`, `trim()`, `toUpperCase()`, `replace()`, `split()`, ...) | text operations (`text.length`, `trim()`, `uppercase()`, ...; #518) |
 | `list.join(separator)`, `"${list}"` | `list.join(separator)`; `"[${list.join(", ")}]"` (#518) |
-| `def x` / `int x` without initializer | `let x: string? = null` (or `string[]?`, ...), and `0` or `false` for primitives |
+| `def x` / `int x` without initializer | `let x: string? = null`, and `0` or `false` for primitives; a list, also one declared `= null`, starts empty (`let lines: string[] = []`) unless code in its script or modules compares it with null or reads it with `?.`, where null and an empty list differ (owner decision); Groovy truth treats them alike |
 | `def x = 0` that later holds a fraction | `let x = 0`, which widens to `number` by itself (#504 option B, #526) |
 | `def x = "a"` that is later set to `null`; `def x = null` | `let x: string? = "a"`; `let x = null`, which keeps the type of its first value (#504 decision 1a) |
 | a variable that receives a function result that may be absent, or a storage read that the script then tests for null; `def b = a` where `a` may be null | `let x: integer? = 7`, since a possibly null value fits only an optional place (ADR 0021 rule 1.9); `let b: string? = a`, since the compiler narrows `a` at the declaration. Other storage reads are checked at runtime when stored |
@@ -283,15 +283,17 @@ condition the importer already marks (`SX_CONDITION_TYPE`). The one menu over `d
 reason: the importer proves a menu's option list at conversion time from Groovy types, which cannot see that `dialog`
 holds a list at that point (`SX_DYNAMIC_CHOICE_OPTIONS`); `main` would accept `choose` over it there.
 
-The larger friction is narrowing of variables that start as null. Such a variable is optional, and the narrowing an
+The larger friction was narrowing of variables that start as null. Such a variable is optional, and the narrowing an
 assignment gives does not survive a loop start whose body changes the variable or, for a top-level variable that a
 function assigns, a call, `wait`, interaction, or `say` (V30 "Type tests and narrowing"). Legacy code assigns lists in a
 function and reads them after a helper call (`dialogArray = [...]`, `dIdx = getRandom(dialogArray.size())`,
-`show(dialogArray[dIdx])`), so each read needs a null test: 38 sites (the lists `dialogArray` 15 and `offenseArray`
-18, and three number variables 5), which blocks `WaitRoom` and would block `Punish` and
-`OffenseSelect` once their other causes are fixed. None of these scripts tests the lists for null, so starting them
-with an empty list instead of null would remove 33 of the sites; it would change only reads before the first
-assignment, where Groovy failed with a null pointer. That is an importer choice left for the owner.
+`show(dialogArray[dIdx])`), so each read needed a null test: 38 sites (the lists `dialogArray` 15 and `offenseArray`
+18, and three number variables 5), which blocked `WaitRoom` and would have blocked `Punish` and `OffenseSelect` once
+their other causes are fixed. By owner decision, a list that starts as null now starts empty unless the code compares
+it with null; that changes only reads before the first assignment, where Groovy failed with a null pointer, so the
+output carries no note. 9 declarations qualify (DisciplineClinic 7, Toy 2) and none is blocked by a null comparison.
+`WaitRoom` compiles again, `OffenseSelect` without its unrelated unknown names has no type error left, and 5 null tests
+remain, all on number variables in `Punish` (`pickMistress` 3, `pointsBonus`, `numSlaps`).
 
 ## Dict findings (#536)
 
@@ -400,7 +402,7 @@ with stand-ins that keep their accepted result types and counts them separately:
 `get(key, default:)` (#536). `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger`
 (#548), rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526),
 and `load "key", default:` (#545) are compiled and run as `main` implements them since its merge at `337388d2`.
-`run`/`end` dominates: it blocks 22 otherwise compiler-clean corpus scripts.
+`run`/`end` dominates: it blocks 23 otherwise compiler-clean corpus scripts.
 
 ## Remaining gaps by workaround class
 
@@ -440,7 +442,7 @@ accepted implementation is still wanted. Each workaround the importer emits carr
 
 | Gap | Corpus | Why |
 | --- | --- | --- |
-| Script transfers `run`/`call`/`goto`/`end` (syntax under re-evaluation in the tracker) | blocks 22 scripts (distribution 9, Domme3 12, DisciplineClinic 1) | A package is several scripts that transfer to each other. Imitating that means merging every script into one file with a dispatcher loop, with every function passing a pending transfer up to it: a rewrite of the whole package. Only `call` alone maps to a function call within one file. |
+| Script transfers `run`/`call`/`goto`/`end` (syntax under re-evaluation in the tracker) | blocks 23 scripts (distribution 9, Domme3 12, DisciplineClinic 2) | A package is several scripts that transfer to each other. Imitating that means merging every script into one file with a dispatcher loop, with every function passing a pending transfer up to it: a rewrite of the whole package. Only `call` alone maps to a function call within one file. |
 | Desktop and Java APIs: `java.time` formatting and zones (5), files (4), `java.util.Random` (4), JSON and Base64 (2), `Eval.me`, `java.util.function.Function`, `System.getProperty`, OS processes (1 each), Java objects, the Cornertime exchange | Toy 19 of its 53 dynamic calls and 8 constructors, distribution | Outside the product boundary by design (see Legacy baggage). `Random.nextInt(n)` alone could become `randomInteger()`, without the seed. |
 | Legacy bugs (variables nothing assigns, helpers without the script host) | Domme3 3 and 7, DisciplineClinic 1 | Need an author's repair; reporting them is correct. Six more sit in functions nothing calls and are notes now. |
 
@@ -464,9 +466,9 @@ Smoke runs that go further surface problems the static gates do not:
   written by many functions, each assigning before it reads, so a split by type would need flow analysis across calls,
   `break`, and loops; with #530 they get declared unions (see the union findings above). Five empty-text placeholders
   later hold lists or yes/no answers and convert with a note.
-- **Isolated runs still fail on settings the introductions save** (Domme3 7 scripts): Groovy compared a missing setting
-  as null, which TeaseScript comparisons reject, and `main` now also rejects a missing setting stored in a Groovy `int`
-  when it is read.
+- **Isolated runs still fail on settings the introductions save** (Domme3 7 scripts, DisciplineClinic `WaitRoom`):
+  Groovy compared a missing setting as null, which TeaseScript comparisons reject, and `main` now also rejects a missing
+  setting stored in a Groovy `int` when it is read.
 
 ## Open importer work
 
@@ -474,6 +476,7 @@ Found while evaluating the proposals, besides the importer work listed above; no
 
 - **Menus over a union variable:** the option list of a menu is proven from Groovy types at conversion time, which
   cannot see that `dialog` holds a list right after `dialog = ["Back"] + mistressArray`; `main` would narrow it there.
+- **Safe navigation:** `x?.size()` converts like `x.size()`, which fails where Groovy gave null (0 corpus sites).
 - **Concatenation that starts with possibly null text:** `dialog + count + ...` with `dialog: string?` keeps a numeric
   `+` for its first pair, which the type pass rejects (1 `Punish` site).
 - **Groovy type inference is per file and flow-insensitive:** a name used in two functions shares one type set, which

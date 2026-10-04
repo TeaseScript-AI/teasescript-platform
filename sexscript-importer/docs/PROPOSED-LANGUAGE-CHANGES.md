@@ -40,7 +40,7 @@ declares unions (#530) for variables that Groovy gave several types. Only M1 rem
 
 ## Corpus evaluation
 
-Measured on 2026-10-04 at importer commit `8c8245bc` with `node src/cli.ts report --run [--proposed=<id>] <package
+Measured on 2026-10-04 at importer commit `a7aa8c84` with `node src/cli.ts report --run [--proposed=<id>] <package
 scripts>`, after merging `main` at `337388d2`. The importer emits a working syntax of its own choosing for the
 remaining proposal; the report compiles and smoke-runs it through stand-ins in current TeaseScript, so "converted"
 means converted, compiled, and run, not just emitted. Each cell: root errors / lowered scripts / compiler-clean except
@@ -52,7 +52,7 @@ pending / scripts reached by smoke runs.
 | default before `dict` (`b4d4362b`) | 13 / 10 / 10 / 10 | 31 / 15 / 12 / 12 | 22 / 3 / 3 / 3 | 254 / 0 / 0 / 0 |
 | default after `dict` (`b4f097a9`) | 13 / 10 / 10 / 10 | 24 / 15 / 12 / 12 | 22 / 3 / 3 / 3 | 183 / 0 / 0 / 0 |
 | default before `main` at `337388d2` (`61ee928e`) | 8 / 12 / 12 / 12 | 24 / 15 / 12 / 12 | 8 / 3 / 3 / 3 | 108 / 0 / 0 / 0 |
-| default now | 8 / 12 / 12 / 12 | 24 / 15 / 12 / 12 | 5 / 3 / 2 / 2 | 107 / 0 / 0 / 0 |
+| default now | 8 / 12 / 12 / 12 | 24 / 15 / 12 / 12 | 5 / 3 / 3 / 3 | 107 / 0 / 0 / 0 |
 | media-tags (M1) | unchanged | 21 / 17 / 14 / 14 | unchanged | unchanged |
 
 The third round converts conditional expressions, inputs, collection loops, and menus inside larger expressions
@@ -61,8 +61,8 @@ references cannot convert, and adds marked workarounds for two regular expressio
 workaround classes in [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md)). The distribution's English and German
 introductions now run to their end. The merge of `main` at `337388d2` replaces most stand-ins with real
 implementations and adds the type pass and unions: DisciplineClinic's `dialog` and `response` and a Toy list become
-unions (3 and 1 fewer root errors), and DisciplineClinic's `WaitRoom` loses its compiler-clean state to narrowing of a
-variable that starts as null (see [`CORPUS-INVENTORY.md`](CORPUS-INVENTORY.md)).
+unions (3 and 1 fewer root errors), and lists that start as null start empty where no code compares them with null
+(see [`CORPUS-INVENTORY.md`](CORPUS-INVENTORY.md)).
 
 The default now includes what the earlier measurement (2026-10-03, importer `d713b469`) counted as the proposals
 choose-lists, string-operations, and input-defaults, everything `main` merged since (#513, #514, #517, #519, #523,
@@ -286,8 +286,9 @@ with type tests and narrowing (#530, #535). The importer follows the owner decis
 `null` keeps the type of its first value (1a) and that an unannotated variable that starts as a whole number widens to
 `number` when it later receives a fraction (option B), which resolved its largest friction (18 legacy variables, plus 14
 that receive a numeric `choose`). It declares a union where Groovy gave a variable values of several types: on the
-corpus, 4 variables with about 270 references need one type test between them, while variables that start as null
-need 38 null tests because calls cancel their narrowing (see [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md)).
+corpus, 4 variables with about 270 references need one type test between them. Variables that start as null needed 38
+null tests because calls cancel their narrowing; lists now start empty where no code compares them with null, which
+leaves 5 on number variables (see [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md)).
 
 **Type-test form (#504 question 4): `value is number`,** as recommended here and merged in #530 (`is` and
 `is not`).
@@ -333,9 +334,6 @@ work as a `.ts` system library, and localized script variants too; one language 
 
 ## Next steps
 
-- **Lists that start as null (importer choice for the owner).** Starting DisciplineClinic's null-started lists that
-  functions assign (`dialogArray`, `offenseArray`) with an empty list instead would remove 33 of the 38 null tests that
-  narrowing needs; only reads before the first assignment, where Groovy failed with a null pointer, would differ.
 - **Re-measure the corpus** as the #532, #536, and script-transfer implementations merge (their stand-ins then go
   away).
 - **M1** stays for later, after tagged media exists.

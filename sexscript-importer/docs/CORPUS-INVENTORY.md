@@ -24,7 +24,7 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-04 at importer commit `8c8245bc`, after merging `main` at `337388d2` (the type pass #526, runtime
+Measured on 2026-10-04 at importer commit `a7aa8c84`, after merging `main` at `337388d2` (the type pass #526, runtime
 type checks #520, unions #530 and #535, text operations #518, `sort` #546, `min`/`max` #550, `askInteger` #548,
 `switch` #529 and #557, the `showButton` timeout #534, and `load` defaults #545), with `node src/cli.ts report --run
 <package scripts>` (default conversion, without proposals). Toy's 21 runtime-loaded modules are part of its
@@ -34,7 +34,7 @@ single script `toy.groovy`, so Toy counts as one script whose statements include
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Distribution | 14 | 12 | 12 | 12 | 8 | 8 |
 | Domme3 | 24 | 15 | 12 | 12 | 24 | 26 |
-| DisciplineClinic | 6 | 3 | 3 | 2 | 5 | 14 |
+| DisciplineClinic | 6 | 3 | 3 | 3 | 5 | 14 |
 | Toy expanded | 1 | 0 | 0 | 0 | 107 | 178 |
 
 Root errors count independent causes that need manual work; placeholders count unconverted statements. Converting a
@@ -57,8 +57,8 @@ Before the merge of `main` at `337388d2` (importer `61ee928e`, `main` at `b45978
 root errors, with DisciplineClinic at 3 scripts compiler-clean except pending and 17 placeholders and Toy at 180. The
 merge replaces most stand-ins with `main`'s implementations, and its type pass now checks every generated script that
 gets past name resolution. DisciplineClinic's three variables that changed type now get declared unions (8 to 5 root
-errors), as does Toy's list of text that later holds lists (108 to 107); `WaitRoom` no longer compiles, because a
-variable that starts as null and that functions assign loses its narrowing at the next call (see
+errors), as does Toy's list of text that later holds lists (108 to 107). Lists that start as null start empty where no
+code compares them with null (owner decision; 9 declarations), so their reads need no null tests after calls (see
 [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md)).
 
 Runtime smoke runs of the compiler-clean scripts (placeholder copies with host stand-ins):
@@ -76,7 +76,8 @@ Runtime smoke runs of the compiler-clean scripts (placeholder copies with host s
 - DisciplineClinic: the entry flow stops at the unconverted `DisciplineClinicMain`, which now declares `dialog` as
   `string | list` (it holds text in most functions and one menu's option list) but keeps that menu unconverted
   (`SX_DYNAMIC_CHOICE_OPTIONS`). Its two test functions nothing references (class loading, never-assigned variables) no
-  longer block. `Exit` runs to the end; `WaitRoom` no longer compiles (see above); `Punish` and `OffenseSelect` are not
+  longer block. `Exit` runs to the end; `WaitRoom` fails on a setting the main script saves (`TSR058`);
+  `Punish` and `OffenseSelect` are not
   converted (Java files, a never-assigned variable, a menu option list, and assignments to undeclared names).
 
 Smoke runs found two importer defects before they reached a snapshot: `getRandom(0)` (fixed with the legacy result)
@@ -89,7 +90,7 @@ use it (capabilities used by fewer than three scripts are omitted):
 
 | Capability | Scripts using it | Otherwise compiler-clean scripts using it |
 | --- | ---: | ---: |
-| `run`/`end` | 41 | 22 |
+| `run`/`end` | 41 | 23 |
 | `getTimestamp().toSeconds()` (#532) | 18 | 4 |
 | `getDateTime()` (#532) | 14 | 4 |
 | `askBooleans()` | 10 | 8 |
