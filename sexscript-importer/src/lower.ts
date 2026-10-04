@@ -15,12 +15,13 @@ import {
   ACTION_DISPATCHER,
   ACTION_DISPATCHER_MARKER,
   helperCall,
+  allHelperStatements,
   helperStatements,
   withActionDispatcher,
   type HelperName,
 } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
-import { enforceVariableTypes } from "./variable-types.ts";
+import { enforceVariableTypes, functionResultTypes, type TeaseType } from "./variable-types.ts";
 import type { ProposalId } from "./proposals.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
@@ -404,13 +405,17 @@ function lowerHelperCompilationUnit(
   };
 }
 
+/** What the generated helpers return, computed once. */
+let helperResults: ReadonlyMap<string, TeaseType> | undefined;
+
 /**
  * Applies TeaseScript's rule that a variable keeps its type (#519): annotates and truncates where a declaration can
  * express the legacy behavior, and turns the declaration of a variable that held values of two types, or a single
  * invalid compound assignment, into code that needs manual migration.
  */
 function withEnforcedTypes(statements: IrStatement[], context: LowerContext): IrStatement[] {
-  const result = enforceVariableTypes(statements);
+  helperResults ??= functionResultTypes(allHelperStatements());
+  const result = enforceVariableTypes(statements, helperResults);
   if (result.appended.length > 0) context.syntheticHelpers.add("concat");
   // A list append no longer needs the note that its `+` operands were not proven numeric.
   const appendedLines = new Set(result.appended.map((statement) => statement.span?.line));

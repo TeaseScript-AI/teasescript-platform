@@ -20,7 +20,9 @@ export type TeaseType =
   | { kind: "scalar"; name: ScalarName }
   | { kind: "list"; element: TeaseType }
   | { kind: "optional"; value: TeaseType }
-  | { kind: "object" | "range" | "handle" };
+  | { kind: "object" | "range" | "handle" }
+  /** A local date, time, or datetime, or a fixed timestamp (#532). */
+  | { kind: "temporal"; name: "date" | "time" | "datetime" | "timestamp" };
 
 const SCALAR_NAMES = ["string", "integer", "number", "boolean", "duration"] as const;
 type ScalarName = (typeof SCALAR_NAMES)[number];
@@ -65,6 +67,11 @@ interface Binding {
   fixed: TeaseType | undefined;
   /** Initializer type as of the last analysis round. */
   initial: TeaseType;
+  /**
+   * For a variable that starts as `null`: the type of its first stored value in this round, which it then keeps as an
+   * optional type (#504 decision 1a); `undefined` until a value is stored.
+   */
+  inferred: TeaseType | undefined;
   widened: boolean;
   optional: boolean;
 }
@@ -81,18 +88,45 @@ interface Conflict {
   code: string;
 }
 
-export function enforceVariableTypes(statements: IrStatement[]): VariableTypeResult {
+/** The result types of the functions among `statements`, from their `return` values. */
+export function functionResultTypes(statements: IrStatement[]): Map<string, TeaseType> {
+  const bindings = new Map<BindingKey, Binding>();
+  let results = new Map<string, TeaseType>();
+  for (let round = 0; round < 50; round += 1) {
+    const analysis = analyse(statements, bindings, results);
+    const changed = [...analysis.results].some(
+      ([name, type]) => typeName(type) !== typeName(results.get(name) ?? UNKNOWN),
+    );
+    results = analysis.results;
+    if (!analysis.changed && !changed) break;
+  }
+  return results;
+}
+
+export function enforceVariableTypes(
+  statements: IrStatement[],
+  /** Result types of functions defined elsewhere, such as the generated helpers. */
+  knownResults: ReadonlyMap<string, TeaseType> = new Map(),
+): VariableTypeResult {
   const bindings = new Map<BindingKey, Binding>();
   let conflicts: Conflict[] = [];
   // Statements whose stored number truncates to an integer.
   const truncations = new Set<IrStatement>();
+  const integerLoads = new Set<IrStatement>();
   let appends = new Map<IrStatement, boolean>();
+  let results = new Map(knownResults);
   for (let round = 0; round < 50; round += 1) {
-    const analysis = analyse(statements, bindings);
+    const analysis = analyse(statements, bindings, results);
     conflicts = analysis.conflicts;
     appends = analysis.appends;
     for (const statement of analysis.truncations) truncations.add(statement);
-    if (!analysis.changed) break;
+    for (const statement of analysis.integerLoads) integerLoads.add(statement);
+    const next = new Map([...knownResults, ...analysis.results]);
+    const resultsChanged =
+      next.size !== results.size ||
+      [...next].some(([name, type]) => typeName(type) !== typeName(results.get(name) ?? UNKNOWN));
+    results = next;
+    if (!analysis.changed && !resultsChanged) break;
   }
   // A repair that needs a type no annotation can write, such as an optional object, becomes a conflict too.
   const conflicting = new Set(conflicts.map((conflict) => conflict.binding));
@@ -165,6 +199,10 @@ export function enforceVariableTypes(statements: IrStatement[]): VariableTypeRes
           if (binding === undefined || declarationConflicts.has(statement)) return statement;
           let next: LetStatement = statement;
           if (truncations.has(statement)) next = { ...next, value: truncate(next.value) };
+          if (integerLoads.has(statement)) {
+            result.annotated += 1;
+            next = { ...next, type: binding.optional ? "integer?" : "integer" };
+          }
           const type = bindingType(binding);
           const written = type === undefined ? null : annotation(type);
           if ((binding.widened || binding.optional) && written !== null) {
@@ -250,18 +288,31 @@ class Scope {
 interface Analysis {
   changed: boolean;
   conflicts: Conflict[];
+  /** Result types of the program's functions as of this round, from their `return` values. */
+  results: Map<string, TeaseType>;
   truncations: Set<IrStatement>;
+  /** Integer declarations initialized from storage, declared `: integer` so the stored value is checked. */
+  integerLoads: Set<IrStatement>;
   /** `list += value` statements, and whether the value is a list whose elements are appended. */
   appends: Map<IrStatement, boolean>;
 }
 
-function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>): Analysis {
+function analyse(
+  statements: IrStatement[],
+  bindings: Map<BindingKey, Binding>,
+  results: ReadonlyMap<string, TeaseType>,
+): Analysis {
   const analysis: Analysis = {
     changed: false,
     conflicts: [],
+    results: new Map(),
     truncations: new Set(),
+    integerLoads: new Set(),
     appends: new Map(),
   };
+  // The `return` value types of the function being walked; null for a bare `return` or falling off the end.
+  let returns: TeaseType[] | null = null;
+  for (const item of bindings.values()) item.inferred = undefined;
   const root = new Scope(null);
   const functions: Array<Extract<IrStatement, { kind: "function" }>> = [];
   const binding = (
@@ -278,6 +329,7 @@ function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>):
         integer: declaration?.integer === true,
         fixed,
         initial: UNKNOWN,
+        inferred: undefined,
         widened: false,
         optional: false,
       };
@@ -286,10 +338,14 @@ function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>):
     return found;
   };
   const typeOf = (value: IrExpression, scope: Scope): TeaseType =>
-    expressionType(value, (name) => {
-      const found = scope.resolve(name);
-      return found === undefined ? UNKNOWN : (bindingType(found) ?? UNKNOWN);
-    });
+    expressionType(
+      value,
+      (name) => {
+        const found = scope.resolve(name);
+        return found === undefined ? UNKNOWN : (bindingType(found) ?? UNKNOWN);
+      },
+      (name) => results.get(name),
+    );
   const conflict = (
     target: Binding,
     statement: IrStatement,
@@ -306,6 +362,16 @@ function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>):
 
   /** Checks that `value` may be stored in `target`, repairing the declaration where an annotation can. */
   const store = (target: Binding, value: TeaseType, statement: IrStatement): void => {
+    if (
+      target.fixed === undefined &&
+      target.initial.kind === "null" &&
+      target.inferred === undefined &&
+      value.kind !== "null"
+    ) {
+      // A variable that starts as null keeps the type of its first value, optional (#504 decision 1a).
+      target.inferred = value;
+      return;
+    }
     if (value.kind === "unknown") return;
     const type = bindingType(target);
     if (type === undefined || isAssignable(type, value)) return;
@@ -328,8 +394,10 @@ function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>):
         const fixed = item.type === undefined ? undefined : parseAnnotation(item.type);
         const declared = binding(item, item.name, item, fixed);
         let initial = typeOf(item.value, scope);
-        if (declared.integer && isNumber(initial)) {
-          analysis.truncations.add(item);
+        if (declared.integer && needsInteger(initial)) {
+          // Groovy stores a whole number in an integer variable; a read from storage is declared and checked.
+          if (item.value.kind === "load" && fixed === undefined) analysis.integerLoads.add(item);
+          else analysis.truncations.add(item);
           initial = scalar("integer");
         }
         declared.initial = initial;
@@ -349,7 +417,7 @@ function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>):
         if (target === undefined) return;
         const type = bindingType(target);
         if (item.operator === "=") {
-          if (target.integer && isNumber(value)) {
+          if (target.integer && needsInteger(value)) {
             analysis.truncations.add(item);
             return store(target, scalar("integer"), item);
           }
@@ -386,6 +454,13 @@ function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>):
           analysis.appends.set(item, appended.kind === "list" || appended.kind === "range");
           return;
         }
+        if (
+          target.integer &&
+          (result === undefined ? nonNull(value).kind === "unknown" : needsInteger(result))
+        ) {
+          analysis.truncations.add(item);
+          return;
+        }
         if (result === undefined) {
           if (nonNull(current).kind !== "unknown" && nonNull(value).kind !== "unknown")
             conflict(
@@ -396,11 +471,7 @@ function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>):
             );
           return;
         }
-        if (target.integer && isNumber(result)) {
-          analysis.truncations.add(item);
-          return;
-        }
-        if (type !== undefined) store(target, result, item);
+        if (type !== undefined && result !== undefined) store(target, result, item);
         return;
       }
       case "expression": {
@@ -419,6 +490,9 @@ function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>):
       }
       case "function":
         functions.push(item);
+        return;
+      case "return":
+        returns?.push(item.value === null ? NULL : typeOf(item.value, scope));
         return;
       case "if":
         block(item.then, scope);
@@ -477,7 +551,16 @@ function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>):
     item.parameters.forEach((parameter: IrFunctionParameter) => {
       scope.names.set(parameter.name, binding(parameter, parameter.name, null, UNKNOWN));
     });
+    returns = [];
     for (const child of item.body) statement(child, scope);
+    // A function that may end without `return` may return nothing (#526: an optional result).
+    if (
+      item.body.findLast((child) => child.kind !== "comment" && child.kind !== "blank")?.kind !==
+      "return"
+    )
+      returns.push(NULL);
+    analysis.results.set(item.name, resultType(returns));
+    returns = null;
   }
   return analysis;
 }
@@ -486,10 +569,13 @@ function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>):
 function bindingType(binding: Binding): TeaseType | undefined {
   let type =
     binding.fixed ??
-    (binding.initial.kind === "unknown" || binding.initial.kind === "null"
-      ? undefined
-      : binding.initial);
-  if (type === undefined || type.kind === "unknown") return undefined;
+    (binding.initial.kind === "null" && binding.inferred !== undefined
+      ? { kind: "optional", value: nonNull(binding.inferred) }
+      : binding.initial.kind === "unknown" || binding.initial.kind === "null"
+        ? undefined
+        : binding.initial);
+  if (type === undefined || type.kind === "unknown" || nonNull(type).kind === "unknown")
+    return undefined;
   if (binding.widened) type = widen(type);
   if (binding.optional && type.kind !== "optional") type = { kind: "optional", value: type };
   return type;
@@ -506,6 +592,26 @@ function widen(type: TeaseType): TeaseType {
 function canWiden(type: TeaseType, value: TeaseType): boolean {
   const widened = widen(type);
   return typeName(widened) !== typeName(type) && isAssignable(widened, value);
+}
+
+/** Whether a value stored in a Groovy integer variable needs truncation: it is not known to be a whole number. */
+function needsInteger(type: TeaseType): boolean {
+  const value = nonNull(type);
+  return value.kind === "unknown" || (value.kind === "scalar" && value.name === "number");
+}
+
+/**
+ * A function's result from its `return` values: one shared type, optional when it may return nothing, and unknown
+ * when the values disagree or are not known.
+ */
+function resultType(returns: readonly TeaseType[]): TeaseType {
+  const values = returns.filter((type) => type.kind !== "null");
+  if (values.length === 0) return NULL;
+  const shared = sharedValueType(values.map(nonNull));
+  if (shared.kind === "unknown") return UNKNOWN;
+  return values.length < returns.length || values.some((type) => type.kind === "optional")
+    ? { kind: "optional", value: shared }
+    : shared;
 }
 
 function isNumber(type: TeaseType): boolean {
@@ -533,6 +639,8 @@ export function isAssignable(target: TeaseType, source: TeaseType): boolean {
       );
     case "list":
       return source.kind === "list" && isAssignable(target.element, source.element);
+    case "temporal":
+      return source.kind === "temporal" && source.name === target.name;
     default:
       return source.kind === target.kind;
   }
@@ -565,6 +673,8 @@ function typeName(type: TeaseType): string {
       return type.element.kind === "unknown" ? "list" : `${typeName(type.element)}[]`;
     case "optional":
       return `${typeName(type.value)}?`;
+    case "temporal":
+      return type.name;
     default:
       return type.kind;
   }
@@ -592,6 +702,8 @@ function describeValue(type: TeaseType): string {
       return "a range";
     case "handle":
       return "a media handle";
+    case "temporal":
+      return `a ${type.name}`;
     case "unknown":
       return "an unknown value";
   }
@@ -678,6 +790,30 @@ const TEXT_RESULTS = new Map<string, TeaseType>([
   ["split", listOf(scalar("string"))],
 ]);
 
+/** The current-time getters of #532 and what they return. */
+const TEMPORAL_GETTERS = new Map<string, "date" | "time" | "datetime" | "timestamp">([
+  ["getDate", "date"],
+  ["getTime", "time"],
+  ["getDateTime", "datetime"],
+  ["getTimestamp", "timestamp"],
+]);
+
+const TEMPORAL_FIELDS = new Map<string, TeaseType>([
+  ...["year", "month", "day", "hour", "minute", "second", "millisecond", "weekdayNumber"].map(
+    (name): [string, TeaseType] => [name, scalar("integer")],
+  ),
+  ["weekday", scalar("string")],
+]);
+
+const TEMPORAL_RESULTS = new Map<string, TeaseType>([
+  ["toSeconds", scalar("integer")],
+  ["toMilliseconds", scalar("integer")],
+  ["toISO", scalar("string")],
+  ["formatDate", scalar("string")],
+  ["formatTime", scalar("string")],
+  ["formatDateTime", scalar("string")],
+]);
+
 const CALL_RESULTS = new Map<string, TeaseType>([
   ["random", scalar("number")],
   ["randomInteger", scalar("integer")],
@@ -697,8 +833,9 @@ const CALL_RESULTS = new Map<string, TeaseType>([
 export function expressionType(
   value: IrExpression,
   variable: (name: string) => TeaseType,
+  result: (name: string) => TeaseType | undefined = () => undefined,
 ): TeaseType {
-  const type = (child: IrExpression): TeaseType => expressionType(child, variable);
+  const type = (child: IrExpression): TeaseType => expressionType(child, variable, result);
   switch (value.kind) {
     case "literal":
       if (value.value === null) return NULL;
@@ -724,7 +861,11 @@ export function expressionType(
     }
     case "property": {
       if (value.proposed !== undefined) return UNKNOWN;
+      // `(date - date).days` counts whole calendar days (#532).
+      if (value.name === "days" && value.target.kind === "binary" && value.target.operator === "-")
+        return scalar("integer");
       const target = nonNull(type(value.target));
+      if (target.kind === "temporal") return TEMPORAL_FIELDS.get(value.name) ?? UNKNOWN;
       if (target.kind === "list") {
         if (value.name === "length") return scalar("integer");
         return ["first", "last", "random"].includes(value.name) ? target.element : UNKNOWN;
@@ -744,6 +885,7 @@ export function expressionType(
       }
       if (target.kind === "scalar" && target.name === "string")
         return TEXT_RESULTS.get(value.name) ?? UNKNOWN;
+      if (target.kind === "temporal") return TEMPORAL_RESULTS.get(value.name) ?? UNKNOWN;
       return UNKNOWN;
     }
     case "load":
@@ -781,9 +923,15 @@ export function expressionType(
     case "binary":
       if (!ARITHMETIC.has(value.operator)) return scalar("boolean");
       return arithmeticType(value.operator, type(value.left), type(value.right)) ?? UNKNOWN;
-    case "call":
+    case "call": {
+      // A function of the package returns what its `return` values share.
+      const local = result(value.name);
+      if (local !== undefined) return local;
       if (value.local === true) return UNKNOWN;
+      const temporal = TEMPORAL_GETTERS.get(value.name);
+      if (temporal !== undefined) return { kind: "temporal", name: temporal };
       return CALL_RESULTS.get(value.name) ?? UNKNOWN;
+    }
   }
 }
 

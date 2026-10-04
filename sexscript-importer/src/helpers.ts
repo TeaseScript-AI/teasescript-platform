@@ -99,6 +99,11 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
   return HELPER_ORDER.filter((name) => needed.has(name)).map((name) => HELPERS[name].build());
 }
 
+/** Every helper definition, for analyses that need what the helpers return. */
+export function allHelperStatements(): IrStatement[] {
+  return helperStatements(new Set(HELPER_ORDER));
+}
+
 const HELPER_ORDER: readonly HelperName[] = [
   "backgroundSounds",
   "playBackgroundSound",

@@ -175,6 +175,42 @@ test(
   },
 );
 
+// A variable that starts as null, or holds a function result, keeps the first type it gets (#504 decision 1a).
+test(
+  "reports type changes of variables that start as null or hold a function result",
+  { skip: parserUnavailable },
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-inferred-"));
+    try {
+      const sourcePath = path.join(directory, "inferred.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          "def value = null",
+          'value = "text"',
+          "value = [1, 2]",
+          'def label = { -> return "x" }',
+          "def text = label()",
+          "text = [1]",
+          "",
+        ].join("\n"),
+      );
+      const program = await convert(sourcePath);
+      assert.deepEqual(
+        program.diagnostics
+          .filter((diagnostic) => diagnostic.severity === "error")
+          .map(({ code, span }) => ({ code, line: span?.line })),
+        [
+          { code: "SX_TYPE_CHANGE", line: 1 },
+          { code: "SX_TYPE_CHANGE", line: 5 },
+        ],
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 // Appends, list literals, list cases, and text defaults whose Groovy meaning depends on a type.
 test(
   "converts list appends, list cases, and text defaults only as far as their types are proven",
@@ -187,9 +223,10 @@ test(
         sourcePath,
         [
           'def extra = { -> return ["b"] }',
-          "def build = { ->",
+          "def build = { more ->",
           '  def items = ["a"]',
           "  items += 1..3",
+          "  items += more",
           "  items += extra()",
           "  return items",
           "}",
@@ -204,10 +241,11 @@ test(
       const output = emitTease(program);
       // A range is a list in Groovy, so its elements are appended.
       assert.match(output, /^ {2}items = sexscriptLegacyConcat\(\[items, 1\.\.=3\]\)$/mu);
-      // A value that may be a list or one element is reported.
+      // A value that may be a list or one element is reported; a function result is a list.
       assert.match(output, /^ {2}\/\/ TODO SX_LIST_CONCATENATION line 5: /mu);
+      assert.match(output, /^ {2}items = sexscriptLegacyConcat\(\[items, extra\(\)\]\)$/mu);
       // A list literal is checked element by element, as the compiler does.
-      assert.match(output, /^\/\/ TODO SX_TYPE_CHANGE line 9: 'weights' holds integer values/mu);
+      assert.match(output, /^\/\/ TODO SX_TYPE_CHANGE line 10: 'weights' holds integer values/mu);
       // A list case holding a range keeps Groovy's membership test.
       assert.match(output, /\[1\.\.=3, 5\]\.contains\(/u);
       // Legacy showed a number default as text.

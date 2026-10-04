@@ -16,3 +16,14 @@ long steps = 10
 steps = steps / 3
 show("Tempo ${tempo}, delay ${delay}, ${weights.size()} weights, mood ${mood}")
 show("Half ${half}, rounds ${rounds}, steps ${steps}")
+// A value of unknown type is truncated too, and an integer read from storage is declared and checked.
+def fraction = { -> return 3.5 }
+int whole = fraction()
+whole = fraction() + 1
+save("x.count", 4)
+int stored = loadInteger("x.count")
+// A variable that starts as null keeps the type of its first value.
+def later = null
+later = 1
+later = 2.5
+show("Whole ${whole}, stored ${stored}, later ${later}")

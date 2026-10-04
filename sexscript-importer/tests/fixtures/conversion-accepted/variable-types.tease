@@ -18,3 +18,17 @@ let steps = 10
 steps = toInteger(steps / 3)
 say "Tempo ${tempo}, delay ${delay}, ${weights.length} weights, mood ${mood}"
 say "Half ${half}, rounds ${rounds}, steps ${steps}"
+// A value of unknown type is truncated too, and an integer read from storage is declared and checked.
+function fraction {
+  return 3.5
+}
+let whole = toInteger(fraction())
+// NOTE SX_PLUS_OPERAND_TYPE line 22: Groovy + operands are not proven numeric; TeaseScript + only adds numbers. Use interpolation if this joins text.
+whole = toInteger(fraction() + 1)
+save 4 as "x.count"
+let stored: integer = load "x.count"
+// A variable that starts as null keeps the type of its first value.
+let later: number? = null
+later = 1
+later = 2.5
+say "Whole ${whole}, stored ${stored}, later ${later}"
