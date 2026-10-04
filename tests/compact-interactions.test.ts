@@ -460,13 +460,13 @@ test("interaction speaker references use the existing precise unknown-speaker di
   }
 });
 
-test("choice diagnostics reject mixed written-value kinds, while values and text may repeat", () => {
+test("mixed written-value kinds need a union-typed place, while values and text may repeat", () => {
   // `at` is the last source occurrence the diagnostic must span: the whole choice for mixed value kinds and the
-  // literal for a non-finite value.
+  // literal for a non-finite value. Text and number values together are kept only by a declared union (#511 C2).
   const rejected = [
     {
       source: 'let x = choose first: "A", 2: "B"',
-      code: "TSV029",
+      code: "TSV044",
       at: 'choose first: "A", 2: "B"',
     },
     { source: 'let x = choose 1e999: "A"', code: "TSC001", at: "1e999" },
@@ -486,6 +486,7 @@ test("choice diagnostics reject mixed written-value kinds, while values and text
     );
   }
   for (const accepted of [
+    'let x: string | integer = choose first: "A", 2: "B"',
     'let x = choose first: "Same", second: "Same"',
     'let x = choose back: "Back", "Spanking", [{ text: "Lines" }, { text: "Corner", value: "corner" }]',
     'let x = choose first: "A", first: "B"',

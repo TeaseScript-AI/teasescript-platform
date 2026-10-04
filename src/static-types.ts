@@ -25,6 +25,8 @@ export type StaticType =
   | {
       readonly kind: "scalar";
       readonly name: ScalarTypeName;
+      /** The only values it may be, as for a `choose` result; places always keep the plain type. */
+      readonly values?: readonly ScalarValue[];
       /**
        * For a number, the variables without a type annotation that its value derives from: when one of them widens to
        * a number, so does this value (ADR 0021 rule 1.2).
@@ -62,6 +64,9 @@ export const UNKNOWN_TYPE: StaticType = Object.freeze({ kind: "unknown" });
 const NEVER_TYPE: StaticType = Object.freeze({ kind: "never" });
 export const NULL_TYPE: StaticType = Object.freeze({ kind: "null" });
 const ANY_OBJECT_TYPE: StaticType = Object.freeze({ kind: "object", properties: null });
+
+/** A literal value that a scalar type may be restricted to, such as one button value of a `choose`. */
+export type ScalarValue = string | number | boolean;
 
 function scalar(name: ScalarTypeName): StaticType {
   return { kind: "scalar", name };
@@ -129,7 +134,7 @@ function withOrigins(type: StaticType, origins: Origins | undefined): StaticType
     if (value.name !== "integer" && value.name !== "number") return type;
     const merged = mergedOrigins(value.origins, origins);
     if (merged === undefined || merged === value.origins) return value;
-    return { kind: "scalar", name: value.name, origins: merged };
+    return { ...value, origins: merged };
   }
   if (value.kind !== "union" || !value.members.some(isNumeric)) return type;
   return union(value.members.map((member) => withOrigins(member, origins)));
@@ -141,9 +146,10 @@ function replacedOrigins(type: StaticType, origins: Origins | undefined): Static
   if (value.kind === "scalar") {
     if (value.name !== "integer" && value.name !== "number") return value;
     if (value.origins === origins) return value;
-    return origins === undefined
+    if (origins !== undefined) return { ...value, origins };
+    return value.values === undefined
       ? { kind: "scalar", name: value.name }
-      : { kind: "scalar", name: value.name, origins };
+      : { kind: "scalar", name: value.name, values: value.values };
   }
   if (value.kind !== "union" || !value.members.some(isNumeric)) return value;
   return union(value.members.map((member) => replacedOrigins(member, origins)));
@@ -166,6 +172,68 @@ export function originsOf(type: StaticType): Iterable<Origin> {
   let origins: Origins | undefined;
   for (const member of members(type)) origins = mergedOrigins(origins, scalarOrigins(member));
   return origins ?? [];
+}
+
+/** A scalar type restricted to the given values; other types are returned as they are. */
+export function withValues(type: StaticType, values: readonly ScalarValue[]): StaticType {
+  const value = resolved(type);
+  return value.kind === "scalar" ? { ...value, values: [...new Set(values)] } : value;
+}
+
+/**
+ * The values a value of this type can only be, with `null` for a possibly null value, or `undefined` when it may be
+ * any value of its type. Only a `choose` with literal button values restricts a type.
+ */
+export function possibleValues(type: StaticType): readonly (ScalarValue | null)[] | undefined {
+  const possible: (ScalarValue | null)[] = [];
+  for (const member of members(type)) {
+    if (member.kind === "null") possible.push(null);
+    else if (member.kind === "scalar" && member.values !== undefined)
+      for (const value of member.values) possible.push(value);
+    else return undefined;
+  }
+  return possible;
+}
+
+/** Whether a value of this type may be equal (`==`) to `value`: false only when its possible values exclude it. */
+export function mayEqual(type: StaticType, value: ScalarValue | null): boolean {
+  const possible = possibleValues(type);
+  return possible === undefined || possible.includes(value);
+}
+
+function isSubset(inner: readonly ScalarValue[], outer: readonly ScalarValue[]): boolean {
+  const kept = new Set(outer);
+  return inner.every((value) => kept.has(value));
+}
+
+/** Whether two scalar types belong together in a union: the same type, or both numbers. */
+function sameFamily(left: StaticType, right: StaticType): boolean {
+  return (
+    left.kind === "scalar" &&
+    right.kind === "scalar" &&
+    (left.name === right.name || (isNumberName(left.name) && isNumberName(right.name)))
+  );
+}
+
+function isNumberName(name: ScalarTypeName): boolean {
+  return name === "integer" || name === "number";
+}
+
+/** One scalar type for two of the same family; it keeps only values that both restrict. */
+function mergeScalars(left: StaticType, right: StaticType): StaticType {
+  if (left.kind !== "scalar" || right.kind !== "scalar") return left;
+  const name = left.name === right.name ? left.name : "number";
+  const origins = mergedOrigins(left.origins, right.origins);
+  const values =
+    left.values === undefined || right.values === undefined
+      ? undefined
+      : [...new Set([...left.values, ...right.values])];
+  return {
+    kind: "scalar",
+    name,
+    ...(values === undefined ? {} : { values }),
+    ...(origins === undefined ? {} : { origins }),
+  };
 }
 
 export const STRING_TYPE = scalar("string");
@@ -284,6 +352,12 @@ export function union(types: readonly StaticType[]): StaticType {
     }
     if (type.kind === "unknown") return UNKNOWN_TYPE;
     if (type.kind === "never") continue;
+    // Scalars of one family share one member, so restricted values join: "a" or "b" is one string.
+    const family = members.findIndex((member) => sameFamily(member, type));
+    if (family >= 0) {
+      members[family] = mergeScalars(members[family]!, type);
+      continue;
+    }
     // A member that includes another keeps what the other's value derives from.
     const including = members.findIndex((member) => includes(member, type));
     if (including >= 0) {
@@ -396,7 +470,9 @@ function* includesTask(outerType: StaticType, innerType: StaticType): CompileTas
     case "scalar":
       return (
         inner.kind === "scalar" &&
-        (inner.name === outer.name || (outer.name === "number" && inner.name === "integer"))
+        (inner.name === outer.name || (outer.name === "number" && inner.name === "integer")) &&
+        (outer.values === undefined ||
+          (inner.values !== undefined && isSubset(inner.values, outer.values)))
       );
     case "list":
     case "set":
@@ -572,6 +648,11 @@ function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
       for (const member of type.members) copied.push(yield* compileChild(copyTask(member)));
       return { kind: "union", members: copied };
     }
+    case "scalar":
+      if (type.values === undefined) return type;
+      return type.origins === undefined
+        ? scalar(type.name)
+        : { kind: "scalar", name: type.name, origins: type.origins };
     default:
       return type;
   }
@@ -600,7 +681,11 @@ function* placeTask(typeToPlace: StaticType, copy = true): CompileTask<StaticTyp
   if (type.kind === "never") return openType();
   if (type.kind === "list" || type.kind === "set")
     return { kind: type.kind, element: yield* compileChild(placeTask(type.element, copy)) };
-  return copy ? yield* compileChild(copyTask(type)) : type;
+  // A place keeps the plain type: values a `choose` restricts it to are not a type of their own.
+  const restricted =
+    type.kind === "union" &&
+    type.members.some((member) => member.kind === "scalar" && member.values !== undefined);
+  return copy || type.kind === "scalar" || restricted ? yield* compileChild(copyTask(type)) : type;
 }
 
 /**
@@ -770,6 +855,7 @@ function* joinValuesTask(
     const element = yield* compileChild(joinTask(left.element, right.element, owned, changes));
     return element === undefined ? undefined : { kind: left.kind, element };
   }
+  if (sameFamily(left, right)) return mergeScalars(left, right);
   if (includes(left, right)) return withOrigins(left, scalarOrigins(right));
   if (includes(right, left)) return withOrigins(right, scalarOrigins(left));
   return undefined;
@@ -882,10 +968,15 @@ export function assignedType(declared: StaticType, value: StaticType): StaticTyp
   const stored = canonical(value);
   if (stored.kind === "unknown") return kept;
   if (kept.kind === "unknown") return stored;
-  if (kept.kind !== "union") return kept;
-  const parts = members(stored).map((part) =>
-    union(kept.members.filter((member) => isAssignable(member, part))),
-  );
+  // A value a `choose` restricted to some literal values keeps that restriction while nothing else is stored.
+  const restricted = (part: StaticType): boolean =>
+    part.kind === "scalar" && part.values !== undefined;
+  if (kept.kind !== "union")
+    return restricted(stored) && isAssignable(kept, stored) ? stored : kept;
+  const parts = members(stored).map((part) => {
+    const accepting = kept.members.filter((member) => isAssignable(member, part));
+    return accepting.length > 0 && restricted(part) ? part : union(accepting);
+  });
   const narrowed = union(parts);
   return narrowed.kind === "never" ? kept : narrowed;
 }

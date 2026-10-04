@@ -10,6 +10,7 @@ import type {
   LetStatement,
   MediaParts,
   Program,
+  ScalarTypeName,
   ShowButtonParts,
   Statement,
   TimerParts,
@@ -62,6 +63,9 @@ import {
   isNumeric,
   isScalar,
   joinTypes,
+  mayEqual,
+  possibleValues,
+  type ScalarValue,
   TypeJoin,
   members,
   misfitProperty,
@@ -78,6 +82,7 @@ import {
   typeFromAnnotation,
   typeName,
   union,
+  withValues,
   UNKNOWN_TYPE,
   originsOf,
   ownOrigins,
@@ -307,6 +312,8 @@ class TypeChecker {
    * type is checked element by element instead; every other one is reported at the end of its statement (rule 1.3).
    */
   #mixedLiterals = new Map<Expression, readonly StaticType[]>();
+  /** `choose` expressions whose buttons return values of different types, which only a declared union may keep. */
+  readonly #mixedChoices = new Set<Expression>();
 
   /** The variable names of unannotated `let` statements by initializer, for messages that suggest a declaration. */
   readonly #declaredBy = new Map<Expression, string>();
@@ -695,6 +702,12 @@ class TypeChecker {
       // from (rule 1.2).
       this.#followFirst(statement, value, statement.initializer.span);
       type = ownOrigins(type, statement);
+      this.#reportMixedChoice(
+        statement.initializer,
+        value,
+        (written) =>
+          `to keep both, declare a union type, as in 'let ${name}: ${written} = choose ...'`,
+      );
     } else {
       type = this.#annotationType(statement.typeAnnotation);
       const place: Place = {
@@ -826,6 +839,7 @@ class TypeChecker {
             return;
           }
           const assigned = yield* compileChild(this.#expressionTask(statement.value, scope));
+          this.#reportMixedChoice(statement.value, assigned, () => ONE_TYPE_FIX);
           if (statement.operator === "=")
             value.properties.set(
               name,
@@ -964,6 +978,13 @@ class TypeChecker {
       return;
     }
     if (isAssignable(place.type, value)) {
+      // A place without a declared type, or whose type the value would decide, cannot keep a mixed `choose`.
+      if (members(place.type).some((member) => !isKnown(member)))
+        this.#reportMixedChoice(expression, value, (written) =>
+          place.verb === "take" && place.label !== null
+            ? `to keep both, declare the parameter as '${place.label}: ${written}'`
+            : ONE_TYPE_FIX,
+        );
       if (decides) settle(place.type, value, expression.span);
       this.#follow(place, value, expression);
       return;
@@ -1238,6 +1259,12 @@ class TypeChecker {
       );
       return;
     }
+    this.#reportMixedChoice(
+      statement.value,
+      value,
+      (written) =>
+        `to keep both, declare the result type, as in 'function ${context.fn.declaration.name.name}(...): ${written}'`,
+    );
     // The result is joined once the body is complete; a later statement may still change the place a value was read from.
     context.returns.push({ type: this.#capture(statement.value), span: statement.value.span });
   }
@@ -1601,10 +1628,17 @@ class TypeChecker {
           types.push(this.#capture(item));
           if (expression.kind === "setLiteral") this.#checkSetElement(item, this.#typeOf(item));
         }
-        // Elements of known types must share one type; an element of unknown type leaves the element type unknown.
+        // Elements of known types must share one type; an element of unknown type leaves the element type unknown. A
+        // `choose` that returns values of different types mixes them too.
         const known = types.filter((type) => resolved(type).kind !== "unknown");
+        const choice = expression.elements.find((item) => this.#mixedChoices.has(unwrap(item)));
         let element = types.length === 0 ? openType() : joinTypes(known);
-        if (element === undefined) this.#mixedLiterals.set(expression, known);
+        if (choice !== undefined) {
+          this.#mixedLiterals.set(expression, members(this.#typeOf(choice)));
+          element = undefined;
+        }
+        if (element === undefined && choice === undefined)
+          this.#mixedLiterals.set(expression, known);
         if (element === undefined || known.length < types.length) element = UNKNOWN_TYPE;
         return { kind: expression.kind === "listLiteral" ? "list" : "set", element };
       }
@@ -1796,6 +1830,36 @@ class TypeChecker {
     };
   }
 
+  /**
+   * Warns about `==` or `!=` with a value that one side can never hold, such as a `choose` result compared with a value
+   * no button returns (#511 C5). The same rule backs impossible `case` values.
+   */
+  #warnImpossibleComparison(
+    expression: Extract<Expression, { kind: "binaryExpression" }>,
+    left: StaticType,
+    right: StaticType,
+  ): void {
+    for (const [side, type, other, otherType] of [
+      [expression.left, left, expression.right, right],
+      [expression.right, right, expression.left, left],
+    ] as const) {
+      const possible = possibleValues(type);
+      if (possible === undefined) continue;
+      const otherValues = possibleValues(otherType) ?? literalValues(other);
+      if (otherValues === undefined || otherValues.some((value) => mayEqual(type, value))) continue;
+      const label = expressionLabel(side);
+      this.diagnostics.push(
+        createDiagnostic(
+          DiagnosticSeverity.Warning,
+          typeCode.constantTest,
+          `${label === null ? "This value" : `'${label}'`} is always ${describeLiterals(possible)} here, so this comparison is always ${expression.operator === "==" ? "false" : "true"}.`,
+          expression.span,
+        ),
+      );
+      return;
+    }
+  }
+
   /** Warns about a type test whose result the compiler can prove (ADR 0021 rule 4.5). */
   #warnConstantTest(
     node: Extract<Expression, { kind: "typeTestExpression" }>,
@@ -1837,6 +1901,7 @@ class TypeChecker {
     switch (expression.operator) {
       case "==":
       case "!=":
+        this.#warnImpossibleComparison(expression, left, right);
         return BOOLEAN_TYPE;
       case "<":
       case "<=":
@@ -2391,8 +2456,15 @@ class TypeChecker {
           ? INTEGER_TYPE
           : STRING_TYPE;
     }
-    // `choose` returns a button's value: one written before `:`, or else what gives the button, with its type.
+    // `choose` returns a button's value: one written before `:`, or else what gives the button, with its type. Each
+    // button's value is also kept when the source shows it, so a comparison with another value can be checked (C5).
     const values: StaticType[] = [];
+    let literals: (ScalarValue | null)[] | null = [];
+    const add = (type: StaticType, literal: ScalarValue | null | undefined): void => {
+      values.push(type);
+      if (literal === undefined) literals = null;
+      else literals?.push(literal);
+    };
     let buttons = 0;
     for (const option of expression.options) {
       const content = unwrap(option.expression);
@@ -2404,6 +2476,12 @@ class TypeChecker {
             : option.value.numericType === "integer"
               ? INTEGER_TYPE
               : NUMBER_TYPE;
+      const writtenValue =
+        option.value === null
+          ? undefined
+          : option.value.kind === "identifier"
+            ? option.value.name
+            : option.value.value;
       if (content.kind === "listLiteral" || content.kind === "setLiteral") {
         // Each element gives one button; a set keeps one of equal members.
         buttons +=
@@ -2414,10 +2492,10 @@ class TypeChecker {
         yield* compileChild(this.#expressionTask(option.expression, scope));
         for (const element of content.elements) {
           const value = this.#choiceEntry(element, this.#typeOf(element), true);
-          if (written === null) values.push(value);
+          if (written === null) add(value, buttonLiteral(element));
         }
         // An empty list or set gives no buttons, so its written value is never returned.
-        if (written !== null && content.elements.length > 0) values.push(written);
+        if (written !== null && content.elements.length > 0) add(written, writtenValue);
         continue;
       }
       const type = yield* compileChild(this.#expressionTask(option.expression, scope));
@@ -2447,16 +2525,19 @@ class TypeChecker {
           // A computed collection's element type is copied, so the result stays apart from the collection.
           return button.kind === "object" ? UNKNOWN_TYPE : copyType(button);
         });
-        values.push(
+        add(
           written ??
             (accepted && !isNullable(type) ? (joinTypes(results) ?? UNKNOWN_TYPE) : UNKNOWN_TYPE),
+          writtenValue,
         );
+        // The buttons of a collection held in a variable are not visible here.
+        if (written === null) literals = null;
         continue;
       }
       if (isKnown(value)) buttons += 1;
       // The option is kept as it was evaluated: a later option may still change the place it was read from.
       const entry = this.#choiceEntry(option.expression, this.#capture(option.expression), false);
-      values.push(written ?? entry);
+      add(written ?? entry, written === null ? buttonLiteral(option.expression) : writtenValue);
     }
     if (buttons > MAX_INTERACTION_OPTION_ENTRIES)
       this.#report(
@@ -2464,8 +2545,36 @@ class TypeChecker {
         `A choice can show at most ${MAX_INTERACTION_OPTION_ENTRIES} buttons.`,
         expression.span,
       );
-    // Integers and numbers together are numbers; values of other different types give a value of unknown type.
-    return values.length === 0 ? UNKNOWN_TYPE : (joinTypes(values) ?? UNKNOWN_TYPE);
+    if (values.length === 0) return UNKNOWN_TYPE;
+    const known: readonly (ScalarValue | null)[] | null = literals;
+    const joined = joinTypes(values);
+    // Integers and numbers together are numbers. Values of other different types are a union that only a place
+    // declared with a union type may keep (#511 C2).
+    // A list or set option that mixes types is reported as that literal already.
+    if (
+      joined === undefined &&
+      !expression.options.some((option) => this.#mixedLiterals.has(unwrap(option.expression)))
+    )
+      this.#mixedChoices.add(expression);
+    if (known === null) return joined ?? union(values);
+    return restrictedChoice(values, known);
+  }
+
+  /**
+   * Reports a `choose` whose buttons return values of different types where its value would decide a type, such as
+   * an unannotated `let`, an inferred function result, or a parameter without a type (#511 C2).
+   */
+  #reportMixedChoice(
+    expression: Expression,
+    type: StaticType,
+    fix: (written: string) => string,
+  ): void {
+    if (!this.#mixedChoices.has(unwrap(expression))) return;
+    this.#report(
+      typeCode.mixedTypes,
+      `This choose returns ${describeValue(copyType(type))}. A place keeps one type; ${fix(typeName(copyType(type)))}.`,
+      expression.span,
+    );
   }
 
   /**
@@ -3833,6 +3942,68 @@ const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
   "media",
   "speaker",
 ]);
+
+/**
+ * The type of a choice whose button values the source shows: one type per family of values, such as text or numbers,
+ * restricted to those values, and `null` when a button returns it.
+ */
+function restrictedChoice(
+  types: readonly StaticType[],
+  values: readonly (ScalarValue | null)[],
+): StaticType {
+  const families = new Map<string, { name: ScalarTypeName; values: ScalarValue[] }>();
+  const parts: StaticType[] = [];
+  for (const [index, type] of types.entries()) {
+    const value = resolved(type);
+    const literal = values[index];
+    if (value.kind !== "scalar" || literal === null || literal === undefined) {
+      parts.push(type);
+      continue;
+    }
+    const key = value.name === "integer" ? "number" : value.name;
+    const family = families.get(key) ?? { name: value.name, values: [] };
+    if (family.name !== value.name) family.name = "number";
+    family.values.push(literal);
+    families.set(key, family);
+  }
+  for (const family of families.values())
+    parts.push(withValues({ kind: "scalar", name: family.name }, family.values));
+  return union(parts);
+}
+
+/** For a place whose type cannot be declared, such as a property: a union type has no written form there yet. */
+const ONE_TYPE_FIX = "give every button a value of one type";
+
+/** The value a button returns when the source shows it: a literal, or a choice object's literal value or text. */
+function buttonLiteral(entry: Expression): ScalarValue | null | undefined {
+  const node = unwrap(entry);
+  if (node.kind !== "objectLiteral") return literalValue(node);
+  const property =
+    node.properties.find((candidate) => candidate.name.name === "value") ??
+    node.properties.find((candidate) => candidate.name.name === "text");
+  return property === undefined ? undefined : literalValue(property.value);
+}
+
+/** The text, number, true, false, or null that an expression certainly is, or `undefined`. */
+function literalValue(expression: Expression): ScalarValue | null | undefined {
+  const known = staticChoiceValue(expression)?.value;
+  return known !== null && typeof known === "object" ? undefined : known;
+}
+
+function literalValues(expression: Expression): readonly (ScalarValue | null)[] | undefined {
+  const value = literalValue(expression);
+  return value === undefined ? undefined : [value];
+}
+
+/** Literal values as an author writes them, as in `"spank" or "lines"`. */
+function describeLiterals(values: readonly (ScalarValue | null)[]): string {
+  const written = values.map((value) =>
+    typeof value === "string" ? JSON.stringify(value) : String(value),
+  );
+  return written.length <= 1
+    ? (written[0] ?? "")
+    : `${written.slice(0, -1).join(", ")} or ${written.at(-1)!}`;
+}
 
 /** Whether `${...}` and text fields show a value of this member type as text. */
 function isShowable(member: StaticType): boolean {
