@@ -577,7 +577,9 @@ opens at Start, `takePhoto()` puts a photo of the test card on the Stage, and th
 run, after which the next mount reclaims a replaced photo; denied, the script continues without a photo; a forged
 reference in saved data shows no photo. Serving the fixture package root `tests/fixtures/packages/`, it opens packages
 by URL in the Player, playground, and editor: a valid package starts at its `main.tease` with its own Stage image and
-plays its own sound, and one that does not compile lists its diagnostic with file and line. Development preview presentation is covered by the
+plays its own sound, and one that does not compile lists its diagnostic with file and line. With a Windows user agent,
+the editor opens a package served only as a catalog whose file paths a model URI could merge (a `\` in a name, `C:`
+and `c:` folders) and keeps every file apart. Development preview presentation is covered by the
 [Player browser verification route](#player-browser-and-visual-verification).
 
 Firefox captures camera frames differently, so the same scenario has a Firefox route after `npm run build`: `npm run
