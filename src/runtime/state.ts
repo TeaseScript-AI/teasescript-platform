@@ -903,10 +903,27 @@ export function classifyCapturedRuntimeSnapshot(
   return validateCapturedRuntimeSnapshotDetails(value, plan);
 }
 
+/**
+ * The part of a plan that a session can run: `main.tease`, its functions, and its handlers. Until `goto` and `call`
+ * reach other files, a snapshot that refers to another file's instructions or functions is malformed, so every check
+ * of a snapshot sees only this part. It is built per validation, like the other analyses of external plan data.
+ */
+function runnablePlan(plan: InstructionPlan): InstructionPlan {
+  if (plan.files.length === 1) return plan;
+  const end = plan.files[0]!.endInstruction;
+  return {
+    ...plan,
+    files: [plan.files[0]!],
+    instructions: plan.instructions.slice(0, end),
+    functions: plan.functions.filter((definition) => definition.endInstruction <= end),
+  };
+}
+
 function validateCapturedRuntimeSnapshotDetails(
   value: unknown,
-  plan?: InstructionPlan,
+  fullPlan?: InstructionPlan,
 ): ClassifiedSnapshotValidationResult {
+  const plan = fullPlan === undefined ? undefined : runnablePlan(fullPlan);
   const errors: string[] = [];
   if (!isPlainRecord(value)) {
     return Object.freeze({

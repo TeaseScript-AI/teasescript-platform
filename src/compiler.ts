@@ -202,12 +202,15 @@ function checkParsedFile(
   };
 }
 
-/** Lowers the error-free files into one plan; a lowering diagnostic belongs to the file it arose in. */
+/**
+ * Lowers the error-free files into one plan; a lowering diagnostic belongs to the file it arose in, and a failure of the
+ * finished plan to `main.tease`.
+ */
 function lowerProject(files: CompiledProjectFile[]): InstructionPlan | null {
   let current = files[0]!;
-  let compiled: InstructionPlan;
+  let failure: ReturnType<typeof compiledPlanValidationDiagnostic>;
   try {
-    compiled = compileStableProject(
+    const compiled = compileStableProject(
       files.map((file) => ({
         path: file.result.path,
         program: file.result.program,
@@ -217,6 +220,9 @@ function lowerProject(files: CompiledProjectFile[]): InstructionPlan | null {
         current = files[fileIndex]!;
       },
     );
+    current = files[0]!;
+    failure = compiledPlanValidationDiagnostic(compiled);
+    if (failure === null) return markValidatedImmutableInstructionPlan(compiled);
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
     const parsed = current.parsed!;
@@ -228,8 +234,6 @@ function lowerProject(files: CompiledProjectFile[]): InstructionPlan | null {
     );
     return null;
   }
-  const failure = compiledPlanValidationDiagnostic(compiled);
-  if (failure === null) return markValidatedImmutableInstructionPlan(compiled);
   const file = files[failure.file]!;
   file.result = Object.freeze({
     ...file.result,

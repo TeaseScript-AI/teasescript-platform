@@ -5,11 +5,19 @@ import { compileProject, compileSource, type ProjectSourceFile } from "../src/co
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
+  CHECKPOINT_FORMAT,
+  CHECKPOINT_VERSION,
   deserializeCheckpoint,
   createCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
+import {
+  createFreshRuntimeSnapshot,
+  validateRuntimeSnapshot,
+  type RuntimeSnapshot,
+} from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 function compiledPlan(files: readonly ProjectSourceFile[]): InstructionPlan {
@@ -237,4 +245,103 @@ test("plan validation checks the file table and keeps calls inside their file", 
   assert.deepEqual(errors({ ...plan, instructions }), [
     `$.instructions[${mainCall}] An instruction refers to a function of another file.`,
   ]);
+});
+
+type Mutable<T> = T extends readonly (infer Item)[]
+  ? Array<Mutable<Item>>
+  : T extends object
+    ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
+    : T;
+
+function mutableCopy(snapshot: RuntimeSnapshot): Mutable<RuntimeSnapshot> {
+  // EVIDENCE: fixture: a JSON round trip of a runtime-produced snapshot keeps its shape for an invalid mutation.
+  return JSON.parse(JSON.stringify(snapshot)) as Mutable<RuntimeSnapshot>;
+}
+
+test("until files can be entered, a checkpoint may refer only to main.tease", () => {
+  const timers = compiledPlan([
+    { path: "main.tease", source: 'timer async 1 { say "main handler" }\nwait 5\nexit' },
+    { path: "other.tease", source: 'timer async 1 { say "other handler" }\nexit' },
+  ]);
+  const otherStart = timers.files[1]!.startInstruction;
+  const foreign = timers.functions.find((definition) => definition.entryInstruction >= otherStart)!;
+  const waiting = run(timers, createImmediatePacingRuntimeSnapshot(timers)).snapshot;
+  const expired = observeTime(timers, waiting, 1000).snapshot;
+  assert.equal(validateRuntimeSnapshot(expired, timers).valid, true);
+
+  // A queued expiry block of another file's timer is rejected before it could run.
+  const queued = mutableCopy(expired);
+  queued.settledTimers[0]!.handlerFunctionId = foreign.id;
+  queued.pendingTimerHandlers[0]!.handlerFunctionId = foreign.id;
+  assert.equal(validateRuntimeSnapshot(queued, timers).valid, false);
+  assert.throws(() =>
+    deserializeCheckpoint(
+      JSON.stringify({
+        format: CHECKPOINT_FORMAT,
+        version: CHECKPOINT_VERSION,
+        plan: timers,
+        snapshot: queued,
+      }),
+    ),
+  );
+  // So is an active timer that another file's timer statement started.
+  const active = mutableCopy(waiting);
+  const timer = active.backgroundActions.find((action) => action.kind === "timer");
+  assert.ok(timer?.kind === "timer");
+  timer.owningInstruction = timers.instructions.findIndex(
+    (instruction, index) => instruction.kind === "startTimer" && index >= otherStart,
+  );
+  timer.timer.handlerFunctionId = foreign.id;
+  assert.equal(validateRuntimeSnapshot(active, timers).valid, false);
+
+  // And a message paced in another file.
+  const says = compiledPlan([
+    { path: "main.tease", source: 'say "main"\nsay "second"\nexit' },
+    { path: "other.tease", source: 'say "other"\nsay "other second"\nexit' },
+  ]);
+  const pacing = run(says, createFreshRuntimeSnapshot(says)).snapshot;
+  assert.equal(pacing.status, "waiting");
+  const offset = says.files[1]!.startInstruction;
+  const moved = mutableCopy(pacing);
+  moved.nextInstruction += offset;
+  for (const action of [moved.foregroundAction, ...moved.backgroundActions]) {
+    if (action?.kind !== "chatPacingGate") continue;
+    action.owningInstruction += offset;
+    action.continuationInstruction += offset;
+    if (action.preparedOutput !== null) {
+      action.preparedOutput.owningInstruction += offset;
+      action.preparedOutput.continuationInstruction += offset;
+    }
+  }
+  assert.equal(validateRuntimeSnapshot(moved, says).valid, false);
+});
+
+test("a host stack failure while the finished plan is validated is still TSC007", () => {
+  const original = Object.keys;
+  // Fails only where the finished, frozen plan is validated, as a host stack failure would.
+  Object.keys = (value: Parameters<typeof original>[0]): string[] => {
+    if (
+      Object.isFrozen(value) &&
+      "format" in value &&
+      value.format === "teasescript-instruction-plan"
+    ) {
+      throw new RangeError("Maximum call stack size exceeded");
+    }
+    return original(value);
+  };
+  let result: ReturnType<typeof compileSource>;
+  try {
+    result = compileSource("let value = 1");
+  } finally {
+    Object.keys = original;
+  }
+  assert.equal(result.plan, null);
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.span.start.offset,
+      diagnostic.span.end.offset,
+    ]),
+    [["TSC007", 0, 13]],
+  );
 });
