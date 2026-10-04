@@ -50,7 +50,7 @@ const SHIM_PREFIX = "sxPending";
 
 export interface PendingShim {
   program: MigrationProgram;
-  /** The shimmed program as TeaseScript, followed by the functions that stand in for proposed constructs. */
+  /** The shimmed program as TeaseScript. */
   source: string;
   /** Placeholder names to register as host builtins when compiling the shimmed program. */
   builtins: string[];
@@ -78,23 +78,6 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
     return candidate;
   };
   let switchCount = 0;
-  // Generated functions standing in for constructs the compiler lacks, by the name the copy calls them with.
-  const generated: { choose: ListChooseNames | null } = { choose: null };
-  const listChoose = (): ListChooseNames =>
-    (generated.choose ??= {
-      textOptions: shimName(`${SHIM_PREFIX}TextOptions`),
-      collect: shimName(`${SHIM_PREFIX}Collect`),
-      locals: {
-        texts: shimName(`${SHIM_PREFIX}Texts`),
-        list: shimName(`${SHIM_PREFIX}List`),
-        text: shimName(`${SHIM_PREFIX}Text`),
-        parts: shimName(`${SHIM_PREFIX}Parts`),
-        part: shimName(`${SHIM_PREFIX}Part`),
-        option: shimName(`${SHIM_PREFIX}Option`),
-        pick: shimName(`${SHIM_PREFIX}Pick`),
-      },
-      sites: [],
-    });
   const call = (
     capability: string,
     name: string,
@@ -240,58 +223,15 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         };
       case "choice":
         return { ...value, options: value.options.map(expression) };
-      case "listChoice": {
-        capabilities.add("choose list options");
-        const names = listChoose();
-        // One function per choose, so the smoke run rotates the answers of each legacy menu separately.
-        const site = shimName(`${SHIM_PREFIX}Choose${names.sites.length + 1}`);
-        names.sites.push(site);
-        const textOptions = (list: IrExpression): IrExpression => ({
-          kind: "call",
-          name: names.textOptions,
-          positional: [list],
-          named: {},
-          local: true,
-        });
-        // Each part is a list of `{ value, text }` choice objects; a text without a value is its own value.
-        const parts: IrExpression[] = [];
-        let texts: IrExpression[] = [];
-        const flushTexts = (): void => {
-          if (texts.length > 0) parts.push(textOptions({ kind: "list", items: texts }));
-          texts = [];
-        };
-        for (const option of value.options) {
-          if (option.kind === "list") {
-            flushTexts();
-            const list = expression(option.list);
-            parts.push(option.records ? list : textOptions(list));
-          } else if (option.value === null) {
-            texts.push(expression(option.text));
-          } else {
-            flushTexts();
-            parts.push({
-              kind: "list",
-              items: [
-                {
-                  kind: "object",
-                  properties: [
-                    { name: "value", value: { kind: "literal", value: option.value } },
-                    { name: "text", value: expression(option.text) },
-                  ],
-                },
-              ],
-            });
-          }
-        }
-        flushTexts();
+      case "listChoice":
         return {
-          kind: "call",
-          name: site,
-          positional: [{ kind: "list", items: parts }],
-          named: {},
-          local: true,
+          ...value,
+          options: value.options.map((option) =>
+            option.kind === "list"
+              ? { ...option, list: expression(option.list) }
+              : { ...option, text: expression(option.text) },
+          ),
         };
-      }
       case "range":
         return { ...value, from: expression(value.from), to: expression(value.to) };
       case "unary":
@@ -378,9 +318,8 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         return [{ ...item, body: statements(item.body) }];
       case "let": {
         if (item.compilerType === undefined) return [{ ...item, value: expression(item.value) }];
-        // The current compiler needs `: number` where an integer widens by itself (#504 option B, #526) or a numeric
-        // `choose` is an integer (#515).
-        capabilities.add("number annotations (#515, #526)");
+        // The current compiler needs `: number` where an integer widens by itself (#504 option B, #526).
+        capabilities.add("number annotations (#526)");
         const { compilerType, ...declaration } = item;
         return [{ ...declaration, type: compilerType, value: expression(item.value) }];
       }
@@ -486,76 +425,13 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
   };
 
   const shimmed = { ...program, statements: statements(program.statements) };
-  const chooseNames = generated.choose;
   return {
     program: shimmed,
-    source: emitTease(shimmed) + (chooseNames === null ? "" : listChooseSource(chooseNames)),
+    source: emitTease(shimmed),
     builtins: [...builtins].sort(),
     operations,
     capabilities,
   };
-}
-
-interface ListChooseNames {
-  textOptions: string;
-  collect: string;
-  /** Local variable names of the generated functions, unique in the program. */
-  locals: Record<"texts" | "list" | "text" | "parts" | "part" | "option" | "pick", string>;
-  /** One function name per `choose` of the program. */
-  sites: string[];
-}
-
-/** Largest number of buttons the stand-in for a list `choose` supports; more fail the smoke run. */
-const LIST_CHOOSE_LIMIT = 40;
-
-/**
- * Stand-ins for a `choose` with list options (PR #515) in current TeaseScript: the choice objects are collected at
- * runtime, and a compact `choose` with numeric labels per option count shows them, so the interaction stays real.
- * The chosen object's value is the result.
- */
-function listChooseSource(names: ListChooseNames): string {
-  const { texts, list, text, parts, part, option, pick } = names.locals;
-  const lines = [
-    "",
-    `function ${names.textOptions}(${texts}) {`,
-    `    let ${list} = []`,
-    `    for ${text} in ${texts} {`,
-    `        ${list}.add({ value: ${text}, text: ${text} })`,
-    "    }",
-    `    return ${list}`,
-    "}",
-    "",
-    `function ${names.collect}(${parts}) {`,
-    `    let ${list} = []`,
-    `    for ${part} in ${parts} {`,
-    `        for ${option} in ${part} {`,
-    `            ${list}.add(${option})`,
-    "        }",
-    "    }",
-    `    return ${list}`,
-    "}",
-  ];
-  for (const site of names.sites) {
-    lines.push("", `function ${site}(${parts}) {`, `    let ${list} = ${names.collect}(${parts})`);
-    for (let count = 1; count <= LIST_CHOOSE_LIMIT; count += 1) {
-      const options = Array.from(
-        { length: count },
-        (_, index) => `${index}: ${list}[${index}].text`,
-      ).join(", ");
-      lines.push(
-        `    if ${list}.length == ${count} {`,
-        `        let ${pick} = choose ${options}`,
-        `        return ${list}[${pick}].value`,
-        "    }",
-      );
-    }
-    lines.push(
-      "    // No options, or more than the stand-in supports: the invalid index fails the run.",
-      `    return ${list}[${list}.length].value`,
-      "}",
-    );
-  }
-  return `${lines.join("\n")}\n`;
 }
 
 /** Accepted switch semantics (literal or range cases, no fallthrough) expressed as an equivalent if chain. */

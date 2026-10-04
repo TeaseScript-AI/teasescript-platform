@@ -10,8 +10,8 @@ import type { IrExpression, IrFunctionParameter, IrStatement } from "./ir.ts";
  * types, such as text and a list, cannot be expressed without union types; those are returned as conflicts.
  *
  * Types follow the compiler (`src/static-types.ts` in the repository root) plus the accepted result types it does not
- * implement yet: text operations, `join`, conversions, and rounding (#518), list `choose` values (#515), and the
- * `showButton` elapsed duration (#513). A compact numeric `choose` keeps `main`'s `number` until PR #515 merges.
+ * implement yet: text operations, `join`, conversions, and rounding (#518), and the `showButton` elapsed duration
+ * (#513).
  * Values it cannot know, such as storage and function results, are not checked.
  */
 export type TeaseType =
@@ -27,12 +27,6 @@ export type TeaseType =
 const SCALAR_NAMES = ["string", "integer", "number", "boolean", "duration"] as const;
 type ScalarName = (typeof SCALAR_NAMES)[number];
 
-/**
- * `accepted` follows the owner decisions: a numeric `choose` value is an integer (#515), and an unannotated variable
- * that starts as a whole number widens to `number` by itself (#504 option B, #526). `main` follows the current
- * compiler, which types a numeric `choose` as `number` and needs `: number` to widen; the compiler gate uses it.
- */
-type Rules = "accepted" | "main";
 type LetStatement = Extract<IrStatement, { kind: "let" }>;
 
 export interface TypeConflict {
@@ -107,7 +101,7 @@ export function functionResultTypes(statements: IrStatement[]): Map<string, Teas
   const bindings = new Map<BindingKey, Binding>();
   let results = new Map<string, TeaseType>();
   for (let round = 0; round < 50; round += 1) {
-    const analysis = analyse(statements, bindings, results, "accepted");
+    const analysis = analyse(statements, bindings, results);
     const changed = [...analysis.results].some(
       ([name, type]) => typeName(type) !== typeName(results.get(name) ?? UNKNOWN),
     );
@@ -133,7 +127,6 @@ interface Rounds {
 function runRounds(
   statements: IrStatement[],
   knownResults: ReadonlyMap<string, TeaseType>,
-  rules: Rules,
 ): Rounds {
   const rounds: Rounds = {
     bindings: new Map(),
@@ -146,7 +139,7 @@ function runRounds(
   };
   let results = new Map(knownResults);
   for (let round = 0; round < 50; round += 1) {
-    const analysis = analyse(statements, rounds.bindings, results, rules);
+    const analysis = analyse(statements, rounds.bindings, results);
     rounds.conflicts = analysis.conflicts;
     rounds.appends = analysis.appends;
     rounds.indexes = analysis.indexes;
@@ -168,9 +161,7 @@ export function enforceVariableTypes(
   /** Result types of functions defined elsewhere, such as the generated helpers. */
   knownResults: ReadonlyMap<string, TeaseType> = new Map(),
 ): VariableTypeResult {
-  const accepted = runRounds(statements, knownResults, "accepted");
-  // The current compiler needs annotations that the accepted rules make unnecessary.
-  const compiler = runRounds(statements, knownResults, "main");
+  const accepted = runRounds(statements, knownResults);
   const { bindings, appends, truncations, integerLoads, textIntegers, indexes } = accepted;
   const conflicts = accepted.conflicts;
   // A repair that needs a type no annotation can write, such as an optional object, becomes a conflict too.
@@ -261,13 +252,8 @@ export function enforceVariableTypes(
             result.annotated += 1;
             next = { ...next, type: written };
           }
-          // The current compiler needs `: number` to widen, and types a numeric `choose` as a number.
-          const compilerBinding = compiler.bindings.get(statement);
-          const compilerType =
-            compilerBinding !== undefined && (compilerBinding.widened || compilerBinding.optional)
-              ? bindingType(compilerBinding)
-              : undefined;
-          const compilerWritten = compilerType === undefined ? null : annotation(compilerType);
+          // An unannotated variable widens by itself (#504 option B), but the current compiler needs `: number`.
+          const compilerWritten = binding.widened || binding.optional ? written : null;
           if (compilerWritten !== null && compilerWritten !== (next.type ?? null)) {
             result.compilerAnnotated += 1;
             next = { ...next, compilerType: compilerWritten };
@@ -381,7 +367,6 @@ function analyse(
   statements: IrStatement[],
   bindings: Map<BindingKey, Binding>,
   results: ReadonlyMap<string, TeaseType>,
-  rules: Rules,
 ): Analysis {
   const analysis: Analysis = {
     changed: false,
@@ -428,7 +413,6 @@ function analyse(
         return found === undefined ? UNKNOWN : (bindingType(found) ?? UNKNOWN);
       },
       (name) => results.get(name),
-      rules,
     );
   const conflict = (
     target: Binding,
@@ -975,9 +959,8 @@ export function expressionType(
   value: IrExpression,
   variable: (name: string) => TeaseType,
   result: (name: string) => TeaseType | undefined = () => undefined,
-  rules: Rules = "accepted",
 ): TeaseType {
-  const type = (child: IrExpression): TeaseType => expressionType(child, variable, result, rules);
+  const type = (child: IrExpression): TeaseType => expressionType(child, variable, result);
   switch (value.kind) {
     case "literal":
       if (value.value === null) return NULL;
@@ -1040,9 +1023,8 @@ export function expressionType(
       // A read with a default has the default's type (#541).
       return value.defaultValue === undefined ? UNKNOWN : type(value.defaultValue);
     case "choice":
-      // PR #515 makes numeric choice values integers; `main` still types them as numbers.
-      if (value.labels !== undefined) return scalar("string");
-      return scalar(rules === "accepted" ? "integer" : "number");
+      // Numeric choice values are integers (#515).
+      return scalar(value.labels === undefined ? "integer" : "string");
     case "listChoice": {
       const values: TeaseType[] = [];
       for (const option of value.options) {

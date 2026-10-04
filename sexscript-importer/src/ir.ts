@@ -97,9 +97,8 @@ export type IrStatement =
       /** The Groovy value may be text, which an integer variable stored as a character code. */
       maybeText?: true;
       /**
-       * The annotation the current compiler needs where the accepted rules need none or another one: an integer that
-       * later holds fractions widens by itself (#504 option B, #526), and a numeric `choose` is an integer (#515).
-       * Only the compiler gate writes it.
+       * The annotation the current compiler needs where the accepted rules need none: an integer that later holds
+       * fractions widens by itself (#504 option B, #526). Only the compiler gate writes it.
        */
       compilerType?: string;
     })
@@ -206,7 +205,7 @@ export type IrExpression =
   | { kind: "choice"; options: IrExpression[]; labels?: string[] }
   /**
    * `choose` whose options may mix written values with options without one, and whose list options give one button
-   * per element (V30 §19 as accepted in PR #515, not implemented on main yet).
+   * per element (V30 §19, #515).
    */
   | { kind: "listChoice"; options: IrListChoiceOption[] }
   /**

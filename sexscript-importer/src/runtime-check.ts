@@ -404,12 +404,10 @@ function interactionAnswer(action: RuntimeData, visit: number) {
         submittedText: String(NUMBER_ANSWERS[visit % NUMBER_ANSWERS.length]),
       };
     default: {
+      // A choice is completed by the position of a rendered option (#515).
       const ui = isRecord(action.ui) ? action.ui : {};
-      const options = Array.isArray(ui.options) ? ui.options.filter(isRecord) : [];
-      const option = options[visit % Math.max(options.length, 1)] ?? {};
-      return ui.labelType === "none"
-        ? { kind: "selectedText", selectedText: option.text }
-        : { kind: "selectedLabel", selectedLabel: option.label };
+      const options = Array.isArray(ui.options) ? ui.options : [];
+      return { kind: "selectedOption", optionIndex: visit % Math.max(options.length, 1) };
     }
   }
 }
