@@ -914,7 +914,7 @@ the script's globals and speakers as the startup prefix sets them up; a speaker'
 Fresh-session creation rejects a host global with the name of a script global or speaker. A name is looked up in the
 scopes of the running function or root, then, unless the running function or block is global, in the root scope of
 its file, and then among the globals. Start values are evaluated without random selection: a list of unknown type
-reaching `.random` or `${...}` there fails with `TSR066`.
+reaching `.random` or `${...}` there fails with `TSR067`.
 
 Snapshot validation requires exactly the host globals followed by the script globals and speakers before the next
 instruction while the prefix runs, and all of them after it, with no scope binding of a global's name and a speaker

@@ -135,15 +135,15 @@ test("a start value uses only literals, earlier globals, operators, and load", (
       { path: "b.tease", source: "global later = 1" },
     ]),
     [
-      ["main.tease", "TSV051", 1],
-      ["main.tease", "TSV051", 2],
-      ["main.tease", "TSV051", 3],
-      ["main.tease", "TSV051", 4],
-      ["main.tease", "TSV051", 5],
-      ["main.tease", "TSV051", 6],
-      ["main.tease", "TSV051", 7],
-      ["main.tease", "TSV051", 10],
-      ["main.tease", "TSV051", 11],
+      ["main.tease", "TSV055", 1],
+      ["main.tease", "TSV055", 2],
+      ["main.tease", "TSV055", 3],
+      ["main.tease", "TSV055", 4],
+      ["main.tease", "TSV055", 5],
+      ["main.tease", "TSV055", 6],
+      ["main.tease", "TSV055", 7],
+      ["main.tease", "TSV055", 10],
+      ["main.tease", "TSV055", 11],
     ],
   );
   assert.deepEqual(
@@ -162,8 +162,8 @@ test("a start value uses only literals, earlier globals, operators, and load", (
       },
     ]),
     [
-      ["main.tease", "TSV051", 2],
-      ["main.tease", "TSV051", 3],
+      ["main.tease", "TSV055", 2],
+      ["main.tease", "TSV055", 3],
     ],
   );
   const unknown = runToEnd(
@@ -171,7 +171,7 @@ test("a start value uses only literals, earlier globals, operators, and load", (
       { path: "main.tease", source: 'global pick = (load "picks", default: [1, 2]).random\nexit' },
     ]),
   );
-  assert.equal(unknown.snapshot.failure?.code, "TSR066");
+  assert.equal(unknown.snapshot.failure?.code, "TSR067");
 
   // Earlier globals, operators, and load with its default are fine.
   const plan = compiledPlan([
@@ -241,7 +241,7 @@ test("a global with default: starts with that value and assigns its value where 
     diagnostics([
       { path: "main.tease", source: 'global name = askText "Name?", default: "nobody"\nexit' },
     ]),
-    [["main.tease", "TSV051", 1]],
+    [["main.tease", "TSV055", 1]],
   );
   assert.deepEqual(
     diagnostics([
