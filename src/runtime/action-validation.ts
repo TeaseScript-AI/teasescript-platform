@@ -1,5 +1,5 @@
 import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../color.js";
-import { isValidInteractionPrefill } from "../interaction-answers.js";
+import { isIntegerAnswerText, isValidInteractionPrefill } from "../interaction-answers.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
 import { expandChoiceOptions } from "./choice-options.js";
 import { RuntimeFault } from "./errors.js";
@@ -1135,11 +1135,14 @@ function validInteractionResultForInstruction(
     return options?.some((option) => serializableEquals(option.value, result)) === true;
   }
   if (instruction.expectedResult === "number") {
+    // An `askInteger` result is a safe whole number.
+    const ui = "preparedUi" in instruction ? instruction.preparedUi : instruction.ui;
     return (
       instruction.interactionKind === "number" &&
       typeof result === "number" &&
       Number.isFinite(result) &&
-      !Object.is(result, -0)
+      !Object.is(result, -0) &&
+      (ui.kind !== "number" || ui.integer !== true || Number.isSafeInteger(result))
     );
   }
   return (
@@ -1397,7 +1400,11 @@ function preparedInteractionUiMatchesAction(
       prepared.prefillTemporary === undefined
         ? undefined
         : runtimeTemporaryValue(temporaries, prepared.prefillTemporary);
-    return hint === actual.hint && prefill === actual.prefill;
+    return (
+      hint === actual.hint &&
+      prefill === actual.prefill &&
+      actual.integer === (prepared.kind === "number" ? prepared.integer : undefined)
+    );
   }
   const options = preparedChoiceOptions(prepared, temporaries, span);
   return options !== undefined && choiceOptionsEqual(options, actual.options);
@@ -1451,9 +1458,16 @@ function validInteractionUiShape(
     kind === "button"
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in value ? ["background"] : [])]
       : kind === "text" || kind === "number"
-        ? ["kind", "hint", "accessibleName", ...("prefill" in value ? ["prefill"] : [])]
+        ? [
+            "kind",
+            "hint",
+            "accessibleName",
+            ...("prefill" in value ? ["prefill"] : []),
+            ...(kind === "number" && "integer" in value ? ["integer"] : []),
+          ]
         : ["kind", "options", "accessibleName"];
-  if (!hasExactKeys(value, expectedUiKeys)) return false;
+  if (!hasExactKeys(value, expectedUiKeys) || ("integer" in value && value.integer !== true))
+    return false;
   let aggregate = 0;
   let measurementExhausted = false;
   const count = (text: unknown): text is string => {
@@ -1506,7 +1520,8 @@ function validInteractionUiShape(
     return (
       (value.hint === null || count(value.hint)) &&
       (!("prefill" in value) ||
-        (count(value.prefill) && isValidInteractionPrefill(kind, value.prefill))) &&
+        (count(value.prefill) &&
+          isValidInteractionPrefill(value.integer === true ? "integer" : kind, value.prefill))) &&
       !measurementExhausted
     );
   }
@@ -1548,7 +1563,11 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
   if (expected.kind === "button")
     return actual.buttonLabel === expected.buttonLabel && actual.background === expected.background;
   if (expected.kind === "text" || expected.kind === "number")
-    return actual.hint === expected.hint && actual.prefill === expected.prefill;
+    return (
+      actual.hint === expected.hint &&
+      actual.prefill === expected.prefill &&
+      actual.integer === (expected.kind === "number" ? expected.integer : undefined)
+    );
   if (expected.kind !== "choice") return false;
   return choiceOptionsEqual(expected.options, actual.options);
 }
@@ -1741,6 +1760,13 @@ function validSettlementKindData(
     const parsed = Number(settlement.transcriptText);
     if (!Number.isFinite(parsed) || (Object.is(parsed, -0) ? 0 : parsed) !== settlement.result)
       return false;
+    // An `askInteger` answer is whole-number notation within the safe integer range.
+    if (
+      isPlainRecord(settlement.ui) &&
+      settlement.ui.integer === true &&
+      (!isIntegerAnswerText(settlement.transcriptText) || !Number.isSafeInteger(parsed))
+    )
+      return false;
   }
 
   if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
@@ -1820,7 +1846,8 @@ function preparedUiFitsPresentedUi(
   if (prepared.kind === "text" || prepared.kind === "number")
     return (
       (ui.hint === null) === (prepared.hintTemporary === null) &&
-      "prefill" in ui === (prepared.prefillTemporary !== undefined)
+      "prefill" in ui === (prepared.prefillTemporary !== undefined) &&
+      ui.integer === (prepared.kind === "number" ? prepared.integer : undefined)
     );
   return Array.isArray(ui.options) && buttonsFitWrittenValues(prepared.values, ui.options);
 }

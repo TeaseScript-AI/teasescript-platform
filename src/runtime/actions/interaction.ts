@@ -1,5 +1,9 @@
 import { cloneInteractionChoiceValue } from "../../choice-values.js";
-import { isBlankTextAnswer, isNumberAnswerText } from "../../interaction-answers.js";
+import {
+  isBlankTextAnswer,
+  isIntegerAnswerText,
+  isNumberAnswerText,
+} from "../../interaction-answers.js";
 import { interactionStringFits } from "../../interaction-limits.js";
 import type { InteractionChoiceOption, InteractionChoiceValue } from "../../plan/model.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
@@ -51,6 +55,23 @@ export function resolveInteractionCompletion(
       return { ok: false, message: "Text completion must contain a non-whitespace character." };
     }
     return { ok: true, result: normalized, transcriptText: normalized };
+  }
+  // `askInteger` accepts only whole-number notation within the safe integer range.
+  if (action.ui.kind === "number" && action.ui.integer === true) {
+    if (
+      payload.kind !== "submittedText" ||
+      typeof payload.submittedText !== "string" ||
+      !completionStringFits(payload.submittedText)
+    )
+      return {
+        ok: false,
+        message: "Number completion requires text within the shared UTF-8 byte limit.",
+      };
+    const submitted = payload.submittedText.trim();
+    const parsed = Number(submitted);
+    return isIntegerAnswerText(submitted) && Number.isSafeInteger(parsed)
+      ? { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted }
+      : { ok: false, message: "That is wrong. I asked for a whole number." };
   }
   if (action.interactionKind === "number") {
     if (

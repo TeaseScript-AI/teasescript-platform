@@ -2312,6 +2312,7 @@ class Parser {
     if (
       this.#checkIdentifier("askText") ||
       this.#checkIdentifier("askNumber") ||
+      this.#checkIdentifier("askInteger") ||
       this.#checkIdentifier("choose")
     ) {
       return yield* parseChild(this.#parseInteractionExpression());
@@ -2397,7 +2398,13 @@ class Parser {
       return null;
     }
     const interactionKind =
-      command.lexeme === "askText" ? "text" : command.lexeme === "askNumber" ? "number" : "choice";
+      command.lexeme === "askText"
+        ? "text"
+        : command.lexeme === "askNumber"
+          ? "number"
+          : command.lexeme === "askInteger"
+            ? "integer"
+            : "choice";
     let asSpan: SourceSpan | null = null;
     let speaker: Identifier | null = null;
     if (!this.#atStorageDelimiter() && this.#match(TokenKind.KeywordAs)) {

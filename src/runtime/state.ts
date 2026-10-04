@@ -68,7 +68,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 30;
+export const RUNTIME_SNAPSHOT_VERSION = 31;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -710,6 +710,7 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
     kind: ui.kind,
     hint: ui.hint,
     ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
+    ...(ui.kind === "number" && ui.integer === true ? { integer: true as const } : {}),
     accessibleName,
   };
 }

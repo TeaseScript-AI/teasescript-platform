@@ -158,7 +158,25 @@ Completion rules:
 - the function returns `number`;
 - the player-authored transcript preserves the trimmed submitted number text rather than reformatting it with JavaScript number-to-string conversion.
 
-The first POC adds no minimum, maximum, integer-only, or other domain-range parameters. Authors perform domain validation explicitly after completion.
+The first POC adds no minimum, maximum, or other domain-range parameters. Authors perform domain validation explicitly
+after completion; `askInteger` below is the whole-number counterpart.
+
+### `askInteger`
+
+Owner-approved extension (2026-10-04, #539): `askInteger` copies the compact `askNumber` forms, including `as speaker`,
+the hint, and `default:`, and returns `integer`.
+
+```tease
+let count = askInteger "How many repetitions?"
+let count = askInteger as mistress "How many?", default: 10
+```
+
+An answer is whole-number notation only: an optional sign, then digits, with surrounding whitespace removed and within
+the safe integer range. `2.5`, `2.0`, and `1e3` are rejected like any other invalid answer, with the
+[V30 message](../specifications/accepted-syntaxes-v30.md#20-input-functions) "That is wrong. I asked for a whole number.".
+Negative zero returns `0`, and the transcript keeps the trimmed submitted text. The engine runs it as a `number`
+interaction whose UI only accepts whole numbers, so completion, prefill, checkpoint, and settlement rules are those of
+`askNumber`. The Player offers a numeric keyboard.
 
 ### Default answers
 

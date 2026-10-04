@@ -370,7 +370,7 @@ export type Expression =
 
 export interface InteractionExpression {
   readonly kind: "interactionExpression";
-  readonly interactionKind: "text" | "number" | "choice";
+  readonly interactionKind: "text" | "number" | "integer" | "choice";
   readonly commandSpan: SourceSpan;
   readonly asSpan: SourceSpan | null;
   readonly speaker: Identifier | null;

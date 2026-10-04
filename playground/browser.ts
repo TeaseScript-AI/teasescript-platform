@@ -565,7 +565,8 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
   elements.composerInput.setAttribute("aria-label", accessibleName);
   if (interaction.ui.kind === "text" || interaction.ui.kind === "number") {
     elements.composerInput.placeholder = interaction.ui.hint ?? "";
-    elements.composerInput.inputMode = interaction.ui.kind === "number" ? "decimal" : "text";
+    elements.composerInput.inputMode =
+      interaction.ui.kind !== "number" ? "text" : interaction.ui.integer ? "numeric" : "decimal";
     elements.composerHelp.textContent =
       interaction.ui.kind === "number"
         ? "Enter the scripted number answer. Engine validation is shown above."

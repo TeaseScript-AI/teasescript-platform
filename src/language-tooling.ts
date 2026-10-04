@@ -40,7 +40,7 @@ export interface LanguageCompletionItem {
 }
 
 export interface LanguageContextHelp {
-  readonly command: "showButton" | "askText" | "askNumber" | "choose" | "say";
+  readonly command: "showButton" | "askText" | "askNumber" | "askInteger" | "choose" | "say";
   readonly summary: string;
   readonly syntax: string;
 }
@@ -85,6 +85,12 @@ const HELP = Object.freeze({
     summary:
       "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript. An optional default number prefills the field.",
     syntax: "askNumber [as speaker] [hint | hint, default: number | default: number]",
+  }),
+  askInteger: Object.freeze({
+    command: "askInteger" as const,
+    summary:
+      "Waits for a whole number: an optional sign and digits, with surrounding whitespace trimmed. Decimals, exponents, and values outside the safe integer range are rejected and asked again. Returns an integer. An optional default whole number prefills the field.",
+    syntax: "askInteger [as speaker] [hint | hint, default: integer | default: integer]",
   }),
   choose: Object.freeze({
     command: "choose" as const,
@@ -139,6 +145,7 @@ export function languageCompletions(
     items.push(command("showButton", "Compact foreground button interaction"));
     items.push(command("askText", "Compact text-input expression"));
     items.push(command("askNumber", "Compact numeric-input expression"));
+    items.push(command("askInteger", "Compact whole-number input expression"));
     items.push(command("choose", "Compact choice expression"));
   }
 
@@ -319,7 +326,7 @@ function isExpressionCompletionContext(
   );
 }
 
-type CompactCommand = "showButton" | "askText" | "askNumber" | "choose" | "say";
+type CompactCommand = "showButton" | "askText" | "askNumber" | "askInteger" | "choose" | "say";
 type CompactStage = "afterCommand" | "afterAs" | "afterComma" | "other";
 
 function compactCommandContext(
@@ -346,6 +353,7 @@ function tokenToCompactCommand(token: Token): CompactCommand | null {
     token.lexeme === "showButton" ||
     token.lexeme === "askText" ||
     token.lexeme === "askNumber" ||
+    token.lexeme === "askInteger" ||
     token.lexeme === "choose"
   ) {
     return token.lexeme;
@@ -383,7 +391,9 @@ function locateCompactCommand(
           ? "askText"
           : node.interactionKind === "number"
             ? "askNumber"
-            : "choose";
+            : node.interactionKind === "integer"
+              ? "askInteger"
+              : "choose";
       best = { command, range: node.commandSpan };
     },
     say(node) {
@@ -447,6 +457,7 @@ function signatureParameters(command: CompactCommand): readonly string[] {
       return Object.freeze(["speaker", "label", "background", "timeout"]);
     case "askText":
     case "askNumber":
+    case "askInteger":
       return Object.freeze(["speaker", "hint", "default"]);
     case "choose":
       return Object.freeze(["speaker", "options"]);
@@ -487,7 +498,12 @@ function activeParameterFor(
     (tail.length === asIndex + 1 || (tail.length === asIndex + 2 && !cursorAfterLastToken))
   )
     return 0;
-  if (command === "askText" || command === "askNumber" || command === "showButton") {
+  if (
+    command === "askText" ||
+    command === "askNumber" ||
+    command === "askInteger" ||
+    command === "showButton"
+  ) {
     // The last named option before the cursor is the active parameter. A delimiter that closes one opened before the
     // command ends the command, so later options belong to the enclosing construct.
     let active = 1;

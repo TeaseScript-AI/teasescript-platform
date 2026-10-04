@@ -605,7 +605,11 @@ class Lexer {
 
 function isInteractionCommand(value: string | undefined): boolean {
   return (
-    value === "showButton" || value === "askText" || value === "askNumber" || value === "choose"
+    value === "showButton" ||
+    value === "askText" ||
+    value === "askNumber" ||
+    value === "askInteger" ||
+    value === "choose"
   );
 }
 

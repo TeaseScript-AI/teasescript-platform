@@ -827,9 +827,15 @@ function validateStaticInteractionUi(
     kind === "button"
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in ui ? ["background"] : [])]
       : kind === "text" || kind === "number"
-        ? ["kind", "hint", "accessibleName", ...("prefill" in ui ? ["prefill"] : [])]
+        ? [
+            "kind",
+            "hint",
+            "accessibleName",
+            ...("prefill" in ui ? ["prefill"] : []),
+            ...(kind === "number" && "integer" in ui ? ["integer"] : []),
+          ]
         : ["kind", "options", "accessibleName"];
-  if (!hasExactKeys(ui, uiKeys)) {
+  if (!hasExactKeys(ui, uiKeys) || ("integer" in ui && ui.integer !== true)) {
     errors.push(planError("TSC002", "Interaction UI payload contains unsupported fields.", path));
   }
   let aggregate = 0;
@@ -889,7 +895,7 @@ function validateStaticInteractionUi(
     if (
       "prefill" in ui &&
       countString(ui.prefill, `${path}.prefill`) &&
-      !isValidInteractionPrefill(kind, ui.prefill)
+      !isValidInteractionPrefill(ui.integer === true ? "integer" : kind, ui.prefill)
     )
       errors.push(
         planError("TSC002", "Interaction prefill is not a valid answer.", `${path}.prefill`),
@@ -976,9 +982,10 @@ function validatePreparedInteractionUi(
             "hintTemporary",
             "accessibleName",
             ...("prefillTemporary" in ui ? ["prefillTemporary"] : []),
+            ...(kind === "number" && "integer" in ui ? ["integer"] : []),
           ]
         : ["kind", "optionsTemporary", "values", "accessibleName"];
-  if (!hasExactKeys(ui, keys)) {
+  if (!hasExactKeys(ui, keys) || ("integer" in ui && ui.integer !== true)) {
     errors.push(
       planError("TSC002", "Prepared interaction UI payload contains unsupported fields.", path),
     );

@@ -1471,7 +1471,10 @@ It only completes when every field contains a valid number and returns `number[]
 let count = askInteger("Enter a whole number")
 ```
 
-`askInteger(...)` only completes when a valid whole number has been entered and returns `integer`.
+`askInteger(...)` only completes when a valid whole number has been entered and returns `integer`. The compact form
+`askInteger [as speaker] [hint] [, default: integer]` is implemented as the whole-number counterpart of `askNumber`
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askinteger)): an answer is an optional sign and
+digits within the safe integer range.
 
 ### Multiple integer inputs
 

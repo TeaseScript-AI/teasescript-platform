@@ -312,7 +312,9 @@ function submit(source: "input" | "button") {
             foreground && 'hint' in foreground ? foreground.hint : 'Type your response…'
           "
           :accessible-name="foreground?.accessibleName ?? 'Response'"
-          :input-mode="foreground?.kind === 'ask-number' ? 'decimal' : 'text'"
+          :input-mode="
+            foreground?.kind !== 'ask-number' ? 'text' : foreground.integer ? 'numeric' : 'decimal'
+          "
           :feedback="feedback"
           @submit="submit"
           @skip="skipPacing(true)"
