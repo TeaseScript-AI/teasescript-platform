@@ -1143,9 +1143,10 @@ ceil(-2.5)   // -2
 ```
 
 `min(...)` and `max(...)` return the smallest or largest of two or more values, which are all numbers or all
-durations. The result is an `integer` when every argument is an `integer`, a `number` otherwise, and a `duration` for
-durations. Mixing numbers and durations, other values, `null`, and named arguments are compile errors when the types
-show them, and runtime errors otherwise:
+durations of one family ([§35](#35-date-time-durations-and-timestamps)). The result is an `integer` when every
+argument is an `integer`, a `number` otherwise, and for durations the chosen duration itself. Mixing numbers and
+durations or duration families, other values, `null`, and named arguments are compile errors when the types show them,
+and runtime errors otherwise:
 
 ```text
 let minutes = min(20, 5 + punishments)
@@ -1438,9 +1439,9 @@ Runtime behavior:
   value is a no-op: the set stays unchanged and execution continues without an error or warning.
 - Mutating methods change the existing list.
 - `sort()` orders a list in place, ascending and stable. Its elements must all be numbers (integers and numbers
-  together), all text, or all durations; text is ordered by Unicode code point, independently of locale, so `"B"`
-  sorts before `"a"`. Other or mixed elements are a compile error when the element type shows them, and a runtime error
-  otherwise.
+  together), all text, or all durations of one family ([§35](#35-date-time-durations-and-timestamps)); text is ordered
+  by Unicode code point, independently of locale, so `"B"` sorts before `"a"`. Other or mixed elements are a compile
+  error when the element type shows them, and a runtime error otherwise.
 - `shuffle()` puts a list in a uniformly random order in place with the deterministic session RNG. The number of random
   draws depends only on the length, so replay and checkpoint resume reproduce the order; a list of fewer than two
   elements draws nothing.
