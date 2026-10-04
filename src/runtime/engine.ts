@@ -800,6 +800,13 @@ function executePlannedInstruction(
       startMedia(plan, instruction, snapshot, evaluator, events);
       return;
     case "goto":
+      // A global function of another file jumps to a label of its own file, which the session cannot enter yet.
+      if (instruction.target >= plan.files[0]!.rootEndInstruction)
+        throw fault(
+          "TSR068",
+          "This goto leads to a label of another file than main.tease, which a session cannot enter until files can go to each other.",
+          instruction.span,
+        );
       executeGoto(instruction, snapshot, events);
       return;
     case "end":

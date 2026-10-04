@@ -374,6 +374,16 @@ test("a global function is callable from every file and sees only globals, its p
   const [lib] = plan.functions.filter((definition) => definition.name === "countdown");
   assert.equal(lib?.global, true);
 
+  // A goto in a global function means a label of its own file, which a session cannot enter until files can go to
+  // each other: it fails there, with a state that stays valid.
+  const jumping = compiledPlan([
+    { path: "main.tease", source: "leave()\nexit" },
+    { path: "lib.tease", source: "label top\nexit\nglobal function leave {\n  goto top\n}" },
+  ]);
+  const failed = runToEnd(jumping).snapshot;
+  assert.deepEqual([failed.failure?.code, failed.failure?.path], ["TSR068", "lib.tease"]);
+  assert.equal(validateRuntimeSnapshot(failed, jumping).valid, true);
+
   assert.deepEqual(
     messages([
       {
