@@ -1641,8 +1641,8 @@ class TypeChecker {
   }
 
   /**
-   * The type an annotation means. A set holds only text, numbers, true or false, date and time values, and null
-   * (ADR 0014, V30 §35).
+   * The type an annotation means. A set holds only text, numbers, true or false, durations, date and time values, and
+   * null (ADR 0014, V30 §35).
    */
   #annotationType(annotation: TypeAnnotation): StaticType {
     const pending: TypeAnnotation[] = [annotation];
@@ -1661,7 +1661,7 @@ class TypeChecker {
           if (!members(element).every(isSetElement))
             this.#report(
               typeCode.invalidSetElement,
-              `A set holds only text, numbers, true or false, date and time values, or null, so it cannot hold ${typeName(element)} values. Use a list instead, as in '${typeName({ kind: "list", element })}'.`,
+              `A set holds only text, numbers, true or false, durations, date and time values, or null, so it cannot hold ${typeName(element)} values. Use a list instead, as in '${typeName({ kind: "list", element })}'.`,
               part.span,
             );
           break;
@@ -3948,15 +3948,16 @@ class TypeChecker {
   }
 
   /**
-   * Reports a value that a set cannot hold: a set holds only text, numbers, true or false, date and time values, and
-   * null (V30 §16). A value of unknown type is checked when the script runs. Returns whether the value may be held.
+   * Reports a value that a set cannot hold: a set holds only text, numbers, true or false, durations, date and time
+   * values, and null (V30 §16). A value of unknown type is checked when the script runs. Returns whether the value may
+   * be held.
    */
   #checkSetElement(expression: Expression, type: StaticType): boolean {
     const rejected = members(type).find((member) => isKnown(member) && !isSetElement(member));
     if (rejected === undefined) return true;
     this.#report(
       typeCode.invalidSetElement,
-      `A set holds only text, numbers, true or false, date and time values, or null, so it cannot hold ${describeValue(rejected)}.`,
+      `A set holds only text, numbers, true or false, durations, date and time values, or null, so it cannot hold ${describeValue(rejected)}.`,
       expression.span,
     );
     return false;
@@ -4923,11 +4924,7 @@ function isSetReceiver(type: StaticType): boolean {
 
 function isSetElement(type: StaticType): boolean {
   const value = resolved(type);
-  return (
-    value.kind === "null" ||
-    value.kind === "unknown" ||
-    (value.kind === "scalar" && value.name !== "duration")
-  );
+  return value.kind === "null" || value.kind === "unknown" || value.kind === "scalar";
 }
 
 /**

@@ -184,14 +184,8 @@ test("misuse the compiler can see is a compile error", () => {
     [
       "let tags = set[1]\nsay tags.union([{ n: 1 }])",
       "TSV006",
-      "A set holds only text, numbers, true or false, date and time values, or null, so it cannot hold an object.",
+      "A set holds only text, numbers, true or false, durations, date and time values, or null, so it cannot hold an object.",
       "[{ n: 1 }]",
-    ],
-    [
-      "let tags = set[]\nsay tags.union([1 s])",
-      "TSV006",
-      "A set holds only text, numbers, true or false, date and time values, or null, so it cannot hold a duration.",
-      "[1 s]",
     ],
     [
       'let items = [1]\nsay items.union(["x"])',
@@ -231,6 +225,6 @@ test("values the compiler cannot know are checked at runtime", () => {
   ]);
   assert.deepEqual(failure(`${DYNAMIC}let tags = set[1]\nsay tags.union(dynamic([[1]]))`), [
     "TSR032",
-    "Sets may contain only string, boolean, integer, number, date, time, datetime, timestamp, or null values.",
+    "Sets may contain only string, boolean, integer, number, duration, date, time, datetime, timestamp, or null values.",
   ]);
 });

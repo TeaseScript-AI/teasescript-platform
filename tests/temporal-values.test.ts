@@ -182,10 +182,11 @@ test("ordering, equality, and set membership compare kind and value", () => {
         'let days = set[d, toDate("2026-10-04"), toDate("2026-10-05")]',
         "say days.length",
         'say days.contains(toDate("2026-10-04"))',
+        "say set[1 h, 60 min].length",
         'say [d] == [toDate("2026-10-04")]',
       ].join("\n"),
     ),
-    ["true", "true", "true", "true", "true", "2", "true", "true"],
+    ["true", "true", "true", "true", "true", "2", "true", "1", "true"],
   );
   const failure = failureOf(
     `${DYNAMIC}let wrong = dynamic(toDate("2026-10-04")) < dynamic(toTime("14:30"))`,

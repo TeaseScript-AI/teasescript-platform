@@ -319,6 +319,7 @@ test("date and time values show as text, give buttons, and are set elements", ()
         '    let pick: date = choose day, toDate("2026-10-05")',
         '    let moment = choose [{ text: "Now", value: started }, { text: "Later", value: started + 1 h }]',
         '    let days: date set = set[day, toDate("2026-10-05")]',
+        "    let spans: duration set = set[1 h, 2 h]",
         "    let mixed: (time | timestamp) set = set[]",
         "}",
       ].join("\n"),
@@ -328,7 +329,7 @@ test("date and time values show as text, give buttons, and are set elements", ()
   assert.deepEqual(diagnostics("let lists: datetime[] set = set[]"), [
     [
       "TSV006",
-      "A set holds only text, numbers, true or false, date and time values, or null, so it cannot hold datetime[] values. Use a list instead, as in 'datetime[][]'.",
+      "A set holds only text, numbers, true or false, durations, date and time values, or null, so it cannot hold datetime[] values. Use a list instead, as in 'datetime[][]'.",
       "datetime[] set",
     ],
   ]);
