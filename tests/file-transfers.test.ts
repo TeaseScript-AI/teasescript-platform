@@ -6,8 +6,14 @@ import { compileStableProject } from "../src/compiler/compile-program.js";
 import { parse } from "../src/parser.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
+import {
+  createCheckpoint,
+  deserializeCheckpoint,
+  serializeCheckpoint,
+} from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
+import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { validateRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
@@ -690,4 +696,53 @@ test("a root retained for a block cannot bind the name of a global", () => {
   const shadowing = structuredClone(waiting) as Mutable<RuntimeSnapshot>;
   shadowing.retainedScopes[0]!.bindings.push({ name: "score", value: 999 });
   assert.equal(validateRuntimeSnapshot(shadowing, plan).valid, false);
+});
+
+test("a photo taken in a called file or a global function of another file survives a checkpoint", () => {
+  const plan = compiled(
+    project(
+      'call "booth.tease"\nsay "first ${shot}"\nlet second = snap()\nsay "second ${second}"\nexit',
+      {
+        "booth.tease":
+          "global shot: string? = null\nglobal function snap {\n  return takePhoto()\n}\nshot = takePhoto()\nend\n",
+      },
+    ),
+  );
+  const photo = "captured-media:photo:1";
+  const admission = { holds: (reference: string) => reference === photo };
+  const answer = (snapshot: RuntimeSnapshot) => {
+    const action = snapshot.foregroundAction;
+    assert.equal(action?.kind, "capture");
+    const completed = completeAction(
+      plan,
+      snapshot,
+      {
+        actionId: action.actionId,
+        actionKind: "capture",
+        payload: { kind: "captured", media: { kind: "image", reference: photo } },
+      },
+      { capturedMedia: admission },
+    );
+    assert.equal(completed.outcome.kind, "completed");
+    return run(plan, completed.snapshot);
+  };
+  const restored = (snapshot: RuntimeSnapshot) =>
+    deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, snapshot))).snapshot;
+
+  // Waiting inside the called file, then inside the global function called from main.tease.
+  const inFile = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+  assert.equal(inFile.callFrames.at(-1)?.kind, "file");
+  const inFunction = answer(inFile);
+  assert.equal(inFunction.snapshot.callFrames.at(-1)?.kind, "function");
+  for (const waiting of [inFile, inFunction.snapshot]) {
+    assert.equal(validateRuntimeSnapshot(waiting, plan).valid, true);
+    assert.deepEqual(restored(waiting), waiting);
+  }
+  const finished = answer(answer(restored(inFile)).snapshot);
+  assert.deepEqual(answer(restored(inFunction.snapshot)).snapshot, finished.snapshot);
+  assert.deepEqual(outputs([...inFunction.events, ...finished.events]), [
+    `first ${photo}`,
+    `second ${photo}`,
+    "exit",
+  ]);
 });
