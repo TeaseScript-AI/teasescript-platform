@@ -360,11 +360,18 @@ let average = total / count
 let remainder = amount % 2
 ```
 
-Division returns a `number` when necessary:
+Dividing numbers always returns a `number`, also when the result is whole. Storing it where an `integer` is required needs
+explicit rounding ([§13](#13-explicit-types)):
 
 ```text
-5 / 2 // 2.5
+5 / 2                                 // 2.5
+let shares: integer = 10 / 5          // compile error: a quotient is a number
+let shares: integer = floor(10 / 5)   // valid
 ```
+
+Arithmetic applies to numbers, and to durations as described in [§35](#35-date-time-durations-and-unix-time). It never
+converts text or booleans: `"a" + "b"` is a compile error, and text is joined with interpolation, as in
+`"${first}${second}"`.
 
 ### Randomness
 
@@ -550,6 +557,8 @@ Rules:
 - Use `else if` as two words.
 - `{}` are required for blocks.
 - Indentation is recommended but not syntactically significant.
+- A condition, like an operand of `and`, `or`, and `not`, is `true` or `false`. There is no truthiness: `if count` is
+  a compile error that suggests a comparison such as `count > 0`.
 
 ## 8. Strings and interpolation
 **Status:** Accepted
@@ -781,6 +790,13 @@ Rules:
 - Parameters are comma-separated.
 - Default values use `name = value`.
 - Required parameters must come before parameters with defaults.
+- An annotated parameter keeps its type; every argument and default must fit it.
+- A parameter with a default but no annotation takes the default's type by the same rule as `let`
+  ([§12](#12-variable-declarations)): with `times = 1`, `times` is an `integer`, and a call that passes `0.5` is a compile
+  error that suggests `times: number = 1`. A default that does not decide a type, such as `null` or `[]`, leaves the
+  parameter's type unknown.
+- A parameter without an annotation or a default has an unknown type. Its arguments are not checked, because a
+  parameter's type is never inferred from its call sites.
 
 ## 12. Variable declarations
 **Status:** Accepted
@@ -821,6 +837,27 @@ let score = 10
 score = "high"
 ```
 
+The first value decides an inferred type:
+
+```text
+let best = null       // best takes the type of its first non-null value
+best = "Ada"          // best is now string?
+best = 5              // compile error: best holds text (string) since line 2
+
+let picks = []        // picks takes its element type from its first element
+picks.add(3)          // picks is now integer[]
+picks.add("three")    // compile error
+```
+
+- A variable that starts as `null` takes the type of its first non-null value and may still hold `null`. The compiler
+  infers no other combination of types.
+- An empty list or set takes its element type from the first element added or assigned. In a list or set literal,
+  integers and numbers together are numbers, and `null` elements make the element type optional.
+- "First" follows checking order: top-level statements in source order, then function bodies that were not yet
+  needed, then timer and media blocks. The message for a later contradiction names the line of the first value.
+- A value whose type the compiler cannot know, such as untyped storage, host data, or a parameter of unknown type,
+  decides nothing and is not rejected at compile time.
+
 ## 13. Explicit types
 **Status:** Accepted
 
@@ -846,6 +883,30 @@ duration
 ```
 
 Lists and optional values continue to use `type[]` and `type?`.
+
+### Implicit conversions
+
+`integer` to `number` is the only implicit type conversion: an integer may be stored where a number is expected, and
+arithmetic on an integer and a number gives a number. Literal spelling decides the numeric type: `2` is an `integer`,
+while `2.0`, `.5`, and `1e3` are `number` values.
+
+```text
+let ratio: number = 3                 // valid
+let count: integer = 2.0              // compile error: 2.0 is a number
+let count: integer = 10 / 4           // compile error: a quotient is a number
+let count: integer = floor(10 / 4)    // valid
+```
+
+Every other change of type is explicit:
+
+- Text and numbers never convert into each other. A number becomes text through interpolation, as in `"${count}"`.
+- Booleans and numbers never convert into each other.
+- A number never becomes an `integer` by itself; `round`, `floor`, or `ceil` makes it whole.
+- A duration needs a unit: `let pause: duration = 5`, `pause = 10`, and `pause + 5` are compile errors that suggest
+  `5 s`. A bare number counts as seconds only in commands that expect a time: `wait`, `timer`, the `showButton`
+  timeout, and media positions.
+
+Values become visible text in `${...}` and `say` as described in [§8](#8-strings-and-interpolation).
 
 ### Type conversion
 
@@ -945,6 +1006,17 @@ Properties use dot access:
 say door.name
 door.locked = false
 ```
+
+A property keeps the type of its first value, like a variable ([§12](#12-variable-declarations)). Assignment may add a
+property, which then keeps its type:
+
+```text
+door.locked = "yes"    // compile error: locked holds true or false (boolean)
+door.color = "red"     // adds color, which holds text (string) from now on
+```
+
+When an object is stored in a place that already holds an object, such as an element of a list of objects, the
+properties they share must have the same types.
 
 Two objects are equal (`==`) when they have the same property names with equal values, in any property order. A
 property set to `null` differs from a missing property:
@@ -1177,6 +1249,15 @@ function calculateDamage(
 ```
 
 `void` is not required for functions without a returned value.
+
+A function's result type comes from its `return` values, so callers keep it like any other value
+([§12](#12-variable-declarations)). Integers and numbers together give a `number`. Returns of different types are a
+compile error that names both. A function that can end without returning a value, by reaching its end or through a
+bare `return`, returns `null` there, so its result may be `null`. A function whose returns have unknown types has an
+unknown result.
+
+With a return-type annotation, every returned value must fit the annotation, and a function that can end without a
+value needs an optional result type such as `number?`.
 
 ## 18. Null and optional values
 **Status:** Accepted
@@ -1825,7 +1906,7 @@ say "${music.elapsed} of ${music.duration}"
   developer warning `TSW010` follow the timer handle rules.
 - An assignment to `position` or `remaining` is a seek. It is clamped to the active range and does not fire cues it
   jumps across; a cue exactly at a new position before the end fires once playback proceeds from it. A seek to the end
-  of the range fires the cues there and completes the current pass at once, like a timer's `remaining = 0`, also while
+  of the range fires the cues there and completes the current pass at once, like a timer's `remaining = 0 s`, also while
   paused, where the next pass stays paused. Seeks do not change `elapsed`.
 - After media finishes or stops, `position` and `elapsed` keep their final values; `remaining` is zero if the source
   loaded and `null` otherwise.
@@ -2742,6 +2823,9 @@ duration / duration -> number
 Elapsed duration values support `==`, `!=`, `<`, `<=`, `>`, and `>=` across compatible units:
 `90 seconds > 1 minute` is true.
 
+A plain number never becomes a duration in these operations or when stored: `pause + 5` and
+`let pause: duration = 5` are compile errors that suggest `5 s` ([§13](#13-explicit-types)).
+
 Date/time values also support those comparisons; `datetime` comparisons use the represented exact moment.
 
 ### Display and technical conversion
@@ -3569,6 +3653,9 @@ player
 random
 randomInteger
 chance
+round
+floor
+ceil
 toString
 toNumber
 toInteger

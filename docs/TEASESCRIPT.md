@@ -12,6 +12,7 @@ Accepted post-V30 additions:
 - ADR 0016 defines the shared resumable pending-action contract and selects blocking `wait` as its first implementation slice.
 - ADR 0017 defines the accepted boundary between official syntax, the public Standard Library, package libraries, privileged platform adapters, and deterministic engine primitives.
 - ADR 0018 defines the accepted first Standard Library POC contract for `showButton`, `askText`, `askNumber`, `choose`, and `say` smart autoplay.
+- ADR 0021 defines static types: enforcement, implicit conversions, union types, type tests, and narrowing.
 - `specifications/message-markup.md` defines the accepted constrained presentation markup for authored Standard-chat
   `say` output and the `escapeMarkup()` literal-insertion helper.
 
@@ -208,7 +209,8 @@ The exact syntax for detailed result objects, advanced accessibility overrides, 
 ## Currently implemented language subset
 
 The repository includes core values, variables, assignments including `+=`/`-=`, speakers, output, collections,
-expressions, comments, ranges, deterministic random built-ins, conditionals, loops, and loop control.
+expressions, comments, ranges, deterministic random built-ins, the `round`, `floor`, and `ceil` built-ins, conditionals,
+loops, and loop control.
 
 Implemented script storage includes `save`, `load` with an optional lazy default, and `delete`, with a checkpointed
 session view and host-acknowledged atomic writes. Accepted semantics and current type-checking limits are defined in
@@ -239,14 +241,15 @@ The current function subset includes:
 - lexical function scope with package-global access;
 - deep-copy ordinary arguments/returns and speaker-reference identity preservation.
 
-The compiler enforces that a variable keeps its declared or inferred type (V30 §12) wherever both types are known:
-`let`, assignment, `+=`/`-=`, list and set elements (`add`, index assignment), and loop variables. An `integer` value may
-be stored where a `number` is expected; every other mismatch is compile error `TSV041`. Values the compiler cannot know,
-such as untyped storage, host data, and function results, are not yet checked at runtime.
+A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces the ADR 0021 type
+rules that do not need new syntax: variables, list and set elements, object properties, parameters, and function results
+keep one type, including types decided by a first non-null value, a first element, a parameter default, or a function's
+returns; `integer` to `number` is the only implicit conversion; and operators, conditions, indexes, members, and command
+operands get values of types they support. A mismatch is `TSV041`, an unsupported operand `TSV043`, and returns of
+different types `TSV044`. Values the compiler cannot know, such as untyped storage, host data, and unknown parameters,
+are not yet checked at runtime. Union types, type tests, and narrowing are not implemented yet.
 
-Complete static typing and the wider V30 Standard Library/runtime APIs are not implemented yet. Until function-signature
-types are checked, a typed function signature parses but does not compile, so its declared types are never silently
-ignored.
+The wider V30 Standard Library/runtime APIs are not implemented yet.
 
 The current source/compiler implements authored presentation options and the ADR 0018 `say` pacing and skip forms while
 preserving existing `say`/
