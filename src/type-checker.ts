@@ -2014,6 +2014,15 @@ class TypeChecker {
       this.#relaxNarrowedRoot(callee.object, scope);
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
     const value = resolved(receiver);
+    // The receiver as it was evaluated, before the arguments run, for the checks of text operations and `join`. Only
+    // they use it, so other methods, such as repeated `add` calls on a growing list, do not copy their receiver.
+    const receiverAtCall =
+      TEXT_MEMBERS.has(method) || method === "join" ? copyType(receiver) : receiver;
+    const typeOf = (argument: Expression): StaticType => this.#typeOf(argument);
+    const memberChecks = (): void =>
+      this.#reportProblems(
+        memberProblems(callee.object, receiverAtCall, callee.property, expression, typeOf),
+      );
     // Pausing, resuming, or stopping media first waits for the previous message's pacing.
     if (["pause", "resume", "stop"].includes(method) && mayBe(receiver, "media")) this.#suspend();
     const collections = members(value).every((member) =>
@@ -2041,9 +2050,15 @@ class TypeChecker {
       }
     }
     const values: StaticType[] = [];
-    for (const argument of expression.arguments)
-      values.push(yield* compileChild(this.#expressionTask(argument.value, scope)));
-    if (!isKnown(value)) return UNKNOWN_TYPE;
+    for (const argument of expression.arguments) {
+      yield* compileChild(this.#expressionTask(argument.value, scope));
+      values.push(this.#capture(argument.value));
+    }
+    if (!isKnown(value)) {
+      // Only text and lists have these methods, so their arguments are checked on any receiver.
+      memberChecks();
+      return UNKNOWN_TYPE;
+    }
     if (method === "removeAt" && values.length === 1 && members(value).every(isList))
       this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value);
     // A set compares only values it can hold, and a list becomes a set only of such values.
@@ -2065,10 +2080,13 @@ class TypeChecker {
           `${resolved(all[0]!).kind === "timer" ? "Timer" : "Media"} ${method}() takes no arguments.`,
           callee.property.span,
         );
+      if (TEXT_MEMBERS.has(method) || method === "join") memberChecks();
       return all.length === 1 ? results[0]! : union(results.map((result) => result!));
     }
     const failing = resolved(all.find((_, index) => results[index] === undefined)!);
     if (passing.length > 0) this.#reportMayBe(callee.object, failing, passing);
+    // Text operations and values without methods name what to write instead (V30 §8).
+    else if (all.length === 1 && MEMBER_CHECKED_KINDS.has(failing.kind)) memberChecks();
     else
       this.#report(
         typeCode.invalidOperand,
@@ -2147,8 +2165,18 @@ class TypeChecker {
       case "round":
       case "floor":
       case "ceil":
-        if (argument !== undefined && value !== undefined)
-          this.#reportUnless(value, isNumeric, argument.value, `${name}(...) takes a number`);
+        {
+          const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+          // A union or a possibly null number names the test or the check first (ADR 0021 rule 3.5, #504 Q1).
+          if (
+            problems.every((problem) => problem.kind === "invalidOperand") &&
+            argument !== undefined &&
+            value !== undefined &&
+            members(value).length > 1
+          )
+            this.#reportUnless(value, isNumeric, argument.value, `${name}(...) takes a number`);
+          else this.#reportProblems(problems);
+        }
         return INTEGER_TYPE;
       case "min":
       case "max": {
@@ -2200,6 +2228,15 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const value = resolved(failing);
+    // Text operations and `join` name what to write instead (V30 §8).
+    if (MEMBER_CHECKED_KINDS.has(value.kind) || (value.kind === "list" && name === "join")) {
+      this.#reportProblems(
+        memberProblems(expression.object, failing, expression.property, null, (item) =>
+          this.#typeOf(item),
+        ),
+      );
+      return UNKNOWN_TYPE;
+    }
     this.#report(
       typeCode.invalidOperand,
       value.kind === "list" || value.kind === "set"
@@ -3523,6 +3560,7 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
     case "media":
       return handlePropertyType(value.kind, name, "read");
     case "scalar":
+      return isScalar(value, "string") && name === "length" ? INTEGER_TYPE : undefined;
     case "range":
     case "null":
       return undefined;
@@ -3538,8 +3576,15 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     return ["pause", "resume", "stop"].includes(method) ? NULL_TYPE : undefined;
   if (value.kind === "speaker" || value.kind === "unknown" || value.kind === "open")
     return UNKNOWN_TYPE;
+  // Text operations (V30 §8).
+  if (isScalar(value, "string")) {
+    const member = TEXT_MEMBERS.get(method);
+    return member?.parameters ? textResultType(member) : undefined;
+  }
   if (value.kind !== "list" && value.kind !== "set") return undefined;
   switch (method) {
+    case "join":
+      return value.kind === "list" ? STRING_TYPE : undefined;
     case "contains":
       return BOOLEAN_TYPE;
     // A conversion builds a new collection, so its elements decide their type apart from the original's.
@@ -3595,7 +3640,9 @@ function assignableProperty(
   // A problem with the receiver itself points at the receiver.
   if (["scalar", "list", "set", "range", "null"].includes(member.kind))
     return {
-      problem: `Only objects, speakers, and timer and media handles have properties to assign, but this is ${describeValue(member)}.`,
+      problem: isScalar(member, "string")
+        ? `Text cannot be changed, so '${name}' cannot be assigned. Assign a new text to the variable instead.`
+        : `Only objects, speakers, and timer and media handles have properties to assign, but this is ${describeValue(member)}.`,
       receiver: true,
     };
   const type = member.kind === "object" ? member.properties?.get(name) : undefined;
