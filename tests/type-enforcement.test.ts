@@ -324,6 +324,19 @@ test("optional types keep their non-null type in operations, elements, and loops
     [],
   );
   assert.deepEqual(codes('let t: string? = "a"\nlet r = round(t)'), [["TSV043", "t"]]);
+  // So may an optional time, timer length, media position, or range bound.
+  for (const source of [
+    "let n: number? = 1\nwait n",
+    "let n: integer? = 1\nwait n ms",
+    "let n: duration? = 1 s\ntimer n",
+    'let n: duration? = 1 s\nplayAudio(file: "a.mp3", startAt: n)',
+  ]) {
+    const result = runValidSource(source);
+    assert.equal(result.snapshot.failure, null, source);
+    assert.equal(result.snapshot.status, "waiting", source);
+  }
+  assert.deepEqual(sayTexts("let n: integer? = 1\nlet r = n..3\nsay r"), ["1..3"]);
+  assert.deepEqual(codes('let n: string? = "a"\nwait n'), [["TSV043", "n"]]);
 });
 
 test("number times duration is a duration, and a media cue's own handle keeps its type", () => {
@@ -362,6 +375,49 @@ test("an optional operand and a parenthesized method keep their checks", () => {
   ]);
   assert.deepEqual(mismatches('let tags = set["a"]\n(tags.add)(1)')[0]?.[0], "TSV041");
   assert.deepEqual(mismatches("let count = 1\nlet extra: integer? = 2\ncount += extra"), []);
+});
+
+test("a set holds only text, numbers, true or false, and null, and only objects and handles take properties", () => {
+  for (const [source, text] of [
+    ["let o = { x: 1 }\nlet s = set[o]", "o"],
+    ["let d = 1 s\nlet s = set[d]", "d"],
+    ["let s = set[]\nlet xs = [1]\ns.add(xs)", "xs"],
+    ["let xs = [{ x: 1 }]\nlet s = xs.toSet()", "xs.toSet()"],
+    ["let s = set[1]\nlet o = {}\nsay s.contains(o)", "o"],
+    ["let s = set[1]\nlet o = {}\ns.remove(o)", "o"],
+  ] as const)
+    assert.deepEqual(codes(source), [["TSV006", text]], source);
+  assert.equal(
+    mismatches("let s = set[]\nlet xs = [1]\ns.add(xs)")[0]?.[1],
+    "A set holds only text, numbers, true or false, or null, so it cannot hold a list (integer[]).",
+  );
+  // A set compares any value it can hold, and checks a value the compiler cannot know when the script runs.
+  assert.deepEqual(
+    sayTexts('let s = set[1, null]\ns.add(2)\nsay "${s.contains("x")}"\ns.remove(null)\nsay s'),
+    ["false", "[1, 2]"],
+  );
+  assert.equal(
+    runValidSource("function f(v) {\n    let s = set[v]\n}\nf([1])").snapshot.failure?.code,
+    "TSR032",
+  );
+  for (const source of [
+    "let n = 1\nn.value = true",
+    "let xs = [1]\nxs.length = 2",
+    "let xs = [1]\nxs.first = 2",
+  ])
+    assert.deepEqual(
+      codes(source).map(([code]) => code),
+      ["TSV043"],
+      source,
+    );
+  assert.deepEqual(mismatches("let xs = [1]\nxs.length = 2"), [
+    [
+      "TSV043",
+      "Only objects, speakers, and timer and media handles have properties to assign, but this is a list (integer[]).",
+      "xs",
+    ],
+  ]);
+  assert.deepEqual(sayTexts("let o = { value: 1 }\no.value = 2\nsay o"), ["{ value: 2 }"]);
 });
 
 test("function bodies check assignments to script variables", () => {

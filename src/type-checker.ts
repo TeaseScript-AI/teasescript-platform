@@ -73,6 +73,7 @@ export interface TypeCheckResult {
 }
 
 const typeCode = {
+  invalidSetElement: "TSV006",
   invalidInteractionChoice: "TSV029",
   invalidInteractionDefault: "TSV039",
   listInText: "TSV040",
@@ -726,7 +727,10 @@ class TypeChecker {
     return "";
   }
 
-  /** The place of a known property, or of a timer or media handle property, which must exist and be assignable. */
+  /**
+   * The place of a known property, or of a timer or media handle property, which must exist and be assignable. A text,
+   * number, list, set, or range has no property to assign.
+   */
   #propertyPlace(
     object: StaticType,
     objectExpression: Expression,
@@ -744,6 +748,14 @@ class TypeChecker {
           property.span,
         );
       return type === undefined ? undefined : propertyPlace(type, label, `'${label}'`);
+    }
+    if (["scalar", "list", "set", "range"].includes(value.kind)) {
+      this.#report(
+        typeCode.invalidOperand,
+        `Only objects, speakers, and timer and media handles have properties to assign, but this is ${describeValue(value)}.`,
+        objectExpression.span,
+      );
+      return undefined;
     }
     if (value.kind !== "object" || value.properties === null) return undefined;
     const type = value.properties.get(name);
@@ -1081,6 +1093,7 @@ class TypeChecker {
         for (const item of expression.elements) {
           yield* compileChild(this.#expressionTask(item, scope));
           types.push(this.#capture(item));
+          if (expression.kind === "setLiteral") this.#checkSetElement(item, this.#typeOf(item));
         }
         // Elements of known types must share one type; an element of unknown type leaves the element type unknown.
         const known = types.filter((type) => resolved(type).kind !== "unknown");
@@ -1125,7 +1138,13 @@ class TypeChecker {
       case "rangeExpression": {
         for (const bound of [expression.start, expression.end]) {
           const type = yield* compileChild(this.#expressionTask(bound, scope));
-          this.#reportUnless(type, isNumeric(type), bound, "A range bound is a number");
+          // A possibly null bound is checked by its other members, like other operands (V30 §34).
+          this.#reportUnless(
+            type,
+            isNumeric(nonNullTypeForUse(type)),
+            bound,
+            "A range bound is a number",
+          );
         }
         return { kind: "range" };
       }
@@ -1245,13 +1264,14 @@ class TypeChecker {
       const argument = expression.arguments[0];
       if (argument !== undefined && expression.arguments.length === 1) {
         const type = yield* compileChild(this.#expressionTask(argument.value, scope));
-        yield* compileChild(
-          this.#storeTask(
-            elementPlace(value, expressionLabel(callee.object), isNullable(receiver)),
-            argument.value,
-            type,
-          ),
-        );
+        if (value.kind === "list" || this.#checkSetElement(argument.value, type))
+          yield* compileChild(
+            this.#storeTask(
+              elementPlace(value, expressionLabel(callee.object), isNullable(receiver)),
+              argument.value,
+              type,
+            ),
+          );
         return NULL_TYPE;
       }
     }
@@ -1259,11 +1279,16 @@ class TypeChecker {
     for (const argument of expression.arguments)
       values.push(yield* compileChild(this.#expressionTask(argument.value, scope)));
     if (value.kind === "list" || value.kind === "set") {
+      // A set compares only values it can hold.
+      if (value.kind === "set" && (method === "contains" || method === "remove"))
+        for (const [index, argument] of expression.arguments.entries())
+          this.#checkSetElement(argument.value, values[index]!);
       switch (method) {
         case "contains":
           return BOOLEAN_TYPE;
         // A conversion builds a new collection, so its elements decide their type apart from the original's.
         case "toSet":
+          if (value.kind === "list") this.#checkSetElement(expression, value.element);
           return value.kind === "list"
             ? { kind: "set", element: copyType(value.element) }
             : UNKNOWN_TYPE;
@@ -1681,12 +1706,14 @@ class TypeChecker {
   }
 
   #reportTime(expression: Expression, type: StaticType, unit: boolean): void {
+    // A possibly null time is checked by its other members, like other operands (V30 §34).
+    const value = nonNullTypeForUse(type);
     if (unit)
-      this.#reportUnless(type, isNumeric(type), expression, "A time before a unit is a number");
+      this.#reportUnless(type, isNumeric(value), expression, "A time before a unit is a number");
     else
       this.#reportUnless(
         type,
-        isNumeric(type) || isScalar(type, "duration"),
+        isNumeric(value) || isScalar(value, "duration"),
         expression,
         "A time is a duration such as '30 s', or a number of seconds",
       );
@@ -1812,6 +1839,21 @@ class TypeChecker {
       `${rule}, but this is ${describeValue(nonNullTypeForUse(type))}.`,
       expression.span,
     );
+  }
+
+  /**
+   * Reports a value that a set cannot hold: a set holds only text, numbers, true or false, and null (V30 §16). A value
+   * of unknown type is checked when the script runs. Returns whether the value may be held.
+   */
+  #checkSetElement(expression: Expression, type: StaticType): boolean {
+    const rejected = members(type).find((member) => isKnown(member) && !isSetElement(member));
+    if (rejected === undefined) return true;
+    this.#report(
+      typeCode.invalidSetElement,
+      `A set holds only text, numbers, true or false, or null, so it cannot hold ${describeValue(rejected)}.`,
+      expression.span,
+    );
+    return false;
   }
 
   /** Reports list and set literals that mix types and were not stored in a place of a declared element type. */
@@ -1954,6 +1996,11 @@ function handlePropertyType(
 function nonNullTypeForUse(type: StaticType): StaticType {
   const value = nonNullType(type);
   return value.kind === "never" ? resolved(type) : value;
+}
+
+function isSetElement(type: StaticType): boolean {
+  const value = resolved(type);
+  return value.kind === "null" || isScalar(value, "string", "boolean", "integer", "number");
 }
 
 function capitalize(text: string): string {
