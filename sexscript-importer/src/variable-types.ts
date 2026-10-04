@@ -753,11 +753,21 @@ function analyse(
         returns?.push(item.value === null ? NULL : typeOf(item.value, scope));
         return;
       case "if": {
-        // The question of a legacy input needs no null test where the variable can never hold null.
+        // The question of a legacy input needs no null test where the variable can never hold null, or where the
+        // statement before has just stored a value that is never null in it.
+        const before: IrStatement | null = preceding;
         const tested = item.condition.kind === "binary" ? item.condition.left : null;
+        const neverNull = (type: TeaseType): boolean =>
+          !["unknown", "null", "optional"].includes(type.kind);
         if (item.guard === "prompt" && tested?.kind === "variable") {
-          const type = typeOf(tested, scope);
-          if (!["unknown", "null", "optional"].includes(type.kind)) analysis.unguarded.add(item);
+          const assigned =
+            before !== null &&
+            before.kind === "assign" &&
+            before.operator === "=" &&
+            before.target.kind === "variable" &&
+            before.target.name === tested.name &&
+            neverNull(typeOf(before.value, scope));
+          if (assigned || neverNull(typeOf(tested, scope))) analysis.unguarded.add(item);
         }
         block(item.then, scope);
         block(item.else, scope);
@@ -823,12 +833,20 @@ function analyse(
     );
   };
 
-  const block = (items: IrStatement[], outer: Scope): void => {
-    const scope = new Scope(outer);
-    for (const item of items) statement(item, scope);
+  // The statement before the one being walked in its block, apart from comments: a prompt guard right after an
+  // assignment of a value that is never null tests nothing.
+  let preceding: IrStatement | null = null;
+  const walk = (items: readonly IrStatement[], scope: Scope): void => {
+    let last: IrStatement | null = null;
+    for (const item of items) {
+      preceding = last;
+      statement(item, scope);
+      if (item.kind !== "comment" && item.kind !== "blank") last = item;
+    }
   };
+  const block = (items: IrStatement[], outer: Scope): void => walk(items, new Scope(outer));
 
-  for (const item of statements) statement(item, root);
+  walk(statements, root);
   // Functions see every package global, also those declared after them.
   for (const item of functions) {
     const scope = new Scope(root);
@@ -836,7 +854,7 @@ function analyse(
       scope.names.set(parameter.name, binding(parameter, parameter.name, null, UNKNOWN));
     });
     returns = [];
-    for (const child of item.body) statement(child, scope);
+    walk(item.body, scope);
     // A function that may end without `return` may return nothing (#526: an optional result).
     if (
       item.body.findLast((child) => child.kind !== "comment" && child.kind !== "blank")?.kind !==

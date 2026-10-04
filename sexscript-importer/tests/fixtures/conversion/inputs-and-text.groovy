@@ -23,3 +23,6 @@ def kneel = getBoolean(question)
 // A question read from storage may be null, which kept the current text, so it is still tested.
 def stored = loadString("question")
 def answer = getString(stored, "")
+// A question that may be null elsewhere needs no test right after it was set to text.
+stored = "Ready now?"
+def ready = getBoolean(stored)

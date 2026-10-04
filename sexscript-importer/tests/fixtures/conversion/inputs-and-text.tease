@@ -43,4 +43,8 @@ if stored != null {
   say stored
 }
 let answer = askText
+// A question that may be null elsewhere needs no test right after it was set to text.
+stored = "Ready now?"
+say stored
+let ready = (choose yes: "Yes", no: "No") == "yes"
 exit
