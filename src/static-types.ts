@@ -266,6 +266,10 @@ export const BOOLEAN_TYPE = scalar("boolean");
 export const INTEGER_TYPE = scalar("integer");
 export const NUMBER_TYPE = scalar("number");
 export const DURATION_TYPE = scalar("duration");
+export const DATE_TYPE = scalar("date");
+export const TIME_TYPE = scalar("time");
+export const DATETIME_TYPE = scalar("datetime");
+export const TIMESTAMP_TYPE = scalar("timestamp");
 
 export function openType(): OpenType {
   return { kind: "open", resolved: null, resolvedAt: null, sawNull: false };

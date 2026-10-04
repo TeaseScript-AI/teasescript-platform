@@ -129,6 +129,10 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "ceil",
   "min",
   "max",
+  "toDate",
+  "toTime",
+  "toDateTime",
+  "toTimestamp",
 ] as const);
 
 /** Temporary direct-call bridge for implemented Platform Standard Library helpers. */
