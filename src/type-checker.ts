@@ -4881,6 +4881,12 @@ function conversionFix(
   const kept = resolved(nonNullType(target));
   if (isScalar(kept, "integer") && isScalar(value, "number")) return `${ROUND_FIX}.`;
   if (isScalar(kept, "duration") && isNumeric(value)) return ` ${unitFix(expression)}`;
+  // Date and time values are written as ISO text and converted.
+  const conversion = Object.entries(TEMPORAL_CONVERSIONS).find(([, { result }]) =>
+    isScalar(kept, result),
+  );
+  if (conversion !== undefined && isScalar(value, "string"))
+    return ` Convert the text with ${conversion[0]}(...).`;
   if (isScalar(kept, "string") && (isNumeric(value) || isScalar(value, "boolean"))) {
     const label =
       expression === null ? null : (expressionLabel(expression) ?? literalText(expression));

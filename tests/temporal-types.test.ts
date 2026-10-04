@@ -33,7 +33,7 @@ test("timestamp is a type name for annotations and type tests, and a protected n
   assert.deepEqual(diagnostics('function f(at: timestamp) {\n    at = "2026-10-04T12:30:00Z"\n}'), [
     [
       "TSV041",
-      "'at' holds a timestamp, so it cannot be set to text (string). To allow both, declare it as 'let at: timestamp | string = ...'.",
+      "'at' holds a timestamp, so it cannot be set to text (string). Convert the text with toTimestamp(...).",
       '"2026-10-04T12:30:00Z"',
     ],
   ]);
@@ -142,6 +142,13 @@ test("conversions report wrong arguments, argument counts, and named arguments",
       ["TSV022", "toDate(...) has no parameter 'fallback'; its only named argument is 'default:'."],
     ],
   );
+  assert.deepEqual(diagnostics('let day: date = "2026-10-04"'), [
+    [
+      "TSV041",
+      "'day' is declared as date, so it cannot start as text (string). Convert the text with toDate(...).",
+      '"2026-10-04"',
+    ],
+  ]);
 });
 
 test("date and time values have read-only fields and methods by kind", () => {
