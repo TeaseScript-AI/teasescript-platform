@@ -79,6 +79,7 @@ function compileCountedBinaryChain(binaryCount: number, leafCallsUserFunction: b
   const callee: Identifier = { kind: "identifier", name: "leaf", span };
   const declaration: FunctionDeclaration = {
     kind: "functionDeclaration",
+    global: false,
     name: callee,
     parameters: [],
     returnTypeAnnotation: null,

@@ -11,6 +11,7 @@ import {
   type InteractionUiPayload,
   type PlanSourceLocation,
   type PreparedInteractionUiPayload,
+  instructionSourcePath,
   mainSourceSpan,
 } from "../plan/model.js";
 import { parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
@@ -151,11 +152,7 @@ export function executeInstruction(
   capabilities: RuntimeCapabilities = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, inputSnapshot);
-  const context = new RuntimeExecutionContext(
-    captured.snapshot,
-    capabilities,
-    captured.plan.images,
-  );
+  const context = new RuntimeExecutionContext(captured.snapshot, capabilities, captured.plan);
   const instructionsExecuted = executeCapturedInstruction(
     captured.plan,
     captured.snapshot,
@@ -212,7 +209,12 @@ function executeInstructionBoundary(
     }
   } catch (error) {
     if (!(error instanceof RuntimeFault)) throw error;
-    failSnapshot(snapshot, error.toInfo(), context.events);
+    failSnapshot(
+      snapshot,
+      error.toInfo(),
+      instructionSourcePath(plan, instructionIndex),
+      context.events,
+    );
   } finally {
     snapshot.contextualSpeaker = null;
   }
@@ -237,7 +239,7 @@ export function stepValidatedStateToEvent(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  const context = new RuntimeExecutionContext(snapshot, capabilities, plan.images);
+  const context = new RuntimeExecutionContext(snapshot, capabilities, plan);
   let instructionsExecuted = 0;
   while (executionRunnable(snapshot) && context.events.length === 0) {
     if (instructionsExecuted >= budget) {
@@ -267,7 +269,7 @@ export function runValidatedState(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  const context = new RuntimeExecutionContext(snapshot, capabilities, plan.images);
+  const context = new RuntimeExecutionContext(snapshot, capabilities, plan);
   let instructionsExecuted = 0;
   while (executionRunnable(snapshot)) {
     if (instructionsExecuted >= budget) {
@@ -287,46 +289,48 @@ function executePlannedInstruction(
   events: InterpreterEvent[],
 ): void {
   switch (instruction.kind) {
+    case "declareGlobal": {
+      if (snapshot.globals.some((binding) => binding.name === instruction.name)) {
+        throw fault("TSR001", `Global '${instruction.name}' is already set up.`, instruction.span);
+      }
+      const value = evaluator.evaluateStartValue(instruction.value);
+      if (instruction.typeCheck !== undefined)
+        assertValueType(value, instruction.typeCheck, instruction.value.span);
+      snapshot.globals.push({
+        name: instruction.name,
+        value: cloneCapturedSerializableValue(value),
+      });
+      advance(snapshot);
+      return;
+    }
     case "declareSpeaker": {
       executeSpeakerAtomically(snapshot, evaluator, events, (stagedSnapshot, stagedEvaluator) => {
-        // A goto back to an earlier label declares a top-level speaker again: it keeps its identity, with new properties.
-        const rerun = rerunsTopLevelDeclaration(stagedSnapshot, instruction.name);
-        if (!rerun && findBinding(stagedSnapshot, instruction.name) !== undefined) {
+        if (stagedSnapshot.globals.some((binding) => binding.name === instruction.name)) {
           throw fault(
             "TSR001",
-            `Speaker '${instruction.name}' is already visible in this scope.`,
+            `Speaker '${instruction.name}' is already set up.`,
             instruction.span,
           );
         }
-        let speaker: RuntimeSpeakerSnapshot;
-        if (rerun) {
-          speaker = stagedEvaluator.speakerByName(instruction.name, instruction.span);
-          speaker.properties.length = 0;
-        } else {
-          assertCounterCanAdvance(stagedSnapshot.nextSpeakerId, "nextSpeakerId");
-          speaker = {
-            id: stagedSnapshot.nextSpeakerId,
-            identifier: instruction.name,
-            properties: [],
-          };
-          stagedSnapshot.nextSpeakerId += 1;
-          stagedSnapshot.speakers.push(speaker);
-          currentFrame(stagedSnapshot).bindings.push({
-            name: instruction.name,
-            value: {
-              kind: "speakerReference",
-              speakerId: speaker.id,
-              identifier: instruction.name,
-            },
-          });
-        }
+        assertCounterCanAdvance(stagedSnapshot.nextSpeakerId, "nextSpeakerId");
+        const speaker: RuntimeSpeakerSnapshot = {
+          id: stagedSnapshot.nextSpeakerId,
+          identifier: instruction.name,
+          properties: [],
+        };
+        stagedSnapshot.nextSpeakerId += 1;
+        stagedSnapshot.speakers.push(speaker);
+        stagedSnapshot.globals.push({
+          name: instruction.name,
+          value: { kind: "speakerReference", speakerId: speaker.id, identifier: instruction.name },
+        });
         stagedSnapshot.contextualSpeaker = speaker.id;
         for (const property of instruction.properties) {
           if (speaker.properties.some((item) => item.name === property.name)) {
             throw fault("TSR007", `Duplicate speaker property '${property.name}'.`, property.span);
           }
           const propertyValue = cloneCapturedSerializableValue(
-            stagedEvaluator.evaluate(property.value),
+            stagedEvaluator.evaluateStartValue(property.value),
           );
           if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
             throw fault(
@@ -337,32 +341,6 @@ function executePlannedInstruction(
           }
           speaker.properties.push({ name: property.name, value: propertyValue });
         }
-        advance(stagedSnapshot);
-      });
-      return;
-    }
-    case "setDeclaredSpeakerProperty": {
-      executeSpeakerAtomically(snapshot, evaluator, events, (stagedSnapshot, stagedEvaluator) => {
-        const speaker = stagedEvaluator.speakerByName(instruction.speaker, instruction.span);
-        if (speaker.properties.some((property) => property.name === instruction.name)) {
-          throw fault(
-            "TSR007",
-            `Duplicate speaker property '${instruction.name}'.`,
-            instruction.span,
-          );
-        }
-        stagedSnapshot.contextualSpeaker = speaker.id;
-        const propertyValue = cloneCapturedSerializableValue(
-          stagedEvaluator.evaluate(instruction.value),
-        );
-        if (instruction.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
-          throw fault(
-            "TSR050",
-            "Speaker property 'defaultSaySkippable' must be a boolean.",
-            instruction.span,
-          );
-        }
-        speaker.properties.push({ name: instruction.name, value: propertyValue });
         advance(stagedSnapshot);
       });
       return;
@@ -389,7 +367,7 @@ function executePlannedInstruction(
     case "declareBinding": {
       // A goto back to an earlier label runs a top-level `let` again, which sets its existing variable anew.
       const rerun = rerunsTopLevelDeclaration(snapshot, instruction.name);
-      if (!rerun && findBinding(snapshot, instruction.name) !== undefined) {
+      if (!rerun && evaluator.binding(instruction.name) !== undefined) {
         throw fault(
           "TSR001",
           `Variable '${instruction.name}' is already visible in this scope.`,
@@ -1143,7 +1121,7 @@ function bindSuppliedParameter(
     throw fault("TSR048", "Function parameter metadata is inconsistent.", instruction.span);
   }
   if (argument.supplied) {
-    declareFunctionBinding(snapshot, parameter.name, argument.value, instruction.span);
+    declareFunctionBinding(plan, snapshot, parameter.name, argument.value, instruction.span);
   }
   frame.parameterState.parameterIndex += 1;
   advance(snapshot);
@@ -1221,7 +1199,7 @@ function bindDefaultParameter(
   const value = evaluator.evaluate(instruction.value);
   if (instruction.typeCheck !== undefined)
     assertValueType(value, instruction.typeCheck, instruction.value.span);
-  declareFunctionBinding(snapshot, parameter.name, value, instruction.span);
+  declareFunctionBinding(plan, snapshot, parameter.name, value, instruction.span);
   frame.parameterState.parameterIndex += 1;
   advance(snapshot);
 }
@@ -1301,12 +1279,13 @@ function functionDefinition(
 }
 
 function declareFunctionBinding(
+  plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   name: string,
   value: SerializableRuntimeValue,
   span: SourceSpan,
 ): void {
-  if (findBinding(snapshot, name) !== undefined) {
+  if (findBinding(snapshot, plan, name) !== undefined) {
     throw fault("TSR001", `Parameter '${name}' duplicates a visible binding.`, span);
   }
   currentFrame(snapshot).bindings.push({ name, value: cloneCapturedSerializableValue(value) });
@@ -1952,22 +1931,30 @@ function requiredEventSequencesForNewDelay(snapshot: RuntimeSnapshot): number {
   return delayRequestAndCompletion + backgroundPacingCompletion;
 }
 
+/** Fails the session; `path` is the project file whose source the failure's span is in. */
 function failSnapshot(
   snapshot: RuntimeSnapshot,
   failure: RuntimeErrorInfo,
+  path: string,
   events: InterpreterEvent[],
 ): void {
   const failureSequence = takeSequence(snapshot);
   snapshot.status = "failed";
   // A failed session is terminal; no foreground action stays pending.
   snapshot.foregroundAction = null;
-  snapshot.failure = { code: failure.code, message: failure.message, span: copySpan(failure.span) };
+  snapshot.failure = {
+    code: failure.code,
+    message: failure.message,
+    path,
+    span: copySpan(failure.span),
+  };
   events.push(
     Object.freeze({
       kind: "runtimeFailure",
       sequence: failureSequence,
       code: failure.code,
       message: failure.message,
+      path,
       span: copySpan(failure.span),
     } satisfies RuntimeFailureEvent),
   );
@@ -1982,6 +1969,7 @@ function failForBudget(
   failSnapshot(
     snapshot,
     { code: "TSR037", message: "Runtime instruction budget exceeded.", span: copySpan(span) },
+    instructionSourcePath(plan, snapshot.nextInstruction),
     events,
   );
 }

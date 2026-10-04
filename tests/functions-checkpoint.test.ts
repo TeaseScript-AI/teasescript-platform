@@ -781,7 +781,7 @@ test("cyclic builtin results become source-associated runtime failures", () => {
   assert.deepEqual(
     result.events.flatMap((event) =>
       event.kind === "runtimeFailure"
-        ? [{ code: event.code, message: event.message, span: event.span }]
+        ? [{ code: event.code, message: event.message, path: event.path, span: event.span }]
         : [],
     ),
     [failure],

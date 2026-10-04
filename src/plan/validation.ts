@@ -97,6 +97,12 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
         errors,
       );
     }
+    validateStartupPrefix(
+      value.instructions,
+      files,
+      Array.isArray(value.files) ? value.files.length : 0,
+      errors,
+    );
     analyzeInstructionStream(value.instructions, value.functions, files, errors);
     if (errors.length === 0 && files !== null) {
       // EVIDENCE: validation: every instruction passed its shape check above, with no error.
@@ -104,6 +110,47 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
     }
   }
   return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
+}
+
+/**
+ * The start values of globals and speakers lead the root region of `main.tease`, which sets them up before the story
+ * runs (ADR 0022 §6). Each sets up another name and refers to the file whose source it comes from.
+ */
+function validateStartupPrefix(
+  instructions: readonly unknown[],
+  files: readonly PlanFileBoundaries[] | null,
+  fileCount: number,
+  errors: PlanValidationError[],
+): void {
+  const names = new Set<string>();
+  let leading = true;
+  instructions.forEach((instruction, index) => {
+    const path = `$.instructions[${index}]`;
+    if (
+      !isRecord(instruction) ||
+      (instruction.kind !== "declareGlobal" && instruction.kind !== "declareSpeaker")
+    ) {
+      leading = false;
+      return;
+    }
+    if (!leading || (files !== null && index >= files[0]!.rootEndInstruction))
+      errors.push(
+        planError(
+          "TSC002",
+          "Globals and speakers are set up only at the start of main.tease.",
+          path,
+        ),
+      );
+    if (!nonNegativeSafeInteger(instruction.file) || instruction.file >= fileCount)
+      errors.push(
+        planError("TSC002", "The source file of a start value is invalid.", `${path}.file`),
+      );
+    if (typeof instruction.name === "string") {
+      if (names.has(instruction.name))
+        errors.push(planError("TSC002", "Each global and speaker is set up once.", `${path}.name`));
+      names.add(instruction.name);
+    }
+  });
 }
 
 const PLAN_FIELDS = [
@@ -319,8 +366,8 @@ function validatePlanFiles(
 
 /** Fields of instruction kinds whose case in validateInstruction does not already require exact keys. */
 const INSTRUCTION_FIELDS = fieldsByKind([
-  ["declareSpeaker", "name", "properties"],
-  ["setDeclaredSpeakerProperty", "speaker", "name", "value"],
+  ["declareGlobal", "name", "value", "typeCheck", "file"],
+  ["declareSpeaker", "name", "properties", "file"],
   ["setDefaultSpeaker", "name"],
   ["enterScope"],
   ["leaveScope"],
@@ -424,10 +471,10 @@ function validateInstruction(
       requireString(value.name, `${path}.name`, errors);
       validateProperties(value.properties, `${path}.properties`, errors, temporaryCount);
       return;
-    case "setDeclaredSpeakerProperty":
-      requireString(value.speaker, `${path}.speaker`, errors);
+    case "declareGlobal":
       requireString(value.name, `${path}.name`, errors);
       validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+      validateOptionalTypeCheck(value, path, errors);
       return;
     case "setDefaultSpeaker":
       requireString(value.name, `${path}.name`, errors);

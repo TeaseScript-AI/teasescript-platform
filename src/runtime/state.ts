@@ -22,14 +22,19 @@ import type {
   RuntimePreparedSayOutputSnapshot,
 } from "./actions/model.js";
 import {
+  type CompiledFunctionDefinition,
   type Instruction,
   type InstructionPlan,
   type InteractionChoiceValue,
   type InteractionUiPayload,
+  startupDeclarations,
 } from "../plan/model.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { cloneMessageMarkup } from "../message-markup.js";
 import { captureOrReuseInstructionPlan } from "../plan/capture.js";
+import { runnablePlan, type RunnablePlan } from "./runnable-plan.js";
+import { GLOBAL_SCOPE_ID } from "./prepared-references.js";
+import { packagePathProblem } from "../project-paths.js";
 import { captureExternalData, type ExternalDataFailureKind } from "../external-data-capture.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {
@@ -96,6 +101,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "version",
   "nextInstruction",
   "frames",
+  "globals",
   "speakers",
   "defaultSpeaker",
   "contextualSpeaker",
@@ -152,6 +158,8 @@ export interface RuntimeSpeakerSnapshot {
 export interface RuntimeFailureSnapshot {
   readonly code: string;
   readonly message: string;
+  /** The project file whose source {@link span} is in. */
+  readonly path: string;
   readonly span: SourceSpan;
 }
 
@@ -259,6 +267,11 @@ export interface RuntimeSnapshot {
   readonly version: typeof RUNTIME_SNAPSHOT_VERSION;
   nextInstruction: number;
   readonly frames: RuntimeScopeFrameSnapshot[];
+  /**
+   * The session's globals, which every file sees (ADR 0022 §6): those the host gives, then the globals and speakers of
+   * the script as the start of `main.tease` sets them up.
+   */
+  readonly globals: RuntimeBindingSnapshot[];
   readonly speakers: RuntimeSpeakerSnapshot[];
   defaultSpeaker: number | null;
   contextualSpeaker: number | null;
@@ -361,7 +374,7 @@ export function createFreshRuntimeSnapshot(
 
 /** Creates fresh state for an engine-owned plan that was already fully validated. */
 export function createFreshRuntimeSnapshotWithValidatedPlan(
-  _plan: InstructionPlan,
+  plan: InstructionPlan,
   options: FreshRuntimeOptions = {},
 ): RuntimeSnapshot {
   const optionsCapture = captureExternalData(options);
@@ -378,7 +391,8 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
   if (!isPlainRecord(globals)) {
     throw new TypeError("Fresh runtime globals must be an object.");
   }
-  const bindings: RuntimeBindingSnapshot[] = [];
+  const hostGlobals: RuntimeBindingSnapshot[] = [];
+  const scriptGlobals = new Set(startupDeclarations(plan).map((declaration) => declaration.name));
   const maxCallDepthValue = capturedOptions.maxCallDepth;
   const initialSessionTimeMs = capturedOptions.initialSessionTimeMs ?? 0;
   const chatPacingSettings = captureChatPacingSettings(capturedOptions);
@@ -424,6 +438,8 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
   }
   for (const [name, value] of Object.entries(globals)) {
     if (name.length === 0) throw new TypeError("Global binding names must not be empty.");
+    if (scriptGlobals.has(name))
+      throw new TypeError(`globals.${name} has the name of a global or speaker of the script.`);
     const failure = validateCapturedSerializableValue(value, `globals.${name}`);
     if (failure !== null) throw new TypeError(failure);
     // EVIDENCE: validation: validateCapturedSerializableValue accepted this captured global value above.
@@ -433,13 +449,14 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
         `globals.${name} contains a timer handle, media handle, or speaker reference, which only the runtime creates.`,
       );
     }
-    bindings.push({ name, value: valid });
+    hostGlobals.push({ name, value: valid });
   }
   return {
     format: RUNTIME_SNAPSHOT_FORMAT,
     version: RUNTIME_SNAPSHOT_VERSION,
     nextInstruction: 0,
-    frames: [{ id: 0, bindings }],
+    frames: [{ id: 0, bindings: [] }],
+    globals: hostGlobals,
     speakers: [],
     defaultSpeaker: null,
     contextualSpeaker: null,
@@ -508,11 +525,9 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     nextInstruction: snapshot.nextInstruction,
     frames: snapshot.frames.map((frame) => ({
       id: frame.id,
-      bindings: frame.bindings.map((binding) => ({
-        name: binding.name,
-        value: cloneCapturedSerializableValue(binding.value),
-      })),
+      bindings: frame.bindings.map(cloneBinding),
     })),
+    globals: snapshot.globals.map(cloneBinding),
     speakers: snapshot.speakers.map((speaker) => ({
       id: speaker.id,
       identifier: speaker.identifier,
@@ -598,9 +613,14 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
         : {
             code: snapshot.failure.code,
             message: snapshot.failure.message,
+            path: snapshot.failure.path,
             span: copySpan(snapshot.failure.span),
           },
   };
+}
+
+function cloneBinding(binding: RuntimeBindingSnapshot): RuntimeBindingSnapshot {
+  return { name: binding.name, value: cloneCapturedSerializableValue(binding.value) };
 }
 
 function cloneInterruption(
@@ -873,22 +893,6 @@ export function classifyCapturedRuntimeSnapshot(
   return validateCapturedRuntimeSnapshotDetails(value, plan);
 }
 
-/**
- * The part of a plan that a session can run: `main.tease`, its functions, and its handlers. Until `goto` and `call`
- * reach other files, a snapshot that refers to another file's instructions or functions is malformed, so every check
- * of a snapshot sees only this part. It is built per validation, like the other analyses of external plan data.
- */
-function runnablePlan(plan: InstructionPlan): InstructionPlan {
-  if (plan.files.length === 1) return plan;
-  const end = plan.files[0]!.endInstruction;
-  return {
-    ...plan,
-    files: [plan.files[0]!],
-    instructions: plan.instructions.slice(0, end),
-    functions: plan.functions.filter((definition) => definition.endInstruction <= end),
-  };
-}
-
 function validateCapturedRuntimeSnapshotDetails(
   value: unknown,
   fullPlan?: InstructionPlan,
@@ -938,12 +942,14 @@ function validateCapturedRuntimeSnapshotDetails(
   }
   validateFrames(value.frames, errors);
   const speakerIds = validateSpeakers(value.speakers, errors);
+  validateGlobals(value, plan, errors);
+  const scopes = referenceScopes(value);
   const preparedReferenceTemporaryIds = collectPreparedReferenceTemporaryIds(plan);
   const preparedSayTemporaryOwnership = collectPreparedSayTemporaryOwnership(plan);
   validateTemporaries(value.temporaries, plan, "Runtime temporaries", errors);
   validatePreparedReferenceTemporaries(
     value.temporaries,
-    value.frames,
+    scopes,
     value.speakers,
     preparedReferenceTemporaryIds,
     "Runtime temporaries",
@@ -971,7 +977,7 @@ function validateCapturedRuntimeSnapshotDetails(
     errors,
   );
   const handleIds = validateSpeakerReferences(
-    value.frames,
+    scopes,
     value.speakers,
     value.loopFrames,
     value.temporaries,
@@ -1091,7 +1097,7 @@ function validateCapturedRuntimeSnapshotDetails(
   if (!isOneOf(value.status, ["ready", "running", "waiting", "halted", "failed"])) {
     errors.push("Runtime status is invalid.");
   }
-  validateFailure(value.failure, value.status, errors);
+  validateFailure(value.failure, value.status, plan, errors);
   validateStatusConsistency(value, plan, errors);
   const validation = Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
   return Object.freeze({ validation, failureKind: validation.valid ? null : failureKind });
@@ -1103,7 +1109,7 @@ function validateLoopFrames(
   nextInstruction: unknown,
   callFrames: unknown,
   callFrameIds: ReadonlySet<number>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
   errors: string[],
 ): void {
@@ -1134,7 +1140,7 @@ function validateLoopFrames(
     }
   }
   plan?.instructions.forEach((instruction, index) => {
-    if (instruction.kind === "loopStart") {
+    if (instruction?.kind === "loopStart") {
       plannedLoops.set(instruction.loopId, {
         kind: instruction.loopKind,
         ...(instruction.loopKind === "for" ? { variable: instruction.variable } : {}),
@@ -1238,7 +1244,7 @@ function iterationLength(source: Record<string, unknown>): number {
 
 function validateTemporaries(
   value: unknown,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   label: string,
   errors: string[],
 ): void {
@@ -1303,15 +1309,13 @@ function validatePreparedReferenceTemporaries(
   }
 }
 
-function collectPreparedReferenceTemporaryIds(
-  plan: InstructionPlan | undefined,
-): ReadonlySet<number> {
+function collectPreparedReferenceTemporaryIds(plan: RunnablePlan | undefined): ReadonlySet<number> {
   if (plan === undefined) return new Set<number>();
   return new Set(
     plan.instructions
       .filter(
         (instruction): instruction is Extract<Instruction, { kind: "prepareReference" }> =>
-          instruction.kind === "prepareReference",
+          instruction?.kind === "prepareReference",
       )
       .map((instruction) => instruction.destinationTemporary),
   );
@@ -1328,7 +1332,7 @@ interface PreparedSayTemporaryOwnership {
 }
 
 function collectPreparedSayTemporaryOwnership(
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): PreparedSayTemporaryOwnership {
   const outputSpeakerIds = new Set<number>();
   const textIds = new Set<number>();
@@ -1339,6 +1343,7 @@ function collectPreparedSayTemporaryOwnership(
   const nullableSaySpeakerSources = new Set<number>();
   if (plan !== undefined) {
     for (const instruction of plan.instructions) {
+      if (instruction === undefined) continue;
       if (instruction.kind === "prepareSaySpeaker") {
         outputSpeakerIds.add(instruction.destinationTemporary);
         if (instruction.speaker === null)
@@ -1529,8 +1534,12 @@ function validatePreparedReferenceDescriptor(
   if (marker !== "preparedReference") {
     return "the descriptor marker is invalid.";
   }
-  if (rootFrameId !== null && !nonNegativeSafeInteger(rootFrameId)) {
-    return "the root frame ID must be a non-negative integer or null.";
+  if (
+    rootFrameId !== null &&
+    rootFrameId !== GLOBAL_SCOPE_ID &&
+    !nonNegativeSafeInteger(rootFrameId)
+  ) {
+    return "the root frame ID must be a non-negative integer, the globals' scope ID, or null.";
   }
   if (rootName !== null && (typeof rootName !== "string" || rootName.length === 0)) {
     return "the root name must be a non-empty string or null.";
@@ -1751,7 +1760,7 @@ function validateCallFrames(
   loopFrames: unknown,
   nextInstruction: unknown,
   maxCallDepth: unknown,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
   preparedReferenceTemporaryIds: ReadonlySet<number>,
   preparedSayTemporaryOwnership: PreparedSayTemporaryOwnership,
@@ -1818,7 +1827,7 @@ function validateCallFrames(
         errors,
       );
     }
-    let callInstruction: InstructionPlan["instructions"][number] | undefined;
+    let callInstruction: Instruction | undefined;
     if (
       !nonNegativeSafeInteger(frame.functionId) ||
       frame.functionId < 1 ||
@@ -1863,7 +1872,7 @@ function validateCallFrames(
     validateTemporaries(frame.callerTemporaries, plan, "Runtime caller temporaries", errors);
     validatePreparedReferenceTemporaries(
       frame.callerTemporaries,
-      frames,
+      referenceScopes(snapshotValue),
       speakers,
       preparedReferenceTemporaryIds,
       "Runtime caller temporaries",
@@ -2016,7 +2025,7 @@ function validateTimerHandlerFrame(
   frames: unknown,
   loopFrames: unknown,
   snapshotValue: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
   errors: string[],
 ): void {
@@ -2094,7 +2103,7 @@ function validateSelfHandleBinding(
   frame: Record<string, unknown>,
   interruption: Record<string, unknown>,
   frames: unknown,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   errors: string[],
 ): void {
   if (plan === undefined || !nonNegativeSafeInteger(frame.functionId)) return;
@@ -2127,7 +2136,7 @@ function validateSelfHandleBinding(
 
 function validateCallArgumentSupply(
   argumentsValue: unknown,
-  callInstruction: InstructionPlan["instructions"][number] | undefined,
+  callInstruction: Instruction | undefined,
   errors: string[],
 ): void {
   if (!Array.isArray(argumentsValue) || callInstruction?.kind !== "callFunction") {
@@ -2164,7 +2173,7 @@ function createTemporaryMap(
 function validateParameterBindings(
   frame: Record<string, unknown>,
   frames: unknown,
-  definition: InstructionPlan["functions"][number] | undefined,
+  definition: CompiledFunctionDefinition | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
   errors: string[],
 ): void {
@@ -2212,7 +2221,7 @@ function validateParameterBindings(
 
 function validateCallArguments(
   value: unknown,
-  definition: InstructionPlan["functions"][number] | undefined,
+  definition: CompiledFunctionDefinition | undefined,
   errors: string[],
 ): void {
   if (!Array.isArray(value)) {
@@ -2249,7 +2258,7 @@ function validateCallArguments(
 
 function validateParameterState(
   value: unknown,
-  definition: InstructionPlan["functions"][number] | undefined,
+  definition: CompiledFunctionDefinition | undefined,
   errors: string[],
 ): void {
   if (
@@ -2267,7 +2276,7 @@ function validateParameterState(
 
 function validateExactParameterPosition(
   value: unknown,
-  definition: InstructionPlan["functions"][number],
+  definition: CompiledFunctionDefinition,
   instructionPosition: number,
   analysis: SnapshotValidationAnalysis,
   errors: string[],
@@ -2284,7 +2293,7 @@ function validateExactParameterPosition(
 }
 
 function expectedParameterProgress(
-  definition: InstructionPlan["functions"][number],
+  definition: CompiledFunctionDefinition,
   instructionPosition: number,
   analysis: SnapshotValidationAnalysis,
 ): RuntimeParameterStateSnapshot | null {
@@ -2330,8 +2339,8 @@ function expectedParameterProgress(
 }
 
 interface SnapshotValidationAnalysis {
-  readonly plan: InstructionPlan;
-  readonly functionsById: ReadonlyMap<number, InstructionPlan["functions"][number]>;
+  readonly plan: RunnablePlan;
+  readonly functionsById: ReadonlyMap<number, CompiledFunctionDefinition>;
   readonly regionEnds: readonly number[];
   readonly functionIdsByInstruction: readonly (number | null)[];
   readonly continuationLiveness: Map<string, readonly ReadonlySet<number>[]>;
@@ -2339,13 +2348,14 @@ interface SnapshotValidationAnalysis {
   readonly parameterNames: ReadonlyMap<number, ReadonlySet<string>>;
 }
 
-function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
-  const functionsById = new Map<number, InstructionPlan["functions"][number]>();
+function createSnapshotValidationAnalysis(plan: RunnablePlan): SnapshotValidationAnalysis {
+  const functionsById = new Map<number, CompiledFunctionDefinition>();
   const regionEnds = new Array<number>(plan.instructions.length).fill(
     plan.files[0]!.rootEndInstruction,
   );
   const functionIdsByInstruction = new Array<number | null>(plan.instructions.length).fill(null);
   for (const definition of plan.functions) {
+    if (definition === undefined) continue;
     functionsById.set(definition.id, definition);
     for (let index = definition.entryInstruction; index < definition.endInstruction; index += 1) {
       regionEnds[index] = definition.endInstruction;
@@ -2361,7 +2371,7 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
   }
   // A media block's self-handle is bound on entry, like a parameter.
   const parameterNames = new Map(
-    plan.functions.map((definition) => [
+    [...functionsById.values()].map((definition) => [
       definition.id,
       new Set([
         ...definition.parameters.map((parameter) => parameter.name),
@@ -2425,7 +2435,9 @@ function computeContinuationLiveness(
   while (changed) {
     changed = false;
     for (let index = count - 1; index >= 0; index -= 1) {
-      const instruction = plan.instructions[index]!;
+      const instruction = plan.instructions[index];
+      // An instruction outside the runnable plan has nothing live.
+      if (instruction === undefined) continue;
       const liveOut = new Set<number>();
       for (const successor of instructionSuccessors(analysis, index)) {
         for (const temporaryId of liveIn[successor] ?? []) {
@@ -2489,7 +2501,7 @@ function sameNumberSet(left: ReadonlySet<number>, right: ReadonlySet<number>): b
 
 function validateStatusConsistency(
   value: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   errors: string[],
 ): void {
   const calls = Array.isArray(value.callFrames) ? value.callFrames.length : 0;
@@ -2636,7 +2648,7 @@ function positiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && typeof value === "number" && value >= 1;
 }
 
-function isLegalHaltPosition(nextInstruction: unknown, plan: InstructionPlan): boolean {
+function isLegalHaltPosition(nextInstruction: unknown, plan: RunnablePlan): boolean {
   if (!nonNegativeSafeInteger(nextInstruction)) return false;
   return nextInstruction > 0 && plan.instructions[nextInstruction - 1]?.kind === "exit";
 }
@@ -2646,7 +2658,7 @@ function validateCurrentTemporaryRequirements(
   loopFrames: unknown,
   nextInstruction: unknown,
   status: unknown,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   errors: string[],
 ): void {
   if (
@@ -2679,6 +2691,100 @@ function validateCurrentTemporaryRequirements(
   if (instruction.kind === "callFunction" && present.has(instruction.destinationTemporary)) {
     errors.push("Runtime function result destination is already occupied.");
   }
+}
+
+/**
+ * The scopes a prepared reference may have as its root: the scope frames, then the session's globals under
+ * {@link GLOBAL_SCOPE_ID}.
+ */
+// oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: boundary: the scope frames remain unvalidated until the reference checks read them.
+function referenceScopes(snapshot: Record<string, unknown>): unknown {
+  return Array.isArray(snapshot.frames)
+    ? [
+        ...snapshot.frames,
+        { id: GLOBAL_SCOPE_ID, bindings: Array.isArray(snapshot.globals) ? snapshot.globals : [] },
+      ]
+    : snapshot.frames;
+}
+
+/**
+ * The session's globals: the host's, then those that the start of `main.tease` set up so far, in its order (ADR 0022
+ * §6). While it runs, exactly the globals and speakers before the next instruction are set up; after it, all of them. A
+ * speaker's global refers to the speaker of its name, and the speaker registry holds exactly these speakers. No scope
+ * binding has the name of a global.
+ */
+function validateGlobals(
+  snapshot: Record<string, unknown>,
+  plan: RunnablePlan | undefined,
+  errors: string[],
+): void {
+  const globals = snapshot.globals;
+  if (!Array.isArray(globals)) {
+    errors.push("Runtime globals must be an array.");
+    return;
+  }
+  const names: string[] = [];
+  const values: unknown[] = [];
+  for (const binding of globals) {
+    if (!isPlainRecord(binding) || typeof binding.name !== "string" || binding.name.length === 0) {
+      errors.push("Runtime global is malformed.");
+      return;
+    }
+    if (names.includes(binding.name)) errors.push("Runtime globals contain a duplicate name.");
+    names.push(binding.name);
+    values.push(binding.value);
+    const failure = validateCapturedSerializableValue(binding.value);
+    if (failure !== null) errors.push(failure);
+  }
+  const globalNames = new Set(names);
+  if (
+    Array.isArray(snapshot.frames) &&
+    snapshot.frames.some(
+      (frame) =>
+        isPlainRecord(frame) &&
+        Array.isArray(frame.bindings) &&
+        frame.bindings.some(
+          (binding) =>
+            isPlainRecord(binding) &&
+            typeof binding.name === "string" &&
+            globalNames.has(binding.name),
+        ),
+    )
+  )
+    errors.push("Runtime scope binding has the name of a global.");
+  if (plan === undefined) return;
+  const declarations = startupDeclarations(plan);
+  const setUp =
+    nonNegativeSafeInteger(snapshot.nextInstruction) &&
+    snapshot.nextInstruction < declarations.length
+      ? snapshot.nextInstruction
+      : declarations.length;
+  const host = globals.length - setUp;
+  const speakers = Array.isArray(snapshot.speakers) ? snapshot.speakers : [];
+  const setUpSpeakers = declarations
+    .slice(0, setUp)
+    .filter((declaration) => declaration.kind === "declareSpeaker");
+  if (
+    host < 0 ||
+    names.slice(0, host).some((name) => declarations.some((item) => item.name === name)) ||
+    declarations
+      .slice(0, setUp)
+      .some((declaration, index) => names[host + index] !== declaration.name) ||
+    speakers.length !== setUpSpeakers.length ||
+    setUpSpeakers.some((declaration, index) => {
+      const speaker = speakers[index];
+      const value = values[host + declarations.indexOf(declaration)];
+      return (
+        !isPlainRecord(speaker) ||
+        speaker.identifier !== declaration.name ||
+        !isPlainRecord(value) ||
+        value.kind !== "speakerReference" ||
+        value.speakerId !== speaker.id ||
+        value.identifier !== declaration.name
+      );
+    })
+  )
+    errors.push("Runtime globals do not match those the plan sets up before the next instruction.");
 }
 
 function validateFrames(value: unknown, errors: string[]): void {
@@ -2760,7 +2866,12 @@ function validateSpeakers(value: unknown, errors: string[]): Set<number> {
   return ids;
 }
 
-function validateFailure(value: unknown, status: unknown, errors: string[]): void {
+function validateFailure(
+  value: unknown,
+  status: unknown,
+  plan: RunnablePlan | undefined,
+  errors: string[],
+): void {
   if (value === null) {
     if (status === "failed") errors.push("Failed runtime status requires failure information.");
     return;
@@ -2769,6 +2880,10 @@ function validateFailure(value: unknown, status: unknown, errors: string[]): voi
     !isPlainRecord(value) ||
     typeof value.code !== "string" ||
     typeof value.message !== "string" ||
+    typeof value.path !== "string" ||
+    (plan === undefined
+      ? packagePathProblem(value.path) !== null
+      : !plan.files.some((file) => file.path === value.path)) ||
     !validSpan(value.span)
   ) {
     errors.push("Runtime failure information is malformed.");

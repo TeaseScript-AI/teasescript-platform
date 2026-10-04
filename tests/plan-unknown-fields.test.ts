@@ -13,7 +13,7 @@ import {
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 
 // Ordinary source whose compiled plan contains every instruction and expression shape the compiler emits for it,
-// plus function definitions, parameters, speaker and object properties, dict entries, template parts, positional and
+// plus function definitions, parameters, globals, speaker and object properties, dict entries, template parts, positional and
 // named builtin arguments, static and prepared interaction payloads, and runtime type checks of host values at each kind
 // of place.
 const REPRESENTATIVE_SOURCE = [
@@ -24,7 +24,7 @@ const REPRESENTATIVE_SOURCE = [
   "  return capture(2)",
   "}",
   'speaker vera { title: "Mistress" }',
-  "speaker mira { title: helper() }",
+  'global stored: integer = load "stored", default: 0',
   "speaker vera",
   "let values = [1, 2]",
   'let tags = set["a"]',
@@ -99,8 +99,8 @@ test("current-version plans reject an added field on each object shape of a comp
   );
   // The source must keep reaching the shapes whose unknown-field rejection this test protects.
   for (const kind of [
+    "declareGlobal",
     "declareSpeaker",
-    "setDeclaredSpeakerProperty",
     "setDefaultSpeaker",
     "enterScope",
     "leaveScope",

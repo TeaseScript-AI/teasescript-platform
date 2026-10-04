@@ -4,12 +4,14 @@ import type {
   TimerParts,
   MediaParts,
   FunctionDeclaration,
+  GlobalStatement,
   ListLiteral,
   ObjectLiteral,
   SetLiteral,
   Statement,
   InteractionExpression,
   ShowButtonParts,
+  SpeakerDeclaration,
   SwitchCase,
   SwitchStatement,
   TagQueryExpression,
@@ -63,6 +65,26 @@ export interface LoweringCounters {
   nextTemporaryId: number;
 }
 
+/** What the compilers of a project's files share about its global functions. */
+export interface ProjectFunctions {
+  /** The global functions of every file, by name. */
+  readonly global: ReadonlyMap<string, FunctionDeclaration>;
+  /**
+   * The calls of a global function of another file, by instruction index. Its ID is known only once every file before
+   * it is lowered, so the call gets it then.
+   */
+  readonly foreignCalls: { readonly instruction: number; readonly name: string }[];
+}
+
+/** A timer expiry block or media cue block, compiled after the file's functions. */
+interface RegisteredHandler {
+  readonly block: Block;
+  readonly owner: "timer" | "media";
+  readonly selfHandle: string | null;
+  /** Whether it is in a global function, directly or through other blocks. */
+  readonly global: boolean;
+}
+
 export class InstructionCompiler {
   readonly #loops: Array<{
     readonly loopId: number;
@@ -70,10 +92,14 @@ export class InstructionCompiler {
     readonly breaks: number[];
   }> = [];
 
+  /** The functions this file may call: its own, with their IDs, and the global functions of other files. */
   readonly #functionByName: ReadonlyMap<
     string,
-    { readonly id: number; readonly declaration: FunctionDeclaration }
+    { readonly id: number | null; readonly declaration: FunctionDeclaration }
   >;
+
+  /** Whether the code being compiled is in a global function or one of its timer and media blocks. */
+  #global = false;
 
   readonly #instructionEmissionByExpression = new WeakMap<Expression, boolean>();
 
@@ -98,14 +124,54 @@ export class InstructionCompiler {
     public readonly instructions: Instruction[] = [],
     public readonly functions: CompiledFunctionDefinition[] = [],
     private readonly counters: LoweringCounters = { nextLoopId: 1, nextTemporaryId: 1 },
+    private readonly project: ProjectFunctions = { global: new Map(), foreignCalls: [] },
   ) {
     this.#functionIdBase = functions.length;
-    this.#functionByName = new Map(
-      declarations.map((declaration, index) => [
-        declaration.name.name,
-        { id: this.#functionIdBase + index + 1, declaration },
-      ]),
+    const functionByName = new Map<
+      string,
+      { readonly id: number | null; readonly declaration: FunctionDeclaration }
+    >([...project.global].map(([name, declaration]) => [name, { id: null, declaration }]));
+    declarations.forEach((declaration, index) =>
+      functionByName.set(declaration.name.name, {
+        id: this.#functionIdBase + index + 1,
+        declaration,
+      }),
     );
+    this.#functionByName = functionByName;
+  }
+
+  /** The ID of one of this file's functions. */
+  public functionId(declaration: FunctionDeclaration): number {
+    return this.#functionIdBase + this.declarations.indexOf(declaration) + 1;
+  }
+
+  /**
+   * Compiles the start value of a global or a speaker declared in file `file`, which a session sets up before its
+   * story runs (ADR 0022 §6). It uses no calls or interactions, so it is one instruction.
+   */
+  public compileStartValue(declaration: GlobalStatement | SpeakerDeclaration, file: number): void {
+    if (declaration.kind === "globalStatement") {
+      this.instructions.push({
+        kind: "declareGlobal",
+        name: declaration.name.name,
+        value: compileExpression(declaration.initial, this.typeChecks),
+        ...withTypeCheck(this.typeChecks.get(declaration)),
+        file,
+        span: copySpan(declaration.span),
+      });
+      return;
+    }
+    this.instructions.push({
+      kind: "declareSpeaker",
+      name: declaration.name.name,
+      properties: declaration.properties.map((property) => ({
+        name: property.name.name,
+        value: compileExpression(property.value, this.typeChecks),
+        span: copySpan(property.span),
+      })),
+      file,
+      span: copySpan(declaration.span),
+    });
   }
 
   public resolveGotos(): void {
@@ -121,7 +187,9 @@ export class InstructionCompiler {
 
   public compileFunctions(): void {
     for (const declaration of this.declarations) {
+      this.#global = declaration.global;
       this.#compileFunction(declaration);
+      this.#global = false;
     }
     // Handlers found while compiling a handler are appended and compiled in ID order.
     for (let index = 0; index < this.#handlers.length; index += 1) {
@@ -133,11 +201,7 @@ export class InstructionCompiler {
   }
 
   /** Timer expiry blocks and media cue blocks, compiled after the user functions in registration order. */
-  readonly #handlers: {
-    readonly block: Block;
-    readonly owner: "timer" | "media";
-    readonly selfHandle: string | null;
-  }[] = [];
+  readonly #handlers: RegisteredHandler[] = [];
 
   /** A statement-level media control call whose receiver waits at a pacing barrier once it is evaluated. */
   #barrierCall: Expression | null = null;
@@ -156,36 +220,12 @@ export class InstructionCompiler {
   *#compileStatement(statement: Statement): CompileTask<void> {
     switch (statement.kind) {
       case "speakerDeclaration":
-        if (statement.properties.some((property) => this.#containsUserCall(property.value))) {
-          this.instructions.push({
-            kind: "declareSpeaker",
-            name: statement.name.name,
-            properties: [],
-            span: copySpan(statement.span),
-          });
-          for (const property of statement.properties) {
-            const lowered = this.#lowerExpression(property.value);
-            this.instructions.push({
-              kind: "setDeclaredSpeakerProperty",
-              speaker: statement.name.name,
-              name: property.name.name,
-              value: lowered.plan,
-              span: copySpan(property.span),
-            });
-            this.#emitTemporaryCleanup(lowered.temporaryIds, property.span);
-          }
-          return;
-        }
-        this.instructions.push({
-          kind: "declareSpeaker",
-          name: statement.name.name,
-          properties: statement.properties.map((property) => ({
-            name: property.name.name,
-            value: compileExpression(property.value, this.typeChecks),
-            span: copySpan(property.span),
-          })),
-          span: copySpan(statement.span),
-        });
+        // A speaker is set up before the story runs, by the start of main.tease.
+        return;
+      case "globalStatement":
+        // A global gets its start value before the story runs; with `default:`, the declaration assigns here.
+        if (statement.assignment !== null)
+          yield* compileChild(this.#compileStatement(statement.assignment));
         return;
       case "speakerSetterStatement":
         this.instructions.push({
@@ -907,18 +947,12 @@ export class InstructionCompiler {
   /** Reserves the next function ID; the region is compiled after all user functions. */
   #registerHandler(block: Block, owner: "timer" | "media", selfHandle: string | null): number {
     const id = this.#functionIdBase + this.declarations.length + this.#handlers.length + 1;
-    this.#handlers.push({ block, owner, selfHandle });
+    this.#handlers.push({ block, owner, selfHandle, global: this.#global });
     return id;
   }
 
-  #compileHandler(
-    registered: {
-      readonly block: Block;
-      readonly owner: "timer" | "media";
-      readonly selfHandle: string | null;
-    },
-    id: number,
-  ): void {
+  #compileHandler(registered: RegisteredHandler, id: number): void {
+    this.#global = registered.global;
     const handler = registered.block;
     const entryInstruction = this.instructions.length;
     this.instructions.push({
@@ -935,9 +969,11 @@ export class InstructionCompiler {
     this.compileStatements(handler.statements);
     const implicitReturnInstruction = this.instructions.length;
     this.instructions.push({ kind: "returnVoid", span: copySpan(handler.span) });
+    this.#global = false;
     this.functions.push({
       id,
       handler: registered.owner,
+      global: registered.global,
       selfHandle: registered.selfHandle,
       name: registered.owner === "timer" ? "timer expiry" : "media cue",
       declarationSpan: copySpan(handler.span),
@@ -951,10 +987,11 @@ export class InstructionCompiler {
   }
 
   #compileFunction(declaration: FunctionDeclaration): void {
-    const registered = this.#functionByName.get(declaration.name.name);
-    if (registered === undefined) {
+    const own = this.#functionByName.get(declaration.name.name);
+    if (own?.id === null || own?.declaration !== declaration) {
       throw new TypeError("Semantically invalid function reached compilation.");
     }
+    const registered = { id: own.id, declaration };
     const entryInstruction = this.instructions.length;
     declaration.parameters.forEach((parameter, parameterIndex) => {
       this.instructions.push({
@@ -1006,6 +1043,7 @@ export class InstructionCompiler {
     this.functions.push({
       id: registered.id,
       handler: null,
+      global: declaration.global,
       selfHandle: null,
       name: declaration.name.name,
       declarationSpan: copySpan(declaration.span),
@@ -1807,9 +1845,10 @@ export class InstructionCompiler {
     });
     const destinationTemporary = this.#allocateTemporary();
     const callIndex = this.instructions.length;
+    if (registered.id === null) this.project.foreignCalls.push({ instruction: callIndex, name });
     this.instructions.push({
       kind: "callFunction",
-      functionId: registered.id,
+      functionId: registered.id ?? 0,
       arguments: planned,
       destinationTemporary,
       returnInstruction: callIndex + 1,

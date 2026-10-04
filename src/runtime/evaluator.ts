@@ -17,6 +17,7 @@ import type {
   BinaryExpressionPlan,
   ExpressionPlan,
   PlanImage,
+  InstructionPlan,
   PlanSourceLocation,
   TagQueryExpressionPlan,
   TagQueryStepPlan,
@@ -32,6 +33,7 @@ import { RuntimeFault } from "./errors.js";
 import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
 import { copySpan, takeSequence } from "./operations/support.js";
 import {
+  GLOBAL_SCOPE_ID,
   detachPreparedReferencesForMutation,
   freezePreparedReferenceDescendants,
   preparePreparedReferencesForListRemoval,
@@ -39,6 +41,7 @@ import {
   preparedReferenceSpeakerPath,
   readPreparedReference,
   refreshPreparedReferenceFallbacks,
+  scopeBindings,
   serializePreparedReference,
   type PreparedReferenceDescriptor,
   type PreparedReferenceStep,
@@ -201,8 +204,7 @@ export class RuntimeExecutionContext {
   public constructor(
     private readonly snapshot: RuntimeSnapshot,
     private readonly capabilities: RuntimeCapabilities,
-    /** The plan's image catalog, which tag queries search. */
-    private readonly images: readonly PlanImage[] = [],
+    private readonly plan: InstructionPlan,
   ) {}
 
   public evaluator(): Evaluator {
@@ -210,7 +212,7 @@ export class RuntimeExecutionContext {
       this.#evaluator.refreshBuiltinRegistration();
       return this.#evaluator;
     }
-    this.#evaluator = new Evaluator(this.snapshot, this.capabilities, this.events, this.images);
+    this.#evaluator = new Evaluator(this.snapshot, this.capabilities, this.events, this.plan);
     return this.#evaluator;
   }
 }
@@ -220,11 +222,14 @@ export class Evaluator {
 
   #referenceEpoch = 0;
 
+  /** Whether a start value is being evaluated, which may not select anything at random (ADR 0022 §6). */
+  #startValue = false;
+
   public constructor(
     private readonly snapshot: RuntimeSnapshot,
     private readonly capabilities: RuntimeCapabilities,
     private readonly events: InterpreterEvent[],
-    private readonly images: readonly PlanImage[] = [],
+    private readonly plan: InstructionPlan,
   ) {
     this.refreshBuiltinRegistration();
   }
@@ -235,11 +240,26 @@ export class Evaluator {
   }
 
   public forSnapshot(snapshot: RuntimeSnapshot, events: InterpreterEvent[]): Evaluator {
-    return new Evaluator(snapshot, this.capabilities, events, this.images);
+    return new Evaluator(snapshot, this.capabilities, events, this.plan);
   }
 
   public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
     return this.#evaluateMachine(expression, false).value;
+  }
+
+  /** Evaluates the start value of a global or a speaker property. */
+  public evaluateStartValue(expression: ExpressionPlan): SerializableRuntimeValue {
+    this.#startValue = true;
+    try {
+      return this.evaluate(expression);
+    } finally {
+      this.#startValue = false;
+    }
+  }
+
+  /** The binding that `name` refers to at the current point of execution. */
+  public binding(name: string): RuntimeBindingSnapshot | undefined {
+    return findBindingLocation(this.snapshot, this.plan, name)?.binding;
   }
 
   #evaluateLeaf(
@@ -262,7 +282,7 @@ export class Evaluator {
             identifier: speaker.identifier,
           };
         }
-        const binding = findBinding(this.snapshot, expression.name);
+        const binding = this.binding(expression.name);
         if (binding === undefined) {
           throw fault("TSR006", `Unknown identifier '${expression.name}'.`, expression.span);
         }
@@ -395,7 +415,7 @@ export class Evaluator {
           continue;
         }
         if (expression.kind === "identifier") {
-          const location = findBindingLocation(this.snapshot, expression.name);
+          const location = findBindingLocation(this.snapshot, this.plan, expression.name);
           if (location === undefined)
             throw fault("TSR006", `Unknown identifier '${expression.name}'.`, expression.span);
           result = {
@@ -758,7 +778,7 @@ export class Evaluator {
 
   public assign(target: AssignmentTargetPlan, value: SerializableRuntimeValue): void {
     if (target.kind === "identifier") {
-      const location = findBindingLocation(this.snapshot, target.name);
+      const location = findBindingLocation(this.snapshot, this.plan, target.name);
       if (location === undefined) {
         throw fault("TSR002", `Cannot assign to unknown variable '${target.name}'.`, target.span);
       }
@@ -967,10 +987,9 @@ export class Evaluator {
   ): SerializableRuntimeValue {
     let value: SerializableRuntimeValue;
     if (!descriptor.detached && descriptor.rootFrameId !== null && descriptor.rootName !== null) {
-      const frame = this.snapshot.frames.find(
-        (candidate) => candidate.id === descriptor.rootFrameId,
+      const binding = scopeBindings(this.snapshot, descriptor.rootFrameId)?.find(
+        (candidate) => candidate.name === descriptor.rootName,
       );
-      const binding = frame?.bindings.find((candidate) => candidate.name === descriptor.rootName);
       if (binding === undefined) {
         throw fault("TSR053", "Prepared reference root is no longer available.", span);
       }
@@ -1004,7 +1023,7 @@ export class Evaluator {
   }
 
   public speakerByName(name: string, span: SourceSpan): RuntimeSpeakerSnapshot {
-    const binding = findBinding(this.snapshot, name);
+    const binding = this.binding(name);
     if (binding === undefined || !isSpeakerReference(binding.value)) {
       throw fault("TSR023", `'${name}' is not a declared speaker.`, span);
     }
@@ -1879,7 +1898,7 @@ export class Evaluator {
       if (step.kind === "tagCompare") bounds.set(step, this.#tagBound(value, span));
       else lists.set(step, tagNames(value, step.option, span));
     }
-    const matches = this.images
+    const matches = this.plan.images
       .filter((image) => {
         const tags = imageTags(image);
         return evaluateTagSteps(query.steps, (step) => {
@@ -1908,6 +1927,12 @@ export class Evaluator {
   }
 
   #findRandom(span: SourceSpan): number {
+    if (this.#startValue)
+      throw fault(
+        "TSR067",
+        "A start value cannot select anything at random: it is set up at the start of the session, before the story runs.",
+        span,
+      );
     const random =
       this.capabilities.random === undefined
         ? nextXorShift32(this.snapshot.rng)
@@ -2441,32 +2466,43 @@ function setSpeakerProperty(
   else property.value = cloneCapturedSerializableValue(value);
 }
 
+/**
+ * The binding `name` refers to: in the scopes of the running function, or of the root; then for a function that is not
+ * global, in the root scope of its file; then among the session's globals (ADR 0022 §3, §6).
+ */
 export function findBinding(
   snapshot: RuntimeSnapshot,
+  plan: InstructionPlan,
   name: string,
 ): RuntimeBindingSnapshot | undefined {
-  return findBindingLocation(snapshot, name)?.binding;
+  return findBindingLocation(snapshot, plan, name)?.binding;
 }
 
 function findBindingLocation(
   snapshot: RuntimeSnapshot,
+  plan: InstructionPlan,
   name: string,
 ):
-  | { readonly frame: RuntimeSnapshot["frames"][number]; readonly binding: RuntimeBindingSnapshot }
+  | {
+      readonly frame: { readonly id: number; readonly bindings: readonly RuntimeBindingSnapshot[] };
+      readonly binding: RuntimeBindingSnapshot;
+    }
   | undefined {
-  const functionBase = snapshot.callFrames.at(-1)?.scopeBaseDepth;
-  const minimum = functionBase ?? 0;
-  for (let index = snapshot.frames.length - 1; index >= minimum; index -= 1) {
+  const call = snapshot.callFrames.at(-1);
+  for (let index = snapshot.frames.length - 1; index >= (call?.scopeBaseDepth ?? 0); index -= 1) {
     const frame = snapshot.frames[index]!;
     const binding = frameBinding(frame.bindings, name);
     if (binding !== undefined) return { frame, binding };
   }
-  if (functionBase !== undefined) {
+  if (call !== undefined && plan.functions[call.functionId - 1]?.global !== true) {
     const frame = snapshot.frames[0]!;
     const binding = frameBinding(frame.bindings, name);
-    return binding === undefined ? undefined : { frame, binding };
+    if (binding !== undefined) return { frame, binding };
   }
-  return undefined;
+  const binding = frameBinding(snapshot.globals, name);
+  return binding === undefined
+    ? undefined
+    : { frame: { id: GLOBAL_SCOPE_ID, bindings: snapshot.globals }, binding };
 }
 
 /** Frames up to this size are scanned; larger frames are looked up through a name index. */

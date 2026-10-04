@@ -22,7 +22,7 @@ test("immediate-pacing snapshots preserve ordinary options while capturing zero 
     delayPerCharacterMs: 0,
   });
   assert.equal(snapshot.rng.state, 77);
-  assert.deepEqual(snapshot.frames[0]?.bindings, [{ name: "score", value: 3 }]);
+  assert.deepEqual(snapshot.globals, [{ name: "score", value: 3 }]);
   assert.equal(snapshot.maxCallDepth, 12);
   assert.equal(snapshot.currentSessionTimeMs, 9);
 });

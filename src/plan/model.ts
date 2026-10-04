@@ -84,6 +84,11 @@ export interface CompiledFunctionDefinition {
    * `callFunction`. `null` for a user function.
    */
   readonly handler: "timer" | "media" | null;
+  /**
+   * A `global function`, which every file may call, or a block inside one. It sees the project's globals but not its
+   * file's top-level variables (ADR 0022 §3).
+   */
+  readonly global: boolean;
   /** For a media block of `let NAME = play... async`, the local name bound to its own handle on entry. */
   readonly selfHandle: string | null;
   readonly name: string;
@@ -97,8 +102,8 @@ export interface CompiledFunctionDefinition {
 }
 
 export type Instruction =
+  | DeclareGlobalInstruction
   | DeclareSpeakerInstruction
-  | SetDeclaredSpeakerPropertyInstruction
   | SetDefaultSpeakerInstruction
   | EnterScopeInstruction
   | LeaveScopeInstruction
@@ -143,17 +148,24 @@ interface InstructionBase {
   readonly span: PlanSourceLocation;
 }
 
+/**
+ * Sets up a global with its start value before the story runs (ADR 0022 §6). The start values of all files lead the
+ * root region of `main.tease`; `file` is the index of the file whose source the locations refer to.
+ */
+export interface DeclareGlobalInstruction extends InstructionBase {
+  readonly kind: "declareGlobal";
+  readonly name: string;
+  readonly value: ExpressionPlan;
+  readonly typeCheck?: TypeCheckPlan;
+  readonly file: number;
+}
+
+/** Sets up a speaker before the story runs, like {@link DeclareGlobalInstruction}. */
 export interface DeclareSpeakerInstruction extends InstructionBase {
   readonly kind: "declareSpeaker";
   readonly name: string;
   readonly properties: readonly PlannedProperty[];
-}
-
-export interface SetDeclaredSpeakerPropertyInstruction extends InstructionBase {
-  readonly kind: "setDeclaredSpeakerProperty";
-  readonly speaker: string;
-  readonly name: string;
-  readonly value: ExpressionPlan;
+  readonly file: number;
 }
 
 export interface SetDefaultSpeakerInstruction extends InstructionBase {
@@ -856,6 +868,37 @@ export interface RangeExpressionPlan extends ExpressionPlanBase {
 }
 
 /** The span of `main.tease`: the location of a plan-level fact that belongs to no single instruction. */
-export function mainSourceSpan(plan: InstructionPlan): PlanSourceLocation {
+export function mainSourceSpan(plan: Pick<InstructionPlan, "files">): PlanSourceLocation {
   return plan.files[0]!.sourceSpan;
+}
+
+/** The globals and speakers that the start of `main.tease` sets up, in order (ADR 0022 §6). */
+export function startupDeclarations(plan: {
+  readonly instructions: readonly (Instruction | undefined)[];
+}): readonly (DeclareGlobalInstruction | DeclareSpeakerInstruction)[] {
+  const declarations: (DeclareGlobalInstruction | DeclareSpeakerInstruction)[] = [];
+  for (const instruction of plan.instructions) {
+    if (instruction?.kind !== "declareGlobal" && instruction?.kind !== "declareSpeaker") break;
+    declarations.push(instruction);
+  }
+  return declarations;
+}
+
+/**
+ * The project file whose source the location of an instruction is in: the file whose block holds it, or for a start
+ * value the file it comes from.
+ */
+export function instructionSourcePath(
+  plan: Pick<InstructionPlan, "files"> & {
+    readonly instructions: readonly (Instruction | undefined)[];
+  },
+  index: number,
+): string {
+  const instruction = plan.instructions[index];
+  if (instruction?.kind === "declareGlobal" || instruction?.kind === "declareSpeaker")
+    return plan.files[instruction.file]!.path;
+  return (
+    plan.files.find((file) => index >= file.startInstruction && index < file.endInstruction) ??
+    plan.files[0]!
+  ).path;
 }
