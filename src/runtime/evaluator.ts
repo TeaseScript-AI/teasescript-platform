@@ -949,6 +949,14 @@ export class Evaluator {
       const equal = serializableEquals(left, right);
       return expression.operator === "==" ? equal : !equal;
     }
+    if (expression.operator === "in") {
+      if (!isRange(right)) throw fault("TSR035", "Unsupported binary operation.", expression.span);
+      return (
+        typeof left === "number" &&
+        left >= right.start &&
+        (right.inclusive ? left <= right.end : left < right.end)
+      );
+    }
     if (isDuration(left) || isDuration(right)) return this.#durationBinary(expression, left, right);
     if (["<", "<=", ">", ">="].includes(expression.operator)) {
       if (

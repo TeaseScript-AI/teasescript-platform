@@ -1717,6 +1717,7 @@ const binaryOperators = new Set([
   ">=",
   "and",
   "or",
+  "in",
 ]);
 
 function invalidPlan(

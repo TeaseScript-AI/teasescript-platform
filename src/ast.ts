@@ -22,6 +22,7 @@ export type Statement =
   | LetStatement
   | AssignmentStatement
   | IfStatement
+  | SwitchStatement
   | RepeatStatement
   | ForStatement
   | WhileStatement
@@ -264,6 +265,22 @@ export interface IfStatement {
   readonly condition: Expression;
   readonly thenBlock: Block;
   readonly elseBlock: Block | IfStatement | null;
+  readonly span: SourceSpan;
+}
+
+export interface SwitchStatement {
+  readonly kind: "switchStatement";
+  readonly subject: Expression;
+  readonly cases: readonly SwitchCase[];
+  readonly defaultBlock: Block | null;
+  readonly span: SourceSpan;
+}
+
+/** One `case`: its literal values and number ranges, any of which selects the block. */
+export interface SwitchCase {
+  readonly kind: "switchCase";
+  readonly values: readonly Expression[];
+  readonly body: Block;
   readonly span: SourceSpan;
 }
 

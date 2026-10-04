@@ -1,5 +1,5 @@
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 30;
+export const INSTRUCTION_PLAN_VERSION = 31;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -693,10 +693,11 @@ export interface UnaryExpressionPlan extends ExpressionPlanBase {
   readonly operand: ExpressionPlan;
 }
 
+/** `in` tests whether the left value is a number within the right range; only `switch` range cases compile to it. */
 export interface BinaryExpressionPlan extends ExpressionPlanBase {
   readonly kind: "binary";
   readonly operator:
-    "*" | "/" | "%" | "+" | "-" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "and" | "or";
+    "*" | "/" | "%" | "+" | "-" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "and" | "or" | "in";
   readonly left: ExpressionPlan;
   readonly right: ExpressionPlan;
 }
