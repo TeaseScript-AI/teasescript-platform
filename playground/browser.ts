@@ -551,7 +551,8 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = interaction.ui.buttonLabel;
-    button.setAttribute("aria-label", accessibleName);
+    // The visible label names the button; the localized default only stands in for a blank label.
+    if (interaction.ui.buttonLabel.trim() === "") button.setAttribute("aria-label", accessibleName);
     const actionId = interaction.actionId;
     button.addEventListener("click", () => activateButton(actionId));
     elements.interactionControls.append(button);

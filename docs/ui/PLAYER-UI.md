@@ -870,7 +870,8 @@ view/tool/stage capability inside the accepted sandbox.
 ## Accessibility invariants
 
 Higher-authority ADR 0018 requires a programmatic accessible name for every Standard UI text field, number field, choice
-group, and button. The Player preserves that requirement regardless of visible hint text or authored styling.
+group, and button. The Player preserves that requirement regardless of visible hint text or authored styling: a button's
+visible label is its accessible name, and the localized default names it only when the label is blank.
 
 Additional maintained presentation invariants:
 

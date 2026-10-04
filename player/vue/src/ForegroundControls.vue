@@ -76,10 +76,11 @@ watch(() => props.foreground, async () => {
         />
       </div>
     </template>
+    <!-- The visible label names the button; the localized default only stands in for a blank label. -->
     <PlayerActionButton
       v-else
       :authored-fill="foreground.authoredFill"
-      :aria-label="foreground.accessibleName"
+      :aria-label="foreground.label.trim() === '' ? foreground.accessibleName : undefined"
       :disabled="disabled"
       :label="foreground.label"
       @click="emit('activate', null)"
