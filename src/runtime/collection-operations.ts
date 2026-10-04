@@ -124,10 +124,7 @@ export function setOperationItems(
   return items;
 }
 
-/**
- * Values for membership tests by `==`, by their canonical keys, so a set operation keys each value once instead of
- * comparing it with every kept one.
- */
+/** Values for membership tests by `==`, which use canonical keys instead of pairwise comparisons. */
 class ValueIndex {
   readonly #keys = new Set<string>();
 
