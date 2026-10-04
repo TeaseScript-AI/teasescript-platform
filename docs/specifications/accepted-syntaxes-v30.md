@@ -949,6 +949,7 @@ number
 date
 time
 datetime
+timestamp
 duration
 ```
 
@@ -1304,8 +1305,8 @@ say "Come closer, ${player.petNames}"
 The two evaluations may choose different elements. Replay and debugging reproduce the same session sequence.
 
 An interpolated list may contain any value that `${...}` shows on its own: text, numbers, `true` and `false`, `null`,
-and durations. A list holds one element type ([§12](#12-variable-declarations)), and integers and numbers together are
-numbers. The selected element is shown as that value would be:
+durations, and date and time values. A list holds one element type ([§12](#12-variable-declarations)), and integers and
+numbers together are numbers. The selected element is shown as that value would be:
 
 ```text
 let waits = [30 seconds, 90 seconds]
@@ -1330,7 +1331,7 @@ let stranger = speakers.random
 ```
 
 `say` is also a debugging aid for whole values. Like Python's `print`, it shows text, numbers, `true` and `false`,
-`null`, and durations as it does on their own, and every other value in a code-like notation:
+`null`, durations, and date and time values as it does on their own, and every other value in a code-like notation:
 
 ```text
 let petNames = ["pet", "puppy", "toy"]
@@ -1571,7 +1572,7 @@ let door = choose win: "Open a door", lose: ["Open a door", "Open a door"]   // 
 Rules:
 
 - A button shows its option, or its choice object's `text`, as `${...}` shows it: text, a number, `true` or `false`,
-  `null`, or a duration.
+  `null`, a duration, or a date or time value.
 - Options with and without a written value may be mixed.
 - When all values have the same type, the result has that type; integers and numbers together are numbers.
 - Values of different types, such as text and numbers, give a union ([§13](#13-explicit-types)). Only a place declared
@@ -2506,9 +2507,9 @@ Rules:
 - Dots and slashes inside a key are naming conventions only.
 - The complete string is treated as one key.
 
-Storage currently supports strings, finite numbers, booleans, lists, objects, sets, ranges, and durations, including
-nested `null`. Wider persistent-data support is not yet implemented; this subset is not a permanent language limit.
-The compiler rejects a default whose type is known and does not match. Replacement-value recovery under
+Storage currently supports strings, finite numbers, booleans, lists, objects, sets, ranges, durations, and date and time
+values, including nested `null`. Wider persistent-data support is not yet implemented; this subset is not a permanent
+language limit. The compiler rejects a default whose type is known and does not match. Replacement-value recovery under
 [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
 
 Examples:
@@ -3098,7 +3099,9 @@ English weekday name gives a compile warning. Values hold whole milliseconds.
 Both long forms are accepted for any number: `1 seconds` and `2 day`. `m` is not a unit, because it would be ambiguous
 between minutes and months. A week is 7 days and a year is 12 months. Adding months or years to a day that the target
 month lacks gives that month's last day: January 31 plus one month is February 28, or 29 in a leap year, and
-February 29 plus one year is February 28.
+February 29 plus one year is February 28. Months and days are whole after normalizing: `0.5 years` is 6 months, while
+`1.5 days`, `1.5 weeks`, and `1 month * 1.5` are errors, at compile time when the values are known. Exact time keeps
+fractions.
 
 A duration keeps months, days, and exact time apart, so `1 week == 7 days` but `1 day != 24 h`. Durations order and
 divide within one family: exact with exact, days and weeks with days and weeks, months and years with months and years.
@@ -3138,9 +3141,10 @@ calendar-date boundaries. `datetime - datetime` measures through the current zon
 
 `say`, `${...}`, and `toString` show every temporal value, including a timestamp, in the player's numeric local form:
 date field order, separators, and 12- or 24-hour clock follow the player's locale, such as `4-10-2026, 18:30` in Dutch
-and `10/4/2026, 6:30 PM` in US English. The exact punctuation follows the engine's locale data. Seconds appear only
-when they are not zero, and no month or weekday names appear. `formatDate()`, `formatTime()`, and `formatDateTime()`
-return the same text for part or all of a value. Durations display as `1 h 2 min 3.5 s`.
+and `10/4/2026, 6:30 PM` in US English. The exact punctuation follows the engine's locale data. Seconds appear only when
+they are not zero, milliseconds never (`toISO()` keeps them), and no month or weekday names appear. `formatDate()`,
+`formatTime()`, and `formatDateTime()` return the same text for part or all of a value. Durations display as `1 h 2 min
+3.5 s`.
 
 Inside a list, set, or object, temporal values use a fixed notation: `<date 2026-10-04>`, `<time 14:30>`,
 `<datetime 2026-10-04 14:30>`, and `<timestamp 2026-10-04T12:30:00Z>`.
