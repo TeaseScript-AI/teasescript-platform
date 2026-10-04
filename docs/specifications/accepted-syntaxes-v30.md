@@ -45,6 +45,7 @@ This table is generated from the current section order.
 - [38. Keywords and protected built-ins](#38-keywords-and-protected-built-ins)
 - [39. Rejected and reserved syntax](#39-rejected-and-reserved-syntax)
 - [40. Dictionaries](#40-dictionaries)
+- [41. Headers and tags](#41-headers-and-tags)
 - [Remaining open decisions](#remaining-open-decisions)
 
 ## Status legend
@@ -2814,7 +2815,8 @@ Cleanup:
 **Status:** Accepted ([ADR 0022](../decisions/0022-multi-file-scripts.md))
 
 A package consists of one or more `.tease` files. The fixed entry file is `main.tease`; a session starts at its top.
-Paths are relative to the package root and separate folders with `/`.
+Paths are relative to the package root and separate folders with `/`. A file may start with a header that describes
+and tags it ([§41](#41-headers-and-tags)).
 
 Go to another file, from its top or at a label:
 
@@ -4271,6 +4273,46 @@ for name in toys { ... }                // the keys
 - **Type tests:** `is dict` and `is T dict` test the value; `is T dict` checks every value.
 
 Deferred: keys other than text, merging dicts, a two-variable `for`, and sorted dicts.
+
+## 41. Headers and tags
+**Status:** Accepted ([ADR 0023](../decisions/0023-tags-for-scripts-and-images.md))
+
+### File header
+
+A file may start with a header between two `---` lines:
+
+```text
+---
+title: "Strict punishment"
+author: "Mistress X"
+description: "Corner time with lines, for after a failed task."
+tags: "chastity", punishment: 4
+keywords: "chastity", "femdom", "long session"
+---
+say "Your punishment begins."
+exit
+```
+
+- Only blank lines and comments may precede the opening `---`, and each `---` stands alone on its line. A `---` line
+  inside a block string is text. A header later in the file is an error.
+- Each field is one `name: value` line. As after any `:` or comma, a value may continue on the next line
+  ([§1](#1-statement-termination)). Every field is optional; an unknown or repeated field is an error.
+- `title`, `author`, and `description` are text in quotes, single-line or block strings, without interpolation. They
+  are shown on the website and in an editor overview of many files.
+- `tags` lists the file's tags for selection, separated by commas: a plain tag in quotes, `"chastity"`, or a tag with a
+  number without quotes, `punishment: 4` (not `"punishment: 4"`).
+- `keywords` lists text in quotes for the future website catalog search. Only the keywords of `main.tease` are used,
+  and they never affect selection.
+- The header is metadata, not YAML: indentation has no meaning, and it runs no code and reads no variables.
+
+### Tags
+
+- A tag name has lowercase ASCII letters `a`–`z`, digits, and hyphens, such as `corner-time`. Surrounding spaces are
+  removed and uppercase letters lowered, so `"Punishment"` is `punishment`.
+- A tag may carry a number: `punishment: 4`. The number is finite, may be negative or a decimal, and uses the forms of
+  [§3](#numeric-literal-forms) with an optional sign. A tag with a number also counts as present.
+- A tag listed more than once counts once, with a warning; a number wins over its absence. Two different numbers for
+  one tag are an error.
 
 ## Remaining open decisions
 The accepted core syntax is consolidated in this document. Remaining work is primarily detailed API payloads and engine/account behavior.

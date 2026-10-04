@@ -8,10 +8,11 @@ import type {
   Statement,
   TimerParts,
 } from "./ast.js";
-import { compileSource } from "./compiler.js";
+import { compileProject, compileSource } from "./compiler.js";
 import { mediaHandlerBlocks, mediaOperands, showButtonOptions } from "./expression-children.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
+import { compareProjectPaths } from "./project-paths.js";
 import { TEASESCRIPT_PROTECTED_NAMES } from "./protected-names.js";
 import {
   createSourcePosition,
@@ -19,6 +20,7 @@ import {
   type SourcePosition,
   type SourceSpan,
 } from "./source.js";
+import type { ScriptHeader } from "./script-header.js";
 import { TokenKind, type Token } from "./token.js";
 
 export interface LanguageDocument {
@@ -29,6 +31,20 @@ export interface LanguageDocument {
 export type LanguagePosition = SourcePosition;
 export type LanguageRange = SourceSpan;
 export type LanguageDiagnostic = Diagnostic;
+
+/** One file of a project, by its path relative to the package root. */
+export interface LanguageProjectFile {
+  readonly path: string;
+  readonly text: string;
+}
+
+/** What an editor's overview of many files shows about one of them. */
+export interface LanguageFileOverview {
+  readonly path: string;
+  /** The file's `---` header, with its title, author, description, and tags; `null` when it has none. */
+  readonly header: ScriptHeader | null;
+  readonly diagnostics: readonly LanguageDiagnostic[];
+}
 
 export type LanguageCompletionKind = "keyword" | "command" | "speaker" | "modifier" | "value";
 
@@ -138,6 +154,33 @@ export function languagePositionAt(document: LanguageDocument, offset: number): 
 
 export function languageDiagnostics(document: LanguageDocument): readonly LanguageDiagnostic[] {
   return compileSource(document.text).diagnostics;
+}
+
+/** Compiles the files as one project and describes each: `main.tease` first, then the others by path. */
+export function languageProjectOverview(
+  files: readonly LanguageProjectFile[],
+): readonly LanguageFileOverview[] {
+  const result = compileProject(files.map(({ path, text }) => ({ path, source: text })));
+  const headers = new Map(result.files.map((file) => [file.path, file.header]));
+  const diagnostics = new Map<string, LanguageDiagnostic[]>();
+  for (const { path, ...diagnostic } of result.diagnostics) {
+    const list = diagnostics.get(path) ?? [];
+    list.push(Object.freeze(diagnostic));
+    diagnostics.set(path, list);
+  }
+  // A project diagnostic may name a path without a file, such as a missing main.tease.
+  const paths = [...new Set([...files.map((file) => file.path), ...diagnostics.keys()])].sort(
+    compareProjectPaths,
+  );
+  return Object.freeze(
+    paths.map((path) =>
+      Object.freeze({
+        path,
+        header: headers.get(path) ?? null,
+        diagnostics: Object.freeze(diagnostics.get(path) ?? []),
+      }),
+    ),
+  );
 }
 
 export function languageCompletions(

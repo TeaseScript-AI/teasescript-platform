@@ -3,7 +3,7 @@ import {
   createTeaseScriptProviders,
   registerTeaseScriptProviders,
 } from "../src/editor/monaco-providers.js";
-import { watchModelDiagnostics } from "../src/editor/model-diagnostics.js";
+import { watchProjectDiagnostics, type ProjectFileView } from "../src/editor/model-diagnostics.js";
 
 const TEASE_LANGUAGE_ID = "teasescript";
 
@@ -183,14 +183,20 @@ function registerProviders(): void {
   );
 }
 
-export function watchDiagnostics(
-  model: monaco.editor.ITextModel,
-  onCount: (count: number) => void,
+/** Marks every model's diagnostics after each edit and reports the project's file overview. */
+export function watchProject(
+  files: readonly { readonly path: string; readonly model: monaco.editor.ITextModel }[],
+  onOverview: (files: readonly ProjectFileView[]) => void,
 ): monaco.IDisposable {
-  return watchModelDiagnostics(model, monaco.MarkerSeverity, (markers) => {
-    monaco.editor.setModelMarkers(model, "teasescript", [...markers]);
-    onCount(markers.length);
+  const models = new Map(files.map((file) => [file.path, file.model]));
+  return watchProjectDiagnostics(files, monaco.MarkerSeverity, (overview) => {
+    for (const file of overview) {
+      const model = models.get(file.path);
+      if (model !== undefined)
+        monaco.editor.setModelMarkers(model, "teasescript", [...file.markers]);
+    }
+    onOverview(overview);
   });
 }
 
-export { monaco };
+export { monaco, type ProjectFileView };
