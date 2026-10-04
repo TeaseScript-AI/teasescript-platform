@@ -325,6 +325,15 @@ test("rejects case values that are not literals, speakers, or number ranges", ()
     "TSV047 7:8",
     "TSV047 10:8",
   ]);
+  const messages = compileSource(source).diagnostics.map((item) => item.message);
+  assert.equal(
+    messages[3],
+    "The range 5..5 excludes its end, so it contains no numbers. Write case 5, or 5..=5 to include the end.",
+  );
+  assert.equal(
+    messages[4],
+    "The range 6..1 counts down, so it contains no numbers. Put the lower bound first, as in 1..6 or 1..=6.",
+  );
 });
 
 test("rejects repeated and overlapping case values on the later value", () => {

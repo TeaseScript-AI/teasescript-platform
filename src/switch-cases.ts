@@ -113,8 +113,11 @@ function caseValue(
     if (start.value > end.value || (start.value === end.value && !unwrapped.inclusive)) {
       report(
         switchCaseCode.invalidCaseValue,
-        `The range ${text} contains no numbers, so this case can never match. Put the lower bound first, ` +
-          "and use ..= to include the upper bound.",
+        start.value === end.value
+          ? `The range ${text} excludes its end, so it contains no numbers. Write case ${start.text}, or ` +
+              `${start.text}..=${end.text} to include the end.`
+          : `The range ${text} counts down, so it contains no numbers. Put the lower bound first, as in ` +
+              `${end.text}..${start.text} or ${end.text}..=${start.text}.`,
         expression.span,
       );
       return undefined;

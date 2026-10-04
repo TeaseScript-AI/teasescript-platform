@@ -2641,7 +2641,9 @@ Rules:
 - `return`, `break`, and `continue` inside a case block behave as inside an `if` block; `break` and `continue` apply to
   the enclosing loop.
 - Compile errors:
-  - a case value that is not one of the forms above, or a range that contains no numbers, such as `5..5` or `5..1`;
+  - a case value that is not one of the forms above, such as a range with a computed bound (use `if` instead);
+  - a range that contains no numbers: `5..5` excludes its end (write `case 5` or `5..=5`), and a reversed range such as
+    `5..1` counts down (write `1..5` or `1..=5`);
   - a case value that repeats or overlaps an earlier case value (§6), such as `2` after `2.0` or after `1..5`;
   - a case value whose type can never match the switched value's known type, such as `case "x"` on an `integer`, or a
     range on text.
