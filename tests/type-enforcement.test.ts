@@ -271,7 +271,7 @@ test("handles, speakers, and a typed load default keep their types", () => {
     "TSV041",
   );
   assert.deepEqual(mismatches("let clock = timer async 5\nclock = 3")[0]?.[0], "TSV041");
-  assert.deepEqual(mismatches('let level: integer = load "level" default "high"'), [
+  assert.deepEqual(mismatches('let level: integer = load "level", default: "high"'), [
     [
       "TSV041",
       "'level' is declared as integer, so it cannot start as text (string). Use a separate variable for a value of another type.",
@@ -781,7 +781,7 @@ test("round, floor, and ceil give whole numbers as V30 section 13 specifies", ()
 
 test("an error inside a stored literal or a typed load default is reported once", () => {
   assert.deepEqual(codes('let xs: integer[] = [1 + "a"]'), [["TSV043", '1 + "a"']]);
-  assert.deepEqual(codes('let level: integer = load "k" default (1 + "x")'), [
+  assert.deepEqual(codes('let level: integer = load "k", default: (1 + "x")'), [
     ["TSV043", '1 + "x"'],
   ]);
 });

@@ -217,7 +217,7 @@ export interface DeleteStatement {
   readonly span: SourceSpan;
 }
 
-/** `load <key> [default <value>]`: the stored value, else the default (evaluated only then), else `null`. */
+/** `load <key>[, default: <value>]`: the stored value, else the default (evaluated only then), else `null`. */
 export interface LoadExpression {
   readonly kind: "loadExpression";
   readonly key: Expression;

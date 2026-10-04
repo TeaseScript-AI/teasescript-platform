@@ -147,15 +147,22 @@ export function parse(source: string): ParseResult {
 class Parser {
   readonly #diagnostics: Diagnostic[] = [];
   #current = 0;
-  #commaLookahead: { readonly at: number; readonly offset: number | null } | null = null;
+  #commaLookahead: {
+    readonly at: number;
+    readonly insideDelimiters: boolean;
+    readonly offset: number | null;
+  } | null = null;
   #recoveredAtStatementBoundary = false;
   /** Inside a media cue position or a switch subject, where the following block `{` ends a compact interaction. */
   #blockEndsCompactInteraction = false;
   /**
-   * The `save` `as` and `load` `default` that end an enclosing storage operand. A compact interaction stops at them, and
-   * a bare interaction leaves the `as` to `save`; groupings such as parentheses start without them.
+   * The `save` `as` that ends an enclosing storage operand, and a bare `default` after a `load` key, the earlier form
+   * that `load` reports with its fix. A compact interaction stops at them, and a bare interaction leaves the `as` to
+   * `save`; groupings such as parentheses start without them.
    */
   #storageDelimiters: ReadonlySet<StorageDelimiter> = NO_STORAGE_DELIMITERS;
+  /** Inside `()`, `[]`, or an object literal, where a line break does not end an expression (V30 §2). */
+  #insideDelimiters = false;
 
   public constructor(private readonly tokens: readonly Token[]) {}
 
@@ -327,9 +334,9 @@ class Parser {
     let background: Expression | null = null;
     let timeout: Expression | null = null;
     for (
-      let offset = this.#interactionDefaultAfterComma();
+      let offset = this.#offsetAfterComma();
       offset !== null;
-      offset = this.#interactionDefaultAfterComma()
+      offset = this.#offsetAfterComma()
     ) {
       const name = this.#peek(offset);
       const option =
@@ -609,7 +616,8 @@ class Parser {
           );
           break;
         }
-        const value = runParse(this.#parseColonValueTask(true));
+        // Presentation options are a `()` grouping, where a line break does not end a value.
+        const value = runParse(this.#withinDelimiters(this.#parseColonValueTask(true)));
         if (value === null) break;
         properties.push({
           kind: "objectProperty",
@@ -724,7 +732,7 @@ class Parser {
       this.#check(TokenKind.LeftParenthesis) &&
       this.#peek().span.start.offset === command.span.end.offset
     ) {
-      return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseNamedTimer(command)));
+      return yield* parseChild(this.#withinDelimiters(this.#parseNamedTimer(command)));
     }
     const async = this.#checkIdentifier("async");
     if (async) this.#advance();
@@ -954,24 +962,17 @@ class Parser {
   }
 
   /**
-   * `load <key> [default <value>]`; both operands are full expressions, so `(load "k") == null` needs parentheses.
-   * The default is evaluated only when the key is absent.
+   * `load <key>[, default: <value>]`; both operands are full expressions, so `(load "k") == null` needs parentheses.
+   * Like the default answer of an ask, the `, default:` binds to the nearest `load` before it. The default is
+   * evaluated only when the key is absent.
    */
   *#parseLoadExpression(): ParseTask<LoadExpression | null> {
     const command = this.#advance();
-    // The key ends at this load's `default` and at any delimiter of an enclosing storage operand; the default
-    // ends only at the enclosing ones.
+    // The key ends at a bare `default`, the earlier fallback form, so that the message below names the fix.
     const enclosing = this.#storageDelimiters;
     this.#storageDelimiters = new Set([...enclosing, "default"]);
     const key = yield* parseChild(this.#parseOr());
     this.#storageDelimiters = enclosing;
-    let defaultValue: Expression | null = null;
-    let missingDefault = false;
-    if (key !== null && this.#checkIdentifier("default")) {
-      this.#advance();
-      defaultValue = yield* parseChild(this.#parseRequiredExpressionTask());
-      missingDefault = defaultValue === null;
-    }
     if (key === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedStorageKey,
@@ -979,7 +980,33 @@ class Parser {
       );
       return null;
     }
-    if (missingDefault) return null;
+    let defaultOffset = this.#offsetAfterComma();
+    if (defaultOffset === null && this.#checkIdentifier("default")) {
+      // The removed V30 form `load "k" default v`, or a missing comma before `default:`.
+      this.#reportToken(
+        parserDiagnosticCode.expectedDelimiter,
+        "Write a fallback for load as 'load key, default: value', with a comma and a colon.",
+        this.#peek(),
+      );
+      // Recover with the fallback as written, so the rest of the statement parses normally.
+      defaultOffset = this.#peek(1).kind === TokenKind.Colon ? 0 : -1;
+    }
+    let defaultValue: Expression | null = null;
+    if (defaultOffset === -1) {
+      this.#advance();
+      defaultValue = yield* parseChild(this.#parseOr());
+    } else if (defaultOffset !== null && this.#atInteractionDefault(defaultOffset)) {
+      for (let skipped = 0; skipped < defaultOffset + 2; skipped += 1) this.#advance();
+      defaultValue = yield* parseChild(this.#parseColonValueTask(false));
+      if (defaultValue === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected a fallback value after 'default:'.",
+        );
+        if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
+          this.#recoveredAtStatementBoundary = true;
+      }
+    }
     return Object.freeze({
       kind: "loadExpression",
       key,
@@ -1028,9 +1055,7 @@ class Parser {
       this.#check(TokenKind.LeftParenthesis) &&
       this.#peek().span.start.offset === command.span.end.offset
     ) {
-      return yield* parseChild(
-        this.#withoutEnclosingDelimiters(this.#parseNamedMedia(command, media)),
-      );
+      return yield* parseChild(this.#withinDelimiters(this.#parseNamedMedia(command, media)));
     }
     const async = this.#checkIdentifier("async");
     if (async) this.#advance();
@@ -1185,7 +1210,7 @@ class Parser {
    */
   *#parseMediaHandlers(): ParseTask<MediaHandlers | null | false> {
     if (!this.#check(TokenKind.LeftBrace)) return null;
-    return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseMediaHandlerBlock()));
+    return yield* parseChild(this.#asStatements(this.#parseMediaHandlerBlock()));
   }
 
   *#parseMediaHandlerBlock(): ParseTask<MediaHandlers | false> {
@@ -1772,7 +1797,8 @@ class Parser {
     let defaultValue: Expression | null = null;
     if (this.#match(TokenKind.Equal)) {
       this.#skipContinuationNewlines();
-      defaultValue = this.#parseRequiredExpression();
+      // A parameter list is a `()` grouping, where a line break does not end the default.
+      defaultValue = runParse(this.#withinDelimiters(this.#parseRequiredExpressionTask()));
       if (defaultValue === null) {
         this.#synchronizeParameter();
         return null;
@@ -1811,7 +1837,7 @@ class Parser {
 
   /** A statement block; statements inside it are not part of an enclosing cue position or switch subject. */
   *#parseBlock(): ParseTask<Block | null> {
-    return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseBlockStatements()));
+    return yield* parseChild(this.#asStatements(this.#parseBlockStatements()));
   }
 
   *#parseBlockStatements(): ParseTask<Block | null> {
@@ -2181,7 +2207,7 @@ class Parser {
         const start = expression;
         this.#skipNewlines();
         const index = yield* parseChild(
-          this.#withoutEnclosingDelimiters(this.#parseRequiredExpressionTask()),
+          this.#withinDelimiters(this.#parseRequiredExpressionTask()),
         );
         this.#skipNewlines();
         if (index === null || !this.#match(TokenKind.RightBracket)) {
@@ -2203,7 +2229,7 @@ class Parser {
       }
       if (this.#match(TokenKind.LeftParenthesis)) {
         expression = yield* parseChild(
-          this.#withoutEnclosingDelimiters(this.#finishCall(expression, this.#previous())),
+          this.#withinDelimiters(this.#finishCall(expression, this.#previous())),
         );
         continue;
       }
@@ -2362,17 +2388,15 @@ class Parser {
       return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseStringLiteral(token)));
     }
     if (this.#match(TokenKind.LeftParenthesis)) {
-      return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseParenthesized(token)));
+      return yield* parseChild(this.#withinDelimiters(this.#parseParenthesized(token)));
     }
     if (this.#match(TokenKind.LeftBracket)) {
       return yield* parseChild(
-        this.#withoutEnclosingDelimiters(
-          this.#parseCollectionLiteralElements(token, "listLiteral"),
-        ),
+        this.#withinDelimiters(this.#parseCollectionLiteralElements(token, "listLiteral")),
       );
     }
     if (this.#match(TokenKind.LeftBrace)) {
-      return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseObjectLiteral(token)));
+      return yield* parseChild(this.#withinDelimiters(this.#parseObjectLiteral(token)));
     }
     if (this.#match(TokenKind.KeywordSet)) {
       if (!this.#match(TokenKind.LeftBracket)) {
@@ -2380,7 +2404,7 @@ class Parser {
         return null;
       }
       return yield* parseChild(
-        this.#withoutEnclosingDelimiters(this.#parseCollectionLiteralElements(token, "setLiteral")),
+        this.#withinDelimiters(this.#parseCollectionLiteralElements(token, "setLiteral")),
       );
     }
     return null;
@@ -2437,7 +2461,7 @@ class Parser {
           ? yield* parseChild(this.#parseOr())
           : null;
       let defaultValue: Expression | null = null;
-      let defaultOffset = hint === null ? 0 : this.#interactionDefaultAfterComma();
+      let defaultOffset = hint === null ? 0 : this.#offsetAfterComma();
       if (defaultOffset === null && this.#atInteractionDefault(0)) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedDelimiter,
@@ -2509,7 +2533,11 @@ class Parser {
         break;
       }
       let separatorSpan: SourceSpan | null = null;
-      if (this.#match(TokenKind.Comma)) {
+      // As for a default answer, inside delimiters a comma on the next line continues the options.
+      const commaOffset = this.#offsetAfterComma();
+      if (commaOffset !== null) {
+        while (this.#check(TokenKind.Newline)) this.#advance();
+        this.#advance();
         separatorSpan = copySpan(this.#previous().span);
       }
       options.push(
@@ -2598,28 +2626,55 @@ class Parser {
   }
 
   /**
-   * The offset of the token after a `,` and any continuation newlines, or `null` without a comma. Nested interactions
+   * The offset of the token after a `,` and any newlines after it, or `null` without a comma. Inside delimiters a line
+   * break does not end the expression, so the comma may also start the next line there (V30 §2). Nested interactions
    * that end at the same token reuse one scan of the newlines.
    */
-  #interactionDefaultAfterComma(): number | null {
-    if (this.#commaLookahead?.at === this.#current) return this.#commaLookahead.offset;
-    let offset: number | null = null;
-    if (this.#check(TokenKind.Comma)) {
-      offset = 1;
+  #offsetAfterComma(): number | null {
+    const lookahead = this.#commaLookahead;
+    if (lookahead?.at === this.#current && lookahead.insideDelimiters === this.#insideDelimiters)
+      return lookahead.offset;
+    let offset: number | null = 0;
+    if (this.#insideDelimiters) while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
+    if (this.#peek(offset).kind !== TokenKind.Comma) offset = null;
+    else {
+      offset += 1;
       while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
     }
-    this.#commaLookahead = { at: this.#current, offset };
+    this.#commaLookahead = { at: this.#current, insideDelimiters: this.#insideDelimiters, offset };
     return offset;
   }
 
   #atStorageDelimiter(): boolean {
     return (
       (this.#storageDelimiters.has("as") && this.#check(TokenKind.KeywordAs)) ||
-      // `default:` is a contextual name, such as a choice option value, not the delimiter.
+      // `default:` is a contextual name, such as a choice option label, not the earlier form.
       (this.#storageDelimiters.has("default") &&
         this.#checkIdentifier("default") &&
         this.#peek(1).kind !== TokenKind.Colon)
     );
+  }
+
+  /** Parses a `()`, `[]`, or object-literal grouping, where a line break does not end an expression. */
+  *#withinDelimiters<T>(task: ParseTask<T>): ParseTask<T> {
+    const enclosing = this.#insideDelimiters;
+    this.#insideDelimiters = true;
+    try {
+      return yield* parseChild(this.#withoutEnclosingDelimiters(task));
+    } finally {
+      this.#insideDelimiters = enclosing;
+    }
+  }
+
+  /** Parses a block of statements, where a line break ends a complete statement again. */
+  *#asStatements<T>(task: ParseTask<T>): ParseTask<T> {
+    const enclosing = this.#insideDelimiters;
+    this.#insideDelimiters = false;
+    try {
+      return yield* parseChild(this.#withoutEnclosingDelimiters(task));
+    } finally {
+      this.#insideDelimiters = enclosing;
+    }
   }
 
   /**

@@ -684,7 +684,7 @@ test("runtime adapter ignores unknown and stale storage action IDs", () => {
 
 test("runtime adapter leaves writes reached after interaction and time observation pending", () => {
   let session = createPlayerRuntimeSession(
-    'showButton "Continue"\nsave 2 as "answered"\nwait 1 s\nsave 3 as "observed"\ndelete "answered"\nlet answer = load "answered" default "deleted"\nsay answer, instant\nexit',
+    'showButton "Continue"\nsave 2 as "answered"\nwait 1 s\nsave 3 as "observed"\ndelete "answered"\nlet answer = load "answered", default: "deleted"\nsay answer, instant\nexit',
     { persistentScriptStorage: true },
   );
   assert.equal(pendingPlayerRuntimeStorageWrite(session.snapshot), null);
