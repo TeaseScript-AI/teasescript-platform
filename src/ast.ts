@@ -67,14 +67,29 @@ export interface SayStatement {
   readonly span: SourceSpan;
 }
 
-export interface ShowButtonStatement {
-  readonly kind: "showButtonStatement";
+/**
+ * Shared data of `showButton [as speaker] label [, background: colour] [, timeout: duration]`. The options may appear
+ * in either order and evaluate in source order.
+ */
+export interface ShowButtonParts {
   readonly commandSpan: SourceSpan;
   readonly asSpan: SourceSpan | null;
   readonly speaker: Identifier | null;
   readonly label: Expression;
   readonly background: Expression | null;
+  /** A number of seconds or an elapsed duration after which the button disappears. */
+  readonly timeout: Expression | null;
   readonly span: SourceSpan;
+}
+
+/** A button whose elapsed-time result is ignored. */
+export interface ShowButtonStatement extends ShowButtonParts {
+  readonly kind: "showButtonStatement";
+}
+
+/** A button used as a value; it evaluates to the elapsed waiting time as a `duration`. */
+export interface ShowButtonExpression extends ShowButtonParts {
+  readonly kind: "showButtonExpression";
 }
 
 /** A compiler-owned blocking delay. A missing unit means seconds. */
@@ -331,6 +346,7 @@ export type Expression =
   | BinaryExpression
   | RangeExpression
   | InteractionExpression
+  | ShowButtonExpression
   | TimerExpression
   | PlayMediaExpression
   | LoadExpression;

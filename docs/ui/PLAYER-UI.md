@@ -623,6 +623,8 @@ rather than visually disabling it:
 - `showButton`: clicking the rendered button or submitting its exact non-empty visible label in the composer activates
   the same action; other text and Space while the empty composer owns focus do not activate it;
 - a primary click on unrelated/blank Player space does **not** activate `showButton`;
+- a `showButton` timeout removes the button without a transcript message; the Player observes time at the timeout
+  so the button disappears on schedule;
 - while any mandatory foreground interaction is active, other composer text does not advance ordinary canonical script
   execution. In the deterministic first POC it is an invalid attempt and the same interaction remains active with the
   accepted validation/retry behavior. A future LLM clarification/interpretation layer may consume non-matching text

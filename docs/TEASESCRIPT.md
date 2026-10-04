@@ -86,6 +86,7 @@ it with focused diagnostic `TSP032`. An `as speaker` clause placed after the pay
 ```tease
 showButton "Continue"
 showButton as mistress "Ready"
+let elapsed = showButton "Continue", timeout: 30 s
 
 let text = askText
 let text = askText as mistress "Type your answer"
@@ -102,7 +103,9 @@ player still submits it, and a cleared field does not fall back to it. See
 [default answers](specifications/accepted-syntaxes-v30.md#default-answers).
 
 All four basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
-`askNumber` returns `number`; the first `showButton` slice has no useful script return value and no timeout.
+`askNumber` returns `number`. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
+optional `timeout:` ends the wait without a chat message; see
+[blocking button](specifications/accepted-syntaxes-v30.md#21-blocking-button).
 Timer interrupts may suspend an interaction; handler `exit` discards its instruction without producing a result
 or binding. See [timer semantics](specifications/accepted-syntaxes-v30.md#27-timers).
 
@@ -197,9 +200,7 @@ Over-limit data is rejected deterministically without truncation or partial stat
 
 ### First-POC source compatibility boundary
 
-The broader parenthesized V30 input functions are not rejected merely because compact forms are implemented first. Their advanced options require a later compatibility and API decision.
-
-V30 `showButton` timeout and elapsed-time return remain accepted future capability but are not included in the first POC slice.
+The broader parenthesized V30 input functions and `showButton` forms are not rejected merely because compact forms are implemented first. Their advanced options require a later compatibility and API decision.
 
 The exact syntax for detailed result objects, advanced accessibility overrides, a speaker-aware typing indicator, custom `choose` field hints, any justified platform guards that later prove necessary, and constrained LLM answer interpretation remains deferred.
 

@@ -756,7 +756,9 @@ function validateInteractionInstruction(
   const ui = prepared ? value.preparedUi : value.ui;
   const expected =
     kind === "button"
-      ? "none"
+      ? value.destinationTemporary === null
+        ? "none"
+        : "duration"
       : kind === "number"
         ? "number"
         : kind === "choice"
@@ -771,17 +773,7 @@ function validateInteractionInstruction(
       ),
     );
   }
-  if (kind === "button") {
-    if (value.destinationTemporary !== null) {
-      errors.push(
-        planError(
-          "TSC002",
-          "Button interaction must not have a result destination.",
-          `${path}.destinationTemporary`,
-        ),
-      );
-    }
-  } else {
+  if (kind !== "button" || value.destinationTemporary !== null) {
     validateTemporaryId(
       value.destinationTemporary,
       `${path}.destinationTemporary`,
@@ -972,6 +964,7 @@ function validatePreparedInteractionUi(
           "buttonLabelTemporary",
           "accessibleName",
           ...("backgroundTemporary" in ui ? ["backgroundTemporary"] : []),
+          ...("timeoutTemporary" in ui ? ["timeoutTemporary"] : []),
         ]
       : kind === "text" || kind === "number"
         ? [
@@ -1053,6 +1046,7 @@ function validatePreparedInteractionUi(
     addTemporary(ui.buttonLabelTemporary, `${path}.buttonLabelTemporary`);
     if ("backgroundTemporary" in ui)
       addTemporary(ui.backgroundTemporary, `${path}.backgroundTemporary`);
+    if ("timeoutTemporary" in ui) addTemporary(ui.timeoutTemporary, `${path}.timeoutTemporary`);
     return;
   }
   if (kind === "text" || kind === "number") {

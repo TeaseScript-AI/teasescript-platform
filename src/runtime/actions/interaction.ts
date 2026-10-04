@@ -5,6 +5,20 @@ import type { InteractionChoiceOption, InteractionChoiceValue } from "../../plan
 import { recordValidationTestWork } from "../../validation-testing.js";
 import type { RuntimeInteractionActionSnapshot } from "./model.js";
 
+/**
+ * The milliseconds of a `showButton` timeout: a number of seconds or an elapsed duration that is finite and greater
+ * than zero. Returns `null` for any other value.
+ */
+export function buttonTimeoutMilliseconds(value: unknown): number | null {
+  const milliseconds =
+    typeof value === "number"
+      ? value * 1_000
+      : isPlainRecord(value) && value.kind === "duration" && typeof value.milliseconds === "number"
+        ? value.milliseconds
+        : Number.NaN;
+  return milliseconds > 0 && Number.isFinite(milliseconds) ? milliseconds : null;
+}
+
 export type ResolvedInteraction =
   | { readonly ok: true; readonly result: InteractionChoiceValue; readonly transcriptText: string }
   | { readonly ok: false; readonly message: string };

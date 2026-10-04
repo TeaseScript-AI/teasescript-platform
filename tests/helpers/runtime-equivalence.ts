@@ -5,6 +5,7 @@ import {
   createCheckpoint,
   deserializeCheckpoint,
   executeInstruction,
+  interactionDeadlineMs,
   observeTime,
   reportMediaLoad,
   run,
@@ -200,8 +201,8 @@ export function assertRuntimeResumeEquivalent(
 
 /**
  * Runs to completion, observing time at the next deadline whenever execution waits: a foreground or interrupted
- * delay (`wait` or blocking `timer`) or a running async timer. Blocking behavior is preserved: nothing settles
- * without an observation.
+ * delay (`wait` or blocking `timer`), a running async timer, or a presented button's timeout. Blocking behavior is
+ * preserved: nothing settles without an observation, and no button is clicked.
  */
 function runServicingDelays(
   plan: InstructionPlan,
@@ -272,9 +273,12 @@ function observeDueDelay(
       deadlines.push(action.timer.deadlineMs);
     }
   }
+  const button = snapshot.foregroundAction;
+  const buttonDeadlineMs = button?.kind === "interaction" ? interactionDeadlineMs(button) : null;
+  if (buttonDeadlineMs !== null) deadlines.push(buttonDeadlineMs);
   assert.ok(
     deadlines.length > 0,
-    `${context}: only delays, pacing, timers, and media can be serviced`,
+    `${context}: only delays, pacing, timers, media, and button timeouts can be serviced`,
   );
   const nowMs = Math.min(...deadlines);
   // The simulated Player plays at normal speed from each media's latest sample.

@@ -878,7 +878,6 @@ function validateCanonicalInteractionResultHandoffs(
     if (
       !isRecord(instruction) ||
       instruction.kind !== "interaction" ||
-      instruction.interactionKind === "button" ||
       !Number.isSafeInteger(instruction.destinationTemporary)
     )
       return;

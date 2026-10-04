@@ -604,7 +604,9 @@ class Lexer {
 }
 
 function isInteractionCommand(value: string | undefined): boolean {
-  return value === "askText" || value === "askNumber" || value === "choose";
+  return (
+    value === "showButton" || value === "askText" || value === "askNumber" || value === "choose"
+  );
 }
 
 interface StringScanTextPart {

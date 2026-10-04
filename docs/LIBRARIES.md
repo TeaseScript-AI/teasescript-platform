@@ -170,7 +170,9 @@ choice
 The engine owns action identity, continuation, result destination, expected type, allowed values, completion validation, canonical transcript-result derivation, events, checkpoint/restore, and bounded duplicate settlement behavior. The Standard Library/compiler own author-facing defaults, compact syntax, Standard UI payload, localized feedback, and accessibility defaults.
 
 The interactions are mandatory and expose no cancellation result. `askText` and `askNumber` never return `null`, and
-`choose` returns `null` only as the value of a selected option; `showButton` has no useful first-slice return value. Invalid input keeps the same action active.
+`choose` returns `null` only as the value of a selected option; `showButton` used as a value returns its elapsed
+waiting time ([V30 §21](specifications/accepted-syntaxes-v30.md#21-blocking-button)). Invalid input keeps the same
+action active.
 Timer interrupts and handler-exit cleanup follow [`RUNTIME.md`](RUNTIME.md#timers-and-scene-time).
 
 Interaction definitions and completions remain subject to justified platform guards; ADR 0018 defines no separate
@@ -187,7 +189,8 @@ over-limit data without truncation or partial state mutation.
 
 A button or dropdown control supplies its position to the engine. The engine validates the selection and derives the returned value and the canonical visible player-transcript text from the stored action. Manually typed choice input uses exact unambiguous visible-text matching.
 
-`showButton` presents one button, blocks until activation, derives the player transcript from its stored visible label, and then completes. V30 timeout and elapsed-time behavior remains later work.
+`showButton` presents one button, blocks until activation or its optional timeout, derives the player transcript from
+its stored visible label when activated, and then completes; a reached timeout adds no transcript.
 
 All four helpers support `as speaker` provenance. The speaker identifies who requested the answer. It does not automatically emit the control text as a speaker message.
 
@@ -258,7 +261,6 @@ The first POC does not settle:
 - advanced parenthesized call forms;
 - detailed result objects with elapsed time or metadata;
 - the option name that selects a detailed return type;
-- `showButton` timeout and elapsed return;
 - custom compact `choose` field hints;
 - any justified platform guards that later prove necessary;
 - exact dynamic choice-layout breakpoints;
