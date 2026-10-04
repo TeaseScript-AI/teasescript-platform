@@ -942,6 +942,7 @@ function validateCapturedRuntimeSnapshotDetails(
   validateFrames(value.frames, errors);
   const speakerIds = validateSpeakers(value.speakers, errors);
   validateGlobals(value, plan, errors);
+  validateStartupPhase(value, plan, errors);
   const scopes = referenceScopes(value);
   const preparedReferenceTemporaryIds = collectPreparedReferenceTemporaryIds(plan);
   const preparedSayTemporaryOwnership = collectPreparedSayTemporaryOwnership(plan);
@@ -2785,6 +2786,79 @@ function validateGlobals(
     speakers.length !== speakerIndex
   )
     errors.push("Runtime globals do not match those the plan sets up before the next instruction.");
+}
+
+/** The parts of a snapshot that hold work or saved instruction positions, in fields named `...Instruction`. */
+const POSITION_HOLDERS = [
+  "callFrames",
+  "foregroundAction",
+  "backgroundActions",
+  "lastSettlement",
+  "interactionResultHandoff",
+  "preparedSayOutput",
+  "settledTimers",
+  "settledMedia",
+  "pendingTimerHandlers",
+] as const;
+
+/**
+ * The start of `main.tease` sets up the globals and speakers once, before anything else runs (ADR 0022 §6). While the
+ * next instruction is in it, a session holds nothing but the globals and speakers set up so far: no call, loop,
+ * temporary, action, timer, media, queued block, settlement, prepared output, top-level variable, default speaker, or
+ * Stage image, and no identity of those was ever allocated. Afterwards no saved position leads back into it.
+ */
+function validateStartupPhase(
+  snapshot: Record<string, unknown>,
+  plan: RunnablePlan | undefined,
+  errors: string[],
+): void {
+  if (plan === undefined) return;
+  const prefixEnd = startupDeclarations(plan).length;
+  if (prefixEnd === 0) return;
+  if (nonNegativeSafeInteger(snapshot.nextInstruction) && snapshot.nextInstruction < prefixEnd) {
+    const empty = (value: unknown): boolean =>
+      value === null || (Array.isArray(value) && value.length === 0);
+    const frames = snapshot.frames;
+    if (
+      !isOneOf(snapshot.status, ["ready", "running", "failed"]) ||
+      !POSITION_HOLDERS.every((field) => empty(snapshot[field])) ||
+      !empty(snapshot.loopFrames) ||
+      !empty(snapshot.temporaries) ||
+      !Array.isArray(frames) ||
+      frames.length !== 1 ||
+      !isPlainRecord(frames[0]) ||
+      !empty(frames[0].bindings) ||
+      snapshot.defaultSpeaker !== null ||
+      snapshot.stageImage !== null ||
+      [
+        snapshot.nextScopeId,
+        snapshot.nextCallFrameId,
+        snapshot.nextActionId,
+        snapshot.nextTimerId,
+        snapshot.nextMediaId,
+      ].some((counter) => counter !== 1)
+    )
+      errors.push(
+        "Runtime state within the startup holds more than the globals and speakers set up.",
+      );
+    return;
+  }
+  const work: unknown[] = POSITION_HOLDERS.map((field) => snapshot[field]);
+  while (work.length > 0) {
+    const node = work.pop();
+    if (Array.isArray(node)) {
+      for (const item of node) work.push(item);
+      continue;
+    }
+    if (!isPlainRecord(node)) continue;
+    for (const [key, nested] of Object.entries(node)) {
+      if (key.endsWith("Instruction") && typeof nested === "number" && nested < prefixEnd) {
+        errors.push("Runtime state saves a position within the startup, which runs only once.");
+        return;
+      }
+      work.push(nested);
+    }
+  }
 }
 
 function validateFrames(value: unknown, errors: string[]): void {

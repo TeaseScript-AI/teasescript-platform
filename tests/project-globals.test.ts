@@ -11,6 +11,7 @@ import {
   deserializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { executeInstruction, run } from "../src/runtime/engine.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import {
   createFreshRuntimeSnapshot,
@@ -733,6 +734,72 @@ test("a plan sets up its globals once, with start values of the accepted kinds",
       "$.files[0].labels A label cannot stand in the start of main.tease, which sets up the globals once.",
     ),
   );
+});
+
+test("a snapshot keeps the startup a phase of its own, before anything else and never again", () => {
+  const plan = compiledPlan([
+    {
+      path: "main.tease",
+      source: "global g = 1\nglobal h = 2\ntimer async 1 { wait 2 }\nwait 2\nexit",
+    },
+  ]);
+  const prefixEnd = 2;
+  // A rejected state fails validation and JSON restore.
+  const rejected = (snapshot: Mutable<RuntimeSnapshot>): void => {
+    assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, false);
+    assert.throws(() =>
+      deserializeCheckpoint(
+        JSON.stringify({ format: CHECKPOINT_FORMAT, version: CHECKPOINT_VERSION, plan, snapshot }),
+      ),
+    );
+  };
+  const restorable = (snapshot: RuntimeSnapshot): void => {
+    assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true);
+    assert.deepEqual(
+      deserializeCheckpoint(JSON.stringify(createCheckpoint(plan, snapshot))).snapshot,
+      snapshot,
+    );
+  };
+  // Within the startup, a valid session holds only the globals set up so far.
+  const initialized = executeInstruction(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+  assert.equal(initialized.nextInstruction, 1);
+  restorable(initialized);
+  const waiting = run(plan, initialized).snapshot;
+  const expired = observeTime(plan, waiting, 1000).snapshot;
+  assert.equal(expired.pendingTimerHandlers.length, 1);
+  restorable(expired);
+  // A queued block could run before every global exists.
+  const queued = mutableCopy(expired);
+  queued.status = "running";
+  queued.foregroundAction = null;
+  queued.nextInstruction = 1;
+  queued.globals = queued.globals.filter((binding) => binding.name !== "h");
+  rejected(queued);
+  // So could a call, a variable, or an action of the story.
+  for (const change of [
+    (copy: Mutable<RuntimeSnapshot>) => {
+      copy.frames[0]!.bindings.push({ name: "x", value: 1 });
+    },
+    (copy: Mutable<RuntimeSnapshot>) => {
+      copy.nextActionId = 2;
+    },
+  ]) {
+    const copy = mutableCopy(initialized);
+    change(copy);
+    rejected(copy);
+  }
+
+  // After the startup, no saved position leads back into it: here the root position that a timer block, which waits
+  // while the main wait has settled, returns to.
+  const interrupted = observeTime(plan, run(plan, expired).snapshot, 2000).snapshot;
+  const frame = interrupted.callFrames[0];
+  assert.ok(frame?.timerInterruption !== null && frame?.timerInterruption.suspendedAction === null);
+  restorable(interrupted);
+  for (let position = 0; position < prefixEnd; position += 1) {
+    const back = mutableCopy(interrupted);
+    back.callFrames[0]!.returnInstruction = position;
+    rejected(back);
+  }
 });
 
 test("snapshot validation requires exactly the globals set up so far, unshadowed", () => {

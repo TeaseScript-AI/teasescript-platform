@@ -904,8 +904,8 @@ The start values of all globals and speakers form a startup prefix at the beginn
 one `declareGlobal` (with an optional runtime `typeCheck`) or `declareSpeaker` instruction each, in session-start order,
 each with the index of the `file` whose source its locations refer to. The declarations themselves emit nothing, except
 a `global` with `default:`, which assigns its value where it stands. Plan validation accepts these instructions only as
-that prefix, each name once, with start values of the accepted kinds (no call, temporary, or global set up later) and
-no control flow back into it. Function definitions record whether they are `global`, which a timer or media block is
+that prefix, each name once, with start values of the accepted kinds (no call, temporary, or global set up later), and
+no label, `goto`, jump, or call return leads back into it. Function definitions record whether they are `global`, which a timer or media block is
 exactly when the code that registers it is. An instruction may call a function of another file only when it is global,
 and a global function or block calls only global functions.
 
@@ -919,7 +919,10 @@ reaching `.random` or `${...}` there fails with `TSR067`.
 
 Snapshot validation requires exactly the host globals followed by the script globals and speakers before the next
 instruction while the prefix runs, and all of them after it, with no scope binding of a global's name and a speaker
-registry of exactly the set-up speakers. Restore never runs a start value again. A snapshot may refer to the
+registry of exactly the set-up speakers. While the prefix runs, a snapshot holds nothing else: no call, loop,
+temporary, action, timer, media, queued block, settlement, prepared output, top-level variable, default speaker, or
+Stage image, and none of their identities allocated; after it, no saved instruction position lies inside it. Restore
+never runs a start value again. A snapshot may refer to the
 instructions, functions, and blocks of `main.tease` and to global functions of any file with their blocks; any other
 file's code is malformed until `goto` and `call` can enter it. A runtime failure, in the snapshot's `failure` and the
 `runtimeFailure` event, carries the `path` of the file whose source its span is in.
