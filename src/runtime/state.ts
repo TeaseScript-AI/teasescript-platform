@@ -162,6 +162,11 @@ export interface RuntimeScopeFrameSnapshot {
    * for a block or function scope.
    */
   readonly file: number | null;
+  /**
+   * Where the activation of a root started: its file's entry or one of its labels, which a `goto` to a label of the
+   * file keeps; `null` for a block or function scope.
+   */
+  readonly entry: number | null;
   readonly bindings: RuntimeBindingSnapshot[];
 }
 
@@ -498,7 +503,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     format: RUNTIME_SNAPSHOT_FORMAT,
     version: RUNTIME_SNAPSHOT_VERSION,
     nextInstruction: 0,
-    frames: [{ id: 0, file: 0, bindings: [] }],
+    frames: [{ id: 0, file: 0, entry: plan.files[0]!.entryInstruction, bindings: [] }],
     globals: hostGlobals,
     retainedScopes: [],
     fallback: null,
@@ -666,7 +671,12 @@ export function cloneTransferDestination(
 }
 
 function cloneScopeFrame(frame: RuntimeScopeFrameSnapshot): RuntimeScopeFrameSnapshot {
-  return { id: frame.id, file: frame.file, bindings: frame.bindings.map(cloneBinding) };
+  return {
+    id: frame.id,
+    file: frame.file,
+    entry: frame.entry,
+    bindings: frame.bindings.map(cloneBinding),
+  };
 }
 
 function cloneFunctionFrame(frame: RuntimeCallFrameSnapshot): RuntimeCallFrameSnapshot {
@@ -3092,12 +3102,14 @@ function validateScopes(
   for (const [index, frame] of [...frames, ...retainedScopes].entries()) {
     if (
       !isPlainRecord(frame) ||
-      !hasExactKeys(frame, ["id", "file", "bindings"]) ||
+      !hasExactKeys(frame, ["id", "file", "entry", "bindings"]) ||
       !nonNegativeSafeInteger(frame.id) ||
       !Array.isArray(frame.bindings) ||
-      (frame.file !== null &&
-        (!nonNegativeSafeInteger(frame.file) ||
-          (plan !== undefined && frame.file >= plan.files.length))) ||
+      (frame.file === null
+        ? frame.entry !== null
+        : !nonNegativeSafeInteger(frame.file) ||
+          !nonNegativeSafeInteger(frame.entry) ||
+          (plan !== undefined && !isFileEntry(plan, frame.file, frame.entry))) ||
       (index >= frames.length && frame.file === null)
     ) {
       errors.push("Runtime scope frame is malformed.");

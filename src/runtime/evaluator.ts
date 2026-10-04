@@ -165,7 +165,7 @@ import {
   stopTimerAction,
   timerRecord,
 } from "./operations/timer-lifecycle.js";
-import { findRoot } from "./activations.js";
+import { contextRootId, findRoot } from "./activations.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import {
   booleanFromText,
@@ -286,9 +286,7 @@ export class Evaluator {
           };
         }
         const binding = this.binding(expression.name);
-        if (binding === undefined) {
-          throw fault("TSR006", `Unknown identifier '${expression.name}'.`, expression.span);
-        }
+        if (binding === undefined) throw this.#unknownName(expression.name, expression.span);
         return binding.value;
       }
       case "temporary":
@@ -419,8 +417,7 @@ export class Evaluator {
         }
         if (expression.kind === "identifier") {
           const location = findBindingLocation(this.snapshot, this.plan, expression.name);
-          if (location === undefined)
-            throw fault("TSR006", `Unknown identifier '${expression.name}'.`, expression.span);
+          if (location === undefined) throw this.#unknownName(expression.name, expression.span);
           result = {
             value: location.binding.value,
             owned: false,
@@ -779,11 +776,44 @@ export class Evaluator {
     return result;
   }
 
+  #unknownName(name: string, span: SourceSpan): RuntimeFault {
+    return (
+      this.#unsetVariable(name, span) ?? fault("TSR006", `Unknown identifier '${name}'.`, span)
+    );
+  }
+
+  /**
+   * The compiler resolves every name, so a top-level variable of the file that the running code cannot find has a `let`
+   * that has not run in this activation: one entered at a label after the `let`, or code that runs before it, such as a
+   * function called earlier (ADR 0022 §3.4). The message names the label the activation started at. Another name, such
+   * as a configured global the host did not supply, gives `null`.
+   */
+  #unsetVariable(name: string, span: SourceSpan): RuntimeFault | null {
+    const root = findRoot(this.snapshot, contextRootId(this.snapshot));
+    if (root?.file === null || root === undefined || !declaresTopLevel(this.plan, root.file, name))
+      return null;
+    const file = this.plan.files[root.file]!;
+    const label =
+      root.entry === file.entryInstruction
+        ? undefined
+        : file.labels.find((candidate) => candidate.instruction === root.entry)?.name;
+    return fault(
+      "TSR070",
+      label === undefined
+        ? `'${name}' has no value yet: its 'let ${name}' has not run. Give ${name} a value before it is used.`
+        : `'${name}' has no value yet: this file was started at label '${label}', and its 'let ${name}' has not run since. Give ${name} a value after the label, or make it a global.`,
+      span,
+    );
+  }
+
   public assign(target: AssignmentTargetPlan, value: SerializableRuntimeValue): void {
     if (target.kind === "identifier") {
       const location = findBindingLocation(this.snapshot, this.plan, target.name);
       if (location === undefined) {
-        throw fault("TSR002", `Cannot assign to unknown variable '${target.name}'.`, target.span);
+        throw (
+          this.#unsetVariable(target.name, target.span) ??
+          fault("TSR002", `Cannot assign to unknown variable '${target.name}'.`, target.span)
+        );
       }
       if (isSpeakerReference(location.binding.value)) {
         throw fault("TSR034", `Cannot replace speaker '${target.name}'.`, target.span);
@@ -2469,6 +2499,20 @@ function setSpeakerProperty(
   if (property === undefined)
     speaker.properties.push({ name, value: cloneCapturedSerializableValue(value) });
   else property.value = cloneCapturedSerializableValue(value);
+}
+
+/** Whether a `let` in the outer scope of a file's root region declares the name. */
+function declaresTopLevel(plan: InstructionPlan, file: number, name: string): boolean {
+  const { startInstruction, rootEndInstruction } = plan.files[file]!;
+  let depth = 0;
+  for (let index = startInstruction; index < rootEndInstruction; index += 1) {
+    const instruction = plan.instructions[index]!;
+    if (instruction.kind === "enterScope") depth += 1;
+    else if (instruction.kind === "leaveScope") depth -= 1;
+    else if (depth === 0 && instruction.kind === "declareBinding" && instruction.name === name)
+      return true;
+  }
+  return false;
 }
 
 /** `script(path, label:)`: a reference to a file or one of its labels, which a transfer checks when it uses it. */

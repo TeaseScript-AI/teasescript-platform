@@ -298,7 +298,12 @@ function freshRoot(
   snapshot: RuntimeSnapshot,
   destination: PlanDestination,
 ): RuntimeScopeFrameSnapshot {
-  const root = { id: snapshot.nextScopeId, file: destination.file, bindings: [] };
+  const root = {
+    id: snapshot.nextScopeId,
+    file: destination.file,
+    entry: destination.target,
+    bindings: [],
+  };
   snapshot.nextScopeId += 1;
   return root;
 }

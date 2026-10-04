@@ -58,6 +58,7 @@ export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapsh
   snapshot.frames.push({
     id: snapshot.nextScopeId,
     file: null,
+    entry: null,
     bindings:
       definition.selfHandle !== null && "mediaId" in invocation
         ? [

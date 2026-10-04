@@ -125,7 +125,7 @@ test("goto, call, and fallback go where a reference in a variable, list, or dict
   );
 });
 
-test("a reference saved in one session goes to its label in the next", () => {
+test("a reference saved in one session goes to its label in the next; a let skipped there has no value yet", () => {
   // The session that saves the reference shows its label; the one that loads it only sees `load`.
   const room =
     'let mood = "calm"\nlabel late\nsay "late"\nlet count = 3\nsay "count ${count}"\nexit';
@@ -141,6 +141,16 @@ test("a reference saved in one session goes to its label in the next", () => {
     "late",
     "count 3",
     "exit",
+  ]);
+  // The compiler cannot see that a loaded reference enters at the label, so reading `mood` fails when it runs.
+  const plan = compiled(project(reader, { "room.tease": room.replace('say "late"', "say mood") }));
+  const result = run(plan, createImmediatePacingRuntimeSnapshot(plan, { scriptStorage: saved }));
+  assert.deepEqual(outputs(result.events), [
+    "failure TSR070: 'mood' has no value yet: this file was started at label 'late', and its 'let mood' has not run since. Give mood a value after the label, or make it a global.",
+  ]);
+  // From the top of a file, the message names no label.
+  assert.deepEqual(ran(project("function show { say level }\nshow()\nlet level = 1\nexit")), [
+    "failure TSR070: 'level' has no value yet: its 'let level' has not run. Give level a value before it is used.",
   ]);
 });
 
@@ -324,7 +334,7 @@ test("plan and restore validation check the expression of a computed target", ()
   );
 });
 
-test("restore accepts a fallback that a computed fallback resolved to", () => {
+test("restore accepts a fallback that a computed fallback resolved to, and checks where each activation started", () => {
   const files = project(
     [
       'let next = script("rooms/hall.tease", label: "start")',
@@ -346,6 +356,13 @@ test("restore accepts a fallback that a computed fallback resolved to", () => {
     file: hall,
     target: plan.files[hall]!.labels[0]!.instruction,
   });
+  assert.deepEqual(
+    waiting.frames.flatMap((frame) => (frame.file === null ? [] : [[frame.file, frame.entry]])),
+    [
+      [0, plan.files[0]!.entryInstruction],
+      [hall, plan.files[hall]!.entryInstruction],
+    ],
+  );
   assert.deepEqual(validateRuntimeSnapshot(waiting, plan).errors, []);
   const errors = (change: (snapshot: Mutable<RuntimeSnapshot>) => void): readonly string[] => {
     // EVIDENCE: structuredClone preserves the runtime snapshot shape while each fixture breaks one field.
@@ -371,6 +388,20 @@ test("restore accepts a fallback that a computed fallback resolved to", () => {
         snapshot.fallback = fallback;
       }),
       ["Runtime fallback is malformed."],
+    );
+  // An activation starts at its file's entry or one of its labels.
+  assert.deepEqual(
+    errors((snapshot) => {
+      snapshot.frames[1]!.entry = plan.files[hall]!.labels[0]!.instruction;
+    }),
+    [],
+  );
+  for (const entry of [inside, null])
+    assert.deepEqual(
+      errors((snapshot) => {
+        snapshot.frames[1]!.entry = entry;
+      }),
+      ["Runtime scope frame is malformed."],
     );
   // Without a computed fallback, the fallback is still exactly the destination of a fallback statement.
   const literal = compiled(

@@ -360,7 +360,7 @@ function executePlannedInstruction(
     }
     case "enterScope":
       assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
-      snapshot.frames.push({ id: snapshot.nextScopeId, file: null, bindings: [] });
+      snapshot.frames.push({ id: snapshot.nextScopeId, file: null, entry: null, bindings: [] });
       snapshot.nextScopeId += 1;
       advance(snapshot);
       return;
@@ -1160,7 +1160,7 @@ function enterFunction(
   snapshot.nextCallFrameId += 1;
   snapshot.callFrames.push(frame);
   snapshot.temporaries.length = 0;
-  snapshot.frames.push({ id: snapshot.nextScopeId, file: null, bindings: [] });
+  snapshot.frames.push({ id: snapshot.nextScopeId, file: null, entry: null, bindings: [] });
   snapshot.nextScopeId += 1;
   snapshot.nextInstruction = definition.entryInstruction;
 }
@@ -1505,7 +1505,7 @@ function executeLoopControl(
 
 function pushIterationScope(snapshot: RuntimeSnapshot, bindings: RuntimeBindingSnapshot[]): void {
   assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
-  snapshot.frames.push({ id: snapshot.nextScopeId, file: null, bindings });
+  snapshot.frames.push({ id: snapshot.nextScopeId, file: null, entry: null, bindings });
   snapshot.nextScopeId += 1;
 }
 

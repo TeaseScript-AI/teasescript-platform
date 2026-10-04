@@ -323,7 +323,12 @@ test("restore validation checks activations, file calls, retained roots, and the
   // A retained root is a root of a file.
   assert.notDeepEqual(
     broken((snapshot) => {
-      snapshot.retainedScopes.push({ id: snapshot.nextScopeId, file: null, bindings: [] });
+      snapshot.retainedScopes.push({
+        id: snapshot.nextScopeId,
+        file: null,
+        entry: null,
+        bindings: [],
+      });
       snapshot.nextScopeId += 1;
     }),
     [],
