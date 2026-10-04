@@ -3,7 +3,7 @@
  *
  * These are transport/runtime ceilings, not recommended UI lengths. Strings
  * are counted as UTF-8 bytes. The aggregate budget counts every retained UI
- * string and choice label string once. Collection entries are counted
+ * string and choice value string once. Collection entries are counted
  * separately so validation and matching remain bounded even for empty text.
  */
 export const INTERACTION_LIMITS_VERSION = 1;

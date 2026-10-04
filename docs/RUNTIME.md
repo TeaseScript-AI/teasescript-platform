@@ -69,7 +69,7 @@ owning and continuation instruction positions
 result destination when applicable
 expected result type
 validated Standard UI payload
-choice labels and visible values when applicable
+choice values and visible texts when applicable
 target
 optional requesting speaker identity
 accessible-name data or localized default key
@@ -79,11 +79,11 @@ The engine owns action identity, active state, completion validation, transcript
 
 The selected interactions expose no player cancellation result. Timer interrupts may suspend them, and handler `exit`
 discards the interrupted instruction without producing a result; see [Timers and scene time](#timers-and-scene-time).
-Wrong-kind, whitespace-only required text, non-finite-number, unknown-label, unknown-visible-choice, ambiguous-choice,
+Wrong-kind, whitespace-only required text, non-finite-number, unknown-option, unknown-visible-choice, ambiguous-choice,
 and over-limit completions leave the same action active without mutating its result, transcript, event sequence, RNG, or
 continuation.
 
-The compact compiler fully lowers these forms into the versioned plan. Static control text is embedded directly in the interaction instruction. Dynamic control text first captures the requesting speaker, evaluates payload expressions in source order, and stores one prepared UI value; dynamic `choose` batches all option expressions into one prepared list rather than emitting one interaction-preparation instruction per option. The runtime materializes and validates that prepared UI atomically before publishing the pending action. No Standard Library lookup or suspended JavaScript/TypeScript call survives the compile boundary.
+The compact compiler fully lowers these forms into the versioned plan. Static control text is embedded directly in the interaction instruction. Dynamic control text first captures the requesting speaker, evaluates payload expressions in source order, and stores one prepared UI value; dynamic `choose` batches all option values into one prepared list, next to the value written before each option's `:` (or `null`) in the plan, rather than emitting one interaction-preparation instruction per option. The runtime materializes and validates that prepared UI atomically before publishing the pending action: it expands each list or set option into one button per element, in order, gives every button its value (the written value, a choice object's `value`, or else the option itself), and rejects a choice without buttons or with more buttons than the option-count limit. Buttons may share a value. No Standard Library lookup or suspended JavaScript/TypeScript call survives the compile boundary.
 
 Result-bearing text, number, and choice instructions require the destination temporary to be absent when the interaction
 is requested. Successful completion atomically writes the typed result into that prepared ordinary runtime temporary,
@@ -107,11 +107,12 @@ Completion semantics are:
 
 - `askText` normalizes `CRLF` and standalone `CR` to `LF`, otherwise preserves submitted text, rejects whitespace-only input, returns `string`, and uses the same normalized text in the player transcript;
 - `askNumber` accepts one line of text, trims surrounding whitespace, parses accepted TeaseScript decimal/scientific forms, requires a finite result, canonicalizes negative zero to numeric `0`, returns `number`, and preserves the trimmed submitted text in the transcript;
-- an unlabelled `choose` returns visible text;
-- a labelled `choose` accepts one exact stored identifier or numeric label and returns `string` or `number` respectively;
+- `choose` returns the value of the selected button: a value written before `:` (an identifier is a `string`, a
+  numeric literal a number), a choice object's `value` (or its `text` when it has none), or otherwise the option
+  itself with its own type, which may be text, a number, a boolean, `null`, or a duration;
 - `showButton` has no useful first-slice return value or timeout.
 
-A labelled rendered choice control supplies its selected label to the engine; an unlabelled control supplies its selected visible text. The engine derives the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
+A rendered choice control supplies the position of its button (`{ kind: "selectedOption", optionIndex }`), because several buttons may return the same value. The engine derives the returned value and the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
 
 The current runtime keeps three independent interaction resource axes: completion/result/transcript string bytes,
 aggregate UTF-8 bytes for one retained interaction definition, and option count. Authored/materialized UI fields have no
@@ -119,18 +120,21 @@ independent per-field byte ceiling; each preflights against the remaining defini
 their provisional Owner POC reassessment route live in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md); they are not accepted
 capacity or source targets. Bounded validation rejects impossible UTF-16 lengths before encoding and encodes no further
 field once the applicable byte budget fails, so encoding work stays bounded by the byte budget rather than by the total
-string size. The text-completion limit applies to the raw host string before CRLF/CR-to-LF normalization, which cannot
-increase its UTF-8 size. Over-limit data is rejected without truncation, clamping, or partial state mutation.
+string size. A choice value that is text other than its button text counts toward the definition aggregate as well. The
+text-completion limit applies to the raw host string before CRLF/CR-to-LF normalization, which cannot increase its
+UTF-8 size. Over-limit data is rejected without truncation, clamping, or partial state mutation.
 
-Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The identifier-choice label grammar is the current ASCII TeaseScript identifier form. Choice duplicate detection and completion matching use bounded native sets or one linear option pass.
+Whitespace-only text rejection uses `ecmascript-whitespace-v1`: the ECMAScript `WhiteSpace` and `LineTerminator` classification represented by the engine's Unicode-aware regular expression. The grammar of an identifier choice value is the current ASCII TeaseScript identifier form. Choice completion matching uses one linear option pass.
 
 Successful completion emits the canonical `playerTranscript` event first and `actionCompleted` second. Both receive
 monotonic sequences, and the bounded settlement retains both sequences, the canonical result, transcript text,
 destination temporary, owning call-frame identity, and the UI the player answered, for duplicate replay. The separate
 single-use handoff, not that settlement, is the persisted authority for the still-unconsumed destination. A pending
-action's prepared dynamic UI is checked against its preparation temporaries. A retained settlement is checked against
+action's prepared dynamic UI is checked against its preparation temporaries; for `choose`, the captured option values are
+expanded again and must give the same buttons. A retained settlement is checked against
 its recorded UI and the plan instead, because cleanup clears those temporaries and a later run of the same instruction
-prepares them anew. Snapshot validation does not authenticate the historical dynamic-UI evaluation itself: a recorded
+prepares them anew; for `choose` options that all have written values, the buttons must return those values in
+written order. Snapshot validation does not authenticate the historical dynamic-UI evaluation itself: a recorded
 UI and transcript edited together consistently are accepted, in line with the general snapshot-history rule below. Delay creation preflights its request plus future completion sequence; interaction creation preflights its
 request plus future transcript and completion sequences. Interaction completion rechecks both required sequences and
 validates the complete destination mutation before publishing any write, handoff, settlement, event, or continuation
@@ -142,7 +146,7 @@ The Standard Player application uses one fixed composer. During a foreground int
 
 Choice buttons may occupy one or two rows. The Player application may render the same choice group as a dropdown when
 viewport, text, font, zoom, accessibility, or other layout constraints make buttons impractical. Button-versus-dropdown
-presentation is not canonical runtime/checkpoint state and does not change labels, visible text, completion validation,
+presentation is not canonical runtime/checkpoint state and does not change values, visible text, completion validation,
 transcript output, or return values. Exact unambiguous visible option text may activate `choose`. The one-option
 `showButton` completes through its rendered control or composer submission of its exact, non-empty visible label;
 other text and Space with the empty focused composer do not activate it.
@@ -187,8 +191,8 @@ delayMs =
 ```
 
 The measured value is the visible text from the final message-markup representation after expression evaluation,
-interpolation, string escaping, deterministic list selection, block-string newline normalization/dedent, and one shared
-message-markup parse. Formatting delimiters and block markers do not count. Words are maximal non-whitespace sequences;
+interpolation, string escaping, deterministic list selection, list, set, and object notation, block-string newline
+normalization/dedent, and one shared message-markup parse. Formatting delimiters and block markers do not count. Words are maximal non-whitespace sequences;
 visible characters are Unicode code points. The authored markup grammar and flattening rules are defined in
 [`specifications/message-markup.md`](specifications/message-markup.md).
 
@@ -821,10 +825,19 @@ data; reconciliation belongs to #469 and is not implemented here.
 
 Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, `null`, and elapsed duration values.
 Duration formatting is defined in specification
-[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-unix-time). When the value is a list, the
-runtime selects exactly one item and then accepts only a string or finite number. Selected booleans, `null`, objects,
-sets, ranges, and nested collections fail with structured runtime error `TSR021`; the runtime does not recursively
-select or stringify them.
+[§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-unix-time). List text follows
+[§16](specifications/accepted-syntaxes-v30.md#lists-in-text):
+
+- `${...}` interpolation checks that every element is a scalar visible-text value, then selects exactly one element
+  with the session RNG. An empty list fails with `TSR019` and any other element with `TSR021`, both before any RNG
+  draw.
+- `say` shows any other value in code-like notation, written iteratively so that deep nesting does not recurse
+  natively. A timer or media handle shows the state the snapshot holds when `say` evaluates its value, so the text is
+  deterministic and the same after checkpoint resume. The engine escapes the notation with `escapeMarkup`, so the
+  ordinary markup parse leaves it literal.
+- Button labels, input hints, and the `text` of a choice object reject a list with `TSR021`, timer labels with
+  `TSR050`, and speaker names and titles with `TSR030`; a list the compiler can see there is compile error `TSV040`,
+  and another value they cannot show `TSV042`. Materializing an interaction draws no RNG.
 
 The earlier proposal for automatic chat pacing at 17 visible characters per second is superseded. ADR 0018 defines the
 accepted deterministic first-POC smart-autoplay and pacing-action contract. The current engine/compiler and playground
@@ -901,9 +914,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 27 | Structural `==` for objects, lists, sets, and ranges (previously `TSR029`); the list method `removeAt`; `removeAt`, `removeFirst`, and `removeLast` return the removed element, and `removeFirst`/`removeLast` on an empty list fail (previously no-ops). Revision 26: text and number interaction UI may carry a `prefill` default answer, or its `prefillTemporary` when computed. Revision 25: script storage: `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and `storageWrite` instructions (`save`; `delete` when the value is `null`). Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
-| Runtime snapshot | 28 | Text and number interaction UI, active or recorded in a settlement, may carry a validated `prefill`. Revision 27: an interaction settlement records the `ui` the player answered, and validates against it instead of the prepared temporaries, which a later run of the same instruction may fill anew. Revision 26: the validated, key-sorted `scriptStorage` session view, `scriptStoragePersistent`, and foreground `storageWrite` actions and settlements. Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
-| Checkpoint | 37 | Updated the self-contained bundle for the structural-equality and list-removal plan contract. Revision 36: interaction prefills. Revision 35: the recorded interaction settlement UI. Revision 34: the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
+| Instruction plan | 28 | List text and choices: `say` shows any value, with lists, sets, and objects in literal notation, only `${...}` interpolation selects a list element, and text fields reject lists; a prepared `choose` keeps its evaluated options and the value written before each `:` (or `null`), static choice UI carries typed values, and choice results use the `choice` domain. Revision 27: structural `==` for objects, lists, sets, and ranges (previously `TSR029`); the list method `removeAt`; `removeAt`, `removeFirst`, and `removeLast` return the removed element, and `removeFirst`/`removeLast` on an empty list fail (previously no-ops). Revision 26: text and number interaction UI may carry a `prefill` default answer, or its `prefillTemporary` when computed. Revision 25: script storage: `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and `storageWrite` instructions (`save`; `delete` when the value is `null`). Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
+| Runtime snapshot | 29 | Choice actions and settlements carry each button's typed value, a choice result may be any choice value including `null` or a duration, and a choice control completes by button position. Revision 28: text and number interaction UI, active or recorded in a settlement, may carry a validated `prefill`. Revision 27: an interaction settlement records the `ui` the player answered, and validates against it instead of the prepared temporaries, which a later run of the same instruction may fill anew. Revision 26: the validated, key-sorted `scriptStorage` session view, `scriptStoragePersistent`, and foreground `storageWrite` actions and settlements. Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
+| Checkpoint | 38 | Updated the self-contained bundle for the list-text and choice plan and snapshot contracts. Revision 37: the structural-equality and list-removal plan contract. Revision 36: interaction prefills. Revision 35: the recorded interaction settlement UI. Revision 34: the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 

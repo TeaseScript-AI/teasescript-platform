@@ -29,13 +29,14 @@ import type {
   TemplatePartPlan,
   StorageTypePlan,
   TemporaryExpressionPlan,
+  InteractionChoiceOption,
   InteractionUiPayload,
   PreparedInteractionUiPayload,
   PlanSourceLocation,
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { numberAnswerText } from "../../interaction-answers.js";
-import { staticVisibleText } from "../../static-evaluation.js";
+import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralMilliseconds } from "../../duration.js";
 import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
 import {
@@ -1182,25 +1183,19 @@ export class InstructionCompiler {
   *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
     const values =
       expression.interactionKind === "choice"
-        ? expression.options.map((option) => option.value)
+        ? expression.options.map((option) => option.expression)
         : expression.hint === null
           ? []
           : [expression.hint];
-    const staticValues = values.map(staticVisibleText);
-    const labelType = interactionLabelType(expression);
     const expectedResult =
-      expression.interactionKind === "number" ||
-      (expression.interactionKind === "choice" && labelType === "number")
-        ? ("number" as const)
-        : ("string" as const);
+      expression.interactionKind === "choice"
+        ? ("choice" as const)
+        : expression.interactionKind === "number"
+          ? ("number" as const)
+          : ("string" as const);
 
-    const staticPrefill =
-      expression.defaultValue === null ? null : staticInteractionPrefill(expression);
-    if (
-      staticValues.every((value): value is string => value !== undefined) &&
-      staticPrefill !== undefined
-    ) {
-      const ui = staticInteractionUi(expression, staticValues, labelType, staticPrefill);
+    const ui = staticInteractionUi(expression);
+    if (ui !== undefined) {
       return this.#emitResultInteraction(
         {
           interactionKind: expression.interactionKind,
@@ -1274,13 +1269,10 @@ export class InstructionCompiler {
       preparedTemporaryIds.push(optionsTemporary);
       preparedUi = {
         kind: "choice",
-        labelType,
         optionsTemporary,
-        optionCount: expression.options.length,
-        labels:
-          labelType === "none"
-            ? null
-            : expression.options.map((option) => interactionLabelValue(option.label!)),
+        values: expression.options.map((option) =>
+          option.value === null ? null : authoredChoiceValue(option.value),
+        ),
         accessibleName: { kind: "localizedDefault", key: "chooseOption" },
       };
     }
@@ -1317,7 +1309,7 @@ export class InstructionCompiler {
 
   #emitPreparedResultInteraction(
     interactionKind: InteractionExpression["interactionKind"],
-    expectedResult: "string" | "number",
+    expectedResult: "string" | "number" | "choice",
     speakerTemporary: number,
     preparedUi: PreparedInteractionUiPayload,
     span: SourceSpan,
@@ -1893,19 +1885,11 @@ function compileExpression(expression: Expression): ExpressionPlan {
   }
 }
 
-function interactionLabelType(expression: InteractionExpression): "none" | "identifier" | "number" {
-  const label = expression.options[0]?.label;
-  return label === undefined || label === null
-    ? "none"
-    : label.kind === "identifier"
-      ? "identifier"
-      : "number";
-}
-
-function interactionLabelValue(
-  label: NonNullable<InteractionExpression["options"][number]["label"]>,
+/** The value written before `:` in a choice option: an identifier is text, a numeric literal a number. */
+function authoredChoiceValue(
+  value: NonNullable<InteractionExpression["options"][number]["value"]>,
 ): string | number {
-  return label.kind === "identifier" ? label.name : Object.is(label.value, -0) ? 0 : label.value;
+  return value.kind === "identifier" ? value.name : Object.is(value.value, -0) ? 0 : value.value;
 }
 
 /**
@@ -1937,16 +1921,15 @@ function staticInteractionPrefill(expression: InteractionExpression): string | u
     : undefined;
 }
 
-function staticInteractionUi(
-  expression: InteractionExpression,
-  staticValues: readonly string[],
-  labelType: "none" | "identifier" | "number",
-  prefill: string | null,
-): InteractionUiPayload {
+/** The UI of an interaction whose text, values, and default answer are all known at compile time. */
+function staticInteractionUi(expression: InteractionExpression): InteractionUiPayload | undefined {
   if (expression.interactionKind === "text" || expression.interactionKind === "number") {
+    const hint = expression.hint === null ? null : staticVisibleText(expression.hint);
+    const prefill = expression.defaultValue === null ? null : staticInteractionPrefill(expression);
+    if (hint === undefined || prefill === undefined) return undefined;
     return {
       kind: expression.interactionKind,
-      hint: staticValues[0] ?? null,
+      hint,
       ...(prefill === null ? {} : { prefill }),
       accessibleName: {
         kind: "localizedDefault",
@@ -1954,13 +1937,19 @@ function staticInteractionUi(
       },
     };
   }
+  const options: InteractionChoiceOption[] = [];
+  for (const option of expression.options) {
+    const text = staticVisibleText(option.expression);
+    const known = option.value === null ? staticChoiceValue(option.expression) : undefined;
+    if (text === undefined || (option.value === null && known === undefined)) return undefined;
+    options.push({
+      text,
+      value: option.value === null ? known!.value : authoredChoiceValue(option.value),
+    });
+  }
   return {
     kind: "choice",
-    labelType,
-    options: expression.options.map((option, index) => ({
-      text: staticValues[index]!,
-      label: option.label === null ? null : interactionLabelValue(option.label),
-    })),
+    options,
     accessibleName: { kind: "localizedDefault", key: "chooseOption" },
   };
 }

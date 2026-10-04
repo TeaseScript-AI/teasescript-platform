@@ -227,7 +227,7 @@ exit
   );
 });
 
-test("runtime adapter preserves unlabelled choice order and rendered-selection semantics", () => {
+test("runtime adapter preserves choice order and rendered-selection semantics", () => {
   let session = createPlayerRuntimeSession(
     'let choice = choose "First", "Second"\nsay choice, instant',
   );
@@ -244,6 +244,24 @@ test("runtime adapter preserves unlabelled choice order and rendered-selection s
   assert.deepEqual(
     session.transcriptEntries.map((entry) => entry.text),
     ["Second", "Second"],
+  );
+});
+
+test("runtime adapter selects the rendered button even when two buttons return the same value", () => {
+  const session = createPlayerRuntimeSession(
+    'let options = [{ text: "A", value: 1 }, { text: "B", value: 1 }]\nlet choice = choose options\nsay [choice], instant',
+  );
+  const foreground = playerRuntimeForeground(session);
+  if (foreground?.kind !== "choose") throw new Error("Expected choice presentation.");
+  assert.deepEqual(
+    foreground.options.map((option) => option.label),
+    ["A", "B"],
+  );
+  const selected = selectPlayerRuntimeChoice(session, foreground.options[1]!.id);
+  assert.equal(selected?.outcome.kind, "completed");
+  assert.deepEqual(
+    selected!.session.transcriptEntries.map((entry) => entry.text),
+    ["B", "[1]"],
   );
 });
 

@@ -25,7 +25,6 @@ type Snapshot = ReturnType<typeof createImmediatePacingRuntimeSnapshot>;
 function answerSecond(plan: Plan, snapshot: Snapshot) {
   const action = snapshot.foregroundAction;
   assert.ok(action !== null && action.kind === "interaction");
-  const option = action.ui.kind === "choice" ? action.ui.options[1]! : null;
   const completed = completeAction(plan, snapshot, {
     actionId: action.actionId,
     actionKind: "interaction",
@@ -33,11 +32,9 @@ function answerSecond(plan: Plan, snapshot: Snapshot) {
     payload:
       action.ui.kind === "text" || action.ui.kind === "number"
         ? { kind: "submittedText", submittedText: action.ui.prefill! }
-        : option === null
-          ? { kind: "activate" }
-          : option.label === null
-            ? { kind: "selectedText", selectedText: option.text }
-            : { kind: "selectedLabel", selectedLabel: option.label },
+        : action.ui.kind === "choice"
+          ? { kind: "selectedOption", optionIndex: 1 }
+          : { kind: "activate" },
   });
   assert.equal(completed.outcome.kind, "completed");
   assert.equal(validateRuntimeSnapshot(completed.snapshot, plan).valid, true);
@@ -46,7 +43,7 @@ function answerSecond(plan: Plan, snapshot: Snapshot) {
 
 const SCENARIOS = [
   {
-    name: "a labelled choice in a loop",
+    name: "a choice with written values in a loop",
     source:
       'for pair in [["Low", "High"], ["Plug", "Clamps"]] {\n    let pick = choose 0: pair[0], 1: pair[1]\n    say "Picked ${pick}"\n}',
     said: ["Picked 1", "Picked 1"],
@@ -56,6 +53,12 @@ const SCENARIOS = [
     source:
       'function ask(first, second) {\n    return choose first, second\n}\nlet x = ask("A", "B")\nlet y = ask("C", "D")\nsay "${x} ${y}"',
     said: ["B D"],
+  },
+  {
+    name: "a choice from lists of different lengths in a loop",
+    source:
+      'for options in [["Low", "High"], ["Plug", "Clamps", "Rope"]] {\n    let pick = choose options\n    say "Picked ${pick}"\n}',
+    said: ["Picked High", "Picked Clamps"],
   },
   {
     name: "a computed button label in a loop",
@@ -112,12 +115,12 @@ test("a forged retained choice is still rejected right after the second completi
     actionId: action.actionId,
     actionKind: "interaction",
     interactionKind: "choice",
-    payload: { kind: "selectedLabel", selectedLabel: 1 },
+    payload: { kind: "selectedOption", optionIndex: 1 },
   });
   const checkpoint = structuredClone(createCheckpoint(plan, completed.snapshot));
   assert.ok(checkpoint.snapshot.lastSettlement?.actionKind === "interaction");
   assert.equal(checkpoint.snapshot.lastSettlement.transcriptText, "Clamps");
-  // EVIDENCE: fixture changes only the retained transcript to the other option presented with label 0.
+  // EVIDENCE: fixture changes only the retained transcript to the other option presented with value 0.
   (checkpoint.snapshot.lastSettlement as { transcriptText: string }).transcriptText = "Plug";
   assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)));
 });
@@ -133,7 +136,7 @@ test("a forged retained choice is rejected until cleanup clears the presented op
     actionId: action.actionId,
     actionKind: "interaction",
     interactionKind: "choice",
-    payload: { kind: "selectedLabel", selectedLabel: "first" },
+    payload: { kind: "selectedOption", optionIndex: 0 },
   }).snapshot;
   // The result is handed off, but the cleanup that clears the presented options has not run yet.
   const consumed = executeInstruction(plan, completed).snapshot;
