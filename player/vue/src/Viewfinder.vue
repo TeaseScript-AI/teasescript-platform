@@ -63,8 +63,9 @@ onBeforeUnmount(() => {
   margin: 0;
   aspect-ratio: var(--viewfinder-ratio);
   overflow: hidden;
+  --viewfinder-radius: 12px;
   border: 1px solid var(--media-border);
-  border-radius: 12px;
+  border-radius: var(--viewfinder-radius);
   background: var(--media-surface);
   box-shadow: 0 2px 10px var(--media-shadow);
 }
@@ -74,5 +75,7 @@ onBeforeUnmount(() => {
   height: 100%;
   object-fit: contain;
   transform: scaleX(-1);
+  /* Firefox does not clip a transformed video to its container's rounded corners; inside the 1px border. */
+  border-radius: calc(var(--viewfinder-radius) - 1px);
 }
 </style>
