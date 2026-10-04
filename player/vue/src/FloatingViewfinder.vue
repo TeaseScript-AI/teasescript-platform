@@ -131,12 +131,11 @@ function measured(next: number) {
   >
     <Viewfinder
       :track="track"
-      :label="false"
       class="floating-viewfinder-frame"
       @aspect="measured"
       @away="away = $event"
     >
-      <!-- The label is the window's grip; the whole window drags too. -->
+      <!-- The grip moves the window by keyboard; the whole window drags. -->
       <button
         type="button"
         class="floating-viewfinder-grip"
@@ -144,7 +143,7 @@ function measured(next: number) {
         title="Drag to move; arrow keys move it too"
         @keydown="keyboard($event, 'move')"
       >
-        <GripVertical aria-hidden="true" class="size-3.5" /><span class="floating-viewfinder-grip-text">Camera preview</span>
+        <GripVertical aria-hidden="true" class="size-3.5" />
       </button>
       <button
         type="button"
@@ -164,7 +163,6 @@ function measured(next: number) {
 .floating-viewfinder {
   position: absolute;
   z-index: 15;
-  container-type: inline-size;
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -181,32 +179,19 @@ function measured(next: number) {
   color: var(--media-text);
   background: var(--media-surface);
   box-shadow: 0 1px 3px var(--media-shadow);
+  width: 26px;
+  height: 26px;
+  border-radius: 9999px;
   backdrop-filter: blur(3px);
 }
 .floating-viewfinder-grip {
   top: 8px;
   left: 8px;
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  padding: 2px 10px 2px 6px;
-  border-radius: 9999px;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 20px;
   cursor: grab;
 }
 .floating-viewfinder-resize {
   right: 6px;
   bottom: 6px;
-  width: 26px;
-  height: 26px;
-  border-radius: 9999px;
   cursor: nwse-resize;
-}
-/* A small window keeps only the grip icon; its accessible name stays. */
-@container (max-width: 220px) {
-  .floating-viewfinder-grip { padding-inline: 6px; }
-  .floating-viewfinder-grip-text { display: none; }
 }
 </style>

@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { PictureInPicture2, Video } from "@lucide/vue";
+import { PictureInPicture2 } from "@lucide/vue";
 
 // A live, local preview of the session camera. It never captures: the script takes photos through `takePhoto()`.
 // Mirrored like a selfie view, so moving left moves the image left; photos themselves stay unmirrored. The default
 // slot holds content over the preview, such as a small reference image or window controls.
-const props = withDefaults(defineProps<{ track: MediaStreamTrack; label?: boolean }>(), {
-  label: true,
-});
+const props = defineProps<{ track: MediaStreamTrack }>();
 const emit = defineEmits<{ aspect: [ratio: number]; away: [away: boolean] }>();
 const video = ref<HTMLVideoElement | null>(null);
 const pipButton = ref<HTMLButtonElement | null>(null);
@@ -143,10 +141,8 @@ onBeforeUnmount(() => {
       @leavepictureinpicture="setAway(false)"
     />
     <slot />
-    <!-- Without its visible label the preview keeps its name. -->
-    <figcaption :class="label ? 'viewfinder-label' : 'sr-only'">
-      <Video v-if="label" aria-hidden="true" class="size-3.5" />Camera preview
-    </figcaption>
+    <!-- The live picture speaks for itself; the name is for assistive technology only. -->
+    <figcaption class="sr-only">Camera preview</figcaption>
     <button
       v-if="pictureInPicture"
       ref="pipButton"
@@ -182,29 +178,16 @@ onBeforeUnmount(() => {
   object-fit: contain;
   transform: scaleX(-1);
 }
-.viewfinder-label,
 .viewfinder-pip {
   position: absolute;
   top: 10px;
+  right: 10px;
   border: 1px solid var(--media-border);
   border-radius: 9999px;
   color: var(--media-text);
   background: var(--media-surface);
   box-shadow: 0 1px 3px var(--media-shadow);
   backdrop-filter: blur(3px);
-}
-.viewfinder-label {
-  left: 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 10px 2px 8px;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 20px;
-}
-.viewfinder-pip {
-  right: 10px;
   display: grid;
   place-items: center;
   width: 28px;
