@@ -616,7 +616,8 @@ class Parser {
           );
           break;
         }
-        const value = runParse(this.#parseColonValueTask(true));
+        // Presentation options are a `()` grouping, where a line break does not end a value.
+        const value = runParse(this.#withinDelimiters(this.#parseColonValueTask(true)));
         if (value === null) break;
         properties.push({
           kind: "objectProperty",
@@ -1796,7 +1797,8 @@ class Parser {
     let defaultValue: Expression | null = null;
     if (this.#match(TokenKind.Equal)) {
       this.#skipContinuationNewlines();
-      defaultValue = this.#parseRequiredExpression();
+      // A parameter list is a `()` grouping, where a line break does not end the default.
+      defaultValue = runParse(this.#withinDelimiters(this.#parseRequiredExpressionTask()));
       if (defaultValue === null) {
         this.#synchronizeParameter();
         return null;

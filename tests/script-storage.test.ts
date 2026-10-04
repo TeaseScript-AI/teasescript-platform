@@ -908,6 +908,12 @@ test("a ', default:' belongs to the nearest load or ask before it", () => {
     grouped.expression.kind === "loadExpression" && grouped.expression.defaultValue !== null,
   );
   assert.notDeepEqual(parse('let v = load "k"\n, default: 7').diagnostics, []);
+  // Every `()` list counts, also function parameters and say presentation options.
+  for (const source of [
+    'function f(x = load "k"\n, default: 7) { return x }\nsay f()',
+    'say bubble(color: load "color"\n, default: "red") "Hi", instant',
+  ])
+    assert.deepEqual(compileSource(source).diagnostics, [], source);
 
   // By the same rule, a compact choice takes `default:` as its own option label; grouping gives the fallback to load.
   for (const source of [
