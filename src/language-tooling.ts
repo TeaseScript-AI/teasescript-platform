@@ -736,6 +736,9 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "speakerSetterStatement":
     case "waitStatement":
     case "exitStatement":
+    case "endStatement":
+    case "labelStatement":
+    case "gotoStatement":
     case "breakStatement":
     case "continueStatement":
       return;

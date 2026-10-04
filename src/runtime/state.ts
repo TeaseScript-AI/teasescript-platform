@@ -927,9 +927,10 @@ function validateCapturedRuntimeSnapshotDetails(
     errors.push(`Runtime temporalCaptures is malformed: ${temporalProblem}`);
   const analysis = plan === undefined ? undefined : createSnapshotValidationAnalysis(plan);
   const instructionLimit = plan?.instructions.length;
+  // Every region ends in a transfer, so a position is always an instruction of the plan.
   if (
     !nonNegativeSafeInteger(value.nextInstruction) ||
-    (instructionLimit !== undefined && value.nextInstruction > instructionLimit)
+    (instructionLimit !== undefined && value.nextInstruction >= instructionLimit)
   ) {
     errors.push("Runtime nextInstruction is outside the plan.");
   }
