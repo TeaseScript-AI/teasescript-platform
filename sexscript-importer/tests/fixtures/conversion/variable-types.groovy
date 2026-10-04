@@ -44,3 +44,7 @@ show("First: " + offenses[0][0] + ", then " + single[0][0])
 def toys = [null]
 toys[0] = "rope"
 show(toys[0])
+// A list of text that later holds lists of text keeps both in a union of its elements.
+def words = ["Rub", "Caress"]
+if (getBoolean("More?")) words = [["Pinch", "Twist"], ["them!"]]
+show("${words.size()}")

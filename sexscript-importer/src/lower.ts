@@ -903,12 +903,14 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
       statement,
     ]);
   }
-  for (const { statement, name, type, example } of result.unions) {
+  for (const { statement, name, type, example, elements } of result.unions) {
     const span = statement.span;
     const diagnostic: MigrationDiagnostic = {
       code: "SX_UNION_TYPE",
       severity: "warning",
-      message: `Groovy let '${name}' hold values of several types; TeaseScript declares it '${type}' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if ${name} is ${example} { ... }`,
+      message: elements
+        ? `Groovy gave the list '${name}' elements of several types; TeaseScript declares it '${type}' (ADR 0021 §3), so a use of an element that needs one of these types must keep it in a variable and test it first, as in: if item is ${example} { ... }`
+        : `Groovy let '${name}' hold values of several types; TeaseScript declares it '${type}' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if ${name} is ${example} { ... }`,
       span,
     };
     context.diagnostics.push(diagnostic);

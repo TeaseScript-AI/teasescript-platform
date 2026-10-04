@@ -55,7 +55,14 @@ export interface VariableTypeResult {
    */
   placeholders: Array<{ statement: IrStatement; name: string; type: string; first?: string }>;
   /** Declarations of variables that Groovy gave values of several types, now declared with a union type. */
-  unions: Array<{ statement: IrStatement; name: string; type: string; example: string }>;
+  unions: Array<{
+    statement: IrStatement;
+    name: string;
+    type: string;
+    example: string;
+    /** Whether the union is the type of the list's elements rather than of the variable itself. */
+    elements: boolean;
+  }>;
   /** Declarations that gained a `number` or optional type annotation. */
   annotated: number;
   /** Values truncated with `toInteger` because Groovy declared the variable with an integer type. */
@@ -290,13 +297,15 @@ export function enforceVariableTypes(
             next = { ...next, type: written };
           const rewritten = withIntegerIndexes(next, indexes);
           if (textIntegers.has(statement)) result.textIntegers.push(rewritten);
-          const union = binding.union === undefined ? undefined : nonNull(binding.union);
+          const declared = binding.union === undefined ? undefined : nonNull(binding.union);
+          const union = declared?.kind === "list" ? declared.element : declared;
           if (union?.kind === "union" && written !== null)
             result.unions.push({
               statement: rewritten,
               name: statement.name,
               type: written,
               example: typeName(union.members[0]!),
+              elements: declared?.kind === "list",
             });
           if (placeholder !== null && type !== undefined)
             result.placeholders.push({

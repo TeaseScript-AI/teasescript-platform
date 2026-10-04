@@ -48,3 +48,11 @@ say "First: ${offenses[0][0]}, then ${single[0][0]}"
 let toys = [null]
 toys[0] = "rope"
 say toys[0]
+// A list of text that later holds lists of text keeps both in a union of its elements.
+// NOTE SX_UNION_TYPE line 48: Groovy gave the list 'words' elements of several types; TeaseScript declares it '(string | string[])[]' (ADR 0021 §3), so a use of an element that needs one of these types must keep it in a variable and test it first, as in: if item is string { ... }
+let words: (string | string[])[] = ["Rub", "Caress"]
+say "More?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  words = [["Pinch", "Twist"], ["them!"]]
+}
+say "${words.length}"
