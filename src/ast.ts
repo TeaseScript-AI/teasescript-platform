@@ -456,7 +456,8 @@ export interface ReturnStatement {
 
 export interface ExpressionStatement {
   readonly kind: "expressionStatement";
-  readonly expression: CallExpression;
+  /** A call, or `findImages(…)`, which reads like one. */
+  readonly expression: CallExpression | TagQueryExpression;
   readonly span: SourceSpan;
 }
 

@@ -59,16 +59,18 @@ export function tagPredicateSteps(
       if (name === null) return null;
       steps.push({ kind: "tag", name, span: node.span });
     } else if (node.kind === "binaryExpression" && isTagComparisonOperator(node.operator)) {
-      if (node.left.kind !== "stringLiteral") {
+      let tag = node.left;
+      while (tag.kind === "parenthesizedExpression") tag = tag.expression;
+      if (tag.kind !== "stringLiteral") {
         report(
-          node.left.kind === "identifier"
-            ? `Write the tag name in quotes: "${node.left.name}".`
+          tag.kind === "identifier"
+            ? `Write the tag name in quotes: "${tag.name}".`
             : 'Write the quoted tag name before the comparison, such as "punishment" > 3.',
-          node.left.span,
+          tag.span,
         );
         return null;
       }
-      const name = queryTagName(node.left, report);
+      const name = queryTagName(tag, report);
       if (name === null) return null;
       steps.push({
         kind: "tagCompare",

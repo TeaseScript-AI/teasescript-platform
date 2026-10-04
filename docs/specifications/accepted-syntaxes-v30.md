@@ -4355,7 +4355,8 @@ if photos.length > 0 { showImage photos.random }
 
 - An image's tags are its XMP keywords ([ADR 0023](../decisions/0023-tags-for-scripts-and-images.md)). A keyword is a
   tag name, or a name and a number such as `punishment: 4`, with the rules of [Tags](#tags). Another keyword is ignored
-  with a warning; two different numbers for one tag are an error.
+  with a warning. A repeated tag counts once without a warning, because photo tools often keep `punishment` beside
+  `punishment: 4`; two different numbers for one tag are an error.
 - The catalog that tag queries search is generated from the images when the project compiles. It is part of the plan,
   so a checkpoint keeps it and a restored session searches the same images.
 

@@ -66,7 +66,14 @@ export { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./prot
 export function compileSource(source: string, options: CompileOptions = {}): CompilationResult {
   const result = compileProject([{ path: MAIN_FILE_PATH, source }], options);
   const { path: _path, ...file } = result.files[0]!;
-  return Object.freeze({ ...file, plan: result.plan });
+  // The image catalog's diagnostics name their image; the source's own follow them, as in the project.
+  const images = result.diagnostics.filter((diagnostic) => diagnostic.path !== MAIN_FILE_PATH);
+  return Object.freeze({
+    ...file,
+    diagnostics:
+      images.length === 0 ? file.diagnostics : Object.freeze([...images, ...file.diagnostics]),
+    plan: result.plan,
+  });
 }
 
 /**

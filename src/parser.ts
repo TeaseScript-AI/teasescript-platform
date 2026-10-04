@@ -977,7 +977,12 @@ class Parser {
           "Expected an image file or null after 'showImage'.",
         );
       }
-      this.#synchronizeStatement(true);
+      // A statement at the start of a continued line, after a trailing comma or option name, is kept.
+      if (tagged && this.#previous().kind === TokenKind.Newline && this.#atStatementStart()) {
+        this.#recoveredAtStatementBoundary = true;
+      } else {
+        this.#synchronizeStatement(true);
+      }
       return null;
     }
     return Object.freeze({
@@ -2245,7 +2250,10 @@ class Parser {
         span: spanFrom(expression.span, value.span),
       });
     }
-    if (expression.kind !== "callExpression") {
+    if (
+      expression.kind !== "callExpression" &&
+      !(expression.kind === "tagQueryExpression" && expression.select === "list")
+    ) {
       if (expression.kind === "identifier") {
         this.#reportSpan(
           parserDiagnosticCode.expectedStatement,

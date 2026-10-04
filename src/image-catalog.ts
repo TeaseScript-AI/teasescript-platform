@@ -19,8 +19,8 @@ const imageDiagnosticCode = {
 
 /**
  * The image catalog of a project: each image once, in path order, with its keywords read as tags (`bedroom`,
- * `punishment: 4`) in name order. A keyword that is not a tag is ignored with a warning; a repeated tag counts once,
- * and its number wins over its absence.
+ * `punishment: 4`) in name order. A keyword that is not a tag is ignored with a warning. A repeated tag counts once,
+ * without a warning, because photo tools often keep `punishment` beside `punishment: 4`; its number wins.
  */
 export function imageCatalog(images: readonly ProjectImageFile[]): {
   readonly images: readonly PlanImage[];
@@ -55,7 +55,7 @@ export function imageCatalog(images: readonly ProjectImageFile[]): {
             image.path,
             DiagnosticSeverity.Error,
             imageDiagnosticCode.conflictingTagValue,
-            `The image has two different numbers for the tag '${tag.name}'; keep one keyword such as '${tag.name}: ${tag.value}'.`,
+            `The image '${image.path}' has two different numbers for the tag '${tag.name}'; keep one keyword such as '${tag.name}: ${tag.value}'.`,
           ),
         );
       }
@@ -66,7 +66,7 @@ export function imageCatalog(images: readonly ProjectImageFile[]): {
           image.path,
           DiagnosticSeverity.Warning,
           imageDiagnosticCode.ignoredKeywords,
-          `Keywords that are not tags are ignored: ${ignored.map((keyword) => `'${keyword}'`).join(", ")}. A tag uses lowercase letters a–z, digits, and hyphens, with an optional number, such as 'punishment: 4'.`,
+          `Keywords of '${image.path}' that are not tags are ignored: ${ignored.map((keyword) => `'${keyword}'`).join(", ")}. A tag uses lowercase letters a–z, digits, and hyphens, with an optional number, such as 'punishment: 4'.`,
         ),
       );
     }

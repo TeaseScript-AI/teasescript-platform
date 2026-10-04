@@ -70,7 +70,13 @@ test("parses multiline defaults, named calls, and exact declaration spans", () =
   const call = result.program.statements[1];
   assert.equal(declaration?.kind, "functionDeclaration");
   assert.equal(call?.kind, "expressionStatement");
-  if (declaration?.kind !== "functionDeclaration" || call?.kind !== "expressionStatement") return;
+  assert.equal(call.kind === "expressionStatement" && call.expression.kind, "callExpression");
+  if (
+    declaration?.kind !== "functionDeclaration" ||
+    call?.kind !== "expressionStatement" ||
+    call.expression.kind !== "callExpression"
+  )
+    return;
   assert.equal(declaration.span.start.offset, 0);
   assert.equal(declaration.span.end.offset, source.indexOf("\ngreet("));
   assert.equal(declaration.parameters[1]?.defaultValue?.kind, "stringLiteral");

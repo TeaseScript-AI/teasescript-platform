@@ -2236,9 +2236,20 @@ class TypeChecker {
    */
   #checkTagQueryCanMatch(query: TagQueryExpression): void {
     if (query.select !== "random" || this.#imageTags === null) return;
+    // Each literal tag list is read once for all images.
+    const lists = new Map<TagQueryStep, readonly string[] | null>();
+    for (const step of query.steps) {
+      if (step.kind === "tagList") lists.set(step, literalTagNames(step.value));
+    }
+    const test = (step: TagQueryStep, tags: ReadonlyMap<string, number | null>) => {
+      if (step.kind === "tag") return tags.has(step.name);
+      if (step.kind !== "tagList") return null;
+      const names = lists.get(step)!;
+      return names === null ? null : passesTagList(step.option, names, tags);
+    };
     if (
       this.#imageTags.some(
-        (tags) => evaluateTagSteps(query.steps, (step) => staticTagTest(step, tags)) !== false,
+        (tags) => evaluateTagSteps(query.steps, (step) => test(step, tags)) !== false,
       )
     )
       return;
@@ -5690,35 +5701,21 @@ function unwrapGrouping(expression: Expression): Expression {
   return expression;
 }
 
-/**
- * A tag test or a literal tag list for an image with these tags, or `null` for anything that involves a value: every
- * comparison, and a tag list that is not a list of quoted names.
- */
-function staticTagTest(
-  step: TagQueryStep,
-  tags: ReadonlyMap<string, number | null>,
-): boolean | null {
-  switch (step.kind) {
-    case "tag":
-      return tags.has(step.name);
-    case "tagList": {
-      if (step.value.kind !== "listLiteral") return null;
-      const names: string[] = [];
-      for (const element of step.value.elements) {
-        if (
-          element.kind !== "stringLiteral" ||
-          element.parts.some((part) => part.kind !== "stringText")
-        )
-          return null;
-        const name = normalizeTagName(
-          element.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join(""),
-        );
-        if (name === null) return null;
-        names.push(name);
-      }
-      return passesTagList(step.option, names, tags);
-    }
-    default:
+/** The tag names of a list literal of quoted names, or `null` for anything else, which only runtime knows. */
+function literalTagNames(value: Expression): readonly string[] | null {
+  if (value.kind !== "listLiteral") return null;
+  const names: string[] = [];
+  for (const element of value.elements) {
+    if (
+      element.kind !== "stringLiteral" ||
+      element.parts.some((part) => part.kind !== "stringText")
+    )
       return null;
+    const name = normalizeTagName(
+      element.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join(""),
+    );
+    if (name === null) return null;
+    names.push(name);
   }
+  return names;
 }

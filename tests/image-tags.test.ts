@@ -11,6 +11,7 @@ import {
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
@@ -414,3 +415,82 @@ function tagQuery(plan: MutablePlan): Record<string, unknown> {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
+
+test("a pick draws exactly once and a list never, also when a bound suspends and the session is restored", () => {
+  let draws = 0;
+  const counting = { random: { next: () => (draws++, 0.5) } };
+  for (const [source, expected] of [
+    ['showImage tagged "bedroom"\nexit', 1],
+    ['say findImages(where: "bedroom")\nexit', 0],
+  ] as const) {
+    draws = 0;
+    const plan = compiled(source);
+    run(plan, createImmediatePacingRuntimeSnapshot(plan), counting);
+    assert.equal(draws, expected, source);
+  }
+
+  draws = 0;
+  const plan = compiled(
+    'function minimum { wait 1 ms\nreturn 1 }\nshowImage tagged "punishment" > minimum()\nexit',
+  );
+  const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan), counting);
+  assert.equal(waiting.snapshot.status, "waiting");
+  assert.equal(draws, 0);
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(plan, waiting.snapshot)),
+  );
+  const deadline = restored.snapshot.currentSessionTimeMs + 1;
+  const finished = run(plan, observeTime(plan, restored.snapshot, deadline).snapshot, counting);
+  assert.equal(finished.snapshot.status, "halted");
+  assert.equal(draws, 1);
+});
+
+test("findImages may stand alone as a statement, and its bounds still run", () => {
+  assert.deepEqual(
+    says(
+      'function bound { say "called"\nreturn 1 }\nfindImages(where: "punishment" > bound())\nexit',
+    ),
+    ["called"],
+  );
+});
+
+test("a grouped tag name before a comparison is still a tag", () => {
+  assert.deepEqual(matches(`("punishment") > 3`), [
+    "images/bedroom-strict.jpg",
+    "images/garden.jpg",
+  ]);
+});
+
+test("compileSource reports the image catalog's diagnostics, naming the image", () => {
+  const result = compileSource("exit", {
+    images: [
+      { path: "a.jpg", keywords: ["p: 1", "p: 2"] },
+      { path: "b.jpg", keywords: ["Long Session"] },
+    ],
+  });
+  assert.equal(result.plan, null);
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.severity]),
+    [
+      ["TST004", "error"],
+      ["TST003", "warning"],
+    ],
+  );
+  assert.match(result.diagnostics[0]!.message, /'a\.jpg'/u);
+  assert.match(result.diagnostics[1]!.message, /'b\.jpg'.*'Long Session'/u);
+});
+
+test("after an incomplete tagged query, a statement on the next line is kept", () => {
+  for (const source of [
+    'showImage tagged "bedroom", none:\nsay "after"\nexit',
+    'showImage tagged "bedroom",\nsay "after"\nexit',
+  ]) {
+    const result = compileSource(source, options);
+    assert.equal(result.diagnostics.length, 1, source);
+    assert.deepEqual(
+      result.program.statements.map((statement) => statement.kind),
+      ["sayStatement", "exitStatement"],
+      source,
+    );
+  }
+});
