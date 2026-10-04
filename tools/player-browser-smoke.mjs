@@ -1033,21 +1033,43 @@ async function transcriptTexts(cdp) {
  */
 async function packageScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
-  await navigate(cdp, `${origin}/player/?package=house`);
-  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
-  await physicalClick(cdp, "[data-session-activation] button");
-  // main.tease shows the package's own image and calls the global function of helpers.tease.
-  await waitFor(
-    cdp,
-    `(() => {
-      const image = document.querySelector('.stage-media');
-      return !!image && image.complete && image.naturalWidth > 0 &&
-        image.getAttribute('src') === '/dev-package/house/files/images/hall.svg' &&
-        [...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Welcome to the house, guest.'));
-    })()`,
-    8_000,
-    "The house package did not start at main.tease with its own Stage image",
-  );
+  const {
+    result: { identifier },
+  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `window.__played = [];
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function () {
+        if (!window.__played.includes(this)) window.__played.push(this);
+        return play.call(this);
+      };`,
+  });
+  try {
+    await navigate(cdp, `${origin}/player/?package=house`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await physicalClick(cdp, "[data-session-activation] button");
+    // main.tease shows the package's own image and calls the global function of helpers.tease.
+    await waitFor(
+      cdp,
+      `(() => {
+        const image = document.querySelector('.stage-media');
+        return !!image && image.complete && image.naturalWidth > 0 &&
+          image.getAttribute('src') === '/dev-package/house/files/images/hall.svg' &&
+          [...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Welcome to the house, guest.'));
+      })()`,
+      8_000,
+      "The house package did not start at main.tease with its own Stage image",
+    );
+    // Then it plays the package's own sound, audibly.
+    await waitFor(
+      cdp,
+      `window.__played.some((element) => element.src.endsWith('/dev-package/house/files/sounds/chime.wav') &&
+        (element.currentTime > 0 || element.ended) && !element.muted && element.volume > 0)`,
+      10_000,
+      "The house package did not play its own sound",
+    );
+  } finally {
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  }
 
   await navigate(cdp, `${origin}/player/?package=broken`);
   await waitFor(

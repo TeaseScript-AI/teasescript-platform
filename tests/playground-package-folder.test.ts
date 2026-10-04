@@ -27,7 +27,7 @@ import {
 } from "../playground/workspace/controller.js";
 
 const fixtures = fileURLToPath(new URL("../../tests/fixtures/xmp/", import.meta.url));
-// house: two files and an image; garden: its own image; broken: does not compile.
+// house: two files, an image, and a sound; garden: its own image; broken: does not compile.
 const packages = fileURLToPath(new URL("../../tests/fixtures/packages/", import.meta.url));
 const keywords = ["bedroom", "Tom & Jerry <3", "Café", "punishment: 4"];
 
@@ -129,6 +129,7 @@ test("the catalog follows edits that keep a file's size and time, and skips what
   assert.equal(response.status, 200);
   assert.deepEqual(JSON.parse(response.body.toString("utf8")), {
     images: [],
+    media: [],
     sources: [],
     problems: [{ path: ".", message: "The folder cannot be read (ENOENT)." }],
   });
@@ -168,6 +169,7 @@ test("a root of packages offers each direct subfolder as a package, with only it
   const house = await catalog("house");
   assert.deepEqual(house, {
     images: [{ path: "images/hall.svg", keywords: [] }],
+    media: ["sounds/chime.wav"],
     sources: [
       {
         path: "helpers.tease",
@@ -182,8 +184,13 @@ test("a root of packages offers each direct subfolder as a package, with only it
   assert.equal(image.contentType, "image/svg+xml");
   assert.deepEqual(image.body, await readFile(join(packages, "house/images/hall.svg")));
   assert.equal((await get(server, "/dev-package/garden/files/images/garden.svg")).status, 200);
+  const sound = await get(server, "/dev-package/house/files/sounds/chime.wav");
+  assert.equal(sound.status, 200);
+  assert.equal(sound.contentType, "audio/wav");
+  assert.deepEqual(sound.body, await readFile(join(packages, "house/sounds/chime.wav")));
   // A package's media come only from that package, and its scripts are not served as files.
   assert.equal((await get(server, "/dev-package/house/files/images/garden.svg")).status, 404);
+  assert.equal((await get(server, "/dev-package/garden/files/sounds/chime.wav")).status, 404);
   assert.equal(
     (await get(server, "/dev-package/house/files/%2E%2E/garden/images/garden.svg")).status,
     400,

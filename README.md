@@ -66,8 +66,9 @@ PLAYGROUND_PACKAGES=/path/to/packages npm run playground
 Open a package by its folder name: `/player/?package=<name>` plays it, `/?package=<name>` opens it in the playground,
 and `/editor/?package=<name>` in the browser editor. All its `.tease` files compile as one project that starts at
 `main.tease`, with its images as above; a package that does not compile lists each diagnostic with its file and line.
-Edits in the playground and the editor stay in the page. Hidden folders and links are not packages, a package's images
-are served only from that package, and other media files are not served.
+Edits in the playground and the editor stay in the page. Hidden folders and links are not packages. A package's images
+and its MP3, WAV, Ogg, MP4, and WebM files are served only from that package, and the Player plays its audio; browser
+video playback is not implemented yet.
 
 Fresh playground runs use the fixed unsigned seed `0x6d2b79f5` (`1831565813`) with the versioned `xorshift32-v1` runtime RNG. It is deterministic and serializable, not cryptographically secure and not a permanent syntax guarantee.
 
