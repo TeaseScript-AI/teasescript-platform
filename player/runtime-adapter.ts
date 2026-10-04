@@ -222,7 +222,9 @@ export function playerRuntimeTimers(
   const timers: Array<PlayerTimerPresentation & { readonly actionId: number }> = [];
   const delays = [
     snapshot.foregroundAction,
-    ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
+    ...snapshot.callFrames.map((frame) =>
+      frame.kind === "function" ? (frame.timerInterruption?.suspendedAction ?? null) : null,
+    ),
   ];
   for (const action of delays) {
     if (action?.kind !== "delay" || action.display === "hidden") continue;
@@ -265,7 +267,9 @@ export function playerRuntimeDeadlines(snapshot: RuntimeSnapshot): readonly numb
   for (const action of [
     snapshot.foregroundAction,
     ...snapshot.backgroundActions,
-    ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
+    ...snapshot.callFrames.map((frame) =>
+      frame.kind === "function" ? (frame.timerInterruption?.suspendedAction ?? null) : null,
+    ),
   ]) {
     if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
       deadlines.push(action.deadlineMs);

@@ -16,9 +16,11 @@ import type {
   SwitchStatement,
   TagQueryExpression,
   TypeTestExpression,
+  TransferTarget,
 } from "../../ast.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { InstructionCompilationError } from "../errors.js";
+import { MAIN_FILE_PATH } from "../../project-paths.js";
 import type {
   AssignmentTargetPlan,
   CompiledFunctionDefinition,
@@ -59,6 +61,13 @@ import {
   showButtonOptions,
   tagQueryOperands,
 } from "../../expression-children.js";
+
+/** A transfer or fallback at `instruction` whose destination is a file, from its entry or at a label. */
+export interface PendingDestination {
+  readonly instruction: number;
+  readonly path: string;
+  readonly label: string | null;
+}
 
 /** Plan-wide numbering shared by the compilers of a project's files: loop and temporary IDs are unique in a plan. */
 export interface LoweringCounters {
@@ -112,6 +121,33 @@ export class InstructionCompiler {
   /** Gotos whose target is set by {@link resolveGotos} once every label of the file has its instruction. */
   readonly #gotos: { readonly instruction: number; readonly label: string }[] = [];
 
+  /** Transfers and fallbacks naming a file or a label, resolved once every file of the project is compiled. */
+  readonly #destinations: PendingDestination[] = [];
+
+  /** The pending file destinations of this file's transfers and fallbacks. */
+  public get destinations(): readonly PendingDestination[] {
+    return this.#destinations;
+  }
+
+  #destinationOf(target: TransferTarget): { readonly path: string; readonly label: string | null } {
+    return target.kind === "labelTarget"
+      ? { path: this.path, label: target.label.name }
+      : { path: target.path, label: target.label?.name ?? null };
+  }
+
+  #emitTransfer(mode: "goto" | "call", target: TransferTarget, span: SourceSpan): void {
+    this.#destinations.push({
+      instruction: this.instructions.length,
+      ...this.#destinationOf(target),
+    });
+    this.instructions.push({
+      kind: "transfer",
+      mode,
+      destination: { file: -1, target: -1 },
+      span: copySpan(span),
+    });
+  }
+
   /** Functions of earlier files come first, so this file's IDs continue after theirs. */
   readonly #functionIdBase: number;
 
@@ -126,6 +162,8 @@ export class InstructionCompiler {
     public readonly functions: CompiledFunctionDefinition[] = [],
     private readonly counters: LoweringCounters = { nextLoopId: 1, nextTemporaryId: 1 },
     private readonly project: ProjectFunctions = { global: new Map(), foreignCalls: [] },
+    /** The file's path, which a label alone in a `call` or `fallback` names. */
+    private readonly path: string = MAIN_FILE_PATH,
   ) {
     this.#functionIdBase = functions.length;
     const functionByName = new Map<
@@ -432,8 +470,39 @@ export class InstructionCompiler {
         this.labels.push({ name: statement.name.name, instruction: this.instructions.length });
         return;
       case "gotoStatement":
-        this.#gotos.push({ instruction: this.instructions.length, label: statement.label.name });
-        this.instructions.push({ kind: "goto", target: -1, span: copySpan(statement.span) });
+        // In a global function or its blocks, a label alone names that label of the function's file, entered
+        // afresh like `goto "file.tease" label` (ADR 0022 §3.5).
+        if (statement.target.kind === "labelTarget" && !this.#global) {
+          this.#gotos.push({
+            instruction: this.instructions.length,
+            label: statement.target.label.name,
+          });
+          this.instructions.push({ kind: "goto", target: -1, span: copySpan(statement.span) });
+          return;
+        }
+        this.#emitTransfer("goto", statement.target, statement.span);
+        return;
+      case "callFileStatement":
+        this.#emitTransfer("call", statement.target, statement.span);
+        return;
+      case "fallbackStatement":
+        if (statement.target === null) {
+          this.instructions.push({
+            kind: "setFallback",
+            destination: null,
+            span: copySpan(statement.span),
+          });
+          return;
+        }
+        this.#destinations.push({
+          instruction: this.instructions.length,
+          ...this.#destinationOf(statement.target),
+        });
+        this.instructions.push({
+          kind: "setFallback",
+          destination: { file: -1, target: -1 },
+          span: copySpan(statement.span),
+        });
         return;
       case "letStatement": {
         const initializer = unwrapParentheses(statement.initializer);

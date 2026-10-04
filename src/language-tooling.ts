@@ -803,6 +803,8 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "endStatement":
     case "labelStatement":
     case "gotoStatement":
+    case "callFileStatement":
+    case "fallbackStatement":
     case "breakStatement":
     case "continueStatement":
       return;

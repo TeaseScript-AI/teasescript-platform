@@ -35,6 +35,8 @@ export interface RuntimeMediaPointSnapshot {
 
 export interface RuntimeMediaSnapshot {
   readonly mediaId: number;
+  /** The activation root its cue and finish blocks run in, kept after it settles; `null` without blocks. */
+  readonly handlerRootScopeId: number | null;
   readonly media: "audio" | "video";
   readonly source: string;
   state: RuntimeMediaState;
@@ -105,6 +107,8 @@ export interface MediaWarning {
 export interface RuntimeMediaCueInvocationSnapshot {
   readonly mediaId: number;
   readonly handlerFunctionId: number;
+  /** The activation root of its media's blocks. */
+  readonly rootScopeId: number;
   readonly dueAtMs: number;
   count: number;
 }

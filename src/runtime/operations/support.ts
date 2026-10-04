@@ -1,4 +1,5 @@
 import type { InstructionPlan, PlanSourceLocation } from "../../plan/model.js";
+import { interruptFrame } from "../activations.js";
 import { cloneInteractionChoiceValue } from "../../choice-values.js";
 import { captureOrReuseInstructionPlan } from "../../plan/capture.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
@@ -134,7 +135,7 @@ export function requiredFutureActionCompletionEvents(snapshot: RuntimeSnapshot):
   const actions = [
     snapshot.foregroundAction,
     ...snapshot.backgroundActions,
-    ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
+    interruptFrame(snapshot)?.timerInterruption?.suspendedAction ?? null,
   ];
   return actions.reduce((count, action) => count + requiredActionCompletionEvents(action), 0);
 }

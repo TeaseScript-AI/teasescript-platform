@@ -100,6 +100,8 @@ export function registerTeaseScriptLanguage(): void {
         "label",
         "goto",
         "tagged",
+        "call",
+        "fallback",
       ],
       types: [
         "string",

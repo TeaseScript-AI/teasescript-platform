@@ -1,4 +1,4 @@
-import type { GlobalStatement, Program, SpeakerDeclaration } from "./ast.js";
+import type { GlobalStatement, Program, SpeakerDeclaration, Statement } from "./ast.js";
 
 /** A declaration that a session initializes before its story runs: a global or a speaker (ADR 0022 §6). */
 export interface SessionDeclaration {
@@ -39,4 +39,16 @@ function declarationsOf(program: Program): (GlobalStatement | SpeakerDeclaration
     for (const nested of Object.values(value)) work.push(nested);
   }
   return found;
+}
+
+/**
+ * Whether a top-level statement runs anything where it stands. A speaker, or a global without `default:`, is set up at
+ * the start of the session instead; a function only runs when called.
+ */
+export function runsOnItsOwn(statement: Statement): boolean {
+  return !(
+    statement.kind === "functionDeclaration" ||
+    statement.kind === "speakerDeclaration" ||
+    (statement.kind === "globalStatement" && statement.assignment === null)
+  );
 }

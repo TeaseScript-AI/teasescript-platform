@@ -258,7 +258,7 @@ function mutableCopy(snapshot: RuntimeSnapshot): Mutable<RuntimeSnapshot> {
   return JSON.parse(JSON.stringify(snapshot)) as Mutable<RuntimeSnapshot>;
 }
 
-test("until files can be entered, a checkpoint may refer only to main.tease", () => {
+test("a checkpoint runs code of a file only in an activation of that file", () => {
   const timers = compiledPlan([
     { path: "main.tease", source: 'timer async 1 { say "main handler" }\nwait 5\nexit' },
     { path: "other.tease", source: 'timer async 1 { say "other handler" }\nexit' },
@@ -269,7 +269,7 @@ test("until files can be entered, a checkpoint may refer only to main.tease", ()
   const expired = observeTime(timers, waiting, 1000).snapshot;
   assert.equal(validateRuntimeSnapshot(expired, timers).valid, true);
 
-  // A queued expiry block of another file's timer is rejected before it could run.
+  // A queued expiry block of another file would run with main.tease's variables.
   const queued = mutableCopy(expired);
   queued.settledTimers[0]!.handlerFunctionId = foreign.id;
   queued.pendingTimerHandlers[0]!.handlerFunctionId = foreign.id;
@@ -284,7 +284,7 @@ test("until files can be entered, a checkpoint may refer only to main.tease", ()
       }),
     ),
   );
-  // So is an active timer that another file's timer statement started.
+  // So would a timer that another file's timer statement started in main.tease's activation.
   const active = mutableCopy(waiting);
   const timer = active.backgroundActions.find((action) => action.kind === "timer");
   assert.ok(timer?.kind === "timer");
@@ -294,7 +294,7 @@ test("until files can be entered, a checkpoint may refer only to main.tease", ()
   timer.timer.handlerFunctionId = foreign.id;
   assert.equal(validateRuntimeSnapshot(active, timers).valid, false);
 
-  // And a message paced in another file.
+  // And a message paced in another file while main.tease runs.
   const says = compiledPlan([
     { path: "main.tease", source: 'say "main"\nsay "second"\nexit' },
     { path: "other.tease", source: 'say "other"\nsay "other second"\nexit' },

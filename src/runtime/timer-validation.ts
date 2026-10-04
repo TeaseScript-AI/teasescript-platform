@@ -1,7 +1,14 @@
-import type { RunnablePlan } from "./runnable-plan.js";
+import type { InstructionPlan } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import { anchoredDeadlineMs } from "./timers.js";
 import { catchUpPaused } from "./action-validation.js";
+import {
+  fileOfInstruction,
+  inGlobalCode,
+  rootFitsFunction,
+  serializedRootFiles,
+  serializedScopes,
+} from "./activation-validation.js";
 
 /** Restore validation for asynchronous timers, their handles, and queued expiry blocks. */
 
@@ -13,6 +20,7 @@ const TIMER_KEYS = [
   "repeat",
   "persist",
   "handlerFunctionId",
+  "rootScopeId",
   "range",
   "repeatDurationMs",
   "roundDurationMs",
@@ -43,7 +51,7 @@ function dueDeadlineMayRemain(snapshot: Record<string, unknown>): boolean {
 export function validTimerAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   const now = snapshot.currentSessionTimeMs;
   if (
@@ -159,7 +167,7 @@ function validTimerRecord(
   timer: Record<string, unknown>,
   active: boolean,
   now: unknown,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
   allowDue = false,
 ): boolean {
   if (
@@ -181,6 +189,8 @@ function validTimerRecord(
   ) {
     return false;
   }
+  // The activation that started the timer; once left, it remains only while the timer's block may run in it.
+  if (!nonNegativeSafeInteger(timer.rootScopeId)) return false;
   if (timer.handlerFunctionId !== null) {
     if (!positiveSafeInteger(timer.handlerFunctionId)) return false;
     if (plan !== undefined && plan.functions[timer.handlerFunctionId - 1]?.handler !== "timer")
@@ -223,7 +233,7 @@ function validTimerRecord(
  */
 export function validateTimerState(
   value: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
   handleIds: ReadonlySet<number>,
   errors: string[],
 ): void {
@@ -253,10 +263,25 @@ export function validateTimerState(
   }
   // Known creation times of active timers bound when their expiries can be due.
   const createdAt = new Map<number, number>();
+  const roots = serializedRootFiles(value);
   if (Array.isArray(value.backgroundActions)) {
     for (const action of value.backgroundActions) {
       if (isPlainRecord(action) && action.kind === "timer" && isPlainRecord(action.timer)) {
         addRecord(records, action.timer, errors);
+        // The activation that started the timer, while it exists, runs the file of the timer statement.
+        const root = action.timer.rootScopeId;
+        if (
+          (action.timer.handlerFunctionId !== null &&
+            !rootFitsFunction(plan, roots, root, action.timer.handlerFunctionId)) ||
+          (plan !== undefined &&
+            nonNegativeSafeInteger(root) &&
+            roots.has(root) &&
+            nonNegativeSafeInteger(action.owningInstruction) &&
+            !inGlobalCode(plan, action.owningInstruction) &&
+            roots.get(root) !== fileOfInstruction(plan, action.owningInstruction))
+        ) {
+          errors.push("Runtime timer refers to an impossible activation.");
+        }
         if (positiveSafeInteger(action.timer.timerId) && typeof action.createdAtMs === "number") {
           createdAt.set(action.timer.timerId, action.createdAtMs);
         }
@@ -265,6 +290,24 @@ export function validateTimerState(
   }
   if (records.size !== nextTimerId - 1 || [...records.keys()].some((id) => id >= nextTimerId)) {
     errors.push("Runtime timers do not match the issued timer IDs.");
+  }
+  // A timer names the activation that started it: an issued scope that, while it still exists, is a root.
+  const scopeFiles = new Map(
+    serializedScopes(value)
+      .filter(isPlainRecord)
+      .map((frame) => [frame.id, frame.file]),
+  );
+  for (const record of records.values()) {
+    const root = record.rootScopeId;
+    if (
+      !nonNegativeSafeInteger(root) ||
+      !nonNegativeSafeInteger(value.nextScopeId) ||
+      root >= value.nextScopeId ||
+      scopeFiles.get(root) === null
+    ) {
+      errors.push("Runtime timer refers to an impossible activation.");
+      break;
+    }
   }
   for (const id of handleIds) {
     if (!records.has(id)) errors.push("Runtime timer handle refers to an unissued timer.");
@@ -297,10 +340,18 @@ export function validateTimerState(
         : undefined;
     if (
       !isPlainRecord(invocation) ||
-      !hasExactKeys(invocation, ["timerId", "handlerFunctionId", "dueAtMs", "count"]) ||
+      !hasExactKeys(invocation, [
+        "timerId",
+        "handlerFunctionId",
+        "rootScopeId",
+        "dueAtMs",
+        "count",
+      ]) ||
       record === undefined ||
       !positiveSafeInteger(invocation.handlerFunctionId) ||
       invocation.handlerFunctionId !== record.handlerFunctionId ||
+      invocation.rootScopeId !== record.rootScopeId ||
+      !rootFitsFunction(plan, roots, invocation.rootScopeId, invocation.handlerFunctionId) ||
       !positiveSafeInteger(invocation.count) ||
       !isValidSessionTime(invocation.dueAtMs) ||
       !isValidSessionTime(value.currentSessionTimeMs) ||
@@ -336,6 +387,7 @@ export function validateTimerState(
       if (
         record === undefined ||
         record.handlerFunctionId !== frame.functionId ||
+        record.rootScopeId !== frame.rootScopeId ||
         (typeof dueAtMs === "number" &&
           positiveSafeInteger(record.timerId) &&
           dueAtMs < (createdAt.get(record.timerId) ?? 0))

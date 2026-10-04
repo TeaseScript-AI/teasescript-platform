@@ -19,7 +19,7 @@ import { nextXorShift32 } from "../src/runtime/random.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
-import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { assertRuntimeResumeEquivalent, functionFrames } from "./helpers/runtime-equivalence.js";
 import {
   activePlayerRuntimePacingGate,
   playerRuntimeDeadlines,
@@ -150,7 +150,7 @@ class Session {
     const actionId =
       action?.kind === "interaction"
         ? action.actionId
-        : this.snapshot.callFrames.find((frame) => frame.timerInterruption?.suspendedAction)
+        : functionFrames(this.snapshot).find((frame) => frame.timerInterruption?.suspendedAction)
             ?.timerInterruption?.suspendedAction?.actionId;
     assert.ok(actionId !== undefined, "an interaction must be pending or suspended");
     const result = completeAction(this.plan, this.snapshot, {

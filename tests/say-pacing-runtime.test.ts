@@ -17,6 +17,7 @@ import {
 } from "../src/runtime/state.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runUntilExit } from "./helpers/run-until-exit.js";
+import { functionFrames } from "./helpers/runtime-equivalence.js";
 
 test("say lowers smart, exact, and instant pacing with explicit skip policy", () => {
   const compiled = plan('say skippable "a"\nsay unskippable "b", 1.5\nsay "c", instant\nexit');
@@ -119,13 +120,14 @@ test("say preparation resumes exactly once across an instruction-call pacing che
   let snapshot = createFreshRuntimeSnapshot(compiled, { seed: 77 });
   for (
     let step = 0;
-    step < compiled.instructions.length * 4 && snapshot.callFrames.at(-1)?.functionId !== pace.id;
+    step < compiled.instructions.length * 4 &&
+    functionFrames(snapshot).at(-1)?.functionId !== pace.id;
     step += 1
   ) {
     assert.ok(["ready", "running"].includes(snapshot.status) && log(snapshot) !== "textpace");
     snapshot = executeInstruction(compiled, snapshot).snapshot;
   }
-  const paceFrame = snapshot.callFrames.at(-1);
+  const paceFrame = functionFrames(snapshot).at(-1);
   assert.equal(paceFrame?.functionId, pace.id, "the pacing call must be reached");
   assert.equal(log(snapshot), "text");
   const preparedRng = snapshot.rng.state;

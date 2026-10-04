@@ -163,6 +163,7 @@ import {
   stopTimerAction,
   timerRecord,
 } from "./operations/timer-lifecycle.js";
+import { findRoot } from "./activations.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import {
   booleanFromText,
@@ -2488,14 +2489,18 @@ function findBindingLocation(
       readonly binding: RuntimeBindingSnapshot;
     }
   | undefined {
-  const call = snapshot.callFrames.at(-1);
-  for (let index = snapshot.frames.length - 1; index >= (call?.scopeBaseDepth ?? 0); index -= 1) {
+  // Code at a file's top level sees its blocks down to its activation's root; a function or block sees its own
+  // scopes, then the root of the activation it runs for (ADR 0022 §5).
+  const top = snapshot.callFrames.at(-1);
+  const minimum = top === undefined ? 0 : top.scopeBaseDepth;
+  for (let index = snapshot.frames.length - 1; index >= minimum; index -= 1) {
     const frame = snapshot.frames[index]!;
     const binding = frameBinding(frame.bindings, name);
     if (binding !== undefined) return { frame, binding };
   }
-  if (call !== undefined && plan.functions[call.functionId - 1]?.global !== true) {
-    const frame = snapshot.frames[0]!;
+  // A function sees the root of the activation it runs for; a global function sees only globals (ADR 0022 §5, §6).
+  if (top?.kind === "function" && plan.functions[top.functionId - 1]?.global !== true) {
+    const frame = findRoot(snapshot, top.rootScopeId)!;
     const binding = frameBinding(frame.bindings, name);
     if (binding !== undefined) return { frame, binding };
   }

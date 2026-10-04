@@ -17,6 +17,7 @@ import {
   type InterpreterEvent,
   type ProjectImageFile,
   type ProjectSourceFile,
+  type RuntimeCallFrameSnapshot,
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
@@ -276,7 +277,7 @@ function observeDueDelay(
   for (const action of [
     snapshot.foregroundAction,
     ...snapshot.backgroundActions,
-    ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
+    ...functionFrames(snapshot).map((frame) => frame.timerInterruption?.suspendedAction ?? null),
   ]) {
     if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
       deadlines.push(action.deadlineMs);
@@ -334,4 +335,13 @@ function describeScenario(source: string): string {
 
 function formatValidationErrors(errors: readonly unknown[]): string {
   return errors.length === 0 ? "none" : JSON.stringify(errors);
+}
+
+/** The function and block frames of the call stack, without file calls. */
+export function functionFrames(
+  snapshot: Pick<RuntimeSnapshot, "callFrames">,
+): RuntimeCallFrameSnapshot[] {
+  return snapshot.callFrames.filter(
+    (frame): frame is RuntimeCallFrameSnapshot => frame.kind === "function",
+  );
 }

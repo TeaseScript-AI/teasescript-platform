@@ -1,4 +1,5 @@
 import type { PlanSourceLocation } from "../plan/model.js";
+import { findScope } from "./activations.js";
 import {
   createSourcePosition,
   createSourceSpan,
@@ -36,9 +37,8 @@ export function scopeBindings(
   snapshot: RuntimeSnapshot,
   scopeId: number,
 ): readonly RuntimeBindingSnapshot[] | undefined {
-  return scopeId === GLOBAL_SCOPE_ID
-    ? snapshot.globals
-    : snapshot.frames.find((candidate) => candidate.id === scopeId)?.bindings;
+  // A block of an activation the session has left refers into its retained root.
+  return scopeId === GLOBAL_SCOPE_ID ? snapshot.globals : findScope(snapshot, scopeId)?.bindings;
 }
 
 export interface PreparedReferenceDescriptor {
