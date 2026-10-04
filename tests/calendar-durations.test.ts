@@ -263,7 +263,8 @@ test("folding known durations takes work in proportion to the source", () => {
   };
   const folds = (source: string) =>
     withValidationTestStatistics((finish) => {
-      compileSource(`let x = ${source}`);
+      // A fixture that fails to compile would measure a different path.
+      assert.notEqual(compileSource(`let x = ${source}`).plan, null, source.slice(0, 40));
       return finish().counts.staticFolds ?? 0;
     });
   for (const [name, shape] of Object.entries(shapes)) {
