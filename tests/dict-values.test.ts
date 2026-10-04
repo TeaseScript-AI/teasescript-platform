@@ -397,13 +397,13 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
   assert.deepEqual(
     says(
       [
-        "let fallback = []",
+        "let backup = []",
         "let table = dict{}",
-        'let copy = table.get("missing", default: fallback)',
+        'let copy = table.get("missing", default: backup)',
         "copy.add(1)",
-        'fallback.add("text")',
+        'backup.add("text")',
         "say copy",
-        "say fallback",
+        "say backup",
       ].join("\n"),
     ),
     ["[1]", '["text"]'],

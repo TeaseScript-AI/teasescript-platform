@@ -241,8 +241,8 @@ test("values that do not convert at runtime raise errors that name the fix", () 
       'toNumber(...) cannot convert text (string) "1e400" to a number. Give a fallback with default: if the value may not convert.',
     ],
     [
-      "say toNumber(value, default: fallback)",
-      { value: "1", fallback: "0" },
+      "say toNumber(value, default: backup)",
+      { value: "1", backup: "0" },
       "TSR058",
       "toNumber(...) needs a number as its default:, not text (string).",
     ],
@@ -288,11 +288,11 @@ test("a conversion checks its value as it was evaluated, before later arguments 
       said(
         [
           declaration,
-          "function fallback {",
+          "function backup {",
           `    ${change}`,
           '    return "fallback"',
           "}",
-          `say toString(${read}, default: fallback())`,
+          `say toString(${read}, default: backup())`,
         ].join("\n"),
       ),
       ["null"],

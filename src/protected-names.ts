@@ -27,10 +27,11 @@ const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
   "as",
   "label",
   "goto",
-  "run",
   "call",
   "end",
   "exit",
+  "fallback",
+  "global",
   "save",
   "load",
   "delete",
@@ -52,6 +53,7 @@ const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
   "object",
   "range",
   "media",
+  "script",
 ] as const);
 
 const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
