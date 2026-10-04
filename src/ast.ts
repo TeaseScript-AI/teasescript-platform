@@ -348,11 +348,12 @@ export interface InteractionExpression {
   readonly span: SourceSpan;
 }
 
+/** One compact `choose` option: an optional authored value before `:`, then its expression. */
 export interface InteractionChoiceOption {
   readonly kind: "interactionChoiceOption";
-  readonly label: Identifier | NumberLiteral | null;
+  readonly value: Identifier | NumberLiteral | null;
   readonly colonSpan: SourceSpan | null;
-  readonly value: Expression;
+  readonly expression: Expression;
   readonly separatorSpan: SourceSpan | null;
   readonly span: SourceSpan;
 }

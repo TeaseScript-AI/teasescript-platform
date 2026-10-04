@@ -139,7 +139,11 @@ test("workspace player controls delegate interaction families and preserve prese
   assert.ok(button.plan && button.snapshot);
   const buttonWaiting = executeValidatedWorkspaceSnapshot(button.plan, button.snapshot, "run");
   assert.ok(buttonWaiting.snapshot);
-  const buttonDone = activateWorkspaceButton(button.plan, buttonWaiting.snapshot);
+  const buttonDone = activateWorkspaceButton(
+    button.plan,
+    buttonWaiting.snapshot,
+    buttonWaiting.snapshot.foregroundAction!.actionId,
+  );
   assert.equal(buttonDone.outcome.kind, "completed");
 
   const choice = compileWorkspaceSource(
@@ -149,15 +153,46 @@ test("workspace player controls delegate interaction families and preserve prese
   const choiceWaiting = executeValidatedWorkspaceSnapshot(choice.plan, choice.snapshot, "run");
   assert.ok(choiceWaiting.snapshot);
   const choiceBefore = JSON.stringify(choiceWaiting.snapshot);
-  const choiceDone = selectWorkspaceChoice(choice.plan, choiceWaiting.snapshot, {
-    kind: "label",
-    value: "second",
-  });
+  const choiceDone = selectWorkspaceChoice(
+    choice.plan,
+    choiceWaiting.snapshot,
+    choiceWaiting.snapshot.foregroundAction!.actionId,
+    1,
+  );
   assert.equal(choiceDone.outcome.kind, "completed");
   assert.equal(JSON.stringify(choiceWaiting.snapshot), choiceBefore);
-  // A labelled choice returns its label; the transcript shows the selected option's visible text.
+  // A choice with written values returns the value; the transcript shows the selected option's visible text.
   assert.deepEqual(transcriptTexts(choiceDone.events), ["Second"]);
   assert.deepEqual(resumedSayTexts(choice.plan, choiceDone.snapshot), ["second"]);
+});
+
+test("a control rendered for an earlier interaction cannot answer a later one", () => {
+  const workspace = compileWorkspaceSource(
+    'let a = choose oldA: "Old A", oldB: "Old B"\nlet b = choose newA: "New A", newB: "New B"\nshowButton "Go"\nshowButton "Again"',
+  );
+  assert.ok(workspace.plan && workspace.snapshot);
+  const plan = workspace.plan;
+  const runOn = (snapshot: RuntimeSnapshot) => {
+    const next = executeValidatedWorkspaceSnapshot(plan, snapshot, "run").snapshot;
+    assert.ok(next);
+    return next;
+  };
+  const firstChoice = runOn(workspace.snapshot);
+  const oldChoice = firstChoice.foregroundAction!.actionId;
+  const secondChoice = runOn(selectWorkspaceChoice(plan, firstChoice, oldChoice, 1).snapshot);
+  const stale = selectWorkspaceChoice(plan, secondChoice, oldChoice, 0);
+  assert.equal(stale.outcome.kind, "localRejection");
+  assert.deepEqual(stale.snapshot, secondChoice);
+  assert.deepEqual(stale.events, []);
+
+  const firstButton = runOn(
+    selectWorkspaceChoice(plan, secondChoice, secondChoice.foregroundAction!.actionId, 0).snapshot,
+  );
+  const oldButton = firstButton.foregroundAction!.actionId;
+  const secondButton = runOn(activateWorkspaceButton(plan, firstButton, oldButton).snapshot);
+  const staleButton = activateWorkspaceButton(plan, secondButton, oldButton);
+  assert.equal(staleButton.outcome.kind, "localRejection");
+  assert.deepEqual(staleButton.snapshot, secondButton);
 });
 
 test("workspace pacing and checkpoint controls are explicit and restore without time mutation", () => {
@@ -226,17 +261,19 @@ test("workspace controls preserve number input and authored choice order", () =>
     ui.options.map((option) => option.text),
     ["Alpha", "Beta"],
   );
-  const selected = selectWorkspaceChoice(choice.plan, choiceWaiting.snapshot, {
-    kind: "text",
-    value: "Beta",
-  });
+  const selected = selectWorkspaceChoice(
+    choice.plan,
+    choiceWaiting.snapshot,
+    choiceWaiting.snapshot.foregroundAction!.actionId,
+    1,
+  );
   assert.equal(selected.outcome.kind, "completed");
   assert.equal(JSON.stringify(choiceWaiting.snapshot), choiceBefore);
   assert.deepEqual(transcriptTexts(selected.events), ["Beta"]);
   assert.deepEqual(resumedSayTexts(choice.plan, selected.snapshot), ["Beta"]);
 });
 
-test("labelled composer text remains engine-owned and rejects ambiguous visible text", () => {
+test("composer text for a choice remains engine-owned and rejects ambiguous visible text", () => {
   const compiled = compileWorkspaceSource('let selected = choose first: "Same", second: "Same"');
   assert.ok(compiled.plan && compiled.snapshot);
   const waiting = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");

@@ -49,7 +49,7 @@ export {
   type InteractionChoiceOption,
   type InteractionAccessibleName,
   type PreparedInteractionUiPayload,
-  type PreparedInteractionChoiceLabel,
+  type PreparedInteractionChoiceValue,
   type InstructionPlan,
   type PlanSourceLocation,
   type LoopControlInstruction,

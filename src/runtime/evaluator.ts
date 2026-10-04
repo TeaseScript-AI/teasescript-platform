@@ -23,7 +23,9 @@ import {
   type PreparedReferenceDescriptor,
   type PreparedReferenceStep,
 } from "./prepared-references.js";
-import { nextXorShift32, type RandomSource, type XorShift32State } from "./random.js";
+import { nextXorShift32, type RandomSource } from "./random.js";
+import { isVisibleScalar, quotedText, valueNotation, visibleText } from "./value-text.js";
+import { formatDuration } from "../duration.js";
 import {
   assertStoredType,
   LOAD_KEY_MESSAGE,
@@ -101,7 +103,6 @@ import {
   timerRecord,
 } from "./operations/timer-lifecycle.js";
 import { isValidSessionTime } from "./actions/delay.js";
-import { formatDuration } from "../duration.js";
 
 export interface RuntimeCapabilityCall {
   readonly positional: readonly SerializableRuntimeValue[];
@@ -421,7 +422,7 @@ export class Evaluator {
           if (frame.stage === 1) {
             const part = expression.parts[frame.index - 1]!;
             if (part.kind === "expression")
-              frame.text += this.visibleText(result.value, part.expression.span);
+              frame.text += this.interpolationText(result.value, part.expression.span);
           }
           while (
             frame.index < expression.parts.length &&
@@ -881,29 +882,61 @@ export class Evaluator {
     });
   }
 
-  public visibleText(value: SerializableRuntimeValue, span: SourceSpan): string {
-    return this.visibleTextWithRng(value, span, this.snapshot.rng);
+  /** `${...}` text. A list selects one element with the session RNG, again at every evaluation. */
+  public interpolationText(value: SerializableRuntimeValue, span: SourceSpan): string {
+    if (!isList(value)) return visibleText(value, span);
+    if (value.items.length === 0)
+      throw fault(
+        "TSR019",
+        "An interpolated list must contain at least one element to select from.",
+        span,
+      );
+    if (!value.items.every(isVisibleScalar))
+      throw fault(
+        "TSR021",
+        "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
+        span,
+      );
+    return visibleText(this.#randomItem(value.items, span), span);
   }
 
-  public visibleTextWithRng(
-    value: SerializableRuntimeValue,
+  /** `say` text. A value other than a scalar shows in code-like notation, escaped so that markup leaves it literal. */
+  public sayText(value: SerializableRuntimeValue, span: SourceSpan): string {
+    return isVisibleScalar(value)
+      ? visibleText(value, span)
+      : escapeMarkup(valueNotation(value, span, (handle) => this.#handleNotation(handle, span)));
+  }
+
+  /**
+   * A timer or media handle as `say` shows it, from the state the snapshot holds now: `<timer "Beat", 7 s left>`,
+   * `<timer, paused, 7 s left>`, `<media "music.mp3", playing at 12 s>`, or a settled `<timer, finished>`.
+   */
+  #handleNotation(
+    handle: SerializableTimerHandle | SerializableMediaHandle,
     span: SourceSpan,
-    rng: XorShift32State,
   ): string {
-    if (isList(value)) {
-      const selected = this.#randomItem(value.items, span, rng);
-      if (typeof selected === "string") return selected;
-      if (typeof selected === "number" && Number.isFinite(selected))
-        return String(Object.is(selected, -0) ? 0 : selected);
-      throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
+    const now = this.snapshot.currentSessionTimeMs;
+    const time = (value: SerializableRuntimeValue | undefined): string =>
+      value !== undefined && isDuration(value) ? formatDuration(value.milliseconds) : "";
+    if (isTimerHandle(handle)) {
+      const timer = this.#timer(handle, span);
+      const name = timer.label === null ? "timer" : `timer ${quotedText(timer.label)}`;
+      const left = `${time(timerProperty(timer, "remaining", now))} left`;
+      return timer.state === "running"
+        ? `<${name}, ${left}>`
+        : timer.state === "paused"
+          ? `<${name}, paused, ${left}>`
+          : `<${name}, ${timer.state}>`;
     }
-    if (typeof value === "string") return value;
-    if (typeof value === "number" && Number.isFinite(value))
-      return String(Object.is(value, -0) ? 0 : value);
-    if (typeof value === "boolean") return value ? "true" : "false";
-    if (value === null) return "null";
-    if (isDuration(value)) return formatDuration(value.milliseconds);
-    throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
+    const media = this.#media(handle, span);
+    const at = `at ${time(mediaProperty(media, "position", now))}`;
+    const state =
+      media.state === "running"
+        ? `playing ${at}`
+        : media.state === "paused"
+          ? `paused ${at}`
+          : media.state;
+    return `<media ${quotedText(media.source)}, ${state}>`;
   }
 
   #binary(
@@ -1414,10 +1447,10 @@ export class Evaluator {
     return value;
   }
 
-  #findRandom(span: SourceSpan, rng = this.snapshot.rng): number {
+  #findRandom(span: SourceSpan): number {
     const random =
       this.capabilities.random === undefined
-        ? nextXorShift32(rng)
+        ? nextXorShift32(this.snapshot.rng)
         : this.capabilities.random.next();
     if (!Number.isFinite(random) || random < 0 || random >= 1) {
       throw fault("TSR020", "The injected random source must return a number in [0, 1).", span);
@@ -1518,11 +1551,10 @@ export class Evaluator {
   #randomItem(
     items: readonly SerializableRuntimeValue[],
     span: SourceSpan,
-    rng = this.snapshot.rng,
   ): SerializableRuntimeValue {
     if (items.length === 0)
       throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
-    return items[Math.floor(this.#findRandom(span, rng) * items.length)]!;
+    return items[Math.floor(this.#findRandom(span) * items.length)]!;
   }
 
   #getProperty(
@@ -1615,6 +1647,12 @@ function optionalSpeakerString(
 ): string | null {
   const value = speaker.properties.find((property) => property.name === name)?.value;
   if (value === undefined || value === null) return null;
+  if (isList(value) && name !== "font" && name !== "avatar")
+    throw fault(
+      "TSR030",
+      `A list cannot be the speaker's ${name}. Select one element with "\${list}" or list.random.`,
+      span,
+    );
   if (typeof value !== "string")
     throw fault("TSR030", `Speaker property '${name}' must be a string for output.`, span);
   return value;

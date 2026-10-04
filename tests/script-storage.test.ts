@@ -776,7 +776,7 @@ test("compact interactions end at the save 'as' and the load 'default' delimiter
     actionId: choice.actionId,
     actionKind: "interaction",
     interactionKind: "choice",
-    payload: { kind: "selectedLabel", selectedLabel: "second" },
+    payload: { kind: "selectedOption", optionIndex: 1 },
   });
   const finished = run(compiled, chosen.snapshot);
   assert.equal(finished.snapshot.status, "halted");

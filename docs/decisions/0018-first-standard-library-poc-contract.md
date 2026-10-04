@@ -186,47 +186,42 @@ for an object property named `default`.
 
 `choose` is the author-facing TeaseScript construct. `choice` is the noun used for the internal interaction/action kind and for an individual choice group.
 
-Unlabelled compact choices return visible text:
+Each option shows one button, or one per element when the option is a list or a set, and `choose` returns the selected
+button's value. A value may be written before an option's `:`; an option without one returns itself, with its own type:
 
 ```tease
 let result = choose "Bratty", "Very submissive"
 let result = choose as mistress "Bratty", "Very submissive"
-```
-
-Labelled compact choices return the authored label:
-
-```tease
 let result = choose bratty: "Bratty", submissive: "Very submissive"
 let result = choose as mistress first: "Mystery", second: "Mystery"
 let result = choose 1: "Open the door", 2: "Walk away"
+let result = choose back: "Back", offenses, "Corner"
 ```
 
-Rules:
+[V30 §19](../specifications/accepted-syntaxes-v30.md#19-choices) defines options, values, list options, and choice
+objects (owner decisions on #511). Interaction rules:
 
 - all compact options belong to one statement;
 - options are comma-separated;
-- labelled and unlabelled options may not be mixed;
-- identifier labels and finite numeric-literal labels are supported to preserve accepted V30 capability;
-- one labelled `choose` uses one label type: identifier labels and numeric labels may not be mixed;
-- identifier labels return `string`; numeric labels return `number`;
-- labels must be unique;
-- numeric-label uniqueness is based on numeric value, so `1` and `1.0` are duplicates;
-- labelled choices may repeat visible text because selecting a rendered control supplies one exact label;
-- unlabelled choices may not repeat visible text because that text is both the typed match and return value;
+- identifiers and finite numeric literals are supported as values before `:` to preserve accepted V30 capability;
+- until union types (#504) allow mixed results in an explicitly union-typed variable, one `choose` uses one kind of
+  value before `:`: identifiers and numeric literals may not be mixed;
+- buttons may repeat values and visible text because selecting a rendered control identifies one button;
 - manually submitted text uses exact visible-text matching without trimming, case folding, locale matching, or Unicode normalization;
-- when repeated visible text makes manual submission ambiguous in a labelled choice, the typed attempt is invalid and the player must select a rendered control;
+- when repeated visible text makes manual submission ambiguous, the typed attempt is invalid and the player must select a rendered control;
 - fuzzy or natural-language matching is not part of deterministic completion.
 
-A labelled button or dropdown selection submits the selected label to the engine. An unlabelled control submits the selected visible text. The engine validates it against the active action, derives the canonical visible text from the stored choice option, writes that visible text as the player-authored transcript message, and returns the label or visible text to the script. The Player application does not supply an independent canonical transcript string.
+A button or dropdown selection submits the selected button's position to the engine. The engine validates it against the active action, derives the canonical visible text from the stored choice option, writes that visible text as the player-authored transcript message, and returns that button's value to the script. The Player application does not supply an independent canonical transcript string.
 
-This compact syntax supersedes the V30 split between labelled `{...}` and unlabelled `[...]` choice bodies. The question itself is normally a preceding `say`; compact `choose` has no prompt argument.
+This compact syntax supersedes the V30 split between `{...}` choice bodies with values and `[...]` choice bodies without. The question itself is normally a preceding `say`; compact `choose` has no prompt argument.
 
 ### Authored button backgrounds
 
 Owner-approved extension (2026-09-21): each choice may use `{ text: expression, background: colour }` instead of
-its ordinary text expression. `text` is required; `background` is optional. Labelled and unlabelled forms retain their
-existing selection, typed-match, return-value and transcript semantics. Object properties and options evaluate in
-source order. A computed object follows the same shape; unknown properties are rejected.
+its ordinary text expression. `text` is required; `background` is optional. Options with and without a value before `:`
+retain their existing selection, typed-match, return-value and transcript semantics. Object properties and options
+evaluate in source order. A computed object follows the same shape; unknown properties are rejected. Since #511 the
+object may also carry `value` ([V30 §19](../specifications/accepted-syntaxes-v30.md#19-choices)).
 
 ```tease
 let result = choose coast: { text: "Stay by the water", background: "seagreen" },
@@ -326,7 +321,7 @@ owning and continuation instruction positions
 result destination when applicable
 expected result type
 validated Standard UI payload
-allowed choice labels and visible text when applicable
+allowed choice values and visible text when applicable
 output target
 optional requesting speaker identity
 accessible-name data or localized default key
@@ -345,13 +340,9 @@ choose through typed input:
     actionId
     submittedText
 
-labelled choose control:
+choose control:
     actionId
-    selectedLabel
-
-unlabelled choose control:
-    actionId
-    selectedText
+    selected option position
 
 showButton:
     actionId
@@ -359,7 +350,7 @@ showButton:
 
 Exact cross-origin property names remain a host-protocol decision. The semantic payload above is fixed.
 
-A completion with a wrong action ID, wrong kind, invalid type, non-finite number, whitespace-only required text, unknown label, unknown visible value, ambiguous typed choice, or over-limit payload does not mutate the action or continuation. The same interaction remains active and Standard UI provides localized validation feedback.
+A completion with a wrong action ID, wrong kind, invalid type, non-finite number, whitespace-only required text, unknown option position, unknown visible value, ambiguous typed choice, or over-limit payload does not mutate the action or continuation. The same interaction remains active and Standard UI provides localized validation feedback.
 
 Retries are built into the interaction contract. An ordinary author does not need to write a retry loop merely because the player submitted invalid input.
 
@@ -367,7 +358,8 @@ Retries are built into the interaction contract. An ordinary author does not nee
 
 `askText`, `askNumber`, `choose`, and `showButton` expose no public cancellation result:
 
-- they never complete with `null`;
+- they never complete with `null` as a cancellation result (`choose` returns `null` only as the value of a selected
+  option);
 - closing or hiding a control does not complete it;
 - invalid input does not complete it;
 - package exit or fatal runtime/player failure is cleanup or failure, not an author-visible cancelled value;
@@ -398,16 +390,16 @@ During a foreground interaction:
 
 The Player application dynamically chooses how a `choose` interaction is presented. Buttons may occupy one or two rows. When the available viewport, text lengths, font metrics, zoom, accessibility settings, or other layout constraints make that presentation impractical, the same choices may render as a dropdown. Exact breakpoints and measurement rules remain a Player UI decision.
 
-Button-versus-dropdown presentation is not canonical runtime or checkpoint state. Restoring the same action on another viewport may select another presentation while preserving the same labels, visible texts, completion validation, transcript output, and return value.
+Button-versus-dropdown presentation is not canonical runtime or checkpoint state. Restoring the same action on another viewport may select another presentation while preserving the same values, visible texts, completion validation, transcript output, and return value.
 
 Valid `askText` and `askNumber` submissions are represented as player-authored transcript messages using their normalization rules while the engine stores the typed return value.
 
 For `choose`, selecting a button or dropdown entry:
 
-1. supplies the exact stored label for a labelled choice or exact stored text for an unlabelled choice;
+1. supplies the position of the selected button;
 2. lets the engine derive and append the exact visible option text as the player's transcript message;
 3. completes the pending action for that option;
-4. returns its label or visible text to the script.
+4. returns its value to the script.
 
 Typing an exact unambiguous visible choice has the same completion effect.
 
@@ -671,7 +663,7 @@ The exact advanced author-override field is deferred. A later custom UI library 
 
 The deterministic first POC does not depend on an LLM. A later optional adapter may receive bounded structured context and propose:
 
-- one currently allowed choice label or visible option;
+- one currently allowed choice value or visible option;
 - one finite number;
 - or `needsClarification`.
 
@@ -683,8 +675,8 @@ This ADR accepts these scoped post-V30 changes:
 
 - add compact `as speaker` forms for `askText`, `askNumber`, `choose`, and `showButton`;
 - add compact command-expression forms for `askText` and `askNumber`;
-- replace the V30 labelled-body versus unlabelled-list `choose` split with one comma-separated compact form;
-- retain identifier and numeric labels from accepted V30 capability;
+- replace the V30 split between `choose` bodies with values and lists without them by one comma-separated compact form;
+- retain identifier and numeric values before `:` from accepted V30 capability;
 - extend `say` with `skippable`, `unskippable`, exact seconds, `0`, and `instant`;
 - define field text as Standard UI hint/label data rather than automatic transcript output.
 

@@ -20,7 +20,8 @@ import {
   numberAnswerText,
 } from "./interaction-answers.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
-import { staticNumber, staticVisibleText } from "./static-evaluation.js";
+import { staticChoiceValue, staticNumber, staticVisibleText } from "./static-evaluation.js";
+import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 import type { SourceSpan } from "./source.js";
 import {
   arithmeticType,
@@ -68,7 +69,10 @@ export interface TypeCheckResult {
 }
 
 const typeCode = {
+  invalidInteractionChoice: "TSV029",
   invalidInteractionDefault: "TSV039",
+  listInText: "TSV040",
+  unshowableValue: "TSV042",
   typeMismatch: "TSV041",
   invalidOperand: "TSV043",
   mixedTypes: "TSV044",
@@ -271,8 +275,11 @@ class TypeChecker {
         return true;
       case "speakerDeclaration":
         scope.declare(statement.name.name, { kind: "speaker" });
-        for (const property of statement.properties)
-          yield* compileChild(this.#expressionTask(property.value, scope));
+        for (const property of statement.properties) {
+          const type = yield* compileChild(this.#expressionTask(property.value, scope));
+          if (SPEAKER_TEXT_PROPERTIES.has(property.name.name))
+            this.#checkShownText(property.value, type, `the speaker's ${property.name.name}`);
+        }
         return true;
       case "speakerSetterStatement":
       case "hideImageStatement":
@@ -292,15 +299,15 @@ class TypeChecker {
           );
         return true;
       case "showButtonStatement":
-        yield* compileChild(this.#expressionTask(statement.label, scope));
+        this.#checkShownText(
+          statement.label,
+          yield* compileChild(this.#expressionTask(statement.label, scope)),
+          "a button label",
+        );
         if (statement.background !== null)
-          yield* compileChild(
-            this.#requireTask(
-              statement.background,
-              scope,
-              (type) => isScalar(type, "string"),
-              "A button background is a colour name or code in text (string)",
-            ),
+          this.#checkBackground(
+            statement.background,
+            yield* compileChild(this.#expressionTask(statement.background, scope)),
           );
         return true;
       case "waitStatement":
@@ -460,6 +467,8 @@ class TypeChecker {
   *#assignmentTask(statement: AssignmentStatement, scope: Scope): CompileTask<void> {
     const target = statement.target;
     let place: Place | undefined;
+    /** A speaker text property shows its value as text. */
+    let shownField: string | null = null;
     if (target.kind === "identifier") {
       const entry = scope.resolve(target.name);
       if (entry?.kind === "variable") place = variablePlace(entry.variable);
@@ -485,9 +494,12 @@ class TypeChecker {
           return;
         }
         place = this.#propertyPlace(object, target.object, target.property);
+        if (value.kind === "speaker" && SPEAKER_TEXT_PROPERTIES.has(name))
+          shownField = `the speaker's ${name}`;
       }
     }
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
+    if (shownField !== null) this.#checkShownText(statement.value, value, shownField);
     if (place === undefined) return;
     if (statement.operator === "=") {
       yield* compileChild(this.#storeTask(place, statement.value, value));
@@ -889,7 +901,7 @@ class TypeChecker {
       case "stringLiteral":
         for (const part of expression.parts)
           if (part.kind === "stringInterpolation")
-            yield* compileChild(this.#expressionTask(part.expression, scope));
+            yield* compileChild(this.#interpolationTask(part.expression, scope));
         return STRING_TYPE;
       case "parenthesizedExpression":
         return yield* compileChild(this.#expressionTask(expression.expression, scope));
@@ -1275,16 +1287,171 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "interactionExpression" }>,
     scope: Scope,
   ): CompileTask<StaticType> {
-    if (expression.hint !== null) yield* compileChild(this.#expressionTask(expression.hint, scope));
-    if (expression.defaultValue !== null && expression.interactionKind !== "choice") {
-      const type = yield* compileChild(this.#expressionTask(expression.defaultValue, scope));
-      this.#checkInteractionDefault(expression.interactionKind, expression.defaultValue, type);
+    if (expression.hint !== null)
+      this.#checkShownText(
+        expression.hint,
+        yield* compileChild(this.#expressionTask(expression.hint, scope)),
+        "an input hint",
+      );
+    if (expression.interactionKind !== "choice") {
+      if (expression.defaultValue !== null) {
+        const type = yield* compileChild(this.#expressionTask(expression.defaultValue, scope));
+        this.#checkInteractionDefault(expression.interactionKind, expression.defaultValue, type);
+      }
+      return expression.interactionKind === "number" ? NUMBER_TYPE : STRING_TYPE;
     }
-    for (const option of expression.options)
-      yield* compileChild(this.#expressionTask(option.value, scope));
-    if (expression.interactionKind === "number") return NUMBER_TYPE;
-    if (expression.interactionKind === "text") return STRING_TYPE;
-    return expression.options[0]?.label?.kind === "numberLiteral" ? NUMBER_TYPE : STRING_TYPE;
+    // `choose` returns a button's value: one written before `:`, or else what gives the button, with its type.
+    const values: StaticType[] = [];
+    let buttons = 0;
+    for (const option of expression.options) {
+      const content = unwrap(option.expression);
+      const written: StaticType | null =
+        option.value === null
+          ? null
+          : option.value.kind === "identifier"
+            ? STRING_TYPE
+            : option.value.numericType === "integer"
+              ? INTEGER_TYPE
+              : NUMBER_TYPE;
+      if (content.kind === "listLiteral" || content.kind === "setLiteral") {
+        // Each element gives one button; a set keeps one of equal members.
+        buttons +=
+          content.kind === "listLiteral"
+            ? content.elements.length
+            : new Set(content.elements.flatMap((element) => staticSetMember(element))).size;
+        for (const element of content.elements) {
+          const value = yield* compileChild(this.#choiceEntryTask(element, scope, true));
+          if (written === null) values.push(value);
+        }
+        // An empty list or set gives no buttons, so its written value is never returned.
+        if (written !== null && content.elements.length > 0) values.push(written);
+        continue;
+      }
+      const type = yield* compileChild(this.#expressionTask(option.expression, scope));
+      const value = resolved(nonNullType(type));
+      if (value.kind === "list" || value.kind === "set") {
+        values.push(written ?? (isNullable(type) ? UNKNOWN_TYPE : value.element));
+        continue;
+      }
+      if (isKnown(value)) buttons += 1;
+      const entry = this.#choiceEntry(option.expression, type, false);
+      values.push(written ?? entry);
+    }
+    if (buttons > MAX_INTERACTION_OPTION_ENTRIES)
+      this.#report(
+        typeCode.invalidInteractionChoice,
+        `A choice can show at most ${MAX_INTERACTION_OPTION_ENTRIES} buttons.`,
+        expression.span,
+      );
+    // Integers and numbers together are numbers; values of other different types give a value of unknown type.
+    return values.length === 0 ? UNKNOWN_TYPE : (joinTypes(values) ?? UNKNOWN_TYPE);
+  }
+
+  /** Checks an element of a list or set option, which gives one button, and returns the value that button returns. */
+  *#choiceEntryTask(entry: Expression, scope: Scope, inList: boolean): CompileTask<StaticType> {
+    const type = yield* compileChild(this.#expressionTask(entry, scope));
+    return this.#choiceEntry(entry, type, inList);
+  }
+
+  /**
+   * Checks what gives one button: a value, or a choice object `{ value?, text, background? }` whose value, else its
+   * text, the button returns. Returns that value's type; a computed choice object's value is not known.
+   */
+  #choiceEntry(entry: Expression, type: StaticType, inList: boolean): StaticType {
+    const value = resolved(nonNullType(type));
+    if (inList && (value.kind === "list" || value.kind === "set")) {
+      this.#report(
+        typeCode.invalidInteractionChoice,
+        "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
+        entry.span,
+      );
+      return UNKNOWN_TYPE;
+    }
+    if (UNSHOWABLE_KINDS.has(value.kind) && value.kind !== "object") {
+      this.#report(
+        typeCode.invalidInteractionChoice,
+        "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
+        entry.span,
+      );
+      return UNKNOWN_TYPE;
+    }
+    const literal = unwrap(entry);
+    if (literal.kind !== "objectLiteral") return value.kind === "object" ? UNKNOWN_TYPE : type;
+    let returned: StaticType = UNKNOWN_TYPE;
+    for (const property of literal.properties) {
+      const propertyType = this.#typeOf(property.value);
+      if (property.name.name === "text") {
+        this.#checkShownText(property.value, propertyType, "the text of a choice option");
+        if (!literal.properties.some((other) => other.name.name === "value"))
+          returned = propertyType;
+      } else if (property.name.name === "value") {
+        if (UNSHOWABLE_KINDS.has(resolved(nonNullType(propertyType)).kind))
+          this.#report(
+            typeCode.invalidInteractionChoice,
+            "A choice value must be text, a number, true, false, null, or a duration.",
+            property.value.span,
+          );
+        returned = propertyType;
+      } else if (property.name.name === "background")
+        this.#checkBackground(property.value, propertyType);
+    }
+    return returned;
+  }
+
+  /** `${...}` shows a value, or one element of a list; a known value it cannot show is an error. */
+  *#interpolationTask(expression: Expression, scope: Scope): CompileTask<void> {
+    const type = yield* compileChild(this.#expressionTask(expression, scope));
+    const value = unwrap(expression);
+    if (value.kind !== "listLiteral") {
+      const shown = resolved(nonNullType(type));
+      if (UNSHOWABLE_KINDS.has(shown.kind) && shown.kind !== "list")
+        this.#report(
+          typeCode.unshowableValue,
+          `"\${...}" cannot show ${describeValue(shown)}. It shows text, numbers, true, false, null, and durations, and selects one element of a list.`,
+          expression.span,
+        );
+      return;
+    }
+    if (value.elements.length === 0)
+      this.#report(
+        typeCode.unshowableValue,
+        "An interpolated list must contain at least one element to select from.",
+        value.span,
+      );
+    for (const element of value.elements)
+      if (UNSHOWABLE_KINDS.has(resolved(nonNullType(this.#typeOf(element))).kind))
+        this.#report(
+          typeCode.unshowableValue,
+          "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
+          element.span,
+        );
+  }
+
+  /** A button background is a colour in text; `null` is no colour either, so an optional type is checked by its value. */
+  #checkBackground(expression: Expression, type: StaticType): void {
+    if (isKnown(nonNullType(type)) && !isScalar(nonNullType(type), "string"))
+      this.#report(
+        typeCode.invalidInteractionChoice,
+        "Expected an opaque CSS button background colour.",
+        expression.span,
+      );
+  }
+
+  /** Only `${...}` selects from a list; a list in a text field is an error, at runtime when it is not known here. */
+  #checkShownText(expression: Expression, type: StaticType, field: string): void {
+    const value = resolved(nonNullType(type));
+    if (value.kind === "list")
+      this.#report(
+        typeCode.listInText,
+        `A list cannot be ${field}. Select one element with "\${list}" or list.random.`,
+        expression.span,
+      );
+    else if (UNSHOWABLE_KINDS.has(value.kind))
+      this.#report(
+        typeCode.unshowableValue,
+        `${capitalize(field)} cannot be ${describeValue(value)}.`,
+        expression.span,
+      );
   }
 
   /**
@@ -1370,13 +1537,10 @@ class TypeChecker {
     if (resolved(nonNullType(duration)).kind !== "range")
       this.#reportTime(timer.duration, duration, timer.unit !== null);
     if (timer.label !== null)
-      yield* compileChild(
-        this.#requireTask(
-          timer.label,
-          scope,
-          (type) => isScalar(type, "string"),
-          "A timer label is text (string)",
-        ),
+      this.#checkShownText(
+        timer.label,
+        yield* compileChild(this.#expressionTask(timer.label, scope)),
+        "a timer label",
       );
     if (timer.handler !== null) this.#handlers.push({ block: timer.handler, selfHandle: null });
   }
@@ -1626,6 +1790,32 @@ function capitalize(text: string): string {
 }
 
 const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
+
+/** Value kinds that `${...}` cannot show. */
+const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
+  "list",
+  "set",
+  "object",
+  "range",
+  "timer",
+  "media",
+  "speaker",
+]);
+
+/** Speaker properties shown as text: the display name and the parts it is derived from. */
+const SPEAKER_TEXT_PROPERTIES: ReadonlySet<string> = new Set([
+  "displayName",
+  "title",
+  "shortTitle",
+  "firstName",
+  "lastName",
+]);
+
+/** A set member known at compile time, or none when it is not known; a set keeps one of equal scalars. */
+function staticSetMember(expression: Expression): (string | number | boolean | null)[] {
+  const known = staticChoiceValue(expression)?.value;
+  return known === undefined || (typeof known === "object" && known !== null) ? [] : [known];
+}
 
 /** Arithmetic yields a number or a duration, never text, even when its operand types are unknown. */
 function isArithmetic(expression: Expression): boolean {

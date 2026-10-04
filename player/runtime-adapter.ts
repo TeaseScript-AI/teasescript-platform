@@ -300,13 +300,8 @@ export function selectPlayerRuntimeChoice(
   const optionIndex = action.ui.options.findIndex(
     (_option, index) => choiceOptionId(action.actionId, index) === optionId,
   );
-  const option = action.ui.options[optionIndex];
-  if (option === undefined) return null;
-  const payload =
-    option.label === null
-      ? { kind: "selectedText", selectedText: option.text }
-      : { kind: "selectedLabel", selectedLabel: option.label };
-  return completePlayerAction(session, action, payload);
+  if (optionIndex === -1) return null;
+  return completePlayerAction(session, action, { kind: "selectedOption", optionIndex });
 }
 
 export function skipPlayerRuntimePacing(

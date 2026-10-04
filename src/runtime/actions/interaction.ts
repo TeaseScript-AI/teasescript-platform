@@ -1,10 +1,12 @@
+import { cloneInteractionChoiceValue } from "../../choice-values.js";
 import { isBlankTextAnswer, isNumberAnswerText } from "../../interaction-answers.js";
 import { interactionStringFits } from "../../interaction-limits.js";
+import type { InteractionChoiceOption, InteractionChoiceValue } from "../../plan/model.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
 import type { RuntimeInteractionActionSnapshot } from "./model.js";
 
 export type ResolvedInteraction =
-  | { readonly ok: true; readonly result: string | number | null; readonly transcriptText: string }
+  | { readonly ok: true; readonly result: InteractionChoiceValue; readonly transcriptText: string }
   | { readonly ok: false; readonly message: string };
 
 export function resolveInteractionCompletion(
@@ -64,46 +66,40 @@ export function resolveInteractionCompletion(
   if (action.ui.kind !== "choice") {
     return { ok: false, message: "Choice action payload is malformed." };
   }
-  let matches: readonly { readonly text: string; readonly label: string | number | null }[] = [];
+  const options = action.ui.options;
+  let selected: InteractionChoiceOption;
   if (
     payload.kind === "submittedText" &&
     typeof payload.submittedText === "string" &&
     completionStringFits(payload.submittedText)
   ) {
-    matches = action.ui.options.filter((option) => option.text === payload.submittedText);
+    const matches = options.filter((option) => option.text === payload.submittedText);
     if (matches.length !== 1) {
       return {
         ok: false,
         message:
           matches.length === 0
             ? "Choice text is not available."
-            : "Choice text is ambiguous; select a labelled control.",
+            : "Choice text is ambiguous; select a rendered control.",
       };
     }
+    selected = matches[0]!;
   } else if (
-    payload.kind === "selectedLabel" &&
-    action.ui.labelType !== "none" &&
-    (typeof payload.selectedLabel === "string" || typeof payload.selectedLabel === "number")
+    payload.kind === "selectedOption" &&
+    typeof payload.optionIndex === "number" &&
+    Number.isSafeInteger(payload.optionIndex) &&
+    payload.optionIndex >= 0 &&
+    payload.optionIndex < options.length
   ) {
-    if (typeof payload.selectedLabel === "string" && !completionStringFits(payload.selectedLabel)) {
-      return { ok: false, message: "Choice label exceeds the shared UTF-8 byte limit." };
-    }
-    matches = action.ui.options.filter((option) => option.label === payload.selectedLabel);
-  } else if (
-    payload.kind === "selectedText" &&
-    action.ui.labelType === "none" &&
-    typeof payload.selectedText === "string" &&
-    completionStringFits(payload.selectedText)
-  ) {
-    matches = action.ui.options.filter((option) => option.text === payload.selectedText);
+    selected = options[payload.optionIndex]!;
   } else {
-    return { ok: false, message: "Choice completion payload does not match the choice domain." };
+    return { ok: false, message: "Choice completion payload does not match the offered options." };
   }
-  if (matches.length !== 1) {
-    return { ok: false, message: "Choice selection is not available." };
-  }
-  const selected = matches[0]!;
-  return { ok: true, result: selected.label ?? selected.text, transcriptText: selected.text };
+  return {
+    ok: true,
+    result: cloneInteractionChoiceValue(selected.value),
+    transcriptText: selected.text,
+  };
 }
 
 function completionStringFits(value: string): boolean {
