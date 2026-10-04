@@ -308,14 +308,49 @@ conversions (#518), text operations and `join` (#518), `choose` with list option
 #475), integer widening (#504 option B, #526), for which the gate writes `: number`, and `dict` (#536). `run`/`end`
 dominates: it blocks 21 otherwise compiler-clean corpus scripts.
 
+## Remaining gaps by workaround class
+
+What still blocks conversion once the open tracker work lands (#504 types, #508 text operations, #511 choose lists,
+#528 switch, #531 `showButton` timeout, #532 date and time, #536 `dict`, camera #475), ranked by whether current
+TeaseScript can express it. Counts are root errors or blocked scripts in default mode at the `dict` round.
+
+**Expressible in current TeaseScript (importer work).** The language already has a clean form; the importer does not
+produce it yet.
+
+| Gap | Corpus | Clean form |
+| --- | --- | --- |
+| Conditional expressions (`?:`, elvis) inside larger expressions | Toy, about 40 | nested `if` with temporaries, keeping the evaluation order |
+| List methods with closures (`collect`, `findAll`, `every`, `sort { }`, `times`, `each` on unproven receivers) | Toy, about 25 | `for` loops |
+| Toy menus built inside larger expressions | Toy 6 | the same loops, before the statement |
+| Non-short-circuit `&` and `\|` on booleans | Toy, about 10 | `and`/`or`, with temporaries when an operand has effects |
+| Closures that capture local state; method pointers | Toy 13 | explicit state parameters; action IDs with a dispatcher |
+| Calls into Toy's plugin modules (`toy.metaClass.name { ... }`, loaded with `Eval.me` from a folder at runtime) | most of Toy's 58 dynamic calls | one function per module method, resolved at import time |
+| Persona data files with Groovy expression strings | Toy | data converted at import time |
+| `instanceof` | Toy 1 | `is` (#530) |
+
+**Workaround possible, but a hack.** Works with current TeaseScript but differs from the intended behavior; the
+accepted implementation is still wanted.
+
+| Gap | Corpus | Workaround | What the workaround loses |
+| --- | --- | --- | --- |
+| `askBooleans` | blocks 8 scripts | one yes/no `choose` per item in a loop, then a confirmation | one form with every option; changing an earlier answer |
+| `showPopup` | blocks 4 scripts | `say` plus `showButton "OK"` | the popup presentation |
+| `askInteger` | blocks 1 script (reached with media tags) | `askNumber` in a loop until `round(n) == n` (#518) | validation while typing |
+| Media selected by tags (M1), including Toy's imagery folders with tag files | Domme3 3, Toy imagery | a file list fixed at conversion time, or asking which packs are installed | packs added after conversion |
+| Regular expressions (`replaceAll`, pattern `split`, `tokenize`) | Toy 3 | loops with `indexOf`/`substring` (#518) | readability: one call becomes a loop |
+
+**No reasonable workaround.**
+
+| Gap | Corpus | Why |
+| --- | --- | --- |
+| Script transfers `run`/`call`/`goto`/`end` (syntax under re-evaluation in the tracker) | blocks 21 scripts (distribution 7, Domme3 12, DisciplineClinic 2) | A package is several scripts that transfer to each other. Imitating that means merging every script into one file with a dispatcher loop, with every function passing a pending transfer up to it: a rewrite of the whole package. Only `call` alone maps to a function call within one file. |
+| Desktop and Java APIs (files, OS processes, Java objects, the Cornertime exchange) | Toy, distribution | Outside the product boundary by design (see Legacy baggage). |
+| Legacy bugs (variables nothing assigns 10, helpers without the script host 7, variables that change type 8) | Domme3, DisciplineClinic | Need an author's repair; reporting them is correct. |
+
 ## Open importer work
 
-Found while evaluating the proposals; none needs a language decision:
+Found while evaluating the proposals, besides the importer work listed above; none needs a language decision:
 
-- **Toy menus built inside larger expressions,** whose `collect` cannot move before the statement.
-- **Toy imagery** (outfit folders with tag files) could map to proposed media tags once tags are ingested from those
-  files.
-- **Regular expressions** in `replaceAll` and `split` remain manual work (Toy).
 - **`load "key" default value`** is now exact for legacy read-then-default code, because `save null` removes the key on
   `main` (#484); the importer does not use it for that pattern yet.
 - **Groovy type inference is per file and flow-insensitive:** a name used in two functions shares one type set, which
