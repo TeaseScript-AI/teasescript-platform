@@ -93,7 +93,11 @@ const OBJECT_METHOD_RESULT_TYPES = new Map<string, ValueType>([
   ["split", LIST],
   ["startsWith", BOOLEAN],
   ["substring", STRING],
+  ["toBigDecimal", NUMBER],
+  ["toDouble", NUMBER],
+  ["toFloat", NUMBER],
   ["toInteger", NUMBER],
+  ["toLong", NUMBER],
   ["toLowerCase", STRING],
   ["toString", STRING],
   ["toUpperCase", STRING],
@@ -235,6 +239,12 @@ function methodCallType(node: AstNode, environment: TypeEnvironment): ValueType 
     return SEXSCRIPT_RESULT_TYPES.get(name) ?? UNKNOWN;
   }
   if (receiver === "Math") return NUMBER;
+  // Java's static number parsers, such as Integer.parseInt(text).
+  if (
+    ["Integer", "Long", "Double", "Float"].includes(receiver ?? "") &&
+    /^(?:parse|valueOf)/u.test(name)
+  )
+    return NUMBER;
   // sort(), unique(), and reverse() on a list return a list.
   if (["sort", "unique", "reverse"].includes(name)) {
     const type = inferType(asNode(node.object), environment);

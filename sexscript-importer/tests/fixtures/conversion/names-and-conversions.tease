@@ -1,0 +1,23 @@
+// Groovy allows `$` in names; TeaseScript names keep the letters and digits.
+let score = 3
+score = score + 1
+say "Score ${score}"
+// Consecutive C-style loops may each declare the same counter, which Groovy scoped to its own loop.
+let i = 0
+while i < 2 {
+  say "Round ${i}"
+  i += 1
+}
+i = 5
+while i > 3 {
+  say "Back ${i}"
+  i -= 1
+}
+// Groovy and Java number conversions of number text read the same values as the TeaseScript conversions.
+let typed = "4"
+let count = toInteger(typed)
+let strokes = toInteger(typed)
+let pace = toNumber(typed) / 2
+let ratio = toNumber("1.5")
+say "Count ${count + strokes} at ${pace * ratio}"
+exit

@@ -4,6 +4,9 @@ import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 /** `timestamp` becomes a protected type name with the date and time values of #532, which main lacks yet. */
 const PROTECTED: ReadonlySet<string> = new Set([...TEASESCRIPT_PROTECTED_NAMES, "timestamp"]);
 
+/** A TeaseScript identifier (V30 §2); Groovy also allows `$` and other letters. */
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+
 /**
  * Renames legacy identifiers that TeaseScript rejects: names reserved by TeaseScript, and function parameters or
  * locals that collide with a package-global name (TeaseScript forbids that shadowing even when the global is
@@ -24,10 +27,18 @@ export function renameConflictingIdentifiers(
    */
   project: ReadonlySet<string> = new Set(),
 ): MigrationProgram {
-  const isProtected = (name: string): boolean => renameProtected && PROTECTED.has(name);
+  const isProtected = (name: string): boolean =>
+    renameProtected && (PROTECTED.has(name) || !IDENTIFIER.test(name));
   const used = new Set<string>([...taken, ...project]);
   collectNames(program.statements, used);
-  const fresh = (base: string, ending = "Value"): string => {
+  const fresh = (name: string, ending = "Value"): string => {
+    // A Groovy name with characters TeaseScript does not allow, such as `$wr1`, keeps its letters and digits.
+    const letters = name.replace(/[^A-Za-z0-9_]/gu, "");
+    const base = letters === "" ? "value" : /^[0-9]/u.test(letters) ? `v${letters}` : letters;
+    if (base !== name && !used.has(base) && !PROTECTED.has(base)) {
+      used.add(base);
+      return base;
+    }
     let candidate = `${base}${ending}`;
     for (let suffix = 2; used.has(candidate) || PROTECTED.has(candidate); suffix += 1) {
       candidate = `${base}${ending}${suffix}`;

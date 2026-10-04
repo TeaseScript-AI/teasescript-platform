@@ -1214,7 +1214,29 @@ function lowerStatementList(
   }
   context.knownKeys.splice(context.knownKeys.length - added, added);
   emitComments(takeCommentsBefore(context, enclosingSpan === null ? null : endOf(enclosingSpan)));
-  return withVisibleCountdowns(result, context);
+  return withVisibleCountdowns(withReusedLoopCounters(result), context);
+}
+
+/**
+ * Groovy scoped the counter a C-style `for` declares to its loop, so consecutive loops declare `i` again; a TeaseScript
+ * block declares a name once, so a later loop of the block assigns the counter instead.
+ */
+function withReusedLoopCounters(statements: IrStatement[]): IrStatement[] {
+  const counters = new Set<string>();
+  return statements.map((statement): IrStatement => {
+    if (statement.kind !== "let" || statement.loopCounter !== true) return statement;
+    if (!counters.has(statement.name)) {
+      counters.add(statement.name);
+      return statement;
+    }
+    return {
+      kind: "assign",
+      target: { kind: "variable", name: statement.name },
+      operator: "=",
+      value: statement.value,
+      span: statement.span,
+    };
+  });
 }
 
 /**
@@ -4696,7 +4718,9 @@ function lowerCStyleFor(
   const step = [...updatePrelude, ...updateStatements];
   return [
     ...initialPrelude,
-    ...initialStatements,
+    ...initialStatements.map((statement): IrStatement =>
+      statement.kind === "let" ? { ...statement, loopCounter: true } : statement,
+    ),
     {
       kind: "while",
       condition,
@@ -4740,6 +4764,25 @@ function withStepBeforeContinue(statements: IrStatement[], step: IrStatement[]):
     }
   });
 }
+
+/** Groovy conversion methods of numbers and text, by the TeaseScript conversion that reads the same value. */
+const CONVERSION_METHODS = new Map([
+  ["toInteger", "toInteger"],
+  ["toLong", "toInteger"],
+  ["toFloat", "toNumber"],
+  ["toDouble", "toNumber"],
+  ["toBigDecimal", "toNumber"],
+]);
+
+/** Java's static number parsers, by the TeaseScript conversion that reads the same value. */
+const STATIC_CONVERSIONS = new Map([
+  ["Integer.parseInt", "toInteger"],
+  ["Integer.valueOf", "toInteger"],
+  ["Long.parseLong", "toInteger"],
+  ["Double.parseDouble", "toNumber"],
+  ["Double.valueOf", "toNumber"],
+  ["Float.parseFloat", "toNumber"],
+]);
 
 function lowerForControlExpression(node: AstNode, context: LowerContext): IrStatement[] | null {
   if (node.kind === "declaration") return lowerDeclaration(node, node.span, context);
@@ -6946,6 +6989,23 @@ function lowerObjectMethodCallExpression(
     if (listParts !== undefined) return listParts === null ? null : templateOrLiteral(listParts);
     const value = lowerExpression(targetNode, context);
     return value === null ? null : templateOrLiteral([{ value }]);
+  }
+  // Groovy number conversions (`x.toInteger()`, `Integer.parseInt(text)`) as TeaseScript conversions (V30 §13): both
+  // fail on text that is no number and drop a number's fraction toward zero; only Groovy rejects integer text "2.7".
+  const conversion =
+    argumentsNodes.length === 0 && targetNode !== null
+      ? CONVERSION_METHODS.get(name)
+      : argumentsNodes.length === 1 && receiverName !== null
+        ? STATIC_CONVERSIONS.get(`${receiverName}.${name}`)
+        : undefined;
+  if (conversion !== undefined) {
+    const value = lowerExpression(
+      argumentsNodes.length === 0 ? targetNode! : argumentsNodes[0]!,
+      context,
+    );
+    return value === null
+      ? null
+      : { kind: "call", name: conversion, positional: [value], named: {} };
   }
   if (receiverName === "Math") {
     const helper = MATH_HELPERS.get(name);

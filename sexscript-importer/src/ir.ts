@@ -104,6 +104,8 @@ export type IrStatement =
       maybeText?: true;
       /** A `global`, visible in every file of the package and initialized at session start (ADR 0022 §6). */
       global?: true;
+      /** The counter a C-style `for` declared, which Groovy scoped to its loop. */
+      loopCounter?: true;
     })
   | (IrBase & {
       kind: "assign";
