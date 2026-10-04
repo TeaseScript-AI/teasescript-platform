@@ -240,7 +240,7 @@ function* expressionTypeTask(
   }
 }
 
-const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
+export const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
 
 /**
  * The result type of arithmetic on known operand types, or `undefined` when it is not known or not valid. Integer

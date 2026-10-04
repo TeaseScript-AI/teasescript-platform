@@ -1,4 +1,5 @@
 import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../color.js";
+import { isValidInteractionPrefill } from "../interaction-answers.js";
 import { capturedChoicePresentation } from "./interaction-presentation.js";
 import { isOneOf } from "../plan/validation-support.js";
 import { isMessagePresentation } from "../message-presentation.js";
@@ -1291,7 +1292,11 @@ function preparedInteractionUiMatchesAction(
       prepared.hintTemporary === null
         ? null
         : runtimeTemporaryValue(temporaries, prepared.hintTemporary);
-    return hint === actual.hint;
+    const prefill =
+      prepared.prefillTemporary === undefined
+        ? undefined
+        : runtimeTemporaryValue(temporaries, prepared.prefillTemporary);
+    return hint === actual.hint && prefill === actual.prefill;
   }
   const raw = runtimeTemporaryValue(temporaries, prepared.optionsTemporary);
   if (
@@ -1370,7 +1375,7 @@ function validInteractionUiShape(
     kind === "button"
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in value ? ["background"] : [])]
       : kind === "text" || kind === "number"
-        ? ["kind", "hint", "accessibleName"]
+        ? ["kind", "hint", "accessibleName", ...("prefill" in value ? ["prefill"] : [])]
         : ["kind", "labelType", "options", "accessibleName"];
   if (!hasExactKeys(value, expectedUiKeys)) return false;
   let aggregate = 0;
@@ -1422,7 +1427,12 @@ function validInteractionUiShape(
     );
   }
   if (kind === "text" || kind === "number") {
-    return (value.hint === null || count(value.hint)) && !measurementExhausted;
+    return (
+      (value.hint === null || count(value.hint)) &&
+      (!("prefill" in value) ||
+        (count(value.prefill) && isValidInteractionPrefill(kind, value.prefill))) &&
+      !measurementExhausted
+    );
   }
   if (
     !Array.isArray(value.options) ||
@@ -1481,7 +1491,8 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
   } else if (actual.accessibleName.key !== expected.accessibleName.key) return false;
   if (expected.kind === "button")
     return actual.buttonLabel === expected.buttonLabel && actual.background === expected.background;
-  if (expected.kind === "text" || expected.kind === "number") return actual.hint === expected.hint;
+  if (expected.kind === "text" || expected.kind === "number")
+    return actual.hint === expected.hint && actual.prefill === expected.prefill;
   if (expected.kind !== "choice") return false;
   if (actual.labelType !== expected.labelType) return false;
   if (!Array.isArray(actual.options)) return false;
@@ -1727,7 +1738,10 @@ function preparedUiFitsPresentedUi(
   if (prepared.kind === "button")
     return "background" in ui === (prepared.backgroundTemporary !== undefined);
   if (prepared.kind === "text" || prepared.kind === "number")
-    return (ui.hint === null) === (prepared.hintTemporary === null);
+    return (
+      (ui.hint === null) === (prepared.hintTemporary === null) &&
+      "prefill" in ui === (prepared.prefillTemporary !== undefined)
+    );
   if (
     ui.labelType !== prepared.labelType ||
     !Array.isArray(ui.options) ||

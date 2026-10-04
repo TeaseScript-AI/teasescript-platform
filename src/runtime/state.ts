@@ -65,7 +65,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 27;
+export const RUNTIME_SNAPSHOT_VERSION = 28;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -699,7 +699,12 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
       ...(ui.background === undefined ? {} : { background: ui.background }),
       accessibleName,
     };
-  return { kind: ui.kind, hint: ui.hint, accessibleName };
+  return {
+    kind: ui.kind,
+    hint: ui.hint,
+    ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
+    accessibleName,
+  };
 }
 
 function cloneSettlement(
@@ -2755,6 +2760,8 @@ function requiredInstructionTemporaries(
         ) {
           if (instruction.preparedUi.hintTemporary !== null)
             output.add(instruction.preparedUi.hintTemporary);
+          if (instruction.preparedUi.prefillTemporary !== undefined)
+            output.add(instruction.preparedUi.prefillTemporary);
         } else output.add(instruction.preparedUi.optionsTemporary);
       }
       break;

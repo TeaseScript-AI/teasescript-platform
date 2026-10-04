@@ -1279,6 +1279,7 @@ Supported options:
 - `allowAutocorrect`: `boolean`
 - `allowSpellcheck`: `boolean`
 - `scope`: `"input"` or `"teasePlayer"`
+- `default`: `string`; see [Default answers](#default-answers)
 
 Rules:
 
@@ -1394,6 +1395,43 @@ askDateTime(...)  // datetime
 ```
 
 These inputs use structured date and time controls and do not return unparsed free text. Like the other blocking `ask...` functions, they only complete with a valid value.
+
+### Default answers
+
+Every single-field input accepts an optional named `default:` answer that prefills its field:
+
+```text
+let name = askText("What is your name?", default: "Ada")
+let minutes = askNumber("Corner time?", default: cornerBase + playerLevel)
+let count = askInteger("How many?", default: 10)
+let answer = askBoolean("Continue?", default: true)
+let day = askDate("Which date?", default: getDate())
+```
+
+| Function | `default:` value |
+|---|---|
+| `askText(...)`, `askTyping(...)` | `string` with a non-whitespace character |
+| `askNumber(...)` | `number` or `integer` |
+| `askInteger(...)` | `integer` |
+| `askBoolean(...)` | `boolean` |
+| `askDate(...)`, `askTime(...)`, `askDateTime(...)` | `date`, `time`, and `datetime` respectively |
+
+Rules:
+
+- The input opens with the default as its editable answer, and the player still submits explicitly. A submitted
+  default is an ordinary answer: its result, validation, and transcript text are those of the same answer entered by
+  hand.
+- Clearing the field never falls back to the default; a blank answer is rejected and asked again.
+- The default must be an answer the input accepts. There is no implicit conversion except `integer` to `number`: write
+  `default: "${count}"` to offer a number as text. A non-whole `askInteger` default is an error, never rounded.
+- The compiler rejects a default that it knows is invalid, and its error names the fix. Any other default is checked
+  when the input opens; an invalid one is a runtime error, and the input does not open.
+- `askTyping` applies its `allow...` restrictions to the prefilled text as to typed text.
+- Restoring a checkpoint shows the original default again; edits the player had not submitted are dropped.
+- `choose` has no preselected option: a choice is an explicit decision, and a choice button completes when activated.
+  An author can style the preferred option instead, for example with `background:`. File, folder, image, video, and
+  audio pickers have no prefill because a browser cannot preset a file input. Multi-field inputs keep their
+  `defaults:` lists.
 
 ### File input
 
