@@ -137,6 +137,33 @@ test("durations compare and divide within one family, and equality compares thei
   );
 });
 
+test("sort, min, max, and set operations treat calendar durations by their parts", () => {
+  assert.deepEqual(
+    says(
+      [
+        "let days = [3 days, 1 week, 1 d]",
+        "days.sort()",
+        "say days",
+        "let months = [1 year, 1 month, 18 months]",
+        "months.sort()",
+        "say months",
+        "say min(1 month, 1 year)",
+        "say max(2 weeks, 10 days)",
+        "say [1 day, 1 month].union([24 h, 1 mo])",
+        "say [1 day, 1 month].intersection([1 mo, 0 s])",
+      ].join("\n"),
+    ),
+    ["[1 d, 3 d, 7 d]", "[1 mo, 1 y, 1 y 6 mo]", "1 mo", "14 d", "[1 d, 1 mo, 24 h]", "[1 mo]"],
+  );
+  // Durations of different families have no order, also when exact time is mixed with calendar days.
+  for (const source of [
+    `${DYNAMIC}let spans = [dynamic(1 day), dynamic(24 h)]\nspans.sort()`,
+    `${DYNAMIC}let spans = [dynamic(1 month), dynamic(30 days)]\nspans.sort()`,
+  ])
+    assert.equal(runtimeFailure(source), "TSR060", source);
+  assert.equal(runtimeFailure(`${DYNAMIC}say min(dynamic(1 day), dynamic(24 h))`), "TSR059");
+});
+
 test("dates move by calendar days and months with clamping, and subtract to whole days", () => {
   assert.deepEqual(
     says(

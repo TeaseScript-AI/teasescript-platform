@@ -1,8 +1,13 @@
+import { compareDurationParts, durationFamily, durationParts } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
-import { serializableEquals, type SerializableRuntimeValue } from "./serializable-values.js";
+import {
+  serializableEquals,
+  type SerializableRuntimeDuration,
+  type SerializableRuntimeValue,
+} from "./serializable-values.js";
 import { describeRuntimeValue, isDuration } from "./value-predicates.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
@@ -39,10 +44,28 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
       );
     kind = itemKind;
   }
-  const compare = (left: SerializableRuntimeValue, right: SerializableRuntimeValue): number =>
-    typeof left === "string" && typeof right === "string"
-      ? compareCodePoints(left, right)
-      : sortKey(left) - sortKey(right);
+  if (kind === "duration") {
+    // Durations order only within one family: exact time, days and weeks, or months and years (V30 §35).
+    const families = new Set(
+      items.map((item) => (isDuration(item) ? durationFamily(durationParts(item)) : "zero")),
+    );
+    families.delete("zero");
+    if (families.size > 1 || families.has("mixed"))
+      throw fault(
+        "TSR060",
+        "sort() orders durations of one kind only: exact time, days and weeks, or months and years.",
+        span,
+      );
+  }
+  const compare = (left: SerializableRuntimeValue, right: SerializableRuntimeValue): number => {
+    if (typeof left === "string" && typeof right === "string")
+      return compareCodePoints(left, right);
+    if (isDuration(left) && isDuration(right)) {
+      const order = compareDurationParts(durationParts(left), durationParts(right));
+      return typeof order === "number" ? order : 0;
+    }
+    return sortKey(left) - sortKey(right);
+  };
   // Ties keep their order, so the sort is stable without relying on the engine's sort.
   return items
     .map((_, index) => index)
@@ -52,7 +75,7 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
 const KIND_DESCRIPTIONS = { number: "numbers", text: "text", duration: "durations" } as const;
 
 function sortKey(value: SerializableRuntimeValue): number {
-  return typeof value === "number" ? value : isDuration(value) ? value.milliseconds : 0;
+  return typeof value === "number" ? value : 0;
 }
 
 /** Compares texts by Unicode code point, independently of locale; UTF-16 order differs above U+FFFF. */
@@ -98,7 +121,7 @@ export function setOperationItems(
  */
 class ValueIndex {
   readonly #scalars = new Set<string | number | boolean | null>();
-  readonly #durations = new Set<number>();
+  readonly #durations = new Set<string>();
   readonly #others: SerializableRuntimeValue[] = [];
 
   constructor(values: readonly SerializableRuntimeValue[]) {
@@ -107,15 +130,21 @@ class ValueIndex {
 
   add(value: SerializableRuntimeValue): void {
     if (value === null || typeof value !== "object") this.#scalars.add(value);
-    else if (isDuration(value)) this.#durations.add(value.milliseconds);
+    else if (isDuration(value)) this.#durations.add(durationKey(value));
     else this.#others.push(value);
   }
 
   has(value: SerializableRuntimeValue): boolean {
     if (value === null || typeof value !== "object") return this.#scalars.has(value);
-    if (isDuration(value)) return this.#durations.has(value.milliseconds);
+    if (isDuration(value)) return this.#durations.has(durationKey(value));
     return this.#others.some((other) => serializableEquals(other, value));
   }
+}
+
+/** Equal for two durations exactly when `==` holds: the same months, days, and milliseconds. */
+function durationKey(value: SerializableRuntimeDuration): string {
+  const parts = durationParts(value);
+  return `${parts.months}:${parts.days}:${parts.milliseconds === 0 ? 0 : parts.milliseconds}`;
 }
 
 /** A text for a set operation's argument that is neither a list nor a set. */

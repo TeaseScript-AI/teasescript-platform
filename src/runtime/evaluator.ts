@@ -1980,16 +1980,23 @@ export class Evaluator {
       );
     }
     // A loop, not a spread into Math.min/Math.max, so a call with very many arguments cannot overflow the native stack.
-    const value = (item: SerializableRuntimeValue): number =>
-      typeof item === "number" ? item : isDuration(item) ? item.milliseconds : Number.NaN;
-    let best = value(positional[0]!);
-    for (const item of positional) {
-      const candidate = value(item);
-      if (name === "min" ? candidate < best : candidate > best) best = candidate;
+    if (numbers) {
+      const values = positional.filter((item): item is number => typeof item === "number");
+      let best = values[0]!;
+      for (const candidate of values)
+        if (name === "min" ? candidate < best : candidate > best) best = candidate;
+      return withoutNegativeZero(best);
     }
-    return numbers
-      ? withoutNegativeZero(best)
-      : { kind: "duration", milliseconds: withoutNegativeZero(best) };
+    // Durations order only within one family (V30 §35); the result keeps its own parts.
+    const durations = positional.filter(isDuration);
+    let best = durations[0]!;
+    for (const candidate of durations) {
+      const order = compareDurationParts(durationParts(candidate), durationParts(best));
+      if (typeof order === "string")
+        throw fault("TSR059", `${name}(...) cannot compare these durations: ${order}.`, span);
+      if (name === "min" ? order < 0 : order > 0) best = candidate;
+    }
+    return cloneSerializableValue(best);
   }
 
   #roundingBuiltin(
