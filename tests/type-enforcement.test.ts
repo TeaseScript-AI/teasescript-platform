@@ -330,6 +330,10 @@ test("an object property keeps the type of its first value, and assignment may a
   assert.deepEqual(codes('let door = { owner: null }\ndoor.owner = "Ada"\ndoor.owner = 3'), [
     ["TSV041", "3"],
   ]);
+  assert.deepEqual(
+    mismatches('let door = {}\ndoor.owner = [null, 1][0]\ndoor.owner = "Ada"')[0]?.[1],
+    "'door.owner' holds a whole number (integer) or null since line 2, so it cannot be set to text (string). Use a separate property for a value of another type.",
+  );
   assert.deepEqual(codes('let door = { keys: [1] }\ndoor.keys.add("x")'), [["TSV041", '"x"']]);
   assert.deepEqual(codes('let door = { locked: true }\ndoor = { locked: "no", open: 1 }'), [
     ["TSV041", '"no"'],
@@ -584,6 +588,23 @@ test("a first null is remembered wherever a first value decides a type", () => {
     codes("let items = []\nitems.add(null)\nitems.add(1)\nitems.add(null)\nitems.add(true)"),
     [["TSV041", "true"]],
   );
+  // A join keeps a first null from either side; an empty collection that never took null adds nothing.
+  for (const [empty, other] of [
+    ["[]", "[1]"],
+    ["set[]", "set[1]"],
+  ] as const) {
+    const seen = `let a = ${empty}\na.add(null)\n`;
+    assert.deepEqual(codes(`${seen}let b = [a, ${other}]\nb[0].add(null)`), [], empty);
+    assert.deepEqual(codes(`${seen}let b = [${other}, a]\nb[1].add(null)`), [], empty);
+  }
+  assert.deepEqual(codes("let a = [null]\nlet b = [[1], a]\nb[1].add(null)"), []);
+  assert.deepEqual(
+    codes(
+      "let a = []\na.add(null)\nfunction f(flag) {\n    if flag {\n        return a\n    }\n    return [1]\n}\nlet r = f(true)\nr.add(null)",
+    ),
+    [],
+  );
+  assert.deepEqual(codes("let a = []\nlet b = [a, [1]]\nb[0].add(null)"), [["TSV041", "null"]]);
 });
 
 test("calls never decide parameter types, and an unknown return makes a result unknown", () => {
@@ -672,6 +693,13 @@ test("a function result, a body, or a copy never changes the types another place
       'function f(opts = { a: 1 }, flag = false) {\n    if flag {\n        opts.b = "x"\n    }\n    let s: string = opts.b\n    return s\n}\nlet given = { a: 2, b: 5 }\nf(given)',
     ),
     [["TSV041", "given"]],
+  );
+  // A return that mixes types adds nothing to the result's properties.
+  assert.deepEqual(
+    codes(
+      'function f(n) {\n    if n > 1 {\n        return { a: 1 }\n    }\n    if n > 2 {\n        return { b: "x", a: "s" }\n    }\n    return { a: 2, b: 3 }\n}\nlet r = f(1)\nlet s: integer = r.b',
+    ),
+    [["TSV044", '{ b: "x", a: "s" }']],
   );
   // A copy of a collection that has seen null may still take null.
   for (const empty of ["[]", "set[]"])

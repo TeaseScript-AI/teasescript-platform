@@ -40,6 +40,7 @@ import {
   isNumeric,
   isScalar,
   joinTypes,
+  TypeJoin,
   members,
   misfitProperty,
   nonNullType,
@@ -697,30 +698,22 @@ class TypeChecker {
    * return value of unknown type makes the result unknown, but the known values must still agree.
    */
   #inferredResult(context: FunctionContext): StaticType {
-    let result: StaticType | undefined;
+    const join = new TypeJoin();
     let first: { readonly type: StaticType; readonly span: SourceSpan } | undefined;
     for (const returned of context.returns) {
       if (resolved(returned.type).kind === "unknown") continue;
-      if (result === undefined) {
-        result = returned.type;
-        first = returned;
-        continue;
-      }
-      const joined = joinTypes([result, returned.type]);
-      if (joined === undefined) {
+      first ??= returned;
+      if (!join.add(returned.type))
         this.#report(
           typeCode.mixedTypes,
-          `'${context.fn.declaration.name.name}' returns ${describeValue(returned.type)} here, but ${describeValue(first!.type)} on line ${first!.span.start.line + 1}. A function returns one type; use a separate function for values of another type.`,
+          `'${context.fn.declaration.name.name}' returns ${describeValue(returned.type)} here, but ${describeValue(first.type)} on line ${first.span.start.line + 1}. A function returns one type; use a separate function for values of another type.`,
           returned.span,
         );
-        continue;
-      }
-      result = joined;
     }
     if (context.returns.some((returned) => resolved(returned.type).kind === "unknown"))
       return UNKNOWN_TYPE;
-    if (result === undefined) return NULL_TYPE;
-    return context.returnsNull ? optional(result) : result;
+    if (first === undefined) return NULL_TYPE;
+    return context.returnsNull ? optional(join.type) : join.type;
   }
 
   /**
@@ -1631,7 +1624,8 @@ function isBorrowed(expression: Expression): boolean {
 
 /** A slot already decided by its first value at `at`, so a later mismatch can name that line. */
 function decidedSlot(type: StaticType, at: SourceSpan): StaticType {
-  if (resolved(type).kind === "union") return type;
+  // A place still undecided, such as one that so far took only null, is decided by its first other value instead.
+  if (members(type).some((member) => member.kind === "open")) return type;
   const slot = openType();
   slot.resolved = type;
   slot.resolvedAt = at;

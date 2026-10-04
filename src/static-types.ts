@@ -424,42 +424,80 @@ function* containsTask(
  * never infers a union here.
  */
 export function joinTypes(types: readonly StaticType[]): StaticType | undefined {
-  // Property tables this join built; merging more objects extends them instead of copying them again.
-  const owned = new Set<PropertyTable>();
-  let result: StaticType | undefined = NEVER_TYPE;
-  for (const type of types) {
-    result = runCompileTask(joinTask(result, type, owned));
-    if (result === undefined) return undefined;
+  const join = new TypeJoin();
+  for (const type of types) if (!join.add(type)) return undefined;
+  return join.type;
+}
+
+/** A property a join set, with the type it replaced, so a join that fails can be undone. */
+interface JoinChange {
+  readonly properties: PropertyTable;
+  readonly name: string;
+  readonly replaced: StaticType | undefined;
+}
+
+/**
+ * Joins values one at a time into the one type of {@link joinTypes}, such as the values a function returns. A value
+ * that mixes types with the earlier ones leaves the type unchanged, so later values are still compared with them.
+ */
+export class TypeJoin {
+  /** Property tables this join built; merging more objects extends them instead of copying them again. */
+  readonly #owned = new Set<PropertyTable>();
+  #type: StaticType = NEVER_TYPE;
+
+  get type(): StaticType {
+    return this.#type;
   }
-  return result;
+
+  /** Joins a value into the type, or returns false and keeps the type when the value mixes types with it. */
+  add(type: StaticType): boolean {
+    const changes: JoinChange[] = [];
+    const joined = runCompileTask(joinTask(this.#type, type, this.#owned, changes));
+    if (joined !== undefined) {
+      this.#type = joined;
+      return true;
+    }
+    for (const { properties, name, replaced } of changes.reverse()) {
+      if (replaced === undefined) properties.delete(name);
+      else properties.set(name, replaced);
+    }
+    return false;
+  }
 }
 
 function* joinTask(
   leftType: StaticType,
   rightType: StaticType,
   owned: Set<PropertyTable>,
+  changes: JoinChange[],
 ): CompileTask<StaticType | undefined> {
   const left = canonical(leftType);
   const right = canonical(rightType);
   if (left.kind === "unknown" || right.kind === "unknown") return UNKNOWN_TYPE;
-  if (left.kind === "never" || left.kind === "open") return right;
-  if (right.kind === "never" || right.kind === "open") return left;
-  const leftValue = nonNullType(left);
-  const rightValue = nonNullType(right);
+  const leftValue = decidedValue(left);
+  const rightValue = decidedValue(right);
+  const nullable = holdsNull(left) || holdsNull(right);
+  if (leftValue.kind === "never" && rightValue.kind === "never") {
+    // No value decided either side yet. An undecided place stays undecided and keeps whether null came first.
+    if (left.kind === "never" && right.kind === "never") return NEVER_TYPE;
+    if (!members(left).some(isOpen) && !members(right).some(isOpen)) return NULL_TYPE;
+    return nullable ? optional(openType()) : openType();
+  }
   const value =
     leftValue.kind === "never"
       ? rightValue
       : rightValue.kind === "never"
         ? leftValue
-        : yield* compileChild(joinValuesTask(leftValue, rightValue, owned));
+        : yield* compileChild(joinValuesTask(leftValue, rightValue, owned, changes));
   if (value === undefined) return undefined;
-  return isNullable(left) || isNullable(right) ? optional(value) : value;
+  return nullable ? optional(value) : value;
 }
 
 function* joinValuesTask(
   left: StaticType,
   right: StaticType,
   owned: Set<PropertyTable>,
+  changes: JoinChange[],
 ): CompileTask<StaticType | undefined> {
   if (left.kind === "object" && right.kind === "object") {
     if (left.properties === null || right.properties === null) return ANY_OBJECT_TYPE;
@@ -469,19 +507,38 @@ function* joinValuesTask(
     owned.add(properties);
     for (const [name, type] of right.properties) {
       const kept = properties.get(name);
-      const joined = kept === undefined ? type : yield* compileChild(joinTask(kept, type, owned));
+      const joined =
+        kept === undefined ? type : yield* compileChild(joinTask(kept, type, owned, changes));
       if (joined === undefined) return undefined;
+      changes.push({ properties, name, replaced: kept });
       properties.set(name, joined);
     }
     return { kind: "object", properties };
   }
   if ((left.kind === "list" || left.kind === "set") && right.kind === left.kind) {
-    const element = yield* compileChild(joinTask(left.element, right.element, owned));
+    const element = yield* compileChild(joinTask(left.element, right.element, owned, changes));
     return element === undefined ? undefined : { kind: left.kind, element };
   }
   if (includes(left, right)) return left;
   if (includes(right, left)) return right;
   return undefined;
+}
+
+/** The non-null part of a type that a value decided, or `never` for `null` and for a place no value decided yet. */
+function decidedValue(type: StaticType): StaticType {
+  const value = nonNullType(type);
+  return value.kind === "open" ? NEVER_TYPE : value;
+}
+
+/** Whether values of a type may be null, including a place that took null before any other value. */
+function holdsNull(type: StaticType): boolean {
+  return members(type).some(
+    (member) => member.kind === "null" || (member.kind === "open" && member.sawNull),
+  );
+}
+
+function isOpen(type: StaticType): boolean {
+  return type.kind === "open";
 }
 
 /** The type of a list or set element, of a loop variable over an iterable, or `undefined` for other types. */
