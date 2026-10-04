@@ -2852,6 +2852,15 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const value = resolved(failing);
+    // A timestamp has no local fields until it is converted through the player's zone.
+    if (isScalar(value, "timestamp") && temporalFieldType("datetime", name) !== undefined) {
+      this.#report(
+        typeCode.invalidOperand,
+        `A timestamp has no property '${name}'. Convert it first, as in '${expressionLabel(expression.object) ?? "value"}.toDateTime().${name}'.`,
+        expression.property.span,
+      );
+      return UNKNOWN_TYPE;
+    }
     // Text operations and `join` name what to write instead (V30 §8).
     if (MEMBER_CHECKED_KINDS.has(value.kind) || (value.kind === "list" && name === "join")) {
       this.#reportProblems(
@@ -2867,12 +2876,7 @@ class TypeChecker {
         ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'; use length, first, last, or random.`
         : value.kind === "timer" || value.kind === "media"
           ? handleMemberMessage(value.kind, name, "read")
-          : `${capitalize(describeValue(value))} has no property '${name}'.${
-              // A timestamp has no local fields until it is converted through the player's zone.
-              isScalar(value, "timestamp") && temporalFieldType("datetime", name) !== undefined
-                ? ` Convert it first, as in '${expressionLabel(expression.object) ?? "value"}.toDateTime().${name}'.`
-                : ""
-            }`,
+          : `${capitalize(describeValue(value))} has no property '${name}'.`,
       expression.property.span,
     );
     return UNKNOWN_TYPE;
