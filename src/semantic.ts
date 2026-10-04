@@ -346,6 +346,16 @@ class SemanticValidator {
           "A timer range must contain at least one whole second.",
           duration.span,
         );
+      } else if (
+        start !== undefined &&
+        !(start * DURATION_UNIT_MILLISECONDS.s <= Number.MAX_SAFE_INTEGER)
+      ) {
+        // Every draw is at least the lower bound.
+        this.#report(
+          semanticCode.invalidRepeatCount,
+          "This timer is too long for scene time to reach. Use a shorter duration.",
+          duration.span,
+        );
       }
     } else {
       const known =
@@ -1677,9 +1687,9 @@ function isDefinitelyNonText(expression: Expression): boolean {
 function knownMilliseconds(expression: Expression, unit: DurationUnit | null): number | undefined {
   const known = staticQuantity(expression);
   if (known === undefined) return undefined;
-  return typeof known === "number"
-    ? known * DURATION_UNIT_MILLISECONDS[unit ?? "s"]
-    : known.milliseconds;
+  if (typeof known === "number") return known * DURATION_UNIT_MILLISECONDS[unit ?? "s"];
+  // A duration with a trailing unit is a type error of its own.
+  return unit === null ? known.milliseconds : undefined;
 }
 
 /** Scene time is at most `Number.MAX_SAFE_INTEGER` milliseconds, so a known longer duration can never be reached. */

@@ -58,7 +58,9 @@ function* staticNumberTask(expression: Expression): CompileTask<number | undefin
         break;
     }
   }
-  return value === undefined || !negate ? value : -value;
+  // A step without a finite result is a visible overflow, reported once by `findVisibleOverflows`.
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  return negate ? -value : value;
 }
 
 /** A scalar known at compile time: text, a finite number, a boolean, `null`, or a duration. */

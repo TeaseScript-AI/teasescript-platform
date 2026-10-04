@@ -44,6 +44,10 @@ test("a visible division by zero is a compile error that names the fix", () => {
 
 test("only the overflowing step is reported, once", () => {
   assert.deepEqual(diagnostics("say (1e308 * 10) * 2 + 1"), ["TSV050 1:6"]);
+  // Checks of a known wait, timer, or repeat value leave an overflow to the overflow error.
+  assert.deepEqual(diagnostics("wait -1e308 * 10"), ["TSV050 1:6"]);
+  assert.deepEqual(diagnostics("timer -1e308 * 10"), ["TSV050 1:7"]);
+  assert.deepEqual(diagnostics("repeat 1e308 * 10 { }"), ["TSV050 1:8"]);
   assert.deepEqual(diagnostics("say 1e308 + 1e308 - 1e308"), ["TSV050 1:5"]);
   assert.deepEqual(diagnostics("say 1e308 * 10\nsay 1 / 0"), ["TSV050 1:5", "TSV050 2:5"]);
 });
@@ -81,6 +85,10 @@ test("a wait or timer that scene time cannot reach is a compile error that names
     ["wait 1e16 ms", "wait"],
     ["timer 1e306", "timer"],
     ["timer async 1e16 ms", "timer"],
+    // Every draw of a range is at least its lower bound.
+    ["timer 10000000000000..=10000000000001", "timer"],
+    ["timer 10000000000000..10000000000002", "timer"],
+    ["timer(duration: 10000000000000..=10000000000001, async: true, repeat: true)", "timer"],
   ] as const) {
     const [reach, ...rest] = compileSource(source).diagnostics;
     assert.equal(reach?.code, "TSV011", source);

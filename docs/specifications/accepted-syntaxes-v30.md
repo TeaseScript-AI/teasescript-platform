@@ -2449,7 +2449,7 @@ including on another device, the gap does not consume timer time and the timer c
 time. A script plays the same however late or often the Player observes time: everything happens at its own moment
 in scene time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
 
-Scene time counts whole milliseconds up to 2^53 − 1, about 285,000 years. A `wait`, timer, or `showButton` timeout
+Scene time is measured in milliseconds, including fractional milliseconds, up to 2^53 − 1, about 285,000 years. A `wait`, timer, or `showButton` timeout
 longer than that can never end; the compiler rejects one it can see, such as `wait 1e15`, and any other is a runtime
 error.
 
