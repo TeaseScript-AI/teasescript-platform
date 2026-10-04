@@ -7332,12 +7332,13 @@ function splitScratchVariables(body: AstNode, context: LowerContext): AstNode {
     }
     if (elsewhere || occurrences.size === 0) continue;
     const last = Math.max(...occurrences.values());
-    const crossing = statements
-      .slice(declarationIndex + 1, last)
-      .some((statement) =>
-        ["for", "while", "switch", "break", "continue", "return"].includes(statement.kind),
-      );
-    if (crossing) continue;
+    // A loop, switch, break, continue, or return anywhere in between, also nested in a branch, crosses the stretch;
+    // a closure body does not run in place.
+    const jumps = (node: AstNode): boolean =>
+      node.kind !== "closure" &&
+      (["for", "while", "switch", "break", "continue", "return"].includes(node.kind) ||
+        nodeChildren(node).some(jumps));
+    if (statements.slice(declarationIndex + 1, last + 1).some(jumps)) continue;
     // Walk the stretch in order: each read takes the kind of the write before it.
     const writes = new Map<AstNode, string>();
     const reads = new Map<AstNode, string>();

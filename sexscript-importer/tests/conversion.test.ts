@@ -627,6 +627,8 @@ test(
         callback:
           'def response = "seed"\ndef writer = { -> response = [1, 2] }\ndef callback = writer\nresponse = "ready"\ncallback()\nsave("result", response)\n',
         loop: 'def response = "seed"\nresponse = 1\nwhile (true) { response = "changed"; break }\nsave("result", response)\n',
+        nested:
+          'def response = "seed"\nif (true) { while (false) { break } }\nresponse = 1\nsave("result", response)\n',
       };
       for (const [name, source] of Object.entries(sources)) {
         const sourcePath = path.join(directory, `${name}.groovy`);
