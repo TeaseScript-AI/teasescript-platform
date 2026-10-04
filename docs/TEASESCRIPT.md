@@ -88,12 +88,17 @@ showButton as mistress "Ready"
 
 let text = askText
 let text = askText as mistress "Type your answer"
+let name = askText "Your name?", default: "Ada"
 
 let amount = askNumber
 let amount = askNumber as mistress "Enter a number"
+let minutes = askNumber default: 10
 ```
 
-For `askText` and `askNumber`, the optional string is Standard UI field text or a hint. It is not automatically spoken into the transcript. The normal question is a preceding `say`.
+For `askText` and `askNumber`, the optional string is Standard UI field text or a hint. It is not automatically spoken
+into the transcript. The normal question is a preceding `say`. An optional `default:` answer prefills the field; the
+player still submits it, and a cleared field does not fall back to it. See
+[default answers](specifications/accepted-syntaxes-v30.md#default-answers).
 
 All four basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
 `askNumber` returns `number`; the first `showButton` slice has no useful script return value and no timeout.

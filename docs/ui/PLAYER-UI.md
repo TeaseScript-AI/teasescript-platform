@@ -615,8 +615,9 @@ Standard keyboard behavior is:
 ### Foreground interaction presentation
 
 `askText` and `askNumber` use the composer as their active answer field. A default answer starts as the composer text,
-which the player submits unchanged or edits first. `choose` and `showButton` keep the composer enabled rather than
-visually disabling it:
+which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint restore the
+composer shows the default again, and unsent edits are not kept. `choose` and `showButton` keep the composer enabled
+rather than visually disabling it:
 
 - `choose`: selecting a rendered control or typing one exact unambiguous visible option completes the same choice;
 - `showButton`: clicking the rendered button or submitting its exact non-empty visible label in the composer activates

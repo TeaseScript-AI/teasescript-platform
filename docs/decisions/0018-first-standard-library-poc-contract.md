@@ -160,6 +160,28 @@ Completion rules:
 
 The first POC adds no minimum, maximum, integer-only, or other domain-range parameters. Authors perform domain validation explicitly after completion.
 
+### Default answers
+
+Owner-approved extension (2026-10-04, #510): `askText` and `askNumber` accept a named `default:` answer after the hint
+or instead of it. It follows the general
+[default-answer rules](../specifications/accepted-syntaxes-v30.md#default-answers): an editable prefill that the player
+still submits, never a fallback for a cleared field.
+
+```tease
+let name = askText "Your name?", default: "Ada"
+let minutes = askNumber as mistress "Corner time?", default: cornerBase + playerLevel
+let name = askText default: player.name
+```
+
+The default is evaluated once, after the hint. Its prefill text is captured with the active interaction and survives
+checkpoint save/restore without re-evaluating author expressions. An `askNumber` default prefills the shortest number
+text that reads back as the same number, such as `2.5e-7`, with `-0` shown as `0`, so submitting it unchanged returns
+that number.
+
+Inside an object literal or call arguments, `default:` binds to the nearest compact ask:
+`{ answer: askText "Name?", default: "Ada" }` prefills the field. Write `{ answer: (askText "Name?"), default: "Ada" }`
+for an object property named `default`.
+
 ### `choose`
 
 `choose` is the author-facing TeaseScript construct. `choice` is the noun used for the internal interaction/action kind and for an individual choice group.
