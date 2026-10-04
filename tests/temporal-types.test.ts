@@ -246,7 +246,8 @@ test("date and time values order within one kind, and timestamps and dates and t
         "}",
       ].join("\n"),
     ),
-    [],
+    // A date is never equal to a date and time, so comparing them is only the always-false warning (ADR 0021 rule 4.5).
+    [["TSV046", "day == dinner"]],
   );
 });
 

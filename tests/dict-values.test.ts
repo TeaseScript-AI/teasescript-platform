@@ -190,11 +190,15 @@ test("dicts compare by keys and values in any order and are copied like other va
   assert.deepEqual(
     says(
       [
+        // A known dict and a known object are never equal, which the compiler warns about (ADR 0021 rule 4.5).
+        "function dynamic(value) {",
+        "    return value",
+        "}",
         "let a = dict{ x: [1], y: [1, 2] }",
         "say a == dict{ y: [1, 2], x: [1] }",
         "say a == dict{ x: [1] }",
         "say dict{ x: 1 } == dict{ x: 2 }",
-        "say dict{ x: 1 } == { x: 1 }",
+        "say dynamic(dict{ x: 1 }) == { x: 1 }",
         "let c = a",
         'c["x"] = [5]',
         'c["y"].add(3)',

@@ -879,11 +879,11 @@ test("conditions and logical operands are true or false, and operators get value
     ["TSV043", "t"],
     ["TSV043", '"x"'],
   ]);
-  // Equality compares values of any kinds, and text compares with text.
-  assert.deepEqual(
-    codes('let same = 1 == "1"\nlet before = "a" < "b"\nlet longer = 2 s > 1 s'),
-    [],
-  );
+  // Equality compares values of any kinds, and text compares with text. Values of different types are never equal, so
+  // such a comparison only warns (ADR 0021 rule 4.5).
+  assert.deepEqual(codes('let same = 1 == "1"\nlet before = "a" < "b"\nlet longer = 2 s > 1 s'), [
+    ["TSV046", '1 == "1"'],
+  ]);
 });
 
 test("round, floor, and ceil give whole numbers as V30 section 13 specifies", () => {

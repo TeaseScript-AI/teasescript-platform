@@ -2227,8 +2227,9 @@ class TypeChecker {
   }
 
   /**
-   * Warns about `==` or `!=` with a value that one side can never hold, such as a `choose` result compared with a value
-   * no button returns (#511 C5); {@link #neverMatchingCaseValue} applies it to a literal `case` value.
+   * Warns about `==` or `!=` with a value that one side can never hold (ADR 0021 rule 4.5): a `choose` result compared
+   * with a value no button returns (#511 C5), or values of types that are never equal, such as text and a number, or a
+   * value that is never `null` compared with `null`. {@link #neverMatchingCaseValue} applies it to a literal `case`.
    */
   #warnImpossibleComparison(
     expression: Extract<Expression, { kind: "binaryExpression" }>,
@@ -2254,6 +2255,18 @@ class TypeChecker {
       );
       return;
     }
+    if (mayCompareEqual(left, right)) return;
+    const describesLeft =
+      expressionLabel(expression.left) !== null || expressionLabel(expression.right) === null;
+    const label = expressionLabel(describesLeft ? expression.left : expression.right);
+    this.diagnostics.push(
+      createDiagnostic(
+        DiagnosticSeverity.Warning,
+        typeCode.constantTest,
+        `${label === null ? "This value" : `'${label}'`} holds ${describeValue(describesLeft ? left : right)}, never ${describeValue(describesLeft ? right : left)}, so this comparison is always ${expression.operator === "==" ? "false" : "true"}.`,
+        expression.span,
+      ),
+    );
   }
 
   /**
@@ -4955,6 +4968,29 @@ function literalValue(expression: Expression): ScalarValue | null | undefined {
 }
 
 /** The value a compared expression certainly is, such as `"Open"` or `1 s`, or `undefined`. */
+
+/**
+ * Whether values of two types may be equal with `==` (structural equality, #509): numbers of either kind may be, two
+ * lists, sets, or objects may both be empty, and a type the compiler cannot know may hold anything.
+ */
+function mayCompareEqual(left: StaticType, right: StaticType): boolean {
+  // Only the kinds of values matter, so a list whose element type is not decided yet is still a list.
+  const uncertain = (type: StaticType) =>
+    !isKnown(type) || members(type).some((part) => !isKnown(part));
+  if (uncertain(left) || uncertain(right)) return true;
+  return members(left)
+    .map(resolved)
+    .some((a) =>
+      members(right)
+        .map(resolved)
+        .some((b) =>
+          a.kind === "scalar" && b.kind === "scalar"
+            ? a.name === b.name || (isNumeric(a) && isNumeric(b))
+            : a.kind === b.kind,
+        ),
+    );
+}
+
 function comparedLiteral(expression: Expression): readonly PossibleValue[] | undefined {
   const known = staticChoiceValue(expression);
   if (known === undefined) return undefined;
