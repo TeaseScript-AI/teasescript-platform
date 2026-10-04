@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 48;
+export const INSTRUCTION_PLAN_VERSION = 49;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -636,6 +636,13 @@ export interface PlanDestination {
   readonly target: number;
 }
 
+/** A glob target: each time it runs, one draw from the session random generator picks one of `pick`. */
+export interface PlanPick {
+  readonly pick: readonly PlanDestination[];
+}
+
+export type PlanTransferDestination = PlanDestination | PlanPick;
+
 /**
  * `goto` or `call` naming a file, or `call label`: enters `destination` with fresh top-level variables. A `goto`
  * leaves the current file like a `goto label`; a `call` continues after it once that file reaches `end`.
@@ -643,13 +650,13 @@ export interface PlanDestination {
 export interface TransferInstruction extends InstructionBase {
   readonly kind: "transfer";
   readonly mode: "goto" | "call";
-  readonly destination: PlanDestination;
+  readonly destination: PlanTransferDestination;
 }
 
 /** `fallback target` sets where an `end` without a caller continues; `fallback none` clears it with `null`. */
 export interface SetFallbackInstruction extends InstructionBase {
   readonly kind: "setFallback";
-  readonly destination: PlanDestination | null;
+  readonly destination: PlanTransferDestination | null;
 }
 
 /** `end`, and the end the compiler adds after the last statement of a file's root region. */

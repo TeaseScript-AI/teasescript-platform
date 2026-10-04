@@ -15,6 +15,7 @@ import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { validateRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
+import { createXorShift32State, nextXorShift32 } from "../src/runtime/random.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
@@ -327,10 +328,16 @@ test("restore validation checks activations, file calls, retained roots, and the
     }),
     [],
   );
-  // The fallback is a file's entry or label.
+  // The fallback is the destination of a fallback statement: here main's label, not another file's.
   assert.notDeepEqual(
     broken((snapshot) => {
-      snapshot.fallback = { file: 1, target: snapshot.fallback!.target };
+      snapshot.fallback = { file: 1, target: plan.files[0]!.labels[0]!.instruction };
+    }),
+    [],
+  );
+  assert.notDeepEqual(
+    broken((snapshot) => {
+      snapshot.fallback = { file: 1, target: plan.files[1]!.entryInstruction };
     }),
     [],
   );
@@ -363,9 +370,6 @@ test("a goto, call, or fallback names a file and label that exist", () => {
   assert.deepEqual(codes('call "rooms/hall.tease" finish\nexit', others), [
     ["TSV051", "'rooms/hall.tease' has no label 'finish'."],
   ]);
-  assert.deepEqual(codes('fallback "rooms/*.tease"\nexit', others), [
-    ["TSV057", "A glob pattern cannot be a goto, call, or fallback target yet. Name one file."],
-  ]);
   assert.deepEqual(codes('goto "helpers.tease"', others), [
     [
       "TSV057",
@@ -378,6 +382,88 @@ test("a goto, call, or fallback names a file and label that exist", () => {
     codes('let room = "hall"\ngoto "rooms/${room}.tease"', others).map(([code]) => code),
     ["TSP039"],
   );
+});
+
+test("a glob picks only files that do something, and needs one", () => {
+  const codes = (main: string): [string, string][] =>
+    compileProject(
+      project(main, {
+        "rooms/hall.tease": "label start\nexit",
+        "rooms/yard.tease": "exit",
+        "rooms/helpers.tease": 'function greet { say "hi" }',
+        "lib/tools.tease": "function tool { return 1 }",
+      }),
+    ).diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]);
+  assert.deepEqual(codes('goto "rooms/*.tease"'), []);
+  assert.deepEqual(codes('call "rooms/*.tease" start\nexit'), []);
+  assert.deepEqual(codes('goto "cellar/*.tease"'), [
+    [
+      "TSV057",
+      "No file of the project matches 'cellar/*.tease'. Paths start at the package root, such as \"rooms/*.tease\".",
+    ],
+  ]);
+  assert.deepEqual(codes('goto "rooms/*.tease" finish'), [
+    ["TSV057", "No file matching 'rooms/*.tease' has label 'finish'."],
+  ]);
+  // Calling a file of declarations only would do nothing, so a glob never picks one.
+  assert.deepEqual(codes('call "lib/*.tease"\nexit'), [
+    [
+      "TSV057",
+      "Every file matching 'lib/*.tease' holds declarations only and runs nothing, so there is nothing to pick.",
+    ],
+  ]);
+  assert.deepEqual(codes('fallback "rooms/*"\nexit'), [
+    ["TSV057", "'rooms/*' is not a pattern of package file paths: it does not name a .tease file."],
+  ]);
+  const plan = compiled(
+    project('call "rooms/*.tease"\nexit', {
+      "rooms/a.tease": "end",
+      "rooms/b.tease": "end",
+      "rooms/helpers.tease": "function help { return 1 }",
+    }),
+  );
+  const transfer = plan.instructions.find((instruction) => instruction.kind === "transfer");
+  assert.ok(transfer?.kind === "transfer" && "pick" in transfer.destination);
+  assert.deepEqual(
+    transfer.destination.pick.map((option) => plan.files[option.file]!.path),
+    ["rooms/a.tease", "rooms/b.tease"],
+  );
+});
+
+test("each glob target that runs draws its file once; restore never draws again", () => {
+  const files = project(
+    ["repeat 8 {", '    call "rooms/*.tease"', "}", 'fallback "ends/*.tease"', "end"].join("\n"),
+    {
+      "rooms/a.tease": 'say "a"\nend',
+      "rooms/b.tease": 'say "b"\nend',
+      "rooms/c.tease": 'say "c"\nend',
+      "ends/calm.tease": 'say "calm end"\nexit',
+      "ends/strict.tease": 'say "strict end"\nexit',
+    },
+  );
+  // Every draw happens at a run of a glob target, the same way stepwise and after each restore.
+  const seed = 12345;
+  const result = assertRuntimeResumeEquivalent(files, { seed });
+  const texts = outputs(result.events);
+  assert.equal(texts.length, 10);
+  assert.ok(texts.slice(0, 8).every((text) => ["a", "b", "c"].includes(text)));
+  assert.ok(["calm end", "strict end"].includes(texts[8]!));
+  assert.equal(texts[9], "exit");
+  // Eight calls and the fallback draw once each; setting the fallback draws nothing.
+  // A stored glob fallback is exactly the destination of a fallback statement.
+  const plan = compiled(files);
+  const set = result.boundaries.find((snapshot) => snapshot.fallback !== null)!;
+  assert.deepEqual(validateRuntimeSnapshot(set, plan).errors, []);
+  const narrowed = structuredClone(set);
+  if (narrowed.fallback !== null && "pick" in narrowed.fallback) {
+    narrowed.fallback = { pick: narrowed.fallback.pick.slice(1) };
+  }
+  assert.deepEqual(validateRuntimeSnapshot(narrowed, plan).errors, [
+    "Runtime fallback is malformed.",
+  ]);
+  const expected = createXorShift32State(seed);
+  for (let draw = 0; draw < 9; draw += 1) nextXorShift32(expected);
+  assert.equal(result.finalSnapshot.rng.state, expected.state);
 });
 
 test("a label that a file is entered at sees none of the variables set before it", () => {

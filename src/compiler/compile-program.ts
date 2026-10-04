@@ -1,4 +1,4 @@
-import type { FunctionDeclaration, Program } from "../ast.js";
+import type { FileTarget, FunctionDeclaration, Program } from "../ast.js";
 import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
@@ -29,6 +29,8 @@ export { InstructionCompilationError } from "./errors.js";
 export interface StableProjectFile {
   readonly path: string;
   readonly program: Program;
+  /** The files each glob target may pick, from semantic validation. */
+  readonly picks?: ReadonlyMap<FileTarget, readonly string[]>;
 }
 
 /** Lowers the AST of a single-file project, the `main.tease` of `program`. */
@@ -64,7 +66,7 @@ export function compileStableProject(
   const globalIds = new Map<string, number>();
   const files: PlanFile[] = [];
   const destinations: PendingDestination[] = [];
-  for (const [fileIndex, { path, program }] of projectFiles.entries()) {
+  for (const [fileIndex, { path, program, picks }] of projectFiles.entries()) {
     const declarations = program.statements.filter(
       (statement): statement is FunctionDeclaration => statement.kind === "functionDeclaration",
     );
@@ -76,6 +78,7 @@ export function compileStableProject(
       counters,
       project,
       path,
+      picks,
     );
     const startInstruction = instructions.length;
     if (fileIndex === 0)
@@ -119,17 +122,23 @@ export function compileStableProject(
   }
   // Every file has its entry and labels now, so transfers and fallbacks can name any of them.
   const fileIndexByPath = new Map(files.map((file, index) => [file.path, index]));
-  for (const { instruction, path, label } of destinations) {
-    const file = fileIndexByPath.get(path) ?? -1;
-    const target =
-      label === null
-        ? files[file]?.entryInstruction
-        : files[file]?.labels.find((candidate) => candidate.name === label)?.instruction;
+  for (const { instruction, paths, label, pick } of destinations) {
+    const options = paths.map((path) => {
+      const file = fileIndexByPath.get(path) ?? -1;
+      const target =
+        label === null
+          ? files[file]?.entryInstruction
+          : files[file]?.labels.find((candidate) => candidate.name === label)?.instruction;
+      if (target === undefined) {
+        throw new TypeError("Semantically invalid transfer reached compilation.");
+      }
+      return { file, target };
+    });
     const pending = instructions[instruction];
-    if (target === undefined || (pending?.kind !== "transfer" && pending?.kind !== "setFallback")) {
+    if (pending?.kind !== "transfer" && pending?.kind !== "setFallback") {
       throw new TypeError("Semantically invalid transfer reached compilation.");
     }
-    instructions[instruction] = { ...pending, destination: { file, target } };
+    instructions[instruction] = { ...pending, destination: pick ? { pick: options } : options[0]! };
   }
   return freezeInstructionPlan({
     format: INSTRUCTION_PLAN_FORMAT,

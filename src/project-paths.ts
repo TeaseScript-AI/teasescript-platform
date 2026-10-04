@@ -37,3 +37,36 @@ export function compareProjectPaths(left: string, right: string): number {
   if (right === MAIN_FILE_PATH) return 1;
   return left < right ? -1 : 1;
 }
+
+/** Whether a target path is a glob, where `*` stands for any characters within one folder or file name. */
+export function isPathGlob(path: string): boolean {
+  return path.includes("*");
+}
+
+/** Why a glob is not one of package paths, or `null` when it is one. */
+export function packageGlobProblem(pattern: string): string | null {
+  return packagePathProblem(pattern.replaceAll("*", "x"));
+}
+
+/** The paths a glob matches, in project order. */
+export function globMatches(pattern: string, paths: Iterable<string>): string[] {
+  const segments = pattern.split("/").map(
+    (segment) =>
+      new RegExp(
+        `^${segment
+          .split("*")
+          .map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
+          .join(".*")}$`,
+        "su",
+      ),
+  );
+  return [...paths]
+    .filter((path) => {
+      const parts = path.split("/");
+      return (
+        parts.length === segments.length &&
+        parts.every((part, index) => segments[index]!.test(part))
+      );
+    })
+    .sort(compareProjectPaths);
+}

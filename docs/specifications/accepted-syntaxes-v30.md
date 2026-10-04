@@ -2922,11 +2922,11 @@ Rules:
   variables. If that entry called the running file, the calls above it are abandoned and its own callers stay; if the
   session had left that entry, it takes the place of the running one.
 - A path that leaves the package, a missing file, and a missing label are compile errors.
-- In a glob, `*` stands for any characters within one folder or file name. Globs are expanded at compile time. With a
-  label, the pick is among the matched files that have it. A glob that matches no file, or no file with the label, is a
-  compile error.
-- Each time a glob target runs, one draw from the session random generator picks the file. Restoring a checkpoint
-  never draws again.
+- In a glob, `*` stands for any characters within one folder or file name. Globs are expanded at compile time. A glob
+  only picks files that do something: the matched files that have the label, when one is given, and do not hold
+  declarations only. A glob with no such file is a compile error. A glob may pick the file it stands in.
+- Each time a glob target runs, one draw from the session random generator picks the file; a glob `fallback` draws
+  each time the fallback is used. Restoring a checkpoint never draws again.
 - `script(path)` returns a `script` reference to a file, and `script(path, label: name)` one to a label in it. Plain
   text is not a jump target. References can be stored in variables, lists, dicts, and globals; a variable as a target is
   grouped, as in `goto (next)`. A missing file or label is a compile error when the compiler knows the path and label,

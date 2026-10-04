@@ -16,6 +16,7 @@ import type {
   SwitchStatement,
   TagQueryExpression,
   TypeTestExpression,
+  FileTarget,
   TransferTarget,
 } from "../../ast.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
@@ -65,8 +66,10 @@ import {
 /** A transfer or fallback at `instruction` whose destination is a file, from its entry or at a label. */
 export interface PendingDestination {
   readonly instruction: number;
-  readonly path: string;
+  /** The file, or for a glob the files to pick from. */
+  readonly paths: readonly string[];
   readonly label: string | null;
+  readonly pick: boolean;
 }
 
 /** Plan-wide numbering shared by the compilers of a project's files: loop and temporary IDs are unique in a plan. */
@@ -129,10 +132,16 @@ export class InstructionCompiler {
     return this.#destinations;
   }
 
-  #destinationOf(target: TransferTarget): { readonly path: string; readonly label: string | null } {
-    return target.kind === "labelTarget"
-      ? { path: this.path, label: target.label.name }
-      : { path: target.path, label: target.label?.name ?? null };
+  #destinationOf(target: TransferTarget): Pick<PendingDestination, "paths" | "label" | "pick"> {
+    if (target.kind === "labelTarget") {
+      return { paths: [this.path], label: target.label.name, pick: false };
+    }
+    const picks = this.picks.get(target);
+    return {
+      paths: picks ?? [target.path],
+      label: target.label?.name ?? null,
+      pick: picks !== undefined,
+    };
   }
 
   #emitTransfer(mode: "goto" | "call", target: TransferTarget, span: SourceSpan): void {
@@ -164,6 +173,8 @@ export class InstructionCompiler {
     private readonly project: ProjectFunctions = { global: new Map(), foreignCalls: [] },
     /** The file's path, which a label alone in a `call` or `fallback` names. */
     private readonly path: string = MAIN_FILE_PATH,
+    /** The files each glob target may pick, from semantic validation. */
+    private readonly picks: ReadonlyMap<FileTarget, readonly string[]> = new Map(),
   ) {
     this.#functionIdBase = functions.length;
     const functionByName = new Map<

@@ -1225,7 +1225,12 @@ function explicitInstructionTargets(instruction: Record<string, unknown>): reado
       return [instruction.target];
     case "transfer":
     case "setFallback":
-      return isRecord(instruction.destination) ? [instruction.destination.target] : [];
+      if (!isRecord(instruction.destination)) return [];
+      return Array.isArray(instruction.destination.pick)
+        ? instruction.destination.pick.map((option: unknown) =>
+            isRecord(option) ? option.target : undefined,
+          )
+        : [instruction.destination.target];
     default:
       return [];
   }
@@ -1393,6 +1398,9 @@ const PARAMETER_FIELDS = ["name", "index", "hasDefault", "declarationSpan", "def
 
 function isFileDestination(index: PlanValidationIndex, destination: unknown): boolean {
   if (!isRecord(destination)) return false;
+  if (Array.isArray(destination.pick)) {
+    return destination.pick.every((option) => isFileDestination(index, option));
+  }
   const { file, target } = destination;
   if (typeof file !== "number" || typeof target !== "number") return false;
   const boundaries = index.files[file];

@@ -20,6 +20,7 @@ import type {
   Program,
   SpeakerDeclaration,
   Statement,
+  FileTarget,
   TransferTarget,
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
@@ -51,7 +52,12 @@ import {
   isExactDuration,
 } from "./duration.js";
 import { validateSwitchCases } from "./switch-cases.js";
-import { packagePathProblem } from "./project-paths.js";
+import {
+  globMatches,
+  isPathGlob,
+  packageGlobProblem,
+  packagePathProblem,
+} from "./project-paths.js";
 import type { StatementFlow } from "./type-checker.js";
 import { MAIN_FILE_PATH } from "./project-paths.js";
 import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
@@ -189,6 +195,8 @@ export interface FileSemanticResult {
   readonly diagnostics: readonly Diagnostic[];
   /** Where this file's transfers enter files afresh, of those that can run by the flow of the type check. */
   reachableEntries(flow: StatementFlow): readonly FileEntry[];
+  /** The files each glob target may pick, in project order. */
+  readonly picks: ReadonlyMap<FileTarget, readonly string[]>;
   /** Checks the uses of top-level variables after labels, given the labels of this file that are entered afresh. */
   checkInitialization(freshLabels: ReadonlySet<string>, flow: StatementFlow): readonly Diagnostic[];
 }
@@ -247,6 +255,7 @@ export function validateProjectSemantics(
   return project.diagnostics.map((diagnostics, index) =>
     Object.freeze({
       diagnostics: Object.freeze([...diagnostics]),
+      picks: validators[index]?.picks ?? new Map<FileTarget, readonly string[]>(),
       reachableEntries: (flow: StatementFlow) =>
         validators[index]?.reachableEntries(flow, reachable(flow)) ?? [],
       checkInitialization: (freshLabels: ReadonlySet<string>, flow: StatementFlow) =>
@@ -505,6 +514,9 @@ class SemanticValidator {
     ]);
     this.#protectedNames = new Set([...TEASESCRIPT_PROTECTED_NAMES, ...(options.builtins ?? [])]);
   }
+
+  /** The files each glob target may pick. */
+  readonly picks = new Map<FileTarget, readonly string[]>();
 
   /** Where transfers of this file enter files afresh, with the code that runs them. */
   readonly #entries: {
@@ -1317,11 +1329,13 @@ class SemanticValidator {
         const target = statement.target;
         if (target === null || !this.#validateTransferTarget(target, statement.kind)) return;
         if (target.kind === "fileTarget") {
-          this.#entries.push({
-            entry: { path: target.path, label: target.label?.name ?? null },
-            context: this.#context,
-            statement,
-          });
+          for (const path of this.picks.get(target) ?? [target.path]) {
+            this.#entries.push({
+              entry: { path, label: target.label?.name ?? null },
+              context: this.#context,
+              statement,
+            });
+          }
         } else if (statement.kind === "gotoStatement" && this.#globalFunction === null) {
           // A goto to a label of the same file keeps the file's variables.
           this.#gotos.push({
@@ -1357,14 +1371,7 @@ class SemanticValidator {
       );
       return false;
     }
-    if (target.path.includes("*")) {
-      this.#report(
-        semanticCode.invalidFileTarget,
-        "A glob pattern cannot be a goto, call, or fallback target yet. Name one file.",
-        target.pathSpan,
-      );
-      return false;
-    }
+    if (isPathGlob(target.path)) return this.#validateGlobTarget(target);
     const problem = packagePathProblem(target.path);
     if (problem !== null) {
       this.#report(
@@ -1400,6 +1407,43 @@ class SemanticValidator {
       return false;
     }
     return true;
+  }
+
+  /**
+   * A glob picks among the files it matches that have the label, if one is given, and that run something; it is an
+   * error only when none remains (ADR 0022 §2.2).
+   */
+  #validateGlobTarget(target: FileTarget): boolean {
+    const problem = packageGlobProblem(target.path);
+    if (problem !== null) {
+      this.#report(
+        semanticCode.invalidFileTarget,
+        `'${target.path}' is not a pattern of package file paths: ${problem}.`,
+        target.pathSpan,
+      );
+      return false;
+    }
+    const label = target.label?.name ?? null;
+    const matches = globMatches(target.path, this.project.labels.keys());
+    const labelled =
+      label === null
+        ? matches
+        : matches.filter((path) => this.project.labels.get(path)!.has(label));
+    const runnable = labelled.filter((path) => !this.project.declarationsOnly.has(path));
+    if (runnable.length > 0) {
+      this.picks.set(target, runnable);
+      return true;
+    }
+    this.#report(
+      semanticCode.invalidFileTarget,
+      matches.length === 0
+        ? `No file of the project matches '${target.path}'. Paths start at the package root, such as "rooms/*.tease".`
+        : labelled.length === 0
+          ? `No file matching '${target.path}' has label '${label}'.`
+          : `Every file matching '${target.path}'${label === null ? "" : ` with label '${label}'`} holds declarations only and runs nothing, so there is nothing to pick.`,
+      target.pathSpan,
+    );
+    return false;
   }
 
   #validateFunction(declaration: FunctionDeclaration): void {
