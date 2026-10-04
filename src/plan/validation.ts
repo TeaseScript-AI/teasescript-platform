@@ -113,8 +113,9 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
 }
 
 /**
- * The start values of globals and speakers lead the root region of `main.tease`, which sets them up before the story
- * runs (ADR 0022 §6). Each sets up another name and refers to the file whose source it comes from.
+ * The start values of globals and speakers lead the root region of `main.tease`, which sets them up once, in order,
+ * before the story runs (ADR 0022 §6). Each sets up another name, refers to the file whose source it comes from, and
+ * uses only literals, the globals set up before it, operators, and `load`; no control flow leads back into them.
  */
 function validateStartupPrefix(
   instructions: readonly unknown[],
@@ -122,18 +123,31 @@ function validateStartupPrefix(
   fileCount: number,
   errors: PlanValidationError[],
 ): void {
+  let prefixEnd = 0;
+  while (isStartupDeclaration(instructions[prefixEnd])) prefixEnd += 1;
+  // The first position of each name in the prefix, so a start value can tell the globals set up after it.
+  const positions = new Map<unknown, number>();
+  for (let index = prefixEnd - 1; index >= 0; index -= 1) {
+    const instruction = instructions[index];
+    if (isRecord(instruction)) positions.set(instruction.name, index);
+  }
   const names = new Set<string>();
-  let leading = true;
   instructions.forEach((instruction, index) => {
     const path = `$.instructions[${index}]`;
-    if (
-      !isRecord(instruction) ||
-      (instruction.kind !== "declareGlobal" && instruction.kind !== "declareSpeaker")
-    ) {
-      leading = false;
-      return;
-    }
-    if (!leading || (files !== null && index >= files[0]!.rootEndInstruction))
+    if (!isRecord(instruction)) return;
+    const targets =
+      typeof instruction.kind === "string" ? CONTROL_TARGETS.get(instruction.kind) : [];
+    for (const field of targets ?? [])
+      if (typeof instruction[field] === "number" && instruction[field] < prefixEnd)
+        errors.push(
+          planError(
+            "TSC002",
+            "Control flow cannot lead back into the start of main.tease, which sets up the globals once.",
+            `${path}.${field}`,
+          ),
+        );
+    if (!isStartupDeclaration(instruction)) return;
+    if (index >= prefixEnd || (files !== null && index >= files[0]!.rootEndInstruction))
       errors.push(
         planError(
           "TSC002",
@@ -150,7 +164,71 @@ function validateStartupPrefix(
         errors.push(planError("TSC002", "Each global and speaker is set up once.", `${path}.name`));
       names.add(instruction.name);
     }
+    // A speaker's properties may read the speaker itself, which is set up before them.
+    const firstLater = instruction.kind === "declareSpeaker" ? index + 1 : index;
+    const values =
+      instruction.kind === "declareGlobal"
+        ? [{ value: instruction.value, path: `${path}.value` }]
+        : Array.isArray(instruction.properties)
+          ? instruction.properties.map((property: unknown, propertyIndex) => ({
+              value: isRecord(property) ? property.value : undefined,
+              path: `${path}.properties[${propertyIndex}].value`,
+            }))
+          : [];
+    for (const { value, path: valuePath } of values)
+      if (!startValueAccepted(value, positions, firstLater))
+        errors.push(
+          planError(
+            "TSC002",
+            "A start value uses only literals, globals set up before it, operators, and load.",
+            valuePath,
+          ),
+        );
   });
+}
+
+function isStartupDeclaration(instruction: unknown): instruction is Record<string, unknown> {
+  return (
+    isRecord(instruction) &&
+    (instruction.kind === "declareGlobal" || instruction.kind === "declareSpeaker")
+  );
+}
+
+/** The fields of each instruction kind that name an instruction where execution continues. */
+const CONTROL_TARGETS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["jump", ["target"]],
+  ["jumpIfFalse", ["target"]],
+  ["loopStart", ["target", "continueTarget"]],
+  ["loopControl", ["target"]],
+  ["prepareParameterDefault", ["target"]],
+  ["callFunction", ["returnInstruction"]],
+]);
+
+/**
+ * Whether a start value stays in the accepted family: no call, which could run a host effect or change a value, no
+ * temporary or prepared reference, which only instructions after it can produce, and no global set up later. The
+ * expression's own shape is validated separately; here every nested record is visited, and the only records that use
+ * these kinds are expressions.
+ */
+function startValueAccepted(
+  value: unknown,
+  positions: ReadonlyMap<unknown, number>,
+  firstLater: number,
+): boolean {
+  const work = [value];
+  while (work.length > 0) {
+    const node = work.pop();
+    if (Array.isArray(node)) {
+      for (const item of node) work.push(item);
+      continue;
+    }
+    if (!isRecord(node)) continue;
+    if (node.kind === "call" || node.kind === "temporary" || node.kind === "preparedReference")
+      return false;
+    if (node.kind === "identifier" && (positions.get(node.name) ?? -1) >= firstLater) return false;
+    for (const nested of Object.values(node)) work.push(nested);
+  }
+  return true;
 }
 
 const PLAN_FIELDS = [

@@ -4,7 +4,12 @@ import test from "node:test";
 import { compileProject, type ProjectSourceFile } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
-import { createCheckpoint } from "../src/runtime/checkpoint.js";
+import {
+  CHECKPOINT_FORMAT,
+  CHECKPOINT_VERSION,
+  createCheckpoint,
+  deserializeCheckpoint,
+} from "../src/runtime/checkpoint.js";
 import { executeInstruction, run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import {
@@ -54,6 +59,23 @@ function runToEnd(
   options: Parameters<typeof createImmediatePacingRuntimeSnapshot>[1] = {},
 ) {
   return run(plan, createImmediatePacingRuntimeSnapshot(plan, options));
+}
+
+/** A compiled plan as external JSON data, which a fixture may change in ways its type excludes. */
+interface ExternalPlan {
+  instructions: ExternalInstruction[];
+  readonly [field: string]: unknown;
+}
+
+interface ExternalInstruction {
+  value?: unknown;
+  properties?: { value: unknown }[];
+  readonly [field: string]: unknown;
+}
+
+function externalPlan(plan: InstructionPlan): ExternalPlan {
+  // EVIDENCE: fixture: a JSON round trip of a compiled plan keeps its instructions and their properties as objects.
+  return JSON.parse(JSON.stringify(plan)) as ExternalPlan;
 }
 
 type Mutable<T> = T extends readonly (infer Item)[]
@@ -548,6 +570,108 @@ test("plan validation keeps the startup at the start of main.tease and calls of 
   assert.deepEqual(errors(withFunction(handler.id, { global: false })), [
     `$.instructions[${start}] A handler is global exactly when the code that registers it is.`,
   ]);
+});
+
+test("a plan sets up its globals once, with start values of the accepted kinds", () => {
+  const plan = compiledPlan([
+    {
+      path: "main.tease",
+      source: 'global items = [1]\nspeaker vera { firstName: "V" }\nglobal level = 2\nexit',
+    },
+  ]);
+  const fresh = createFreshRuntimeSnapshot(plan);
+  // A rejected plan fails at the plan and checkpoint boundaries, before anything runs.
+  const rejected = (changed: ExternalPlan): string[] => {
+    assert.throws(() =>
+      deserializeCheckpoint(
+        JSON.stringify({
+          format: CHECKPOINT_FORMAT,
+          version: CHECKPOINT_VERSION,
+          plan: changed,
+          snapshot: fresh,
+        }),
+      ),
+    );
+    return validateInstructionPlan(changed).errors.map((error) => `${error.path} ${error.message}`);
+  };
+  const span = plan.instructions[0]!.span;
+  const call = (callee: unknown, args: unknown[] = []) => ({
+    kind: "call",
+    callee,
+    arguments: args,
+    span,
+  });
+  const bump = call({ kind: "identifier", name: "bump", span });
+  const changed = (index: number, change: (instruction: ExternalInstruction) => void) => {
+    const copy = externalPlan(plan);
+    change(copy.instructions[index]!);
+    return copy;
+  };
+  const startValue =
+    "A start value uses only literals, globals set up before it, operators, and load.";
+
+  // No control flow returns into the startup, which would set a global up again.
+  const loop = externalPlan(plan);
+  loop.instructions[3] = { kind: "jump", target: 0, span };
+  assert.deepEqual(rejected(loop), [
+    "$.instructions[3].target Control flow cannot lead back into the start of main.tease, which sets up the globals once.",
+  ]);
+  // A start value calls nothing: no host builtin, and no method that changes an earlier global.
+  assert.deepEqual(
+    rejected(
+      changed(0, (instruction) => {
+        instruction.value = bump;
+      }),
+    ),
+    [`$.instructions[0].value ${startValue}`],
+  );
+  const add = call(
+    { kind: "property", object: { kind: "identifier", name: "items", span }, name: "add", span },
+    [{ kind: "positional", value: { kind: "literal", value: 2, span }, span }],
+  );
+  assert.deepEqual(
+    rejected(
+      changed(2, (instruction) => {
+        instruction.value = add;
+      }),
+    ),
+    [`$.instructions[2].value ${startValue}`],
+  );
+  // The same holds for speaker properties and for the lazy default of a load.
+  assert.deepEqual(
+    rejected(
+      changed(1, (instruction) => {
+        instruction.properties![0]!.value = bump;
+      }),
+    ),
+    [`$.instructions[1].properties[0].value ${startValue}`],
+  );
+  assert.deepEqual(
+    rejected(
+      changed(2, (instruction) => {
+        instruction.value = {
+          kind: "storageLoad",
+          key: { kind: "literal", value: "level", span },
+          default: bump,
+          span,
+        };
+      }),
+    ),
+    [`$.instructions[2].value ${startValue}`],
+  );
+  // A start value reads only globals set up before it; a speaker's properties may read the speaker.
+  assert.deepEqual(
+    rejected(
+      changed(0, (instruction) => {
+        instruction.value = { kind: "identifier", name: "level", span };
+      }),
+    ),
+    [`$.instructions[0].value ${startValue}`],
+  );
+  const self = changed(1, (instruction) => {
+    instruction.properties![0]!.value = { kind: "identifier", name: "vera", span };
+  });
+  assert.deepEqual(validateInstructionPlan(self).errors, []);
 });
 
 test("snapshot validation requires exactly the globals set up so far, unshadowed", () => {
