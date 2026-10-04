@@ -1,0 +1,32 @@
+function sexscriptLegacyConcat(lists) {
+  let combined = []
+  for part in lists {
+    for item in part {
+      combined.add(item)
+    }
+  }
+  return combined
+}
+// Groovy list - value drops the value from a copy of the list; list - otherList drops each of its elements.
+let picked = load "picked"
+function pickToy {
+  let toys = ["paddle", "crop", "cane"]
+  say "Add the strap?"
+  if (choose yes: "Yes", no: "No") == "yes" {
+    toys = sexscriptLegacyConcat([toys, ["strap"]])
+  }
+  // NOTE SX_LIST_DIFFERENCE line 6: Groovy list - kept repeated elements of the list; difference() keeps each remaining element once (V30 §16).
+  if picked != null {
+    toys = toys.difference([picked])
+  }
+  picked = toys.random
+}
+pickToy()
+say "Use the ${picked}"
+let rounds = [1, 2, 3, 4]
+// NOTE SX_LIST_DIFFERENCE line 12: Groovy list - kept repeated elements of the list; difference() keeps each remaining element once (V30 §16).
+rounds = rounds.difference([2])
+// NOTE SX_LIST_DIFFERENCE line 13: Groovy list - kept repeated elements of the list; difference() keeps each remaining element once (V30 §16).
+rounds = rounds.difference([1, 4])
+say "Rounds left: ${rounds.length}"
+exit

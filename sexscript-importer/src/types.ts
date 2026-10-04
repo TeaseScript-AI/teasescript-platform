@@ -33,6 +33,8 @@ export interface TypeEnvironment {
   singleAssignment?: ReadonlySet<string>;
   /** Union of the values each local function (a closure in a variable) returns. */
   functionResults?: ReadonlyMap<string, ValueType>;
+  /** Set while the list elements are not inferred yet, so an element read adds no type (inferVariableTypes). */
+  elementsPending?: true;
 }
 
 /** True when every possible value has one of the `allowed` types. */
@@ -176,11 +178,17 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   const operator = typeof node.operator === "string" ? node.operator : "";
   if (operator === "[" && isCalendarConstant(asNode(node.right))) return NUMBER;
   if (operator === "[") {
+    if (environment.elementsPending === true) return 0;
     const name = variableName(node.left);
     const element = name === null ? undefined : environment.listElements?.get(name);
     return element === undefined || element === 0 ? UNKNOWN : element;
   }
   if (BOOLEAN_OPERATORS.has(operator)) return BOOLEAN;
+  // Groovy list - value is a list without the value.
+  if (operator === "-") {
+    const left = inferType(asNode(node.left), environment);
+    if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
+  }
   if (ARITHMETIC_OPERATORS.has(operator)) return NUMBER;
   if (operator === "=") return inferType(asNode(node.right), environment);
   if (operator === "&" || operator === "|" || operator === "^") {
@@ -306,25 +314,50 @@ export function inferVariableTypes(
   const functionResults = new Map<string, ValueType>(
     [...knownResults].filter(([name]) => !returns.some((item) => item.name === name)),
   );
-  const environment: TypeEnvironment = { variables, localFunctions, functionResults };
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const assignment of assignments) {
-      const current = variables.get(assignment.name) ?? 0;
-      const next = current | assignment.type(environment);
-      if (next !== current) {
-        variables.set(assignment.name, next);
-        changed = true;
+  let environment: TypeEnvironment = {
+    variables,
+    localFunctions,
+    functionResults,
+    elementsPending: true,
+  };
+  const settle = (): void => {
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const assignment of assignments) {
+        const current = variables.get(assignment.name) ?? 0;
+        const next = current | assignment.type(environment);
+        if (next !== current) {
+          variables.set(assignment.name, next);
+          changed = true;
+        }
+      }
+      for (const { name, values } of returns) {
+        const current = functionResults.get(name) ?? 0;
+        const next = values.reduce((type, value) => type | inferType(value, environment), current);
+        if (next !== current) {
+          functionResults.set(name, next);
+          changed = true;
+        }
       }
     }
-    for (const { name, values } of returns) {
-      const current = functionResults.get(name) ?? 0;
-      const next = values.reduce((type, value) => type | inferType(value, environment), current);
-      if (next !== current) {
-        functionResults.set(name, next);
-        changed = true;
-      }
-    }
+  };
+  settle();
+  // An element read (`list[i]`) has the type of the list's elements, which depend on the variable types in turn; when
+  // they do not settle, element reads stay unknown.
+  let settled = false;
+  for (let round = 0; round < 10 && !settled; round += 1) {
+    const listElements = inferListElements(body, environment);
+    const previous = environment.listElements;
+    settled =
+      previous !== undefined &&
+      listElements.size === previous.size &&
+      [...listElements].every(([name, type]) => previous.get(name) === type);
+    environment = { variables, localFunctions, functionResults, listElements };
+    settle();
+  }
+  if (!settled) {
+    environment = { variables, localFunctions, functionResults };
+    settle();
   }
   for (const [name, type] of variables) if (type === 0) variables.set(name, UNKNOWN);
   for (const [name, type] of functionResults) if (type === 0) functionResults.set(name, UNKNOWN);
@@ -462,6 +495,15 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
       aliases.push([name, source]);
       return;
     }
+    // `list = list - value` keeps some of its elements; `list = list + other` appends as `+=` does.
+    const extended = value.kind === "binary" && variableName(value.left) === name;
+    const extension = extended ? asNode(value.right) : null;
+    if (extended && value.operator === "-") return;
+    if (extended && value.operator === "+" && extension !== null) {
+      if ((inferType(extension, environment) & LIST) !== 0) appendList(name, extension);
+      else add(name, inferType(extension, environment));
+      return;
+    }
     if (value.kind !== "list") {
       unknown.add(name);
       return;
@@ -547,7 +589,18 @@ function collectAssignments(
             environment,
           ),
       });
-    } else if (["-=", "*=", "/=", "%="].includes(node.operator)) {
+    } else if (node.operator === "-=") {
+      // Groovy list -= value keeps a list.
+      const right = asNode(node.right);
+      assignments.push({
+        name,
+        type: (environment) =>
+          binaryType(
+            { kind: "binary", span: null, operator: "-", left: node.left, right },
+            environment,
+          ),
+      });
+    } else if (["*=", "/=", "%="].includes(node.operator)) {
       assignments.push({ name, type: () => NUMBER });
     }
     return;

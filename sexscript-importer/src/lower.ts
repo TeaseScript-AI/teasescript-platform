@@ -3440,6 +3440,19 @@ function lowerAssignment(
       ),
     ];
   }
+  if (
+    operator === "-=" &&
+    variableTarget !== null &&
+    isListType(inferType(targetNode, context.types))
+  ) {
+    const difference = lowerListDifference(
+      { kind: "binary", span: node.span, operator: "-", left: targetNode, right },
+      context,
+    );
+    return difference === null
+      ? []
+      : [{ kind: "assign", target, operator: "=", value: difference, span }];
+  }
   const value =
     right.kind === "map" && variableTarget !== null && operator === "="
       ? namedMapLiteral(targetNode, right, context)
@@ -5878,6 +5891,8 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     return { kind: "binary", operator: operator === "&&" ? "and" : "or", left, right };
   }
   if (operator === "+") return lowerPlus(node, context);
+  if (operator === "-" && isListType(inferType(asNode(node.left), context.types)))
+    return lowerListDifference(node, context);
   if (operator === "in") return lowerMembership(node, context);
   if ((operator === "&" || operator === "|") && isBooleanOperation(node, context)) {
     // Groovy & and | on booleans evaluate both sides; with a side-effect-free right side that equals and/or.
@@ -6673,6 +6688,42 @@ function lowerPlus(node: AstNode, context: LowerContext): IrExpression | null {
     );
   }
   return { kind: "binary", operator: "+", left, right };
+}
+
+/**
+ * Groovy `list - value` and `list - otherList` drop every element equal to the value or to an element of the other
+ * list, as `difference` does (V30 §16); `difference` also keeps each remaining element once.
+ */
+function lowerListDifference(node: AstNode, context: LowerContext): IrExpression | null {
+  const leftNode = asNode(node.left);
+  const rightNode = asNode(node.right);
+  if (leftNode === null || rightNode === null) return null;
+  const rightType = inferType(rightNode, context.types);
+  const removesList = isListType(rightType);
+  if (!removesList && !onlyOf(rightType, NUMBER | STRING | BOOLEAN | NULL)) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_LIST_DIFFERENCE",
+      "Groovy list - removed one value or every element of a list; the right side is not proven to be either. Use difference() with a list.",
+    );
+  }
+  const left = lowerExpression(leftNode, context);
+  const right = lowerExpression(rightNode, context);
+  if (left === null || right === null) return null;
+  addDiagnostic(
+    context,
+    "SX_LIST_DIFFERENCE",
+    "warning",
+    "Groovy list - kept repeated elements of the list; difference() keeps each remaining element once (V30 §16).",
+    node.span,
+  );
+  return {
+    kind: "methodCall",
+    target: left,
+    name: "difference",
+    arguments: [removesList ? right : { kind: "list", items: [right] }],
+  };
 }
 
 /** A null list operand fails in Groovy and TeaseScript alike, so "list or null" counts as a list. */
