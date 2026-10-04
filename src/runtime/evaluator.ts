@@ -6,6 +6,7 @@ import type {
   PlanSourceLocation,
 } from "../plan/model.js";
 import { escapeMarkup } from "../message-markup.js";
+import { expressionPlanChildren } from "../plan/expression-children.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
@@ -499,6 +500,15 @@ export class Evaluator {
           }
           if (frame.stage === 1) {
             frame.value = result.value;
+            // An operand is read when it is evaluated: copy a shared list, set, or object before a call in the right
+            // operand can change it.
+            if (
+              (expression.operator === "==" || expression.operator === "!=") &&
+              !result.owned &&
+              (isList(frame.value) || isSet(frame.value) || isObject(frame.value)) &&
+              mayRunCall(expression.right)
+            )
+              frame.value = cloneCapturedSerializableValue(frame.value);
             if (expression.operator === "and" || expression.operator === "or") {
               if (typeof frame.value !== "boolean")
                 throw fault("TSR026", "Expected a boolean value.", expression.left.span);
@@ -1682,6 +1692,33 @@ interface EvaluationFrame {
   positional: SerializableRuntimeValue[] | null;
   named: Record<string, SerializableRuntimeValue> | null;
 }
+const callingExpressions = new WeakMap<ExpressionPlan, boolean>();
+
+/** Whether evaluating an expression can run a call. Results are cached per plan node, so nested checks stay linear. */
+function mayRunCall(expression: ExpressionPlan): boolean {
+  // A node is decided after its children, which are pushed above it.
+  const work: { expression: ExpressionPlan; children: readonly ExpressionPlan[] | null }[] = [
+    { expression, children: null },
+  ];
+  while (work.length > 0) {
+    const current = work.pop()!;
+    if (callingExpressions.has(current.expression)) continue;
+    if (current.expression.kind === "call") {
+      callingExpressions.set(current.expression, true);
+    } else if (current.children !== null) {
+      callingExpressions.set(
+        current.expression,
+        current.children.some((child) => callingExpressions.get(child) === true),
+      );
+    } else {
+      const children = expressionPlanChildren(current.expression);
+      work.push({ expression: current.expression, children });
+      for (const child of children) work.push({ expression: child, children: null });
+    }
+  }
+  return callingExpressions.get(expression)!;
+}
+
 function evaluationFrame(expression: ExpressionPlan, reference = false): EvaluationFrame {
   return {
     expression,

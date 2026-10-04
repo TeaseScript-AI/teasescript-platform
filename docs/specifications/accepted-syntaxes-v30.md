@@ -1129,6 +1129,8 @@ Runtime behavior:
   the same inclusiveness, so `1..=2 != 1..3` although both produce `1` and `2`. Values of different kinds, such as a
   list and a set, are never equal. List `contains(value)` and `remove(value)` use this equality, so they also find
   objects and nested lists; `remove(value)` removes the first equal element. Set elements remain scalar values.
+- The operands of `==` and `!=` are read when they are evaluated, left to right, so a change made while evaluating the
+  right operand does not affect the left one: `items == [items.removeAt(0)]` is `true` for `items = [1]`.
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
 - `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
   raises the same runtime error as indexing.

@@ -36,6 +36,24 @@ test("objects, lists, sets, and ranges compare by value", () => {
   }
 });
 
+test("each operand of == and != is read when it is evaluated, left to right", () => {
+  const cases = [
+    ['let items = [1]\nsay "${items == [items.removeAt(0)]}"', "true"],
+    [
+      'let items = [1]\nfunction take {\n    return items.removeAt(0)\n}\nsay "${items == [take()]}"',
+      "true",
+    ],
+    ['let items = [1, 2]\nsay "${items != [items.removeFirst(), 2]}"', "false"],
+    ['let items = [1]\nsay "${[items.removeAt(0)] == items}"', "false"],
+  ] as const;
+  for (const [source, expected] of cases) {
+    const result = runValidSource(source);
+    assert.equal(result.snapshot.failure, null, source);
+    assert.deepEqual(sayTexts(result), [expected], source);
+    assertRuntimeResumeEquivalent(source);
+  }
+});
+
 test("list contains and remove find an object by value", () => {
   const result = runValidSource(
     [
