@@ -104,13 +104,36 @@ test("durations compare and divide within one family, and equality compares thei
     "let x = 1 day >= 24 h",
     "let x = 1 month >= 30 days",
     "let x = 1 week / 2 h",
-    "let x = 1 day / 0 days",
   ])
     assert.ok(compileErrors(source).includes("TSV043"), source);
+  // A zero of any family divides by zero, as `1 s / 0 s` does.
+  assert.deepEqual(compileErrors("let x = 1 day / 0 days"), ["TSV050"]);
   assert.equal(runtimeFailure(`${DYNAMIC}let x = dynamic(1 day) >= dynamic(24 h)`), "TSR009");
   assert.equal(
     runtimeFailure(`${DYNAMIC}let x = dynamic(1 day + 1 h) < dynamic(2 days)`),
     "TSR009",
+  );
+  // A switch matches as == does: `1 week` and `7 days` are one case value, `1 day` and `24 h` two.
+  assert.deepEqual(
+    says(
+      [
+        "function describe(span: duration) {",
+        "    switch span {",
+        '        case 7 days { say "a week" }',
+        '        case 24 h { say "24 hours" }',
+        '        case 1 d { say "a day" }',
+        "    }",
+        "}",
+        "describe(1 week)",
+        "describe(1 day)",
+        "describe(24 h)",
+      ].join("\n"),
+    ),
+    ["a week", "a day", "24 hours"],
+  );
+  assert.deepEqual(
+    compileErrors("switch 1 week {\n    case 1 week, 7 days {}\n    case 1 d, 24 h {}\n}"),
+    ["TSV048"],
   );
 });
 
@@ -179,6 +202,7 @@ test("a timestamp moves only by exact time, and elapsed-time consumers reject ca
     runtimeFailure(`${DYNAMIC}let t = timer async 10 s\nt.remaining = dynamic(1 week)`),
     "TSR065",
   );
+  assert.equal(runtimeFailure(`${DYNAMIC}showButton "Go", timeout: dynamic(1 day)`), "TSR065");
 });
 
 test("calendar durations survive checkpoints and choices with their parts", () => {

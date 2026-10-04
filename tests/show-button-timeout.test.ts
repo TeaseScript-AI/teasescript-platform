@@ -206,7 +206,11 @@ test("the compiler rejects a timeout it can see is invalid and names the fix", (
       fix: "a number of seconds",
     },
     { source: 'showButton "Go", timeout: [5]', code: "TSV043", fix: "a number of seconds" },
-    { source: 'showButton "Go", timeout: 2 days', code: "TSP033", fix: "use ms, s, min, or h" },
+    {
+      source: 'showButton "Go", timeout: 2 days',
+      code: "TSV043",
+      fix: "needs an exact duration such as 24 h",
+    },
     { source: 'showButton "Go", timeout: 1, timeout: 2', code: "TSP032", fix: "one timeout:" },
     { source: 'showButton "Go", 5', code: "TSP032", fix: "background: and timeout:" },
     { source: 'showButton("Go", 5)', code: "TSP032", fix: "Parenthesized" },
