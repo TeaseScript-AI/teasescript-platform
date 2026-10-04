@@ -196,8 +196,14 @@ test("misuse the compiler can see is a compile error", () => {
     [
       'let items = [1]\nsay items.union(["x"])',
       "TSV044",
-      "union() would mix a whole number (integer) and text (string). A list holds one type; keep values of different types in separate lists.",
+      "union() would mix a whole number (integer) and text (string). A list holds one type; to keep both, declare a union type, as in 'let items: (integer | string)[] = ...'.",
       'items.union(["x"])',
+    ],
+    [
+      'say set[1].union(set["x"])',
+      "TSV044",
+      "union() would mix a whole number (integer) and text (string). A set holds one type; to keep both, declare a union type, as in 'let values: (integer | string) set = ...'.",
+      'set[1].union(set["x"])',
     ],
   ];
   for (const [source, code, message, text] of cases)

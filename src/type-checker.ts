@@ -2923,12 +2923,23 @@ class TypeChecker {
       return { kind: receiver.kind, element: UNKNOWN_TYPE };
     const element = joinTypes([own, ...others]);
     if (element === undefined) {
-      if (reportMix)
+      if (reportMix) {
+        // As for a mixed literal, the fix declares the receiver with a union element type.
+        const callee = unwrap(expression.callee);
+        const target = callee.kind === "propertyAccessExpression" ? unwrap(callee.object) : null;
+        const name = target?.kind === "identifier" ? target.name : "values";
+        const written = typeName({ kind: receiver.kind, element: union([own, other]) });
+        const property = misfitProperty(own, other);
+        const fix =
+          property !== undefined
+            ? `give '${property.name}' one type in every element`
+            : `to keep both, declare a union type, as in 'let ${name}: ${written} = ...'`;
         this.#report(
           typeCode.mixedTypes,
-          `union() would mix ${mixDescription(own, other)}. A ${receiver.kind} holds one type; keep values of different types in separate ${receiver.kind}s.`,
+          `union() would mix ${mixDescription(own, other)}. A ${receiver.kind} holds one type; ${fix}.`,
           expression.span,
         );
+      }
       return { kind: receiver.kind, element: UNKNOWN_TYPE };
     }
     return { kind: receiver.kind, element };
