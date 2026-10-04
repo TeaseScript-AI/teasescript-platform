@@ -555,6 +555,7 @@ class TypeChecker {
             const valueType = yield* compileChild(this.#expressionTask(value, scope));
             const message = impossibleCaseMessage(statement.subject, subject, value, valueType);
             if (message !== undefined) this.#report(typeCode.impossibleCase, message, value.span);
+            else this.#warnImpossibleCase(statement.subject, subject, value);
           }
         // At most one block runs, so each starts from the facts before the statement, and the paths that continue meet
         // after it like the branches of an `if`. Without a `default`, no case may match, which continues as it began.
@@ -1894,7 +1895,7 @@ class TypeChecker {
 
   /**
    * Warns about `==` or `!=` with a value that one side can never hold, such as a `choose` result compared with a value
-   * no button returns (#511 C5). The same rule backs impossible `case` values.
+   * no button returns (#511 C5); {@link #warnImpossibleCase} applies it to a literal `case` value.
    */
   #warnImpossibleComparison(
     expression: Extract<Expression, { kind: "binaryExpression" }>,
@@ -1920,6 +1921,30 @@ class TypeChecker {
       );
       return;
     }
+  }
+
+  /**
+   * Warns about a literal `case` value that a `choose` result never is: the case compares with `==` (V30 §32), so it
+   * never matches (#511 C5).
+   */
+  #warnImpossibleCase(subjectExpression: Expression, subject: StaticType, value: Expression): void {
+    const possible = possibleValues(subject);
+    const literal = comparedLiteral(value);
+    if (
+      possible === undefined ||
+      literal === undefined ||
+      literal.some((one) => mayEqual(subject, one))
+    )
+      return;
+    const label = expressionLabel(subjectExpression);
+    this.diagnostics.push(
+      createDiagnostic(
+        DiagnosticSeverity.Warning,
+        typeCode.constantTest,
+        `${label === null ? "This value" : `'${label}'`} is always ${describeLiterals(possible)} here, so this case never matches.`,
+        value.span,
+      ),
+    );
   }
 
   /** Warns about a type test whose result the compiler can prove (ADR 0021 rule 4.5). */

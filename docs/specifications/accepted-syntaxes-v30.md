@@ -1576,7 +1576,8 @@ Rules:
 
 - When the source shows every button's value, the result is known to be one of them until the variable is assigned
   again or a call or suspension may change it ([ADR 0021](../decisions/0021-static-types.md) rule 5.5), and comparing
-  it with a value that no button returns is a compiler warning:
+  it with a value that no button returns, also as a literal `case` value ([§32](#32-switch-statements)), is a compiler
+  warning:
 
   ```text
   let answer = choose "spank", "lines"

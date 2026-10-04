@@ -708,6 +708,23 @@ test("comparing a choice result with a value no button returns is a warning", ()
       ],
     ],
   );
+  // A literal `case` compares with `==` as well; a case that some button returns, and a range, are not warned about.
+  assert.deepEqual(
+    warned(
+      'let answer = choose "spank", "lines"\nswitch answer {\n    case "Open" {\n        say "x"\n    }\n    case "spank" {\n        say "y"\n    }\n}',
+    ),
+    [
+      [
+        "TSV046",
+        '"Open"',
+        '\'answer\' is always "spank" or "lines" here, so this case never matches.',
+      ],
+    ],
+  );
+  assert.deepEqual(
+    warned('let n = choose 1, 2\nswitch n {\n    case 1..3 {\n        say "x"\n    }\n}'),
+    [],
+  );
   for (const source of [
     "let d = choose 1 s, 2 s\nlet same = d == 1000 ms",
     "let value: duration | integer = choose 1 s, 2000\nlet same = value == 1000 ms",
