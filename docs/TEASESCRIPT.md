@@ -218,10 +218,10 @@ specification [§25](specifications/accepted-syntaxes-v30.md#25-persistent-stora
 in [Runtime](RUNTIME.md#script-storage). The Player keeps script storage in browser local storage
 ([data boundary](DATA-AND-API.md#script-storage-in-the-browser)).
 
-Implemented timing includes exact elapsed duration literals/values, cross-unit comparisons, date, time, datetime, and
-timestamp values with strict ISO conversion and the player's numeric presentation, blocking `wait`/`timer`,
-and asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and
-checkpoint restore. Accepted forms and current limits are defined in specification
+Implemented timing includes exact and calendar duration literals/values, cross-unit comparisons, date, time, datetime,
+and timestamp values with strict ISO conversion and the player's numeric presentation, blocking `wait`/`timer`, and
+asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and checkpoint
+restore. Accepted forms and current limits are defined in specification
 [§27](specifications/accepted-syntaxes-v30.md#27-timers) and
 [§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps).
 

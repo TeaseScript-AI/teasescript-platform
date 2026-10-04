@@ -3015,8 +3015,8 @@ Recovery is not offered for structural errors such as malformed syntax, unknown 
 
 ## 35. Date, time, durations, and timestamps
 **Status:** Accepted (#532). Implemented: `date`, `time`, `datetime`, and `timestamp` values, their conversions,
-fields, comparison, exact arithmetic, presentation, collections, and storage, and the current-time getters. Deferred:
-calendar duration units and typed date and time input.
+fields, comparison, arithmetic, presentation, collections, and storage, the current-time getters, and calendar
+durations. Deferred: typed date and time input.
 
 TeaseScript has two kinds of time:
 
