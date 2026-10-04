@@ -575,3 +575,22 @@ test("value cases keep the narrowing of the cases above, and a never-matching ca
     ["1", "2"],
   );
 });
+
+test("a case that lists null with other values takes null away from the cases after it", () => {
+  const source = [
+    "function punish(count: integer?) {",
+    "  switch count {",
+    "    case null, 0 { return }",
+    "    default {",
+    "      let strokes: integer = count * 2",
+    '      say "${strokes} strokes."',
+    "    }",
+    "  }",
+    "}",
+    "punish(null)",
+    "punish(0)",
+    "punish(3)",
+  ].join("\n");
+
+  assert.deepEqual(says(source), ["6 strokes."]);
+});

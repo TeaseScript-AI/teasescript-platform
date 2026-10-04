@@ -677,12 +677,15 @@ class TypeChecker {
                   ),
                 );
             }
-            // A value case keeps what the cases above left, and `case null` narrows like `x == null`.
+            // A value case keeps what the cases above left. `null` narrows like `x == null`: `case null` knows `null`, and
+            // a case that lists `null`, as in `case null, 0`, takes it from every later case.
             reached = matchable;
-            if (switchCase.values.every((value) => unwrap(value).kind === "nullLiteral")) {
-              taken = narrowTo(remaining, NULL_TYPE);
-              remaining = excludeType(remaining, NULL_TYPE);
-            } else taken = remaining;
+            const nulls = switchCase.values.filter((value) => unwrap(value).kind === "nullLiteral");
+            taken =
+              nulls.length === switchCase.values.length
+                ? narrowTo(remaining, NULL_TYPE)
+                : remaining;
+            if (nulls.length > 0) remaining = excludeType(remaining, NULL_TYPE);
           }
           this.#flow.restore(start);
           if (variable !== null && taken !== null && reached)
