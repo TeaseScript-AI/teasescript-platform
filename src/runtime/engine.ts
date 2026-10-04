@@ -290,7 +290,7 @@ function executePlannedInstruction(
 ): void {
   switch (instruction.kind) {
     case "declareGlobal": {
-      if (snapshot.globals.some((binding) => binding.name === instruction.name)) {
+      if (evaluator.binding(instruction.name) !== undefined) {
         throw fault("TSR001", `Global '${instruction.name}' is already set up.`, instruction.span);
       }
       const value = evaluator.evaluateStartValue(instruction.value);
@@ -305,7 +305,7 @@ function executePlannedInstruction(
     }
     case "declareSpeaker": {
       executeSpeakerAtomically(snapshot, evaluator, events, (stagedSnapshot, stagedEvaluator) => {
-        if (stagedSnapshot.globals.some((binding) => binding.name === instruction.name)) {
+        if (stagedEvaluator.binding(instruction.name) !== undefined) {
           throw fault(
             "TSR001",
             `Speaker '${instruction.name}' is already set up.`,

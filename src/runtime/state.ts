@@ -2724,18 +2724,19 @@ function validateGlobals(
   }
   const names: string[] = [];
   const values: unknown[] = [];
+  const globalNames = new Set<string>();
   for (const binding of globals) {
     if (!isPlainRecord(binding) || typeof binding.name !== "string" || binding.name.length === 0) {
       errors.push("Runtime global is malformed.");
       return;
     }
-    if (names.includes(binding.name)) errors.push("Runtime globals contain a duplicate name.");
+    if (globalNames.has(binding.name)) errors.push("Runtime globals contain a duplicate name.");
+    globalNames.add(binding.name);
     names.push(binding.name);
     values.push(binding.value);
     const failure = validateCapturedSerializableValue(binding.value);
     if (failure !== null) errors.push(failure);
   }
-  const globalNames = new Set(names);
   if (
     Array.isArray(snapshot.frames) &&
     snapshot.frames.some(
@@ -2759,29 +2760,29 @@ function validateGlobals(
       ? snapshot.nextInstruction
       : declarations.length;
   const host = globals.length - setUp;
+  const scriptNames = new Set(declarations.map((declaration) => declaration.name));
   const speakers = Array.isArray(snapshot.speakers) ? snapshot.speakers : [];
-  const setUpSpeakers = declarations
-    .slice(0, setUp)
-    .filter((declaration) => declaration.kind === "declareSpeaker");
+  let speakerIndex = 0;
+  const matches = (declaration: (typeof declarations)[number], index: number): boolean => {
+    if (names[host + index] !== declaration.name) return false;
+    if (declaration.kind !== "declareSpeaker") return true;
+    const speaker = speakers[speakerIndex];
+    speakerIndex += 1;
+    const value = values[host + index];
+    return (
+      isPlainRecord(speaker) &&
+      speaker.identifier === declaration.name &&
+      isPlainRecord(value) &&
+      value.kind === "speakerReference" &&
+      value.speakerId === speaker.id &&
+      value.identifier === declaration.name
+    );
+  };
   if (
     host < 0 ||
-    names.slice(0, host).some((name) => declarations.some((item) => item.name === name)) ||
-    declarations
-      .slice(0, setUp)
-      .some((declaration, index) => names[host + index] !== declaration.name) ||
-    speakers.length !== setUpSpeakers.length ||
-    setUpSpeakers.some((declaration, index) => {
-      const speaker = speakers[index];
-      const value = values[host + declarations.indexOf(declaration)];
-      return (
-        !isPlainRecord(speaker) ||
-        speaker.identifier !== declaration.name ||
-        !isPlainRecord(value) ||
-        value.kind !== "speakerReference" ||
-        value.speakerId !== speaker.id ||
-        value.identifier !== declaration.name
-      );
-    })
+    names.slice(0, host).some((name) => scriptNames.has(name)) ||
+    !declarations.slice(0, setUp).every(matches) ||
+    speakers.length !== speakerIndex
   )
     errors.push("Runtime globals do not match those the plan sets up before the next instruction.");
 }
