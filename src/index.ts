@@ -271,6 +271,7 @@ export type {
   ShowButtonStatement,
   SwitchCase,
   SwitchStatement,
+  SwitchTypeTest,
   WaitStatement,
   TimerStatement,
   ShowImageStatement,

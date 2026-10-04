@@ -301,11 +301,23 @@ export interface SwitchStatement {
   readonly span: SourceSpan;
 }
 
-/** One `case`: its literal values and number ranges, any of which selects the block. */
+/**
+ * One `case`: either its literal values and number ranges, any of which selects the block, or one type test, as in
+ * `case is integer`, with no values.
+ */
 export interface SwitchCase {
   readonly kind: "switchCase";
   readonly values: readonly Expression[];
+  readonly typeTest: SwitchTypeTest | null;
   readonly body: Block;
+  readonly span: SourceSpan;
+}
+
+/** `is T` or `is not T` after `case`, testing the switched value like `value is T`. */
+export interface SwitchTypeTest {
+  readonly kind: "switchTypeTest";
+  readonly type: TypeAnnotation;
+  readonly negated: boolean;
   readonly span: SourceSpan;
 }
 

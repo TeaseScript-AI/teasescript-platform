@@ -60,6 +60,7 @@ import type {
   StringText,
   SwitchCase,
   SwitchStatement,
+  SwitchTypeTest,
   TypeAnnotation,
   TypeName,
   UnaryExpression,
@@ -1608,7 +1609,14 @@ class Parser {
             clause,
           );
         }
-        const values = this.#parseCaseValues();
+        let typeTest: SwitchTypeTest | null = null;
+        let values: readonly Expression[] | null = Object.freeze([]);
+        if (this.#check(TokenKind.KeywordIs)) {
+          typeTest = yield* parseChild(this.#parseCaseTypeTestTask());
+          if (typeTest === null) values = null;
+        } else {
+          values = this.#parseCaseValues();
+        }
         if (values === null) {
           this.#synchronizeSwitchClause();
         } else {
@@ -1623,6 +1631,7 @@ class Parser {
               Object.freeze({
                 kind: "switchCase",
                 values,
+                typeTest,
                 body,
                 span: spanFrom(clause.span, body.span),
               }),
@@ -1670,6 +1679,36 @@ class Parser {
       cases: Object.freeze(cases),
       defaultBlock,
       span: spanFrom(keyword.span, this.#previous().span),
+    });
+  }
+
+  /** `is T` or `is not T` after `case`: one type, or a union for several, as in `case is integer | string`. */
+  *#parseCaseTypeTestTask(): ParseTask<SwitchTypeTest | null> {
+    const keyword = this.#advance();
+    const negated = this.#match(TokenKind.KeywordNot);
+    if (this.#atComparedValue()) {
+      this.#reportToken(
+        parserDiagnosticCode.invalidType,
+        "'case is' checks a type; to compare with a value, write the value itself, as in 'case \"open\"'.",
+        this.#peek(),
+      );
+      return null;
+    }
+    const type = yield* parseChild(this.#parseTypeTask("typeTest"));
+    if (type === null) return null;
+    if (this.#check(TokenKind.Comma)) {
+      this.#reportToken(
+        parserDiagnosticCode.invalidSwitchForm,
+        "A type case tests one type. For several, write a union, as in 'case is integer | string'.",
+        this.#peek(),
+      );
+      return null;
+    }
+    return Object.freeze({
+      kind: "switchTypeTest",
+      type,
+      negated,
+      span: spanFrom(keyword.span, type.span),
     });
   }
 

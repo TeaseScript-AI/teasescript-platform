@@ -12,6 +12,7 @@ import type {
   ShowButtonParts,
   SwitchCase,
   SwitchStatement,
+  TypeTestExpression,
 } from "../../ast.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { InstructionCompilationError } from "../errors.js";
@@ -552,10 +553,9 @@ export class InstructionCompiler {
     this.#emitTemporaryCleanup(subject.temporaryIds, statement.subject.span);
     const jumpsToEnd: { readonly index: number; readonly instruction: JumpInstruction }[] = [];
     for (const switchCase of statement.cases) {
-      const valuesSpan = createSourceSpan(
-        switchCase.values[0]!.span.start,
-        switchCase.values.at(-1)!.span.end,
-      );
+      const valuesSpan =
+        switchCase.typeTest?.span ??
+        createSourceSpan(switchCase.values[0]!.span.start, switchCase.values.at(-1)!.span.end);
       const conditional = this.instructions.length;
       const conditionalInstruction: JumpIfFalseInstruction = {
         kind: "jumpIfFalse",
@@ -590,6 +590,12 @@ export class InstructionCompiler {
     subjectTemporary: number,
     valuesSpan: SourceSpan,
   ): ExpressionPlan {
+    if (switchCase.typeTest !== null)
+      return typeTestPlan(switchCase.typeTest, {
+        kind: "temporary",
+        temporaryId: subjectTemporary,
+        span: copySpan(valuesSpan),
+      });
     const tests = switchCase.values.map((expression): ExpressionPlan => {
       const value = unwrapParentheses(expression);
       const subject = (): ExpressionPlan => ({
@@ -2259,8 +2265,9 @@ function assembleExpression(
 }
 
 /** A type test; a type the runtime cannot narrow down, which no written type is, makes the test constant. */
+/** `value is T` or `value is not T`, from a type test expression or a `case is T`. */
 function typeTestPlan(
-  expression: Extract<Expression, { kind: "typeTestExpression" }>,
+  expression: Pick<TypeTestExpression, "type" | "negated" | "span">,
   value: ExpressionPlan,
 ): ExpressionPlan {
   const type = typePlan(typeFromAnnotation(expression.type));
