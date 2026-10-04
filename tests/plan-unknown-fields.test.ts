@@ -189,7 +189,7 @@ test("current-version plans reject an added field on each object shape of a comp
     [
       "declareBinding",
       "condition",
-      { kind: "literal", value: true, span: compiled.plan!.sourceSpan },
+      { kind: "literal", value: true, span: compiled.plan!.files[0]!.sourceSpan },
     ],
     ["literal", "name", "value"],
   ] as const) {

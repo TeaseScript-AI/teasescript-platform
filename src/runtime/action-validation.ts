@@ -16,14 +16,15 @@ import {
 } from "./serializable-values.js";
 import { isOneOf } from "../plan/validation-support.js";
 import { isMessagePresentation } from "../message-presentation.js";
-import type {
-  Instruction,
-  InstructionPlan,
-  InteractionChoiceOption,
-  InteractionKind,
-  InteractionTemporalKind,
-  InteractionUiPayload,
-  PlanSourceLocation,
+import {
+  type Instruction,
+  type InstructionPlan,
+  type InteractionChoiceOption,
+  type InteractionKind,
+  type InteractionTemporalKind,
+  type InteractionUiPayload,
+  type PlanSourceLocation,
+  mainRootEnd,
 } from "../plan/model.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -1064,8 +1065,8 @@ export function validateTerminalContinuationHandoffState(
   if (plan === undefined) return;
   const instruction = plan.instructions[handoff.owningInstruction];
   const terminalHandoffMatchesPlan =
-    handoff.continuationInstruction === plan.rootEndInstruction &&
-    snapshot.nextInstruction === plan.rootEndInstruction &&
+    handoff.continuationInstruction === mainRootEnd(plan) &&
+    snapshot.nextInstruction === mainRootEnd(plan) &&
     handoff.owningInstruction + 1 === handoff.continuationInstruction &&
     ((handoff.actionKind === "delay" && instruction?.kind === "wait") ||
       (handoff.actionKind === "storageWrite" && instruction?.kind === "storageWrite") ||
@@ -2151,7 +2152,7 @@ function validSettlementProvenance(
       owningInstruction < candidate.endInstruction,
   );
   return definition === undefined
-    ? continuationInstruction <= plan.rootEndInstruction
+    ? continuationInstruction <= mainRootEnd(plan)
     : continuationInstruction < definition.endInstruction;
 }
 
@@ -2208,7 +2209,7 @@ function validForegroundActionOwnership(
   const activeFrame = callFrames.at(-1);
   if (definition === undefined) {
     return (
-      continuationInstruction <= plan.rootEndInstruction &&
+      continuationInstruction <= mainRootEnd(plan) &&
       action.ownerCallFrameId === null &&
       callFrames.length === 0
     );

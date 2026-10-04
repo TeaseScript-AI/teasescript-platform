@@ -11,20 +11,22 @@ import {
   validInstructionBoundary,
 } from "./validation-support.js";
 
+/** Validated instruction boundaries of one plan file. */
+export interface PlanFileBoundaries {
+  readonly startInstruction: number;
+  readonly rootEndInstruction: number;
+  readonly endInstruction: number;
+}
+
 export function analyzeInstructionStream(
   instructions: readonly unknown[],
   functions: unknown,
-  rootEndInstruction: number | null,
+  files: readonly PlanFileBoundaries[] | null,
   errors: PlanValidationError[],
 ): void {
   validateLoopStructure(instructions, errors);
   validatePreparedReferenceStructure(instructions, errors);
-  const validationIndex = validateFunctionDefinitions(
-    functions,
-    instructions,
-    rootEndInstruction,
-    errors,
-  );
+  const validationIndex = validateFunctionDefinitions(functions, instructions, files, errors);
   validateInstructionControlFlowRegions(instructions, validationIndex, errors);
 }
 
@@ -227,9 +229,15 @@ export function collectFunctionIds(value: unknown): ReadonlySet<number> {
 }
 
 type InstructionExecutionRegion =
-  | { readonly kind: "root"; readonly startInstruction: 0; readonly endInstruction: number }
+  | {
+      readonly kind: "root";
+      readonly file: number;
+      readonly startInstruction: number;
+      readonly endInstruction: number;
+    }
   | {
       readonly kind: "function";
+      readonly file: number;
       readonly functionId: number;
       readonly startInstruction: number;
       readonly endInstruction: number;
@@ -238,6 +246,7 @@ type InstructionExecutionRegion =
 interface ValidatedFunctionRange {
   readonly definition: Record<string, unknown>;
   readonly path: string;
+  readonly file: number;
   readonly id: number;
   readonly entryInstruction: number;
   readonly bodyEntryInstruction: number;
@@ -256,21 +265,27 @@ interface PlanValidationIndex {
 
 function createPlanValidationIndex(
   instructions: readonly unknown[],
-  rootEndInstruction: number | null,
+  files: readonly PlanFileBoundaries[] | null,
   functions: readonly ValidatedFunctionRange[],
 ): PlanValidationIndex | null {
-  if (rootEndInstruction === null) return null;
+  if (files === null) return null;
   const owners: Array<InstructionExecutionRegion | undefined> = new Array(instructions.length);
-  const root: InstructionExecutionRegion = {
-    kind: "root",
-    startInstruction: 0,
-    endInstruction: rootEndInstruction,
-  };
-  for (let index = 0; index < rootEndInstruction; index += 1) owners[index] = root;
+  files.forEach((file, fileIndex) => {
+    const root: InstructionExecutionRegion = {
+      kind: "root",
+      file: fileIndex,
+      startInstruction: file.startInstruction,
+      endInstruction: file.rootEndInstruction,
+    };
+    for (let index = file.startInstruction; index < file.rootEndInstruction; index += 1) {
+      owners[index] = root;
+    }
+  });
   const functionsById = new Map<number, ValidatedFunctionRange>();
   for (const definition of functions) {
     const region: InstructionExecutionRegion = {
       kind: "function",
+      file: definition.file,
       functionId: definition.id,
       startInstruction: definition.entryInstruction,
       endInstruction: definition.endInstruction,
@@ -1203,20 +1218,46 @@ const FUNCTION_FIELDS = [
 
 const PARAMETER_FIELDS = ["name", "index", "hasDefault", "declarationSpan", "defaultSpan"];
 
+/** Functions and handlers are local to their file: an instruction may only refer to its own file's regions. */
+function reportForeignFunction(
+  target: ValidatedFunctionRange | undefined,
+  ownerRegion: InstructionExecutionRegion | undefined,
+  instructionIndex: number,
+  errors: PlanValidationError[],
+): void {
+  if (target === undefined || ownerRegion === undefined || target.file === ownerRegion.file) return;
+  errors.push(
+    planError(
+      "TSC002",
+      "An instruction refers to a function of another file.",
+      `$.instructions[${instructionIndex}]`,
+    ),
+  );
+}
+
 function validateFunctionDefinitions(
   value: unknown,
   instructions: readonly unknown[],
-  rootEndInstruction: number | null,
+  files: readonly PlanFileBoundaries[] | null,
   errors: PlanValidationError[],
 ): PlanValidationIndex | null {
   if (!Array.isArray(value)) {
     errors.push(planError("TSC002", "Function definitions must be an array.", "$.functions"));
-    return createPlanValidationIndex(instructions, rootEndInstruction, []);
+    return createPlanValidationIndex(instructions, files, []);
   }
   const ids = new Set<number>();
-  const names = new Set<string>();
   const validatedRanges: ValidatedFunctionRange[] = [];
-  let expectedEntry = rootEndInstruction;
+  // Function ranges fill each file's block after its root region, file by file; names are unique within a file.
+  let file = 0;
+  let names = new Set<string>();
+  let expectedEntry = files?.[0]?.rootEndInstruction ?? null;
+  const skipCompletedFiles = (): void => {
+    while (files !== null && file < files.length && expectedEntry === files[file]!.endInstruction) {
+      file += 1;
+      names = new Set();
+      expectedEntry = files[file]?.rootEndInstruction ?? null;
+    }
+  };
   value.forEach((definition, definitionIndex) => {
     const path = `$.functions[${definitionIndex}]`;
     if (!isRecord(definition)) {
@@ -1259,9 +1300,12 @@ function validateFunctionDefinitions(
       }
       ids.add(definition.id);
     }
+    skipCompletedFiles();
     if (typeof definition.name === "string" && definition.handler === null) {
       if (names.has(definition.name)) {
-        errors.push(planError("TSC002", "Function names must be unique.", `${path}.name`));
+        errors.push(
+          planError("TSC002", "Function names must be unique within a file.", `${path}.name`),
+        );
       }
       names.add(definition.name);
     }
@@ -1286,7 +1330,7 @@ function validateFunctionDefinitions(
       entry >= bodyEntry ||
       bodyEntry > implicitReturn ||
       implicitReturn !== end - 1 ||
-      end > instructions.length
+      end > (files?.[file]?.endInstruction ?? -1)
     ) {
       errors.push(
         planError("TSC002", "Function instruction range is overlapping or impossible.", path),
@@ -1300,6 +1344,7 @@ function validateFunctionDefinitions(
     const validatedRange: ValidatedFunctionRange = {
       definition,
       path,
+      file,
       // EVIDENCE: validation: functionId passed the positive safe-integer check above.
       id: functionId as number,
       entryInstruction: entry,
@@ -1332,7 +1377,8 @@ function validateFunctionDefinitions(
     validateFunctionPrologue(validatedRange, instructions, errors);
     expectedEntry = end;
   });
-  if (expectedEntry !== null && expectedEntry !== instructions.length) {
+  skipCompletedFiles();
+  if (files !== null && expectedEntry !== null && file < files.length) {
     errors.push(
       planError(
         "TSC002",
@@ -1342,7 +1388,7 @@ function validateFunctionDefinitions(
     );
   }
 
-  const index = createPlanValidationIndex(instructions, rootEndInstruction, validatedRanges);
+  const index = createPlanValidationIndex(instructions, files, validatedRanges);
   instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
     const ownerRegion = index?.owners[instructionIndex];
@@ -1388,12 +1434,14 @@ function validateFunctionDefinitions(
         ? instruction.functionId
         : instruction.handlerFunctionId) === "number"
     ) {
-      const target = index?.functionsById.get(
+      const targetRange = index?.functionsById.get(
         // EVIDENCE: validation: the enclosing condition established the numeric ID.
         (instruction.kind === "callFunction"
           ? instruction.functionId
           : instruction.handlerFunctionId) as number,
-      )?.definition;
+      );
+      reportForeignFunction(targetRange, ownerRegion, instructionIndex, errors);
+      const target = targetRange?.definition;
       if (
         target !== undefined &&
         target.handler !== (instruction.kind === "startTimer" ? "timer" : null)
@@ -1418,7 +1466,9 @@ function validateFunctionDefinitions(
       ];
       for (const id of handlerIds) {
         if (typeof id !== "number") continue;
-        const target = index?.functionsById.get(id)?.definition;
+        const targetRange = index?.functionsById.get(id);
+        reportForeignFunction(targetRange, ownerRegion, instructionIndex, errors);
+        const target = targetRange?.definition;
         if (target !== undefined && target.handler !== "media") {
           errors.push(
             planError(

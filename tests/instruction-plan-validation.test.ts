@@ -209,7 +209,7 @@ test("preserves a compiler-generated root-end target", () => {
   );
   const jumpIndex = rootInstructionIndex(compiled, "jumpIfFalse");
 
-  assert.equal(targetOf(compiled, jumpIndex, "target"), compiled.rootEndInstruction);
+  assert.equal(targetOf(compiled, jumpIndex, "target"), compiled.files[0]!.rootEndInstruction);
   assert.equal(validateInstructionPlan(compiled).valid, true);
 });
 
@@ -285,7 +285,7 @@ test("keeps snapshots valid after accepted root control flow reaches its boundar
   const first = executeInstruction(compiled, initial);
 
   assert.equal(first.snapshot.status, "halted");
-  assert.equal(first.snapshot.nextInstruction, compiled.rootEndInstruction);
+  assert.equal(first.snapshot.nextInstruction, compiled.files[0]!.rootEndInstruction);
   assert.equal(validateRuntimeSnapshot(first.snapshot, compiled).valid, true);
 });
 
@@ -732,7 +732,7 @@ function functionLoop(): string {
 function rootInstructionIndex(plan: InstructionPlan, kind: Instruction["kind"]): number {
   const index = plan.instructions.findIndex(
     (instruction, instructionIndex) =>
-      instructionIndex < plan.rootEndInstruction && instruction.kind === kind,
+      instructionIndex < plan.files[0]!.rootEndInstruction && instruction.kind === kind,
   );
   assert.notEqual(index, -1, `Expected root ${kind} instruction.`);
   return index;
