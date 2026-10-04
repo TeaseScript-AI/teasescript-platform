@@ -26,12 +26,13 @@ stable enough to test lowering independently from a particular Groovy parser imp
 
 ## Target policy
 
-The importer targets accepted TeaseScript (V30 plus accepted ADRs and the owner storage decision below), not the
+The importer targets accepted TeaseScript (V30 plus accepted ADRs, the owner storage decision below, and owner
+decisions recorded on issues whose implementation is still open, such as #515, #518, #528, #531, and #532), not the
 subset the current compiler implements. Script chaining, for example, has no faithful implemented substitute, so
 avoiding accepted-but-unimplemented forms would only trade compiler errors for wrong behavior. Within that target:
 
-- prefer an implemented compact form when it is equally faithful, such as `say` plus `askText`, `askNumber`, or a
-  `choose` with numeric or `yes`/`no` labels instead of parenthesized V30 input calls;
+- prefer a compact form when it is equally faithful, such as `say` plus `askText`, `askNumber`, a `choose` with
+  numeric or `yes`/`no` values, or `showButton "Done", timeout: 30`, instead of parenthesized V30 input calls;
 - produce natural TeaseScript: keep comments and paragraph breaks, `else if` chains, interpolation, and idiomatic
   forms such as `list.random`; rename only identifiers TeaseScript rejects; make Groovy's implicit last-expression
   result an explicit `return` only in functions whose result some caller in the package uses;
@@ -68,7 +69,7 @@ Do not silently approximate behavior when the source depends on:
 - arbitrary Java, Android, AWT, OS, process, filesystem, or unrestricted network APIs;
 - Groovy metaprogramming or dynamic method/property names;
 - mutable alias identity that is observably different from TeaseScript value-copy semantics;
-- a `def` variable changing between incompatible runtime types;
+- a `def` variable changing between incompatible runtime types (TeaseScript variables keep one type, #519);
 - unsupported closures, exception-driven control flow, or Java object identity;
 - platform- or locale-dependent behavior without a defined TeaseScript capability.
 

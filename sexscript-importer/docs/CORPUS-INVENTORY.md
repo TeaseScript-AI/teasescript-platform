@@ -24,23 +24,27 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-03 at importer commit `d713b469` with `node src/cli.ts report --run <package scripts>` (default
-conversion, without proposals). Toy's 21 runtime-loaded modules are part of its single script `toy.groovy`, so Toy
-counts as one script whose statements include all module code.
+Measured on 2026-10-04 at importer commit `c72e3637`, after merging `main` at `66f0a750`, with `node src/cli.ts
+report --run <package scripts>` (default conversion, without proposals). Toy's 21 runtime-loaded modules are part of
+its single script `toy.groovy`, so Toy counts as one script whose statements include all module code.
 
 | Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Root errors | Placeholders |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Distribution | 14 | 10 | 10 | 10 | 15 | 13 |
-| Domme3 | 24 | 13 | 10 | 10 | 35 | 37 |
-| DisciplineClinic | 6 | 3 | 3 | 3 | 17 | 17 |
-| Toy expanded | 1 | 0 | 0 | 0 | 267 | 465 |
+| Distribution | 14 | 10 | 10 | 10 | 13 | 11 |
+| Domme3 | 24 | 14 | 11 | 11 | 32 | 34 |
+| DisciplineClinic | 6 | 3 | 3 | 3 | 21 | 21 |
+| Toy expanded | 1 | 0 | 0 | 0 | 254 | 443 |
 
 Root errors count independent causes that need manual work; placeholders count unconverted statements. Converting a
-statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 267 come
+statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 254 come
 from about 4,800 source statements, mostly map (dictionary) operations and lookups with runtime keys, Java objects,
-conditionals in positions where moving them would change evaluation order, string methods, and menus from runtime
-lists. The earlier snapshot counted 229: lookups and writes with runtime keys on maps were emitted as list indexing,
-which fails at runtime, and are now reported (`SX_DYNAMIC_MAP_ACCESS`).
+conditionals in positions where moving them would change evaluation order, and closures that capture variables.
+
+The previous snapshot (2026-10-03, importer `d713b469`) counted 15, 35, 17, and 267 root errors, as did the same
+importer after merging `main` (`6e0d4d03`). Since then menus from runtime lists, text operations, input defaults,
+date formatting, and `getImage` convert by default, while DisciplineClinic's 7 variables that change type (#519) and
+10 reads of never-assigned variables (legacy bugs in Domme3 and DisciplineClinic) are newly reported; see
+[`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md) and [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md).
 
 Runtime smoke runs of the compiler-clean scripts (placeholder copies with host stand-ins):
 
@@ -49,29 +53,36 @@ Runtime smoke runs of the compiler-clean scripts (placeholder copies with host s
   adversarial `test.groovy`).
 - Domme3: the entry flow stops at the unconverted `introfirst`, which counts installed image packs by listing
   directories. Isolated runs: `implements` and `inform` run to the end, `permission` reaches the step limit in a
-  line-writing loop (the typed text must match the shown line), `spanking` returns to the entry flow, and four
-  scripts fail comparing or calculating with settings that the introduction would have saved (see the null-comparison
-  difference in `COMPATIBILITY-GAPS.md`).
-- DisciplineClinic: the entry flow stops at the unconverted `DisciplineClinicMain` (menus from runtime lists);
-  `Exit` runs to the end, `WaitRoom` fails on a setting saved by the main script.
+  line-writing loop (the typed text must match the shown line), `explain` returns to the entry flow, and five scripts
+  (`confess`, `discipline`, `fun` through `spanking`, `maintenance`, `task`) fail comparing or calculating with
+  settings that the introduction would have saved (see the null-comparison difference in `COMPATIBILITY-GAPS.md`).
+- DisciplineClinic: the entry flow stops at the unconverted `DisciplineClinicMain` (a menu whose option variable also
+  holds text, Java object calls, and never-assigned variables); `Exit` runs to the end, `WaitRoom` fails on a setting
+  saved by the main script.
 
 Smoke runs found two importer defects before they reached a snapshot: `getRandom(0)` (fixed with the legacy result)
 and range switch cases tested as lists.
 
-Two scripts compile as generated (a distribution example and DisciplineClinic's entry script), now that `main`
-implements storage (#484); script chaining is the main remaining gap. Scripts using each accepted-but-unimplemented
-capability, and how many otherwise compiler-clean scripts use it:
+Two scripts compile as generated (a distribution example and DisciplineClinic's entry script); script chaining is the
+main remaining gap. Scripts using each accepted-but-unimplemented capability, and how many otherwise compiler-clean
+scripts use it (capabilities used by fewer than three scripts are omitted):
 
 | Capability | Scripts using it | Otherwise compiler-clean scripts using it |
 | --- | ---: | ---: |
-| `run`/`end` | 41 | 19 |
-| `switch` | 26 | 9 |
-| `getSeconds()` | 18 | 3 |
-| `showButton` timeout/elapsed | 14 | 4 |
-| `getDateTime()` | 13 | 2 |
+| `run`/`end` | 41 | 20 |
+| `switch` (#528) | 26 | 10 |
+| `getDateTime().toSeconds()` (#532) | 18 | 4 |
+| `showButton` timeout/elapsed (#531) | 14 | 4 |
+| `getDateTime()` (#532) | 13 | 3 |
 | `askBooleans()` | 10 | 8 |
 | `showPopup` | 10 | 4 |
 | `askInteger()` | 9 | 0 |
+| `toInteger()` (#518) | 9 | 1 |
+| `choose` list options (#515) | 5 | 0 |
+| `round()` (#518) | 4 | 1 |
+| `choose` integer values (#515) | 4 | 0 |
+| `getDate().toISO()`, `getTime().formatTime()` (#532) | 3 each | 1 each |
+| `openUrl()` | 3 | 0 |
 
 The proposal mode's measurements are in [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md).
 
