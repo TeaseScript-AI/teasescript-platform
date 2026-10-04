@@ -3149,10 +3149,11 @@ class TypeChecker {
       }
     }
     const all = members(object);
-    // An exact object never gets a property its literals do not write. Its type has the properties they write.
+    // An exact object never gets a property its literals do not write. Its type has the properties they write, unless a
+    // written type such as `object` hides them.
     const lacking = all.some((member) => {
       const value = resolved(member);
-      return value.kind === "object" && value.properties?.has(name) !== true;
+      return !isKnown(value) || (value.kind === "object" && value.properties?.has(name) !== true);
     });
     const exact = lacking ? this.#exactValues(expression.object) : undefined;
     if (
@@ -3415,17 +3416,8 @@ class TypeChecker {
                 option.expression.span,
               ),
           );
-        // When the option is one exact list of choice objects, each element gives a button, so each is checked by its
-        // literal. The text of other computed collections' choice objects is checked by their type.
-        const lists = this.#exactValues(option.expression);
-        const elements =
-          lists?.length === 1 && lists[0]!.kind === "listLiteral"
-            ? lists[0]!.elements.map(unwrap)
-            : [];
-        if (elements.length > 0 && elements.every(isObjectLiteral))
-          for (const element of elements)
-            this.#checkExactChoiceObjects(option.expression, [element], written !== null);
-        else
+        // The text of a computed collection's choice objects that are not one exact list is checked by their type.
+        if (!this.#checkExactChoiceList(option.expression, written !== null))
           for (const part of parts)
             if (part.kind === "list" || part.kind === "set")
               for (const element of members(part.element).map(resolved))
@@ -3519,17 +3511,18 @@ class TypeChecker {
     if (rejected) return UNKNOWN_TYPE;
     const literal = unwrap(entry);
     if (literal.kind !== "objectLiteral") {
-      const objects = members(nonNullType(type))
-        .map(resolved)
-        .filter((member) => member.kind === "object");
-      const exact = objects.length > 0 ? this.#exactValues(entry) : undefined;
+      // An exact value's literals decide, also when a written type such as `object` hides what they hold.
+      const exact = this.#exactValues(entry);
       const literals = exact?.filter(isObjectLiteral);
       if (literals !== undefined && literals.length === exact!.length)
         this.#checkExactChoiceObjects(entry, literals, written);
-      else
-        for (const member of objects)
+      else {
+        for (const member of members(nonNullType(type)).map(resolved))
           if (member.kind === "object" && member.properties !== null)
             this.#checkChoiceText(entry, member.properties);
+        // A known list or set is checked as a computed collection; one whose type is hidden may still be an exact list.
+        if (!inList && !isKnown(value)) this.#checkExactChoiceList(entry, written);
+      }
       return value.kind === "object" ? UNKNOWN_TYPE : type;
     }
     let returned: StaticType = UNKNOWN_TYPE;
@@ -3552,6 +3545,19 @@ class TypeChecker {
         this.#checkBackground(property.value, propertyType);
     }
     return returned;
+  }
+
+  /**
+   * When an option is one exact list of choice objects, each element gives a button, so each is checked by its literal.
+   * Returns whether it is one.
+   */
+  #checkExactChoiceList(expression: Expression, written: boolean): boolean {
+    const lists = this.#exactValues(expression);
+    const elements =
+      lists?.length === 1 && lists[0]!.kind === "listLiteral" ? lists[0]!.elements.map(unwrap) : [];
+    if (elements.length === 0 || !elements.every(isObjectLiteral)) return false;
+    for (const element of elements) this.#checkExactChoiceObjects(expression, [element], written);
+    return true;
   }
 
   /** A choice object's text that cannot be shown fails whether it is there or missing, so its type alone decides. */

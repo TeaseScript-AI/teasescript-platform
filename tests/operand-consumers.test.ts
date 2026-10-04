@@ -54,13 +54,15 @@ test("built-ins with fixed arguments check their number and names", () => {
 
 /**
  * The sources that give an exact object (ADR 0021 rule 1.8): a variable, also with a written type, an element, and a
- * property that keep a literal.
+ * property that keep a literal, also where a written type hides what the parent holds.
  */
 const EXACT = [
   SOURCES[1]!,
   (value: string, use: string) => `let held: object = ${value}\n${use.replaceAll("@", "held")}`,
   SOURCES[3]!,
   SOURCES[4]!,
+  (value: string, use: string) =>
+    `let box: object = { part: ${value} }\n${use.replaceAll("@", "box.part")}`,
 ];
 
 test("a choice object that is not written in the option is checked by its known properties", () => {
@@ -73,6 +75,7 @@ test("a choice object that is not written in the option is checked by its known 
     for (const source of [
       ...EXACT.map((wrap) => wrap(value, "let answer = choose @")),
       `let options = [${value}]\nlet answer = choose options`,
+      `let box: object = { options: [${value}] }\nlet answer = choose box.options`,
     ]) {
       const diagnostics = compileSource(source).diagnostics;
       assert.ok(
