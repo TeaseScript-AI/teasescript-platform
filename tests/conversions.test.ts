@@ -151,7 +151,7 @@ test("conversions the compiler can prove invalid and misused arguments are compi
     [
       "say toString(1..3)",
       "TSV043",
-      "toString(...) converts text, numbers, true or false, null, and durations, not a range.",
+      "toString(...) converts text, numbers, true or false, null, durations, and date and time values, not a range.",
       "1..3",
     ],
     [

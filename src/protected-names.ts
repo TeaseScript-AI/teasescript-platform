@@ -45,6 +45,7 @@ const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
   "date",
   "time",
   "datetime",
+  "timestamp",
   "duration",
   "list",
   "object",
@@ -69,11 +70,11 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "toDate",
   "toTime",
   "toDateTime",
+  "toTimestamp",
   "getDate",
   "getTime",
   "getDateTime",
-  "getSeconds",
-  "getMilliseconds",
+  "getTimestamp",
   "schedule",
   "cancelSchedule",
   "askText",
@@ -128,6 +129,10 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "ceil",
   "min",
   "max",
+  "toDate",
+  "toTime",
+  "toDateTime",
+  "toTimestamp",
 ] as const);
 
 /** Temporary direct-call bridge for implemented Platform Standard Library helpers. */

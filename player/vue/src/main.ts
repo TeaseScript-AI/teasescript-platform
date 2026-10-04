@@ -1,5 +1,5 @@
 import { createApp, h } from "vue";
-import { createPlayerRuntimeSession } from "../../runtime-adapter.js";
+import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime-adapter.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import { demoSource, demoStorageScope, resolveDemoAsset } from "./demoHost";
 import PlayerApp from "./PlayerApp.vue";
@@ -21,13 +21,15 @@ const app = developmentPreview
           scriptStorage: createLocalScriptStorage(browserStorage(), demoStorageScope),
         });
         // Stored values are read before Start, so Start runs within the player's activation.
-        void player
-          .loadScriptStorage()
-          .then(() =>
-            player.prepare(() =>
-              createPlayerRuntimeSession(demoSource, player.scriptStorageOptions()),
-            ),
-          );
+        void player.loadScriptStorage().then(() =>
+          player.prepare(() =>
+            createPlayerRuntimeSession(demoSource, {
+              ...player.scriptStorageOptions(),
+              // Captured at Start: the session keeps this zone and presentation.
+              temporalContext: playerTemporalContext(),
+            }),
+          ),
+        );
         return () => h(PlayerApp, { player });
       },
     });

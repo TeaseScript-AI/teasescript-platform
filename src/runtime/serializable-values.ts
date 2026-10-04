@@ -1,4 +1,12 @@
 import { captureExternalData, type ExternalDataFailure } from "../external-data-capture.js";
+import {
+  isValidDate,
+  isValidEpochMilliseconds,
+  isValidTime,
+  type DateFields,
+  type DateTimeFields,
+  type TimeFields,
+} from "../temporal.js";
 
 export type SerializableRuntimeScalar = string | number | boolean | null;
 
@@ -14,8 +22,11 @@ export interface SerializableRuntimeObject {
 
 export interface SerializableRuntimeSet {
   readonly kind: "set";
-  readonly items: SerializableRuntimeScalar[];
+  readonly items: SerializableSetElement[];
 }
+
+/** A value a set can hold: a scalar or a date or time value. Membership compares kind and value. */
+export type SerializableSetElement = SerializableRuntimeScalar | SerializableRuntimeTemporal;
 
 export interface SerializableSpeakerReference {
   readonly kind: "speakerReference";
@@ -35,6 +46,33 @@ export interface SerializableRuntimeDuration {
   readonly kind: "duration";
   readonly milliseconds: number;
 }
+
+/** A local calendar date without a zone (V30 §35). */
+export interface SerializableRuntimeDate extends DateFields {
+  readonly kind: "date";
+}
+
+/** A local clock time without a zone. */
+export interface SerializableRuntimeTime extends TimeFields {
+  readonly kind: "time";
+}
+
+/** A local date and clock time without a zone; it follows the player's zone. */
+export interface SerializableRuntimeDateTime extends DateTimeFields {
+  readonly kind: "datetime";
+}
+
+/** A fixed moment, in whole milliseconds since 1970-01-01T00:00:00Z. */
+export interface SerializableRuntimeTimestamp {
+  readonly kind: "timestamp";
+  readonly epochMilliseconds: number;
+}
+
+export type SerializableRuntimeTemporal =
+  | SerializableRuntimeDate
+  | SerializableRuntimeTime
+  | SerializableRuntimeDateTime
+  | SerializableRuntimeTimestamp;
 
 /** An opaque script handle for one asynchronous timer record. */
 export interface SerializableTimerHandle {
@@ -60,6 +98,7 @@ export type SerializableRuntimeValue =
   | SerializableRuntimeSet
   | SerializableRuntimeRange
   | SerializableRuntimeDuration
+  | SerializableRuntimeTemporal
   | SerializableTimerHandle
   | SerializableMediaHandle
   | SerializableSpeakerReference;
@@ -125,41 +164,20 @@ export function createSerializableSet(
     throw new SerializableValueError("invalid", "Serializable set items must be an array.");
   }
 
-  const seen = new Set<SerializableRuntimeScalar>();
-  const capturedItems: SerializableRuntimeScalar[] = [];
-  for (let index = 0; index < capture.value.length; index += 1) {
-    const item = capture.value[index];
-    if (!isScalar(item)) {
-      throw new SerializableValueError(
-        "setElement",
-        "Sets may contain only string, boolean, integer, number, or null values.",
-      );
-    }
-    if (seen.has(item)) continue;
-    seen.add(item);
-    capturedItems.push(item);
-  }
-  return { kind: "set", items: capturedItems };
+  const failure = validateSerializableValueInternal({ kind: "list", items: capture.value }, "$");
+  if (failure !== null) throw new SerializableValueError("invalid", failure);
+  // EVIDENCE: validation: the captured items were just validated as runtime values.
+  return createCapturedSerializableSet(capture.value as SerializableRuntimeValue[]);
 }
 
 /** Creates a set from engine-owned, already validated values. */
 export function createCapturedSerializableSet(
   items: readonly SerializableRuntimeValue[],
 ): SerializableRuntimeSet {
-  const seen = new Set<SerializableRuntimeScalar>();
-  const capturedItems: SerializableRuntimeScalar[] = [];
-  for (const item of items) {
-    if (!isScalar(item)) {
-      throw new SerializableValueError(
-        "setElement",
-        "Sets may contain only string, boolean, integer, number, or null values.",
-      );
-    }
-    if (seen.has(item)) continue;
-    seen.add(item);
-    capturedItems.push(item);
-  }
-  return { kind: "set", items: capturedItems };
+  const set: SerializableRuntimeSet = { kind: "set", items: [] };
+  const membership = new Set<string>();
+  for (const item of items) addSerializableSetValue(set, item, membership);
+  return set;
 }
 
 export function cloneSerializableValue(value: SerializableRuntimeValue): SerializableRuntimeValue {
@@ -266,11 +284,21 @@ function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRun
       return { ...value };
     case "speakerReference":
     case "duration":
+    case "date":
+    case "time":
+    case "datetime":
+    case "timestamp":
     case "timerHandle":
     case "mediaHandle":
       return { ...value };
     case "set":
-      return { kind: "set", items: [...value.items] };
+      // Date and time members and durations are records of their own; each copy gets new ones.
+      return {
+        kind: "set",
+        items: value.items.map((item) =>
+          item !== null && typeof item === "object" ? { ...item } : item,
+        ),
+      };
     case "list":
       return { kind: "list", items: new Array(value.items.length) };
     case "object":
@@ -297,16 +325,18 @@ export function setCapturedSerializableProperty(
   else existing.value = copied;
 }
 
+/** Adds an engine-owned value; `membership` holds the set's member keys when a caller adds many values. */
 export function addSerializableSetValue(
   set: SerializableRuntimeSet,
   value: SerializableRuntimeValue,
-  membership?: Set<SerializableRuntimeScalar>,
+  membership?: Set<string>,
 ): boolean {
-  assertSerializableScalar(value);
-  const seen = membership ?? new Set(set.items);
-  if (seen.has(value)) return false;
-  seen.add(value);
-  set.items.push(value);
+  assertSetElement(value);
+  const seen = membership ?? new Set(set.items.map(setMemberKey));
+  const key = setMemberKey(value);
+  if (seen.has(key)) return false;
+  seen.add(key);
+  set.items.push(value !== null && typeof value === "object" ? { ...value } : value);
   return true;
 }
 
@@ -314,8 +344,9 @@ export function removeSerializableSetValue(
   set: SerializableRuntimeSet,
   value: SerializableRuntimeValue,
 ): boolean {
-  assertSerializableScalar(value);
-  const index = set.items.findIndex((item) => item === value);
+  assertSetElement(value);
+  const key = setMemberKey(value);
+  const index = set.items.findIndex((item) => setMemberKey(item) === key);
   if (index < 0) return false;
   set.items.splice(index, 1);
   return true;
@@ -325,8 +356,37 @@ export function serializableSetContains(
   set: SerializableRuntimeSet,
   value: SerializableRuntimeValue,
 ): boolean {
-  assertSerializableScalar(value);
-  return new Set(set.items).has(value);
+  assertSetElement(value);
+  const key = setMemberKey(value);
+  return set.items.some((item) => setMemberKey(item) === key);
+}
+
+/** Whether a value can be a set member. */
+export function isSetElement(value: SerializableRuntimeValue): value is SerializableSetElement {
+  return value === null || typeof value !== "object" || isSetElementKind(value.kind);
+}
+
+/** The kinds of non-scalar values a set holds. */
+function isSetElementKind(kind: unknown): boolean {
+  return kind === "date" || kind === "time" || kind === "datetime" || kind === "timestamp";
+}
+
+/** A text that is equal for two set members exactly when they are the same kind and `==` value. */
+function setMemberKey(value: SerializableSetElement): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return `s${value}`;
+  if (typeof value === "number") return `n${value === 0 ? 0 : value}`;
+  if (typeof value === "boolean") return `b${value}`;
+  switch (value.kind) {
+    case "date":
+      return `d${value.year}-${value.month}-${value.day}`;
+    case "time":
+      return `t${value.hour}:${value.minute}:${value.second}.${value.millisecond}`;
+    case "datetime":
+      return `D${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}:${value.second}.${value.millisecond}`;
+    case "timestamp":
+      return `T${value.epochMilliseconds}`;
+  }
 }
 
 /**
@@ -344,8 +404,8 @@ export function serializableEquals(
   while (pending.length > 0) {
     const next = pending.pop()!;
     if (next.kind === "set") {
-      const members = new Set(next.right.items);
-      if (!next.left.items.every((item) => members.has(item))) return false;
+      const members = new Set(next.right.items.map(setMemberKey));
+      if (!next.left.items.every((item) => members.has(setMemberKey(item)))) return false;
     } else if (next.kind === "list") {
       for (let index = 0; index < next.left.items.length; index += 1) {
         if (!equalsOrDefer(next.left.items[index]!, next.right.items[index]!, pending))
@@ -415,6 +475,11 @@ function equalsOrDefer(
       );
     case "duration":
       return right.kind === "duration" && right.milliseconds === left.milliseconds;
+    case "date":
+    case "time":
+    case "datetime":
+    case "timestamp":
+      return right.kind === left.kind && setMemberKey(right) === setMemberKey(left);
     case "timerHandle":
       return right.kind === "timerHandle" && right.timerId === left.timerId;
     case "mediaHandle":
@@ -552,13 +617,9 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         return `${path()} contains a malformed speaker reference.`;
       continue;
     }
-    if (current.kind === "duration") {
-      if (
-        !hasOnlyKeys(current, ["kind", "milliseconds"]) ||
-        typeof current.milliseconds !== "number" ||
-        !Number.isFinite(current.milliseconds)
-      )
-        return `${path()} contains a malformed duration.`;
+    if (current.kind === "duration" || TEMPORAL_KEYS.has(current.kind)) {
+      const problem = setElementObjectProblem(current);
+      if (problem !== null) return `${path()} contains ${problem}.`;
       continue;
     }
     if (current.kind === "timerHandle") {
@@ -596,12 +657,22 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
     if (current.kind === "set") {
       if (!hasOnlyKeys(current, ["kind", "items"])) return `${path()} contains a malformed set.`;
       if (!Array.isArray(current.items)) return `${path()}.items must be an array.`;
-      const seen = new Set<SerializableRuntimeScalar>();
+      const seen = new Set<string>();
       for (let index = 0; index < current.items.length; index += 1) {
-        const nested = current.items[index];
-        if (!isScalar(nested)) return `${path()}.items[${index}] is not a scalar.`;
-        if (seen.has(nested)) return `${path()}.items contains a duplicate scalar.`;
-        seen.add(nested);
+        const nested: unknown = current.items[index];
+        if (typeof nested === "number" && !Number.isFinite(nested))
+          return `${path()}.items[${index}] must be a finite number.`;
+        if (!isScalar(nested)) {
+          const problem =
+            isPlainRecord(nested) && isSetElementKind(nested.kind)
+              ? setElementObjectProblem(nested)
+              : "a value of another kind";
+          if (problem !== null) return `${path()}.items[${index}] is not a set member: ${problem}.`;
+        }
+        // EVIDENCE: validation: the member is a finite scalar or passed setElementObjectProblem above.
+        const key = setMemberKey(nested as SerializableSetElement);
+        if (seen.has(key)) return `${path()}.items contains a duplicate member.`;
+        seen.add(key);
       }
       continue;
     }
@@ -634,15 +705,61 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
   return null;
 }
 
-function assertSerializableScalar(
+function assertSetElement(
   value: SerializableRuntimeValue,
-): asserts value is SerializableRuntimeScalar {
-  if (value !== null && typeof value === "object") {
+): asserts value is SerializableSetElement {
+  if (!isSetElement(value)) {
     throw new SerializableValueError(
       "setElement",
-      "Sets may contain only string, boolean, integer, number, or null values.",
+      "Sets may contain only string, boolean, integer, number, date, time, datetime, timestamp, or null values.",
     );
   }
+}
+
+const TEMPORAL_KEYS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["date", ["kind", "year", "month", "day"]],
+  ["time", ["kind", "hour", "minute", "second", "millisecond"]],
+  ["datetime", ["kind", "year", "month", "day", "hour", "minute", "second", "millisecond"]],
+  ["timestamp", ["kind", "epochMilliseconds"]],
+]);
+
+/**
+ * Why a duration, date, time, datetime, or timestamp record is malformed, as a phrase such as "a malformed date", or
+ * `null` when it is valid. Other kinds are reported as not set members.
+ */
+function setElementObjectProblem(value: Record<string, unknown>): string | null {
+  if (value.kind === "duration")
+    return hasOnlyKeys(value, ["kind", "milliseconds"]) &&
+      typeof value.milliseconds === "number" &&
+      Number.isFinite(value.milliseconds)
+      ? null
+      : "a malformed duration";
+  const keys = typeof value.kind === "string" ? TEMPORAL_KEYS.get(value.kind) : undefined;
+  if (keys === undefined)
+    return typeof value.kind === "string" ? `a ${value.kind} value` : "a value without a kind";
+  if (
+    !hasOnlyKeys(value, keys) ||
+    keys.some((key) => key !== "kind" && typeof value[key] !== "number")
+  )
+    return `a malformed ${value.kind}`;
+  // Every field other than kind was just checked to be a number.
+  const field = (key: string): number => Number(value[key]);
+  const date = { year: field("year"), month: field("month"), day: field("day") };
+  const time = {
+    hour: field("hour"),
+    minute: field("minute"),
+    second: field("second"),
+    millisecond: field("millisecond"),
+  };
+  const valid =
+    value.kind === "date"
+      ? isValidDate(date)
+      : value.kind === "time"
+        ? isValidTime(time)
+        : value.kind === "datetime"
+          ? isValidDate(date) && isValidTime(time)
+          : isValidEpochMilliseconds(field("epochMilliseconds"));
+  return valid ? null : `a malformed ${value.kind}`;
 }
 
 function serializableCaptureError(failure: ExternalDataFailure): SerializableValueError {

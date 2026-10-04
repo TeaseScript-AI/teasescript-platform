@@ -15,8 +15,8 @@ accept syntax, architecture, or implementation details.
 
 - **Source pipeline:** lexer, parser, immutable AST, source spans, diagnostics, semantic validation, type checking,
   and compilation for the implemented TeaseScript subset.
-- **Language foundation:** values including elapsed durations, variables, assignments including `+=`/`-=`, speakers,
-  output, collections, expressions, interpolated
+- **Language foundation:** values including elapsed durations and date, time, datetime, and timestamp values,
+  variables, assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated
   single-line and block strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion,
   control flow, deterministic random, rounding, and `min`/`max` built-ins, text operations and list `join`, the
   `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `sort`/`shuffle` and set operations, and top-level
@@ -53,8 +53,8 @@ contracts and boundaries.
 
 ## Current major exclusions and blockers
 
-- complete V30 coverage, complete static typing, measurement units, date/time values, calendar durations,
-  generalized duration ranges, and locale-aware duration presentation;
+- complete V30 coverage, complete static typing, measurement units, the current-time getters, calendar durations,
+  typed date and time input, generalized duration ranges, and locale-aware duration presentation;
 - production cross-origin Player/host integration, richer editor support, and final browser acceptance coverage;
 - pending-action capabilities beyond the implemented timer, interaction, pacing, and media families; browser video
   playback, the layered scene, camera lifecycle, and custom views;

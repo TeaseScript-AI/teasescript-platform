@@ -1,3 +1,4 @@
+import { temporalContextProblem, type TemporalContext } from "../temporal.js";
 import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../color.js";
 import { isIntegerAnswerText, isValidInteractionPrefill } from "../interaction-answers.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
@@ -1128,7 +1129,12 @@ function validInteractionResultForInstruction(
     if (instruction.expectedResult !== "choice" || !isInteractionChoiceValue(result)) return false;
     const options =
       "preparedUi" in instruction
-        ? preparedChoiceOptions(instruction.preparedUi, snapshot.temporaries, instruction.span)
+        ? preparedChoiceOptions(
+            instruction.preparedUi,
+            snapshot.temporaries,
+            snapshotTemporalContext(snapshot),
+            instruction.span,
+          )
         : instruction.ui.kind === "choice"
           ? instruction.ui.options
           : undefined;
@@ -1159,9 +1165,11 @@ function validInteractionResultForInstruction(
 function preparedChoiceOptions(
   prepared: import("../plan/model.js").PreparedInteractionUiPayload,
   temporaries: unknown,
+  context: TemporalContext | undefined,
   span: PlanSourceLocation,
 ): readonly InteractionChoiceOption[] | undefined {
-  if (prepared.kind !== "choice" || !Array.isArray(temporaries)) return undefined;
+  if (prepared.kind !== "choice" || !Array.isArray(temporaries) || context === undefined)
+    return undefined;
   const raw = runtimeTemporaryValue(temporaries, prepared.optionsTemporary);
   if (
     validateCapturedSerializableValue(raw) !== null ||
@@ -1173,7 +1181,12 @@ function preparedChoiceOptions(
     return undefined;
   try {
     // EVIDENCE: validation: validateCapturedSerializableValue accepted the captured list and its items above.
-    return expandChoiceOptions(raw.items as SerializableRuntimeValue[], prepared.values, span);
+    return expandChoiceOptions(
+      raw.items as SerializableRuntimeValue[],
+      prepared.values,
+      context,
+      span,
+    );
   } catch (error) {
     if (error instanceof RuntimeFault) return undefined;
     throw error;
@@ -1358,8 +1371,17 @@ function validPreparedInteractionAction(
     prepared,
     action.ui,
     snapshot.temporaries,
+    snapshotTemporalContext(snapshot),
     instruction.span,
   );
+}
+
+/** The snapshot's temporal context when it is valid: choice texts are derived from it. */
+function snapshotTemporalContext(snapshot: Record<string, unknown>): TemporalContext | undefined {
+  // EVIDENCE: validation: temporalContextProblem accepted the snapshot's context.
+  return temporalContextProblem(snapshot.temporalContext) === null
+    ? (snapshot.temporalContext as TemporalContext)
+    : undefined;
 }
 
 // oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: boundary: a temporary payload remains unvalidated while snapshot consistency is checked.
@@ -1374,6 +1396,7 @@ function preparedInteractionUiMatchesAction(
   prepared: import("../plan/model.js").PreparedInteractionUiPayload,
   actual: unknown,
   temporaries: readonly unknown[],
+  context: TemporalContext | undefined,
   span: PlanSourceLocation,
 ): boolean {
   if (
@@ -1406,7 +1429,7 @@ function preparedInteractionUiMatchesAction(
       actual.integer === (prepared.kind === "number" ? prepared.integer : undefined)
     );
   }
-  const options = preparedChoiceOptions(prepared, temporaries, span);
+  const options = preparedChoiceOptions(prepared, temporaries, context, span);
   return options !== undefined && choiceOptionsEqual(options, actual.options);
 }
 

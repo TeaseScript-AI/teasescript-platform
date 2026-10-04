@@ -105,6 +105,7 @@ export function registerTeaseScriptLanguage(): void {
         "date",
         "time",
         "datetime",
+        "timestamp",
         "duration",
         "list",
         "set",

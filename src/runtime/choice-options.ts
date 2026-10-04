@@ -7,10 +7,11 @@ import type {
   PreparedInteractionChoiceValue,
 } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
+import type { TemporalContext } from "../temporal.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import { getSerializableProperty, type SerializableRuntimeValue } from "./serializable-values.js";
-import { isDuration, isList, isObject, isSet } from "./value-predicates.js";
+import { isDuration, isList, isObject, isSet, isTemporal } from "./value-predicates.js";
 import { fieldText, isVisibleScalar, visibleText } from "./value-text.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
@@ -24,6 +25,7 @@ type SourceSpan = RichSourceSpan | PlanSourceLocation;
 export function expandChoiceOptions(
   options: readonly SerializableRuntimeValue[],
   values: readonly (PreparedInteractionChoiceValue | null)[],
+  context: TemporalContext,
   span: SourceSpan,
 ): readonly InteractionChoiceOption[] {
   const buttons: InteractionChoiceOption[] = [];
@@ -34,7 +36,7 @@ export function expandChoiceOptions(
         `A choice can show at most ${MAX_INTERACTION_OPTION_ENTRIES} buttons.`,
         span,
       );
-    buttons.push(choiceButton(option, value, span));
+    buttons.push(choiceButton(option, value, context, span));
   };
   options.forEach((option, index) => {
     const value = values[index] ?? null;
@@ -64,6 +66,7 @@ export function expandChoiceOptions(
 function choiceButton(
   option: SerializableRuntimeValue,
   value: PreparedInteractionChoiceValue | null,
+  context: TemporalContext,
   span: SourceSpan,
 ): InteractionChoiceOption {
   if (!isObject(option)) {
@@ -73,7 +76,7 @@ function choiceButton(
         "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
         span,
       );
-    return { text: visibleText(option, span), value: value ?? choiceValue(option) };
+    return { text: visibleText(option, span, context), value: value ?? choiceValue(option) };
   }
   if (
     option.properties.some(
@@ -84,7 +87,7 @@ function choiceButton(
     throw fault("TSR052", "Choice objects support value, text, and background only.", span);
   const textValue = getSerializableProperty(option, "text");
   if (textValue === undefined) throw fault("TSR052", "A choice object requires text.", span);
-  const text = fieldText(textValue, span);
+  const text = fieldText(textValue, span, context);
   const ownValue = getSerializableProperty(option, "value");
   if (ownValue !== undefined && value !== null)
     throw fault(
@@ -95,7 +98,7 @@ function choiceButton(
   if (ownValue !== undefined && !isVisibleScalar(ownValue))
     throw fault(
       "TSR052",
-      "A choice value must be text, a number, true, false, null, or a duration.",
+      "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
       span,
     );
   const background = getSerializableProperty(option, "background");
@@ -109,6 +112,7 @@ function choiceButton(
 /** A scalar that `isVisibleScalar` accepted, as a choice value. */
 function choiceValue(value: SerializableRuntimeValue): InteractionChoiceValue {
   if (isDuration(value)) return { kind: "duration", milliseconds: value.milliseconds };
+  if (isTemporal(value)) return { ...value };
   if (typeof value === "number") return Object.is(value, -0) ? 0 : value;
   if (typeof value === "string" || typeof value === "boolean" || value === null) return value;
   throw new Error("A choice value must be a visible scalar.");

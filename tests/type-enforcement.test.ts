@@ -495,10 +495,11 @@ test("an optional operand and a parenthesized method keep their checks", () => {
   assert.deepEqual(mismatches("let count = 1\nlet extra: integer? = 2\ncount += extra"), []);
 });
 
-test("a set holds only text, numbers, true or false, and null, and only objects and handles take properties", () => {
+test("a set holds only scalar and date and time values, and only objects and handles take properties", () => {
   for (const [source, text] of [
     ["let o = { x: 1 }\nlet s = set[o]", "o"],
     ["let d = 1 s\nlet s = set[d]", "d"],
+    ["let r = 1..=3\nlet s = set[r]", "r"],
     ["let s = set[]\nlet xs = [1]\ns.add(xs)", "xs"],
     ["let xs = [{ x: 1 }]\nlet s = xs.toSet()", "xs.toSet()"],
     ["let s = set[1]\nlet o = {}\nsay s.contains(o)", "o"],
@@ -507,7 +508,7 @@ test("a set holds only text, numbers, true or false, and null, and only objects 
     assert.deepEqual(codes(source), [["TSV006", text]], source);
   assert.equal(
     mismatches("let s = set[]\nlet xs = [1]\ns.add(xs)")[0]?.[1],
-    "A set holds only text, numbers, true or false, or null, so it cannot hold a list (integer[]).",
+    "A set holds only text, numbers, true or false, date and time values, or null, so it cannot hold a list (integer[]).",
   );
   // A set compares any value it can hold, and checks a value the compiler cannot know when the script runs.
   assert.deepEqual(

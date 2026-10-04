@@ -1,3 +1,11 @@
+import {
+  combinedDateAndTime,
+  hasTemporalMethod,
+  temporalBinary,
+  temporalConverted,
+  temporalMethod,
+  temporalProperty,
+} from "./temporal-operations.js";
 import { normalizeColor } from "../color.js";
 import type {
   AssignmentTargetPlan,
@@ -61,7 +69,6 @@ import {
   type SerializableRuntimeObject,
   type SerializableRuntimeRange,
   type SerializableRuntimeSet,
-  type SerializableRuntimeScalar,
   type SerializableRuntimeValue,
   type SerializableTimerHandle,
   type SerializableMediaHandle,
@@ -80,6 +87,7 @@ import {
   isRange,
   isSet,
   isSpeakerReference,
+  isTemporal,
   isTimerHandle,
   isMediaHandle,
 } from "./value-predicates.js";
@@ -123,10 +131,12 @@ import {
   describeConversionResult,
   isConversionName,
   isConversionResult,
+  isTemporalConversionResult,
   numberFromText,
   rounded,
   MIN_MAX_BUILTINS,
   ROUNDING_BUILTINS,
+  temporalTextProblem,
   withoutNegativeZero,
   type ConversionName,
   type ConversionResult,
@@ -779,6 +789,11 @@ export class Evaluator {
         throw fault("TSR016", unknownTextMemberMessage(method, "method"), span);
       return;
     }
+    if (isTemporal(receiver)) {
+      if (!hasTemporalMethod(receiver, method))
+        throw fault("TSR016", `Unsupported method '${method}'.`, span);
+      return;
+    }
     if (!isList(receiver) && !isSet(receiver)) {
       throw fault("TSR016", missingMemberMessage(receiver, method, "method"), span);
     }
@@ -870,12 +885,25 @@ export class Evaluator {
     return speaker;
   }
 
+  /** A speaker's name or title as shown text, like any other shown value, or `null` when it is not set. */
+  #speakerText(speaker: RuntimeSpeakerSnapshot, name: string, span: SourceSpan): string | null {
+    const value = speaker.properties.find((property) => property.name === name)?.value;
+    if (
+      value === undefined ||
+      value === null ||
+      typeof value === "string" ||
+      !isVisibleScalar(value)
+    )
+      return optionalSpeakerString(speaker, name, span);
+    return visibleText(value, span, this.snapshot.temporalContext);
+  }
+
   public outputSpeaker(
     speaker: RuntimeSpeakerSnapshot,
     span: SourceSpan,
     events: InterpreterEvent[],
   ): OutputSpeaker {
-    const explicit = optionalSpeakerString(speaker, "displayName", span);
+    const explicit = this.#speakerText(speaker, "displayName", span);
     let displayName: string;
     let fallback = false;
     if (explicit !== null) {
@@ -889,10 +917,9 @@ export class Evaluator {
       displayName = explicit;
     } else {
       const derived = [
-        optionalSpeakerString(speaker, "title", span) ??
-          optionalSpeakerString(speaker, "shortTitle", span),
-        optionalSpeakerString(speaker, "firstName", span),
-        optionalSpeakerString(speaker, "lastName", span),
+        this.#speakerText(speaker, "title", span) ?? this.#speakerText(speaker, "shortTitle", span),
+        this.#speakerText(speaker, "firstName", span),
+        this.#speakerText(speaker, "lastName", span),
       ]
         .filter((part): part is string => part !== null && part.length > 0)
         .join(" ");
@@ -926,7 +953,7 @@ export class Evaluator {
 
   /** `${...}` text. A list selects one element with the session RNG, again at every evaluation. */
   public interpolationText(value: SerializableRuntimeValue, span: SourceSpan): string {
-    if (!isList(value)) return visibleText(value, span);
+    if (!isList(value)) return visibleText(value, span, this.snapshot.temporalContext);
     if (value.items.length === 0)
       throw fault(
         "TSR019",
@@ -936,16 +963,16 @@ export class Evaluator {
     if (!value.items.every(isVisibleScalar))
       throw fault(
         "TSR021",
-        "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
+        "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
         span,
       );
-    return visibleText(this.#randomItem(value.items, span), span);
+    return visibleText(this.#randomItem(value.items, span), span, this.snapshot.temporalContext);
   }
 
   /** `say` text. A value other than a scalar shows in code-like notation, escaped so that markup leaves it literal. */
   public sayText(value: SerializableRuntimeValue, span: SourceSpan): string {
     return isVisibleScalar(value)
-      ? visibleText(value, span)
+      ? visibleText(value, span, this.snapshot.temporalContext)
       : escapeMarkup(valueNotation(value, span, (handle) => this.#handleNotation(handle, span)));
   }
 
@@ -986,10 +1013,10 @@ export class Evaluator {
     if (!isVisibleScalar(item))
       throw fault(
         "TSR021",
-        "join() can only join text, numbers, true or false, null, and durations. Select an element or a property first.",
+        "join() can only join text, numbers, true or false, null, durations, and date and time values. Select an element or a property first.",
         span,
       );
-    return visibleText(item, span);
+    return visibleText(item, span, this.snapshot.temporalContext);
   }
 
   #binary(
@@ -1014,6 +1041,14 @@ export class Evaluator {
         (right.inclusive ? left <= right.end : left < right.end)
       );
     }
+    const temporal = temporalBinary(
+      expression.operator,
+      left,
+      right,
+      this.snapshot.temporalContext,
+      expression.span,
+    );
+    if (temporal !== undefined) return temporal;
     if (isDuration(left) || isDuration(right)) return this.#durationBinary(expression, left, right);
     if (["<", "<=", ">", ">="].includes(expression.operator)) {
       if (
@@ -1187,6 +1222,16 @@ export class Evaluator {
           expression.span,
         );
       return callStringMethod(receiver, expression.callee.name, positional, expression.span);
+    }
+    if (expression.callee.kind === "property" && isTemporal(receiver)) {
+      return temporalMethod(
+        receiver,
+        expression.callee.name,
+        positional,
+        named,
+        this.snapshot.temporalContext,
+        expression.span,
+      );
     }
     if (expression.callee.kind === "property") {
       return this.#callCollection(
@@ -1642,13 +1687,15 @@ export class Evaluator {
     span: SourceSpan,
   ): SerializableRuntimeValue {
     const extra = Object.keys(named).find((key) => key !== "default");
-    if (positional.length !== 1 || extra !== undefined)
+    const result = CONVERSION_RESULTS.get(name)!;
+    // A date and a time combine into one date and time (V30 §35).
+    const parts = result === "datetime" && positional.length === 2;
+    if ((positional.length !== 1 && !parts) || extra !== undefined)
       throw fault(
         "TSR028",
         `${name}(...) takes one value and an optional default:, such as ${name}(value, default: ...).`,
         span,
       );
-    const result = CONVERSION_RESULTS.get(name)!;
     const fallback = Object.hasOwn(named, "default") ? named.default : undefined;
     if (fallback !== undefined && !isConversionResult(result, fallback))
       throw fault(
@@ -1657,13 +1704,25 @@ export class Evaluator {
         span,
       );
     const value = positional[0]!;
-    const converted = this.#converted(result, value, span);
+    const converted = parts
+      ? combinedDateAndTime(value, positional[1]!)
+      : this.#converted(result, value, span);
     if (converted !== undefined) return converted;
     if (fallback !== undefined) return fallback;
+    if (parts)
+      throw fault(
+        "TSR058",
+        `toDateTime(date, time) combines a date and a time, not ${describeRuntimeValue(value)} and ${describeRuntimeValue(positional[1]!)}.`,
+        span,
+      );
     const shown = typeof value === "string" ? ` ${JSON.stringify(value)}` : "";
+    const reason =
+      typeof value === "string" && isTemporalConversionResult(result)
+        ? (temporalTextProblem(result, value) ?? "")
+        : "";
     throw fault(
       "TSR058",
-      `${name}(...) cannot convert ${describeRuntimeValue(value)}${shown} to ${describeConversionResult(result)}. Give a fallback with default: if the value may not convert.`,
+      `${name}(...) cannot convert ${describeRuntimeValue(value)}${shown} to ${describeConversionResult(result)}${reason}. Give a fallback with default: if the value may not convert.`,
       span,
     );
   }
@@ -1674,7 +1733,11 @@ export class Evaluator {
     value: SerializableRuntimeValue,
     span: SourceSpan,
   ): SerializableRuntimeValue | undefined {
-    if (result === "string") return isVisibleScalar(value) ? visibleText(value, span) : undefined;
+    if (isTemporalConversionResult(result)) return temporalConverted(result, value);
+    if (result === "string")
+      return isVisibleScalar(value)
+        ? visibleText(value, span, this.snapshot.temporalContext)
+        : undefined;
     if (result === "boolean")
       return typeof value === "boolean"
         ? value
@@ -1844,6 +1907,18 @@ export class Evaluator {
       );
       if (property === undefined)
         throw fault("TSR017", `Media handles have no property '${name}'.`, span);
+      return property;
+    }
+    if (isTemporal(value)) {
+      const property = temporalProperty(value, name);
+      if (property === undefined)
+        throw fault(
+          "TSR017",
+          value.kind === "timestamp"
+            ? `Timestamps have no property '${name}'; convert with toDateTime() to read local fields.`
+            : `This ${value.kind} has no property '${name}'.`,
+          span,
+        );
       return property;
     }
     if (isTimerHandle(value)) {
@@ -2018,7 +2093,8 @@ interface EvaluationFrame {
   epoch: number;
   text: string;
   set: SerializableRuntimeSet | null;
-  membership: Set<SerializableRuntimeScalar> | null;
+  /** The member keys of `set`, for duplicate checks while its elements are added. */
+  membership: Set<string> | null;
   positional: SerializableRuntimeValue[] | null;
   named: Record<string, SerializableRuntimeValue> | null;
 }

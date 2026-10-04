@@ -1,5 +1,6 @@
 import { resolveMessagePresentation } from "./message-presentation.js";
 import type { MessagePresentation } from "../message-presentation.js";
+import type { TemporalContext } from "../temporal.js";
 import type {
   DelayDisplay,
   DurationUnitPlan,
@@ -698,7 +699,12 @@ function executePlannedInstruction(
             ? null
             : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span);
       const materialized = prepared
-        ? materializeInteractionUi(instruction.preparedUi, snapshot.temporaries, instruction.span)
+        ? materializeInteractionUi(
+            instruction.preparedUi,
+            snapshot.temporaries,
+            snapshot.temporalContext,
+            instruction.span,
+          )
         : { ui: instruction.ui, stagedWrites: [] as const };
       const timeoutMs =
         prepared &&
@@ -838,6 +844,7 @@ interface MaterializedInteractionUi {
 function materializeInteractionUi(
   prepared: PreparedInteractionUiPayload,
   temporaries: RuntimeTemporarySnapshot[],
+  temporalContext: TemporalContext,
   span: SourceSpan,
 ): MaterializedInteractionUi {
   const stagedWrites: Array<{
@@ -852,7 +859,7 @@ function materializeInteractionUi(
   };
   const readText = (temporaryId: number): string => {
     const temporary = read(temporaryId);
-    const text = fieldText(temporary.value, span);
+    const text = fieldText(temporary.value, span, temporalContext);
     stagedWrites.push({ temporaryId: temporary.id, value: text });
     return text;
   };
@@ -901,7 +908,7 @@ function materializeInteractionUi(
     }
     ui = {
       kind: "choice",
-      options: expandChoiceOptions(source.value.items, prepared.values, span),
+      options: expandChoiceOptions(source.value.items, prepared.values, temporalContext, span),
       accessibleName: prepared.accessibleName,
     };
   }

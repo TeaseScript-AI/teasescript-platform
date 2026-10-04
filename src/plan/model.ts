@@ -1,5 +1,7 @@
+import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
+
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 36;
+export const INSTRUCTION_PLAN_VERSION = 37;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -418,9 +420,17 @@ export type InteractionAccessibleName =
       readonly kind: "localizedDefault";
       readonly key: "answer" | "number" | "chooseOption" | "continue";
     };
-/** A value a choice option can show and return: text, a finite number, a boolean, `null`, or a duration. */
+/** A value a choice option can show and return: a scalar, a duration, or a date or time value. */
 export type InteractionChoiceValue =
-  string | number | boolean | null | { readonly kind: "duration"; readonly milliseconds: number };
+  | string
+  | number
+  | boolean
+  | null
+  | { readonly kind: "duration"; readonly milliseconds: number }
+  | ({ readonly kind: "date" } & DateFields)
+  | ({ readonly kind: "time" } & TimeFields)
+  | ({ readonly kind: "datetime" } & DateTimeFields)
+  | { readonly kind: "timestamp"; readonly epochMilliseconds: number };
 /** One button. `value` is what `choose` returns for it; `text` is what the button shows. */
 export interface InteractionChoiceOption {
   readonly text: string;
@@ -610,6 +620,7 @@ export type TypePlanName =
   | "date"
   | "time"
   | "datetime"
+  | "timestamp"
   | "never"
   | "null"
   | "range"

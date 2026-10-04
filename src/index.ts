@@ -222,7 +222,18 @@ export {
   type SerializableRuntimeValue,
   type SerializableSpeakerReference,
   type SerializableMediaHandle,
+  type SerializableRuntimeDate,
+  type SerializableRuntimeDateTime,
+  type SerializableRuntimeTime,
+  type SerializableRuntimeTimestamp,
 } from "./runtime/serializable-values.js";
+export {
+  DEFAULT_TEMPORAL_CONTEXT,
+  type PresentationSettings,
+  type TemporalContext,
+  type ZoneRules,
+} from "./temporal.js";
+export { captureTemporalContext } from "./temporal-capture.js";
 export {
   combineSourceSpans,
   createSourcePosition,

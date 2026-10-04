@@ -266,6 +266,10 @@ export const BOOLEAN_TYPE = scalar("boolean");
 export const INTEGER_TYPE = scalar("integer");
 export const NUMBER_TYPE = scalar("number");
 export const DURATION_TYPE = scalar("duration");
+export const DATE_TYPE = scalar("date");
+export const TIME_TYPE = scalar("time");
+export const DATETIME_TYPE = scalar("datetime");
+export const TIMESTAMP_TYPE = scalar("timestamp");
 
 export function openType(): OpenType {
   return { kind: "open", resolved: null, resolvedAt: null, sawNull: false };
@@ -1341,6 +1345,7 @@ const SCALAR_DESCRIPTIONS: Readonly<Record<ScalarTypeName, string>> = {
   date: "a date",
   time: "a time",
   datetime: "a date and time",
+  timestamp: "a timestamp",
 };
 
 /** A plain-language description of a value of `type` for diagnostics. */
@@ -1376,7 +1381,8 @@ export function describeValue(type: StaticType): string {
 
 /**
  * The result type of arithmetic on known operand types, or `undefined` when the operator does not support them.
- * Integer arithmetic stays integer except `/`, which always gives a number (ADR 0021 rule 2.2).
+ * Integer arithmetic stays integer except `/`, which always gives a number (ADR 0021 rule 2.2). A duration is added to
+ * a timestamp or a date and time after it, not before it.
  */
 export function arithmeticType(
   operator: string,
@@ -1404,5 +1410,11 @@ export function arithmeticType(
   if (left.name === "duration" && numeric(right.name) && (operator === "*" || operator === "/"))
     return DURATION_TYPE;
   if (numeric(left.name) && right.name === "duration" && operator === "*") return DURATION_TYPE;
+  // A timestamp or a local date and time moves by a duration, and two of one kind differ by one (V30 §35).
+  if (left.name === "timestamp" || left.name === "datetime") {
+    if (right.name === "duration" && (operator === "+" || operator === "-"))
+      return scalar(left.name);
+    if (right.name === left.name && operator === "-") return DURATION_TYPE;
+  }
   return undefined;
 }

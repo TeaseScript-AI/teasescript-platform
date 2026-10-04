@@ -31,11 +31,12 @@ import {
   numberAnswerText,
 } from "./interaction-answers.js";
 import type { TypeCheckPlan } from "./plan/model.js";
-import { CONVERSION_RESULTS } from "./conversions.js";
+import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
 import {
   builtinCallProblems,
   COLLECTION_METHODS,
   collectionMethodProblems,
+  expressionLabel,
   memberProblems,
   type OperationProblem,
 } from "./operation-checks.js";
@@ -52,6 +53,8 @@ import {
   containsType,
   copyType,
   coversType,
+  DATE_TYPE,
+  DATETIME_TYPE,
   decidedType,
   describeValue,
   DURATION_TYPE,
@@ -83,6 +86,8 @@ import {
   resolved,
   settle,
   STRING_TYPE,
+  TIME_TYPE,
+  TIMESTAMP_TYPE,
   typeFromAnnotation,
   typeName,
   union,
@@ -1539,7 +1544,10 @@ class TypeChecker {
     context.returns.push({ type: this.#capture(statement.value), span: statement.value.span });
   }
 
-  /** The type an annotation means. A set holds only text, numbers, true or false, and null (ADR 0014). */
+  /**
+   * The type an annotation means. A set holds only text, numbers, true or false, date and time values, and null
+   * (ADR 0014, V30 §35).
+   */
   #annotationType(annotation: TypeAnnotation): StaticType {
     const pending: TypeAnnotation[] = [annotation];
     while (pending.length > 0) {
@@ -1556,7 +1564,7 @@ class TypeChecker {
           if (!members(element).every(isSetElement))
             this.#report(
               typeCode.invalidSetElement,
-              `A set holds only text, numbers, true or false, or null, so it cannot hold ${typeName(element)} values. Use a list instead, as in '${typeName({ kind: "list", element })}'.`,
+              `A set holds only text, numbers, true or false, date and time values, or null, so it cannot hold ${typeName(element)} values. Use a list instead, as in '${typeName({ kind: "list", element })}'.`,
               part.span,
             );
           break;
@@ -2268,7 +2276,9 @@ class TypeChecker {
         this.#operation(expression.operator, [left, right], expression, (a, b) =>
           (isNumeric(a) && isNumeric(b)) ||
           (isScalar(a, "string") && isScalar(b, "string")) ||
-          (isScalar(a, "duration") && isScalar(b, "duration"))
+          (isScalar(a, "duration") && isScalar(b, "duration")) ||
+          // Date and time values order only within one kind (V30 §35).
+          (isTemporal(a) && typeName(a) === typeName(b))
             ? BOOLEAN_TYPE
             : undefined,
         );
@@ -2534,6 +2544,15 @@ class TypeChecker {
         this.#keepFirstDiagnostics(before);
         return memberResults.length === 1 ? memberResults[0]! : union(memberResults);
       }
+      // The methods of date and time values take no arguments; a format follows the player's settings.
+      if (all.every(isTemporal) && expression.arguments.length > 0)
+        this.#report(
+          typeCode.argumentCount,
+          method.startsWith("format")
+            ? `${method}() takes no arguments: it shows the value in the player's own date and time format.`
+            : `${method}() takes no arguments.`,
+          callee.property.span,
+        );
       return all.length === 1 ? results[0]! : union(results.map((result) => result!));
     }
     const failing = resolved(all.find((_, index) => results[index] === undefined)!);
@@ -2710,6 +2729,10 @@ class TypeChecker {
       case "toNumber":
       case "toInteger":
       case "toBoolean":
+      case "toDate":
+      case "toTime":
+      case "toDateTime":
+      case "toTimestamp":
         this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
         return scalarType(CONVERSION_RESULTS.get(name)!);
       case "escapeMarkup":
@@ -2744,6 +2767,15 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const value = resolved(failing);
+    // A timestamp has no local fields until it is converted through the player's zone.
+    if (isScalar(value, "timestamp") && temporalFieldType("datetime", name) !== undefined) {
+      this.#report(
+        typeCode.invalidOperand,
+        `A timestamp has no property '${name}'. Convert it first, as in '${expressionLabel(expression.object) ?? "value"}.toDateTime().${name}'.`,
+        expression.property.span,
+      );
+      return UNKNOWN_TYPE;
+    }
     // Text operations and `join` name what to write instead (V30 §8).
     if (MEMBER_CHECKED_KINDS.has(value.kind) || (value.kind === "list" && name === "join")) {
       this.#reportProblems(
@@ -2877,7 +2909,7 @@ class TypeChecker {
             () =>
               this.#report(
                 typeCode.invalidInteractionChoice,
-                "A choice list element must be text, a number, true, false, null, a duration, or a choice object { value?, text, background? }.",
+                "A choice list element must be text, a number, true, false, null, a duration, a date or time value, or a choice object { value?, text, background? }.",
                 option.expression.span,
               ),
           );
@@ -2975,7 +3007,7 @@ class TypeChecker {
         this.#checkMembers(property.value, propertyType, isShowable, () =>
           this.#report(
             typeCode.invalidInteractionChoice,
-            "A choice value must be text, a number, true, false, null, or a duration.",
+            "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
             property.value.span,
           ),
         );
@@ -2999,7 +3031,7 @@ class TypeChecker {
         (member) =>
           this.#report(
             typeCode.unshowableValue,
-            `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, and durations, and selects one element of a list.`,
+            `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, and date and time values, and selects one element of a list.`,
             expression.span,
           ),
       );
@@ -3007,7 +3039,7 @@ class TypeChecker {
         this.#checkElements(expression, type, isShowable, () =>
           this.#report(
             typeCode.unshowableValue,
-            "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
+            "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
             expression.span,
           ),
         );
@@ -3023,7 +3055,7 @@ class TypeChecker {
       this.#checkMembers(element, this.#typeOf(element), isShowable, () =>
         this.#report(
           typeCode.unshowableValue,
-          "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
+          "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
           element.span,
         ),
       );
@@ -3426,15 +3458,15 @@ class TypeChecker {
   }
 
   /**
-   * Reports a value that a set cannot hold: a set holds only text, numbers, true or false, and null (V30 §16). A value
-   * of unknown type is checked when the script runs. Returns whether the value may be held.
+   * Reports a value that a set cannot hold: a set holds only text, numbers, true or false, date and time values, and
+   * null (V30 §16). A value of unknown type is checked when the script runs. Returns whether the value may be held.
    */
   #checkSetElement(expression: Expression, type: StaticType): boolean {
     const rejected = members(type).find((member) => isKnown(member) && !isSetElement(member));
     if (rejected === undefined) return true;
     this.#report(
       typeCode.invalidSetElement,
-      `A set holds only text, numbers, true or false, or null, so it cannot hold ${describeValue(rejected)}.`,
+      `A set holds only text, numbers, true or false, date and time values, or null, so it cannot hold ${describeValue(rejected)}.`,
       expression.span,
     );
     return false;
@@ -3822,6 +3854,10 @@ const OPERAND_KINDS: readonly StaticType[] = [
   STRING_TYPE,
   BOOLEAN_TYPE,
   DURATION_TYPE,
+  DATE_TYPE,
+  TIME_TYPE,
+  DATETIME_TYPE,
+  TIMESTAMP_TYPE,
 ];
 
 /** Whether a variable of this type holds a list or set whose element type no value decided yet. */
@@ -4150,7 +4186,8 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
     case "media":
       return handlePropertyType(value.kind, name, "read");
     case "scalar":
-      return isScalar(value, "string") && name === "length" ? INTEGER_TYPE : undefined;
+      if (isScalar(value, "string")) return name === "length" ? INTEGER_TYPE : undefined;
+      return temporalFieldType(value.name, name);
     case "range":
     case "null":
       return undefined;
@@ -4171,6 +4208,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     const member = TEXT_MEMBERS.get(method);
     return member?.parameters ? textResultType(member) : undefined;
   }
+  if (value.kind === "scalar") return temporalMethodType(value.name, method);
   if (value.kind !== "list" && value.kind !== "set") return undefined;
   switch (method) {
     case "join":
@@ -4200,6 +4238,72 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     case "removeLast":
       // The removed element leaves the list, so its type is a copy for the place that keeps it.
       return value.kind === "list" ? copyType(value.element) : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/** The weekday names a date's `weekday` field is, from Monday (V30 §35). */
+const WEEKDAY_TYPE = withValues(STRING_TYPE, [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+]);
+
+/** A date's ISO `weekdayNumber`: Monday is 1 and Sunday is 7. */
+const WEEKDAY_NUMBER_TYPE = withValues(INTEGER_TYPE, [1, 2, 3, 4, 5, 6, 7]);
+
+const TEMPORAL_KINDS: ReadonlySet<ScalarTypeName> = new Set([
+  "date",
+  "time",
+  "datetime",
+  "timestamp",
+]);
+
+/** Whether a value of this type is a date, time, date and time, or timestamp. */
+function isTemporal(type: StaticType): boolean {
+  const value = resolved(type);
+  return value.kind === "scalar" && TEMPORAL_KINDS.has(value.name);
+}
+
+/** The type of a read-only field of a date or time value (V30 §35); a timestamp has none. */
+function temporalFieldType(kind: ScalarTypeName, name: string): StaticType | undefined {
+  if (kind === "date" || kind === "datetime") {
+    if (name === "year" || name === "month" || name === "day") return INTEGER_TYPE;
+    if (name === "weekday") return WEEKDAY_TYPE;
+    if (name === "weekdayNumber") return WEEKDAY_NUMBER_TYPE;
+  }
+  if (
+    (kind === "time" || kind === "datetime") &&
+    ["hour", "minute", "second", "millisecond"].includes(name)
+  )
+    return INTEGER_TYPE;
+  return undefined;
+}
+
+/** The result of a method of a date or time value, or `undefined` when it has none (V30 §35). */
+function temporalMethodType(kind: ScalarTypeName, method: string): StaticType | undefined {
+  if (!TEMPORAL_KINDS.has(kind)) return undefined;
+  switch (method) {
+    case "toISO":
+      return STRING_TYPE;
+    case "formatDate":
+      return kind === "time" ? undefined : STRING_TYPE;
+    case "formatTime":
+      return kind === "date" ? undefined : STRING_TYPE;
+    case "formatDateTime":
+      return kind === "datetime" || kind === "timestamp" ? STRING_TYPE : undefined;
+    case "toTimestamp":
+      return kind === "datetime" ? TIMESTAMP_TYPE : undefined;
+    case "toDateTime":
+      return kind === "timestamp" ? DATETIME_TYPE : undefined;
+    case "toSeconds":
+    case "toMilliseconds":
+      return kind === "timestamp" ? INTEGER_TYPE : undefined;
     default:
       return undefined;
   }
@@ -4236,6 +4340,10 @@ function assignableProperty(
   if (member.kind === "speaker" || member.kind === "unknown" || member.kind === "open")
     return { type: null };
   if (member.kind === "object" && member.properties === null) return { type: null };
+  if (member.kind === "scalar" && temporalFieldType(member.name, name) !== undefined)
+    return {
+      problem: `Property '${name}' of ${describeValue(member)} cannot be assigned; date and time values do not change.`,
+    };
   // A problem with the receiver itself points at the receiver.
   if (["scalar", "list", "set", "range", "null"].includes(member.kind))
     return {
@@ -4264,7 +4372,7 @@ function isSetElement(type: StaticType): boolean {
   return (
     value.kind === "null" ||
     value.kind === "unknown" ||
-    isScalar(value, "string", "boolean", "integer", "number")
+    (value.kind === "scalar" && value.name !== "duration")
   );
 }
 
@@ -4472,19 +4580,6 @@ function unwrap(expression: Expression): Expression {
   return expression;
 }
 
-/** The source spelling of a variable or property path, such as `items` or `door.keys`. */
-function expressionLabel(expression: Expression): string | null {
-  const names: string[] = [];
-  let current = unwrap(expression);
-  while (current.kind === "propertyAccessExpression") {
-    names.push(current.property.name);
-    current = unwrap(current.object);
-  }
-  if (current.kind !== "identifier") return null;
-  names.push(current.name);
-  return names.reverse().join(".");
-}
-
 /** A slot already decided by its first value at `at`, so a later mismatch can name that line. */
 function decidedSlot(type: StaticType, at: SourceSpan): StaticType {
   // A place still undecided, such as one that so far took only null, is decided by its first other value instead.
@@ -4538,8 +4633,12 @@ function operatorMessage(
     return `'${operator}' needs a number or a duration, but this is ${describeValue(left!)}.`;
   const text = (type: StaticType): boolean => isScalar(type, "string");
   const duration = (type: StaticType): boolean => isScalar(type, "duration");
-  if (["<", "<=", ">", ">="].includes(operator))
+  if (["<", "<=", ">", ">="].includes(operator)) {
+    const temporal = isTemporal(left!) ? left! : isTemporal(right!) ? right! : undefined;
+    if (temporal !== undefined)
+      return `'${operator}' compares ${describeValue(temporal)} only with another ${temporalNoun(temporal)}, not with ${describeValue(temporal === left ? right! : left!)}.${expression.kind === "binaryExpression" ? temporalPairFix(expression, operator, left!, right!) : ""}`;
     return `'${operator}' compares two numbers, two texts, or two durations, but these are ${describeValue(left!)} and ${describeValue(right!)}.`;
+  }
   if (operator === "+" && (text(left!) || text(right!)))
     return `'+' does not join text. Put the values in one text instead, such as "\${first}\${second}".`;
   if ((duration(left!) && isNumeric(right!)) || (isNumeric(left!) && duration(right!))) {
@@ -4551,7 +4650,53 @@ function operatorMessage(
         : null;
     return `A duration and a number cannot be combined with '${operator}'. ${unitFix(number)}`;
   }
+  if (isScalar(left!, "time") || isScalar(right!, "time"))
+    return `'${operator}' cannot combine ${describeValue(left!)} and ${describeValue(right!)}: arithmetic on a time is not available. Combine it with a date first, as in 'toDateTime(date, time)'.`;
+  if (expression.kind === "binaryExpression" && (operator === "+" || operator === "-")) {
+    // A timestamp or a date and time moves by a duration written after it.
+    if (isScalar(left!, "timestamp", "datetime")) {
+      const subject = describeValue(left!);
+      const added =
+        operator === "+"
+          ? `'+' adds only a duration to ${subject}`
+          : `'-' subtracts only a duration or another ${temporalNoun(left!)} from ${subject}`;
+      const fix = isNumeric(right!)
+        ? ` ${unitFix(expression.right)}`
+        : operator === "-"
+          ? temporalPairFix(expression, operator, left!, right!)
+          : "";
+      return `${added}, not ${describeValue(right!)}.${fix}`;
+    }
+    if (operator === "+" && duration(left!) && isScalar(right!, "timestamp", "datetime"))
+      return `'+' cannot add ${describeValue(right!)} to a duration. Write it first, as in '${expressionLabel(expression.right) ?? "value"} + 1 h'.`;
+  }
   return `'${operator}' cannot combine ${describeValue(left!)} and ${describeValue(right!)}.`;
+}
+
+/** What a date or time value is called after "another", such as `date and time`. */
+function temporalNoun(type: StaticType): string {
+  return describeValue(type).replace(/^an? /u, "");
+}
+
+/**
+ * How to compare or subtract a date and time and a value of another kind: convert one of them. A date and time and a
+ * timestamp convert through the player's zone; a date or a time is compared with that part of a date and time.
+ */
+function temporalPairFix(
+  expression: Extract<Expression, { kind: "binaryExpression" }>,
+  operator: string,
+  left: StaticType,
+  right: StaticType,
+): string {
+  const local = isScalar(left, "datetime") ? 0 : isScalar(right, "datetime") ? 1 : -1;
+  if (local < 0) return "";
+  const other = local === 0 ? right : left;
+  const label = expressionLabel(local === 0 ? expression.left : expression.right) ?? "value";
+  if (isScalar(other, "timestamp")) return ` Convert one first, as in '${label}.toTimestamp()'.`;
+  if (operator === "-") return "";
+  if (isScalar(other, "date")) return ` Compare its date, as in 'toDate(${label})'.`;
+  if (isScalar(other, "time")) return ` Compare its time, as in 'toTime(${label})'.`;
+  return "";
 }
 
 /** Give a bare number a unit: `'5 s'` for a literal, else multiplication by one second. */
@@ -4566,7 +4711,8 @@ function unitFix(number: Expression | null): string {
 /** How to make an operand fit `+=`/`-=` on a place of `operand` type. */
 function operandFix(operand: StaticType, value: Expression): string {
   if (isNumeric(operand)) return " Use a number instead.";
-  if (isScalar(operand, "duration")) {
+  // A timestamp or a date and time moves by a duration as well.
+  if (isScalar(operand, "duration", "timestamp", "datetime")) {
     const literal = unwrap(value);
     return literal.kind === "numberLiteral"
       ? ` Give the number a unit, such as '${literal.raw} s'.`
@@ -4587,6 +4733,12 @@ function conversionFix(
   const kept = resolved(nonNullType(target));
   if (isScalar(kept, "integer") && isScalar(value, "number")) return `${ROUND_FIX}.`;
   if (isScalar(kept, "duration") && isNumeric(value)) return ` ${unitFix(expression)}`;
+  // Date and time values are written as ISO text and converted.
+  const conversion = [...CONVERSION_RESULTS].find(
+    ([, result]) => isTemporalConversionResult(result) && isScalar(kept, result),
+  );
+  if (conversion !== undefined && isScalar(value, "string"))
+    return ` Convert the text with ${conversion[0]}(...).`;
   if (isScalar(kept, "string") && (isNumeric(value) || isScalar(value, "boolean"))) {
     const label =
       expression === null ? null : (expressionLabel(expression) ?? literalText(expression));
@@ -4745,6 +4897,6 @@ function textResultType(member: TextMember): StaticType {
     : scalarType(member.result);
 }
 
-function scalarType(name: "string" | "integer" | "number" | "boolean"): StaticType {
+function scalarType(name: ScalarTypeName): StaticType {
   return { kind: "scalar", name };
 }
