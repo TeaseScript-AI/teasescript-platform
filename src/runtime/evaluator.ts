@@ -125,6 +125,7 @@ import {
   isConversionResult,
   numberFromText,
   rounded,
+  MIN_MAX_BUILTINS,
   ROUNDING_BUILTINS,
   withoutNegativeZero,
   type ConversionName,
@@ -1093,6 +1094,8 @@ export class Evaluator {
         return this.#conversionBuiltin(name, positional, named, expression.span);
       if (ROUNDING_BUILTINS.has(name))
         return this.#roundingBuiltin(name, positional, named, expression.span);
+      if (MIN_MAX_BUILTINS.has(name))
+        return this.#minMaxBuiltin(name, positional, named, expression.span);
       const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
       const builtin = Object.hasOwn(this.#builtins, name) ? this.#builtins[name] : undefined;
@@ -1680,6 +1683,41 @@ export class Evaluator {
     return number === undefined || result === "number"
       ? number
       : withoutNegativeZero(Math.trunc(number));
+  }
+
+  /** `min` or `max` of two or more values that are all numbers or all durations. */
+  #minMaxBuiltin(
+    name: string,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): SerializableRuntimeValue {
+    if (positional.length < 2 || Object.keys(named).length !== 0)
+      throw fault(
+        "TSR028",
+        `${name}(...) takes two or more numbers or durations, such as ${name}(20, total).`,
+        span,
+      );
+    const numbers = positional.every((value) => typeof value === "number");
+    if (!numbers && !positional.every(isDuration)) {
+      const other = positional.find((value) => typeof value !== "number" && !isDuration(value));
+      throw fault(
+        "TSR059",
+        other === undefined
+          ? `${name}(...) needs all numbers or all durations, not a mix of both.`
+          : `${name}(...) needs numbers or durations, not ${describeRuntimeValue(other)}.`,
+        span,
+      );
+    }
+    const pick = name === "min" ? Math.min : Math.max;
+    if (numbers)
+      // EVIDENCE: invariant: every argument was checked to be a number above.
+      return withoutNegativeZero(pick(...(positional as readonly number[])));
+    // EVIDENCE: invariant: every argument was checked to be a duration above.
+    const milliseconds = (positional as readonly SerializableRuntimeDuration[]).map(
+      (value) => value.milliseconds,
+    );
+    return { kind: "duration", milliseconds: withoutNegativeZero(pick(...milliseconds)) };
   }
 
   #roundingBuiltin(

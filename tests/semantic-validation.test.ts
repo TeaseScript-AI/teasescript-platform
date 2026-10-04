@@ -230,7 +230,7 @@ test("reports a declaration named after the set keyword as a protected name", ()
       [
         [
           "TSV001",
-          "Declaration 'set' conflicts with a protected TeaseScript name.",
+          "Declaration 'set' conflicts with a protected TeaseScript name. Choose another name, such as 'setValue'.",
           start,
           start + 3,
         ],
