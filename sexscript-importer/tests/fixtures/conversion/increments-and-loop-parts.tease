@@ -19,4 +19,18 @@ let stats = { score: 1 }
 // NOTE SX_SHARED_MAP_WRITE line 13: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 stats.score += 1
 say "Tally ${tally[3]} ${tally[0]}, score ${stats.score}"
+// A later loop in a nested block may declare the counter of an earlier loop again.
+let i = 0
+while i < 2 {
+  say "Warm up ${i}"
+  i += 1
+}
+say "Again?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  i = 0
+  while i < 3 {
+    say "Again ${i}"
+    i += 1
+  }
+}
 exit

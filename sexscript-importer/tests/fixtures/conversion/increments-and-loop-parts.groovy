@@ -12,3 +12,8 @@ tally[0]--
 def stats = [score: 1]
 stats.score++
 show("Tally ${tally[3]} ${tally[0]}, score ${stats.score}")
+// A later loop in a nested block may declare the counter of an earlier loop again.
+for (def i = 0; i < 2; i++) show("Warm up ${i}")
+if (getBoolean("Again?")) {
+	for (def i = 0; i < 3; i++) show("Again ${i}")
+}

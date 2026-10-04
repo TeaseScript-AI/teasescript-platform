@@ -1218,13 +1218,21 @@ function lowerStatementList(
 }
 
 /**
- * Groovy scoped the counter a C-style `for` declares to its loop, so consecutive loops declare `i` again; a TeaseScript
- * block declares a name once, so a later loop of the block assigns the counter instead.
+ * Groovy scoped the counter a C-style `for` declares to its loop, so later loops declare `i` again, also in a nested
+ * block; TeaseScript declares a visible name once, so a later loop assigns the counter instead. A function has its own
+ * names.
  */
-function withReusedLoopCounters(statements: IrStatement[]): IrStatement[] {
-  const counters = new Set<string>();
+function withReusedLoopCounters(
+  statements: IrStatement[],
+  visible: ReadonlySet<string> = new Set(),
+): IrStatement[] {
+  const counters = new Set(visible);
   return statements.map((statement): IrStatement => {
-    if (statement.kind !== "let" || statement.loopCounter !== true) return statement;
+    if (statement.kind !== "let" || statement.loopCounter !== true) {
+      return counters.size === 0
+        ? statement
+        : withNestedStatements(statement, (body) => withReusedLoopCounters(body, counters));
+    }
     if (!counters.has(statement.name)) {
       counters.add(statement.name);
       return statement;
@@ -1237,6 +1245,29 @@ function withReusedLoopCounters(statements: IrStatement[]): IrStatement[] {
       span: statement.span,
     };
   });
+}
+
+/** The statement with each block it contains, other than a function body, mapped by `map`. */
+function withNestedStatements(
+  statement: IrStatement,
+  map: (body: IrStatement[]) => IrStatement[],
+): IrStatement {
+  switch (statement.kind) {
+    case "if":
+      return { ...statement, then: map(statement.then), else: map(statement.else) };
+    case "while":
+    case "repeat":
+    case "for":
+      return { ...statement, body: map(statement.body) };
+    case "switch":
+      return {
+        ...statement,
+        cases: statement.cases.map((item) => ({ ...item, body: map(item.body) })),
+        default: map(statement.default),
+      };
+    default:
+      return statement;
+  }
 }
 
 /**
