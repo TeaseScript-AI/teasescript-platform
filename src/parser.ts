@@ -14,8 +14,10 @@ import type {
   ForStatement,
   FunctionDeclaration,
   FunctionParameter,
+  GotoStatement,
   Identifier,
   IfStatement,
+  LabelStatement,
   LetStatement,
   NamedArgument,
   ObjectLiteral,
@@ -128,6 +130,7 @@ const parserDiagnosticCode = {
   expectedStorageKey: "TSP036",
   symbolicOperator: "TSP037",
   invalidSwitchForm: "TSP038",
+  expectedLabelName: "TSP039",
 } as const;
 
 const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
@@ -242,6 +245,12 @@ class Parser {
     }
     if (this.#checkIdentifier("switch")) {
       return yield* parseChild(this.#parseSwitchStatement());
+    }
+    if (this.#checkIdentifier("label") || this.#checkIdentifier("goto")) {
+      return this.#parseLabelOrGotoStatement();
+    }
+    if (this.#checkIdentifier("end")) {
+      return Object.freeze({ kind: "endStatement", span: copySpan(this.#advance().span) });
     }
     if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
       const parts = yield* parseChild(this.#parseMediaParts());
@@ -705,6 +714,23 @@ class Parser {
     speculative.#current = this.#current;
     speculative.#advance();
     return speculative.#isSayStatementBoundary();
+  }
+
+  #parseLabelOrGotoStatement(): LabelStatement | GotoStatement | null {
+    const keyword = this.#advance();
+    if (!this.#check(TokenKind.Identifier)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedLabelName,
+        `Expected a label name after '${keyword.lexeme}'.`,
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const name = this.#identifier(this.#advance());
+    const span = spanFrom(keyword.span, name.span);
+    return keyword.lexeme === "label"
+      ? Object.freeze({ kind: "labelStatement", name, span })
+      : Object.freeze({ kind: "gotoStatement", label: name, span });
   }
 
   #parseExitStatement(): Statement {

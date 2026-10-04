@@ -78,7 +78,22 @@ export function compileProject(
     inventory.diagnostics.length === 0 &&
     files.every((file) => file.typeChecks !== null && !hasErrors(file.result.diagnostics))
   ) {
-    plan = lowerProject(files);
+    if (files.some((file) => file.reachesExit)) {
+      plan = lowerProject(files);
+    } else {
+      const main = files[0]!.result;
+      const noExit = createDiagnostic(
+        DiagnosticSeverity.Error,
+        "TSV053",
+        "The script never reaches exit, so the session has no end. Add exit where the session should finish.",
+        main.program.statements.at(-1)?.span ?? main.program.span,
+      );
+      files[0]!.result = Object.freeze({
+        ...main,
+        semanticDiagnostics: Object.freeze([...main.semanticDiagnostics, noExit]),
+        diagnostics: Object.freeze([...main.diagnostics, noExit]),
+      });
+    }
   }
   const results = files.map((file) => file.result);
   return Object.freeze({
@@ -97,6 +112,7 @@ interface CompiledProjectFile {
   result: ProjectFileCompilation;
   /** `null` when the file has no valid program to lower. */
   readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> | null;
+  readonly reachesExit: boolean;
   readonly parsed: ReturnType<typeof parse> | null;
 }
 
@@ -158,7 +174,12 @@ function compileFile(path: string, source: string, options: CompileOptions): Com
     parsed = parse(source);
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
-    return { result: stackExhaustionResult(path, source, null), typeChecks: null, parsed: null };
+    return {
+      result: stackExhaustionResult(path, source, null),
+      typeChecks: null,
+      reachesExit: false,
+      parsed: null,
+    };
   }
   try {
     return checkParsedFile(path, parsed, options);
@@ -167,6 +188,7 @@ function compileFile(path: string, source: string, options: CompileOptions): Com
     return {
       result: stackExhaustionResult(path, source, parsed.program, parsed.diagnostics),
       typeChecks: null,
+      reachesExit: false,
       parsed,
     };
   }
@@ -198,6 +220,7 @@ function checkParsedFile(
       diagnostics: Object.freeze([...parserDiagnostics, ...semanticDiagnostics]),
     }),
     typeChecks: types?.runtimeChecks ?? null,
+    reachesExit: types?.reachesExit ?? false,
     parsed,
   };
 }
@@ -235,11 +258,18 @@ function lowerProject(files: CompiledProjectFile[]): InstructionPlan | null {
     return null;
   }
   const file = files[failure.file]!;
-  file.result = Object.freeze({
-    ...file.result,
-    diagnostics: Object.freeze([...file.result.diagnostics, failure.diagnostic]),
-  });
+  file.result = withDiagnostic(file.result, failure.diagnostic);
   return null;
+}
+
+function withDiagnostic(
+  result: ProjectFileCompilation,
+  diagnostic: Diagnostic,
+): ProjectFileCompilation {
+  return Object.freeze({
+    ...result,
+    diagnostics: Object.freeze([...result.diagnostics, diagnostic]),
+  });
 }
 
 function stackExhaustionResult(

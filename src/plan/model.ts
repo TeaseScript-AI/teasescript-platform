@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 43;
+export const INSTRUCTION_PLAN_VERSION = 44;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -39,9 +39,19 @@ export interface PlanFile {
   readonly path: string;
   readonly sourceSpan: PlanSourceLocation;
   readonly startInstruction: number;
-  /** End of the root region; the file's functions and handlers follow up to {@link endInstruction}. */
+  /**
+   * End of the root region, whose last instruction is the `end` that the compiler adds after the file's statements;
+   * the file's functions and handlers follow up to {@link endInstruction}.
+   */
   readonly rootEndInstruction: number;
   readonly endInstruction: number;
+  /** The labels of the file's outer scope, in source order, each at the root instruction where it stands. */
+  readonly labels: readonly PlanLabel[];
+}
+
+export interface PlanLabel {
+  readonly name: string;
+  readonly instruction: number;
 }
 
 export interface CompiledFunctionParameter {
@@ -110,6 +120,8 @@ export type Instruction =
   | StorageWriteInstruction
   | PlayMediaInstruction
   | InteractionInstruction
+  | GotoInstruction
+  | EndInstruction
   | ExitInstruction;
 
 interface InstructionBase {
@@ -567,6 +579,20 @@ export interface ExitInstruction extends InstructionBase {
   readonly kind: "exit";
 }
 
+/**
+ * `goto label`: leaves the current function, handler, loop, and block, abandons an interrupted action, and continues at
+ * `target`, a label of the same file's root region.
+ */
+export interface GotoInstruction extends InstructionBase {
+  readonly kind: "goto";
+  readonly target: number;
+}
+
+/** `end`, and the end the compiler adds after the last statement of a file's root region. */
+export interface EndInstruction extends InstructionBase {
+  readonly kind: "end";
+}
+
 export interface PlannedProperty {
   readonly name: string;
   readonly value: ExpressionPlan;
@@ -787,11 +813,6 @@ export interface RangeExpressionPlan extends ExpressionPlanBase {
   readonly start: ExpressionPlan;
   readonly end: ExpressionPlan;
   readonly inclusive: boolean;
-}
-
-/** End of the root region of `main.tease`, where a session that reaches it without `exit` completes. */
-export function mainRootEnd(plan: InstructionPlan): number {
-  return plan.files[0]!.rootEndInstruction;
 }
 
 /** The span of `main.tease`: the location of a plan-level fact that belongs to no single instruction. */

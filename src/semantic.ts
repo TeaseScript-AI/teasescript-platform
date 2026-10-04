@@ -125,6 +125,7 @@ const semanticCode = {
   invalidStorageKey: "TSV038",
   invalidListIndex: "TSV045",
   visibleOverflow: "TSV050",
+  invalidLabel: "TSV051",
 } as const;
 
 const OVERFLOW_MESSAGES = {
@@ -238,6 +239,25 @@ class SemanticValidator {
       }
     }
     for (const statement of program.statements) {
+      if (statement.kind !== "labelStatement") continue;
+      const name = statement.name.name;
+      if (this.#protectedNames.has(name)) {
+        this.#report(
+          semanticCode.duplicateDeclaration,
+          `Label '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Label'.`,
+          statement.name.span,
+        );
+      } else if (this.#labels.has(name)) {
+        this.#report(
+          semanticCode.invalidLabel,
+          `This file already has a label '${name}'. Give each label in a file its own name.`,
+          statement.name.span,
+        );
+      } else {
+        this.#labels.add(name);
+      }
+    }
+    for (const statement of program.statements) {
       if (statement.kind !== "functionDeclaration") {
         runCompileTask(this.#validateStatement(statement, this.#root, 0));
       }
@@ -282,6 +302,9 @@ class SemanticValidator {
   }
 
   #handlerDepth = 0;
+
+  /** The labels of the file, which stand only in its outer scope. */
+  readonly #labels = new Set<string>();
 
   #handlerOwner: "timer" | "media" = "timer";
 
@@ -924,6 +947,25 @@ class SemanticValidator {
         }
         return;
       case "exitStatement":
+      case "endStatement":
+        return;
+      case "labelStatement":
+        if (scope !== this.#root || this.#functionDepth > 0) {
+          this.#report(
+            semanticCode.invalidLabel,
+            `A label stands only in the outer level of a file, not inside a block, loop, function, or handler. Move 'label ${statement.name.name}' out of the block; a goto may still jump to it from anywhere in the file.`,
+            statement.span,
+          );
+        }
+        return;
+      case "gotoStatement":
+        if (!this.#labels.has(statement.label.name)) {
+          this.#report(
+            semanticCode.invalidLabel,
+            `This file has no label '${statement.label.name}'. Add 'label ${statement.label.name}' in the outer level of the file.`,
+            statement.label.span,
+          );
+        }
         return;
     }
   }

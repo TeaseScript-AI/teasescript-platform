@@ -19,6 +19,9 @@ export type Statement =
   | SaveStatement
   | DeleteStatement
   | ExitStatement
+  | EndStatement
+  | LabelStatement
+  | GotoStatement
   | LetStatement
   | AssignmentStatement
   | IfStatement
@@ -227,6 +230,26 @@ export interface LoadExpression {
 
 export interface ExitStatement {
   readonly kind: "exitStatement";
+  readonly span: SourceSpan;
+}
+
+/** `end`: ends the current file and returns to the file that called it (ADR 0022). */
+export interface EndStatement {
+  readonly kind: "endStatement";
+  readonly span: SourceSpan;
+}
+
+/** `label name`, a `goto` destination in its file's outer scope. */
+export interface LabelStatement {
+  readonly kind: "labelStatement";
+  readonly name: Identifier;
+  readonly span: SourceSpan;
+}
+
+/** `goto name`: continues at a label of the same file. */
+export interface GotoStatement {
+  readonly kind: "gotoStatement";
+  readonly label: Identifier;
   readonly span: SourceSpan;
 }
 
