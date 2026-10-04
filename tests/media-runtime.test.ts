@@ -1761,14 +1761,14 @@ test("a late observation across silent repeat passes equals observing every pass
   // Pass ends without in-range cues are skipped arithmetically during catch-up (docs/RUNTIME.md). The oracle observes
   // in 5-millisecond steps, shorter than every pass here, so it commits each pass end separately.
   const scenarios = [
-    'let m = playAudio(file: "a", async: true, endAt: 5.1 ms, repeat: true)\nwait 997 ms\nsay "${m.elapsed} ${m.position}"',
-    'let m = playAudio(file: "a", async: true, endAt: 6.3 ms, repeat: 150 times) {\n  finish { say "done" }\n}\nwait 1000 ms\nsay "${m.state} ${m.elapsed}"',
-    'let m = playAudio(file: "a", async: true, startAt: 0.05 ms, endAt: 6.3 ms, repeat: 777.7 ms) {\n  finish { say "done ${m.position}" }\n}\nwait 1000 ms',
-    'let m = playAudio(file: "a", async: true, startAt: 2 ms, endAt: 9.3 ms, repeat: true) {\n  at 1 ms { say "never" }\n}\nm.position = 2.4 ms\nwait 500 ms\nsay "${m.elapsed} ${m.position}"',
-    'let m = playAudio(file: "a", async: true, endAt: 7.5 ms, repeat: true)\nlet t = timer(duration: 97 ms, async: true, repeat: true) { say "${m.elapsed} ${m.position}" }\nwait 1000 ms',
+    'let m = playAudio(file: "a", async: true, endAt: 5.1 ms, repeat: true)\nwait 997 ms\nsay "${m.elapsed} ${m.position}"\nexit',
+    'let m = playAudio(file: "a", async: true, endAt: 6.3 ms, repeat: 150 times) {\n  finish { say "done" }\n}\nwait 1000 ms\nsay "${m.state} ${m.elapsed}"\nexit',
+    'let m = playAudio(file: "a", async: true, startAt: 0.05 ms, endAt: 6.3 ms, repeat: 777.7 ms) {\n  finish { say "done ${m.position}" }\n}\nwait 1000 ms\nexit',
+    'let m = playAudio(file: "a", async: true, startAt: 2 ms, endAt: 9.3 ms, repeat: true) {\n  at 1 ms { say "never" }\n}\nm.position = 2.4 ms\nwait 500 ms\nsay "${m.elapsed} ${m.position}"\nexit',
+    'let m = playAudio(file: "a", async: true, endAt: 7.5 ms, repeat: true)\nlet t = timer(duration: 97 ms, async: true, repeat: true) { say "${m.elapsed} ${m.position}" }\nwait 1000 ms\nexit',
     // A lower action ID at a pass end's exact time runs before that pass end commits, so it reads the arrival unwrapped.
-    'timer async 100 ms { say "${m.position}" }\nlet m = playAudio(file: "a", async: true, endAt: 10 ms, repeat: true)\nwait 150 ms\nsay "${m.elapsed}"',
-    'let m = playAudio(file: "a", async: true, endAt: 5.7 ms, repeat: true)\nlet n = playAudio(file: "b", async: true, endAt: 8.9 ms, repeat: 100 times)\nwait 1000 ms\nsay "${m.position} ${n.state} ${n.elapsed}"',
+    'timer async 100 ms { say "${m.position}" }\nlet m = playAudio(file: "a", async: true, endAt: 10 ms, repeat: true)\nwait 150 ms\nsay "${m.elapsed}"\nexit',
+    'let m = playAudio(file: "a", async: true, endAt: 5.7 ms, repeat: true)\nlet n = playAudio(file: "b", async: true, endAt: 8.9 ms, repeat: 100 times)\nwait 1000 ms\nsay "${m.position} ${n.state} ${n.elapsed}"\nexit',
   ];
   for (const source of scenarios) {
     const start = (): Session => {
@@ -1794,7 +1794,7 @@ test("a late observation across silent repeat passes equals observing every pass
 
 test("catch-up across 10^12 silent repeat passes finishes within the bound with on-time values", () => {
   const forever = new Session(
-    'let m = playAudio(file: "a", async: true, endAt: 1 ms, repeat: true)\nwait 1000000000 s\nsay "${m.elapsed == 1000000000 s}"',
+    'let m = playAudio(file: "a", async: true, endAt: 1 ms, repeat: true)\nwait 1000000000 s\nsay "${m.elapsed == 1000000000 s}"\nexit',
   )
     .load(1, 10)
     .atBounded(1e12, [1, 1e12]);
@@ -1802,7 +1802,7 @@ test("catch-up across 10^12 silent repeat passes finishes within the bound with 
   assert.equal(forever.media(1)?.passesCompleted, 1e12);
 
   const counted = new Session(
-    'let m = playAudio(file: "a", async: true, endAt: 1 ms, repeat: 1000000000000 times) {\n  finish { say "done ${m.elapsed == 1000000000 s}" }\n}\nwait 2000000000 s',
+    'let m = playAudio(file: "a", async: true, endAt: 1 ms, repeat: 1000000000000 times) {\n  finish { say "done ${m.elapsed == 1000000000 s}" }\n}\nwait 2000000000 s\nexit',
   )
     .load(1, 10)
     .atBounded(2e12, [1, 2e12]);
@@ -1811,7 +1811,7 @@ test("catch-up across 10^12 silent repeat passes finishes within the bound with 
   assert.equal(counted.media(1)?.passesCompleted, 1e12);
 
   const budget = new Session(
-    'let m = playAudio(file: "a", async: true, endAt: 1.5 ms, repeat: 1000000000.25 s) {\n  finish { say "done ${m.position}" }\n}\nwait 2000000000 s',
+    'let m = playAudio(file: "a", async: true, endAt: 1.5 ms, repeat: 1000000000.25 s) {\n  finish { say "done ${m.position}" }\n}\nwait 2000000000 s\nexit',
   )
     .load(1, 10)
     .atBounded(2e12, [1, 2e12]);

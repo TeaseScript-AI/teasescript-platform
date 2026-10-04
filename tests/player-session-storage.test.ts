@@ -464,7 +464,7 @@ test("Vue host's Continue resumes a restored ready session within the activating
     write: async () => {},
     clear: async () => {},
   });
-  const { plan } = compileSource('say "Resumed", instant');
+  const { plan } = compileSource('say "Resumed", instant\nexit');
   assert.ok(plan);
   host.prepareRestore(
     restorePlayerRuntimeSession({
