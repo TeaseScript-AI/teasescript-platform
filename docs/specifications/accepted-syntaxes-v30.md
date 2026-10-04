@@ -1153,8 +1153,12 @@ items.removeFirst()
 items.removeLast()
 items.clear()
 items.sort()
+items.shuffle()
 items.contains("map")
 items.join(", ")
+items.intersection(other)
+items.union(other)
+items.difference(other)
 ```
 
 `removeAt`, `removeFirst`, and `removeLast` return the removed element; the result may be ignored:
@@ -1312,9 +1316,32 @@ Runtime behavior:
 - `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
   raises the same runtime error as indexing.
 - `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`.
-- `add(value)`, `remove(value)`, and `clear()` return `null`. Set `remove(value)` of an absent value is a no-op: the
-  set stays unchanged and execution continues without an error or warning.
+- `add(value)`, `remove(value)`, `clear()`, `sort()`, and `shuffle()` return `null`. Set `remove(value)` of an absent
+  value is a no-op: the set stays unchanged and execution continues without an error or warning.
 - Mutating methods change the existing list.
+- `sort()` orders a list in place, ascending and stable. Its elements must all be numbers (integers and numbers
+  together), all text, or all durations; text is ordered by Unicode code point, independently of locale, so `"B"`
+  sorts before `"a"`. Other or mixed elements are a compile error when the element type shows them, and a runtime error
+  otherwise.
+- `shuffle()` puts a list in a uniformly random order in place with the deterministic session RNG. The number of random
+  draws depends only on the length, so replay and checkpoint resume reproduce the order; a list of fewer than two
+  elements draws nothing.
+- Sets keep their insertion order and have no `sort()` or `shuffle()`; copy a set into a list with `toList()` first.
+- `intersection(other)`, `union(other)`, and `difference(other)` return a new collection of the receiver's kind and
+  leave both operands unchanged. `other` may be a list or a set. The result holds each element once, in the receiver's
+  order: `intersection` keeps the elements also in `other`, `difference` the elements not in `other`, and `union` all
+  elements followed by the new elements of `other` in its order. Elements compare with `==`. `union` holds the element
+  types of both, as a list literal of both would; `intersection` and `difference` keep the receiver's element type:
+
+```text
+let mine = ["collar", "gag", "cuffs"]
+let yours = ["cuffs", "collar", "rope"]
+
+mine.intersection(yours)  // ["collar", "cuffs"]
+mine.union(yours)         // ["collar", "gag", "cuffs", "rope"]
+mine.difference(yours)    // ["gag"]
+```
+
 - Recoverable index and empty-selection errors follow the runtime recovery rules described later in this document.
 
 ## 17. Return statements

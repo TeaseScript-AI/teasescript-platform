@@ -17,6 +17,7 @@ import {
   detachPreparedReferencesForMutation,
   freezePreparedReferenceListDescendants,
   preparePreparedReferencesForListRemoval,
+  preparePreparedReferencesForListReorder,
   preparedReferenceSpeakerPath,
   readPreparedReference,
   refreshPreparedReferenceFallbacks,
@@ -26,6 +27,12 @@ import {
 } from "./prepared-references.js";
 import { nextXorShift32, type RandomSource } from "./random.js";
 import { isVisibleScalar, quotedText, valueNotation, visibleText } from "./value-text.js";
+import {
+  SET_OPERATIONS,
+  setOperationArgumentMessage,
+  setOperationItems,
+  sortOrder,
+} from "./collection-operations.js";
 import { formatDuration } from "../duration.js";
 import {
   callStringMethod,
@@ -768,8 +775,11 @@ export class Evaluator {
       throw fault("TSR016", missingMemberMessage(receiver, method, "method"), span);
     }
     const supported = isSet(receiver)
-      ? new Set(["add", "remove", "clear", "contains", "toList"])
+      ? new Set(["add", "remove", "clear", "contains", "toList", ...SET_OPERATIONS])
       : new Set([
+          ...SET_OPERATIONS,
+          "sort",
+          "shuffle",
           "add",
           "remove",
           "removeAt",
@@ -1232,6 +1242,24 @@ export class Evaluator {
           case "toList":
             expect(0);
             return createCapturedSerializableList(receiver.items);
+          case "intersection":
+          case "union":
+          case "difference":
+            expect(1);
+            return createCapturedSerializableSet(
+              setOperationItems(
+                name,
+                receiver.items,
+                this.#setOperationArgument(name, positional[0]!, span),
+              ),
+            );
+          case "sort":
+          case "shuffle":
+            throw fault(
+              "TSR016",
+              `A set keeps its insertion order, so it has no ${name}(). Copy it into a list with toList() first.`,
+              span,
+            );
           default:
             throw fault("TSR016", `Unsupported method '${name}'.`, span);
         }
@@ -1287,6 +1315,27 @@ export class Evaluator {
         case "toSet":
           expect(0);
           return createCapturedSerializableSet(receiver.items);
+        case "sort":
+        case "shuffle":
+          expect(0);
+          this.#reorderList(
+            receiver,
+            name === "sort"
+              ? sortOrder(receiver.items, span)
+              : this.#shuffleOrder(receiver.items.length, span),
+          );
+          return null;
+        case "intersection":
+        case "union":
+        case "difference":
+          expect(1);
+          return createCapturedSerializableList(
+            setOperationItems(
+              name,
+              receiver.items,
+              this.#setOperationArgument(name, positional[0]!, span),
+            ),
+          );
         case "join": {
           checkTextArguments(LIST_JOIN, positional, span);
           // EVIDENCE: invariant: checkTextArguments proved that a given separator is text.
@@ -1669,6 +1718,40 @@ export class Evaluator {
   }
 
   /** Removes one list element, rebasing or freezing prepared references into the list, and returns it. */
+  /** The items of a set operation's argument, which may be a list or a set whatever the receiver is. */
+  #setOperationArgument(
+    name: string,
+    argument: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): readonly SerializableRuntimeValue[] {
+    if (!isList(argument) && !isSet(argument))
+      throw fault("TSR060", setOperationArgumentMessage(name, argument), span);
+    return argument.items;
+  }
+
+  /**
+   * A uniform random order of `length` items as their old indexes (Fisher–Yates), drawing `length - 1` numbers from the
+   * session RNG, or none for fewer than two items, so replay and checkpoint resume reproduce it.
+   */
+  #shuffleOrder(length: number, span: SourceSpan): number[] {
+    const order = Array.from({ length }, (_, index) => index);
+    for (let index = length - 1; index > 0; index -= 1) {
+      const other = Math.floor(this.#findRandom(span) * (index + 1));
+      [order[index], order[other]] = [order[other]!, order[index]!];
+    }
+    return order;
+  }
+
+  /** Puts the items in `order` (old indexes), moving prepared references into items along with them. */
+  #reorderList(list: SerializableRuntimeList, order: readonly number[]): void {
+    const newIndexOf: number[] = [];
+    for (const [index, old] of order.entries()) newIndexOf[old] = index;
+    const rebased = preparePreparedReferencesForListReorder(this.snapshot, list, newIndexOf);
+    const items = order.map((old) => list.items[old]!);
+    for (const [index, item] of items.entries()) list.items[index] = item;
+    refreshPreparedReferenceFallbacks(this.snapshot, rebased);
+  }
+
   #removeListItem(list: SerializableRuntimeList, index: number): SerializableRuntimeValue {
     const rebased = preparePreparedReferencesForListRemoval(this.snapshot, list, index);
     const removed = list.items.splice(index, 1)[0]!;

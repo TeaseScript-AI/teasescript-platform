@@ -348,3 +348,90 @@ function forUse(type: StaticType): StaticType {
   const value = resolved(nonNullType(type));
   return value.kind === "never" ? resolved(type) : value;
 }
+
+/** The list methods that reorder a list in place, and the set operations of lists and sets (V30 §16, ADR 0013). */
+export const COLLECTION_METHODS: ReadonlySet<string> = new Set([
+  "sort",
+  "shuffle",
+  "intersection",
+  "union",
+  "difference",
+]);
+
+/**
+ * Compile-time problems with `sort`, `shuffle`, `intersection`, `union`, or `difference` on a list or set: argument
+ * names and count, reordering a set, elements `sort` cannot order, and a set operation's argument that is neither a
+ * list nor a set.
+ */
+export function collectionMethodProblems(
+  name: string,
+  receiverType: StaticType & { readonly kind: "list" | "set" },
+  property: Identifier,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  const reorders = name === "sort" || name === "shuffle";
+  if (reorders && receiverType.kind === "set")
+    return [
+      {
+        kind: "invalidOperand",
+        message: `A set keeps its insertion order, so it has no ${name}(). Copy it into a list with toList() first.`,
+        span: property.span,
+      },
+    ];
+  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
+  if (named !== undefined)
+    return [
+      {
+        kind: "unknownNamedArgument",
+        message: `${name}() takes its arguments without names; remove '${named.name.name}:'.`,
+        span: named.name.span,
+      },
+    ];
+  const expected = reorders ? 0 : 1;
+  if (call.arguments.length !== expected)
+    return [
+      {
+        kind: "argumentCount",
+        message: `${name}() takes ${reorders ? "no arguments" : "1 argument (other)"}, received ${call.arguments.length}.`,
+        span: call.span,
+      },
+    ];
+  if (name === "sort") {
+    const message = sortProblem(receiverType.element);
+    return message === undefined ? [] : [{ kind: "invalidOperand", message, span: property.span }];
+  }
+  if (reorders) return [];
+  const argument = call.arguments[0]!.value;
+  const type = forUse(typeOf(argument));
+  return !isKnown(type) || type.kind === "list" || type.kind === "set"
+    ? []
+    : [
+        {
+          kind: "invalidOperand",
+          message: `${name}() needs a list or a set, not ${describeValue(type)}.`,
+          span: argument.span,
+        },
+      ];
+}
+
+/** Why elements of `element` type cannot be sorted, or `undefined` when they can or may. */
+function sortProblem(element: StaticType): string | undefined {
+  const candidates = members(element).map(resolved);
+  if (candidates.some((candidate) => !isKnown(candidate))) return undefined;
+  const kindOf = (candidate: StaticType): string | undefined =>
+    isScalar(candidate, "integer", "number")
+      ? "numbers"
+      : isScalar(candidate, "string")
+        ? "text"
+        : isScalar(candidate, "duration")
+          ? "durations"
+          : undefined;
+  const unsortable = candidates.find((candidate) => kindOf(candidate) === undefined);
+  if (unsortable !== undefined)
+    return `sort() sorts numbers, text, or durations, not ${describeValue(unsortable)}.`;
+  const kinds = new Set(candidates.map(kindOf));
+  return kinds.size > 1
+    ? `sort() needs elements of one kind, but this list may hold ${[...kinds].join(" and ")}.`
+    : undefined;
+}
