@@ -10,8 +10,8 @@ import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 
 // ADR 0021 rule 1.8 (#552): an operand whose type the compiler knows, and that the operation can never take, is a
-// compile error instead of a runtime failure. Each consumer is checked with the operand written as a literal, held in a
-// variable, returned by a function, and read as an element or a property, against valid and unknown controls.
+// compile error instead of a runtime failure. Together the groups exercise representative operand sources, valid and
+// unknown controls, and public compilation and execution.
 
 /** The error codes of a source with the source text each one marks. */
 function errors(source: string): [string, string][] {
