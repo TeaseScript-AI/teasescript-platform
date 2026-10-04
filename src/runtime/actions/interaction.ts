@@ -56,7 +56,7 @@ export function resolveInteractionCompletion(
     }
     return { ok: true, result: normalized, transcriptText: normalized };
   }
-  // `askInteger` accepts only whole-number notation within the safe integer range.
+  // `askInteger` accepts only whole-number notation within the safe integer range, on one line like `askNumber`.
   if (action.ui.kind === "number" && action.ui.integer === true) {
     if (
       payload.kind !== "submittedText" ||
@@ -69,7 +69,9 @@ export function resolveInteractionCompletion(
       };
     const submitted = payload.submittedText.trim();
     const parsed = Number(submitted);
-    return isIntegerAnswerText(submitted) && Number.isSafeInteger(parsed)
+    return !/[\r\n\u2028\u2029]/u.test(payload.submittedText) &&
+      isIntegerAnswerText(submitted) &&
+      Number.isSafeInteger(parsed)
       ? { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted }
       : { ok: false, message: "That is wrong. I asked for a whole number." };
   }
