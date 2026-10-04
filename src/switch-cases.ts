@@ -67,7 +67,10 @@ export function impossibleCaseMessage(
 ): string | undefined {
   const unwrapped = unwrapParentheses(value);
   const range = unwrapped.kind === "rangeExpression";
-  const literal = resolved(valueType);
+  // Name validation accepts an identifier case only for a declared speaker, which the type checker may not have seen
+  // yet when it checks a function called before the declaration.
+  const literal: StaticType =
+    unwrapped.kind === "identifier" ? { kind: "speaker" } : resolved(valueType);
   const possible = members(subjectType).some((member) => {
     if (!isKnown(member)) return true;
     if (range) return isNumeric(member);
@@ -81,7 +84,7 @@ export function impossibleCaseMessage(
     return `This range case can never match: ${described}, and a range matches only numbers. Compare with a value instead.`;
   const text =
     unwrapped.kind === "identifier" ? unwrapped.name : (literalValue(unwrapped)?.text ?? "it");
-  return `This case can never match: ${described}, but ${text} is ${describeValue(valueType)}. Use a case value of the same type.`;
+  return `This case can never match: ${described}, but ${text} is ${describeValue(literal)}. Use a case value of the same type.`;
 }
 
 function describeSubject(expression: Expression): string {

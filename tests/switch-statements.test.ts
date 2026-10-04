@@ -363,6 +363,24 @@ test("rejects repeated and overlapping case values on the later value", () => {
   );
 });
 
+test("a speaker case is a speaker even in a function called before the speaker is declared", () => {
+  const source = [
+    "speaker vera {}",
+    "function greet {",
+    "  switch vera {",
+    '    case guest { say "guest" }',
+    '    default { say "vera" }',
+    "  }",
+    "}",
+    "if false { greet() }",
+    "speaker guest {}",
+    "greet()",
+  ].join("\n");
+
+  assert.deepEqual(says(source), ["vera"]);
+  assert.deepEqual(diagnostics("speaker vera {}\nswitch 1 { case vera {} }"), ["TSV049 2:17"]);
+});
+
 test("rejects case values whose type can never match the switched value's known type", () => {
   const source = [
     "speaker vera {}",
