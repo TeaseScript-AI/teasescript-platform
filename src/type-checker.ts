@@ -2081,12 +2081,26 @@ class TypeChecker {
           callee.property.span,
         );
       if (TEXT_MEMBERS.has(method) || method === "join") memberChecks();
+      const collection = resolved(all[0]!);
+      if (
+        all.length === 1 &&
+        COLLECTION_METHODS.has(method) &&
+        (collection.kind === "list" || collection.kind === "set")
+      )
+        return this.#collectionMethodType(method, collection, callee.property, expression);
       return all.length === 1 ? results[0]! : union(results.map((result) => result!));
     }
     const failing = resolved(all.find((_, index) => results[index] === undefined)!);
     if (passing.length > 0) this.#reportMayBe(callee.object, failing, passing);
     // Text operations and values without methods name what to write instead (V30 §8).
     else if (all.length === 1 && MEMBER_CHECKED_KINDS.has(failing.kind)) memberChecks();
+    // A set has no order to sort or shuffle (V30 §16).
+    else if (all.length === 1 && failing.kind === "set" && COLLECTION_METHODS.has(method))
+      this.#reportProblems(
+        collectionMethodProblems(method, failing, callee.property, expression, (argument) =>
+          this.#typeOf(argument),
+        ),
+      );
     else
       this.#report(
         typeCode.invalidOperand,
@@ -2098,6 +2112,31 @@ class TypeChecker {
         callee.property.span,
       );
     return UNKNOWN_TYPE;
+  }
+
+  /**
+   * Checks `sort`, `shuffle`, or a set operation on one list or set, as evaluated, and gives its result (V30 §16).
+   */
+  #collectionMethodType(
+    method: string,
+    value: StaticType & { readonly kind: "list" | "set" },
+    property: Identifier,
+    expression: CallExpression,
+  ): StaticType {
+    const typeOf = (argument: Expression): StaticType => this.#typeOf(argument);
+    const problems = collectionMethodProblems(method, value, property, expression, typeOf);
+    this.#reportProblems(problems);
+    if (method === "sort" || method === "shuffle") return NULL_TYPE;
+    // A set's union adds the argument's elements, which must be values a set can hold.
+    const argument = expression.arguments[0]?.value;
+    const other =
+      argument === undefined ? undefined : resolved(nonNullTypeForUse(typeOf(argument)));
+    const held =
+      method !== "union" ||
+      value.kind !== "set" ||
+      other?.kind !== "list" ||
+      this.#checkSetElement(argument!, other.element);
+    return this.#setOperationType(method, value, expression, problems.length === 0 && held);
   }
 
   /**
@@ -3585,6 +3624,15 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
   switch (method) {
     case "join":
       return value.kind === "list" ? STRING_TYPE : undefined;
+    // A list reorders in place; a set keeps its insertion order (V30 §16).
+    case "sort":
+    case "shuffle":
+      return value.kind === "list" ? NULL_TYPE : undefined;
+    // A set operation builds a new collection of the receiver's kind.
+    case "intersection":
+    case "union":
+    case "difference":
+      return { kind: value.kind, element: copyType(value.element) };
     case "contains":
       return BOOLEAN_TYPE;
     // A conversion builds a new collection, so its elements decide their type apart from the original's.
