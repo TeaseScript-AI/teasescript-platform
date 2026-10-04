@@ -608,11 +608,13 @@ test("dynamic media options are validated when supplied, including null and inde
   // [source, the offending source text the failure must point at]
   const indefinite =
     'playAudio(file: "a", async: true, repeat: loop) {\n  finish {\n    say "x"\n  }\n}';
+  const hidden = "function dynamic(value) {\n    return value\n}\n";
   for (const [source, offending] of [
     [`let loop = true\n${indefinite}`, indefinite],
-    ['let v = null\nplayAudio(file: "a", volume: v)', "v"],
-    ['let s = null\nplayAudio(file: "a", startAt: s)', "s"],
-    ['let e = null\nplayAudio(file: "a", endAt: e)', "e"],
+    // A variable just set to null is known to be null, so the function hides it until the media starts.
+    [`${hidden}let v = dynamic(null)\nplayAudio(file: "a", volume: v)`, "v"],
+    [`${hidden}let s = dynamic(null)\nplayAudio(file: "a", startAt: s)`, "s"],
+    [`${hidden}let e = dynamic(null)\nplayAudio(file: "a", endAt: e)`, "e"],
   ] as const) {
     const compiled = plan(source);
     const { snapshot } = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));

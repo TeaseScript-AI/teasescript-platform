@@ -570,6 +570,30 @@ test("a choice that returns text and numbers needs a place declared with a union
   const answer = 'let answer: string | integer = choose "a", 1\n';
   assert.deepEqual(spans(`${answer}let copy = answer\ncopy = "z"`), []);
   assert.deepEqual(spans(`${answer}let copies = [answer]\ncopies.add("z")`), []);
+  // Values of one union type join, whatever values each may be.
+  assert.deepEqual(
+    spans(`${answer}let other: string | integer = choose "b", 2\nlet both = [answer, other]`),
+    [],
+  );
+  // A place whose type is not written needs a written union, also when it already holds a union, and options of
+  // unknown type do not hide the known ones.
+  assert.deepEqual(message(`${answer}let copied = answer\ncopied = choose "b", 2`), [
+    [
+      "TSV044",
+      "This choose returns text (string) or a whole number (integer). A place keeps one type; to keep both, declare it as 'let copied: string | integer = ...'.",
+    ],
+  ]);
+  for (const options of ['v, "a", 1', '"a", v, 1', '"a", 1, v'])
+    assert.deepEqual(
+      message(`function pick(v) {\n    let answer = choose ${options}\n}`),
+      [
+        [
+          "TSV044",
+          "This choose returns text (string) or a whole number (integer). A place keeps one type; to keep both, declare a union type, as in 'let answer: string | integer = choose ...'.",
+        ],
+      ],
+      options,
+    );
 });
 
 test("comparing a choice result with a value no button returns is a warning", () => {
@@ -617,7 +641,25 @@ test("comparing a choice result with a value no button returns is a warning", ()
       [["warning", "TSV046"]],
       source,
     );
+  // A test leaves only the values that can pass or fail it, durations compare by length, and `choose null` is null.
   for (const source of [
+    "let n = choose 1.0, 1.5\nif n is not integer {\n    let same = n == 1.0\n}",
+    "let n = choose 1.0, 2.0\nlet whole = n is integer",
+    "let d = choose 1 s, 2 s\nlet same = d == 3 s",
+    'let answer = choose null\nlet same = answer == "z"',
+  ])
+    assert.deepEqual(
+      warnings(source).map(([severity, code]) => [severity, code]),
+      [["warning", "TSV046"]],
+      source,
+    );
+  assert.match(
+    warnings("let d = choose 1 s, 2 s\nlet same = d == 3 s")[0]?.[2] ?? "",
+    /1 s or 2 s/,
+  );
+  for (const source of [
+    "let d = choose 1 s, 2 s\nlet same = d == 1000 ms",
+    'let answer = choose null\nanswer = "z"\nlet same = answer == "z"',
     "let n = choose 1, 2\nlet negative = -n\nlet same = negative == -1",
     'let n = choose 1.0, 1.5\nlet items = ["zero", "one"]\nif n is integer {\n    say items[n]\n}',
   ])

@@ -886,6 +886,12 @@ function* joinValuesTask(
   if (sameFamily(left, right)) return mergeScalars(left, right);
   if (includes(left, right)) return withOrigins(left, scalarOrigins(right));
   if (includes(right, left)) return withOrigins(right, scalarOrigins(left));
+  // Values of one type that a `choose` restricted to different values, such as two `string | integer` results, still
+  // share that type: the join keeps both sets of values.
+  const plainLeft = plainType(left);
+  const plainRight = plainType(right);
+  if (includes(plainLeft, plainRight) || includes(plainRight, plainLeft))
+    return union([left, right]);
   return undefined;
 }
 
@@ -1004,10 +1010,27 @@ function scalarOverlap(
 export function excludeType(type: StaticType, test: StaticType): StaticType {
   const value = canonical(type);
   if (value.kind === "unknown") return value;
-  return memberSubset(
-    value,
-    members(value).filter((member) => !includes(test, member)),
-  );
+  const kept = members(value).filter((member) => !includes(test, member));
+  // A number restricted to some values keeps only those the test does not take: a whole value passes `is integer`.
+  if (!members(test).some((member) => isScalar(member, "integer")))
+    return memberSubset(value, kept);
+  let filtered = false;
+  const remaining: StaticType[] = [];
+  for (const member of kept) {
+    if (member.kind !== "scalar" || member.name !== "number" || member.values === undefined) {
+      remaining.push(member);
+      continue;
+    }
+    const fractions = member.values.filter(
+      (part) => typeof part !== "number" || !Number.isInteger(part),
+    );
+    if (fractions.length === member.values.length) remaining.push(member);
+    else {
+      filtered = true;
+      if (fractions.length > 0) remaining.push(withValues(member, fractions));
+    }
+  }
+  return filtered ? union(remaining) : memberSubset(value, kept);
 }
 
 /**
@@ -1027,13 +1050,17 @@ export function assignedType(declared: StaticType, value: StaticType): StaticTyp
     part.kind === "scalar" && part.values !== undefined ? withValues(member, part.values) : member;
   if (kept.kind !== "union")
     return restricted(stored) && isAssignable(kept, stored) ? restrict(kept, stored) : kept;
-  const parts = members(stored).map((part) =>
-    union(
-      kept.members
-        .filter((member) => isAssignable(member, part))
-        .map((member) => (restricted(part) ? restrict(member, part) : member)),
-    ),
-  );
+  const parts = members(stored).map((part) => {
+    const accepting = kept.members.filter((member) => isAssignable(member, part));
+    // A member that holds the value itself, such as the `null` of `let answer = choose null`, says more than a slot
+    // that a later value decides.
+    const precise = accepting.filter((member) => member.kind !== "open");
+    return union(
+      (precise.length > 0 ? precise : accepting).map((member) =>
+        restricted(part) ? restrict(member, part) : member,
+      ),
+    );
+  });
   const narrowed = union(parts);
   return narrowed.kind === "never" ? kept : narrowed;
 }
