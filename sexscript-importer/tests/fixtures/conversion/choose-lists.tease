@@ -43,3 +43,4 @@ for roundValue in 1..=2 {
   say "Picked ${options[picked]}"
   options = ["Plug", "Clamps"]
 }
+exit

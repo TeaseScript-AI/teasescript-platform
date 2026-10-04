@@ -38,3 +38,4 @@ function debugImages {
   // NOTE SX_UNDEFINED_VARIABLE line 20: missingCount is never assigned in this script or its package; SexScript failed with a missing property whenever this ran. Nothing in the program references this function, so Groovy never ran this code.
   // | for (int n = 1; n <= missingCount; n++) show("Image ${n}")
 }
+exit

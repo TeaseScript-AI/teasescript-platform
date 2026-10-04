@@ -13,3 +13,4 @@ let toys = ["plug", "clamps"]
 say "Which toys?"
 let wanted = askText default: "[${toys.join(", ")}]"
 say "${name}: level ${newLevel}, ${weight} kg, code ${code}, toys ${wanted}"
+exit

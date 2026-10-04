@@ -19,3 +19,4 @@ if labelValue == null or labelValue == "" {
   labelValue = "pet"
 }
 say "Mood ${mood}, bonus ${bonus}, ${labelValue}"
+exit

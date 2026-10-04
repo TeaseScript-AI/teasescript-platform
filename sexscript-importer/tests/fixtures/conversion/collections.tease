@@ -95,3 +95,4 @@ for it in 0..rounds {
   say "Round"
 }
 say "Second ${[1, 2, 3][[1, 2, 3].length - 2]}"
+exit

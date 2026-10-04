@@ -56,3 +56,4 @@ if (choose yes: "Yes", no: "No") == "yes" {
   words = [["Pinch", "Twist"], ["them!"]]
 }
 say "${words.length}"
+exit

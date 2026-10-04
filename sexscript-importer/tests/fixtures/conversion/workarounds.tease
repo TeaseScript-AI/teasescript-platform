@@ -32,3 +32,4 @@ if conditional {
 if conditional {
   say "Fonts"
 }
+exit

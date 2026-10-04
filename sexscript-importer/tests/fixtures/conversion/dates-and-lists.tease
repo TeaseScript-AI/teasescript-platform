@@ -32,3 +32,4 @@ if hour > 22 {
 let stamp = getDate().toISO()
 // NOTE SX_DATE_FORMAT line 20: Java formatted the current time with the pattern "HH:mm"; formatTime() shows the player's local form instead (#532).
 say "Status of ${stamp} at ${getTime().formatTime()}, day ${dayOfYear} ${sameDay}"
+exit

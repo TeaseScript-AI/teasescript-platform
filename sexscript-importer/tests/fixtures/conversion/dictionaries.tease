@@ -121,3 +121,4 @@ session = { mood: null, aborted: null }
 // NOTE SX_SHARED_MAP_WRITE line 71: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 session.mood = "tense"
 say "Mood ${session.mood}, aborted ${session.aborted}"
+exit

@@ -291,7 +291,7 @@ test("reports recognized, lowered, and dependency-closed script stages separatel
     },
   });
   // Once as generated and once with pending-capability placeholders (none are needed here).
-  assert.deepEqual(compiledSources, ['say "hello"\n', 'say "hello"\n']);
+  assert.deepEqual(compiledSources, ['say "hello"\nexit\n', 'say "hello"\nexit\n']);
   assert.equal(rejecting.compilerCleanScriptFileCount, 0);
   assert.equal(rejecting.compilerCleanExceptPendingScriptFileCount, 0);
   assert.equal(rejecting.files[0]?.compilerClean, false);

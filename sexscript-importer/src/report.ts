@@ -120,10 +120,12 @@ export function analyzeFeasibility(
   files: ParsedGroovyFile[],
   options: FeasibilityOptions = {},
 ): FeasibilityReport {
-  const { lowered: filePrograms, composed: packagePrograms } = lowerPackage(
-    files,
-    options.proposals === undefined ? {} : { proposals: options.proposals },
-  );
+  const {
+    lowered: filePrograms,
+    composed: packagePrograms,
+    main,
+  } = lowerPackage(files, options.proposals === undefined ? {} : { proposals: options.proposals });
+  const entryFile = main !== null && "file" in main ? main.file : null;
   const report: FeasibilityReport = {
     fileCount: files.length,
     scriptBodyFileCount: 0,
@@ -221,6 +223,7 @@ export function analyzeFeasibility(
       const source = compilerCleanExceptPending === true ? shim.source : null;
       flowScripts.push({
         sourceName: file.sourceName,
+        ...(fileIndex === entryFile ? { key: MAIN } : {}),
         transfers: ir.transfers,
         script:
           source === null
@@ -266,6 +269,20 @@ export function analyzeFeasibility(
   report.blockingPendingCapabilityFileCounts = sortCounts(
     report.blockingPendingCapabilityFileCounts,
   );
+  if (main !== null && "menu" in main) {
+    // The generated entry menu is part of the flows, not a legacy file of the report.
+    const shim = shimPendingCapabilities(main.menu);
+    const compiled = options.compiler?.(shim.source, shim.builtins);
+    flowScripts.push({
+      sourceName: main.menu.sourceName,
+      key: MAIN,
+      transfers: countIrStatements(main.menu.statements).transfers,
+      script:
+        compiled === undefined || compiled.compiled
+          ? { source: shim.source, builtins: (state) => pendingHostFunctions(shim, state) }
+          : null,
+    });
+  }
   if (options.runner !== undefined) {
     runPackageFlows(report, flowScripts, options.runner, options.packageRoot);
   }
@@ -281,9 +298,14 @@ export function analyzeFeasibility(
 
 interface FlowScriptRecord {
   sourceName: string;
+  /** The flow key when it is not the file's own path: `main.tease` for the package entry. */
+  key?: string;
   script: FlowScript | null;
   transfers: string[];
 }
+
+/** The fixed entry file of a package (ADR 0022 §1). */
+const MAIN = "main.tease";
 
 function runPackageFlows(
   report: FeasibilityReport,
@@ -303,29 +325,34 @@ function runPackageFlows(
           return common.slice(0, length);
         }, directories[0] ?? [])
       : segments(packageRoot);
-  const keyOf = (sourceName: string): string =>
+  const pathKey = (sourceName: string): string =>
     flowKey(
       segments(sourceName)
         .slice(root.length)
         .join("/")
         .replace(/\.groovy$/iu, ".tease"),
     );
+  const keyOf = (record: FlowScriptRecord): string =>
+    record.key === undefined ? pathKey(record.sourceName) : flowKey(record.key);
   // Two files whose paths differ only in case are ambiguous for the legacy player; flows reaching them are blocked.
   const keyCounts = new Map<string, number>();
-  for (const { sourceName } of flowScripts) {
-    keyCounts.set(keyOf(sourceName), (keyCounts.get(keyOf(sourceName)) ?? 0) + 1);
+  for (const record of flowScripts) {
+    keyCounts.set(keyOf(record), (keyCounts.get(keyOf(record)) ?? 0) + 1);
   }
   const scripts = new Map(
-    flowScripts.map(({ sourceName, script }) => {
-      const key = keyOf(sourceName);
-      return [key, keyCounts.get(key) === 1 ? script : null];
+    flowScripts.map((record) => {
+      const key = keyOf(record);
+      return [key, keyCounts.get(key) === 1 ? record.script : null];
     }),
   );
-  const entries = flowScripts
-    .filter((_, index) => directories[index]!.join(path.sep) === root.join(path.sep))
-    .map(({ sourceName }) => keyOf(sourceName))
-    .filter((key, index, keys) => keys.indexOf(key) === index)
-    .sort();
+  // A package starts at main.tease (ADR 0022); a single script, which keeps its name, starts each root script.
+  const entries = scripts.has(MAIN)
+    ? [MAIN]
+    : flowScripts
+        .filter((_, index) => directories[index]!.join(path.sep) === root.join(path.sep))
+        .map(keyOf)
+        .filter((key, index, keys) => keys.indexOf(key) === index)
+        .sort();
   const reached = new Set<string>();
   const record = (flow: FlowRunResult): void => {
     const prefix = flow.isolated ? "isolated " : "";
@@ -342,10 +369,10 @@ function runPackageFlows(
   for (const entry of entries) record(smokeRunFlow(runner, entry, scripts));
   // Scripts that no other script transfers to start isolated runs first, so their targets run with their state.
   const targets = new Set(
-    flowScripts.flatMap(({ sourceName, script, transfers }) =>
-      script === null
+    flowScripts.flatMap((record) =>
+      record.script === null
         ? []
-        : transfers.map(flowKey).filter((target) => target !== keyOf(sourceName)),
+        : record.transfers.map(flowKey).filter((target) => target !== keyOf(record)),
     ),
   );
   const unreached = [...scripts]
@@ -358,10 +385,12 @@ function runPackageFlows(
   for (const key of unreached) {
     if (!reached.has(key)) record(smokeRunFlow(runner, key, scripts, true));
   }
-  // Only the script records count; auxiliary classes and modules share no keys with them.
+  // Only the legacy script files count; auxiliary classes and modules share no keys with them, and the generated entry
+  // menu is no legacy file.
+  const reportedFiles = new Set(report.files.map(({ sourceName }) => sourceName));
   const reachedFiles = new Set(
     flowScripts
-      .filter(({ sourceName }) => reached.has(keyOf(sourceName)))
+      .filter((record) => reportedFiles.has(record.sourceName) && reached.has(keyOf(record)))
       .map(({ sourceName }) => sourceName),
   );
   for (const file of report.files) {
@@ -383,13 +412,8 @@ function countIrStatements(statements: IrStatement[]): {
     for (const statement of items) {
       total += 1;
       if (statement.kind === "unsupported") unsupported += 1;
-      if (
-        statement.kind === "run" &&
-        statement.script.kind === "literal" &&
-        typeof statement.script.value === "string"
-      ) {
-        transfers.push(statement.script.value);
-      }
+      if (statement.kind === "goto" && statement.target.kind === "file")
+        transfers.push(statement.target.path);
       if (statement.kind === "if") {
         visit(statement.then);
         visit(statement.else);

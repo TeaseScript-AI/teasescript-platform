@@ -1439,8 +1439,8 @@ function ownExpressions(statement: IrStatement): IrExpression[] {
         : [statement.file, statement.repeatCount];
     case "switch":
       return [statement.value, ...statement.cases.flatMap((item) => item.matches)];
-    case "run":
-      return [statement.script];
+    case "goto":
+      return statement.target.kind === "file" ? [] : [statement.target.path];
     case "delete":
       return [statement.key];
     default:
@@ -1532,8 +1532,10 @@ function mapOwnExpressions<T extends IrStatement>(
             matches: switchCase.matches.map(map),
           })),
         };
-      case "run":
-        return { ...item, script: map(item.script) };
+      case "goto":
+        return item.target.kind === "file"
+          ? item
+          : { ...item, target: { kind: "script", path: map(item.target.path) } };
       case "delete":
         return { ...item, key: map(item.key) };
       default:

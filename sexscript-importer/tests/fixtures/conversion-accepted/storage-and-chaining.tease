@@ -13,7 +13,8 @@ if title == null or title == "" {
 }
 if (load "training.finished") == true {
   say "Welcome back, ${title}"
-  run "finished.tease"
+  goto "finished.tease"
 }
 delete "training.old"
 say "Visit ${visits + 1}"
+exit

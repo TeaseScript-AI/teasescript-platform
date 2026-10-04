@@ -6,3 +6,4 @@ if mood == 0 {
 } else {
   say "Bored"
 }
+exit

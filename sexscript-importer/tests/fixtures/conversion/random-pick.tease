@@ -21,3 +21,4 @@ say "Count: ${lines.length}"
 let packs = 1
 let pack = sexscriptLegacyRandom(packs - 1)
 wait randomInteger(0..5) + 2
+exit

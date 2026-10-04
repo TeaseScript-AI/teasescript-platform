@@ -68,6 +68,159 @@ export interface LoweredPackage {
   lowered: MigrationProgram[];
   /** Scripts with their package helpers and loaded modules embedded; other files as lowered. */
   composed: MigrationProgram[];
+  /**
+   * The package's entry, `main.tease` (ADR 0022 §1): the index of the script that becomes it, or a generated menu over
+   * the scripts the legacy player listed. Null for a single script, which keeps its name.
+   */
+  main: { file: number } | { menu: MigrationProgram } | null;
+}
+
+/** A package's scripts with their TeaseScript paths, relative to the package root (packageScripts). */
+interface PackageScripts {
+  /** The legacy name of each script (its path without `.groovy`, in lower case) to its TeaseScript path. */
+  paths: Map<string, string>;
+  /** The script that becomes `main.tease`, or null when several scripts share the package root. */
+  entry: number | null;
+  /** The scripts in the package root, which the legacy player listed. */
+  rootScripts: number[];
+  /** The TeaseScript path of each script by file index. */
+  pathOf: Map<number, string>;
+  /** The package root directory, with `/` separators. */
+  root: string;
+}
+
+/**
+ * The scripts of a package, with their paths from the package root, the common directory of the scripts. A single
+ * script in the root is the entry and becomes `main.tease`, as is one named `main.groovy`.
+ */
+function packageScripts(files: readonly ParsedGroovyFile[]): PackageScripts | null {
+  const scripts = files.flatMap((file, index) =>
+    file.root?.kind === "scriptBody" && describeMixinModule(file) === null ? [index] : [],
+  );
+  // A file converted alone has no package around it; a script with its modules or helpers is a package.
+  if (scripts.length === 0 || files.length < 2) return null;
+  const segments = new Map(
+    scripts.map((index) => [index, files[index]!.sourceName.replaceAll("\\", "/").split("/")]),
+  );
+  const directories = scripts.map((index) => segments.get(index)!.slice(0, -1));
+  const root = directories.reduce((common, directory) => {
+    let length = 0;
+    while (length < common.length && common[length] === directory[length]) length += 1;
+    return common.slice(0, length);
+  }, directories[0]!);
+  const relative = (index: number): string => segments.get(index)!.slice(root.length).join("/");
+  const rootScripts = scripts.filter((index) => !relative(index).includes("/"));
+  const entry =
+    rootScripts.length === 1
+      ? rootScripts[0]!
+      : (rootScripts.find((index) => relative(index).toLowerCase() === "main.groovy") ?? null);
+  const pathOf = new Map(
+    scripts.map((index) => [
+      index,
+      index === entry ? "main.tease" : relative(index).replace(/\.groovy$/iu, ".tease"),
+    ]),
+  );
+  const paths = new Map(
+    scripts.map((index) => [
+      relative(index)
+        .replace(/\.groovy$/iu, "")
+        .toLowerCase(),
+      pathOf.get(index)!,
+    ]),
+  );
+  return { paths, entry, rootScripts, pathOf, root: root.join("/") };
+}
+
+/**
+ * A `main.tease` for a package whose root holds several scripts: the legacy player listed them for the player to pick,
+ * so a menu offers each one that no other script chains to, also through the localized variant the legacy player chose
+ * by language (`intro_de` for `intro`).
+ */
+function entryMenu(
+  scripts: PackageScripts,
+  programs: readonly MigrationProgram[],
+): MigrationProgram {
+  const targets = new Set<string>();
+  const collect = (statements: readonly IrStatement[]): void => {
+    for (const statement of statements) {
+      if (statement.kind === "goto" && statement.target.kind === "file")
+        targets.add(statement.target.path.toLowerCase());
+      if (statement.kind === "function") collect(statement.body);
+      if (statement.kind === "if") {
+        collect(statement.then);
+        collect(statement.else);
+      }
+      if (statement.kind === "while" || statement.kind === "repeat" || statement.kind === "for")
+        collect(statement.body);
+      if (statement.kind === "switch") {
+        for (const item of statement.cases) collect(item.body);
+        collect(statement.default);
+      }
+    }
+  };
+  for (const program of programs) collect(program.statements);
+  const base = (path: string): string =>
+    path.replace(/_[a-z]{2}(?:_[a-z]{2})?\.tease$/iu, ".tease");
+  const targeted = (path: string): boolean =>
+    targets.has(path.toLowerCase()) || targets.has(base(path).toLowerCase());
+  const offered = scripts.rootScripts
+    .map((index) => scripts.pathOf.get(index)!)
+    .filter((path) => !targeted(path))
+    .sort();
+  const choices =
+    offered.length > 0 ? offered : scripts.rootScripts.map((index) => scripts.pathOf.get(index)!);
+  const variants = [...scripts.pathOf.values()]
+    .filter((path) => base(path) !== path && targeted(path) && !targets.has(path.toLowerCase()))
+    .sort();
+  const message =
+    "The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, so this menu offers each script that no other script chains to." +
+    (variants.length === 0
+      ? ""
+      : ` The legacy player also chose a localized variant of a script by the system language, which the converted scripts do not, so these variants are not reached: ${variants.join(", ")}.`);
+  const name = (path: string): string => path.replace(/\.tease$/u, "");
+  const picked = { kind: "variable" as const, name: "picked" };
+  let chain: IrStatement[] = [
+    { kind: "goto", target: { kind: "file", path: choices.at(-1)! }, span: null },
+  ];
+  for (let index = choices.length - 2; index >= 0; index -= 1) {
+    chain = [
+      {
+        kind: "if",
+        condition: {
+          kind: "binary",
+          operator: "==",
+          left: picked,
+          right: { kind: "literal", value: index },
+        },
+        then: [{ kind: "goto", target: { kind: "file", path: choices[index]! }, span: null }],
+        else: chain,
+        span: null,
+      },
+    ];
+  }
+  return {
+    sourceName: `${scripts.root}/main.tease`,
+    metadata: null,
+    statements: [
+      { kind: "comment", text: `// NOTE SX_ENTRY_MENU: ${message}`, trailing: false, span: null },
+      {
+        kind: "say",
+        value: { kind: "literal", value: "Which script do you want to start?" },
+        span: null,
+      },
+      {
+        kind: "let",
+        name: "picked",
+        value: {
+          kind: "choice",
+          options: choices.map((path) => ({ kind: "literal", value: name(path) })),
+        },
+        span: null,
+      },
+      ...chain,
+    ],
+    diagnostics: [{ code: "SX_ENTRY_MENU", severity: "warning", message, span: null }],
+  };
 }
 
 export function lowerPackage(
@@ -87,6 +240,7 @@ export function lowerPackage(
     directoryFiles.set(directory, [...(directoryFiles.get(directory) ?? []), file.sourceName]);
   }
   // Map uses are shared within a composition group, like function names and field types.
+  const scripts = packageScripts(files);
   const functionResults = files.map((_, index) => packageFunctionResults(groups[index]!));
   const mapUses = files.map((_, index) => packageMapUses(groups[index]!, functionResults[index]!));
   const lowered = files.map((file, index) =>
@@ -101,6 +255,7 @@ export function lowerPackage(
       stopsBackgroundSounds,
       resultUses,
       directoryFiles,
+      ...(scripts === null ? {} : { scriptPaths: scripts.paths }),
       renameIdentifiers: false,
       ...(options.proposals === undefined ? {} : { proposals: options.proposals }),
     }),
@@ -135,11 +290,18 @@ export function lowerPackage(
       scripts.every((script) => uncalled[script]!.includes(diagnostic)),
     );
   };
+  const composedPrograms = composed.map((program, index) =>
+    program.module === undefined ? program : withUncalledNotes(program, notes(program, index)),
+  );
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
-    composed: composed.map((program, index) =>
-      program.module === undefined ? program : withUncalledNotes(program, notes(program, index)),
-    ),
+    composed: composedPrograms,
+    main:
+      scripts === null
+        ? null
+        : scripts.entry !== null
+          ? { file: scripts.entry }
+          : { menu: entryMenu(scripts, composedPrograms) },
   };
 }
 

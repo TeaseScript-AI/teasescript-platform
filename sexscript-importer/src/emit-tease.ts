@@ -189,11 +189,10 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
     case "continue":
       lines.push(`${pad}continue`);
       return;
-    case "run":
-      lines.push(`${pad}run ${emitExpression(statement.script)}`);
-      return;
-    case "end":
-      lines.push(`${pad}end`);
+    case "goto":
+      lines.push(
+        `${pad}goto ${statement.target.kind === "file" ? JSON.stringify(statement.target.path) : `script(${emitExpression(statement.target.path)})`}`,
+      );
       return;
     case "exit":
       lines.push(`${pad}exit`);

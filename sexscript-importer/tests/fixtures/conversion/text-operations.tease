@@ -34,3 +34,4 @@ for step in [1, 2] {
 }
 trail = "${trail}!"
 say trail
+exit

@@ -71,7 +71,7 @@ test("lowers common SexScript flow to accepted TeaseScript forms", () => {
       'playAudio "bell.mp3"',
       'playAudio(file: "beat.mp3", async: true, repeat: 3 times)',
       'showButton "Continue"',
-      'run "next.tease"',
+      'goto "next.tease"',
       "",
     ].join("\n"),
   );
@@ -110,7 +110,7 @@ test("maps Groovy inclusive ranges and removes terminal switch breaks", () => {
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    ["switch value {", "  case 0..=3 {", '    say "small"', "  }", "}", ""].join("\n"),
+    ["switch value {", "  case 0..=3 {", '    say "small"', "  }", "}", "exit", ""].join("\n"),
   );
 });
 
@@ -151,6 +151,7 @@ test("keeps a switch whose cases overlap as an if chain, which keeps Groovy's fi
       "} else if value >= 0 and value <= 3 {",
       '  say "low"',
       "}",
+      "exit",
       "",
     ].join("\n"),
   );
@@ -216,7 +217,7 @@ test("lowers nullable legacy scalar storage reads to read-only TeaseScript load"
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    ['let enabled = load "feature.enabled"', 'let raw = load "legacy.raw"', ""].join("\n"),
+    ['let enabled = load "feature.enabled"', 'let raw = load "legacy.raw"', "exit", ""].join("\n"),
   );
 });
 
@@ -258,7 +259,7 @@ test("extracts static setInfos metadata instead of emitting runtime code", () =>
   const program = lowerParsedFile(source);
   assert.equal(program.metadata?.title, "Example");
   assert.deepEqual(program.metadata?.tags, ["tag-a", "tag-b"]);
-  // No runtime setInfos code; the metadata survives as a header, and the final `return null` adds nothing.
+  // No runtime setInfos code; the metadata survives as a header, and the final `return null` ends the chain.
   assert.equal(
     emitTease(program),
     [
@@ -269,6 +270,8 @@ test("extracts static setInfos metadata instead of emitting runtime code", () =>
       "// Language: en",
       "// Tags: tag-a, tag-b",
       "",
+      "exit",
+      "",
     ].join("\n"),
   );
 });
@@ -277,7 +280,7 @@ test("preserves accepted showButton timeout and elapsed-result semantics", () =>
   const timeoutSource = file([statement(call("showButton", constant("Quick"), constant(3)))]);
   const timeoutProgram = lowerParsedFile(timeoutSource);
   assert.deepEqual(timeoutProgram.diagnostics, []);
-  assert.equal(emitTease(timeoutProgram), 'showButton "Quick", timeout: 3\n');
+  assert.equal(emitTease(timeoutProgram), 'showButton "Quick", timeout: 3\nexit\n');
 
   const assignedSource = file([
     {
@@ -295,7 +298,7 @@ test("preserves accepted showButton timeout and elapsed-result semantics", () =>
   const assignedProgram = lowerParsedFile(assignedSource);
   assert.deepEqual(assignedProgram.diagnostics, []);
   // Legacy returned the seconds until the click; the accepted result is a duration (V30 §21, #531).
-  assert.equal(emitTease(assignedProgram), 'let elapsed = (showButton "Continue") / 1 s\n');
+  assert.equal(emitTease(assignedProgram), 'let elapsed = (showButton "Continue") / 1 s\nexit\n');
 });
 
 test("maps legacy save(key, null) deletion semantics to delete", () => {
@@ -303,7 +306,7 @@ test("maps legacy save(key, null) deletion semantics to delete", () => {
     file([statement(call("save", constant("intro.running"), constant(null)))]),
   );
   assert.deepEqual(program.diagnostics, []);
-  assert.equal(emitTease(program), 'delete "intro.running"\n');
+  assert.equal(emitTease(program), 'delete "intro.running"\nexit\n');
 });
 
 test("lowers top-level Groovy closure helpers to TeaseScript functions with defaults and returns", () => {
@@ -332,7 +335,14 @@ test("lowers top-level Groovy closure helpers to TeaseScript functions with defa
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    ["function helper(count, record = true) {", "  return count", "}", "helper(4)", ""].join("\n"),
+    [
+      "function helper(count, record = true) {",
+      "  return count",
+      "}",
+      "helper(4)",
+      "exit",
+      "",
+    ].join("\n"),
   );
 });
 
@@ -359,7 +369,7 @@ test("synthesizes optional it only when an implicit Groovy closure is called wit
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    ["function helper(it = null) {", '  say "ok"', "}", 'helper("ignored")', ""].join("\n"),
+    ["function helper(it = null) {", '  say "ok"', "}", 'helper("ignored")', "exit", ""].join("\n"),
   );
 });
 
@@ -391,7 +401,7 @@ test("lowers indexing, primitive casts, and compound multiplication assignments"
 
   const program = lowerParsedFile(source);
   assert.deepEqual(program.diagnostics, []);
-  assert.equal(emitTease(program), "let value = toInteger(items[1])\nvalue = value * 2\n");
+  assert.equal(emitTease(program), "let value = toInteger(items[1])\nvalue = value * 2\nexit\n");
 });
 
 test("maps list-only Groovy size property and size() method to TeaseScript length", () => {
@@ -441,7 +451,9 @@ test("maps list-only Groovy size property and size() method to TeaseScript lengt
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    ['let items = ["a", "b"]', "let a = items.length", "let b = items.length", ""].join("\n"),
+    ['let items = ["a", "b"]', "let a = items.length", "let b = items.length", "exit", ""].join(
+      "\n",
+    ),
   );
 });
 
@@ -516,7 +528,7 @@ test("lowers direct indexed assignment targets", () => {
 
   const program = lowerParsedFile(source);
   assert.deepEqual(program.diagnostics, []);
-  assert.equal(emitTease(program), "let items = [1, 2]\nitems[1] = 9\n");
+  assert.equal(emitTease(program), "let items = [1, 2]\nitems[1] = 9\nexit\n");
 });
 
 test("maps literal getSelectedValue options to zero-based numeric choice labels", () => {
@@ -538,9 +550,12 @@ test("maps literal getSelectedValue options to zero-based numeric choice labels"
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    ['say "Choose one"', 'let selected = choose 0: "First", 1: "Second", 2: "Third"', ""].join(
-      "\n",
-    ),
+    [
+      'say "Choose one"',
+      'let selected = choose 0: "First", 1: "Second", 2: "Third"',
+      "exit",
+      "",
+    ].join("\n"),
   );
 });
 
@@ -590,7 +605,7 @@ test("lowers simple C-style for loops through an equivalent while loop", () => {
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    ["let i = 0", "while i < 3 {", "  say i", "  i += 1", "}", ""].join("\n"),
+    ["let i = 0", "while i < 3 {", "  say i", "  i += 1", "}", "exit", ""].join("\n"),
   );
 });
 
@@ -644,6 +659,7 @@ test("runs the update step of a C-style for loop before continue", () => {
       "  say i",
       "  i += 1",
       "}",
+      "exit",
       "",
     ].join("\n"),
   );
@@ -718,6 +734,7 @@ test("lowers Groovy each() on ranges and proven lists to TeaseScript for loops",
       "for it in items {",
       "  say it",
       "}",
+      "exit",
       "",
     ].join("\n"),
   );
@@ -771,6 +788,7 @@ test("turns return inside Groovy each() into continue", () => {
       "  }",
       "  say it",
       "}",
+      "exit",
       "",
     ].join("\n"),
   );
@@ -832,10 +850,11 @@ test("lowers single-statement if, else, and else-if bodies", () => {
       "if first {",
       "  value = 1",
       "} else if second {",
-      "  end",
+      "  exit",
       "} else {",
       "  value = 2",
       "}",
+      "exit",
       "",
     ].join("\n"),
   );
@@ -973,6 +992,7 @@ test("expands Groovy switch fallthrough into explicit TeaseScript case bodies", 
       '    say "default"',
       "  }",
       "}",
+      "exit",
       "",
     ].join("\n"),
   );
@@ -1038,9 +1058,14 @@ test("maps proven Math ceil/floor and list add to accepted TeaseScript operation
   );
   assert.equal(
     emitTease(program),
-    ["let items = [1]", "items.add(2)", "let high = ceil(2.1)", "let low = floor(2.9)", ""].join(
-      "\n",
-    ),
+    [
+      "let items = [1]",
+      "items.add(2)",
+      "let high = ceil(2.1)",
+      "let low = floor(2.9)",
+      "exit",
+      "",
+    ].join("\n"),
   );
 });
 
@@ -1140,7 +1165,7 @@ test("lowers static Groovy maps and string-key access to TeaseScript objects", (
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    'let exercise = { name: "Squats", pictures: ["a.jpg"] }\nlet name = exercise.name\n',
+    'let exercise = { name: "Squats", pictures: ["a.jpg"] }\nlet name = exercise.name\nexit\n',
   );
 });
 
@@ -1209,7 +1234,7 @@ test("maps legacy getBooleans to accepted askBooleans", () => {
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
-    'let selected = askBooleans(message: "Choose", texts: ["A", "B"], defaults: [true, false])\n',
+    'let selected = askBooleans(message: "Choose", texts: ["A", "B"], defaults: [true, false])\nexit\n',
   );
 });
 
@@ -1253,7 +1278,7 @@ test("turns a lookup with a text key into a dict lookup (#536)", () => {
   );
   assert.match(
     emitTease(program),
-    /^let registry = dict\{\}\nlet key = "collar"\n\/\/ NOTE SX_DICT_MISSING_KEY .*\nlet found = registry\[key\]\n$/u,
+    /^let registry = dict\{\}\nlet key = "collar"\n\/\/ NOTE SX_DICT_MISSING_KEY .*\nlet found = registry\[key\]\nexit\n$/u,
   );
 });
 

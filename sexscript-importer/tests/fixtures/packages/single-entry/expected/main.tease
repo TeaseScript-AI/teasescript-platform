@@ -1,0 +1,8 @@
+// The one script in the package root is its entry.
+say "Hall or garden?"
+let visits = load "visits", default: 0
+save visits + 1 as "visits"
+if visits < 2 {
+  goto "rooms/hall.tease"
+}
+exit

@@ -5,7 +5,7 @@ import { loadRepositoryCompiler, type TeaseCompiler } from "./compile-check.ts";
 import { emitTease } from "./emit-tease.ts";
 import { inventoryFiles } from "./inventory.ts";
 import { lowerParsedFile } from "./lower.ts";
-import { lowerSelfContainedPackage } from "./package.ts";
+import { lowerPackage } from "./package.ts";
 import { parseProposals, type ProposalId } from "./proposals.ts";
 import type { MediaFile } from "./pending.ts";
 import { analyzeFeasibility, type FeasibilityOptions } from "./report.ts";
@@ -100,22 +100,35 @@ async function convertPackage(
   const sourcePaths = await findGroovyFiles(sourceRoot);
   if (sourcePaths.length === 0) fail(`No .groovy files found under ${sourceRoot}`);
   const parsed = await parseGroovyFiles(sourcePaths);
-  const programs = lowerSelfContainedPackage(parsed, { proposals });
+  const lowered = lowerPackage(parsed, { proposals });
+  const programs = lowered.composed;
+  // The package starts at main.tease (ADR 0022): its entry script, or a generated menu over the scripts it lists.
+  const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;
+  const outputs = programs.map((program, index) => ({
+    program,
+    index,
+    relative:
+      index === entry
+        ? "main.tease"
+        : path.relative(sourceRoot, sourcePaths[index]!).replace(/\.groovy$/iu, ".tease"),
+  }));
+  if (lowered.main !== null && "menu" in lowered.main)
+    outputs.push({ program: lowered.main.menu, index: -1, relative: "main.tease" });
   let errors = 0;
   let written = 0;
   let compilerClean = 0;
-  for (let index = 0; index < programs.length; index += 1) {
+  for (const { program, index, relative } of outputs) {
+    const file = index < 0 ? null : parsed[index]!;
     // A file that does not parse produces no output but reports its parser errors.
-    if (parsed[index]!.root === null) errors += reportDiagnostics(programs[index]!);
-    if (parsed[index]!.root?.kind !== "scriptBody" || programs[index]!.module !== undefined)
+    if (file !== null && file.root === null) errors += reportDiagnostics(program);
+    if (file !== null && (file.root?.kind !== "scriptBody" || program.module !== undefined))
       continue;
-    const relative = path.relative(sourceRoot, sourcePaths[index]!);
-    const outputPath = path.join(outputRoot, relative.replace(/\.groovy$/iu, ".tease"));
+    const outputPath = path.join(outputRoot, relative);
     await mkdir(path.dirname(outputPath), { recursive: true });
-    const source = emitTease(programs[index]!);
+    const source = emitTease(program);
     await writeFile(outputPath, source, "utf8");
     written += 1;
-    errors += reportDiagnostics(programs[index]!);
+    errors += reportDiagnostics(program);
     if (compiler !== undefined) {
       const compiled = compiler(source);
       if (compiled.compiled) compilerClean += 1;

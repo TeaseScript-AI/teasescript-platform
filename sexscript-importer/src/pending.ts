@@ -27,6 +27,10 @@ const PROPOSED_CALLS = new Map<string, ProposalId>([["countImages", "media-tags"
 
 const SHIM_PREFIX = "sxPending";
 
+/** Capabilities of the file transfers of ADR 0022 (#570), which `main` does not implement yet. */
+const GOTO_FILE = "goto to a file (#570)";
+const GOTO_SCRIPT = "goto script() (#570)";
+
 /**
  * Stand-ins whose accepted result is never null, by the conversion that gives the placeholder's untyped result that
  * type, so that the compiler checks and narrows its uses as it will the accepted operation's.
@@ -188,15 +192,15 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         return [{ ...item, key: expression(item.key), value: expression(item.value) }];
       case "delete":
         return [{ ...item, key: expression(item.key) }];
-      // Transfer and end leave the current file, so the shimmed copy stops there.
-      case "run":
+      // A transfer to another file (ADR 0022, #570) leaves the current file, so the shimmed copy stops there.
+      case "goto":
         return [
-          callStatement(call("run/end", "run", [expression(item.script)]), item.span),
-          { kind: "exit", span: item.span },
-        ];
-      case "end":
-        return [
-          callStatement(call("run/end", "end", []), item.span),
+          callStatement(
+            item.target.kind === "file"
+              ? call(GOTO_FILE, "goto", [{ kind: "literal", value: item.target.path }])
+              : call(GOTO_SCRIPT, "goto script()", [expression(item.target.path)]),
+            item.span,
+          ),
           { kind: "exit", span: item.span },
         ];
       case "showPopup":
@@ -303,8 +307,8 @@ export interface MediaFile {
 }
 
 /**
- * Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only: `run` records its target in
- * the flow state, and inputs answer in turn.
+ * Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only: a transfer to another file
+ * records its target in the flow state, and inputs answer in turn.
  */
 export function pendingHostFunctions(
   shim: PendingShim,
@@ -332,8 +336,8 @@ export function pendingHostFunctions(
         return media.filter((file) => tags.every((tag) => file.tags.includes(tag))).length;
       },
     ],
-    ["run", ([script]) => ((state.transfer = String(script)), null)],
-    ["end", () => null],
+    ["goto", ([script]) => ((state.transfer = String(script)), null)],
+    ["goto script()", ([script]) => ((state.transfer = String(script)), null)],
     ["showPopup", () => null],
     ["askBoolean", () => next("askBoolean", [true, false])],
     ["askBooleans", (_, named) => named.defaults ?? emptyList],

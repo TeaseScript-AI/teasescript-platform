@@ -134,9 +134,13 @@ export type IrStatement =
     })
   | (IrBase & { kind: "break" })
   | (IrBase & { kind: "continue" })
-  | (IrBase & { kind: "run"; script: IrExpression })
-  | (IrBase & { kind: "end" })
-  | (IrBase & { kind: "exit" })
+  /**
+   * A transfer to another file of the package (ADR 0022 §2): a path relative to the package root, or a script reference
+   * computed at runtime, `goto script(path)`.
+   */
+  | (IrBase & { kind: "goto"; target: IrGotoTarget })
+  /** `returned` marks the end of a legacy script chain, a script-level `return` without a script name. */
+  | (IrBase & { kind: "exit"; returned?: true })
   /** Legacy code that needs manual migration, preserved as commented-out source lines. */
   | (IrBase & { kind: "unsupported"; legacySource: string[] })
   /** Preserved legacy source comment; `trailing` keeps it on the previous statement's line. */
@@ -152,6 +156,8 @@ export type IrStatement =
 export type IrListChoiceOption =
   | { kind: "option"; value: number | null; text: IrExpression }
   | { kind: "list"; list: IrExpression; records: boolean };
+
+export type IrGotoTarget = { kind: "file"; path: string } | { kind: "script"; path: IrExpression };
 
 export interface IrSwitchCase {
   span: SourceSpan | null;

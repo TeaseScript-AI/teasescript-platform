@@ -38,3 +38,4 @@ if count == match {
 } else if [1, 2].contains(count) {
   say "small"
 }
+exit

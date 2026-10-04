@@ -12,3 +12,4 @@ if roundValue == 0 {
   say "Hard"
   // nothing else yet
 }
+exit

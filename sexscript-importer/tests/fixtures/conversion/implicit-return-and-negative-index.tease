@@ -24,3 +24,4 @@ function greet {
   bump()
 }
 greet()
+exit

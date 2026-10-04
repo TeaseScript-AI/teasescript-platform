@@ -204,12 +204,13 @@ function renameStatement(
       return { ...statement, value: statement.value === null ? null : expression(statement.value) };
     case "expression":
       return { ...statement, expression: expression(statement.expression) };
-    case "run":
-      return { ...statement, script: expression(statement.script) };
+    case "goto":
+      return statement.target.kind === "file"
+        ? statement
+        : { ...statement, target: { kind: "script", path: expression(statement.target.path) } };
     case "hideImage":
     case "break":
     case "continue":
-    case "end":
     case "exit":
     case "unsupported":
     case "comment":

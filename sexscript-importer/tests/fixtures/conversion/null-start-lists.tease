@@ -16,3 +16,4 @@ fill()
 let index = last(prompts.length)
 say prompts[index]
 save extras.length as "extras"
+exit

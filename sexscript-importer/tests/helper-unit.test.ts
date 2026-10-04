@@ -196,7 +196,7 @@ test("package-aware lowering reconnects proven legacy helper calls without choos
     program.diagnostics.filter((diagnostic) => diagnostic.severity === "error").length,
     0,
   );
-  assert.equal(emitTease(program), "helper(3)\n");
+  assert.equal(emitTease(program), "helper(3)\nexit\n");
 });
 
 test("flags auxiliary helper fields instead of silently duplicating shared state", () => {

@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { loadRepositoryCompiler, type TeaseCompiler } from "../src/compile-check.ts";
 import { emitTease } from "../src/emit-tease.ts";
 import type { MigrationProgram } from "../src/ir.ts";
-import { lowerSelfContainedPackage } from "../src/package.ts";
+import { lowerPackage, lowerSelfContainedPackage } from "../src/package.ts";
 import { pendingHostFunctions, shimPendingCapabilities } from "../src/pending.ts";
 import type { ProposalId } from "../src/proposals.ts";
 import { analyzeFeasibility } from "../src/report.ts";
@@ -130,7 +130,7 @@ test(
       writeFileSync(sourcePath, '// header\rwait(2)\rshow("done") // trailing\r');
       assert.equal(
         emitTease(await convert(sourcePath)),
-        '// header\nwait 2\nsay "done" // trailing\n',
+        '// header\nwait 2\nsay "done" // trailing\nexit\n',
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -386,6 +386,83 @@ test(
   },
 );
 
+// Legacy chaining becomes file transfers (ADR 0022): a script name is `goto` to that file, a computed one `goto
+// script(...)`, and a null or empty one, a missing script, or the end of a script ends the chain with `exit`. A package
+// starts at main.tease: its one root script, or a generated menu over the scripts the legacy player listed.
+test(
+  "converts legacy script chains into goto, goto script(), exit, and one main.tease entry",
+  {
+    skip:
+      parserUnavailable ||
+      ("reason" in compilerResult ? compilerResult.reason : false) ||
+      ("reason" in runnerResult ? runnerResult.reason : false),
+  },
+  async () => {
+    if (!("compiler" in compilerResult) || !("runner" in runnerResult)) return;
+    for (const name of ["script-chain", "single-entry"]) {
+      const directory = fileURLToPath(new URL(`./fixtures/packages/${name}/`, import.meta.url));
+      const scripts = path.join(directory, "scripts");
+      const sources = readdirSync(scripts, { recursive: true, encoding: "utf8" })
+        .filter((file) => file.endsWith(".groovy"))
+        .sort();
+      const files = await Promise.all(
+        sources.map((file) => parseGroovySource(path.join(scripts, file))),
+      );
+      const lowered = lowerPackage(files);
+      const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;
+      const outputs = lowered.composed.map((program, index): [string, MigrationProgram] => [
+        index === entry ? "main.tease" : sources[index]!.replace(/\.groovy$/u, ".tease"),
+        program,
+      ]);
+      if (lowered.main !== null && "menu" in lowered.main)
+        outputs.push(["main.tease", lowered.main.menu]);
+      const expected = readdirSync(path.join(directory, "expected"), {
+        recursive: true,
+        encoding: "utf8",
+      }).filter((file) => file.endsWith(".tease"));
+      assert.deepEqual(outputs.map(([file]) => file).sort(), expected.sort(), name);
+      for (const [file, program] of outputs) {
+        assert.equal(
+          emitTease(program),
+          readFileSync(path.join(directory, "expected", file), "utf8"),
+          `${name}/${file}`,
+        );
+        const shim = shimPendingCapabilities(program);
+        assert.deepEqual(
+          compilerResult.compiler(shim.source, shim.builtins).diagnostics,
+          [],
+          `${name}/${file}`,
+        );
+      }
+      if (name !== "script-chain") continue;
+      const report = analyzeFeasibility(files, {
+        compiler: compilerResult.compiler,
+        runner: runnerResult.runner,
+        packageRoot: scripts,
+      });
+      assert.deepEqual(
+        report.smokeRuns
+          .filter(({ entry: start }) => ["main.tease", "intro.tease"].includes(start))
+          .map(({ entry: start, status, visited }) => ({ start, status, visited })),
+        [
+          // The menu's first option, then the chain through a stored script reference to its exit.
+          { start: "main.tease", status: "halted", visited: ["main.tease", "extra.tease"] },
+          {
+            start: "intro.tease",
+            status: "halted",
+            visited: [
+              "intro.tease",
+              "chapters/first.tease",
+              "chapters/second.tease",
+              "chapters/last.tease",
+            ],
+          },
+        ],
+      );
+    }
+  },
+);
+
 test(
   "package smoke run uses the package root for entries and counts only scripts as reached",
   {
@@ -424,7 +501,8 @@ test(
           visited,
         })),
         [
-          { entry: "helper.tease", isolated: false, status: "halted", visited: ["helper.tease"] },
+          // The one script in the package root is the entry, main.tease (ADR 0022).
+          { entry: "main.tease", isolated: false, status: "halted", visited: ["main.tease"] },
           {
             entry: "sub/start.tease",
             isolated: true,
@@ -465,8 +543,13 @@ test(
         packageRoot: directory,
       });
       assert.deepEqual(
-        report.smokeRuns.map(({ entry, status }) => ({ entry, status })),
-        [{ entry: "a.tease", status: "blocked" }],
+        report.smokeRuns.map(({ entry, status, blockedTarget }) => ({
+          entry,
+          status,
+          blockedTarget,
+        })),
+        // The generated entry menu offers both scripts; the first one it reaches is ambiguous.
+        [{ entry: "main.tease", status: "blocked", blockedTarget: "a.tease" }],
       );
       assert.equal(report.smokeRunReachedScriptFileCount, 0);
     } finally {

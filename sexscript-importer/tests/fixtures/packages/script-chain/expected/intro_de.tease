@@ -1,0 +1,2 @@
+say "Willkommen."
+goto "chapters/first.tease"

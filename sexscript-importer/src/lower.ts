@@ -83,6 +83,11 @@ export interface LowerOptions {
   /** Source names of the package files in each directory, to check that a module loader's directory is complete. */
   directoryFiles?: ReadonlyMap<string, readonly string[]>;
   /**
+   * The TeaseScript path of each script of a package (packageScriptPaths), keyed by its legacy name: the path from the
+   * package root without `.groovy`, in lower case. Without it, a script name keeps its path.
+   */
+  scriptPaths?: ReadonlyMap<string, string>;
+  /**
    * Rename identifiers TeaseScript rejects (default). Package composition disables this per file and renames
    * the composed program once.
    */
@@ -155,6 +160,7 @@ interface LowerContext {
   stopsBackgroundSounds: boolean;
   resultUses: ReadonlySet<string>;
   directoryFiles: ReadonlyMap<string, readonly string[]>;
+  scriptPaths: ReadonlyMap<string, string> | null;
   /** Variables assigned once with the current date (`new Date()`, `Calendar.getInstance()`). */
   dateValues: ReadonlySet<string>;
   /** List variables that Groovy shared with another variable by an assignment of one to the other. */
@@ -676,6 +682,7 @@ export function lowerParsedFile(
     stopsBackgroundSounds: options.stopsBackgroundSounds ?? packageStopsBackgroundSounds([file]),
     resultUses: options.resultUses ?? packageResultUses([file]),
     directoryFiles: options.directoryFiles ?? new Map(),
+    scriptPaths: options.scriptPaths ?? null,
     dateValues: new Set(),
     aliasedLists: new Set(),
     mapUses: mapUsesOf([]),
@@ -761,9 +768,12 @@ export function lowerParsedFile(
     context.classLoaderVariables = helpers.classLoaders;
     context.legacyHelperClasses = helpers.helperClasses;
   }
-  const authoredStatements = withoutTrailingEnd(
-    body?.kind === "block" ? lowerBlock(body, context) : [],
-  );
+  const lowered = body?.kind === "block" ? lowerBlock(body, context) : [];
+  // Every file ends with a transfer or exit (ADR 0022 §4); where the legacy script just ended, its chain ended.
+  const authoredStatements =
+    mixin === null && !terminates(lowered)
+      ? [...lowered, { kind: "exit" as const, span: null }]
+      : lowered;
   const typedStatements = withEnforcedTypes(
     [...context.closureFunctions, ...authoredStatements],
     context,
@@ -1105,6 +1115,7 @@ function lowerHelperMethod(
     stopsBackgroundSounds: baseContext.stopsBackgroundSounds,
     resultUses: baseContext.resultUses,
     directoryFiles: baseContext.directoryFiles,
+    scriptPaths: baseContext.scriptPaths,
     dateValues: new Set(),
     aliasedLists: new Set(),
     mapUses: baseContext.mapUses,
@@ -1379,20 +1390,29 @@ function paragraphBreak(
     : [];
 }
 
-/** A legacy `return null` on the last line only ends the script, which reaching the end already does. */
-function withoutTrailingEnd(statements: IrStatement[]): IrStatement[] {
-  const lastCode = statements.findLastIndex(
-    (statement) => statement.kind !== "comment" && statement.kind !== "blank",
+/**
+ * Whether the statements never reach their end: the last statement that runs is a transfer or `exit`, or branches that
+ * all are. Function declarations do not run in place.
+ */
+function terminates(statements: readonly IrStatement[]): boolean {
+  const last = statements.findLast(
+    (statement) => !["comment", "blank", "function"].includes(statement.kind),
   );
-  if (statements[lastCode]?.kind !== "end") return statements;
-  // A trailing comment of the removed statement must not attach to the previous one.
-  return statements
-    .toSpliced(lastCode, 1)
-    .map((statement, index) =>
-      index >= lastCode && statement.kind === "comment"
-        ? { ...statement, trailing: false }
-        : statement,
-    );
+  switch (last?.kind) {
+    case "goto":
+    case "exit":
+      return true;
+    case "if":
+      return last.else.length > 0 && terminates(last.then) && terminates(last.else);
+    case "switch":
+      return (
+        last.default.length > 0 &&
+        terminates(last.default) &&
+        last.cases.every((item) => terminates(item.body))
+      );
+    default:
+      return false;
+  }
 }
 
 /** Like withPrelude, with `root` as the evaluation point for prompt placement. */
@@ -4319,9 +4339,10 @@ function returnsAsContinue(statements: IrStatement[]): IrStatement[] {
   return statements.map((statement): IrStatement => {
     switch (statement.kind) {
       case "return":
-      case "run":
-      case "end":
+      case "goto":
         return { kind: "continue", span: statement.span };
+      case "exit":
+        return statement.returned === true ? { kind: "continue", span: statement.span } : statement;
       case "if":
         return {
           ...statement,
@@ -5115,7 +5136,10 @@ function lowerReturnStatement(node: AstNode, context: LowerContext): IrStatement
     return [{ kind: "return", value, span: node.span }];
   }
 
-  if (valueNode === null || isNullConstant(valueNode)) return [{ kind: "end", span: node.span }];
+  // A null or empty script name ended the legacy chain.
+  const ends: IrStatement = { kind: "exit", returned: true, span: node.span };
+  if (valueNode === null || isNullConstant(valueNode) || constantValue(valueNode) === "")
+    return [ends];
   const script = lowerExpression(valueNode, context);
   if (script === null)
     return [
@@ -5126,9 +5150,71 @@ function lowerReturnStatement(node: AstNode, context: LowerContext): IrStatement
         "Script return value could not be migrated.",
       ),
     ];
-  if (script.kind === "literal" && typeof script.value === "string")
-    script.value = migrateScriptPath(script.value);
-  return [{ kind: "run", script, span: node.span }];
+  if (script.kind === "literal" && typeof script.value === "string") {
+    const path = scriptPath(script.value, context);
+    if (path !== null) return [{ kind: "goto", target: { kind: "file", path }, span: node.span }];
+    addDiagnostic(
+      context,
+      "SX_MISSING_SCRIPT",
+      "warning",
+      `Legacy chained to the script "${script.value}", which is not part of this package; the legacy player ended the chain when it found no such file, so the script exits here.`,
+      node.span,
+    );
+    return [ends];
+  }
+  addDiagnostic(
+    context,
+    "SX_DYNAMIC_SCRIPT",
+    "warning",
+    'Legacy chained to the script this value names, and ended the chain when the value was null or empty or named no file; script() needs the path of a file in the package, such as "folder/name.tease", and fails at runtime for a missing one.',
+    node.span,
+  );
+  const transfer: IrStatement = {
+    kind: "goto",
+    target: { kind: "script", path: script },
+    span: node.span,
+  };
+  if (!isRepeatableExpression(valueNode)) return [transfer];
+  return [
+    {
+      kind: "if",
+      condition: {
+        kind: "binary",
+        operator: "or",
+        left: {
+          kind: "binary",
+          operator: "==",
+          left: script,
+          right: { kind: "literal", value: null },
+        },
+        right: {
+          kind: "binary",
+          operator: "==",
+          left: script,
+          right: { kind: "literal", value: "" },
+        },
+      },
+      then: [ends],
+      else: [],
+      span: node.span,
+    },
+    transfer,
+  ];
+}
+
+/**
+ * The TeaseScript path a legacy script name chains to: the package's file of that name (its entry is `main.tease`),
+ * or null when the package has none. The legacy player also looked for a localized variant first (`name_de`), which
+ * the converted package does not choose by language. Without package context, the name keeps its path.
+ */
+function scriptPath(name: string, context: LowerContext): string | null {
+  if (context.scriptPaths === null) return migrateScriptPath(name);
+  const key = name
+    .replaceAll("\\", "/")
+    .replace(/^(?:\.\/|\/)+/u, "")
+    .replace(/\.groovy$/iu, "")
+    .toLowerCase();
+  return context.scriptPaths.get(key) ?? null;
 }
 
 function lowerExpression(node: AstNode, context: LowerContext): IrExpression | null {

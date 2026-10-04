@@ -3,3 +3,4 @@ let count = 3
 say "Hello ${name}, you have ${count + 1} tasks."
 say "Literal \${not interpolated} and \"quotes\""
 say "Path C:\\temp\tTab"
+exit

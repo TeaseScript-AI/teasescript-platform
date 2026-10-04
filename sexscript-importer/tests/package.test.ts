@@ -194,6 +194,7 @@ test("self-contained package output includes only transitively required helper f
       "  return value",
       "}",
       "used(3)",
+      "exit",
       "",
     ].join("\n"),
   );

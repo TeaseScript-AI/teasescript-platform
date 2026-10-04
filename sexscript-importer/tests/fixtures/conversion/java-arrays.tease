@@ -22,3 +22,4 @@ let counts = sexscriptLegacyArray(2, 0)
 counts[0] = counts[0] + 1
 // TODO SX_JAVA_ARRAY_TYPE line 10: A Java char[] converts every written value to its element type; a TeaseScript list keeps values as written. Use a list and convert values explicitly.
 // | def letters = new char[2]
+exit

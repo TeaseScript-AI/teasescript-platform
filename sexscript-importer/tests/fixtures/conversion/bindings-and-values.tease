@@ -34,4 +34,4 @@ function pick(a, b) {
 say "Pick"
 say "Picked ${pick((choose 0: "A", 1: "B"), 3)}"
 say "hello"
-// final return
+exit // final return

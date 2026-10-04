@@ -10,3 +10,4 @@ fill()
 if answers != null {
   say answers[0]
 }
+exit

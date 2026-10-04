@@ -1,0 +1,3 @@
+// A script no other script chains to, which the legacy player listed.
+say "An extra scene."
+exit

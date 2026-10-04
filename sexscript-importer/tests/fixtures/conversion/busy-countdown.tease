@@ -11,3 +11,4 @@ let after = getTimestamp().toSeconds()
 if after - before >= 0 {
   say "Measured"
 }
+exit

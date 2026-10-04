@@ -54,7 +54,7 @@ export type TeaseRunner = (
 ) => SmokeRunResult;
 
 /**
- * State shared by the scripts of one package flow: storage, the script a `run` transfers to, simulated time, and
+ * State shared by the scripts of one package flow: storage, the file a `goto` transfers to, simulated time, and
  * answer rotation of host stand-ins for pending inputs.
  */
 export interface FlowState {
@@ -99,8 +99,8 @@ export function flowKey(scriptPath: string): string {
 }
 
 /**
- * Runs a package the way a player would: from an entry script, following `run` transfers to other scripts of the
- * package with shared storage, until the flow ends, fails, reaches an unconverted script, or uses up its steps.
+ * Runs a package the way a player would: from an entry script, following `goto` transfers to other files of the
+ * package with shared storage, until the flow exits, fails, reaches an unconverted script, or uses up its steps.
  * `scripts` is keyed by `flowKey()`.
  */
 export function smokeRunFlow(

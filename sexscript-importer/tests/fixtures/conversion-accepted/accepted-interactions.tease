@@ -53,3 +53,4 @@ let photo = takePhoto()
 if photo != null {
   showImage photo
 }
+exit

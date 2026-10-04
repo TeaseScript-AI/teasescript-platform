@@ -43,3 +43,4 @@ if stored != null {
   say stored
 }
 let answer = askText
+exit

@@ -87,3 +87,4 @@ greet()
 let cycle = "pauseCycle"
 sexscriptLegacyCall(cycle, [120])
 say "Rounds: ${rounds}"
+exit
