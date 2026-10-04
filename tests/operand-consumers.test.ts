@@ -120,6 +120,13 @@ test("a choice object that is not written in the option is checked by its known 
   const copied =
     'let box: object = { part: [{ value: 1 }] }\nlet part = box.part\nif part is integer[] {\n    let copy: list = part\n    let answer = choose copy\n}\nsay "done"';
   assert.deepEqual(says(copied), ["done"]);
+  // Objects with different properties fit `object[]` but not `integer[]`, although their joined element type is unknown.
+  assert.deepEqual(
+    says(
+      'let part: object[] = [{ value: 1 }, { value: "x" }]\nif part is integer[] {\n    let answer = choose part\n}\nsay "done"',
+    ),
+    ["done"],
+  );
   assert.deepEqual(
     errors(hidden("{ value: 1 }", "object")).map(([code]) => code),
     ["TSV029"],
@@ -147,6 +154,12 @@ test("a property that an exact object never gets is an error where it is read", 
   assert.deepEqual(
     says(
       'let box: object = { part: dict{ k: { a: 1 } } }\nlet part = box.part\nif part is integer dict {\n    let copy: dict = part\n    say copy["k"].missing\n}\nsay "done"',
+    ),
+    ["done"],
+  );
+  assert.deepEqual(
+    says(
+      'let part: object dict = dict{ a: { a: 1 }, b: { a: "x" } }\nif part is integer dict {\n    let copy: dict = part\n    say copy["a"].missing\n}\nsay "done"',
     ),
     ["done"],
   );

@@ -2014,13 +2014,18 @@ class TypeChecker {
         const entry = scope.resolve(expression.name);
         this.#exactReads.delete(expression);
         if (entry?.kind === "variable") {
-          const type = this.#currentType(entry.variable);
-          // A test may narrow the variable to a type its literals do not fit, such as `integer[]` for a list of objects:
-          // then they are not its value here, and neither is any copy taken here.
+          const narrowed = this.#flow.get(entry.variable);
+          // The literals fit the variable's own type. Where a test narrowed it, they are its value here only if each surely
+          // fits the narrowed type, unlike a list of objects and `integer[]`; otherwise neither they nor a copy taken here
+          // count.
           const literals = this.#exactLiterals.get(entry.variable);
-          if (literals?.every((literal) => isAssignable(type, this.#typeOf(literal))))
+          if (
+            literals !== undefined &&
+            (narrowed === undefined ||
+              literals.every((literal) => surelyFits(narrowed, this.#typeOf(literal))))
+          )
             this.#exactReads.set(expression, literals);
-          return placeRead(type);
+          return placeRead(narrowed ?? entry.variable.type);
         }
         if (entry?.kind === "speaker" || (entry === undefined && expression.name === "speaker"))
           return { kind: "speaker" };
@@ -5355,6 +5360,17 @@ function exactParts(
 function fails(type: StaticType, accepts: (member: StaticType) => boolean): boolean {
   const known = members(type).filter(isKnown);
   return known.length > 0 && !known.some(accepts);
+}
+
+/**
+ * Whether every value of `source` fits `target`: it is assignable, and no part of it is unknown or undecided, which
+ * assignment accepts for the runtime to check, as a list of objects with different properties has unknown elements.
+ */
+function surelyFits(target: StaticType, source: StaticType): boolean {
+  return (
+    isAssignable(target, source) &&
+    !containsType(source, (part) => part.kind === "unknown" || part.kind === "open")
+  );
 }
 
 /**
