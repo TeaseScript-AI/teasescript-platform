@@ -251,11 +251,19 @@ test("optional types keep their non-null type in operations, elements, and loops
     mismatches("let items: integer[]? = [1]\nitems.add(2.5)")[0]?.[1],
     "'items' holds integer values (integer[]), so it cannot contain a number. To allow fractions, declare it as 'let items: number[]? = ...'.",
   );
-  // An optional whole number may serve as an index or a repeat count; only a null value fails at runtime.
+  // An optional whole number may serve as an index or a repeat count, and an optional value as a built-in's argument;
+  // only a null value fails at runtime.
   assert.deepEqual(
     codes('let n: integer? = 0\nlet items = [1]\nsay "${items[n]}"\nrepeat n {\n    say "x"\n}'),
     [],
   );
+  assert.deepEqual(
+    codes(
+      'let v: number? = 2.5\nlet r = round(v)\nlet t: string? = "<b>"\nlet e = escapeMarkup(t)',
+    ),
+    [],
+  );
+  assert.deepEqual(codes('let t: string? = "a"\nlet r = round(t)'), [["TSV043", "t"]]);
 });
 
 test("number times duration is a duration, and a media cue's own handle keeps its type", () => {
@@ -939,6 +947,12 @@ test("a choice result has the type of its values, and an option without a writte
     codes("let value: integer? = null\nlet answer = choose value\nanswer = null"),
     [],
   );
+  // A direct option is the value as it was evaluated: a later option's call does not change it.
+  const fill = 'let token = null\nfunction fill {\n    token = 9\n    return "Ready"\n}\n';
+  assert.deepEqual(codes(`${fill}let answer: integer? = choose token, fill()`), [
+    ["TSV041", "choose token, fill()"],
+  ]);
+  assert.deepEqual(codes(`${fill}let answer: string? = choose token, fill()`), []);
   // A computed choice object returns its value or text, whose type is not known here.
   assert.deepEqual(
     codes(

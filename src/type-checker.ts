@@ -1319,7 +1319,8 @@ class TypeChecker {
     values: readonly StaticType[],
   ): StaticType {
     const argument = expression.arguments[0];
-    const value = values[0];
+    // A possibly null argument is checked by its other members, like other operands (V30 §34).
+    const value = values[0] === undefined ? undefined : nonNullTypeForUse(values[0]);
     switch (name) {
       case "random":
         return NUMBER_TYPE;
@@ -1505,7 +1506,8 @@ class TypeChecker {
         continue;
       }
       if (isKnown(value)) buttons += 1;
-      const entry = this.#choiceEntry(option.expression, type, false);
+      // The option is kept as it was evaluated: a later option may still change the place it was read from.
+      const entry = this.#choiceEntry(option.expression, this.#capture(option.expression), false);
       values.push(written ?? entry);
     }
     if (buttons > MAX_INTERACTION_OPTION_ENTRIES)
