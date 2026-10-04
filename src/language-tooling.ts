@@ -624,6 +624,15 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
       else if (statement.elseBlock !== null)
         children.push({ kind: "statement", node: statement.elseBlock });
       return;
+    case "switchStatement":
+      children.push({ kind: "expression", node: statement.subject });
+      for (const switchCase of statement.cases)
+        for (const child of switchCase.body.statements)
+          children.push({ kind: "statement", node: child });
+      if (statement.defaultBlock !== null)
+        for (const child of statement.defaultBlock.statements)
+          children.push({ kind: "statement", node: child });
+      return;
     case "repeatStatement":
       children.push({ kind: "expression", node: statement.count });
       for (const child of statement.body.statements)

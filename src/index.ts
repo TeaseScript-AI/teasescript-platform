@@ -269,6 +269,8 @@ export type {
   ScalarTypeName,
   SayStatement,
   ShowButtonStatement,
+  SwitchCase,
+  SwitchStatement,
   WaitStatement,
   TimerStatement,
   ShowImageStatement,

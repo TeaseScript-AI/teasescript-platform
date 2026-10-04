@@ -59,6 +59,8 @@ import type {
   StringLiteral,
   StringPart,
   StringText,
+  SwitchCase,
+  SwitchStatement,
   TypeAnnotation,
   UnaryExpression,
   WhileStatement,
@@ -82,6 +84,7 @@ const statementOnlyCommands: ReadonlySet<string> = new Set([
   "hideImage",
   "save",
   "delete",
+  "switch",
 ]);
 
 const parserDiagnosticCode = {
@@ -120,6 +123,7 @@ const parserDiagnosticCode = {
   invalidTimerForm: "TSP034",
   invalidMediaForm: "TSP035",
   expectedStorageKey: "TSP036",
+  invalidSwitchForm: "TSP038",
 } as const;
 
 const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
@@ -145,8 +149,8 @@ class Parser {
   #current = 0;
   #commaLookahead: { readonly at: number; readonly offset: number | null } | null = null;
   #recoveredAtStatementBoundary = false;
-  /** Inside a media cue position, whose block `{` ends a compact choice. */
-  #inCuePosition = false;
+  /** Inside a media cue position or a switch subject, where the following block `{` ends a compact choice. */
+  #blockEndsCompactChoice = false;
   /**
    * The `save` `as` and `load` `default` that end an enclosing storage operand. A compact interaction stops at them, and
    * a bare interaction leaves the `as` to `save`; groupings such as parentheses start without them.
@@ -201,6 +205,9 @@ class Parser {
     }
     if (this.#checkIdentifier("delete")) {
       return this.#parseDeleteStatement();
+    }
+    if (this.#checkIdentifier("switch")) {
+      return yield* parseChild(this.#parseSwitchStatement());
     }
     if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
       const parts = yield* parseChild(this.#parseMediaParts());
@@ -1178,12 +1185,12 @@ class Parser {
    */
   *#parseMediaHandlers(): ParseTask<MediaHandlers | null | false> {
     if (!this.#check(TokenKind.LeftBrace)) return null;
-    const enclosingCuePosition = this.#inCuePosition;
-    this.#inCuePosition = false;
+    const enclosingBlockEndsChoice = this.#blockEndsCompactChoice;
+    this.#blockEndsCompactChoice = false;
     const handlers = yield* parseChild(
       this.#withoutStorageDelimiters(this.#parseMediaHandlerBlock()),
     );
-    this.#inCuePosition = enclosingCuePosition;
+    this.#blockEndsCompactChoice = enclosingBlockEndsChoice;
     return handlers;
   }
 
@@ -1296,10 +1303,10 @@ class Parser {
       keyword.lexeme === "at" ? "at" : keyword.lexeme === "beforeEnd" ? "beforeEnd" : "finish";
     let offset: Expression | null = null;
     if (kind !== "finish") {
-      const enclosing = this.#inCuePosition;
-      this.#inCuePosition = true;
+      const enclosing = this.#blockEndsCompactChoice;
+      this.#blockEndsCompactChoice = true;
       offset = yield* parseChild(this.#parseOr());
-      this.#inCuePosition = enclosing;
+      this.#blockEndsCompactChoice = enclosing;
       if (offset === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
@@ -1457,6 +1464,148 @@ class Parser {
       elseBlock,
       span: spanFrom(keyword.span, (elseBlock ?? thenBlock).span),
     });
+  }
+
+  *#parseSwitchStatement(): ParseTask<SwitchStatement | null> {
+    const keyword = this.#advance();
+    if (this.#check(TokenKind.LeftBrace)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedExpression,
+        "Expected the value to switch on, as in 'switch answer { ... }'.",
+      );
+      this.#skipMalformedBlock();
+      return null;
+    }
+    const enclosingBlockEndsChoice = this.#blockEndsCompactChoice;
+    this.#blockEndsCompactChoice = true;
+    const subject = this.#parseRequiredExpression();
+    this.#blockEndsCompactChoice = enclosingBlockEndsChoice;
+    if (subject === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    this.#skipContinuationNewlines();
+    if (!this.#match(TokenKind.LeftBrace)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedBlock,
+        "Expected '{' to start the switch cases.",
+      );
+      return null;
+    }
+    const cases: SwitchCase[] = [];
+    let defaultBlock: Block | null = null;
+    let malformedClause = false;
+    this.#skipNewlines();
+    while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
+      const clause = this.#peek();
+      if (this.#checkIdentifier("case")) {
+        this.#advance();
+        if (defaultBlock !== null) {
+          this.#reportToken(
+            parserDiagnosticCode.invalidSwitchForm,
+            "A 'case' may not follow 'default'. Move 'default' after the last case.",
+            clause,
+          );
+        }
+        const values = this.#parseCaseValues();
+        if (values === null) {
+          malformedClause = true;
+          this.#synchronizeSwitchClause();
+        } else {
+          this.#skipContinuationNewlines();
+          const body = yield* parseChild(this.#parseBlock());
+          if (body === null) return null;
+          cases.push(
+            Object.freeze({
+              kind: "switchCase",
+              values,
+              body,
+              span: spanFrom(clause.span, body.span),
+            }),
+          );
+        }
+      } else if (this.#checkIdentifier("default")) {
+        this.#advance();
+        this.#skipContinuationNewlines();
+        const body = yield* parseChild(this.#parseBlock());
+        if (body === null) return null;
+        if (defaultBlock === null) {
+          defaultBlock = body;
+        } else {
+          this.#reportToken(
+            parserDiagnosticCode.invalidSwitchForm,
+            "A switch has only one 'default'. Remove this one or merge the two blocks.",
+            clause,
+          );
+        }
+      } else {
+        this.#reportToken(
+          parserDiagnosticCode.invalidSwitchForm,
+          "Expected 'case' or 'default'. Every statement in a switch belongs inside a case block.",
+          clause,
+        );
+        malformedClause = true;
+        this.#synchronizeSwitchClause();
+      }
+      this.#skipNewlines();
+    }
+    if (!this.#match(TokenKind.RightBrace)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedRightBrace,
+        "Expected '}' to close the switch.",
+      );
+      return null;
+    }
+    if (cases.length === 0) {
+      if (malformedClause) return null;
+      this.#reportToken(
+        parserDiagnosticCode.invalidSwitchForm,
+        "A switch needs at least one 'case'.",
+        keyword,
+      );
+      return null;
+    }
+    return Object.freeze({
+      kind: "switchStatement",
+      subject,
+      cases: Object.freeze(cases),
+      defaultBlock,
+      span: spanFrom(keyword.span, this.#previous().span),
+    });
+  }
+
+  /** Parses the comma-separated values after `case`; their kinds are checked semantically. */
+  #parseCaseValues(): readonly Expression[] | null {
+    const values: Expression[] = [];
+    do {
+      this.#skipContinuationNewlines();
+      if (this.#check(TokenKind.LeftBrace)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected a value after 'case', as in 'case \"open\" { ... }'.",
+        );
+        return null;
+      }
+      const value = this.#parseRequiredExpression();
+      if (value === null) return null;
+      values.push(value);
+    } while (this.#match(TokenKind.Comma));
+    return Object.freeze(values);
+  }
+
+  /** Skips a malformed switch clause up to the next line, including a block that starts on it. */
+  #synchronizeSwitchClause(): void {
+    while (
+      !this.#check(TokenKind.Newline) &&
+      !this.#check(TokenKind.RightBrace) &&
+      !this.#check(TokenKind.EndOfFile)
+    ) {
+      if (this.#check(TokenKind.LeftBrace)) {
+        this.#skipMalformedBlock();
+        return;
+      }
+      this.#advance();
+    }
   }
 
   *#parseRepeatStatement(): ParseTask<RepeatStatement | null> {
@@ -1664,12 +1813,12 @@ class Parser {
     });
   }
 
-  /** A statement block; statements inside it are not part of an enclosing cue position. */
+  /** A statement block; statements inside it are not part of an enclosing cue position or switch subject. */
   *#parseBlock(): ParseTask<Block | null> {
-    const enclosingCuePosition = this.#inCuePosition;
-    this.#inCuePosition = false;
+    const enclosingBlockEndsChoice = this.#blockEndsCompactChoice;
+    this.#blockEndsCompactChoice = false;
     const block = yield* parseChild(this.#withoutStorageDelimiters(this.#parseBlockStatements()));
-    this.#inCuePosition = enclosingCuePosition;
+    this.#blockEndsCompactChoice = enclosingBlockEndsChoice;
     return block;
   }
 
@@ -2375,7 +2524,7 @@ class Parser {
         if (
           !this.#isInteractionChoiceTerminator() &&
           !this.#recoveredAtStatementBoundary &&
-          !(this.#inCuePosition && this.#check(TokenKind.LeftBrace))
+          !(this.#blockEndsCompactChoice && this.#check(TokenKind.LeftBrace))
         ) {
           if (this.#check(TokenKind.KeywordAs)) {
             this.#reportSpan(

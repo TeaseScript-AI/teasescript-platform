@@ -33,6 +33,7 @@ import {
   showButtonOptions,
 } from "./expression-children.js";
 import { durationLiteralMilliseconds } from "./duration.js";
+import { validateSwitchCases } from "./switch-cases.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -768,6 +769,21 @@ class SemanticValidator {
           } else {
             yield* compileChild(this.#validateBlock(statement.elseBlock, scope, loopDepth));
           }
+        }
+        return;
+      case "switchStatement":
+        this.#validateExpression(statement.subject, scope, null);
+        validateSwitchCases(
+          statement,
+          this.#expressionType(statement.subject, scope),
+          (name) => scope.resolve(name)?.kind === "speaker",
+          (code, message, span) => this.#report(code, message, span),
+        );
+        for (const switchCase of statement.cases) {
+          yield* compileChild(this.#validateBlock(switchCase.body, scope, loopDepth));
+        }
+        if (statement.defaultBlock !== null) {
+          yield* compileChild(this.#validateBlock(statement.defaultBlock, scope, loopDepth));
         }
         return;
       case "repeatStatement":

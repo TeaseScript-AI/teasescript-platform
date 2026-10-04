@@ -2610,7 +2610,7 @@ Permission handling and unsupported environments are runtime implementation deta
 
 ```text
 switch action {
-    case "open" {
+    case "open", "unlock" {
         openDoor()
     }
 
@@ -2627,11 +2627,23 @@ switch action {
 Rules:
 
 - Parentheses around the switched expression are optional.
-- Every `case` uses a required block.
-- `break` is not used.
-- Cases do not fall through.
-- `default` is optional.
-- Cases may use literal values or ranges.
+- The switched expression is evaluated once. The cases are then tested in source order, and only the first matching
+  case runs. Cases do not fall through, and `break` is not used to end a case.
+- A switch has at least one `case`. Every `case` uses a required block.
+- A `case` lists one or more values separated by commas and matches when any of them matches.
+- A case value is a literal (text without `${...}`, a number, `true`, `false`, `null`, or a duration), a declared
+  speaker, or a range with a number literal on each side. A literal or speaker matches when the switched value `==` it.
+- A range matches a number within its bounds (§6): `1..5` matches `1 <= value < 5` and `1..=5` matches
+  `1 <= value <= 5`, including numbers that are not whole, such as `4.5`. A value that is not a number fails at a range
+  case like a comparison with `<`.
+- `default` is optional. It comes after the last case, runs when no case matches, and appears at most once.
+- `return`, `break`, and `continue` inside a case block behave as inside an `if` block; `break` and `continue` apply to
+  the enclosing loop.
+- Compile errors:
+  - a case value that is not one of the forms above, or a range that contains no numbers, such as `5..5` or `5..1`;
+  - a case value that repeats or overlaps an earlier case value (§6), such as `2` after `2.0` or after `1..5`;
+  - a case value whose type can never match the switched value's known type, such as `case "x"` on an `integer`, or a
+    range on text.
 
 ## 33. Browser API: file, folder, camera, and URL references
 **Status:** Accepted

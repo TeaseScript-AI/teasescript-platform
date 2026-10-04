@@ -207,8 +207,8 @@ The exact syntax for detailed result objects, advanced accessibility overrides, 
 ## Currently implemented language subset
 
 The repository includes core values, variables, assignments including `+=`/`-=`, speakers, output, collections,
-expressions, comments, ranges, deterministic random built-ins, the `round`, `floor`, and `ceil` built-ins, conditionals,
-loops, and loop control.
+expressions, comments, ranges, deterministic random built-ins, the `round`, `floor`, and `ceil` built-ins, conditionals
+including `switch`, loops, and loop control.
 
 Implemented script storage includes `save`, `load` with an optional lazy default, and `delete`, with a checkpointed
 session view and host-acknowledged atomic writes. Accepted semantics and current type-checking limits are defined in

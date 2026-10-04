@@ -10,8 +10,10 @@ import type {
   Statement,
   InteractionExpression,
   ShowButtonParts,
+  SwitchCase,
+  SwitchStatement,
 } from "../../ast.js";
-import type { SourceSpan } from "../../source.js";
+import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { InstructionCompilationError } from "../errors.js";
 import type {
   AssignmentTargetPlan,
@@ -432,6 +434,9 @@ export class InstructionCompiler {
       case "ifStatement":
         yield* compileChild(this.#compileIf(statement));
         return;
+      case "switchStatement":
+        yield* compileChild(this.#compileSwitch(statement));
+        return;
       case "repeatStatement":
         yield* compileChild(
           this.#compileLoop("repeat", statement.count, statement.body, null, statement.span),
@@ -525,6 +530,106 @@ export class InstructionCompiler {
       yield* compileChild(this.#compileBlock(statement.elseBlock));
     }
     this.instructions[jump] = { ...jumpInstruction, target: this.instructions.length };
+  }
+
+  /**
+   * Evaluates the switched value once into a temporary, then tests the cases in order. The temporary is cleared before
+   * any case block runs, so it never stays live across a pause, `return`, `break`, or `continue` in a block.
+   */
+  *#compileSwitch(statement: SwitchStatement): CompileTask<void> {
+    const subject = this.#lowerExpression(statement.subject);
+    const subjectTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: subjectTemporary,
+      value: subject.plan,
+      expectBoolean: false,
+      span: copySpan(statement.subject.span),
+    });
+    this.#emitTemporaryCleanup(subject.temporaryIds, statement.subject.span);
+    const jumpsToEnd: { readonly index: number; readonly instruction: JumpInstruction }[] = [];
+    for (const switchCase of statement.cases) {
+      const valuesSpan = createSourceSpan(
+        switchCase.values[0]!.span.start,
+        switchCase.values.at(-1)!.span.end,
+      );
+      const conditional = this.instructions.length;
+      const conditionalInstruction: JumpIfFalseInstruction = {
+        kind: "jumpIfFalse",
+        condition: this.#caseCondition(switchCase, subjectTemporary, valuesSpan),
+        target: -1,
+        span: copySpan(valuesSpan),
+      };
+      this.instructions.push(conditionalInstruction);
+      this.#emitTemporaryCleanup([subjectTemporary], valuesSpan);
+      yield* compileChild(this.#compileBlock(switchCase.body));
+      const jump: JumpInstruction = { kind: "jump", target: -1, span: copySpan(switchCase.span) };
+      jumpsToEnd.push({ index: this.instructions.length, instruction: jump });
+      this.instructions.push(jump);
+      this.instructions[conditional] = {
+        ...conditionalInstruction,
+        target: this.instructions.length,
+      };
+    }
+    this.#emitTemporaryCleanup([subjectTemporary], statement.subject.span);
+    if (statement.defaultBlock !== null) {
+      yield* compileChild(this.#compileBlock(statement.defaultBlock));
+    }
+    const end = this.instructions.length;
+    for (const { index, instruction } of jumpsToEnd) {
+      this.instructions[index] = { ...instruction, target: end };
+    }
+  }
+
+  /** `subject == value` for each literal and `start <= subject < end` (`<=` when inclusive) for each range, or-ed. */
+  #caseCondition(
+    switchCase: SwitchCase,
+    subjectTemporary: number,
+    valuesSpan: SourceSpan,
+  ): ExpressionPlan {
+    const tests = switchCase.values.map((expression): ExpressionPlan => {
+      const value = unwrapParentheses(expression);
+      const subject = (): ExpressionPlan => ({
+        kind: "temporary",
+        temporaryId: subjectTemporary,
+        span: copySpan(expression.span),
+      });
+      if (value.kind !== "rangeExpression") {
+        return {
+          kind: "binary",
+          operator: "==",
+          left: subject(),
+          right: this.#lowerExpression(value).plan,
+          span: copySpan(expression.span),
+        };
+      }
+      return {
+        kind: "binary",
+        operator: "and",
+        left: {
+          kind: "binary",
+          operator: ">=",
+          left: subject(),
+          right: this.#lowerExpression(value.start).plan,
+          span: copySpan(expression.span),
+        },
+        right: {
+          kind: "binary",
+          operator: value.inclusive ? "<=" : "<",
+          left: subject(),
+          right: this.#lowerExpression(value.end).plan,
+          span: copySpan(expression.span),
+        },
+        span: copySpan(expression.span),
+      };
+    });
+    return tests.reduce((left, right): ExpressionPlan => ({
+      kind: "binary",
+      operator: "or",
+      left,
+      right,
+      span: copySpan(valuesSpan),
+    }));
   }
 
   *#compileBlock(block: Block): CompileTask<void> {
