@@ -290,6 +290,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         };
       }
       case "literal":
+      case "duration":
       case "variable":
         return value;
     }
@@ -915,13 +916,20 @@ export function pendingHostFunctions(
     ["run", ([script]) => ((state.transfer = String(script)), null)],
     ["end", () => null],
     ["showPopup", () => null],
-    // Seconds until the click: quick, then at the timeout. The simulated clock does not advance meanwhile.
+    // The elapsed duration until the click: quick, then the whole timeout. The simulated clock does not advance.
     [
       "showButton",
       ([, positionalTimeout], named) => {
-        const timeout = positionalTimeout ?? named.timeout;
-        const limit = typeof timeout === "number" ? timeout : 30;
-        return next("showButton", [Math.min(1, limit), limit]);
+        const timeout = composite(positionalTimeout ?? named.timeout);
+        const limit =
+          typeof (positionalTimeout ?? named.timeout) === "number"
+            ? Number(positionalTimeout ?? named.timeout) * 1000
+            : typeof timeout?.milliseconds === "number"
+              ? timeout.milliseconds
+              : 30_000;
+        const milliseconds = next("showButton", [Math.min(1000, limit), limit]);
+        const elapsed = { kind: "duration", milliseconds };
+        return elapsed;
       },
     ],
     ["askIntegerPrompt", () => 0],
@@ -932,7 +940,7 @@ export function pendingHostFunctions(
     ["getDateTime", () => date(true)],
     ["getDate", () => date(false)],
     ["openUrl", () => null],
-    // Owner decision (#507): ties round away from zero.
+    // V30 §13: ties round away from zero.
     ["round", rounded("round", (value) => Math.sign(value) * Math.round(Math.abs(value)))],
     ["floor", rounded("floor", Math.floor)],
     ["ceil", rounded("ceil", Math.ceil)],

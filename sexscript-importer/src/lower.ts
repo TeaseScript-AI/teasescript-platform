@@ -758,6 +758,7 @@ function hasIrCall(expression: IrExpression): boolean {
     case "load":
       return true;
     case "literal":
+    case "duration":
     case "variable":
       return false;
     case "list":
@@ -4766,7 +4767,7 @@ function lowerObjectMethodCallExpression(
         context,
         "SX_ROUNDING_TIES",
         "warning",
-        "Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2; owner decision, #507).",
+        "Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13).",
         node.span,
       );
       return { kind: "call", name: "round", positional: args, named: {} };
@@ -5775,8 +5776,14 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
             "getBooleans() must have exactly three arguments.",
           );
     case "showButton":
+      // Legacy returned the seconds until the click; TeaseScript returns the elapsed duration (V30 §21).
       return args.length === 1 || args.length === 2
-        ? { kind: "call", name: "showButton", positional: args, named: {} }
+        ? {
+            kind: "binary",
+            operator: "/",
+            left: { kind: "call", name: "showButton", positional: args, named: {} },
+            right: { kind: "duration", value: 1, unit: "s" },
+          }
         : unsupportedExpression(
             context,
             node,

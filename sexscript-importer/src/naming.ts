@@ -1,11 +1,7 @@
 import { TEASESCRIPT_PROTECTED_NAMES } from "../../src/protected-names.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 
-/**
- * `set` starts a set literal (ADR 0013) in the parser although the repository's protected-name list does not
- * include it yet, so the importer reserves it too.
- */
-const PROTECTED = new Set<string>([...TEASESCRIPT_PROTECTED_NAMES, "set"]);
+const PROTECTED: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);
 
 /**
  * Renames legacy identifiers that TeaseScript rejects: names reserved by TeaseScript, and function parameters or
@@ -292,6 +288,8 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
           "text" in part ? part : { value: child(part.value) },
         ),
       };
+    case "duration":
+      return expression;
     case "literal":
       return expression.action === true && typeof expression.value === "string"
         ? { ...expression, value: renamer.functions.get(expression.value) ?? expression.value }

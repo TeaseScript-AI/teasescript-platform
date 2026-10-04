@@ -31,6 +31,8 @@ let items = ["a", "b"]
 // | show("Items: " + items)
 let more = sexscriptLegacyConcat([items, ["c"]])
 let check = (1 < 2) == true
+let setValue = "tools" // protected in TeaseScript
+say "Set: ${setValue}"
 function pick(a, b) {
   return b
 }

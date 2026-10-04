@@ -167,6 +167,8 @@ export type IrExpression =
    */
   | { kind: "input"; input: "askText" | "askNumber"; defaultValue?: IrExpression }
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
+  /** An elapsed duration literal such as `1 s`. */
+  | { kind: "duration"; value: number; unit: "s" | "ms" }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }
   | { kind: "binary"; operator: string; left: IrExpression; right: IrExpression }
   /** `local` marks a call to a function defined in the generated package rather than a TeaseScript built-in. */

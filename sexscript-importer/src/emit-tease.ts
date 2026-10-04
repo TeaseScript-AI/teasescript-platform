@@ -215,6 +215,8 @@ export function emitExpression(expression: IrExpression): string {
       return typeof expression.value === "string"
         ? `"${escapeStringText(expression.value)}"`
         : String(expression.value);
+    case "duration":
+      return `${expression.value} ${expression.unit}`;
     case "template": {
       const parts = expression.parts.map((part) =>
         "text" in part ? escapeStringText(part.text) : `\${${emitExpression(part.value)}}`,
