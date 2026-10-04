@@ -365,6 +365,9 @@ function validateCanonicalPreparedSays(
   const explicitIncomingSources = hasPreparedSay
     ? collectExplicitIncomingSources(instructions)
     : [];
+  const payloadReferences = hasPreparedSay
+    ? collectPayloadTemporaryReferences(instructions)
+    : new Map<number, readonly number[]>();
 
   const consumed = new Set<number>();
   instructions.forEach((instruction, instructionIndex) => {
@@ -456,6 +459,7 @@ function validateCanonicalPreparedSays(
       instructions,
       index,
       explicitIncomingSources,
+      payloadReferences,
       producers,
       consumed,
       errors,
@@ -562,6 +566,7 @@ function validatePreparedSayContextualSpeaker(
   instructions: readonly unknown[],
   index: PlanValidationIndex,
   explicitIncomingSources: readonly (readonly number[])[],
+  payloadReferences: ReadonlyMap<number, readonly number[]>,
   producers: ReadonlyMap<number, readonly number[]>,
   consumed: Set<number>,
   errors: PlanValidationError[],
@@ -616,7 +621,7 @@ function validatePreparedSayContextualSpeaker(
   }
   if (
     preparedSayContextualSpeakerIsUsedBeforeCapture(
-      instructions,
+      payloadReferences,
       index,
       region,
       producerIndex,
@@ -644,140 +649,151 @@ function validatePreparedSayContextualSpeaker(
 }
 
 function preparedSayContextualSpeakerIsUsedBeforeCapture(
-  instructions: readonly unknown[],
+  payloadReferences: ReadonlyMap<number, readonly number[]>,
   index: PlanValidationIndex,
   region: InstructionExecutionRegion,
   producerIndex: number,
   temporaryId: number,
 ): boolean {
-  for (
-    let instructionIndex = region.startInstruction;
-    instructionIndex < producerIndex;
-    instructionIndex += 1
-  ) {
-    const instruction = instructions[instructionIndex];
-    if (
-      isRecord(instruction) &&
-      index.owners[instructionIndex] === region &&
-      preparedSayPayloadMayReferenceTemporary(instruction, temporaryId)
-    )
-      return true;
+  for (const instructionIndex of payloadReferences.get(temporaryId) ?? []) {
+    if (instructionIndex >= producerIndex) return false;
+    if (index.owners[instructionIndex] === region) return true;
   }
   return false;
 }
 
-function preparedSayPayloadMayReferenceTemporary(
+/**
+ * Maps each temporary ID to the ascending instruction indices whose payload may
+ * reference it, so the capture-order check does not rescan preceding instructions.
+ */
+function collectPayloadTemporaryReferences(
+  instructions: readonly unknown[],
+): ReadonlyMap<number, readonly number[]> {
+  const references = new Map<number, number[]>();
+  const referenced = new Set<number>();
+  instructions.forEach((instruction, instructionIndex) => {
+    if (!isRecord(instruction)) return;
+    referenced.clear();
+    collectPreparedSayPayloadTemporaryReferences(instruction, referenced);
+    for (const temporaryId of referenced) {
+      const indices = references.get(temporaryId) ?? [];
+      indices.push(instructionIndex);
+      references.set(temporaryId, indices);
+    }
+  });
+  return references;
+}
+
+function collectPreparedSayPayloadTemporaryReferences(
   instruction: Record<string, unknown>,
-  temporaryId: number,
-): boolean {
-  let expression: unknown;
+  output: Set<number>,
+): void {
   switch (instruction.kind) {
     case "evaluate":
     case "prepareReference":
-      expression = instruction.expression;
-      break;
+      collectExpressionTemporaryReferences(instruction.expression, output);
+      return;
     case "say":
-      return (
-        expressionMayReferenceTemporary(instruction.presentation, temporaryId) ||
-        expressionMayReferenceTemporary(instruction.value, temporaryId) ||
-        expressionMayReferenceTemporary(instruction.pacing, temporaryId)
-      );
+      collectExpressionTemporaryReferences(instruction.presentation, output);
+      collectExpressionTemporaryReferences(instruction.value, output);
+      collectExpressionTemporaryReferences(instruction.pacing, output);
+      return;
     case "declareBinding":
     case "assign":
     case "storeTemporary":
     case "prepareSayText":
     case "setDeclaredSpeakerProperty":
     case "returnValue":
-      expression = instruction.value;
-      break;
-    default:
-      expression = undefined;
+      collectExpressionTemporaryReferences(instruction.value, output);
+      return;
   }
-  return expressionMayReferenceTemporary(expression, temporaryId);
 }
 
 export function expressionMayReferenceTemporary(value: unknown, temporaryId: number): boolean {
-  if (!isRecord(value)) return false;
+  const referenced = new Set<number>();
+  collectExpressionTemporaryReferences(value, referenced);
+  return referenced.has(temporaryId);
+}
+
+function collectExpressionTemporaryReferences(value: unknown, output: Set<number>): void {
+  if (!isRecord(value)) return;
   switch (value.kind) {
     case "temporary":
-      return value.temporaryId === temporaryId;
+      if (Number.isInteger(value.temporaryId)) {
+        // EVIDENCE: validation: Number.isInteger proved the numeric temporary ID above.
+        output.add(value.temporaryId as number);
+      }
+      return;
     case "list":
     case "set":
-      return (
-        Array.isArray(value.elements) &&
-        value.elements.some((item) => expressionMayReferenceTemporary(item, temporaryId))
-      );
+      if (Array.isArray(value.elements)) {
+        for (const item of value.elements) collectExpressionTemporaryReferences(item, output);
+      }
+      return;
     case "object":
-      return (
-        Array.isArray(value.properties) &&
-        value.properties.some(
-          (property) =>
-            isRecord(property) && expressionMayReferenceTemporary(property.value, temporaryId),
-        )
-      );
+      if (Array.isArray(value.properties)) {
+        for (const property of value.properties) {
+          if (isRecord(property)) collectExpressionTemporaryReferences(property.value, output);
+        }
+      }
+      return;
     case "dict":
-      return (
-        Array.isArray(value.entries) &&
-        value.entries.some(
-          (entry) =>
-            isRecord(entry) &&
-            (expressionMayReferenceTemporary(entry.key, temporaryId) ||
-              expressionMayReferenceTemporary(entry.value, temporaryId)),
-        )
-      );
+      if (Array.isArray(value.entries)) {
+        for (const entry of value.entries) {
+          if (isRecord(entry)) {
+            collectExpressionTemporaryReferences(entry.key, output);
+            collectExpressionTemporaryReferences(entry.value, output);
+          }
+        }
+      }
+      return;
     case "group":
-      return expressionMayReferenceTemporary(value.expression, temporaryId);
+      collectExpressionTemporaryReferences(value.expression, output);
+      return;
     case "template":
-      return (
-        Array.isArray(value.parts) &&
-        value.parts.some(
-          (part) =>
-            isRecord(part) &&
-            part.kind === "expression" &&
-            expressionMayReferenceTemporary(part.expression, temporaryId),
-        )
-      );
+      if (Array.isArray(value.parts)) {
+        for (const part of value.parts) {
+          if (isRecord(part) && part.kind === "expression") {
+            collectExpressionTemporaryReferences(part.expression, output);
+          }
+        }
+      }
+      return;
     case "property":
-      return expressionMayReferenceTemporary(value.object, temporaryId);
+      collectExpressionTemporaryReferences(value.object, output);
+      return;
     case "index":
-      return (
-        expressionMayReferenceTemporary(value.object, temporaryId) ||
-        expressionMayReferenceTemporary(value.index, temporaryId)
-      );
-    case "call": {
-      const calleeReferences =
-        isRecord(value.callee) &&
-        value.callee.kind === "property" &&
-        expressionMayReferenceTemporary(value.callee.object, temporaryId);
-      const argumentReferences =
-        Array.isArray(value.arguments) &&
-        value.arguments.some(
-          (argument) =>
-            isRecord(argument) && expressionMayReferenceTemporary(argument.value, temporaryId),
-        );
-      return calleeReferences || argumentReferences;
-    }
+      collectExpressionTemporaryReferences(value.object, output);
+      collectExpressionTemporaryReferences(value.index, output);
+      return;
+    case "call":
+      if (isRecord(value.callee) && value.callee.kind === "property") {
+        collectExpressionTemporaryReferences(value.callee.object, output);
+      }
+      if (Array.isArray(value.arguments)) {
+        for (const argument of value.arguments) {
+          if (isRecord(argument)) collectExpressionTemporaryReferences(argument.value, output);
+        }
+      }
+      return;
     case "unary":
-      return expressionMayReferenceTemporary(value.operand, temporaryId);
+      collectExpressionTemporaryReferences(value.operand, output);
+      return;
     case "typeTest":
-      return expressionMayReferenceTemporary(value.value, temporaryId);
+      collectExpressionTemporaryReferences(value.value, output);
+      return;
     case "binary":
-      return (
-        expressionMayReferenceTemporary(value.left, temporaryId) ||
-        expressionMayReferenceTemporary(value.right, temporaryId)
-      );
+      collectExpressionTemporaryReferences(value.left, output);
+      collectExpressionTemporaryReferences(value.right, output);
+      return;
     case "range":
-      return (
-        expressionMayReferenceTemporary(value.start, temporaryId) ||
-        expressionMayReferenceTemporary(value.end, temporaryId)
-      );
+      collectExpressionTemporaryReferences(value.start, output);
+      collectExpressionTemporaryReferences(value.end, output);
+      return;
     case "storageLoad":
-      return (
-        expressionMayReferenceTemporary(value.key, temporaryId) ||
-        expressionMayReferenceTemporary(value.default, temporaryId)
-      );
-    default:
-      return false;
+      collectExpressionTemporaryReferences(value.key, output);
+      collectExpressionTemporaryReferences(value.default, output);
+      return;
   }
 }
 
