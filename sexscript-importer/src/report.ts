@@ -113,6 +113,18 @@ export interface FeasibilityReport {
   smokeRunFailuresByMessage: Record<string, number>;
   /** Null when no runner was supplied. */
   smokeRunReachedScriptFileCount: number | null;
+  /**
+   * Functions several scripts share, promoted to `global function`s in a generated helpers.tease (#570): how many
+   * names and copies, the globals they read, the functions that stay in each file and why, and whether helpers.tease
+   * compiles (null without a compiler or helpers).
+   */
+  globalFunctions: {
+    promoted: number;
+    copiesReplaced: number;
+    globals: Array<{ name: string; kind: string }>;
+    kept: Array<{ name: string; copies: number; reason: string }>;
+    helpersCompile: boolean | null;
+  } | null;
   files: FeasibilityFileReport[];
 }
 
@@ -124,7 +136,9 @@ export function analyzeFeasibility(
     lowered: filePrograms,
     composed: packagePrograms,
     main,
+    globals,
   } = lowerPackage(files, options.proposals === undefined ? {} : { proposals: options.proposals });
+  const helpers = globals?.helpers ?? null;
   const entryFile = main !== null && "file" in main ? main.file : null;
   const report: FeasibilityReport = {
     fileCount: files.length,
@@ -149,6 +163,26 @@ export function analyzeFeasibility(
     smokeRuns: [],
     smokeRunStatusCounts: emptyCounts(),
     smokeRunFailuresByMessage: emptyCounts(),
+    globalFunctions:
+      globals === null
+        ? null
+        : {
+            promoted: globals.promoted.length,
+            copiesReplaced: globals.promoted.reduce((sum, { copies }) => sum + copies, 0),
+            globals: globals.globals,
+            kept: globals.kept,
+            helpersCompile:
+              helpers === null || options.compiler === undefined
+                ? null
+                : (() => {
+                    const shim = shimPendingCapabilities(helpers);
+                    const result = options.compiler(shim.source, shim.builtins);
+                    return (
+                      result.compiled &&
+                      result.diagnostics.every(({ severity }) => severity !== "error")
+                    );
+                  })(),
+          },
     smokeRunReachedScriptFileCount: options.runner === undefined ? null : 0,
     files: [],
   };
@@ -187,7 +221,7 @@ export function analyzeFeasibility(
     let compilerClean: boolean | null = null;
     let compilerCleanExceptPending: boolean | null = null;
     let compilerDiagnostics: TeaseCompileDiagnostic[] = [];
-    const shim = shimPendingCapabilities(packageProgram);
+    const shim = shimPendingCapabilities(packageProgram, helpers);
     const pendingCapabilities = [...shim.capabilities].sort();
     if (isScriptBody) {
       for (const capability of pendingCapabilities) {

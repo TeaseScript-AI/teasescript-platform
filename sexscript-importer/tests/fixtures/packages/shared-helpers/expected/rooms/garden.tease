@@ -1,0 +1,9 @@
+// mistress is a global of helpers.tease; this script starts it with its own value.
+mistress = load "mistress"
+// Another picture under the same name stays in this script.
+function imageLocal {
+  showImage "garden.jpg"
+}
+imageLocal()
+greet()
+exit

@@ -17,6 +17,7 @@ import {
   packageStopsBackgroundSounds,
 } from "./lower.ts";
 import { helperDefinitionOrder, withActionDispatcher } from "./helpers.ts";
+import { promoteGlobalFunctions, type GlobalPromotion } from "./globals.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import type { ProposalId } from "./proposals.ts";
 
@@ -73,6 +74,11 @@ export interface LoweredPackage {
    * the scripts the legacy player listed. Null for a single script, which keeps its name.
    */
   main: { file: number } | { menu: MigrationProgram } | null;
+  /**
+   * The functions several scripts share as `global function`s (#570), with the globals they read, in a generated
+   * `helpers.tease`; null without package context.
+   */
+  globals: Omit<GlobalPromotion, "programs"> | null;
 }
 
 /** A package's scripts with their TeaseScript paths, relative to the package root (packageScripts). */
@@ -290,9 +296,24 @@ export function lowerPackage(
       scripts.every((script) => uncalled[script]!.includes(diagnostic)),
     );
   };
-  const composedPrograms = composed.map((program, index) =>
+  const noted = composed.map((program, index) =>
     program.module === undefined ? program : withUncalledNotes(program, notes(program, index)),
   );
+  // Functions several scripts share become global functions in one helpers.tease (#570).
+  const scriptIndexes = noted.flatMap((program, index) =>
+    files[index]?.root?.kind === "scriptBody" && program.module === undefined ? [index] : [],
+  );
+  const promotion =
+    scripts === null
+      ? null
+      : promoteGlobalFunctions(
+          scriptIndexes.map((index) => noted[index]!),
+          scripts.root,
+        );
+  const composedPrograms = noted.map((program, index) => {
+    const position = scriptIndexes.indexOf(index);
+    return promotion === null || position < 0 ? program : promotion.programs[position]!;
+  });
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
     composed: composedPrograms,
@@ -302,6 +323,15 @@ export function lowerPackage(
         : scripts.entry !== null
           ? { file: scripts.entry }
           : { menu: entryMenu(scripts, composedPrograms) },
+    globals:
+      promotion === null
+        ? null
+        : {
+            helpers: promotion.helpers,
+            promoted: promotion.promoted,
+            globals: promotion.globals,
+            kept: promotion.kept,
+          },
   };
 }
 

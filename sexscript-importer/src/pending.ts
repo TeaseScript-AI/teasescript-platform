@@ -8,6 +8,7 @@ import { emitTease } from "./emit-tease.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 import { proposalCapability, type ProposalId } from "./proposals.ts";
 import { isRecord } from "./ast.ts";
+import { renameConflictingIdentifiers } from "./naming.ts";
 
 /**
  * Accepted TeaseScript the importer emits although the current compiler does not implement it yet. The
@@ -26,6 +27,22 @@ const PENDING_CALLS = new Map<string, string>([
 const PROPOSED_CALLS = new Map<string, ProposalId>([["countImages", "media-tags"]]);
 
 const SHIM_PREFIX = "sxPending";
+
+/** Capability of global functions and globals (#570), which `main` does not implement yet. */
+const GLOBALS = "global function (#570)";
+
+/** Whether a statement is a `global` or a `global function`. */
+function isGlobalForm(statement: IrStatement): boolean {
+  return (statement.kind === "let" || statement.kind === "function") && statement.global === true;
+}
+
+/** A `global` as a `let` and a `global function` as a function of the file. */
+function withoutGlobalForm(statement: IrStatement): IrStatement {
+  if (statement.kind !== "let" && statement.kind !== "function") return statement;
+  if (statement.global !== true) return statement;
+  const { global: _global, ...local } = statement;
+  return local;
+}
 
 /** Capabilities of the file transfers of ADR 0022 (#570), which `main` does not implement yet. */
 const GOTO_FILE = "goto to a file (#570)";
@@ -52,9 +69,48 @@ export interface PendingShim {
   capabilities: Set<string>;
 }
 
-export function shimPendingCapabilities(program: MigrationProgram): PendingShim {
+export function shimPendingCapabilities(
+  generated: MigrationProgram,
+  /** The package's helpers.tease, whose global functions and globals (#570) the file may use. */
+  helpers: MigrationProgram | null = null,
+): PendingShim {
   const builtins = new Set<string>();
   const capabilities = new Set<string>();
+  // Until #570 lands, the file compiles with its own copy of the package's global functions and globals.
+  const shared = (helpers?.statements ?? []).filter(
+    (statement) =>
+      (statement.kind === "function" || statement.kind === "let") && statement.global === true,
+  );
+  const fileNames = new Set<string>();
+  collectNames(generated.statements, fileNames);
+  // Only the global functions and globals the file reaches, also through each other, go into its copy.
+  const needed = new Set<IrStatement>();
+  for (let grown = generated !== helpers; grown;) {
+    grown = false;
+    for (const statement of shared) {
+      if (needed.has(statement)) continue;
+      if (
+        (statement.kind === "function" || statement.kind === "let") &&
+        fileNames.has(statement.name)
+      ) {
+        needed.add(statement);
+        collectNames(statement, fileNames);
+        grown = true;
+      }
+    }
+  }
+  const usesShared = needed.size > 0;
+  if (usesShared || generated.statements.some(isGlobalForm)) capabilities.add(GLOBALS);
+  const combined: MigrationProgram = {
+    ...generated,
+    statements: [
+      ...shared.filter((statement) => needed.has(statement)),
+      ...generated.statements,
+    ].map(withoutGlobalForm),
+  };
+  // In the copy, a parameter or local of a global function may meet a top-level name of the file, which a global
+  // function never sees; it gets another name there.
+  const program = usesShared ? renameConflictingIdentifiers(combined, new Set(), false) : combined;
   // Placeholder names must not collide with names the generated program already uses.
   const used = new Set<string>();
   collectNames(program.statements, used);

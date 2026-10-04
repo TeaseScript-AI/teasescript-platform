@@ -83,6 +83,8 @@ export type IrStatement =
       leadingComments?: string[];
       /** Diagnostics of the legacy function body, which become notes if nothing references it (uncalledCode). */
       ownDiagnostics?: MigrationDiagnostic[];
+      /** A `global function`, callable from every file of the package (#570). */
+      global?: true;
     })
   | (IrBase & { kind: "return"; value: IrExpression | null })
   /**
@@ -98,6 +100,8 @@ export type IrStatement =
       integer?: true;
       /** The Groovy value may be text, which an integer variable stored as a character code. */
       maybeText?: true;
+      /** A `global`, visible in every file of the package and initialized at session start (ADR 0022 §6). */
+      global?: true;
     })
   | (IrBase & {
       kind: "assign";

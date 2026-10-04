@@ -114,6 +114,9 @@ async function convertPackage(
   }));
   if (lowered.main !== null && "menu" in lowered.main)
     outputs.push({ program: lowered.main.menu, index: -1, relative: "main.tease" });
+  // The functions the scripts share, as global functions (#570).
+  if (lowered.globals?.helpers != null)
+    outputs.push({ program: lowered.globals.helpers, index: -1, relative: "helpers.tease" });
   let errors = 0;
   let written = 0;
   let compilerClean = 0;

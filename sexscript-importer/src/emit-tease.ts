@@ -111,7 +111,7 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
           : `${parameter.name} = ${emitExpression(parameter.defaultValue)}`,
       );
       lines.push(
-        `${pad}function ${statement.name}${parameters.length === 0 ? "" : `(${parameters.join(", ")})`} {`,
+        `${pad}${statement.global === true ? "global " : ""}function ${statement.name}${parameters.length === 0 ? "" : `(${parameters.join(", ")})`} {`,
       );
       emitStatements(statement.body, lines, depth + 1);
       lines.push(`${pad}}`);
@@ -122,7 +122,9 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
       return;
     case "let": {
       const type = statement.type === undefined ? "" : `: ${statement.type}`;
-      lines.push(`${pad}let ${statement.name}${type} = ${emitValue(statement.value)}`);
+      lines.push(
+        `${pad}${statement.global === true ? "global" : "let"} ${statement.name}${type} = ${emitValue(statement.value)}`,
+      );
       return;
     }
     case "assign":

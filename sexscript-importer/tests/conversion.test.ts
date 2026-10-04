@@ -399,7 +399,7 @@ test(
   },
   async () => {
     if (!("compiler" in compilerResult) || !("runner" in runnerResult)) return;
-    for (const name of ["script-chain", "single-entry"]) {
+    for (const name of ["script-chain", "single-entry", "shared-helpers"]) {
       const directory = fileURLToPath(new URL(`./fixtures/packages/${name}/`, import.meta.url));
       const scripts = path.join(directory, "scripts");
       const sources = readdirSync(scripts, { recursive: true, encoding: "utf8" })
@@ -416,6 +416,8 @@ test(
       ]);
       if (lowered.main !== null && "menu" in lowered.main)
         outputs.push(["main.tease", lowered.main.menu]);
+      const helpers = lowered.globals?.helpers ?? null;
+      if (helpers !== null) outputs.push(["helpers.tease", helpers]);
       const expected = readdirSync(path.join(directory, "expected"), {
         recursive: true,
         encoding: "utf8",
@@ -427,12 +429,46 @@ test(
           readFileSync(path.join(directory, "expected", file), "utf8"),
           `${name}/${file}`,
         );
-        const shim = shimPendingCapabilities(program);
+        const shim = shimPendingCapabilities(program, helpers);
         assert.deepEqual(
           compilerResult.compiler(shim.source, shim.builtins).diagnostics,
           [],
           `${name}/${file}`,
         );
+      }
+      if (name === "shared-helpers") {
+        // The scripts call the shared functions, which read the shared table and the global each script assigns.
+        const report = analyzeFeasibility(files, {
+          compiler: compilerResult.compiler,
+          runner: runnerResult.runner,
+          packageRoot: scripts,
+        });
+        assert.deepEqual(
+          report.smokeRuns.map(({ entry: start, status, visited }) => ({ start, status, visited })),
+          [
+            {
+              start: "main.tease",
+              status: "halted",
+              visited: ["main.tease", "rooms/hall.tease", "rooms/garden.tease"],
+            },
+          ],
+        );
+        assert.deepEqual(
+          {
+            promoted: report.globalFunctions?.promoted,
+            copiesReplaced: report.globalFunctions?.copiesReplaced,
+            globals: report.globalFunctions?.globals,
+          },
+          {
+            promoted: 3,
+            copiesReplaced: 7,
+            globals: [
+              { name: "phrases", kind: "table" },
+              { name: "mistress", kind: "reassigned" },
+            ],
+          },
+        );
+        continue;
       }
       if (name !== "script-chain") continue;
       const report = analyzeFeasibility(files, {

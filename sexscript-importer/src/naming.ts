@@ -18,14 +18,19 @@ export function renameConflictingIdentifiers(
    * program, because calls from other files must follow the same rename.
    */
   renameProtected = true,
+  /**
+   * Global functions and globals of the package (#570), which no name in any file may reuse: a function of the same
+   * name becomes `nameLocal`, and other names get another name too.
+   */
+  project: ReadonlySet<string> = new Set(),
 ): MigrationProgram {
   const isProtected = (name: string): boolean => renameProtected && PROTECTED.has(name);
-  const used = new Set<string>(taken);
+  const used = new Set<string>([...taken, ...project]);
   collectNames(program.statements, used);
-  const fresh = (base: string): string => {
-    let candidate = `${base}Value`;
+  const fresh = (base: string, ending = "Value"): string => {
+    let candidate = `${base}${ending}`;
     for (let suffix = 2; used.has(candidate) || PROTECTED.has(candidate); suffix += 1) {
-      candidate = `${base}Value${suffix}`;
+      candidate = `${base}${ending}${suffix}`;
     }
     used.add(candidate);
     return candidate;
@@ -38,15 +43,17 @@ export function renameConflictingIdentifiers(
     if (statement.kind === "function") {
       functions.set(
         statement.name,
-        isProtected(statement.name) || taken.has(statement.name)
-          ? fresh(statement.name)
-          : statement.name,
+        project.has(statement.name)
+          ? fresh(statement.name, "Local")
+          : isProtected(statement.name) || taken.has(statement.name)
+            ? fresh(statement.name)
+            : statement.name,
       );
     }
   }
   const rootScope = new Map<string, string>();
   for (const name of globals) {
-    if (isProtected(name) || functions.has(name) || taken.has(name)) {
+    if (isProtected(name) || functions.has(name) || taken.has(name) || project.has(name)) {
       rootScope.set(name, fresh(name));
     }
   }
@@ -55,7 +62,10 @@ export function renameConflictingIdentifiers(
     functions,
     // Function names are package-global too, so no variable may reuse one.
     conflicts: (name, inFunction) =>
-      isProtected(name) || functions.has(name) || (inFunction && globals.has(name)),
+      isProtected(name) ||
+      functions.has(name) ||
+      project.has(name) ||
+      (inFunction && globals.has(name)),
     fresh,
   };
   return {
