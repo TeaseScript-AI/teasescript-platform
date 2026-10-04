@@ -1271,6 +1271,11 @@ class SemanticValidator {
           );
         }
         return;
+      case "typeTestExpression":
+        yield* compileChild(
+          this.#validateExpressionTask(expression.value, scope, contextualSpeaker),
+        );
+        return;
     }
     expression satisfies never;
   }

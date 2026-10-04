@@ -53,8 +53,9 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    `and`, `or`, and `not` must be `true` or `false`; there is no truthiness. The implementation does not reject every
    such operand yet: some, such as an object element of a computed list in `${...}`, still fail only at runtime with a
    source-located error; #552 completes the compile-time rejection.
-9. A possibly null value used where its non-null type is required follows V30 §34: compiler warnings and runtime
-   recovery, not a compile error.
+9. A possibly null value used where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
+   error whose message names the check, `if n != null { ... }` (owner decision of 2026-10-04 on #504). The check
+   narrows the value (rule 5.1). Places and operands that accept `null` themselves still take it.
 
 ### 2. Conversions
 

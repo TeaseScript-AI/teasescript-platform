@@ -35,6 +35,8 @@ export function expressionChildren(expression: Expression): readonly Expression[
       return [expression.start, expression.end];
     case "playMediaExpression":
       return mediaOperands(expression);
+    case "typeTestExpression":
+      return [expression.value];
     case "loadExpression":
       return expression.defaultValue === null
         ? [expression.key]

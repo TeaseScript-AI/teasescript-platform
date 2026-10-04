@@ -451,7 +451,7 @@ Expression precedence from strongest to weakest:
 4. `*`, `/`, `%`
 5. `+`, `-`
 6. Ranges `..` and `..=`
-7. Comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`
+7. Comparisons `==`, `!=`, `<`, `<=`, `>`, `>=`, and type tests `is`, `is not` ([§13](#13-explicit-types))
 8. `not`
 9. `and`
 10. `or`
@@ -950,7 +950,90 @@ datetime
 duration
 ```
 
-Lists and optional values continue to use `type[]` and `type?`.
+The other type names are `null`; `list`, `set`, and `object` for any list, set, or object; and the program-control
+types `range`, `speaker`, `timer` (a timer handle), and `media` (a media handle). A type is a type name or one of
+these forms ([ADR 0021](../decisions/0021-static-types.md)):
+
+```text
+integer[]            // a list of integers
+integer set          // a set of integers
+integer?             // an integer or null: integer | null
+integer | string     // an integer or text
+(integer | string)[] // a list whose elements are integers or text
+integer | string[]   // an integer, or a list of text
+integer?[]           // a list of integers or nulls
+integer[]?           // a list of integers, or null
+```
+
+`[]`, `set`, and `?` follow a type and bind tighter than `|`; parentheses group. A set holds only `string`,
+`boolean`, `integer`, `number`, and `null` values, so `integer[] set` is a compile error.
+
+### Union types
+
+A union `A | B` holds a value of either type. Unions may be used wherever a type is allowed: variables, list and set
+elements, parameters, and return types. The compiler never infers a union; mixing types without a declared union is an
+error whose message names the union form:
+
+```text
+let reward: integer | string = 10
+reward = "a long break"                        // valid
+let values: (string | number)[] = ["Level", 2]  // valid
+let mixed = ["Level", 2]                       // compile error: declare (string | number)[]
+```
+
+An operation on a union is allowed when every member supports it with a compatible result. `==`, `!=`, and storing into
+an equal or wider union always work; `${...}` and text fields need every member to be a value they can show
+([§16](#16-lists)). Otherwise the error names the test the author needs:
+
+```text
+let points = reward + 1
+// 'reward' may be text (string). Check it first: if reward is integer { ... }
+```
+
+### Type tests and narrowing
+
+`value is T` tests a value against any type `T`; `value is not T` is its negation. `is` binds like the comparison
+operators, so `x is integer and x > 3` needs no parentheses, and type tests do not chain.
+
+```text
+if reward is integer {
+    say "You earned ${reward} points"
+} else {
+    say "You earned ${reward}"
+}
+```
+
+- `x is T` is true exactly when the value may be stored in a place of type `T`. `is number` is also true for integers,
+  and `is integer` is true for any whole number, including `2.0`. A collection test with an element type checks every
+  element; `[] is integer[]` is true. `is date`, `is time`, and `is datetime` are false for every current value.
+- A test works on every value, including untyped storage, host data, and parameters of unknown type. The operand is
+  evaluated once, and the test has no side effects.
+- `x is "happy"` is a compile error: `is` checks a type, and `==` compares values.
+- The compiler warns about a test that is provably always true or always false, such as `5 is number`.
+
+After a test, the compiler knows the narrower type:
+
+- in the branches of `if`/`else`, in the right operand of `and` and `or`, and in the body of `while`;
+- after an `if` whose branch ends with `return`, `exit`, `break`, or `continue`;
+- `x != null` and `x == null` narrow like `x is not null` and `x is null`.
+
+```text
+let saved = load "level"
+if saved is not integer {
+    exit
+}
+let level: integer = saved   // valid: saved is an integer here
+```
+
+- An assignment narrows the variable to the assigned value's type: directly after `let reward: integer | string = 10`,
+  `reward` is an `integer`.
+- Tests can overlap: an `else` branch keeps only what the test provably excludes, so a `number` that fails
+  `is integer` is still a `number`.
+- Only plain variables narrow; `door.locked` and `items[0]` do not.
+- A function call, `wait`, interaction, `say`, timer, media command, storage write, or timer or media property write
+  may let a function or block run, so it cancels narrowing for every top-level variable that a function or block
+  assigns. A loop's start forgets what the loop body may change, and a function or block body does not inherit
+  narrowing from the code around it.
 
 ### Implicit conversions
 
@@ -1222,6 +1305,14 @@ let waits = [30 seconds, 90 seconds]
 say "Wait ${waits}"  // for example "Wait 1 min 30 s"
 ```
 
+A list that holds values of different types needs a declared union element type ([§13](#13-explicit-types)):
+
+```text
+let values: (string | number | duration)[] = ["Level", 2, 3.5, 90 seconds]
+
+say "Current: ${values}"  // for example "Current: 1 min 30 s"
+```
+
 The whole list is checked before the selection, so a list that also contains a list, a set, an object, or a media or
 resource reference is rejected whichever element would have been selected. Object lists remain valid lists; select from
 them explicitly:
@@ -1417,9 +1508,10 @@ Explicit optional type syntax:
 let file: string? = chooseFile()
 ```
 
-The `:` introduces the explicit type; `?` means the value may also be `null`.
+The `:` introduces the explicit type; `?` means the value may also be `null`: `string?` is the union
+`string | null` ([§13](#13-explicit-types)).
 
-Advanced authors may check explicitly:
+Advanced authors may check explicitly; the check narrows `file` to `string` inside the block:
 
 ```text
 if file != null {
@@ -1427,7 +1519,9 @@ if file != null {
 }
 ```
 
-Potentially nullable use without an explicit check follows the compiler-warning and runtime-recovery rules in the next section.
+Using a possibly null value where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
+error. The message names the check to write: `if n != null { ... }`, inside which `n` is an `integer`. A loaded value
+can instead get a default, as in `load "level" default 1`.
 
 ## 19. Choices
 **Status:** Accepted
@@ -2812,10 +2906,9 @@ How the browser internally stores or resolves references, handles permissions, o
 ## 34. Runtime warnings and recoverable values
 **Status:** Accepted
 
-Potentially nullable results produce compiler warnings when used without an explicit check, but they are not automatically hard compile errors.
-
-Nullable-result compiler warnings are accepted future behavior and not yet implemented. Media commands accept `null`
-references at runtime; see the fallback below.
+Using a possibly null value without an explicit check, where its non-null type is required, is a compile error
+([§18](#18-null-and-optional-values)). Commands that accept `null` themselves, such as media commands, still take it;
+see the fallback below.
 
 Compatible built-ins may apply a safe fallback. For example, `showImage null` clears the Stage image, reports developer warning `TSW011` with the source location, and continues ([§22](#22-stage-image-audio-and-video)).
 
@@ -3784,6 +3877,7 @@ exit
 save
 load
 delete
+is
 ```
 
 The same keyword may have more than one grammar form when the next token makes the form unambiguous. For example, `speaker identifier { ... }` declares a speaker, while `speaker identifier` sets the default speaker. A parser distinguishes these forms through normal lookahead; this is not an implementation problem.
@@ -3803,7 +3897,13 @@ date
 time
 datetime
 duration
+list
+object
+range
+media
 ```
+
+The type names `null`, `set`, `speaker`, and `timer` are protected as grammar keywords or engine names.
 
 ### Protected engine names
 

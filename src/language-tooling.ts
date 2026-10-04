@@ -783,6 +783,9 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
     case "playMediaExpression":
       visitMedia(expression, children);
       return;
+    case "typeTestExpression":
+      children.push({ kind: "expression", node: expression.value });
+      return;
     case "loadExpression":
       children.push({ kind: "expression", node: expression.key });
       if (expression.defaultValue !== null)

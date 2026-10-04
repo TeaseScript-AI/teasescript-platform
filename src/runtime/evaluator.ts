@@ -83,7 +83,7 @@ import {
   isTimerHandle,
   isMediaHandle,
 } from "./value-predicates.js";
-import { assertValueType } from "./value-types.js";
+import { assertValueType, matchesValueType } from "./value-types.js";
 import {
   mediaEndMs,
   mediaProperty,
@@ -499,6 +499,13 @@ export class Evaluator {
             this.#assertIndex(object, index, expression.index.span);
             value = object.items[index]!;
           }
+          break;
+        case "typeTest":
+          if (frame.stage++ === 0) {
+            pending.push(evaluationFrame(expression.value));
+            continue;
+          }
+          value = matchesValueType(result.value, expression.type) !== expression.negated;
           break;
         case "unary":
           if (frame.stage++ === 0) {

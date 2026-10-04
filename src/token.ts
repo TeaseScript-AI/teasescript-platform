@@ -32,6 +32,7 @@ export const TokenKind = {
   KeywordContinue: "keywordContinue",
   KeywordFunction: "keywordFunction",
   KeywordReturn: "keywordReturn",
+  KeywordIs: "keywordIs",
 
   LeftBrace: "leftBrace",
   RightBrace: "rightBrace",
@@ -45,6 +46,7 @@ export const TokenKind = {
   RangeExclusive: "rangeExclusive",
   RangeInclusive: "rangeInclusive",
   Question: "question",
+  Pipe: "pipe",
   Plus: "plus",
   Minus: "minus",
   PlusEqual: "plusEqual",

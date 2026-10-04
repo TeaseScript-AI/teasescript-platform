@@ -1615,7 +1615,11 @@ test("held projections and reads at an arrival use the position the timeline com
     [
       "let saved = 0 ms",
       "timer async 2498 ms {",
-      "  saved = m.remaining",
+      // `remaining` is null while the media's length is unknown, so it is checked first.
+      "  let left = m.remaining",
+      "  if left != null {",
+      "    saved = left",
+      "  }",
       "}",
       'let m = playAudio(file: "a", async: true, startAt: 1.1 ms, endAt: 1000.3 ms, repeat: 2498 ms) {',
       "  finish {",

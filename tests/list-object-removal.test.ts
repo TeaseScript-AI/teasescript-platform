@@ -160,7 +160,15 @@ test("the compiler reports a list index it can see is invalid", () => {
     ["items.removeAt(1.0)", fractional],
     ["let index: number = 0\nsay items[index]", fractional],
     ["let s = set[1]\ns.removeAt(0)", "TSV043 Sets have no method 'removeAt'."],
-    ["let index: integer? = null\nitems.removeAt(index)", null],
+    // A possibly null index is checked first (owner decision on #504 Q1).
+    [
+      "function remove(index: integer?) {\n    items.removeAt(index)\n}",
+      "TSV043 'index' may be null. Check it first: if index != null { ... }",
+    ],
+    [
+      "function remove(index: integer?) {\n    if index != null {\n        items.removeAt(index)\n    }\n}",
+      null,
+    ],
   ] as const;
   for (const [statement, expected] of cases) {
     const diagnostics = compileSource(`let items = [1]\n${statement}`).diagnostics;

@@ -34,6 +34,11 @@ export function assertValueType(
   );
 }
 
+/** Whether a value fits a type: the answer of `value is T`, by the same matcher as the runtime type checks. */
+export function matchesValueType(value: SerializableRuntimeValue, type: TypePlan): boolean {
+  return findTypeMismatch(value, type) === null;
+}
+
 interface TypeMismatch {
   readonly value: SerializableRuntimeValue;
   /** The path from the checked value to the part that does not fit, such as `[2].locked`; empty for the value. */
@@ -146,6 +151,9 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
     case "datetime":
       // These types have no runtime values yet.
       return false;
+    case "never":
+      // No value fits, so a list of it is only ever empty, as for an element both list types share.
+      return false;
   }
 }
 
@@ -164,6 +172,7 @@ const NAMED_DESCRIPTIONS: Readonly<Record<string, string>> = {
   timer: "a timer handle",
   media: "a media handle",
   object: "an object",
+  never: "no value",
 };
 
 /** A plain-language description of the values of `type`, in the compiler's wording. */

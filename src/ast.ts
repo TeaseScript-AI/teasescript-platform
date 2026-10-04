@@ -241,11 +241,36 @@ export interface LetStatement {
 export type ScalarTypeName =
   "string" | "boolean" | "integer" | "number" | "date" | "time" | "datetime" | "duration";
 
-export interface TypeAnnotation {
-  readonly kind: "typeAnnotation";
-  readonly name: ScalarTypeName;
-  readonly collection: "list" | "set" | null;
-  readonly optional: boolean;
+/** A type name: a scalar type, `null`, any `list`, `set`, or `object`, or a program-control type (ADR 0021). */
+export type TypeName =
+  ScalarTypeName | "null" | "list" | "set" | "object" | "range" | "speaker" | "timer" | "media";
+
+/** A written type: a name, `T[]`, `T set`, `T?`, or a union `A | B`. Parentheses only group. */
+export type TypeAnnotation = NamedType | CollectionType | OptionalType | UnionType;
+
+export interface NamedType {
+  readonly kind: "namedType";
+  readonly name: TypeName;
+  readonly span: SourceSpan;
+}
+
+/** `T[]` or `T set`. */
+export interface CollectionType {
+  readonly kind: "listType" | "setType";
+  readonly element: TypeAnnotation;
+  readonly span: SourceSpan;
+}
+
+/** `T?`, which means `T | null`. */
+export interface OptionalType {
+  readonly kind: "optionalType";
+  readonly value: TypeAnnotation;
+  readonly span: SourceSpan;
+}
+
+export interface UnionType {
+  readonly kind: "unionType";
+  readonly members: readonly TypeAnnotation[];
   readonly span: SourceSpan;
 }
 
@@ -366,7 +391,17 @@ export type Expression =
   | ShowButtonExpression
   | TimerExpression
   | PlayMediaExpression
-  | LoadExpression;
+  | LoadExpression
+  | TypeTestExpression;
+
+/** `value is T` or `value is not T`: whether the value may be stored in a place of type `T` (ADR 0021). */
+export interface TypeTestExpression {
+  readonly kind: "typeTestExpression";
+  readonly value: Expression;
+  readonly type: TypeAnnotation;
+  readonly negated: boolean;
+  readonly span: SourceSpan;
+}
 
 export interface InteractionExpression {
   readonly kind: "interactionExpression";

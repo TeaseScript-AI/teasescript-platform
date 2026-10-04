@@ -32,6 +32,7 @@ const keywordKinds: ReadonlyMap<string, TokenKind> = new Map([
   ["continue", TokenKind.KeywordContinue],
   ["function", TokenKind.KeywordFunction],
   ["return", TokenKind.KeywordReturn],
+  ["is", TokenKind.KeywordIs],
 ]);
 
 const diagnosticCodes = {
@@ -438,6 +439,7 @@ class Lexer {
       case TokenKind.GreaterEqual:
       case TokenKind.RangeExclusive:
       case TokenKind.RangeInclusive:
+      case TokenKind.KeywordIs:
       case TokenKind.KeywordNot:
       case TokenKind.KeywordAnd:
       case TokenKind.KeywordOr:
@@ -764,6 +766,7 @@ const singleCharacterKinds: Readonly<Record<string, TokenKind>> = {
   ",": TokenKind.Comma,
   ".": TokenKind.Dot,
   "?": TokenKind.Question,
+  "|": TokenKind.Pipe,
   "*": TokenKind.Star,
   "/": TokenKind.Slash,
   "%": TokenKind.Percent,

@@ -1,5 +1,5 @@
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 35;
+export const INSTRUCTION_PLAN_VERSION = 36;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -546,7 +546,8 @@ export type ExpressionPlan =
   | RangeExpressionPlan
   | TemporaryExpressionPlan
   | PreparedReferenceExpressionPlan
-  | StorageLoadExpressionPlan;
+  | StorageLoadExpressionPlan
+  | TypeTestExpressionPlan;
 
 interface ExpressionPlanBase {
   readonly span: PlanSourceLocation;
@@ -609,6 +610,7 @@ export type TypePlanName =
   | "date"
   | "time"
   | "datetime"
+  | "never"
   | "null"
   | "range"
   | "speaker"
@@ -689,6 +691,14 @@ export interface CallExpressionPlan extends ExpressionPlanBase {
   readonly arguments: readonly ArgumentPlan[];
   /** For a list or set `add`, the check of the added element. */
   readonly typeCheck?: TypeCheckPlan;
+}
+
+/** `value is T` or `value is not T`: whether the value fits the type, by the matcher of the runtime type checks. */
+export interface TypeTestExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "typeTest";
+  readonly value: ExpressionPlan;
+  readonly type: TypePlan;
+  readonly negated: boolean;
 }
 
 export interface UnaryExpressionPlan extends ExpressionPlanBase {

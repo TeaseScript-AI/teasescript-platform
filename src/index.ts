@@ -293,6 +293,11 @@ export type {
   StringPart,
   StringText,
   TypeAnnotation,
+  TypeName,
+  NamedType,
+  CollectionType,
+  OptionalType,
+  UnionType,
   UnaryExpression,
   WhileStatement,
 } from "./ast.js";

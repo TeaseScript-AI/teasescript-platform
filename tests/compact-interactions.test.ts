@@ -1012,10 +1012,7 @@ test("blocking interactions resume through ordinary expression contexts and para
     assert.equal(validateInstructionPlan(defaultResult.plan).valid, true);
   }
 
-  // `dynamic` hides the number's type, so the list may hold text and a number.
-  const pairPlan = compiled(
-    "function dynamic(value) {\n  return value\n}\nlet pair = [askText, dynamic(askNumber)]",
-  );
+  const pairPlan = compiled("let pair: (string | number)[] = [askText, askNumber]");
   const firstPending = run(pairPlan, createFreshRuntimeSnapshot(pairPlan));
   assert.equal(firstPending.snapshot.status, "waiting");
   assert.equal(

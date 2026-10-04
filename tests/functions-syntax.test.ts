@@ -139,7 +139,10 @@ test("preserves typed signatures and never silently ignores declared types", () 
     [
       ...declaration.parameters.map((parameter) => parameter.typeAnnotation),
       declaration.returnTypeAnnotation,
-    ].map((annotation) => [annotation?.name, annotation?.span.start.offset]),
+    ].map((annotation) => [
+      annotation?.kind === "namedType" ? annotation.name : null,
+      annotation?.span.start.offset,
+    ]),
     [...source.matchAll(/number/gu)].map((match) => ["number", match.index]),
   );
 

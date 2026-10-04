@@ -182,6 +182,7 @@ const EXPRESSION_FIELDS = fieldsByKind([
   ["index", "object", "index"],
   ["call", "callee", "arguments", "typeCheck"],
   ["unary", "operator", "operand"],
+  ["typeTest", "value", "type", "negated"],
   ["binary", "operator", "left", "right"],
   ["range", "start", "end", "inclusive"],
 ]);
@@ -1281,8 +1282,13 @@ function validateOptionalTypeCheck(
   }
   rejectUnknownFields(check, ["type", "place"], checkPath, errors);
   requireString(check.place, `${checkPath}.place`, errors);
+  validateTypePlan(check.type, `${checkPath}.type`, errors);
+}
+
+/** Validates a type of a runtime type check or a type test, iteratively for deep types. */
+function validateTypePlan(root: unknown, rootPath: string, errors: PlanValidationError[]): void {
   const pending: { readonly value: unknown; readonly path: string }[] = [
-    { value: check.type, path: `${checkPath}.type` },
+    { value: root, path: rootPath },
   ];
   while (pending.length > 0) {
     const { value: type, path: typePath } = pending.pop()!;
@@ -1362,6 +1368,7 @@ const TYPE_PLAN_NAMES = [
   "date",
   "time",
   "datetime",
+  "never",
   "null",
   "range",
   "speaker",
@@ -1478,6 +1485,14 @@ function validateExpressionNode(
         );
       pending.push({ kind: "arguments", value: value.arguments, path: `${path}.arguments` });
       pending.push({ value: value.callee, path: `${path}.callee`, assignmentTarget: false });
+      return;
+    case "typeTest":
+      if (typeof value.negated !== "boolean")
+        errors.push(
+          planError("TSC002", "A type test needs a boolean 'negated'.", `${path}.negated`),
+        );
+      validateTypePlan(value.type, `${path}.type`, errors);
+      pending.push({ value: value.value, path: `${path}.value`, assignmentTarget: false });
       return;
     case "unary":
       if (!isOneOf(value.operator, ["+", "-", "not"])) {

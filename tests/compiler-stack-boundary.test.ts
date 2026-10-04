@@ -197,7 +197,7 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
   });
 });
 
-test("type checking follows long function, default, and property chains and wide literals with a constrained host stack", () => {
+test("type checking follows long function, default, and property chains, wide literals, and wide unions with a constrained host stack", () => {
   const compilerUrl = new URL("../src/compiler.js", import.meta.url).href;
   // The child builds the sources itself: they are larger than an environment variable may be.
   const script = `
@@ -208,6 +208,7 @@ test("type checking follows long function, default, and property chains and wide
       chain((index, next) => "function f" + index + "(x = " + next + ") { return x }").join("\\n") + "\\nlet result = f0()",
       "function f(obj) { obj" + ".x".repeat(4096) + ".p = 1 }\\nexit",
       "let wide = [" + "1, ".repeat(32767) + "1]\\nexit",
+      'let passed = (load "v") is ' + Array.from({ length: 65536 }, (_, index) => (index % 2 === 0 ? "integer" : "string")).join(" | "),
     ];
     process.stdout.write(JSON.stringify(sources.map((source) => {
       const compiled = compileSource(source);
@@ -222,7 +223,7 @@ test("type checking follows long function, default, and property chains and wide
   assert.equal(child.status, 0, child.stderr);
   assert.deepEqual(
     JSON.parse(child.stdout),
-    Array.from({ length: 4 }, () => ({ codes: [], plan: true })),
+    Array.from({ length: 5 }, () => ({ codes: [], plan: true })),
   );
 });
 

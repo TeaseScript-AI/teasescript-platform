@@ -749,6 +749,8 @@ export function expressionMayReferenceTemporary(value: unknown, temporaryId: num
     }
     case "unary":
       return expressionMayReferenceTemporary(value.operand, temporaryId);
+    case "typeTest":
+      return expressionMayReferenceTemporary(value.value, temporaryId);
     case "binary":
       return (
         expressionMayReferenceTemporary(value.left, temporaryId) ||
@@ -1110,6 +1112,8 @@ function expressionGuaranteesTemporaryEvaluation(value: unknown, temporaryId: nu
     }
     case "unary":
       return expressionGuaranteesTemporaryEvaluation(value.operand, temporaryId);
+    case "typeTest":
+      return expressionGuaranteesTemporaryEvaluation(value.value, temporaryId);
     case "binary":
       if (value.operator === "and" || value.operator === "or") {
         return expressionGuaranteesTemporaryEvaluation(value.left, temporaryId);
