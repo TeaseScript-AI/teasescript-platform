@@ -88,7 +88,7 @@ import {
   isNumeric,
   isScalar,
   joinTypes,
-  mayEqual,
+  mayEqualAny,
   plainType,
   possibleValues,
   type PossibleValue,
@@ -2221,7 +2221,7 @@ class TypeChecker {
       const possible = possibleValues(type);
       if (possible === undefined) continue;
       const otherValues = possibleValues(otherType) ?? comparedLiteral(other);
-      if (otherValues === undefined || otherValues.some((value) => mayEqual(type, value))) continue;
+      if (otherValues === undefined || mayEqualAny(type, otherValues)) continue;
       const label = expressionLabel(side);
       this.diagnostics.push(
         createDiagnostic(
@@ -2259,11 +2259,7 @@ class TypeChecker {
       return `${holder} holds ${describeValue(subject)} here, after the cases above, so this case never matches.`;
     const possible = possibleValues(subject);
     const literal = comparedLiteral(value);
-    if (
-      possible === undefined ||
-      literal === undefined ||
-      literal.some((one) => mayEqual(subject, one))
-    )
+    if (possible === undefined || literal === undefined || mayEqualAny(subject, literal))
       return undefined;
     return `${holder} is always ${describeLiterals(possible)} here, so this case never matches.`;
   }

@@ -225,13 +225,18 @@ export function possibleValues(type: StaticType): readonly PossibleValue[] | und
   return possible;
 }
 
-/** Whether a value of this type may be equal (`==`) to `other`: false only when its possible values exclude it. */
-export function mayEqual(type: StaticType, other: PossibleValue): boolean {
+/**
+ * Whether a value of this type may be equal (`==`) to one of `others`: false only when its possible values exclude
+ * them all. Possible values are finite literals, so set membership agrees with `===`.
+ */
+export function mayEqualAny(type: StaticType, others: readonly PossibleValue[]): boolean {
+  if (others.length === 0) return false;
   const possible = possibleValues(type);
-  return (
-    possible === undefined ||
-    possible.some(({ value, duration }) => value === other.value && duration === other.duration)
-  );
+  if (possible === undefined) return true;
+  const values = new Set<ScalarValue | null>();
+  const durations = new Set<ScalarValue | null>();
+  for (const { value, duration } of possible) (duration ? durations : values).add(value);
+  return others.some(({ value, duration }) => (duration ? durations : values).has(value));
 }
 
 function isSubset(inner: readonly ScalarValue[], outer: readonly ScalarValue[]): boolean {
