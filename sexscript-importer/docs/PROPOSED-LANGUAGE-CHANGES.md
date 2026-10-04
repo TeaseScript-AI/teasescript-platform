@@ -40,7 +40,7 @@ options` and `text operations`. Only D1 and M1 remain proposals (`--proposed`).
 
 ## Corpus evaluation
 
-Measured on 2026-10-04 at importer commit `f0d02e3c` with `node src/cli.ts report --run [--proposed=<id>] <package
+Measured on 2026-10-04 at importer commit `b4d4362b` with `node src/cli.ts report --run [--proposed=<id>] <package
 scripts>`, after merging `main` at `66f0a750`. The importer emits a working syntax of its own choosing for the two
 remaining proposals; the report compiles and smoke-runs it through stand-ins in current TeaseScript, so "converted"
 means converted, compiled, and run, not just emitted. Each cell: root errors / lowered scripts / compiler-clean except
@@ -49,22 +49,22 @@ pending / scripts reached by smoke runs.
 | Conversion | Distribution | Domme3 | DisciplineClinic | Toy |
 | --- | --- | --- | --- | --- |
 | default before (`6e0d4d03`) | 15 / 10 / 10 / 10 | 35 / 13 / 10 / 10 | 17 / 3 / 3 / 3 | 267 / 0 / 0 / 0 |
-| default now | 13 / 10 / 10 / 10 | 32 / 14 / 11 / 11 | 21 / 3 / 3 / 3 | 254 / 0 / 0 / 0 |
-| dictionaries (D1) | unchanged | 25 / 14 / 11 / 11 | unchanged | 183 / 0 / 0 / 0 |
-| media-tags (M1) | unchanged | 29 / 16 / 13 / 13 | unchanged | unchanged |
-| both | 13 / 10 / 10 / 10 | 22 / 16 / 13 / 13 | 21 / 3 / 3 / 3 | 183 / 0 / 0 / 0 |
+| default now | 13 / 10 / 10 / 10 | 31 / 15 / 12 / 12 | 22 / 3 / 3 / 3 | 254 / 0 / 0 / 0 |
+| dictionaries (D1) | unchanged | 24 / 15 / 12 / 12 | unchanged | 183 / 0 / 0 / 0 |
+| media-tags (M1) | unchanged | 28 / 17 / 14 / 14 | unchanged | unchanged |
+| both | 13 / 10 / 10 / 10 | 21 / 17 / 14 / 14 | 22 / 3 / 3 / 3 | 183 / 0 / 0 / 0 |
 
 The default now includes what the earlier measurement (2026-10-03, importer `d713b469`) counted as the proposals
 choose-lists, string-operations, and input-defaults, everything `main` merged since (#513, #514, #517, #519, #523,
-#524), and the owner decisions on switch, showButton, and date and time (#528, #531, #532). The default before,
-measured at the `main` merge `6e0d4d03`, matches that earlier baseline. Per package:
+#524), and the owner decisions on switch, showButton, date and time, and integer widening (#528, #531, #532, #504
+option B). The default before, measured at the `main` merge `6e0d4d03`, matches that earlier baseline. Per package:
 
 - Distribution: the font menu converts, and `getImage` in `test.groovy` becomes `takePhoto()`.
-- Domme3: 6 of its 9 Java date formats convert (#532), and `task` becomes lowered and runs; the 3 formats of a date
-  built from Unix time remain, and 3 reads of never-assigned variables (legacy bugs) are now reported, which keeps
-  `assignments` unlowered. Its 8 string-method errors are `size()` calls on values that may be maps, which only
-  dictionaries count.
-- DisciplineClinic: 7 of its 9 runtime menus and both `getImage` calls convert, while 7 variables that change type
+- Domme3: 6 of its 9 Java date formats and its `Calendar.DAY_OF_YEAR` read convert (#532), so `task` and `sleep`
+  become lowered and run; the 3 formats of a date built from Unix time remain, and 3 reads of never-assigned variables
+  (legacy bugs) are now reported, which keeps `assignments` unlowered. Its 8 string-method errors are `size()` calls
+  on values that may be maps, which only dictionaries count.
+- DisciplineClinic: 7 of its 9 runtime menus and both `getImage` calls convert, while 8 variables that change type
   (#519) and 7 reads of never-assigned variables are new errors (see [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md)).
   Its three unconverted scripts keep other causes, so the lowered count does not move.
 - Toy: 7 runtime menus and 7 string methods convert; one lookup with a text key is now reported as map access.
@@ -209,8 +209,8 @@ an explicitly union-typed variable. The owner takes that, and C5, up with #504. 
 
 Importer consequence: the legacy menus convert with numeric values, whose type is `integer` under PR #515 while `main`
 still types a numeric `choose` as `number`. A legacy variable that starts at `0` and later receives a menu result is
-valid under PR #515 but rejected by `main`, so until PR #515 merges the importer follows `main` and declares such a
-variable `let answer: number = 0` (14 corpus declarations).
+valid under PR #515 but rejected by `main`, so the compiler gate writes `: number` on such declarations (14 in the
+corpus) until PR #515 merges; the output writes none.
 
 ## C3. Values from a list: choice objects
 
@@ -265,7 +265,11 @@ the owner takes it up there.
 Tracked in issue #504. `main` enforces that a variable keeps its declared or inferred type (#519): an `integer` may be
 stored where a `number` is expected, and every other mismatch is compile error `TSV041`. The type rules (ADR 0021,
 draft PR #526), runtime checks for values the compiler cannot know (draft PR #520), and union types with type tests and
-narrowing (draft PR #530) are not merged; the importer emits no union types.
+narrowing (draft PR #530) are not merged; the importer emits no union types. It follows two owner decisions that
+#526 builds: a variable that starts as `null` keeps the type of its first value (1a), and an unannotated variable that
+starts as a whole number widens to `number` when it later receives a fraction (option B). Option B resolved the
+importer's largest friction: 18 legacy variables, plus 14 that receive a numeric `choose`, needed `: number` under
+#519 alone.
 
 **Type-test form (#504 question 4): `value is number`,** as recommended here and implemented in draft PR #530 (`is` and
 `is not`).

@@ -24,15 +24,15 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-04 at importer commit `f0d02e3c`, after merging `main` at `66f0a750`, with `node src/cli.ts
+Measured on 2026-10-04 at importer commit `b4d4362b`, after merging `main` at `66f0a750`, with `node src/cli.ts
 report --run <package scripts>` (default conversion, without proposals). Toy's 21 runtime-loaded modules are part of
 its single script `toy.groovy`, so Toy counts as one script whose statements include all module code.
 
 | Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Root errors | Placeholders |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Distribution | 14 | 10 | 10 | 10 | 13 | 11 |
-| Domme3 | 24 | 14 | 11 | 11 | 32 | 34 |
-| DisciplineClinic | 6 | 3 | 3 | 3 | 21 | 21 |
+| Domme3 | 24 | 15 | 12 | 12 | 31 | 33 |
+| DisciplineClinic | 6 | 3 | 3 | 3 | 22 | 22 |
 | Toy expanded | 1 | 0 | 0 | 0 | 254 | 443 |
 
 Root errors count independent causes that need manual work; placeholders count unconverted statements. Converting a
@@ -42,7 +42,7 @@ conditionals in positions where moving them would change evaluation order, and c
 
 The previous snapshot (2026-10-03, importer `d713b469`) counted 15, 35, 17, and 267 root errors, as did the same
 importer after merging `main` (`6e0d4d03`). Since then menus from runtime lists, text operations, input defaults,
-date formatting, and `getImage` convert by default, while DisciplineClinic's 7 variables that change type (#519) and
+date formatting, and `getImage` convert by default, while DisciplineClinic's 8 variables that change type (#519) and
 10 reads of never-assigned variables (legacy bugs in Domme3 and DisciplineClinic) are newly reported; see
 [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md) and [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md).
 
@@ -53,9 +53,9 @@ Runtime smoke runs of the compiler-clean scripts (placeholder copies with host s
   adversarial `test.groovy`).
 - Domme3: the entry flow stops at the unconverted `introfirst`, which counts installed image packs by listing
   directories. Isolated runs: `implements` and `inform` run to the end, `permission` reaches the step limit in a
-  line-writing loop (the typed text must match the shown line), `explain` returns to the entry flow, and five scripts
-  (`confess`, `discipline`, `fun` through `spanking`, `maintenance`, `task`) fail comparing or calculating with
-  settings that the introduction would have saved (see the null-comparison difference in `COMPATIBILITY-GAPS.md`).
+  line-writing loop (the typed text must match the shown line), `explain` returns to the entry flow, and six scripts
+  (`confess`, `discipline`, `fun` through `spanking`, `maintenance`, `sleep`, `task`) fail comparing or calculating
+  with settings that the introduction would have saved (see the null-comparison difference in `COMPATIBILITY-GAPS.md`).
 - DisciplineClinic: the entry flow stops at the unconverted `DisciplineClinicMain` (a menu whose option variable also
   holds text, Java object calls, and never-assigned variables); `Exit` runs to the end, `WaitRoom` fails on a setting
   saved by the main script.
@@ -69,15 +69,16 @@ scripts use it (capabilities used by fewer than three scripts are omitted):
 
 | Capability | Scripts using it | Otherwise compiler-clean scripts using it |
 | --- | ---: | ---: |
-| `run`/`end` | 41 | 20 |
-| `switch` (#528) | 26 | 10 |
-| `getDateTime().toSeconds()` (#532) | 18 | 4 |
-| `showButton` timeout/elapsed (#531) | 14 | 4 |
-| `getDateTime()` (#532) | 13 | 3 |
+| `run`/`end` | 41 | 21 |
+| `switch` (#528) | 26 | 11 |
+| `toInteger()` (#518) | 20 | 5 |
+| `getTimestamp().toSeconds()` (#532) | 18 | 4 |
+| `showButton` timeout/elapsed (#531) | 14 | 5 |
+| `getDateTime()` (#532) | 13 | 4 |
 | `askBooleans()` | 10 | 8 |
 | `showPopup` | 10 | 4 |
 | `askInteger()` | 9 | 0 |
-| `toInteger()` (#518) | 9 | 1 |
+| `: number` for integer widening (#526, #515) | 7 | 1 |
 | `choose` list options (#515) | 5 | 0 |
 | `round()` (#518) | 4 | 1 |
 | `getDate().toISO()`, `getTime().formatTime()` (#532) | 3 each | 1 each |

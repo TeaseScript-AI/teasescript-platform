@@ -61,19 +61,22 @@ TeaseScript that the compiler gate replaces with stand-ins until it is implement
 | `getBoolean(text, yes, no)` | `say text` plus `(choose yes: ..., no: ...) == "yes"` |
 | `getString` / `getFloat` / `getInteger` with a default | `say text` plus `askText default: value` / `askNumber default: value`; `askInteger(text, default: value)` |
 | `Calendar.getInstance().get(Calendar.HOUR_OF_DAY)` and other fields | `getDateTime().hour`, with month and weekday-number conversions |
-| `getTime()` (Unix seconds) | `getDateTime().toSeconds()` (#532) |
+| `getTime()` (Unix seconds) | `getTimestamp().toSeconds()`, a fixed moment (#532) |
+| `Calendar.getInstance().get(Calendar.DAY_OF_YEAR)` | `(getDate() - toDate("${getDate().year}-01-01")).days + 1` (#532) |
 | `new Date().format("yyyy-MM-dd")`, `new Date().format("HH:mm")` | `getDate().toISO()`; `getTime().formatTime()`, with a note (#532) |
 | `list + other`, `list << x`, `list.push(x)`, `list += other` | a generated concatenation helper and `add()` |
 | `list.remove(index)`, `list.remove(value)` | `list.removeAt(index)`, also as a value; `list.remove(value)` with structural equality (#517) |
 | Groovy string methods (`size()`, `trim()`, `toUpperCase()`, `replace()`, `split()`, ...) | text operations (`text.length`, `trim()`, `uppercase()`, ...; PR #518) |
 | `list.join(separator)`, `"${list}"` | `list.join(separator)`; `"[${list.join(", ")}]"` (PR #518) |
 | `def x` / `int x` without initializer | `let x: string? = null` (or `string[]?`, ...), and `0` or `false` for primitives |
-| `def x = 0` that later holds a fraction, or `null` | `let x: number = 0`, `let x: integer? = 0` (#519) |
-| `int x = 7 / 2`, and later numbers stored in `x` | `let x = toInteger(7 / 2)` (Groovy stores 3) |
+| `def x = 0` that later holds a fraction | `let x = 0`, which widens to `number` by itself (#504 option B; the compiler gate writes `: number` until #526 lands) |
+| `def x = "a"` that is later set to `null`; `def x = null` | `let x: string? = "a"`; `let x = null`, which keeps the type of its first value (#504 decision 1a) |
+| `int x = 7 / 2`, `int x = f()`, and later values stored in `x` | `let x = toInteger(7 / 2)`, `let x = toInteger(f())` (Groovy stores 3); `int x = loadInteger(k)` becomes `let x: integer = load k` |
 | `new Boolean[n]`, `x in list`, boolean `&`/`|` | a generated list helper, `list.contains(x)`, `and`/`or` with a side-effect-free right side |
 | `System.exit(0)` | `exit` (the Player stays open) |
-| `int t = showPopup(m)` (seconds until closed) | `getDateTime().toSeconds()` before and after `showPopup m`, in whole seconds |
+| `int t = showPopup(m)` (seconds until closed) | `getTimestamp().toSeconds()` before and after `showPopup m`, in whole seconds |
 | `showButton(text, s)` used as a value (seconds until the click) | `(showButton text, timeout: s) / 1 s` (#531) |
+| `showButton(text, 0)` (the button stayed for its 10 ms safety margin; the result was 0) | `showButton text, timeout: 10 ms`, with a note; a used result is `0` |
 | `getImage(message)` (webcam picture path or null) | `takePhoto()`, with a note (V30 §33) |
 | `playBackgroundSound(null)`, `stopSoundThreads()` | handles of the async sounds kept in a list and stopped by a generated helper |
 | `f(x++)`, `continue` in a C-style `for`, `return` inside `each()` | `f(x)` then `x += 1`; the update step before each `continue`; `continue` |
@@ -90,7 +93,9 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   heading, or quote markers and backslash escapes get a `NOTE` (`escapeMarkup()` keeps text literal).
 - Single-field input prefilled its field with the default, also when the default was null (the field showed "null")
   or empty. TeaseScript prefills with `default:` but rejects a null or blank default when the input opens, so a
-  default that may be either gets a note (`SX_INPUT_PREFILL`); a literal empty or null default is dropped. A default
+  default that may be either gets a note (`SX_INPUT_PREFILL`); a literal empty or null default is dropped. A text
+  default that is not text becomes text (`"${level}"`), and a list becomes `"[${list.join(", ")}]"`, as Groovy printed
+  it; a map default is reported (`SX_INPUT_PREFILL_VALUE`). A default
   computed with side effects stays manual work for text and number input (`SX_INPUT_PREFILL_EFFECT`): legacy computed
   it before showing the question, and the converted question is a `say` before the input.
 - Groovy turned a list into text as `[a, b]`; TeaseScript `${list}` selects one element and `say list` shows a quoted
@@ -99,7 +104,10 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   separator, so it becomes `join("")`, as TeaseScript's default separator is `", "`.
 - Text operations follow Unicode code points and full case mapping (PR #518): lengths and positions count code points
   where Java counted UTF-16 units, `trim()` also removes non-breaking spaces, and `uppercaseFirst()` turns a leading
-  `ß` into `SS`. Java `split()` drops trailing empty parts and TeaseScript `split()` keeps them (`NOTE`).
+  `ß` into `SS`. A literal with a character outside the Basic Multilingual Plane, such as an emoji, gets a `NOTE` on a
+  length, `substring`, `indexOf`, or `lastIndexOf` (`SX_TEXT_CODE_POINTS`); text known only at runtime does not. Java
+  `split()` drops trailing empty parts and TeaseScript `split()` keeps them (`NOTE`). Groovy `join()` printed nested
+  lists and maps, which the accepted `join()` rejects, so a list known to hold them is reported (`SX_LIST_JOIN`).
 - Legacy `save(key, null)` deleted the key and every dotted sub-key (`key.*`), and generic `load()` decoded a stored
   string `"null"` as null. Generated reads therefore compare with `null` explicitly, which treats a stored null and a
   missing key alike; `load ... default` is not used because it would keep a stored null (see the specification
@@ -130,8 +138,9 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   scripts that load the same module directory share one set of function and field facts; a variable that shadows
   `Calendar` is still read as the Calendar class; functions authored with the importer's `sexscriptLegacy` prefix
   collide with generated helpers; a closure parameter declared `int` does not truncate later stores, as a typed local
-  does (the corpus's one typed parameter is never reassigned); and `remove(x)` with a fractional number removed by
-  value in Groovy, while the conversion removes by position (no corpus site).
+  does (the corpus's one typed parameter is never reassigned); `remove(x)` with a fractional number removed by value
+  in Groovy, while the conversion removes by position (no corpus site); and a text default whose value is a list only
+  at runtime shows one element (`"${value}"`).
 - Groovy maps are shared references; TeaseScript records copy. A field write through a copy gets a `NOTE`
   (`SX_SHARED_MAP_WRITE`). Picking from an empty list returned null in Groovy and fails in TeaseScript.
 - Groovy lists and maps alias by reference; TeaseScript composite values copy (ADR 0014). Groovy `def` variables may
@@ -143,7 +152,9 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   so `round(-2.5)` is `-3` where Java gave `-2` (`SX_ROUNDING_TIES`, 7 corpus sites).
 - Legacy `showButton()` returned the seconds until the click as a number; the TeaseScript result is a duration
   (#513, #531), so a used result is divided by `1 s`, 49 corpus sites. A Groovy `int` that stores it truncates, as
-  Groovy did: `t = toInteger((showButton "Done") / 1 s)`, 25 sites in Domme3.
+  Groovy did: `t = toInteger((showButton "Done") / 1 s)`, 25 sites in Domme3. A literal zero timeout kept the legacy
+  button for its 10 ms safety margin and returned 0, which the conversion keeps (`SX_BUTTON_TIMEOUT`); a timeout that
+  is zero only at runtime fails in TeaseScript (#531), and a negative literal, which failed in legacy too, is reported.
 - Java date pattern formatting (#532): `yyyy-MM-dd` is a machine format and becomes `toISO()`, exactly; a display
   pattern of a whole date or time becomes `formatDate()`, `formatTime()`, or `formatDateTime()`, which show the
   player's local form instead of the legacy pattern, a deliberate difference with a `NOTE`. Of the corpus's 9
@@ -159,29 +170,36 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 ## Type enforcement findings (#519)
 
 `main` rejects a value of another type than a variable's declared or inferred one (`TSV041`), and only `integer`
-widens to `number`. The importer follows the compiler's static types over the generated program (plus the accepted
-result types of PRs #515 and #518) and repairs what a declaration can express. Measured on the four corpus packages:
+widens to `number`. The importer follows the compiler's static types over the generated program, under the accepted
+rules: the result types of PRs #515 and #518, and the #504 decisions that a variable starting as `null` keeps the type
+of its first value (1a) and that an unannotated integer widens to `number` by itself (option B, built in #526). Where
+`main` needs another annotation, only the compiler gate writes it. Measured on the four corpus packages:
 
-- **Variables that change type: 7, all in DisciplineClinic.** Four start as an empty-text placeholder and later hold
+- **Variables that change type: 8, all in DisciplineClinic.** Four start as an empty-text placeholder and later hold
   a list (`def lineArray = ""`, then `lineArray = ["I need discipline, ...", ...]`, also `mantraArray`,
   `lessonArray`, `adviceArray`); three reuse an answer variable for text and then booleans or menu positions
-  (`def response = ""`, later `response = getBoolean(...)` and `response = getSelectedValue(...)`). Without union
-  types they are reported at the declaration (`SX_TYPE_CHANGE`) and need separate variables. Two more DisciplineClinic
-  menus use one variable for the menu text or a number and for the option list, so they stay unconverted
+  (`def response = ""`, later `response = getBoolean(...)` and `response = getSelectedValue(...)`); and `dialog` holds
+  the menu text and then the option list (`dialog = ["Back"] + mistressArray`), now seen because helper and function
+  results have types. Without union types they are reported at the declaration (`SX_TYPE_CHANGE`) and need separate
+  variables. That menu and one in OffenseSelect (whose option variable also holds a number) stay unconverted
   (`SX_DYNAMIC_CHOICE_OPTIONS`). The other three packages reuse variables only with compatible types.
-- **Integer/number friction: 18 declarations** (Domme3 3, DisciplineClinic 9, Toy 6) start with a whole number and
-  later hold a fraction, so they become `let spankTempo: number = 1`; Groovy `def` never cared. Deciding that needs a
-  whole-program view of every later assignment, which an author editing one line does not have.
+- **Integer/number friction, resolved by #504 option B:** 18 declarations (Domme3 3, DisciplineClinic 9, Toy 6) start
+  with a whole number and later hold a fraction (`def spankTempo = 1`, later `spankTempo = 0.75`), and 14 more receive
+  a numeric `choose` result, which `main` still types as `number`. Under #519 alone each needed `: number`, which takes
+  a whole-program view of every later assignment. The output now writes none; until #526 and PR #515 land, the
+  compiler gate writes `: number` on 42 declarations (counted as the pending capability "number annotations").
 - **Optional types:** one variable starts with text and is later set to null (`let block: string? = "begin"`).
-- **Groovy integer declarations truncate:** `int` locals store whole numbers, so 27 values truncate with
-  `toInteger` (25 of them `showButton` seconds stored in Domme3's `int t`, and `int tt = (t - 720) / 60`).
-- **Numeric `choose` values:** `main` types `choose 0: ..., 1: ...` as `number`, while PR #515 makes it `integer`.
-  Until PR #515 merges, the common `def answer = 0` followed by `answer = getSelectedValue(...)` therefore needs
-  `let answer: number = 0`: 14 more declarations (DisciplineClinic 13, Toy 1), which PR #515 makes unnecessary.
+  Variables that start as `null` are no longer annotated from Groovy's number evidence, which cannot tell an integer
+  from a fraction; they keep the type of their first value.
+- **Groovy integer declarations coerce:** an `int` stores whole numbers, so every value not known to be an integer
+  truncates with `toInteger`, 55 sites (25 of them `showButton` seconds stored in Domme3's `int t`), and the 52 `int`
+  declarations initialized from storage become `let x: integer = load k`, which checks the stored value.
+- **Index rule:** a variable that may hold a fraction cannot index a list (#504 option B); such an index truncates
+  with `toInteger`, as Groovy's `getAt(Number)` did. No corpus site remains once null-started variables are inferred.
 - **Importer defects the checks exposed:** 13 Toy `lines += [...]` appends were emitted as numeric `+=` because the
-  per-file Groovy type inference could not prove the list; the type pass now appends with the concatenation helper.
-  A text key on a receiver of unknown type was emitted as list indexing, which `main` now rejects; it is reported as
-  map access.
+  per-file Groovy type inference could not prove the list; the type pass now appends with the concatenation helper,
+  and reports an append whose value may be a list or one element (`SX_LIST_CONCATENATION`). A text key on a receiver
+  of unknown type was emitted as list indexing, which `main` now rejects; it is reported as map access.
 - **Coming with #526:** an unannotated parameter takes its default's type, so a legacy default such as `amount = 1`
   that callers pass fractions would need `amount: number = 1`; 101 generated functions have defaults, and `main` does
   not compile typed function signatures yet.
@@ -220,18 +238,18 @@ Concrete points the migration surfaced in TeaseScript itself:
   null (`askInteger(dialog, default: playerLevel)`). TeaseScript rejects a null default when the input opens, so a
   faithful conversion would need an `if` around two inputs; the output keeps one input with a note. A form that
   prefills only when the value is present would fit these settings dialogs.
-- **The date and time design is still being refined.** The owner is settling a local date and time that follows the
-  player and a fixed UTC-based moment for measuring elapsed time; the conversions here keep to what #532 decided and
-  depend on neither. `day` and `week` are calendar units like `month` and `year` (`1 day` is tomorrow's same local
-  clock time), so legacy arithmetic in seconds or milliseconds stays exact: the importer keeps such values as numbers
-  or emits `s` and `ms`, never `day` or `week`.
-- **No conversion from Unix time to a datetime (#532).** Domme3 stores the chastity start as Unix seconds
+- **Two kinds of time (#532).** Local `date`, `time`, and `datetime` values have no zone and follow the player; a
+  `timestamp` from `getTimestamp()` is the fixed moment for "how long ago". Legacy code measured elapsed time in Unix
+  seconds (`getTime()`, 18 scripts), so it uses `getTimestamp().toSeconds()`, while fields and formats keep the local
+  getters. `day` and `week` are calendar units like `month` and `year` (`1 day` is tomorrow's same local clock time),
+  so legacy arithmetic in seconds stays exact: the importer keeps such values as numbers and emits no `day` or `week`.
+- **No timestamp from a number (#532).** Domme3 stores the chastity start as Unix seconds
   (`save("domme3.chastitystart", getTime())`) and later formats it (`new Date((long)chastitystart * 1000)`, 3 sites).
-  #532 converts a datetime to seconds but not back, so these stay manual work; storing the datetime itself is the
-  TeaseScript way, which needs a package-wide rewrite of the saved value.
-- **Calendar day counts.** Domme3 seeds a pseudo-random choice with `Calendar.DAY_OF_YEAR` (1 site). #532's
-  `date - date` gives whole calendar days, but division accepts only exact durations, so the number of days between
-  two dates cannot be read as a number.
+  #532 converts a timestamp to seconds but builds none from a number, because seconds and milliseconds would be
+  ambiguous, so these stay manual work; storing the timestamp itself is the TeaseScript way, which needs a package-wide
+  rewrite of the saved value.
+- **Calendar day counts** convert with #532's `(date - date).days`: Domme3's `Calendar.DAY_OF_YEAR` seed (1 site)
+  becomes `(getDate() - toDate("${getDate().year}-01-01")).days + 1`, which lowers `sleep`.
 - **Compact interactions as values.** A used `showButton` result needs parentheses and a duration division,
   `(showButton "Done", timeout: 30) / 1 s`, 49 corpus sites; most compare the seconds with a number.
 
@@ -259,10 +277,11 @@ Emily persona; the code's default owner `ancilla` is not included.
 
 The importer emits these accepted forms although the current compiler rejects them; the compiler gate counts them
 separately: `run`/`end`, `switch` (#528, PR #529), `showPopup`, the `showButton` timeout and elapsed result (#531),
-`askInteger`, `askBooleans`, date and time (`getDateTime()`, `getDate()`, `getTime()`, `toSeconds()`, `toISO()`,
-`formatTime()`; #532), `openUrl`, `round`/`floor`/`ceil` and the conversions (#518), text operations and `join`
-(#518), `choose` with list options (#515), and `takePhoto()` (camera, #475). `run`/`end` dominates: it blocks 20
-otherwise compiler-clean corpus scripts.
+`askInteger`, `askBooleans`, date and time (`getDateTime()`, `getDate()`, `getTime()`, `getTimestamp()`,
+`toSeconds()`, `toISO()`, `formatTime()`, `toDate()`, `.days`; #532), `openUrl`, `round`/`floor`/`ceil` and the
+conversions (#518), text operations and `join` (#518), `choose` with list options (#515), `takePhoto()` (camera,
+#475), and integer widening (#504 option B, #526), for which the gate writes `: number`. `run`/`end` dominates: it
+blocks 21 otherwise compiler-clean corpus scripts.
 
 ## Open importer work
 
