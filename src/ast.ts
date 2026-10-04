@@ -239,7 +239,15 @@ export interface LetStatement {
 }
 
 export type ScalarTypeName =
-  "string" | "boolean" | "integer" | "number" | "date" | "time" | "datetime" | "duration";
+  | "string"
+  | "boolean"
+  | "integer"
+  | "number"
+  | "date"
+  | "time"
+  | "datetime"
+  | "timestamp"
+  | "duration";
 
 /** A type name: a scalar type, `null`, any `list`, `set`, or `object`, or a program-control type (ADR 0021). */
 export type TypeName =

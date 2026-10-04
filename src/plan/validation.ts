@@ -1368,6 +1368,7 @@ const TYPE_PLAN_NAMES = [
   "date",
   "time",
   "datetime",
+  "timestamp",
   "never",
   "null",
   "range",

@@ -3347,6 +3347,7 @@ const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
       "date",
       "time",
       "datetime",
+      "timestamp",
       "duration",
       "list",
       "object",

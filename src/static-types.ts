@@ -1341,6 +1341,7 @@ const SCALAR_DESCRIPTIONS: Readonly<Record<ScalarTypeName, string>> = {
   date: "a date",
   time: "a time",
   datetime: "a date and time",
+  timestamp: "a timestamp",
 };
 
 /** A plain-language description of a value of `type` for diagnostics. */

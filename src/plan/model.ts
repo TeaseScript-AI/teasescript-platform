@@ -620,6 +620,7 @@ export type TypePlanName =
   | "date"
   | "time"
   | "datetime"
+  | "timestamp"
   | "never"
   | "null"
   | "range"

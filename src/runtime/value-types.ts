@@ -15,6 +15,7 @@ import {
   isSpeakerReference,
   isTime,
   isTimerHandle,
+  isTimestamp,
 } from "./value-predicates.js";
 
 /**
@@ -155,6 +156,8 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
       return isTime(value);
     case "datetime":
       return isDateTime(value);
+    case "timestamp":
+      return isTimestamp(value);
     case "never":
       // No value fits, so a list of it is only ever empty, as for an element both list types share.
       return false;
