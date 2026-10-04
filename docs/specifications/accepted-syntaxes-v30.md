@@ -2124,9 +2124,10 @@ let music = playAudio(
 ```
 
 `file` is required and evaluates to a reference string or `null`; `async` is the literal `true` or `false`. `startAt`,
-`endAt`, `at`, and `beforeEnd` accept non-negative durations or numbers of seconds. `startAt` and `endAt` default to the
-start and end of the file and define the active playback range; a supplied `endAt` must be later than `startAt`, and
-the effective end is limited to the source duration. `volume` is a number from `0` through `1` and defaults to `1`.
+`endAt`, `at`, and `beforeEnd` accept non-negative exact durations or numbers of seconds. `startAt` and `endAt` default
+to the start and end of the file and define the active playback range; a supplied `endAt` must be later than
+`startAt`, and the effective end is limited to the source duration. `volume` is a number from `0` through `1` and
+defaults to `1`.
 Arguments evaluate in source order, followed by the cue positions in block order.
 
 Repeat:
@@ -2136,8 +2137,9 @@ Repeat:
 - `repeat: 60 s` repeats for 60 seconds of active playback and may end mid-pass;
 - `repeat: false`, or no repeat, plays one pass.
 
-A count is a whole number of at least one and a duration is greater than zero. A plain number such as `repeat: 3` is
-an error; write `3 times` or a duration. Blocking media may use a count or a duration but not indefinite repetition.
+A count is a whole number of at least one and a duration is exact and greater than zero. A plain number such as
+`repeat: 3` is an error; write `3 times` or a duration. Blocking media may use a count or a duration but not
+indefinite repetition.
 
 On the ordinary story path, `showImage`, `hideImage`, `playAudio`, `playVideo`, and statement-level media handle
 operations such as `music.pause()` or `music.position = 2 min` wait until the previous message's pacing has completed or
@@ -2161,7 +2163,7 @@ say "${music.elapsed} of ${music.duration}"
 - `position` is the playhead in the source; `remaining` is the time to the effective end of the current pass;
   `duration` is the source duration; `elapsed` is the active playback time since the start across all passes, excluding
   pauses and Player stalls; `volume` is the script volume.
-- Assignable properties are `position` and `remaining` (`=`, `+=`, `-=`, with durations) and `volume`. `duration`,
+- Assignable properties are `position` and `remaining` (`=`, `+=`, `-=`, with exact durations) and `volume`. `duration`,
   `elapsed`, and `state` are read-only. Media that could not be loaded reads `null` for `duration` and `remaining`.
 - `state` is `running`, `paused`, `finished`, or `stopped`. Idempotent calls, other operations on settled media, and
   developer warning `TSW010` follow the timer handle rules.
@@ -3120,7 +3122,9 @@ belongs to every family, and dividing by any zero duration is an error. `duratio
 duration made only of days and weeks, and `duration.months` the whole number of months of one made only of months and
 years: `(getDate() - locked).days`.
 
-`wait`, timers, and the `showButton` timeout accept exact durations only.
+`wait`, timers, the `showButton` timeout, media positions and repeat budgets, and assignments to timer and media
+`remaining`, `position`, and `repeatDuration` accept exact durations only; a known calendar duration there is a compile
+error, and any other one a runtime error.
 
 ### Arithmetic and comparison
 
