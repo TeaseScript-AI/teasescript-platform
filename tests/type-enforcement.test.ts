@@ -659,10 +659,19 @@ test("a function result, a body, or a copy never changes the types another place
     ),
     [],
   );
-  // What a body adds to an object parameter does not change what later calls may pass.
+  // Every call is checked against the parameters as the whole body uses them, so identical calls agree.
   assert.deepEqual(
     codes("function f(obj = {}) {\n    obj.flag = true\n}\nf({ flag: 1 })\nf({ flag: 1 })"),
-    [],
+    [
+      ["TSV041", "1"],
+      ["TSV041", "1"],
+    ],
+  );
+  assert.deepEqual(
+    codes(
+      'function f(opts = { a: 1 }, flag = false) {\n    if flag {\n        opts.b = "x"\n    }\n    let s: string = opts.b\n    return s\n}\nlet given = { a: 2, b: 5 }\nf(given)',
+    ),
+    [["TSV041", "given"]],
   );
   // A copy of a collection that has seen null may still take null.
   for (const empty of ["[]", "set[]"])

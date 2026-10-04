@@ -117,7 +117,13 @@ class Scope {
 /** A function's parameter types and result type, both computed once, when first needed. */
 interface FunctionType {
   readonly declaration: FunctionDeclaration;
+  /** The parameter types the declaration and defaults give. */
   parameters: readonly Variable[] | null;
+  /**
+   * The parameters as the body uses them: copies of `parameters` that the body may extend, for example with a property
+   * it assigns. Arguments must fit these, so a property the body relies on cannot arrive with another type.
+   */
+  accepted: readonly Variable[] | null;
   result: StaticType | null;
   checking: boolean;
 }
@@ -190,6 +196,7 @@ class TypeChecker {
       const fn: FunctionType = {
         declaration: statement,
         parameters: null,
+        accepted: null,
         result: null,
         checking: false,
       };
@@ -650,12 +657,14 @@ class TypeChecker {
     fn.checking = true;
     const parameters = yield* compileChild(this.#parametersTask(fn));
     const scope = new Scope(this.#root);
-    // The body works on its own copies, so what it adds to an object parameter never changes the signature.
-    for (const parameter of parameters)
-      scope.declare(parameter.name, {
-        kind: "variable",
-        variable: { name: parameter.name, type: copyType(parameter.type) },
-      });
+    // The body works on its own copies, so checking an argument never changes what the body assumes.
+    const accepted = parameters.map((parameter) => ({
+      name: parameter.name,
+      type: copyType(parameter.type),
+    }));
+    fn.accepted = accepted;
+    for (const parameter of accepted)
+      scope.declare(parameter.name, { kind: "variable", variable: parameter });
     const context: FunctionContext = { fn, declared, returns: [], returnsNull: false };
     const outer = this.#function;
     const outerLoops = this.#loops.splice(0);
@@ -762,15 +771,20 @@ class TypeChecker {
     fn: FunctionType,
     scope: Scope,
   ): CompileTask<StaticType> {
-    const parameters = yield* compileChild(this.#parametersTask(fn));
+    const values: StaticType[] = [];
+    for (const argument of expression.arguments)
+      values.push(yield* compileChild(this.#expressionTask(argument.value, scope)));
+    // The body is checked first, so arguments must fit the parameters as the body uses them.
+    const result = copyType(yield* compileChild(this.#functionResultTask(fn)));
+    const parameters = fn.accepted ?? (yield* compileChild(this.#parametersTask(fn)));
     const declarations = fn.declaration.parameters;
     let position = 0;
-    for (const argument of expression.arguments) {
+    for (const [argumentIndex, argument] of expression.arguments.entries()) {
       const index =
         argument.kind === "positionalArgument"
           ? position++
           : declarations.findIndex((parameter) => parameter.name.name === argument.name.name);
-      const value = yield* compileChild(this.#expressionTask(argument.value, scope));
+      const value = values[argumentIndex]!;
       const parameter = parameters[index];
       if (parameter === undefined) continue;
       const declaration = declarations[index]!;
@@ -799,7 +813,7 @@ class TypeChecker {
         ),
       );
     }
-    return copyType(yield* compileChild(this.#functionResultTask(fn)));
+    return result;
   }
 
   // Expressions ------------------------------------------------------------------------------------------------------
