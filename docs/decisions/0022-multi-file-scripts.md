@@ -42,15 +42,35 @@ goto script("rooms/${room}.tease", label: "start")
    is a compile error when known, otherwise a runtime error.
 5. `run` is removed. There is no automatic rotation or category selection; composition logic is visible in the script.
 
-### 3. Labels and file-local names
+### 3. Labels, file-local names, global functions, and speakers
 
 1. A label stands only in a file's outer scope, not inside `if`, loops, functions, or handlers. A `goto` may appear
    anywhere.
-2. Functions and labels are local to their file. Two files may use the same function or label names.
+2. Functions and labels are local to their file. Two files may use the same function or label names. A regular function
+   may read its file's top-level `let`s and is callable only from its own file.
 3. A `goto` back to an earlier label runs the top-level `let`s after it again, which set their variables anew.
 4. A variable of the file may be used after a label only when every way to the label has run its `let`; otherwise it
    is a compile error. A goto has run what came before the statement it stands in, or before the call of its function
    or the start of its handler. The ways are those of the ending check (§4.3), so a goto that cannot run is no way.
+   Globals and speakers are not variables of a file: they have their values from the start of the session (§6).
+5. A `global function` is callable from every file, without an import:
+
+   ```tease
+   // helpers.tease
+   global function punish(count) { ... }
+   // chapter1.tease
+   punish(3)
+   ```
+
+   It may use only globals, its parameters, and its own locals, not its file's top-level `let`s, and may call only
+   other global functions and built-ins. Breaking either rule is a compile error whose fix is to make the name a global
+   or pass it as a parameter. Interactions, `goto`, `call`, `end`, `exit`, and recursion work in it normally; a bare
+   label means a label of the file where the function is written.
+6. Speakers are always global: `speaker vera { … }`, declared anywhere in any file, is known in every file and is set up
+   at session start under the rules for globals (§6). There is no `global speaker`. `speaker vera`, which sets the
+   default speaker, stays an ordinary statement.
+7. Globals, global functions, and speakers are unique across the project. A regular function, `let`, parameter, or
+   host-provided global with the same name anywhere is a compile error.
 
 ### 4. Endings
 
@@ -59,7 +79,8 @@ goto script("rooms/${room}.tease", label: "start")
 2. `end` ends the current file and returns to the file that `call`ed it.
 3. A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file, with a friendly
    message. Branches that all end or transfer need nothing extra, and loops and recursion are fine. A file of
-   declarations only runs nothing on its own, so it needs no ending; a `goto` into such a file is a compile error.
+   declarations only (functions, global functions, speakers, and globals without `default:`) runs nothing on its own,
+   so it needs no ending; a `goto` into such a file is a compile error.
    The compiler follows the statements, with constant conditions, loops that certainly run once or never,
    `while true`, and branches that all end; a call counts as returning, also of a function that always ends the
    session, so the ending after such a call is still written out.
@@ -93,17 +114,35 @@ global strictness = 2
 global level = load "level", default: 1
 ```
 
-1. A `global` may be declared anywhere in any file, including inside `if`, loops, and functions. Declarations are
-   collected at compile time and initialized at session start, whether or not the surrounding block ever runs, so an
-   initializer cannot use local values.
-2. It is visible in all files. Global names are unique in the project, and no other name may shadow one.
-3. Globals are initialized once at session start, before the story runs, in a deterministic order: `main.tease` first,
-   then the other files in path order, each in source order. An initializer that reads a global initialized after it
-   is a compile error.
-4. Initializers may use literals, earlier globals, side-effect-free operators, and `load … , default:`. They may not use
-   interactions, calls, or random numbers.
-5. Types follow the `let` rules of ADR 0021, applied across all files.
-6. Values are checkpointed and live for the session. `save` and `load` give persistence beyond it.
+1. A `global` may be declared anywhere in any file, including inside `if`, loops, functions, and timer and media
+   blocks. Declarations are collected at compile time and initialized at session start, whether or not the surrounding
+   block ever runs, so an initializer cannot use local values. Reaching the declaration later does nothing, except in
+   the `default:` form of rule 5.
+2. It is visible in all files. Global names are unique in the project (§3.7), and no other name may shadow one.
+3. Globals and speakers are initialized once at session start, before the story runs, in a deterministic order:
+   `main.tease` first, then the other files in path order, each in source order. An initializer that reads a global
+   initialized after it is a compile error.
+4. Initializers, including speaker properties, may use literals, earlier globals, side-effect-free operators, and
+   `load … , default:`. They may not use local values, interactions, calls, or random numbers, including the random
+   element that `.random` or a list in `${...}` selects. Nested and lazy parts, such as a `load` default, follow the
+   same rules.
+5. With `default:`, the global gets the `default:` value at session start, and the declaration assigns its initializer,
+   which may be any expression, each time it runs:
+
+   ```tease
+   function practice {
+       let localCount = askInteger "How many did you do?"
+       global attempts = localCount, default: 0
+   }
+   ```
+
+   The `default:` value follows rule 4. A `, default:` belongs to the nearest construct before it that takes one, so
+   `global level = load "level", default: 1` gives the default to `load`. Without `default:`, an initializer that uses
+   a local value is a compile error that names the global, explains that it needs a value from the start of the session,
+   and shows both fixes: adding `, default: 0`, or writing `global attempts = 0` and later `attempts = localCount`.
+6. Types follow the `let` rules of ADR 0021, with one type environment for all files; ADR 0021 rule 6 gives the
+   checking order across files.
+7. Values are checkpointed and live for the session. `save` and `load` give persistence beyond it.
 
 ## Consequences
 

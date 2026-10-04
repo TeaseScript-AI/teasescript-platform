@@ -854,6 +854,28 @@ Rules:
 - A parameter without an annotation or a default has an unknown type. Its arguments are not checked, because a
   parameter's type is never inferred from its call sites.
 
+### Global functions
+
+A function belongs to its file ([§29](#29-script-files-and-paths)); `global function` declares one that every file of a
+package can call, without an import ([ADR 0022](../decisions/0022-multi-file-scripts.md)):
+
+```text
+// helpers.tease
+global function punish(count) {
+    say "That is ${count} more."
+}
+
+// chapter1.tease
+punish(3)
+```
+
+- A global function may use only globals, its parameters, and its own locals, not the top-level `let` variables of its
+  file, and may call only other global functions and built-ins. Using a name of its file is a compile error whose fix is
+  to make that name a global, or to pass it as a parameter.
+- Interactions, timers, media, `goto`, `call`, `end`, `exit`, and recursion work in it as in any function. A bare label
+  in it means a label of the file where it is written.
+- Its name is unique in the package, like that of a global ([§12](#global-variables)).
+
 ## 12. Variable declarations
 **Status:** Accepted
 
@@ -926,7 +948,10 @@ picks.add("three")    // compile error
 - An empty list or set takes its element type from the first element added or assigned. In a list or set literal,
   integers and numbers together are numbers, and `null` elements make the element type optional.
 - "First" follows checking order: top-level statements in source order, then function bodies that were not yet
-  needed, then timer and media blocks. The message for a later contradiction names the line of the first value.
+  needed, then timer and media blocks. The start values of globals and speakers come before all of this, in the order a
+  session sets them up. A package checks its files in turn, `main.tease` first and then the others by path; a global
+  function's body is checked where a call first needs its result, otherwise after its own file. The message for a later
+  contradiction names the line of the first value, and its file when that is another one.
 - A value whose type the compiler cannot know, such as untyped storage, host data, or a parameter of unknown type,
   decides nothing and is not rejected at compile time.
 
@@ -943,15 +968,34 @@ global answer: string? = null
 
 Rules:
 
-- A global may be declared anywhere in any file, including inside `if`, loops, and functions.
-- It is visible in all files. Its name is unique in the project, and no other name may shadow it.
-- Declarations are collected at compile time. Globals are initialized once at session start, before the story runs,
-  whether or not the surrounding block ever runs: `main.tease` first, then the other files in path order, each in
-  source order. Reaching the declaration later does nothing.
+- A global may be declared anywhere in any file, including inside `if`, loops, functions, and timer and media blocks.
+- It is visible in all files. Its name is unique in the project, also among global functions and speakers, and no other
+  name may shadow it: a `let`, parameter, regular function, or host-provided global of the same name anywhere is a
+  compile error.
+- Declarations are collected at compile time. Globals and speakers ([§37](#37-dynamic-speaker-terms)) are initialized
+  once at session start, before the story runs, whether or not the surrounding block ever runs: `main.tease` first, then
+  the other files in path order, each in source order. Reaching the declaration later does nothing.
 - An initializer may use literals, earlier globals, side-effect-free operators, and `load … , default:`. It may not use
-  local values, interactions, calls, or random numbers, or read a global initialized after it.
+  local values, interactions, calls, or random numbers, including the element that `.random` or a list in `${...}`
+  selects, or read a global initialized after it. These rules also hold inside a `load` default.
 - Types follow the `let` rules above, across all files. Values are checkpointed and live for the session; `save` and
   `load` keep a value beyond it.
+
+A value that exists only later, such as a local variable, needs a start value with `default:`:
+
+```text
+function practice {
+    let localCount = askInteger "How many did you do?"
+    global attempts = localCount, default: 0
+}
+```
+
+`attempts` holds `0` from the start of the session, in every file. Each time the declaration runs, it assigns
+`localCount`. The `default:` value follows the initializer rules. Like every `, default:`, it belongs to the nearest
+construct before it that takes one ([§25](#25-persistent-storage-and-keys)), so
+`global level = load "level", default: 1` gives the default to `load`. Without `default:`, an initializer that uses a
+local value is a compile error that names the global, explains that it needs a value from the start of the session,
+and shows both fixes: `, default: 0`, or `global attempts = 0` and a later `attempts = localCount`.
 
 ## 13. Explicit types
 **Status:** Accepted
@@ -1199,7 +1243,8 @@ Rules:
 - A nested block may not redeclare a name visible from an outer scope.
 - A nested block may modify a visible outer variable.
 - Separate sibling blocks may declare the same local name.
-- Top-level variables belong to their file. A global ([§12](#global-variables)) is visible in all files.
+- Top-level variables and functions belong to their file. A global ([§12](#global-variables)), a global function
+  ([§11](#global-functions)), and a speaker ([§37](#37-dynamic-speaker-terms)) are visible in all files.
 
 ```text
 if firstCondition {
@@ -2907,7 +2952,8 @@ Behavior:
 - `fallback` may run any number of times, anywhere, including inside `if`; the latest one executed wins. It is session
   state and is checkpointed. `fallback none` clears it again.
 - A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. A file of
-  declarations only runs nothing on its own and needs no ending; a `goto` into such a file is a compile error. A call
+  declarations only (functions, global functions, speakers, and globals without `default:`) runs nothing on its own
+  and needs no ending; a `goto` into such a file is a compile error. A call
   counts as returning, also of a function that always ends the session, so `exit` or `end` still follows it. Branches
   that all end or transfer need nothing after them:
 
@@ -3354,6 +3400,13 @@ speaker mistressVera
 ```
 
 This does not redeclare the speaker. The parser distinguishes `speaker identifier { ... }` from `speaker identifier` through the following token. The default speaker is session state: it survives `goto`, `end`, and `call`, remains active until changed again, and is cleared by `exit`.
+
+A speaker is global ([ADR 0022](../decisions/0022-multi-file-scripts.md)): declared anywhere in any file of a package,
+also inside a block or function, it is known in every file. Its name is unique in the package like that of a global
+([§12](#global-variables)). The session sets it up at its start, together with the globals and in their order, so its
+property values follow the initializer rules of globals: literals, earlier globals and speakers, side-effect-free
+operators, and `load … , default:`. A property may also read the speaker's own earlier properties through `speaker`. To
+use a value that exists only later, assign the property then, as in `mistressVera.alias = chosenName`.
 
 ### Names, titles, and presentation
 
@@ -4039,7 +4092,7 @@ delete
 is
 ```
 
-The same keyword may have more than one grammar form when the next token makes the form unambiguous. For example, `speaker identifier { ... }` declares a speaker, while `speaker identifier` sets the default speaker. A parser distinguishes these forms through normal lookahead; this is not an implementation problem.
+The same keyword may have more than one grammar form when the next token makes the form unambiguous. For example, `speaker identifier { ... }` declares a speaker, while `speaker identifier` sets the default speaker, and `global function` declares a global function, while `global identifier = ...` declares a global. A parser distinguishes these forms through normal lookahead; this is not an implementation problem.
 
 Modifier and block words such as `async`, `visible`, `mystery`, `hidden`, `times`, and the media cue words `at`,
 `beforeEnd`, and `finish` are contextual: they have their special meaning only in the positions documented in
