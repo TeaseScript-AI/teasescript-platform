@@ -1257,7 +1257,11 @@ class SemanticValidator {
   #validateButtonTimeout(expression: Expression): void {
     const known = staticQuantity(expression);
     const milliseconds =
-      known === undefined ? undefined : typeof known === "number" ? known * 1_000 : known.milliseconds;
+      known === undefined
+        ? undefined
+        : typeof known === "number"
+          ? known * 1_000
+          : known.milliseconds;
     if (milliseconds !== undefined && milliseconds <= 0)
       this.#report(
         semanticCode.invalidRepeatCount,

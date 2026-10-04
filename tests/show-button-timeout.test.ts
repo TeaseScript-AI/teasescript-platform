@@ -190,9 +190,13 @@ test("the compiler rejects a timeout it can see is invalid and names the fix", (
       code: "TSV011",
       fix: "shorter timeout",
     },
-    { source: 'showButton "Go", timeout: "5"', code: "TSV041", fix: "'timeout: 5'" },
-    { source: 'let t = true\nshowButton "Go", timeout: t', code: "TSV041", fix: "'timeout: 5'" },
-    { source: 'showButton "Go", timeout: [5]', code: "TSV041", fix: "'timeout: 5'" },
+    { source: 'showButton "Go", timeout: "5"', code: "TSV043", fix: "a number of seconds" },
+    {
+      source: 'let t = true\nshowButton "Go", timeout: t',
+      code: "TSV043",
+      fix: "a number of seconds",
+    },
+    { source: 'showButton "Go", timeout: [5]', code: "TSV043", fix: "a number of seconds" },
     { source: 'showButton "Go", timeout: 2 days', code: "TSP033", fix: "use ms, s, min, or h" },
     { source: 'showButton "Go", timeout: 1, timeout: 2', code: "TSP032", fix: "one timeout:" },
     { source: 'showButton "Go", 5', code: "TSP032", fix: "background: and timeout:" },
@@ -214,7 +218,10 @@ test("a timeout the compiler cannot know fails at runtime before the button appe
   for (const { source, message } of [
     { source: "let limit = 0", message: "greater than zero" },
     { source: "let limit = -3", message: "greater than zero" },
-    { source: 'let values = [1, "5"]\nlet limit = values[1]', message: "greater than zero" },
+    {
+      source: 'function pick(value) {\n  return value\n}\nlet limit = pick("5")',
+      message: "greater than zero",
+    },
     { source: "let limit = 1e300", message: "outside the supported session-time range" },
   ]) {
     const plan = compileValidPlan(`${source}\nlet elapsed = showButton "Go", timeout: limit`);
