@@ -367,6 +367,11 @@ interface OpenElement {
   readonly scope: number;
 }
 
+interface Namespace {
+  readonly uri: string;
+  readonly id: number;
+}
+
 interface Attribute {
   readonly namespace: string;
   readonly localName: string;
@@ -388,9 +393,11 @@ interface Item {
 class SubjectReader {
   private at = 0;
   private readonly open: OpenElement[] = [];
-  private readonly namespaces = new Map<string, string>([["xml", XML]]);
+  /** A number for each namespace URI, so that equal URIs compare without comparing their text again. */
+  private readonly namespaceIds = new Map<string, number>([[XML, 0]]);
+  private readonly namespaces = new Map<string, Namespace>([["xml", { uri: XML, id: 0 }]]);
   /** The bindings that open elements' declarations replaced, restored when those elements close. */
-  private readonly shadowed: [prefix: string, namespace: string | undefined][] = [];
+  private readonly shadowed: [prefix: string, namespace: Namespace | undefined][] = [];
   private hasRoot = false;
   private keywords: string[] | null = null;
   private hasExtendedXmp = false;
@@ -474,11 +481,11 @@ class SubjectReader {
     const end = this.endOf("?>", this.at);
     const content = this.text.slice(this.at, end - 2);
     this.at = end;
-    if (content !== "" && !isSpace(content.charCodeAt(0))) {
+    if ((content !== "" && !isSpace(content.charCodeAt(0))) || target.includes(":")) {
       malformed(`The XMP has a malformed <?${target}?> processing instruction.`);
     }
     const isDeclaration = target.toLowerCase() === "xml";
-    if (isDeclaration && (target !== "xml" || markup !== 0 || !hasXmlVersion(content))) {
+    if (isDeclaration && (target !== "xml" || markup !== 0 || !isXmlDeclaration(content))) {
       malformed("The XMP has a malformed XML declaration, or one that is not at its start.");
     }
   }
@@ -543,16 +550,16 @@ class SubjectReader {
     for (const [attribute, value] of rawAttributes) {
       const [prefix, localName] = splitName(attribute);
       if (prefix === "xmlns" || attribute === "xmlns") continue;
-      const namespace = prefix === "" ? "" : this.namespaceOf(prefix);
-      const expandedName = `${namespace} ${localName}`; // A local name has no space.
+      const namespace = prefix === "" ? undefined : this.namespaceOf(prefix);
+      const expandedName = `${namespace?.id ?? -1} ${localName}`;
       if (expandedNames.has(expandedName)) {
         malformed(`The XMP repeats the attribute ${attribute} under another prefix in <${name}>.`);
       }
       expandedNames.add(expandedName);
-      attributes.push({ namespace, localName, value });
+      attributes.push({ namespace: namespace?.uri ?? "", localName, value });
     }
     const [prefix, localName] = splitName(name);
-    const namespace = this.namespaceOf(prefix);
+    const namespace = this.namespaceOf(prefix)?.uri ?? "";
 
     if (this.open.length >= MAX_XMP_ELEMENT_DEPTH) {
       beyondLimit(
@@ -589,21 +596,26 @@ class SubjectReader {
     this.exit(element);
   }
 
-  private bind(prefix: string, namespace: string): void {
-    if (prefix === "xmlns" || namespace === XMLNS || (prefix === "xml") !== (namespace === XML)) {
+  private bind(prefix: string, uri: string): void {
+    if (prefix === "xmlns" || uri === XMLNS || (prefix === "xml") !== (uri === XML)) {
       malformed("The XMP binds the reserved xml or xmlns prefix or namespace.");
     }
+    let id = this.namespaceIds.get(uri);
+    if (id === undefined) {
+      id = this.namespaceIds.size;
+      this.namespaceIds.set(uri, id);
+    }
     this.shadowed.push([prefix, this.namespaces.get(prefix)]);
-    this.namespaces.set(prefix, namespace);
+    this.namespaces.set(prefix, { uri, id });
   }
 
-  /** The namespace bound to `prefix`; the empty prefix is the default namespace, or none. */
-  private namespaceOf(prefix: string): string {
+  /** The namespace bound to `prefix`; the empty prefix is the default namespace, if any. */
+  private namespaceOf(prefix: string): Namespace | undefined {
     const namespace = this.namespaces.get(prefix);
     if (namespace === undefined && prefix !== "") {
       malformed(`The XMP uses the undeclared namespace prefix ${prefix}.`);
     }
-    return namespace ?? "";
+    return namespace;
   }
 
   /** The role of an element opened inside `parent`, starting the state its role collects. */
@@ -773,24 +785,48 @@ function isNumeral(text: string, radix: 10 | 16): boolean {
   return true;
 }
 
-/** Whether the content of `<?xml …?>` starts with whitespace and `version="1.x"`. */
-function hasXmlVersion(content: string): boolean {
+/**
+ * Whether the content of `<?xml …?>` is an XML 1.0 declaration: `version`, then optionally `encoding` and then
+ * `standalone`, each after whitespace, with optional whitespace at the end.
+ */
+function isXmlDeclaration(content: string): boolean {
+  const names = ["version", "encoding", "standalone"];
+  let next = 0; // The index in `names` of the first name that may follow.
   let at = 0;
-  const skipSpace = (): number => {
+  const skipSpace = (): boolean => {
     const start = at;
     while (isSpace(content.charCodeAt(at))) at += 1;
-    return at - start;
+    return at > start;
   };
-  if (skipSpace() === 0 || !content.startsWith("version", at)) return false;
-  at += "version".length;
-  skipSpace();
-  if (content[at] !== "=") return false;
-  at += 1;
-  skipSpace();
-  const quote = content[at];
-  if ((quote !== '"' && quote !== "'") || !content.startsWith("1.", at + 1)) return false;
-  const close = content.indexOf(quote, at + 3);
-  return close >= 0 && isNumeral(content.slice(at + 3, close), 10);
+  for (;;) {
+    const spaced = skipSpace();
+    if (at === content.length) return next > 0;
+    const name = names.slice(next).find((candidate) => content.startsWith(candidate, at));
+    if (!spaced || name === undefined || (next === 0 && name !== "version")) return false;
+    at += name.length;
+    skipSpace();
+    if (content[at] !== "=") return false;
+    at += 1;
+    skipSpace();
+    const quote = content[at];
+    const close = quote === '"' || quote === "'" ? content.indexOf(quote, at + 1) : -1;
+    if (close < 0 || !isDeclarationValue(name, content.slice(at + 1, close))) return false;
+    at = close + 1;
+    next = names.indexOf(name) + 1;
+  }
+}
+
+function isDeclarationValue(name: string, value: string): boolean {
+  if (name === "version") return value.startsWith("1.") && isNumeral(value.slice(2), 10);
+  if (name === "standalone") return value === "yes" || value === "no";
+  // An encoding name: a Latin letter, then Latin letters, digits, `.`, `_`, or `-`.
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    const isLetter = (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
+    const isOther = "0123456789._-".includes(value[index] ?? "");
+    if (!isLetter && (index === 0 || !isOther)) return false;
+  }
+  return value !== "";
 }
 
 /** The prefix (empty when there is none) and local part of a namespace-qualified name. */

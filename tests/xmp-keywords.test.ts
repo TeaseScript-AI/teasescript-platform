@@ -225,6 +225,13 @@ test("decodes UTF-8 and UTF-16 packets by their byte order mark and rejects UTF-
   const utf16le = Buffer.from(`\uFEFF${sidecar.toString("utf8")}`, "utf16le");
   const encodings: [string, Buffer][] = [
     ["UTF-8 with a byte order mark", Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), sidecar])],
+    [
+      "UTF-8 with an XML declaration",
+      Buffer.concat([
+        Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`),
+        sidecar,
+      ]),
+    ],
     ["UTF-16LE", utf16le],
     ["UTF-16BE", Buffer.from(utf16le).swap16()],
   ];
@@ -454,6 +461,16 @@ test("reports XMP that is not well-formed XML, or has a DOCTYPE, as invalid", ()
       /missing a closing "/,
     ],
     ["no root element", `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>`, /no root/],
+    [
+      "an XML declaration with unknown content",
+      `<?xml version="1.0" encoding="UTF-8" garbage?>${valid}`,
+      /XML declaration/,
+    ],
+    [
+      "a processing instruction target with a colon",
+      valid.replace("<rdf:li>", "<?bad:pi data?><rdf:li>"),
+      /processing instruction/,
+    ],
     ["-- inside a comment", valid.replace("<rdf:li>", "<!-- a -- b --><rdf:li>"), /-- inside/],
     [
       "a processing instruction target run into its data",
@@ -534,4 +551,20 @@ test("reads XMP up to the reader's size, nesting, and keyword limits and reports
     /keywords/,
     "keywords",
   );
+});
+
+test("reads names and character references of millions of characters in non-ASCII text", () => {
+  // Regular expressions with repetition exhausted V8's stack on such runs in two-byte strings, from about 10 million.
+  const run = "0".repeat(12_000_000);
+  const keywords = (items: string, other = ""): Buffer =>
+    packet(
+      `<rdf:Description><dc:subject><rdf:Bag><rdf:li>Café</rdf:li>${items}</rdf:Bag></dc:subject>${other}</rdf:Description>`,
+    );
+  const longReference = keywords(`<rdf:li>&#${run}65;</rdf:li>`);
+  assert.deepEqual(readXmpPacketKeywords(longReference), {
+    kind: "keywords",
+    keywords: ["Café", "A"],
+  });
+  const longName = keywords("", `<ex:a${run}/>`);
+  assert.deepEqual(readXmpPacketKeywords(longName), { kind: "keywords", keywords: ["Café"] });
 });
