@@ -16,12 +16,12 @@ const mirrored = defineModel<boolean>({ required: true });
       <Button
         data-viewfinder-mirror
         variant="ghost"
-        size="icon-sm"
+        size="icon-xs"
         aria-label="Flip camera preview"
         @pointerdown.stop
         @click="mirrored = !mirrored"
       >
-        <FlipHorizontal />
+        <FlipHorizontal class="size-3.5" />
       </Button>
     </TooltipTrigger>
     <TooltipContent>Flip preview</TooltipContent>

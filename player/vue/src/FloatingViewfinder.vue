@@ -197,7 +197,7 @@ function measured(next: number) {
         Drag to move, or drag an edge to resize. Arrow keys move it; plus and minus resize it.
       </span>
       <div class="floating-viewfinder-window">
-        <div class="floating-viewfinder-bar" :style="{ height: `${BAR}px` }">
+        <div class="floating-viewfinder-bar" :style="{ '--bar-height': `${BAR}px`, height: `${BAR}px` }">
           <ViewfinderMirrorButton v-model="mirrored" />
         </div>
         <Viewfinder :track="track" :mirrored="mirrored" @aspect="measured" />
@@ -242,7 +242,8 @@ function measured(next: number) {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding-inline: 2px;
+  /* The button sits as far from the right as from the top and bottom, clear of the window's rounded corner. */
+  padding-inline: calc((var(--bar-height) - 1.5rem) / 2);
   color: var(--media-text);
   border-bottom: 1px solid var(--media-border);
   backdrop-filter: blur(6px);
