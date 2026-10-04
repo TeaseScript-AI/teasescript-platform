@@ -715,6 +715,48 @@ test("a function result, a body, or a copy never changes the types another place
     );
 });
 
+test("arguments are checked as they were evaluated, against the parameters of the whole body", () => {
+  // The body and later arguments add properties to the caller's object only after the argument was evaluated.
+  const given = "let given = {}\nfunction fill {\n    given.flag = 1\n    return 0\n}\n";
+  for (const [parameter, use, call] of [
+    ["obj = {}, n = 0", "obj.flag", "f(given)"],
+    ["obj = {}, n = 0", "obj.flag", "f(given, fill())"],
+    ["obj = { nest: {} }", "obj.nest.flag", "f({ nest: given })"],
+    ["items = [{}]", "items[0].flag", "f([given])"],
+  ])
+    assert.deepEqual(
+      sayTexts(
+        `${given}function f(${parameter}) {\n    ${use} = true\n    given.flag = 1\n    return ${use}\n}\nsay "\${${call}}"`,
+      ),
+      ["true"],
+      call,
+    );
+  // A property the argument already has when it is evaluated must fit.
+  assert.deepEqual(
+    codes(
+      "let given = { flag: 1 }\nfunction f(obj = { nest: {} }) {\n    obj.nest.flag = true\n}\nf({ nest: given })",
+    ),
+    [["TSV041", "given"]],
+  );
+  // A call made inside the body, directly or through another function, is checked once the body is complete.
+  assert.deepEqual(
+    codes(
+      "function f(obj = {}, n = 0): boolean {\n    if n == 0 {\n        return f({ flag: 1 }, 1)\n    }\n    obj.flag = true\n    return obj.flag\n}\nlet result = f()",
+    ),
+    [["TSV041", "1"]],
+  );
+  assert.deepEqual(
+    codes(
+      "function f(obj = {}, n = 0): boolean {\n    if n == 0 {\n        return g()\n    }\n    obj.flag = true\n    return obj.flag\n}\nfunction g: boolean {\n    return f({ flag: 1 }, 1)\n}\nlet result = f()",
+    ),
+    [["TSV041", "1"]],
+  );
+  // A declared element type decides a literal argument also when the call checks the body first.
+  assert.deepEqual(codes('function f(values: integer[]) {\n    say "x"\n}\nf([1, "a"])'), [
+    ["TSV041", '"a"'],
+  ]);
+});
+
 test("a loop that may end through continue can still reach the function's end", () => {
   for (const loop of [
     "repeat 1 {\n        continue\n    }",

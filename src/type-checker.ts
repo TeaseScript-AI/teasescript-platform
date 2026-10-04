@@ -20,9 +20,8 @@ import {
   numberAnswerText,
 } from "./interaction-answers.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
-import { staticNumber } from "./static-evaluation.js";
+import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import type { SourceSpan } from "./source.js";
-import { staticVisibleText } from "./static-evaluation.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -127,6 +126,12 @@ interface FunctionType {
   accepted: readonly Variable[] | null;
   result: StaticType | null;
   checking: boolean;
+  /** Arguments of calls made while the body is checked, checked again against the parameters of the whole body. */
+  readonly pending: {
+    readonly place: Place;
+    readonly expression: Expression;
+    readonly value: StaticType;
+  }[];
 }
 
 /** The function whose body is being checked, with what its `return` statements produced. */
@@ -177,7 +182,7 @@ class TypeChecker {
    * List and set literals whose elements mix types, with those types. A literal stored in a place of a declared element
    * type is checked element by element instead; every other one is reported at the end of its statement (rule 1.3).
    */
-  readonly #mixedLiterals = new Map<Expression, readonly StaticType[]>();
+  #mixedLiterals = new Map<Expression, readonly StaticType[]>();
 
   /** The variable names of unannotated `let` statements by initializer, for messages that suggest a declaration. */
   readonly #declaredBy = new Map<Expression, string>();
@@ -200,6 +205,7 @@ class TypeChecker {
         accepted: null,
         result: null,
         checking: false,
+        pending: [],
       };
       this.#functions.push(fn);
       this.#root.declare(statement.name.name, { kind: "function", fn });
@@ -658,6 +664,9 @@ class TypeChecker {
         : typeFromAnnotation(declaration.returnTypeAnnotation);
     if (fn.checking) return declared ?? UNKNOWN_TYPE;
     fn.checking = true;
+    // A call in the middle of a statement checks the function; the statement's own literals are reported after it.
+    const outerLiterals = this.#mixedLiterals;
+    this.#mixedLiterals = new Map();
     const parameters = yield* compileChild(this.#parametersTask(fn));
     const scope = new Scope(this.#root);
     // The body works on its own copies, so checking an argument never changes what the body assumes.
@@ -678,6 +687,9 @@ class TypeChecker {
     this.#function = outer;
     this.#reachable = outerReachable;
     this.#loops.push(...outerLoops);
+    this.#mixedLiterals = outerLiterals;
+    for (const call of fn.pending.splice(0))
+      yield* compileChild(this.#storeTask(call.place, call.expression, call.value, false));
     if (continues) context.returnsNull = true;
     fn.result = declared ?? this.#inferredResult(context);
     if (
@@ -760,16 +772,24 @@ class TypeChecker {
     return parameters;
   }
 
-  /** Checks the arguments of a call to an author function against its parameter types, which they do not change. */
+  /**
+   * Checks the arguments of a call to an author function against its parameter types, which they do not change. A
+   * call made while the function's body is checked is checked again once the body is complete.
+   */
   *#functionCallTask(
     expression: CallExpression,
     fn: FunctionType,
     scope: Scope,
   ): CompileTask<StaticType> {
     const values: StaticType[] = [];
-    for (const argument of expression.arguments)
-      values.push(yield* compileChild(this.#expressionTask(argument.value, scope)));
-    // The body is checked first, so arguments must fit the parameters as the body uses them.
+    for (const argument of expression.arguments) {
+      const value = yield* compileChild(this.#expressionTask(argument.value, scope));
+      // An argument is the value as it was evaluated: a later argument or the body may still add a property to an
+      // object it was read from.
+      values.push(isBorrowed(argument.value) ? copyType(value) : value);
+      this.#captureLiteralParts(argument.value);
+    }
+    // The body is checked before the arguments, so they must fit the parameters as the body uses them.
     const result = copyType(yield* compileChild(this.#functionResultTask(fn)));
     const parameters = fn.accepted ?? (yield* compileChild(this.#parametersTask(fn)));
     const declarations = fn.declaration.parameters;
@@ -784,31 +804,50 @@ class TypeChecker {
       if (parameter === undefined) continue;
       const declaration = declarations[index]!;
       const name = fn.declaration.name.name;
-      yield* compileChild(
-        this.#storeTask(
-          {
-            type: parameter.type,
-            label: parameter.name,
-            subject: `'${name}' takes '${parameter.name}' as ${describeValue(parameter.type)}`,
-            verb: "take",
-            fix: (rejected, value) =>
-              declaration.typeAnnotation === null && declaration.defaultValue !== null
-                ? parameterFix(
-                    parameter.name,
-                    parameter.type,
-                    rejected,
-                    value,
-                    declaration.defaultValue,
-                  )
-                : parameterFix(parameter.name, parameter.type, rejected, value),
-          },
-          argument.value,
-          value,
-          false,
-        ),
-      );
+      const place: Place = {
+        type: parameter.type,
+        label: parameter.name,
+        subject: `'${name}' takes '${parameter.name}' as ${describeValue(parameter.type)}`,
+        verb: "take",
+        fix: (rejected, value) =>
+          declaration.typeAnnotation === null && declaration.defaultValue !== null
+            ? parameterFix(
+                parameter.name,
+                parameter.type,
+                rejected,
+                value,
+                declaration.defaultValue,
+              )
+            : parameterFix(parameter.name, parameter.type, rejected, value),
+      };
+      const before = this.diagnostics.length;
+      yield* compileChild(this.#storeTask(place, argument.value, value, false));
+      // A call inside the function's own body sees the parameters only as the body used them so far.
+      if (fn.checking && this.diagnostics.length === before)
+        fn.pending.push({ place, expression: argument.value, value });
     }
     return result;
+  }
+
+  /**
+   * Keeps the types of the variables and properties read inside a list, set, or object literal as they were when the
+   * literal was evaluated, for checks that run after other code may have added properties to them.
+   */
+  #captureLiteralParts(expression: Expression): void {
+    const pending = [expression];
+    while (pending.length > 0) {
+      const node = unwrap(pending.pop()!);
+      const parts =
+        node.kind === "listLiteral" || node.kind === "setLiteral"
+          ? node.elements
+          : node.kind === "objectLiteral"
+            ? node.properties.map((property) => property.value)
+            : [];
+      for (const part of parts) {
+        if (isBorrowed(part)) this.#types.set(part, copyType(this.#typeOf(part)));
+        else pending.push(part);
+      }
+    }
   }
 
   // Expressions ------------------------------------------------------------------------------------------------------
