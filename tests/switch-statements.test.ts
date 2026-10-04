@@ -56,7 +56,9 @@ test("matches literal kinds by == and declared speakers by identity", () => {
     "let pause = 5 s",
     'switch pause { case 5000 ms { say "five seconds" } }',
     'switch -1 s { case -1000 ms { say "minus one second" } }',
-    "let reply: string? = null",
+    // A function result hides the null, which assignment narrowing would otherwise know.
+    "function noReply: string? { return null }",
+    "let reply: string? = noReply()",
     'switch reply { case null { say "no reply" } case "yes" { say "yes" } }',
     'switch 2.0 { case 2 { say "two" } }',
     'switch true { case false { say "off" } case true { say "on" } }',
@@ -99,7 +101,8 @@ test("matches a number range by its bounds, including numbers that are not whole
 
 test("a range case never matches a value that is not a number, whatever the case order", () => {
   const source = [
-    "let missing: number? = null",
+    "function none: number? { return null }",
+    "let missing: number? = none()",
     'switch missing { case 0..4 { say "low" } case null { say "none" } }',
     "function describe(value) {",
     "  switch value {",

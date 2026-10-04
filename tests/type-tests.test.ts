@@ -169,6 +169,34 @@ test("only plain variables narrow, and a call, wait, or shared assignment cancel
   );
   // Nothing else assigns `v`, so a wait keeps it narrowed.
   assert.deepEqual(errors(`${union}if v is integer {\n    wait 1\n    let i: integer = v\n}`), []);
+  // At most one block of a `switch` runs: each starts from the facts before it, and they meet after it.
+  const cases = (blocks: string) =>
+    `${union}let n = 2\nif v is integer {\n    switch n {\n${blocks}    }\n`;
+  assert.deepEqual(
+    errors(
+      `${cases('        case 1 {\n            v = "s"\n        }\n        case 2 {\n            let i: integer = v\n        }\n')}}`,
+    ),
+    [],
+  );
+  assert.deepEqual(
+    errors(
+      `${cases('        case 1 {\n            v = "s"\n        }\n')}    let i: integer = v\n}`,
+    ),
+    [["TSV041", "v"]],
+  );
+  assert.deepEqual(
+    errors(
+      `${cases("        case 1 {\n            v = 2\n        }\n        default {\n            v = 3\n        }\n")}    let i: integer = v\n}`,
+    ),
+    [],
+  );
+  // An assignment in a `switch` inside a loop cancels narrowing at the loop's start.
+  assert.deepEqual(
+    errors(
+      `${union}let n = 2\nif v is integer {\n    repeat 2 {\n        let i: integer = v\n        switch n {\n            case 1 {\n                v = "z"\n            }\n        }\n    }\n}`,
+    ),
+    [["TSV041", "v"]],
+  );
   // A button used as a value waits for the player too, also inside a loop condition.
   const timer = 'timer async 1 s {\n    v = "x"\n}\n';
   assert.deepEqual(

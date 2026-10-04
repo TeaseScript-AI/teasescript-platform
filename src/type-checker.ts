@@ -539,16 +539,21 @@ class TypeChecker {
             const message = impossibleCaseMessage(statement.subject, subject, value, valueType);
             if (message !== undefined) this.#report(typeCode.impossibleCase, message, value.span);
           }
-        // Without a `default`, no case may match; otherwise execution continues after any block that continues.
-        let continues = statement.defaultBlock === null;
-        for (const switchCase of statement.cases)
-          if (yield* compileChild(this.#blockTask(switchCase.body, scope))) continues = true;
-        if (
-          statement.defaultBlock !== null &&
-          (yield* compileChild(this.#blockTask(statement.defaultBlock, scope)))
-        )
-          continues = true;
-        return continues;
+        // At most one block runs, so each starts from the facts before the statement, and the paths that continue meet
+        // after it like the branches of an `if`. Without a `default`, no case may match, which continues as it began.
+        const start = this.#flow.mark();
+        const ends: FlowState[] = statement.defaultBlock === null ? [start] : [];
+        const blocks = statement.cases.map((switchCase) => switchCase.body);
+        if (statement.defaultBlock !== null) blocks.push(statement.defaultBlock);
+        for (const block of blocks) {
+          this.#flow.restore(start);
+          if (yield* compileChild(this.#blockTask(block, scope))) ends.push(this.#flow.mark());
+        }
+        this.#flow.restore(start);
+        if (ends.length === 1) this.#flow.restore(ends[0]!);
+        else if (ends.length > 1)
+          this.#flow.apply(this.#flow.join(ends.map((end) => this.#flow.between(start, end))));
+        return ends.length > 0;
       }
       case "whileStatement": {
         // The condition is tested anew on each iteration, after whatever the body changed (rule 5.5).
@@ -3267,6 +3272,11 @@ function nestedStatements(statement: Statement): readonly Statement[] {
     case "repeatStatement":
     case "forStatement":
       return statement.body.statements;
+    case "switchStatement":
+      return [
+        ...statement.cases.flatMap((switchCase) => switchCase.body.statements),
+        ...(statement.defaultBlock?.statements ?? []),
+      ];
     default:
       return [];
   }
@@ -3292,6 +3302,8 @@ function statementExpressions(statement: Statement): readonly Expression[] {
         : [...expressionChildren(statement.target), statement.value];
     case "expressionStatement":
       return [statement.expression];
+    case "switchStatement":
+      return [statement.subject, ...statement.cases.flatMap((switchCase) => switchCase.values)];
     case "speakerDeclaration":
       return statement.properties.map((property) => property.value);
     case "sayStatement":
