@@ -39,7 +39,10 @@ const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
 
 const player = usePlayerSession({ resolveAsset: resolveDevelopmentAsset });
 player.prepare(() =>
-  createPlayerRuntimeSession(openingScenario, { temporalContext: playerTemporalContext() }),
+  createPlayerRuntimeSession(openingScenario, {
+    temporalContext: playerTemporalContext(),
+    wallClockMs: Date.now(),
+  }),
 );
 </script>
 

@@ -1,8 +1,11 @@
+import { temporalCaptureAt } from "./temporal-captures.js";
 import {
   combinedDateAndTime,
   hasTemporalMethod,
+  TEMPORAL_GETTERS,
   temporalBinary,
   temporalConverted,
+  temporalNow,
   temporalMethod,
   temporalProperty,
 } from "./temporal-operations.js";
@@ -78,11 +81,12 @@ import {
   type SerializableTimerHandle,
   type SerializableMediaHandle,
 } from "./serializable-values.js";
-import type {
-  RuntimeBindingSnapshot,
-  RuntimeSnapshot,
-  RuntimeSpeakerSnapshot,
-  RuntimeTemporarySnapshot,
+import {
+  currentTemporalContext,
+  type RuntimeBindingSnapshot,
+  type RuntimeSnapshot,
+  type RuntimeSpeakerSnapshot,
+  type RuntimeTemporarySnapshot,
 } from "./state.js";
 import {
   describeRuntimeValue,
@@ -981,7 +985,7 @@ export class Evaluator {
       !isVisibleScalar(value)
     )
       return optionalSpeakerString(speaker, name, span);
-    return visibleText(value, span, this.snapshot.temporalContext);
+    return visibleText(value, span, currentTemporalContext(this.snapshot));
   }
 
   public outputSpeaker(
@@ -1040,7 +1044,7 @@ export class Evaluator {
   /** `${...}` text. A list selects one element with the session RNG, again at every evaluation. */
   public interpolationText(value: SerializableRuntimeValue, span: SourceSpan): string {
     if (isDict(value)) throw fault("TSR021", DICT_TEXT_MESSAGE, span);
-    if (!isList(value)) return visibleText(value, span, this.snapshot.temporalContext);
+    if (!isList(value)) return visibleText(value, span, currentTemporalContext(this.snapshot));
     if (value.items.length === 0)
       throw fault(
         "TSR019",
@@ -1053,13 +1057,17 @@ export class Evaluator {
         "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
         span,
       );
-    return visibleText(this.#randomItem(value.items, span), span, this.snapshot.temporalContext);
+    return visibleText(
+      this.#randomItem(value.items, span),
+      span,
+      currentTemporalContext(this.snapshot),
+    );
   }
 
   /** `say` text. A value other than a scalar shows in code-like notation, escaped so that markup leaves it literal. */
   public sayText(value: SerializableRuntimeValue, span: SourceSpan): string {
     return isVisibleScalar(value)
-      ? visibleText(value, span, this.snapshot.temporalContext)
+      ? visibleText(value, span, currentTemporalContext(this.snapshot))
       : escapeMarkup(valueNotation(value, span, (handle) => this.#handleNotation(handle, span)));
   }
 
@@ -1103,7 +1111,7 @@ export class Evaluator {
         "join() can only join text, numbers, true or false, null, durations, and date and time values. Select an element or a property first.",
         span,
       );
-    return visibleText(item, span, this.snapshot.temporalContext);
+    return visibleText(item, span, currentTemporalContext(this.snapshot));
   }
 
   #binary(
@@ -1132,7 +1140,7 @@ export class Evaluator {
       expression.operator,
       left,
       right,
-      this.snapshot.temporalContext,
+      currentTemporalContext(this.snapshot),
       expression.span,
     );
     if (temporal !== undefined) return temporal;
@@ -1235,6 +1243,11 @@ export class Evaluator {
           expression.callee.span,
         );
       }
+      if (TEMPORAL_GETTERS.has(name)) {
+        const now = this.snapshot.currentSessionTimeMs;
+        const capture = temporalCaptureAt(this.snapshot.temporalCaptures, now);
+        return temporalNow(name, positional, named, capture, now, expression.span);
+      }
       const call = Object.freeze({
         positional: Object.freeze(positional),
         named: Object.freeze(named),
@@ -1316,7 +1329,7 @@ export class Evaluator {
         expression.callee.name,
         positional,
         named,
-        this.snapshot.temporalContext,
+        currentTemporalContext(this.snapshot),
         expression.span,
       );
     }
@@ -1881,7 +1894,7 @@ export class Evaluator {
     if (isTemporalConversionResult(result)) return temporalConverted(result, value);
     if (result === "string")
       return isVisibleScalar(value)
-        ? visibleText(value, span, this.snapshot.temporalContext)
+        ? visibleText(value, span, currentTemporalContext(this.snapshot))
         : undefined;
     if (result === "boolean")
       return typeof value === "boolean"

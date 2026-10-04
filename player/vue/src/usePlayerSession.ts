@@ -3,6 +3,8 @@ import { tryOnScopeDispose, useIntervalFn } from "@vueuse/core";
 import { MediaDevice, MediaLoadQueue } from "../../media-device.js";
 import {
   completePlayerRuntimeStorageWrite,
+  continuePlayerRuntimeSession,
+  playerTemporalContext,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
@@ -201,9 +203,19 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function prepare(create: () => PlayerRuntimeSession) {
     activation.value = { kind: "start", begin: create };
   }
-  /** Shows the explicit Continue control for a restored session; its execution, time and media resume only then. */
+  /**
+   * Shows the explicit Continue control for a restored session; its execution, time and media resume only then.
+   * Continue records the wall clock and the player's zone and presentation as they are now.
+   */
   function prepareRestore(restored: PlayerRuntimeSession) {
-    activation.value = { kind: "continue", begin: () => restored };
+    activation.value = {
+      kind: "continue",
+      begin: () =>
+        continuePlayerRuntimeSession(restored, {
+          wallClockMs: Date.now(),
+          temporalContext: playerTemporalContext(),
+        }).session,
+    };
   }
   /** Runs the prepared Start or Continue; call it from the activating click. */
   function activate() {

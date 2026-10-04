@@ -43,7 +43,10 @@ export interface RuntimeInteractionActionSnapshot {
   readonly target: "standardChat";
   readonly speakerId: number | null;
   readonly ui: InteractionUiPayload;
-  /** Scene time when the interaction appeared; a button's elapsed time counts from here. */
+  /**
+   * Scene time when the interaction appeared; a button's elapsed time counts from here, and its buttons show the date
+   * and time presentation in force then.
+   */
   readonly createdAtMs: number;
   /** A button's timeout; it times out at `createdAtMs + timeoutMs`. Always `null` for other interactions. */
   readonly timeoutMs: number | null;

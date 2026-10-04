@@ -134,6 +134,11 @@ export {
 export { completeAction } from "./runtime/operations/complete-action.js";
 export { observeTime, type MediaProgressReport } from "./runtime/operations/observe-time.js";
 export {
+  recordContinueCapture,
+  type ContinueCaptureOutcome,
+} from "./runtime/operations/continue-capture.js";
+export type { RuntimeTemporalCapture } from "./runtime/temporal-captures.js";
+export {
   reportMediaLoad,
   type MediaLoadReport,
   type MediaReportOutcome,

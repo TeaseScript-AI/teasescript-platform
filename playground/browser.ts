@@ -196,7 +196,7 @@ function sourceEdited(saveDraft = true): void {
 
 function compileAndReset(): void {
   try {
-    const result = compileWorkspaceSource(elements.source.value);
+    const result = compileWorkspaceSource(elements.source.value, { wallClockMs: Date.now() });
     compiledRevision = result.plan === null ? null : sourceRevision;
     applyResult(result, true);
     setActionStatus(

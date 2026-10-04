@@ -134,6 +134,10 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "toTime",
   "toDateTime",
   "toTimestamp",
+  "getDate",
+  "getTime",
+  "getDateTime",
+  "getTimestamp",
 ] as const);
 
 /** Temporary direct-call bridge for implemented Platform Standard Library helpers. */

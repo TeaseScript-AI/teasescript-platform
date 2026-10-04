@@ -25,8 +25,9 @@ const app = developmentPreview
           player.prepare(() =>
             createPlayerRuntimeSession(demoSource, {
               ...player.scriptStorageOptions(),
-              // Captured at Start: the session keeps this zone and presentation.
+              // Captured at Start: the session keeps this zone, presentation, and clock until a Continue.
               temporalContext: playerTemporalContext(),
+              wallClockMs: Date.now(),
             }),
           ),
         );

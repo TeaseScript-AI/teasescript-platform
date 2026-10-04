@@ -80,6 +80,7 @@ import {
   type RuntimeLoopFrameSnapshot,
   type RuntimeCallFrameSnapshot,
   type RuntimeTemporarySnapshot,
+  currentTemporalContext,
 } from "./state.js";
 import type {
   RuntimeChatPacingGateActionSnapshot,
@@ -704,7 +705,7 @@ function executePlannedInstruction(
         ? materializeInteractionUi(
             instruction.preparedUi,
             snapshot.temporaries,
-            snapshot.temporalContext,
+            currentTemporalContext(snapshot),
             instruction.span,
           )
         : { ui: instruction.ui, stagedWrites: [] as const };

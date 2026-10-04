@@ -1,4 +1,9 @@
-import { temporalContextProblem, type TemporalContext } from "../temporal.js";
+import type { TemporalContext } from "../temporal.js";
+import {
+  temporalCaptureAt,
+  temporalCapturesProblem,
+  type RuntimeTemporalCapture,
+} from "./temporal-captures.js";
 import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../color.js";
 import { isIntegerAnswerText, isValidInteractionPrefill } from "../interaction-answers.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
@@ -1132,7 +1137,7 @@ function validInteractionResultForInstruction(
         ? preparedChoiceOptions(
             instruction.preparedUi,
             snapshot.temporaries,
-            snapshotTemporalContext(snapshot),
+            snapshotTemporalContextAt(snapshot, snapshot.currentSessionTimeMs),
             instruction.span,
           )
         : instruction.ui.kind === "choice"
@@ -1371,17 +1376,37 @@ function validPreparedInteractionAction(
     prepared,
     action.ui,
     snapshot.temporaries,
-    snapshotTemporalContext(snapshot),
+    // The buttons were shown with the context in force when the interaction opened, also after a later Continue.
+    snapshotTemporalContextAt(snapshot, action.createdAtMs, action.requestEventSequence),
     instruction.span,
   );
 }
 
-/** The snapshot's temporal context when it is valid: choice texts are derived from it. */
-function snapshotTemporalContext(snapshot: Record<string, unknown>): TemporalContext | undefined {
-  // EVIDENCE: validation: temporalContextProblem accepted the snapshot's context.
-  return temporalContextProblem(snapshot.temporalContext) === null
-    ? (snapshot.temporalContext as TemporalContext)
-    : undefined;
+/** The snapshot's temporal context at a scene time when its captures are valid: choice texts are derived from it. */
+function snapshotTemporalContextAt(
+  snapshot: Record<string, unknown>,
+  atMs: unknown,
+  eventSequence: unknown = Infinity,
+): TemporalContext | undefined {
+  if (
+    typeof atMs !== "number" ||
+    typeof eventSequence !== "number" ||
+    typeof snapshot.currentSessionTimeMs !== "number" ||
+    typeof snapshot.observedSessionTimeMs !== "number" ||
+    typeof snapshot.nextEventSequence !== "number" ||
+    temporalCapturesProblem(
+      snapshot.temporalCaptures,
+      snapshot.currentSessionTimeMs,
+      snapshot.observedSessionTimeMs,
+      snapshot.nextEventSequence,
+    ) !== null
+  )
+    return undefined;
+  // EVIDENCE: validation: temporalCapturesProblem accepted the snapshot's captures.
+  const captures = snapshot.temporalCaptures as RuntimeTemporalCapture[];
+  return captures[0]!.boundaryMs > atMs
+    ? undefined
+    : temporalCaptureAt(captures, atMs, eventSequence).context;
 }
 
 // oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: boundary: a temporary payload remains unvalidated while snapshot consistency is checked.

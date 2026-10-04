@@ -12,10 +12,11 @@ import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
-import { DEFAULT_PRESENTATION_SETTINGS, type TemporalContext } from "../src/temporal.js";
+import type { TemporalContext } from "../src/temporal.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileSource } from "../src/compiler.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { AMSTERDAM } from "./helpers/temporal-fixtures.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 type Mutable<T> = T extends readonly [infer First, infer Second]
@@ -25,33 +26,6 @@ type Mutable<T> = T extends readonly [infer First, infer Second]
     : T extends object
       ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
       : T;
-
-function utc(text: string): number {
-  return Date.parse(`${text}Z`);
-}
-
-/**
- * Europe/Amsterdam in 2026 under the EU rule (summer time from 29 March to 25 October, both at 01:00 UTC), shown
- * day first with a 24-hour clock. Hand-written, so the expectations do not depend on host locale data.
- */
-const AMSTERDAM: TemporalContext = {
-  zone: {
-    name: "Europe/Amsterdam",
-    initialOffsetSeconds: 3_600,
-    transitions: [
-      [utc("2026-03-29T01:00:00"), 7_200],
-      [utc("2026-10-25T01:00:00"), 3_600],
-    ],
-  },
-  presentation: {
-    ...DEFAULT_PRESENTATION_SETTINGS,
-    date: "{day}-{month}-{year}",
-    dateTime: "{day}-{month}-{year}, {hour}:{minute}",
-    dateTimeWithSeconds: "{day}-{month}-{year}, {hour}:{minute}:{second}",
-    padDay: false,
-    padMonth: false,
-  },
-};
 
 /** Hides a value's type from the compiler, so a check reaches the runtime. */
 const DYNAMIC = "function dynamic(value) {\n    return value\n}\n";
@@ -304,10 +278,10 @@ test("a checkpoint keeps temporal values and the captured context, and rejects m
     Object.assign(set.items[0]!, { kind: { toString: null, valueOf: null } });
   });
   corrupt((snapshot) => {
-    snapshot.temporalContext.zone.transitions.reverse();
+    snapshot.temporalCaptures[0]!.context.zone.transitions.reverse();
   });
   corrupt((snapshot) => {
-    snapshot.temporalContext.presentation.date = "{day}-{month}";
+    snapshot.temporalCaptures[0]!.context.presentation.date = "{day}-{month}";
   });
 });
 
@@ -393,9 +367,9 @@ test("a session keeps the context it started with, whatever the host does with i
   assert.deepEqual(finish(plan, restored.snapshot), ["4-10-2026"]);
   // Every restore path gives a deeply frozen context, which no later operation can change.
   const json = serializeCheckpoint(createCheckpoint(plan, waiting.snapshot));
-  for (const { temporalContext: restoredContext } of [
-    restoreCheckpoint(JSON.parse(json)).snapshot,
-    deserializeCheckpoint(json).snapshot,
+  for (const restoredContext of [
+    restoreCheckpoint(JSON.parse(json)).snapshot.temporalCaptures[0]!.context,
+    deserializeCheckpoint(json).snapshot.temporalCaptures[0]!.context,
   ])
     for (const part of [
       restoredContext,
