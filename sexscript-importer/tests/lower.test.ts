@@ -1086,10 +1086,19 @@ test("maps System.exit and Math.round with notes but keeps Java reflection manua
     statement({
       kind: "methodCall",
       span,
-      object: variable("Math"),
-      method: constant("round"),
-      arguments: args(constant(2.5)),
-      implicitThis: false,
+      object: variable("this"),
+      method: constant("show"),
+      arguments: args({
+        kind: "methodCall",
+        span,
+        object: variable("Math"),
+        method: constant("round"),
+        arguments: args(constant(2.5)),
+        implicitThis: false,
+        safe: false,
+        spreadSafe: false,
+      }),
+      implicitThis: true,
       safe: false,
       spreadSafe: false,
     }),
@@ -1123,7 +1132,7 @@ test("maps System.exit and Math.round with notes but keeps Java reflection manua
   assert.equal(severities.get("SX_JAVA_REFLECTION"), "error");
   const output = emitTease(program);
   assert.match(output, /^exit$/m);
-  assert.match(output, /^round\(2\.5\)$/m);
+  assert.match(output, /round\(2\.5\)/);
 });
 
 test("lowers static Groovy maps and string-key access to TeaseScript objects", () => {

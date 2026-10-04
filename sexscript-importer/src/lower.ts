@@ -2397,18 +2397,26 @@ const PURE_OBJECT_METHODS = new Set([
   "trim",
 ]);
 
+/** Java Math methods without randomness; `Math.random()` is not one. */
+const PURE_MATH_METHODS = new Set(["abs", "ceil", "floor", "max", "min", "pow", "round", "sqrt"]);
+
 /** Expressions without interactions, randomness, waits, or writes, so they may be evaluated earlier. */
 function isPure(node: AstNode, context: LowerContext): boolean {
   const pure = (child: AstNode): boolean => isPure(child, context);
   if (node.kind === "methodCall") {
     const call = callParts(node);
     if (call === null) return false;
+    const target = asNode(node.object);
+    const mathCall = target !== null && variableName(target) === "Math";
     const pureCall = call.inherited
       ? DIRECT_STORAGE_LOADS.has(legacyApiCall(node, context)?.name ?? "")
-      : PURE_OBJECT_METHODS.has(call.name);
-    const target = asNode(node.object);
+      : mathCall
+        ? PURE_MATH_METHODS.has(call.name)
+        : PURE_OBJECT_METHODS.has(call.name);
     return (
-      pureCall && (call.inherited || target === null || pure(target)) && call.arguments.every(pure)
+      pureCall &&
+      (call.inherited || mathCall || target === null || pure(target)) &&
+      call.arguments.every(pure)
     );
   }
   if (node.kind === "binary" && node.operator === "<<") return false;
@@ -2482,11 +2490,7 @@ function lowerExpressionStatement(node: AstNode, context: LowerContext): IrState
     return [unsupportedStatement(context, node, "SX_MISSING_EXPRESSION", "Missing expression.")];
 
   if (expression.kind === "declaration") return lowerDeclaration(expression, node.span, context);
-  if (
-    expression.kind !== "methodCall" &&
-    !isUncalledClosure(expression, context) &&
-    isPure(expression, context)
-  ) {
+  if (!isUncalledClosure(expression, context) && isPure(expression, context)) {
     addDiagnostic(
       context,
       "SX_DISCARDED_VALUE",

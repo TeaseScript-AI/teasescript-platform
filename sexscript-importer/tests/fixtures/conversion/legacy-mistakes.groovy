@@ -17,3 +17,7 @@ outer: for (def i = 0; i < 2; i++) {
 		if (j == 0) continue outer
 	}
 }
+// A stored value read without using it, or text computed and dropped, had no effect.
+loadBoolean("ritual.done")
+def limit = 7.5
+if (limit > 5) "Limit now ${Math.round(limit)} seconds."

@@ -40,4 +40,10 @@ while i < 2 {
   }
   i += 1
 }
+// A stored value read without using it, or text computed and dropped, had no effect.
+// NOTE SX_DISCARDED_VALUE line 21: Groovy computed this value and discarded it, so the statement had no effect and is dropped. A comparison (==) here is often a mistake for an assignment (=).
+let limit = 7.5
+// NOTE SX_DISCARDED_VALUE line 23: Groovy computed this value and discarded it, so the statement had no effect and is dropped. A comparison (==) here is often a mistake for an assignment (=).
+if limit > 5 {
+}
 exit
