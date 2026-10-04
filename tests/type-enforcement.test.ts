@@ -96,15 +96,35 @@ test("an unannotated integer variable is a number when one of its assignments ca
     ),
     [["TSV041", "speed"]],
   );
-  // A long chain of copies widens in either order.
+  // A long chain widens in either order, through arithmetic, a `choose`, a literal read at once, or a function result.
   const names = Array.from({ length: 2_000 }, (_, index) => `v${index}`);
   const declarations = names.map((name) => `let ${name} = 0`).join("\n");
-  const copies = names.slice(1).map((name, index) => `${names[index]} = ${name} + 1`);
-  for (const order of [copies, [...copies].reverse()])
-    assert.deepEqual(
-      codes(`${declarations}\n${order.join("\n")}\nv1999 = 0.5\nlet k: integer = v0`),
-      [["TSV041", "v0"]],
-    );
+  for (const copy of [
+    (name: string) => `${name} + 1`,
+    (name: string) => `choose ${name}, 1`,
+    (name: string) => `{ n: ${name} }.n`,
+    (name: string) => `read_${name}()`,
+  ]) {
+    const functions = names.map((name) => `function read_${name} {\n    return ${name}\n}`);
+    const copies = names.slice(1).map((name, index) => `${names[index]} = ${copy(name)}`);
+    for (const order of [copies, [...copies].reverse()])
+      assert.deepEqual(
+        codes(
+          `${declarations}\n${functions.join("\n")}\n${order.join("\n")}\nv1999 = 0.5\nlet k: integer = v0`,
+        ),
+        [["TSV041", "v0"]],
+        copy("v"),
+      );
+  }
+  // A variable whose first value may be null widens to `number?`, and a use through arithmetic names the assignment.
+  const nullFirst =
+    "let items = [10, 20]\nlet first: integer? = 0\nlet i = null\ni = first\ni = 0.5\n";
+  assert.deepEqual(codes(`${nullFirst}say items[i]`), [["TSV043", "i"]]);
+  assert.deepEqual(codes(`${nullFirst}let strict: integer? = i`), [["TSV041", "i"]]);
+  assert.deepEqual(
+    mismatches("let items = [10, 20]\nlet i = 0\nsay items[i + 1]\ni = 0.5")[0]?.[1],
+    "A list index must be a whole number (integer), but this is a number. 'i' is a number because line 4 can store a non-whole number in it. Round it with floor(...), round(...), or ceil(...).",
+  );
   // Assignments in its body widen a parameter's default, but calls never do; properties and elements keep their type.
   assert.deepEqual(
     sayTexts(
@@ -580,13 +600,13 @@ test("conditions and logical operands are true or false, and operators get value
   );
   assert.deepEqual(
     codes(
-      'let r = 1..3\nlet q = r + 1\nlet less = "a" < 1\nlet x = 5\nsay x.length\nlet items = [1]\nitems.sort()\nsay items[1.5]',
+      'let r = 1..3\nlet q = r + 1\nlet less = "a" < 1\nlet x = 5\nsay x.length\nlet items = [1]\nitems.noSuchMethod()\nsay items[1.5]',
     ),
     [
       ["TSV043", "r + 1"],
       ["TSV043", '"a" < 1'],
       ["TSV043", "length"],
-      ["TSV043", "sort"],
+      ["TSV043", "noSuchMethod"],
       ["TSV043", "1.5"],
     ],
   );

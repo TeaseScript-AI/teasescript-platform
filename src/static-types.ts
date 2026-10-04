@@ -275,7 +275,7 @@ function* settleTask(
     }
     // The first other value decides the type by the `let` rule; an earlier null keeps it optional.
     const placed = yield* compileChild(placeTask(source));
-    const value = target.widens === true && isScalar(placed, "integer") ? NUMBER_TYPE : placed;
+    const value = target.widens === true ? widenedType(placed) : placed;
     target.resolved = target.sawNull ? optional(value) : value;
     target.resolvedAt = at;
     return;

@@ -161,6 +161,8 @@ interface FunctionType {
    */
   accepted: readonly Variable[] | null;
   result: StaticType | null;
+  /** For an inferred result, the variables its returned values depend on (see {@link TypeChecker.#numericSources}). */
+  sources: readonly Declaration[];
   checking: boolean;
   /**
    * Calls reached while the function itself is checked, directly or through another function: their arguments, as
@@ -177,7 +179,11 @@ interface FunctionType {
 interface FunctionContext {
   readonly fn: FunctionType;
   readonly declared: StaticType | null;
-  readonly returns: { readonly type: StaticType; readonly span: SourceSpan }[];
+  readonly returns: {
+    readonly type: StaticType;
+    readonly span: SourceSpan;
+    readonly expression: Expression;
+  }[];
   returnsNull: boolean;
 }
 
@@ -247,8 +253,8 @@ class TypeChecker {
 
   readonly #widened: Widened;
 
-  /** Reads of widened variables, with the assignment that widened them, for messages about integer-only uses. */
-  readonly #widenedReads = new Map<Expression, SourceSpan>();
+  /** The author functions that call expressions call, for the sources of their results. */
+  readonly #calls = new Map<Expression, FunctionType>();
 
   /** The declarations of the variables that identifier expressions read. */
   readonly #reads = new Map<Expression, Declaration>();
@@ -280,6 +286,7 @@ class TypeChecker {
         parameters: null,
         accepted: null,
         result: null,
+        sources: [],
         checking: false,
         pending: [],
       };
@@ -682,39 +689,95 @@ class TypeChecker {
     if (place.declaration === undefined) return false;
     if (!isScalar(nonNullType(place.type), "integer") || !isScalar(nonNullType(value), "number"))
       return false;
-    if (!this.#widened.has(place.declaration)) {
-      this.#widened.set(place.declaration, expression.span);
-      this.widenedMore = true;
-    }
+    // A variable an earlier check widened is a number in this one; were it not, the store is reported, not hidden.
+    if (this.#widened.has(place.declaration)) return false;
+    this.#widened.set(place.declaration, expression.span);
+    this.widenedMore = true;
     return true;
   }
 
-  /**
-   * Records that an integer variable stores the value of other integer variables, read directly or through arithmetic
-   * that stays whole only while they do, so it widens together with them.
-   */
+  /** Records that an integer variable stores a value whose sources (see {@link #numericSources}) widen it with them. */
   #follow(place: Place, value: StaticType, expression: Expression): void {
     if (place.declaration === undefined || !isScalar(nonNullType(value), "integer")) return;
-    const pending = [expression];
-    while (pending.length > 0) {
-      const node = unwrap(pending.pop()!);
-      const source = this.#reads.get(node);
-      if (source !== undefined && source !== place.declaration) {
-        const followers = this.#followers.get(source) ?? [];
-        followers.push({ declaration: place.declaration, at: expression.span });
-        this.#followers.set(source, followers);
-      } else if (node.kind === "binaryExpression" && WHOLE_ARITHMETIC.has(node.operator))
-        pending.push(node.left, node.right);
-      else if (node.kind === "unaryExpression" && node.operator === "-") pending.push(node.operand);
+    for (const source of this.#numericSources(expression)) {
+      if (source === place.declaration) continue;
+      const followers = this.#followers.get(source) ?? [];
+      followers.push({ declaration: place.declaration, at: expression.span });
+      this.#followers.set(source, followers);
     }
   }
 
-  /** Why a variable that a non-whole number widened is a number, naming that assignment, or nothing. */
+  /**
+   * The variables whose integer type a checked expression's integer value depends on: when one of them widens to a
+   * number, so does the value. They are read directly or through arithmetic that stays whole only while its operands
+   * do, through a `choose` option, through a part of a literal that is read at once, or through the returns of a
+   * function whose result type is inferred. A built-in such as `round(...)` stays whole whatever its argument is.
+   */
+  #numericSources(expression: Expression): Declaration[] {
+    const sources: Declaration[] = [];
+    const pending = [expression];
+    while (pending.length > 0) {
+      const node = unwrap(pending.pop()!);
+      const read = this.#reads.get(node);
+      if (read !== undefined) {
+        sources.push(read);
+        continue;
+      }
+      switch (node.kind) {
+        case "binaryExpression":
+          if (WHOLE_ARITHMETIC.has(node.operator)) pending.push(node.left, node.right);
+          break;
+        case "unaryExpression":
+          if (node.operator === "-") pending.push(node.operand);
+          break;
+        case "interactionExpression":
+          for (const option of node.options)
+            if (option.value === null) pending.push(option.expression);
+          break;
+        case "listLiteral":
+        case "setLiteral":
+          pending.push(...node.elements);
+          break;
+        case "objectLiteral":
+          // A choice object returns its value.
+          for (const property of node.properties)
+            if (property.name.name === "value") pending.push(property.value);
+          break;
+        case "propertyAccessExpression": {
+          const object = unwrap(node.object);
+          if (object.kind === "objectLiteral")
+            for (const property of object.properties)
+              if (property.name.name === node.property.name) pending.push(property.value);
+          if (object.kind === "listLiteral" && LIST_ELEMENT_READS.has(node.property.name))
+            pending.push(...object.elements);
+          break;
+        }
+        case "indexExpression": {
+          const object = unwrap(node.object);
+          if (object.kind === "listLiteral") pending.push(...object.elements);
+          break;
+        }
+        case "callExpression": {
+          const fn = this.#calls.get(node);
+          if (fn !== undefined) sources.push(...fn.sources);
+          break;
+        }
+        default:
+          break;
+      }
+    }
+    return sources;
+  }
+
+  /** Why a value is a number when a non-whole number widened a variable it depends on, naming that assignment. */
   #widenedNote(expression: Expression | null): string {
-    const read = expression === null ? null : unwrap(expression);
-    const at = read === null ? undefined : this.#widenedReads.get(read);
-    if (read?.kind !== "identifier" || at === undefined) return "";
-    return ` '${read.name}' is a number because line ${at.start.line + 1} can store a non-whole number in it.`;
+    if (expression === null) return "";
+    for (const source of this.#numericSources(expression)) {
+      const at = this.#widened.get(source);
+      if (at !== undefined)
+        return ` '${declarationName(source)}' is a number because line ${at.start.line + 1} can store a non-whole number in it.`;
+    }
+    return "";
   }
 
   /** The place of a known property, or of a timer or media handle property, which must exist and be assignable. */
@@ -782,7 +845,11 @@ class TypeChecker {
       return;
     }
     // The result is joined once the body is complete; a later statement may still change the place a value was read from.
-    context.returns.push({ type: this.#capture(statement.value), span: statement.value.span });
+    context.returns.push({
+      type: this.#capture(statement.value),
+      span: statement.value.span,
+      expression: statement.value,
+    });
   }
 
   // Functions --------------------------------------------------------------------------------------------------------
@@ -831,6 +898,8 @@ class TypeChecker {
     this.#mixedLiterals = outerLiterals;
     if (continues) context.returnsNull = true;
     fn.result = declared ?? this.#inferredResult(context);
+    if (declared === null)
+      fn.sources = context.returns.flatMap((returned) => this.#numericSources(returned.expression));
     if (
       declared !== null &&
       continues &&
@@ -936,6 +1005,7 @@ class TypeChecker {
     }
     // The body is checked before the arguments, so they must fit the parameters as the body uses them.
     const result = copyType(yield* compileChild(this.#functionResultTask(fn)));
+    this.#calls.set(expression, fn);
     if (fn.checking)
       fn.pending.push({ call: expression, values, literals: this.#takeMixedLiterals(expression) });
     else yield* compileChild(this.#argumentsTask(fn, expression, values));
@@ -1060,11 +1130,7 @@ class TypeChecker {
         const entry = scope.resolve(expression.name);
         if (entry?.kind === "variable") {
           const declaration = entry.variable.declaration;
-          if (declaration !== undefined) {
-            this.#reads.set(expression, declaration);
-            const widened = this.#widened.get(declaration);
-            if (widened !== undefined) this.#widenedReads.set(expression, widened);
-          }
+          if (declaration !== undefined) this.#reads.set(expression, declaration);
           return placeRead(entry.variable.type);
         }
         if (entry?.kind === "speaker" || (entry === undefined && expression.name === "speaker"))
@@ -1961,6 +2027,14 @@ const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "
 
 /** Arithmetic whose result is whole when its operands are, and a number when one of them is. */
 const WHOLE_ARITHMETIC: ReadonlySet<string> = new Set(["+", "-", "*", "%"]);
+
+/** List properties that read one of its elements. */
+const LIST_ELEMENT_READS: ReadonlySet<string> = new Set(["first", "last", "random"]);
+
+/** The name of the variable a declaration declares. */
+function declarationName(declaration: Declaration): string {
+  return declaration.kind === "forStatement" ? declaration.variable.name : declaration.name.name;
+}
 
 /** Value kinds that `${...}` cannot show. */
 const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
