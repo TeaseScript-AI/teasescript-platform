@@ -9105,6 +9105,7 @@ function pushPrompt(
       then: [say],
       else: [],
       span: inputNode.span,
+      guard: "prompt",
     });
   } else {
     addDiagnostic(

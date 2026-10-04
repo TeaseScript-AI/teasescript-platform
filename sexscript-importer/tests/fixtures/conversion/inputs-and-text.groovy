@@ -14,3 +14,12 @@ while (getString("Round " + round) || true) {
 	round += 1
 	if (round == 2) break
 }
+// A question in a variable that never holds null needs no test before it is shown, also when the variable holds a
+// list elsewhere.
+def question = "Ready?"
+def menu = { -> question = ["Yes", "No"] }
+question = "Kneel?"
+def kneel = getBoolean(question)
+// A question read from storage may be null, which kept the current text, so it is still tested.
+def stored = loadString("question")
+def answer = getString(stored, "")

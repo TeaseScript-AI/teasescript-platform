@@ -27,3 +27,19 @@ while true {
     break
   }
 }
+// A question in a variable that never holds null needs no test before it is shown, also when the variable holds a
+// list elsewhere.
+// NOTE SX_UNION_TYPE line 19: Groovy let 'question' hold values of several types; TeaseScript declares it 'string | string[]' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if question is string { ... }
+let question: string | string[] = "Ready?"
+function menu {
+  question = ["Yes", "No"]
+}
+question = "Kneel?"
+say question
+let kneel = (choose yes: "Yes", no: "No") == "yes"
+// A question read from storage may be null, which kept the current text, so it is still tested.
+let stored = load "question"
+if stored != null {
+  say stored
+}
+let answer = askText

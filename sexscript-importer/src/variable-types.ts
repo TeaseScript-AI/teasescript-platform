@@ -141,6 +141,7 @@ interface Rounds {
   conflicts: Conflict[];
   appends: Map<IrStatement, boolean>;
   textAppends: Set<IrStatement>;
+  unguarded: Set<IrStatement>;
   /** Statements whose stored number truncates to an integer. */
   truncations: Set<IrStatement>;
   integerLoads: Set<IrStatement>;
@@ -159,6 +160,7 @@ function runRounds(
     conflicts: [],
     appends: new Map(),
     textAppends: new Set(),
+    unguarded: new Set(),
     truncations: new Set(),
     integerLoads: new Set(),
     textIntegers: new Set(),
@@ -170,6 +172,7 @@ function runRounds(
     rounds.conflicts = analysis.conflicts;
     rounds.appends = analysis.appends;
     rounds.textAppends = analysis.textAppends;
+    rounds.unguarded = analysis.unguarded;
     rounds.indexes = analysis.indexes;
     for (const statement of analysis.truncations) rounds.truncations.add(statement);
     for (const statement of analysis.integerLoads) rounds.integerLoads.add(statement);
@@ -394,7 +397,7 @@ export function enforceVariableTypes(
             : withIntegerIndexes(statement, indexes);
       }
     });
-  result.statements = rewrite(statements);
+  result.statements = rewrite(withoutGuards(statements, accepted.unguarded));
   return result;
 }
 
@@ -439,6 +442,8 @@ interface Analysis {
   appends: Map<IrStatement, boolean>;
   /** `text += value` statements on a variable that holds text. */
   textAppends: Set<IrStatement>;
+  /** The importer's null tests of input questions on variables that can never hold null. */
+  unguarded: Set<IrStatement>;
 }
 
 function analyse(
@@ -456,6 +461,7 @@ function analyse(
     indexes: new Set(),
     appends: new Map(),
     textAppends: new Set(),
+    unguarded: new Set(),
   };
   // The `return` value types of the function being walked; null for a bare `return` or falling off the end.
   let returns: TeaseType[] | null = null;
@@ -746,10 +752,17 @@ function analyse(
       case "return":
         returns?.push(item.value === null ? NULL : typeOf(item.value, scope));
         return;
-      case "if":
+      case "if": {
+        // The question of a legacy input needs no null test where the variable can never hold null.
+        const tested = item.condition.kind === "binary" ? item.condition.left : null;
+        if (item.guard === "prompt" && tested?.kind === "variable") {
+          const type = typeOf(tested, scope);
+          if (!["unknown", "null", "optional"].includes(type.kind)) analysis.unguarded.add(item);
+        }
         block(item.then, scope);
         block(item.else, scope);
         return;
+      }
       case "while":
       case "repeat":
         block(item.body, scope);
@@ -834,6 +847,44 @@ function analyse(
     returns = null;
   }
   return analysis;
+}
+
+/** The statements with each of the `guards` replaced by its `then` statements. */
+function withoutGuards(items: IrStatement[], guards: ReadonlySet<IrStatement>): IrStatement[] {
+  if (guards.size === 0) return items;
+  return items.flatMap((statement): IrStatement[] => {
+    if (guards.has(statement) && statement.kind === "if")
+      return withoutGuards(statement.then, guards);
+    switch (statement.kind) {
+      case "function":
+        return [{ ...statement, body: withoutGuards(statement.body, guards) }];
+      case "if":
+        return [
+          {
+            ...statement,
+            then: withoutGuards(statement.then, guards),
+            else: withoutGuards(statement.else, guards),
+          },
+        ];
+      case "while":
+      case "repeat":
+      case "for":
+        return [{ ...statement, body: withoutGuards(statement.body, guards) }];
+      case "switch":
+        return [
+          {
+            ...statement,
+            cases: statement.cases.map((item) => ({
+              ...item,
+              body: withoutGuards(item.body, guards),
+            })),
+            default: withoutGuards(statement.default, guards),
+          },
+        ];
+      default:
+        return [statement];
+    }
+  });
 }
 
 /** Names of the variables the program compares with null (`x == null`, `x != null`). */

@@ -108,7 +108,14 @@ export type IrStatement =
       maybeText?: true;
     })
   | (IrBase & { kind: "expression"; expression: IrExpression })
-  | (IrBase & { kind: "if"; condition: IrExpression; then: IrStatement[]; else: IrStatement[] })
+  | (IrBase & {
+      kind: "if";
+      condition: IrExpression;
+      then: IrStatement[];
+      else: IrStatement[];
+      /** `prompt` marks the importer's test that a legacy input's question is not null before it is shown. */
+      guard?: "prompt";
+    })
   | (IrBase & { kind: "while"; condition: IrExpression; body: IrStatement[] })
   | (IrBase & { kind: "repeat"; count: IrExpression; body: IrStatement[] })
   /** `dict` marks a loop over the keys of a dict (#536). */
