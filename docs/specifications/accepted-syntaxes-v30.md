@@ -1240,10 +1240,11 @@ let answer = choose back: "Back", "Spanking", "Lines"   // "back", "Spanking", o
 let rounds = choose 5, 10                               // 5 or 10, an integer
 ```
 
-A list used as an option gives one button per element, in order. An element is a value, or a choice object
-`{ value?, text, background? }`: the button shows `text`, returns `value` (or the `text` value when `value` is
-omitted), and uses `background` as its colour ([§37](#authored-colours)). A choice object may also be a whole option.
-A value written before a list option is the value of every button from that list:
+A list used as an option gives one button per element, in order; a set gives one button per member, in insertion order,
+in the same way. An element is a value, or a choice object `{ value?, text, background? }`: the button shows `text`,
+returns `value` (or the `text` value when `value` is omitted), and uses `background` as its colour
+([§37](#authored-colours)). A choice object may also be a whole option. A value written before a list or set option is
+the value of every button from it:
 
 ```text
 let offenses = [{ value: "spank", text: "Spanking" }, { text: "Corner" }]
@@ -1258,11 +1259,11 @@ Rules:
   `null`, or a duration.
 - Options with and without a written value may be mixed.
 - When all values have the same type, the result has that type; integers and numbers together are numbers.
-- The elements of a list option are values or choice objects, not lists.
+- The elements of a list option are values or choice objects, not lists or sets.
 - A choice object has `text`, and optionally `value` and `background`. It has no `value` property when a value is
-  written before its option's `:`, also as an element of a list option.
-- An empty list contributes no buttons. A `choose` without any button is an error: a compile error when it is visible
-  in the source, such as `choose []`, and a runtime error otherwise.
+  written before its option's `:`, also as an element of a list or set option.
+- An empty list or set contributes no buttons. A `choose` without any button is an error: a compile error when it is
+  visible in the source, such as `choose []`, and a runtime error otherwise.
 - Buttons may repeat a value or a text: `choose win: "Open a door", lose: "Open a door", lose: "Open a door"` shows
   three buttons. A selected button is identified by its position, so each returns its own value.
 - `choose` does not return a result object.

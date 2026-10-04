@@ -10,15 +10,16 @@ import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import { getSerializableProperty, type SerializableRuntimeValue } from "./serializable-values.js";
-import { isDuration, isList, isObject } from "./value-predicates.js";
+import { isDuration, isList, isObject, isSet } from "./value-predicates.js";
 import { fieldText, isVisibleScalar, visibleText } from "./value-text.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 /**
  * The buttons of a prepared `choose`, in order: one for each value or choice object, and one for each element of a
- * list option. `options` holds what each authored option evaluated to, and `values` the value written before its `:`
- * (or `null`); every button of a list option returns that written value.
+ * list option or member of a set option, in insertion order. `options` holds what each authored option evaluated to,
+ * and `values` the value written before its `:` (or `null`); every button of a list or set option returns that written
+ * value.
  */
 export function expandChoiceOptions(
   options: readonly SerializableRuntimeValue[],
@@ -37,15 +38,15 @@ export function expandChoiceOptions(
   };
   options.forEach((option, index) => {
     const value = values[index] ?? null;
-    if (!isList(option)) {
+    if (!isList(option) && !isSet(option)) {
       add(option, value);
       return;
     }
     for (const element of option.items) {
-      if (isList(element))
+      if (isList(element) || isSet(element))
         throw fault(
           "TSR052",
-          "A choice list element must be a value or a choice object { value?, text, background? }, not a list.",
+          "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
           span,
         );
       add(element, value);
@@ -69,7 +70,7 @@ function choiceButton(
     if (!isVisibleScalar(option))
       throw fault(
         "TSR052",
-        "A choice option must be a value, a choice object { value?, text, background? }, or a list.",
+        "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
         span,
       );
     return { text: visibleText(option, span), value: value ?? choiceValue(option) };

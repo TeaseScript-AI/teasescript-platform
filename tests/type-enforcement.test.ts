@@ -265,6 +265,7 @@ test("a choice result has the type of its values, and an option without a writte
   const codes = (source: string) => mismatches(source).map(([code, , text]) => [code, text]);
   assert.deepEqual(codes("let n = choose [5, 10, 15]\nn = 2.5"), [["TSV041", "2.5"]]);
   assert.deepEqual(codes("let n = choose 5, 10\nn = 20"), []);
+  assert.deepEqual(codes("let n = choose set[5, 10]\nn = 2.5"), [["TSV041", "2.5"]]);
   assert.deepEqual(codes("let n: string = choose 5, 10"), [["TSV041", "choose 5, 10"]]);
   assert.deepEqual(codes('let n = choose 1: "One", 2.5: "Two"\nn = 0.5'), []);
   assert.deepEqual(codes("let d = choose [1 min, 90 seconds]\nd = 5"), [["TSV041", "5"]]);

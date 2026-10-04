@@ -28,7 +28,8 @@ import {
   isValidInteractionPrefill,
   numberAnswerText,
 } from "./interaction-answers.js";
-import { staticNumber, staticVisibleText } from "./static-evaluation.js";
+import { staticChoiceValue, staticNumber, staticVisibleText } from "./static-evaluation.js";
+import { choiceValueKey } from "./choice-values.js";
 import {
   ARITHMETIC_OPERATORS,
   arithmeticType,
@@ -1682,16 +1683,20 @@ class SemanticValidator {
         this.#validateExpressionTask(option.expression, scope, contextualSpeaker),
       );
       const content = unwrapParentheses(option.expression);
-      if (content.kind !== "listLiteral") {
+      if (content.kind !== "listLiteral" && content.kind !== "setLiteral") {
         empty = false;
-        // A value of a known type other than a list, `null` included, is exactly one button.
+        // A value of a known type other than a list or set, `null` included, is exactly one button.
         const inner = nonNullType(this.#expressionType(content, scope));
-        if (inner.kind !== "unknown" && inner.kind !== "list") buttons += 1;
+        if (inner.kind !== "unknown" && inner.kind !== "list" && inner.kind !== "set") buttons += 1;
         this.#validateChoiceEntry(content, option.value, scope, false);
         continue;
       }
       if (content.elements.length > 0) empty = false;
-      buttons += content.elements.length;
+      // A set keeps one of equal members, so only its distinct known members are counted.
+      buttons +=
+        content.kind === "listLiteral"
+          ? content.elements.length
+          : new Set(content.elements.flatMap((element) => staticChoiceKeys(element))).size;
       for (const element of content.elements)
         this.#validateChoiceEntry(unwrapParentheses(element), option.value, scope, true);
     }
@@ -1710,8 +1715,8 @@ class SemanticValidator {
   }
 
   /**
-   * Checks what gives one button: a whole option or an element of a list option. `value` is the value written before
-   * the option's `:`, which every button of a list option returns.
+   * Checks what gives one button: a whole option, or an element of a list or set option. `value` is the value written
+   * before the option's `:`, which every button of a list or set option returns.
    */
   #validateChoiceEntry(
     entry: Expression,
@@ -1720,18 +1725,23 @@ class SemanticValidator {
     inList: boolean,
   ): void {
     const type = this.#unshowableType(entry, scope);
-    if (inList && type?.kind === "list") {
+    if (inList && (type?.kind === "list" || type?.kind === "set")) {
       this.#report(
         semanticCode.invalidInteractionChoice,
-        "A choice list element must be a value or a choice object { value?, text, background? }, not a list.",
+        "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
         entry.span,
       );
       return;
     }
-    if (type !== undefined && type.kind !== "list" && type.kind !== "object") {
+    if (
+      type !== undefined &&
+      type.kind !== "list" &&
+      type.kind !== "set" &&
+      type.kind !== "object"
+    ) {
       this.#report(
         semanticCode.invalidInteractionChoice,
-        "A choice option must be a value, a choice object { value?, text, background? }, or a list.",
+        "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
         entry.span,
       );
       return;
@@ -2108,6 +2118,12 @@ function findFirstInteraction(
     for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
   }
   return null;
+}
+
+/** The identity of a set member known at compile time, as `choiceValueKey`, or none when it is not known. */
+function staticChoiceKeys(expression: Expression): string[] {
+  const known = staticChoiceValue(expression);
+  return known === undefined ? [] : [choiceValueKey(known.value)];
 }
 
 function unwrapParentheses(expression: Expression): Expression {

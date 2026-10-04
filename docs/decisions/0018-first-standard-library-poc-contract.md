@@ -186,7 +186,7 @@ for an object property named `default`.
 
 `choose` is the author-facing TeaseScript construct. `choice` is the noun used for the internal interaction/action kind and for an individual choice group.
 
-Each option shows one button, or one per element when the option is a list, and `choose` returns the selected
+Each option shows one button, or one per element when the option is a list or a set, and `choose` returns the selected
 button's value. A value may be written before an option's `:`; an option without one returns itself, with its own type:
 
 ```tease

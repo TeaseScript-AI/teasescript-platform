@@ -243,17 +243,17 @@ function* expressionTypeTask(
         }
         let value = option.expression;
         while (value.kind === "parenthesizedExpression") value = value.expression;
-        if (value.kind === "listLiteral") {
+        if (value.kind === "listLiteral" || value.kind === "setLiteral") {
           for (const element of value.elements)
             values.push(yield* compileChild(choiceEntryTypeTask(element, context)));
           continue;
         }
         const type = yield* compileChild(choiceEntryTypeTask(value, context));
-        // A list option gives a button per element; an optional list may also be one `null` button.
+        // A list or set option gives a button per element; an optional one may also be one `null` button.
         values.push(
-          type.kind === "list"
+          type.kind === "list" || type.kind === "set"
             ? type.element
-            : type.kind === "optional" && type.value.kind === "list"
+            : type.kind === "optional" && (type.value.kind === "list" || type.value.kind === "set")
               ? UNKNOWN_TYPE
               : type,
         );

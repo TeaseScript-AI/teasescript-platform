@@ -112,7 +112,7 @@ or binding. See [timer semantics](specifications/accepted-syntaxes-v30.md#27-tim
 ### Compact choices
 
 `choose` returns the value of the selected button. A value may be written before an option's `:`; an option without
-one returns itself, with its own type. A list option gives one button per element:
+one returns itself, with its own type. A list or set option gives one button per element:
 
 ```tease
 let result = choose "Bratty", "Very submissive"

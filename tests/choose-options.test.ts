@@ -172,6 +172,40 @@ test("a value written before a list option is the value of every button from tha
   );
 });
 
+test("a set option gives one button per member, in insertion order, like a list", () => {
+  const source = [
+    'let tags = set["b", "a", "b"]',
+    'tags.add("c")',
+    "let none = set[]",
+    "let answer = choose tags, key: set[1, 2], gone: none",
+    "say [answer]",
+  ].join("\n");
+  const { pending } = start(source);
+  assert.deepEqual(
+    buttons(pending.snapshot).map((option) => [option.text, option.value]),
+    [
+      ["b", "b"],
+      ["a", "a"],
+      ["c", "c"],
+      ["1", "key"],
+      ["2", "key"],
+    ],
+  );
+  assertEachButtonResumes(source, [
+    ["b", '["b"]'],
+    ["a", '["a"]'],
+    ["c", '["c"]'],
+    ["1", '["key"]'],
+    ["2", '["key"]'],
+  ]);
+
+  const result = compileSource("let x = choose set[]");
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
+    [["TSV029", "A choice needs at least one button, but its option lists are empty."]],
+  );
+});
+
 test("an option returns its value with its own type", () => {
   const cases = [
     ["let n = choose [5, 10, 15]", 1, "10", "[10]"],
@@ -298,7 +332,7 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       'let x = choose [["a"]]',
       "TSV029",
-      "A choice list element must be a value or a choice object { value?, text, background? }, not a list.",
+      "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
     ],
     [
       'let x = choose a: { text: "A", value: "b" }',
@@ -335,7 +369,7 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       'let x = choose ["A", 1..2]',
       "TSV029",
-      "A choice option must be a value, a choice object { value?, text, background? }, or a list.",
+      "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
     ],
     [
       `let x = choose [${Array.from({ length: 4097 }, (_, index) => index).join(", ")}]`,
@@ -355,7 +389,7 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       "speaker vera {}\nlet x = choose [vera]",
       "TSV029",
-      "A choice option must be a value, a choice object { value?, text, background? }, or a list.",
+      "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
     ],
     [
       "speaker vera {}\nlet x = choose [{ text: vera }]",
@@ -365,7 +399,7 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       'let names = ["a"]\nlet x = choose [names]',
       "TSV029",
-      "A choice list element must be a value or a choice object { value?, text, background? }, not a list.",
+      "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
     ],
     [
       'let x = choose { text: "A", background: 1 second }',
@@ -380,12 +414,12 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       'speaker vera {}\nlet x = choose as vera speaker, "B"',
       "TSV029",
-      "A choice option must be a value, a choice object { value?, text, background? }, or a list.",
+      "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
     ],
     [
-      "let x = choose set[1]",
+      'let x = choose ["A", set["B"]]',
       "TSV029",
-      "A choice option must be a value, a choice object { value?, text, background? }, or a list.",
+      "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
     ],
   ] as const;
   for (const [source, code, message] of cases) {
@@ -421,7 +455,7 @@ test("a choice of durations is a duration where the compiler checks numbers and 
 
 test("choice options known only at runtime are checked before the choice opens", () => {
   const cases = [
-    ['let o = ["a", ["b"]]\nlet x = choose o', "not a list."],
+    ['let o = ["a", ["b"]]\nlet x = choose o', "not a list or set."],
     ['let o = { text: "A", value: "a" }\nlet x = choose k: o', "Keep one."],
     [
       'function options {\n    return [{ text: "A", value: "a" }]\n}\nlet x = choose k: options()',
@@ -429,7 +463,8 @@ test("choice options known only at runtime are checked before the choice opens",
     ],
     ['let o = [{ value: "a" }]\nlet x = choose o', "A choice object requires text."],
     ['let o = [{ text: "A", value: ["a"] }]\nlet x = choose o', "or a duration."],
-    ["let o = [set[1]]\nlet x = choose o", "or a list."],
+    ["let o = [set[1]]\nlet x = choose o", "not a list or set."],
+    ["let o = [1..2]\nlet x = choose o", "a list, or a set."],
   ] as const;
   for (const [source, ending] of cases) {
     const { pending } = start(source);
