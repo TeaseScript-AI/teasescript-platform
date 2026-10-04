@@ -54,7 +54,8 @@ accept `.groovy` files, directories, or parser JSON; inputs of one invocation fo
 directory, following script transfers with shared storage, then each runnable script no run reached in isolation (with
 empty storage, so a failure there can come from missing setup). Answers are deterministic: buttons are pressed, each
 visit of a choice takes the next option, text and number inputs cycle through fixed values, and time and media advance
-in simulation. Pending capabilities use host stand-ins that follow the same clock and answer rotation. A run proves one
+in simulation; the wall clock starts at 2026-10-02 12:00 UTC and follows that time. Pending capabilities use host
+stand-ins with the same answer rotation. A run proves one
 path executes; `stepLimit` is inconclusive (for example a loop that waits until the typed text matches), while
 `TSR037` means the work between two events exceeds the product's instruction budget, which fails in the Player too.
 With a single directory argument, that directory is the package root that script transfers are relative to.
@@ -85,7 +86,7 @@ node --test tests/*.test.ts
 
 `tests/fixtures/conversion/` pairs real Groovy inputs with the expected `.tease` output; that output must compile with
 the TeaseScript compiler. `tests/fixtures/conversion-accepted/` holds output that uses accepted but not yet implemented
-TeaseScript, including owner-decided syntax whose implementation is still open (such as script transfers, date and
-time, and `dict`); it must compile once those capabilities are replaced by placeholder calls. Both groups must also run to the
+TeaseScript, including owner-decided syntax whose implementation is still open (such as script transfers, `showPopup`,
+and `askBooleans`); it must compile once those capabilities are replaced by placeholder calls. Both groups must also run to the
 end in the runtime smoke run. These tests skip with a stated reason when Java/Groovy or the repository build is
 unavailable.

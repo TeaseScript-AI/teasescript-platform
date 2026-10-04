@@ -30,18 +30,18 @@ with the direction TeaseScript already took, and common practice in other langua
 | C4 | Effective values are unique | Withdrawn: buttons may repeat a value |
 | C5 | Warning when a choice result is compared with a value no option has | Merged as part of #504 (#535) |
 | T1 | Type enforcement, union types, type tests, narrowing | #504: merged (#519 enforcement, #526 type rules, #520 runtime checks, #530 unions, `is`, and narrowing) |
-| D1 | Dictionaries: lookup by runtime key (`toys[name]`) | Owner-decided as a separate `dict` type (#536) |
+| D1 | Dictionaries: lookup by runtime key (`toys[name]`) | Owner-decided as a separate `dict` type (#536); merged as #555 |
 | M1 | Media selected by tags (include/exclude tags, count matches) | Evaluated (counting); later |
 
 The importer emits L1 and C1–C3 in its default output as merged in #515, and the text operations, `join`, and
 conversions of #508 as merged in #518; the compiler gate and smoke runs check both with `main`'s implementation. It
-also emits the `dict` type of #536 for D1, counted as `dict (#536)` in the compiler gate until it is implemented, and
-declares unions (#530) for variables that Groovy gave several types. Only M1 remains a proposal (`--proposed`).
+also emits the `dict` type of #536 for D1 as merged in #555, and declares unions (#530) for variables that Groovy gave
+several types. Only M1 remains a proposal (`--proposed`).
 
 ## Corpus evaluation
 
-Measured on 2026-10-04 at importer commit `a7aa8c84` with `node src/cli.ts report --run [--proposed=<id>] <package
-scripts>`, after merging `main` at `337388d2`. The importer emits a working syntax of its own choosing for the
+Measured on 2026-10-04 at importer commit `5e9e33e8` with `node src/cli.ts report --run [--proposed=<id>] <package
+scripts>`, after merging `main` at `242ada7a`; the merge of `dict` (#555) and date and time (#532) changed no cell. The importer emits a working syntax of its own choosing for the
 remaining proposal; the report compiles and smoke-runs it through stand-ins in current TeaseScript, so "converted"
 means converted, compiled, and run, not just emitted. Each cell: root errors / lowered scripts / compiler-clean except
 pending / scripts reached by smoke runs.
@@ -322,8 +322,8 @@ prefilled `default:` for single-field inputs (#510, as #514); positional argumen
 #524); the runtime fix for a `choose` reached again with other option texts (#521, as #523); and L1 with C1–C3 (#511, as
 #515); built-in text operations (#508, as #518); switch with several values per case and type cases (#528, as #529 and
 #557); the compact `showButton "Done", timeout: 30` form (#531, as #534); `askInteger` (#539, as #548); and
-`load "key", default: value` (#541, as #545). Open: date, time, and datetime values (#532). The importer follows all of
-them in its default output. `save null` already removes the key on `main` (#484). Text utilities beyond #508, such as regular expressions, are future
+`load "key", default: value` (#541, as #545); and date, time, and datetime values (#532, as #551, #554, #556, #561, and
+#563). The importer follows all of them in its default output. `save null` already removes the key on `main` (#484). Text utilities beyond #508, such as regular expressions, are future
 work as a `.ts` system library, and localized script variants too; one language is enough for now.
 
 ## Later
@@ -334,6 +334,6 @@ work as a `.ts` system library, and localized script variants too; one language 
 
 ## Next steps
 
-- **Re-measure the corpus** as the #532, #536, and script-transfer implementations merge (their stand-ins then go
-  away).
+- **Re-measure the corpus** as script transfers, `showPopup`, `askBooleans`, `openUrl`, and the camera land (their
+  stand-ins then go away).
 - **M1** stays for later, after tagged media exists.

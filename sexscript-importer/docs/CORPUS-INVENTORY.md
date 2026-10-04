@@ -24,10 +24,11 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-04 at importer commit `a7aa8c84`, after merging `main` at `337388d2` (the type pass #526, runtime
-type checks #520, unions #530 and #535, text operations #518, `sort` #546, `min`/`max` #550, `askInteger` #548,
-`switch` #529 and #557, the `showButton` timeout #534, and `load` defaults #545), with `node src/cli.ts report --run
-<package scripts>` (default conversion, without proposals). Toy's 21 runtime-loaded modules are part of its
+Measured on 2026-10-04 at importer commit `5e9e33e8`, after merging `main` at `242ada7a` (since `337388d2`: `dict`
+#555, date and time #551, #554, #556, #561, and #563, element widening #538, and the conformance fixes #567; before
+that the type pass #526, runtime type checks #520, unions #530 and #535, text operations #518, `sort` #546,
+`min`/`max` #550, `askInteger` #548, `switch` #529 and #557, the `showButton` timeout #534, and `load` defaults
+#545), with `node src/cli.ts report --run <package scripts>` (default conversion, without proposals). Toy's 21 runtime-loaded modules are part of its
 single script `toy.groovy`, so Toy counts as one script whose statements include all module code.
 
 | Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Root errors | Placeholders |
@@ -59,9 +60,12 @@ merge replaces most stand-ins with `main`'s implementations, and its type pass n
 gets past name resolution. DisciplineClinic's three variables that changed type now get declared unions (8 to 5 root
 errors), as does Toy's list of text that later holds lists (108 to 107). Lists that start as null start empty where no
 code compares them with null (owner decision; 9 declarations), so their reads need no null tests after calls (see
-[`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md)).
+[`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md)). The merge of `main` at `242ada7a` changes no count or smoke run:
+the corpus's dicts and date and time values now compile and run with `main`'s implementations instead of stand-ins,
+and 11 compiler warnings point at legacy null tests that can never be true or false (see `COMPATIBILITY-GAPS.md`).
 
-Runtime smoke runs of the compiler-clean scripts (placeholder copies with host stand-ins):
+Runtime smoke runs of the compiler-clean scripts (placeholder copies with host stand-ins for what `main` does not
+implement yet; the wall clock starts at 2026-10-02 12:00 UTC and follows simulated time):
 
 - Distribution: all 12 runnable scripts run to the end; the English, German, and French introductions' flows each pass
   through three other scripts. The two remaining entry scripts are not converted (desktop font configuration with
@@ -91,15 +95,13 @@ use it (capabilities used by fewer than three scripts are omitted):
 | Capability | Scripts using it | Otherwise compiler-clean scripts using it |
 | --- | ---: | ---: |
 | `run`/`end` | 41 | 23 |
-| `getTimestamp().toSeconds()` (#532) | 18 | 4 |
-| `getDateTime()` (#532) | 14 | 4 |
 | `askBooleans()` | 10 | 8 |
 | `showPopup` | 10 | 4 |
-| `getDate().toISO()`, `getTime().formatTime()` (#532) | 3 each | 1 each |
 | `openUrl()` | 3 | 0 |
 
-`switch` (26 scripts), the conversions (20), the `showButton` timeout and elapsed result (14), `askInteger` (9), integer
-widening, `load "key", default:`, rounding, text operations, and `sort` were in this table before the merge and are now
+Date and time (`getTimestamp().toSeconds()` in 18 scripts, `getDateTime()` in 14, `toISO()` and `formatTime()` in 3
+each), `dict`, `switch` (26), the conversions (20), the `showButton` timeout and elapsed result (14), `askInteger` (9),
+integer widening, `load "key", default:`, rounding, text operations, and `sort` were in this table before and are now
 compiled and run with `main`'s implementations.
 
 The proposal mode's measurements are in [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md).

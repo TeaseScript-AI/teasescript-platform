@@ -361,17 +361,16 @@ Concrete points the migration surfaced in TeaseScript itself:
   becomes `(getDate() - toDate("${getDate().year}-01-01")).days + 1`, which lowers `sleep`.
 - **Compact interactions as values.** A used `showButton` result needs parentheses and a duration division,
   `(showButton "Done", timeout: 30) / 1 s`, 49 corpus sites; most compare the seconds with a number.
-- **Possible defects in `main` at `337388d2`,** found by stress-testing the merged PRs with corpus code; none of them
-  causes a corpus compile error or smoke-run failure. A `switch` case `case null, 0` does not remove null from the
-  later cases and `default`, while separate `case null` and `case 0` do (#557). `==` and `!=` with a value the other
-  side can never hold warn only for literal-valued types such as `choose` results, not for `text != null` with
-  `text: string` or `n == null` with `n: integer` (ADR 0021 rule 4.5; #535); Domme3's `chores` has such tests. A range
-  case that a `choose` result never matches, and `case 5` after `case is integer` on a value that is not typed
-  `integer`, get no warning (V30 §32; #557). A `load` default of the wrong type is a compile error only in an
-  annotated `let`, not in an assignment, a return, or an argument (V30 §25; #526). `askInteger` accepts an answer with
-  line breaks that `askNumber` rejects (ADR 0018; #548). The `union()` error for mixed element types names separate
-  lists instead of the union form (#546, #530), `toString()` of a nested list suggests `join()`, which fails for it too
-  (#518), and V30 §18 still shows the removed form `load "level" default 1`.
+- **Defects found in `main` at `337388d2` are fixed in `242ada7a`** (#567): `case null, 0` removes null from the later
+  cases (#557); `==` and `!=` with a value the other side can never hold warn (ADR 0021 rule 4.5; #535); a range case a
+  `choose` result never matches, and `case 5` after `case is integer`, warn (V30 §32; #557); a `load` default of the
+  wrong type is a compile error also in an assignment (V30 §25; #526); `askInteger` rejects an answer with line breaks
+  (ADR 0018; #548); the `union()` and nested `toString()` errors name a working fix (#546, #518); and V30 §18 shows
+  `load "level", default: 1`. In the corpus the warning for impossible null tests found the importer's own null test
+  of input questions, which it now leaves out where the question can never be null (41 sites), and 11 legacy null
+  tests that can never be true or false (8 distribution: `askBooleans` values tested for null, which TeaseScript never
+  returns, and a commented dead test; 2 Domme3; 1 DisciplineClinic); they stay as written, with the compiler's
+  warning.
 
 ## Legacy baggage
 
@@ -397,19 +396,18 @@ Emily persona; the code's default owner `ancilla` is not included.
 
 The importer emits these accepted forms although `main` does not implement them yet; the compiler gate replaces them
 with stand-ins that keep their accepted result types and counts them separately: `run`/`end`, `showPopup`,
-`askBooleans`, date and time (`getDateTime()`, `getDate()`, `getTime()`, `getTimestamp()`, `toSeconds()`, `toISO()`,
-`formatTime()`, `toDate()`, `.days`; #532), `openUrl`, `takePhoto()` (camera, #475), and `dict` with
-`get(key, default:)` (#536). `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger`
+`askBoolean`, `askBooleans`, `openUrl`, and `takePhoto()` (camera, #475). `dict` with `get(key, default:)` (#555), date
+and time (`getDateTime()`, `getDate()`, `getTime()`, `getTimestamp()`, `toSeconds()`, `toISO()`, the formats,
+`toDate()`, `.days`; #532), `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger`
 (#548), rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526),
-and `load "key", default:` (#545) are compiled and run as `main` implements them since its merge at `337388d2`.
-`run`/`end` dominates: it blocks 23 otherwise compiler-clean corpus scripts.
+and `load "key", default:` (#545) are compiled and run as `main` implements them. `run`/`end` dominates: it blocks 23
+otherwise compiler-clean corpus scripts.
 
 ## Remaining gaps by workaround class
 
-What still blocks conversion once the open tracker work lands (#532 date and time, #536 `dict`, camera #475, and the
-other accepted forms above), ranked by whether current TeaseScript can express it. Counts are root errors or blocked
-scripts in default mode after the merge of `main` at `337388d2`; the column "Before" gives the count at the `dict`
-round.
+What still blocks conversion once the open tracker work lands (camera #475 and the other accepted forms above),
+ranked by whether current TeaseScript can express it. Counts are root errors or blocked scripts in default mode after
+the merge of `main` at `242ada7a`; the column "Before" gives the count at the `dict` round.
 
 **Expressible in current TeaseScript (importer work).** The language already has a clean form.
 
