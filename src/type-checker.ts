@@ -729,14 +729,14 @@ class TypeChecker {
 
   /**
    * The place of a known property, or of a timer or media handle property, which must exist and be assignable. A text,
-   * number, list, set, or range has no property to assign.
+   * number, list, set, range, or null has no property to assign.
    */
   #propertyPlace(
     object: StaticType,
     objectExpression: Expression,
     property: Identifier,
   ): Place | undefined {
-    const value = resolved(nonNullType(object));
+    const value = resolved(nonNullTypeForUse(object));
     const name = property.name;
     const label = `${expressionLabel(objectExpression) ?? "this object"}.${name}`;
     if (value.kind === "timer" || value.kind === "media") {
@@ -749,7 +749,7 @@ class TypeChecker {
         );
       return type === undefined ? undefined : propertyPlace(type, label, `'${label}'`);
     }
-    if (["scalar", "list", "set", "range"].includes(value.kind)) {
+    if (["scalar", "list", "set", "range", "null"].includes(value.kind)) {
       this.#report(
         typeCode.invalidOperand,
         `Only objects, speakers, and timer and media handles have properties to assign, but this is ${describeValue(value)}.`,
@@ -1259,7 +1259,7 @@ class TypeChecker {
     }
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
     const method = callee.property.name;
-    const value = resolved(nonNullType(receiver));
+    const value = resolved(nonNullTypeForUse(receiver));
     if ((value.kind === "list" || value.kind === "set") && method === "add") {
       const argument = expression.arguments[0];
       if (argument !== undefined && expression.arguments.length === 1) {
@@ -1288,14 +1288,12 @@ class TypeChecker {
           return BOOLEAN_TYPE;
         // A conversion builds a new collection, so its elements decide their type apart from the original's.
         case "toSet":
-          if (value.kind === "list") this.#checkSetElement(expression, value.element);
-          return value.kind === "list"
-            ? { kind: "set", element: copyType(value.element) }
-            : UNKNOWN_TYPE;
+          if (value.kind !== "list") break;
+          this.#checkSetElement(expression, value.element);
+          return { kind: "set", element: copyType(value.element) };
         case "toList":
-          return value.kind === "set"
-            ? { kind: "list", element: copyType(value.element) }
-            : UNKNOWN_TYPE;
+          if (value.kind !== "set") break;
+          return { kind: "list", element: copyType(value.element) };
         case "removeAt":
         case "removeFirst":
         case "removeLast":
@@ -1399,7 +1397,7 @@ class TypeChecker {
     object: StaticType,
     expression: Extract<Expression, { kind: "propertyAccessExpression" }>,
   ): StaticType | PlaceRead {
-    const value = resolved(nonNullType(object));
+    const value = resolved(nonNullTypeForUse(object));
     const name = expression.property.name;
     switch (value.kind) {
       case "list":
@@ -1448,7 +1446,7 @@ class TypeChecker {
     index: StaticType,
     expression: Expression,
   ): void {
-    const value = resolved(nonNullType(object));
+    const value = resolved(nonNullTypeForUse(object));
     if (value.kind !== "unknown" && value.kind !== "open" && value.kind !== "list") {
       this.#report(
         typeCode.invalidOperand,

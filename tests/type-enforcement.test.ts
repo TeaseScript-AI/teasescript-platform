@@ -418,6 +418,20 @@ test("a set holds only text, numbers, true or false, and null, and only objects 
     ],
   ]);
   assert.deepEqual(sayTexts("let o = { value: 1 }\no.value = 2\nsay o"), ["{ value: 2 }"]);
+  // A value known to be null has no members, and a conversion goes only from a list to a set or back.
+  for (const [source, text] of [
+    ["function nothing {\n    return null\n}\nnothing().value = true", "nothing()"],
+    ["let s = set[]\ns.add(1).value = true", "s.add(1)"],
+    ["function nothing {\n    return null\n}\nsay nothing().value", "value"],
+    ["function nothing {\n    return null\n}\nnothing().clear()", "clear"],
+    ["let s = set[1]\nlet converted = s.toSet()", "toSet"],
+    ["let xs = [1]\nlet converted = xs.toList()", "toList"],
+  ] as const)
+    assert.deepEqual(codes(source), [["TSV043", text]], source);
+  assert.deepEqual(sayTexts("let xs = [1, 1, 2]\nsay xs.toSet().toList()"), ["[1, 2]"]);
+  assert.deepEqual(sayTexts("let o = null\no = { value: 1 }\no.value = 2\nsay o"), [
+    "{ value: 2 }",
+  ]);
 });
 
 test("function bodies check assignments to script variables", () => {
