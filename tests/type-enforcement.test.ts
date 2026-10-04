@@ -378,6 +378,20 @@ test("handles, speakers, and a typed load default keep their types", () => {
       '"high"',
     ],
   ]);
+  // A load assigned to an existing place checks its default as well, as if the default were assigned.
+  assert.deepEqual(mismatches('let count: integer = 0\ncount = load "count", default: "none"'), [
+    [
+      "TSV041",
+      "'count' holds a whole number (integer), so it cannot be set to text (string). To allow both, declare it as 'let count: integer | string = ...'.",
+      '"none"',
+    ],
+  ]);
+  assert.deepEqual(
+    mismatches('let tally = { n: 1 }\ntally.n = load "n", default: "x"')[0]?.[2],
+    '"x"',
+  );
+  assert.deepEqual(mismatches('let marks = [1]\nmarks[0] = load "m", default: "x"')[0]?.[2], '"x"');
+  assert.deepEqual(mismatches('let count = 0\ncount = load "count", default: 2.5'), []);
 });
 
 test("a list or set literal is checked element by element against a known element type", () => {
@@ -879,11 +893,11 @@ test("conditions and logical operands are true or false, and operators get value
     ["TSV043", "t"],
     ["TSV043", '"x"'],
   ]);
-  // Equality compares values of any kinds, and text compares with text.
-  assert.deepEqual(
-    codes('let same = 1 == "1"\nlet before = "a" < "b"\nlet longer = 2 s > 1 s'),
-    [],
-  );
+  // Equality compares values of any kinds, and text compares with text. Values of different types are never equal, so
+  // such a comparison only warns (ADR 0021 rule 4.5).
+  assert.deepEqual(codes('let same = 1 == "1"\nlet before = "a" < "b"\nlet longer = 2 s > 1 s'), [
+    ["TSV046", '1 == "1"'],
+  ]);
 });
 
 test("round, floor, and ceil give whole numbers as V30 section 13 specifies", () => {

@@ -70,6 +70,10 @@ test("askInteger asks again for anything but a whole number", () => {
     "   ",
     "1 2",
     "7\n8",
+    // Like `askNumber`, an answer is one line, even when trimming would leave a whole number.
+    "\n1\n",
+    "1\r",
+    "1\u2028",
     "9007199254740992",
     "0x10",
   ]) {

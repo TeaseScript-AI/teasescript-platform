@@ -108,7 +108,7 @@ Completion semantics are:
 
 - `askText` normalizes `CRLF` and standalone `CR` to `LF`, otherwise preserves submitted text, rejects whitespace-only input, returns `string`, and uses the same normalized text in the player transcript;
 - `askNumber` accepts one line of text, trims surrounding whitespace, parses accepted TeaseScript decimal/scientific forms, requires a finite result, canonicalizes negative zero to numeric `0`, returns `number`, and preserves the trimmed submitted text in the transcript;
-- `askInteger` is a `number` interaction whose UI carries `integer: true`: it accepts only an optional sign and digits within the safe integer range, rejects anything else with "That is wrong. I asked for a whole number.", and requires a whole-number prefill;
+- `askInteger` is a `number` interaction whose UI carries `integer: true`: it accepts one line with only an optional sign and digits within the safe integer range, rejects anything else with "That is wrong. I asked for a whole number.", and requires a whole-number prefill;
 - `choose` returns the value of the selected button: a value written before `:` (an identifier is a `string`, a
   numeric literal a number), a choice object's `value` (or its `text` when it has none), or otherwise the option
   itself with its own type, which may be text, a number, a boolean, `null`, or a duration;

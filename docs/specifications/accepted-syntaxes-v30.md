@@ -1538,7 +1538,7 @@ if file != null {
 
 Using a possibly null value where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
 error. The message names the check to write: `if n != null { ... }`, inside which `n` is an `integer`. A loaded value
-can instead get a default, as in `load "level" default 1`.
+can instead get a default, as in `load "level", default: 1`.
 
 ## 19. Choices
 **Status:** Accepted

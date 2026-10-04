@@ -62,7 +62,7 @@ import {
   type StaticScalar,
 } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
-import { impossibleCaseMessage } from "./switch-cases.js";
+import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
 import type { SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
 import {
@@ -629,6 +629,8 @@ class TypeChecker {
         const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
         const variable = entry?.kind === "variable" ? entry.variable : null;
         let remaining = subject;
+        // The type cases so far, which take a literal value of their type even when the switched type is not known.
+        const typeCases: { readonly typeTest: SwitchTypeTest; readonly test: StaticType }[] = [];
         const start = this.#flow.mark();
         const ends: FlowState[] = [];
         for (const switchCase of statement.cases) {
@@ -649,6 +651,7 @@ class TypeChecker {
             );
             remaining = switchCase.typeTest.negated ? passed : failed;
             reached = taken.kind !== "never";
+            typeCases.push({ typeTest: switchCase.typeTest, test });
           } else {
             // The block is reached when one of its values can still match what the cases above left.
             let matchable = false;
@@ -658,6 +661,19 @@ class TypeChecker {
               // A value whose type can never match is an error, and it does not reach the block either.
               if (message !== undefined) {
                 this.#report(typeCode.impossibleCase, message, value.span);
+                continue;
+              }
+              const earlier = takingTypeCase(typeCases, value, valueType);
+              if (earlier !== undefined) {
+                const { typeTest, test } = earlier;
+                this.diagnostics.push(
+                  createDiagnostic(
+                    DiagnosticSeverity.Warning,
+                    typeCode.constantTest,
+                    `'case is ${typeTest.negated ? "not " : ""}${typeName(test)}' on line ${typeTest.span.start.line + 1} already takes ${caseValueText(value) ?? "this value"}, so this case never matches.`,
+                    value.span,
+                  ),
+                );
                 continue;
               }
               const never = this.#neverMatchingCaseValue(
@@ -677,12 +693,15 @@ class TypeChecker {
                   ),
                 );
             }
-            // A value case keeps what the cases above left, and `case null` narrows like `x == null`.
+            // A value case keeps what the cases above left. `null` narrows like `x == null`: `case null` knows `null`, and
+            // a case that lists `null`, as in `case null, 0`, takes it from every later case.
             reached = matchable;
-            if (switchCase.values.every((value) => unwrap(value).kind === "nullLiteral")) {
-              taken = narrowTo(remaining, NULL_TYPE);
-              remaining = excludeType(remaining, NULL_TYPE);
-            } else taken = remaining;
+            const nulls = switchCase.values.filter((value) => unwrap(value).kind === "nullLiteral");
+            taken =
+              nulls.length === switchCase.values.length
+                ? narrowTo(remaining, NULL_TYPE)
+                : remaining;
+            if (nulls.length > 0) remaining = excludeType(remaining, NULL_TYPE);
           }
           this.#flow.restore(start);
           if (variable !== null && taken !== null && reached)
@@ -861,14 +880,14 @@ class TypeChecker {
         verb: "start as",
         fix: (rejected, expression) => typeFix(name, type, rejected, expression),
       };
-      // A typed load's default must fit the variable as well; the loaded value itself is checked at runtime.
-      if (initializer.kind === "loadExpression" && initializer.defaultValue !== null) {
-        yield* compileChild(
-          this.#storeTask(place, initializer.defaultValue, this.#typeOf(initializer.defaultValue)),
-        );
-      } else {
-        yield* compileChild(this.#storeTask(place, statement.initializer, value));
-      }
+      const checked = checkedValue(statement.initializer);
+      yield* compileChild(
+        this.#storeTask(
+          place,
+          checked,
+          checked === statement.initializer ? value : this.#typeOf(checked),
+        ),
+      );
       this.#recordRuntimeCheck(statement, type, `'${name}'`, value);
     }
     const variable: Variable = {
@@ -948,8 +967,15 @@ class TypeChecker {
         if (statement.operator === "=") {
           const value = yield* compileChild(this.#expressionTask(statement.value, scope));
           const receiver = this.#elementReceiver(target.object, scope, object, value);
+          const checked = checkedValue(statement.value);
           yield* compileChild(
-            this.#storeElementTask(receiver, target.object, statement.value, value, scope),
+            this.#storeElementTask(
+              receiver,
+              target.object,
+              checked,
+              checked === statement.value ? value : this.#typeOf(checked),
+              scope,
+            ),
           );
           this.#recordRuntimeCheck(
             statement,
@@ -1041,7 +1067,14 @@ class TypeChecker {
     // For `+=` and `-=`, the runtime checks the computed result, which is unknown when the operand is.
     this.#recordRuntimeCheck(statement, place.type, runtimePlace(target), value);
     if (statement.operator === "=") {
-      yield* compileChild(this.#storeTask(place, statement.value, value));
+      const checked = checkedValue(statement.value);
+      yield* compileChild(
+        this.#storeTask(
+          place,
+          checked,
+          checked === statement.value ? value : this.#typeOf(checked),
+        ),
+      );
       // A variable of unknown type may take the value's own type, so it gets a copy of a place it was read from.
       if (variable !== undefined) this.#assigned(variable, this.#capture(statement.value));
       return;
@@ -2224,8 +2257,9 @@ class TypeChecker {
   }
 
   /**
-   * Warns about `==` or `!=` with a value that one side can never hold, such as a `choose` result compared with a value
-   * no button returns (#511 C5); {@link #neverMatchingCaseValue} applies it to a literal `case` value.
+   * Warns about `==` or `!=` with a value that one side can never hold (ADR 0021 rule 4.5): a `choose` result compared
+   * with a value no button returns (#511 C5), or values of types that are never equal, such as text and a number, or a
+   * value that is never `null` compared with `null`. {@link #neverMatchingCaseValue} applies it to a literal `case`.
    */
   #warnImpossibleComparison(
     expression: Extract<Expression, { kind: "binaryExpression" }>,
@@ -2251,6 +2285,18 @@ class TypeChecker {
       );
       return;
     }
+    if (mayCompareEqual(left, right)) return;
+    const describesLeft =
+      expressionLabel(expression.left) !== null || expressionLabel(expression.right) === null;
+    const label = expressionLabel(describesLeft ? expression.left : expression.right);
+    this.diagnostics.push(
+      createDiagnostic(
+        DiagnosticSeverity.Warning,
+        typeCode.constantTest,
+        `${label === null ? "This value" : `'${label}'`} holds ${describeValue(describesLeft ? left : right)}, never ${describeValue(describesLeft ? right : left)}, so this comparison is always ${expression.operator === "==" ? "false" : "true"}.`,
+        expression.span,
+      ),
+    );
   }
 
   /**
@@ -2276,9 +2322,21 @@ class TypeChecker {
     )
       return `${holder} holds ${describeValue(subject)} here, after the cases above, so this case never matches.`;
     const possible = possibleValues(subject);
+    if (possible === undefined) return undefined;
+    // A range matches a number within its bounds, so no button value may fall in it.
+    const range = literalRange(value);
+    if (range !== undefined) {
+      const within = ({ value, duration }: PossibleValue) =>
+        typeof value === "number" &&
+        !duration &&
+        value >= range.start &&
+        (range.inclusive ? value <= range.end : value < range.end);
+      return possible.some(within)
+        ? undefined
+        : `${holder} is always ${describeLiterals(possible)} here, so this case never matches.`;
+    }
     const literal = comparedLiteral(value);
-    if (possible === undefined || literal === undefined || mayEqualAny(subject, literal))
-      return undefined;
+    if (literal === undefined || mayEqualAny(subject, literal)) return undefined;
     return `${holder} is always ${describeLiterals(possible)} here, so this case never matches.`;
   }
 
@@ -2865,12 +2923,23 @@ class TypeChecker {
       return { kind: receiver.kind, element: UNKNOWN_TYPE };
     const element = joinTypes([own, ...others]);
     if (element === undefined) {
-      if (reportMix)
+      if (reportMix) {
+        // As for a mixed literal, the fix declares the receiver with a union element type.
+        const callee = unwrap(expression.callee);
+        const target = callee.kind === "propertyAccessExpression" ? unwrap(callee.object) : null;
+        const name = target?.kind === "identifier" ? target.name : "values";
+        const written = typeName({ kind: receiver.kind, element: union([own, other]) });
+        const property = misfitProperty(own, other);
+        const fix =
+          property !== undefined
+            ? `give '${property.name}' one type in every element`
+            : `to keep both, declare a union type, as in 'let ${name}: ${written} = ...'`;
         this.#report(
           typeCode.mixedTypes,
-          `union() would mix ${mixDescription(own, other)}. A ${receiver.kind} holds one type; keep values of different types in separate ${receiver.kind}s.`,
+          `union() would mix ${mixDescription(own, other)}. A ${receiver.kind} holds one type; ${fix}.`,
           expression.span,
         );
+      }
       return { kind: receiver.kind, element: UNKNOWN_TYPE };
     }
     return { kind: receiver.kind, element };
@@ -4418,6 +4487,14 @@ function isPureBuiltinCall(expression: CallExpression): boolean {
 
 // Places -------------------------------------------------------------------------------------------------------------
 
+/** What a store checks at compile time: for a load, its default; the loaded value itself is checked at runtime. */
+function checkedValue(expression: Expression): Expression {
+  const value = unwrap(expression);
+  return value.kind === "loadExpression" && value.defaultValue !== null
+    ? value.defaultValue
+    : expression;
+}
+
 function variablePlace(variable: Variable): Place {
   const name = variable.name;
   const type = variable.type;
@@ -4952,6 +5029,29 @@ function literalValue(expression: Expression): ScalarValue | null | undefined {
 }
 
 /** The value a compared expression certainly is, such as `"Open"` or `1 s`, or `undefined`. */
+
+/**
+ * Whether values of two types may be equal with `==` (structural equality, #509): numbers of either kind may be, two
+ * lists, sets, or objects may both be empty, and a type the compiler cannot know may hold anything.
+ */
+function mayCompareEqual(left: StaticType, right: StaticType): boolean {
+  // Only the kinds of values matter, so a list whose element type is not decided yet is still a list.
+  const uncertain = (type: StaticType) =>
+    !isKnown(type) || members(type).some((part) => !isKnown(part));
+  if (uncertain(left) || uncertain(right)) return true;
+  return members(left)
+    .map(resolved)
+    .some((a) =>
+      members(right)
+        .map(resolved)
+        .some((b) =>
+          a.kind === "scalar" && b.kind === "scalar"
+            ? a.name === b.name || (isNumeric(a) && isNumeric(b))
+            : a.kind === b.kind,
+        ),
+    );
+}
+
 function comparedLiteral(expression: Expression): readonly PossibleValue[] | undefined {
   const known = staticChoiceValue(expression);
   if (known === undefined) return undefined;
@@ -4963,6 +5063,29 @@ function comparedLiteral(expression: Expression): readonly PossibleValue[] | und
       ? { value: value.milliseconds, duration: true }
       : { value, duration: false },
   ];
+}
+
+/** The earlier `case is T` or `case is not T` that already takes a literal case value, if any. */
+function takingTypeCase<
+  Case extends { readonly typeTest: SwitchTypeTest; readonly test: StaticType },
+>(typeCases: readonly Case[], value: Expression, valueType: StaticType): Case | undefined {
+  if (caseValueText(value) === undefined) return undefined;
+  // Every duration literal is a duration, also a calendar one such as `1 d` that is not compared as one exact length.
+  const duration = isScalar(valueType, "duration");
+  const literal = duration ? undefined : comparedLiteral(value)?.[0];
+  if (!duration && literal === undefined) return undefined;
+  const scalar = literal?.value;
+  // Like the runtime type test: a whole number such as `5.0` is an integer.
+  const passes = (member: StaticType): boolean =>
+    member.kind === "null"
+      ? scalar === null
+      : member.kind === "scalar" &&
+        (duration
+          ? member.name === "duration"
+          : typeof scalar === "number"
+            ? member.name === "number" || (member.name === "integer" && Number.isInteger(scalar))
+            : member.name === typeof scalar);
+  return typeCases.find(({ typeTest, test }) => members(test).some(passes) !== typeTest.negated);
 }
 
 /** Literal values as an author writes them, as in `"spank" or "lines"`. */

@@ -54,11 +54,13 @@ test("duration literals accept short and long elapsed units and convert exactly"
 test("duration arithmetic and cross-unit comparisons follow V30 section 35", () => {
   assert.deepEqual(
     sayTexts(
-      [
-        'say "${90 seconds > 1 minute} ${90 s == 1.5 min} ${60 min == 1 h} ${59 s >= 1 min}"',
-        'say "${1 min + 30 s} ${1 min - 90 s} ${2 * 30 s} ${30 s * 3} ${1 h / 4}"',
-        'say "${1 h / 30 min} ${[5 s].random} ${10 s != 10} ${10 s == 10000}"',
-      ].join("\n"),
+      // A known duration and a known number are never equal, which the compiler warns about (ADR 0021 rule 4.5).
+      DYNAMIC +
+        [
+          'say "${90 seconds > 1 minute} ${90 s == 1.5 min} ${60 min == 1 h} ${59 s >= 1 min}"',
+          'say "${1 min + 30 s} ${1 min - 90 s} ${2 * 30 s} ${30 s * 3} ${1 h / 4}"',
+          'say "${1 h / 30 min} ${[5 s].random} ${10 s != dynamic(10)} ${10 s == dynamic(10000)}"',
+        ].join("\n"),
     ),
     ["true true true false", "1 min 30 s -30 s 1 min 1 min 30 s 15 min", "2 5 s true false"],
   );

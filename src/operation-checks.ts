@@ -360,6 +360,14 @@ function candidateConversionProblem(
   const text = isScalar(type, "string") ? staticVisibleText(value) : undefined;
   if (result === "string") {
     if (type.kind === "scalar" || type.kind === "null") return undefined;
+    // `.join()` combines only values that are shown as text, so a list of lists or objects needs another fix.
+    if (type.kind === "list" || type.kind === "dict") {
+      const unjoinable = members(type.element)
+        .map(resolved)
+        .find((member) => isKnown(member) && member.kind !== "scalar" && member.kind !== "null");
+      if (unjoinable !== undefined)
+        return `toString(...) cannot convert ${describeValue(type)}, and ${type.kind === "list" ? ".join() cannot combine its elements" : ".values.join() cannot combine its values"}, which hold ${describeValue(unjoinable)}. Show the whole ${type.kind} with say, or select a value inside it that toString(...) converts.`;
+    }
     return type.kind === "list" || type.kind === "set"
       ? `toString(...) cannot convert ${describeValue(type)}; use ${type.kind === "set" ? ".toList().join()" : ".join()"} to combine its elements as text.`
       : type.kind === "dict"
