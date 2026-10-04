@@ -24,11 +24,13 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-04 at importer commit `5e9e33e8`, after merging `main` at `242ada7a` (since `337388d2`: `dict`
+Measured on 2026-10-04 at importer commit `df3cd3be`, after merging `main` at `2ea87216` (since `337388d2`: `dict`
 #555, date and time #551, #554, #556, #561, and #563, element widening #538, and the conformance fixes #567; before
 that the type pass #526, runtime type checks #520, unions #530 and #535, text operations #518, `sort` #546,
 `min`/`max` #550, `askInteger` #548, `switch` #529 and #557, the `showButton` timeout #534, and `load` defaults
-#545), with `node src/cli.ts report --run <package scripts>` (default conversion, without proposals). Toy's 21 runtime-loaded modules are part of its
+#545; ADR 0022 on multi-file scripts, #571), with `node src/cli.ts report --run <package scripts>` (default conversion,
+without proposals). Script chains follow ADR 0022: each package starts at `main.tease`, and scripts transfer with `goto`
+and end with `exit`. Toy's 21 runtime-loaded modules are part of its
 single script `toy.groovy`, so Toy counts as one script whose statements include all module code.
 
 | Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Root errors | Placeholders |
@@ -67,9 +69,10 @@ and 11 compiler warnings point at legacy null tests that can never be true or fa
 Runtime smoke runs of the compiler-clean scripts (placeholder copies with host stand-ins for what `main` does not
 implement yet; the wall clock starts at 2026-10-02 12:00 UTC and follows simulated time):
 
-- Distribution: all 12 runnable scripts run to the end; the English, German, and French introductions' flows each pass
-  through three other scripts. The two remaining entry scripts are not converted (desktop font configuration with
-  `try`/`catch`, and the adversarial `test.groovy`).
+- Distribution: all 12 runnable scripts run to the end. The flow starts at the generated `main.tease` menu, whose first
+  option, the English introduction, passes through three other scripts; the German and French introductions do the
+  same in isolated runs. The two remaining scripts are not converted (desktop font configuration with `try`/`catch`,
+  and the adversarial `test.groovy`).
 - Domme3: the entry flow stops at the unconverted `introfirst`, which counts installed image packs by listing
   directories. Isolated runs: `implements` and `inform` run to the end, `permission` reaches the step limit in a
   line-writing loop (the typed text must match the shown line), `explain` returns to the entry flow, and seven scripts
@@ -88,13 +91,13 @@ Smoke runs found two importer defects before they reached a snapshot: `getRandom
 and range switch cases tested as lists. A third-round run into DisciplineClinic's main script found a write by
 position into a list that starts empty, which Groovy grew (see `SX_LIST_GROWTH` in `COMPATIBILITY-GAPS.md`).
 
-Two scripts compile as generated (a distribution example and DisciplineClinic's `Exit`); script chaining is the main
-remaining gap. Scripts using each accepted-but-unimplemented capability, and how many otherwise compiler-clean scripts
+Three scripts compile as generated (two distribution examples and DisciplineClinic's `Exit`); file transfers are the
+main remaining gap. Scripts using each accepted-but-unimplemented capability, and how many otherwise compiler-clean scripts
 use it (capabilities used by fewer than three scripts are omitted):
 
 | Capability | Scripts using it | Otherwise compiler-clean scripts using it |
 | --- | ---: | ---: |
-| `run`/`end` | 41 | 23 |
+| `goto` to a file (#570) | 39 | 22 |
 | `askBooleans()` | 10 | 8 |
 | `showPopup` | 10 | 4 |
 | `openUrl()` | 3 | 0 |

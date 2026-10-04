@@ -186,7 +186,7 @@ Legacy semantics below are verified against the API contract (`ss/IScript.java`)
 | `playBackgroundSound(f[, n])` | `playAudio async f` / with `repeat: n times` | Legacy plays `n` passes total and overlaps; `null` stops all sounds (no TeaseScript equivalent). |
 | `useUrl(u)` | `openUrl(u)` | Accepted, not implemented yet. |
 | `setInfos(...)` | header comment | No accepted manifest format yet. |
-| returned script name / `return null` | `run "x.tease"` / `end` | A final `return null` is dropped; chaining is not a function call. |
+| returned script name / `return null` | `goto "x.tease"` / `exit` | ADR 0022: paths from the package root, the entry is `main.tease`, a computed name becomes `goto script(name)`, a missing script `exit`; every file ends with a transfer or `exit`. Chaining is not a function call, so no `call`. |
 | `exit()`, `System.exit(n)` | `exit` | Ends the session; the Player stays open. |
 
 ## Parser recommendation

@@ -25,7 +25,7 @@ Importer progress is measured at package level rather than by requiring every ge
 3. **Dependency-closed** — every generated function call resolves to generated package code or a known accepted
    TeaseScript/Standard-Library capability. This includes transitive helper dependencies.
 4. **Compiler-clean** — the generated script passes the real compiler. The report also compiles a copy in which
-   accepted-but-unimplemented TeaseScript (`run`/`end`, `showPopup`, ...) is replaced by placeholder host calls that
+   accepted-but-unimplemented TeaseScript (file transfers, `showPopup`, ...) is replaced by placeholder host calls that
    keep the accepted result types; a file that is clean only in that copy is blocked by TeaseScript implementation
    work, not by importer output.
 5. **Runnable/verified** — relevant execution paths have actually run without unresolved runtime behavior. The
@@ -81,6 +81,10 @@ implemented):
 | `int x = 7 / 2`, `int x = f()`, and later values stored in `x` | `let x = toInteger(7 / 2)`, `let x = toInteger(f())` (Groovy stores 3); `int x = loadInteger(k)` becomes `let x: integer = load k`, and another storage read `toInteger(load k)` |
 | `new Boolean[n]`, `x in list`, boolean `&`/`|` | a generated list helper, `list.contains(x)`, `and`/`or` with a side-effect-free right side |
 | `System.exit(0)` | `exit` (the Player stays open) |
+| a script-level `return "name"`, the next script of the legacy chain | `goto "path.tease"`, with the path from the package root (ADR 0022); a name the package has no script for ended the legacy chain quietly, so it becomes `exit` with a note (`SX_MISSING_SCRIPT`, 8 sites) |
+| `return name` with a computed name | `goto script(name)` (#570), after `exit` when the name is null or empty (`SX_DYNAMIC_SCRIPT`, DisciplineClinic's `returnPoint`) |
+| `return null`, `return`, or the end of a script | `exit`: every file ends with a transfer or `exit` (ADR 0022 §4); parameters and return points passed through storage stay `save` and `load` |
+| the scripts the legacy player listed | one entry, `main.tease`: the only script in the package root (Domme3, DisciplineClinic, Toy), or a generated menu that goes to each script no other script chains to (the distribution, `SX_ENTRY_MENU`) |
 | `int t = showPopup(m)` (seconds until closed) | `getTimestamp().toSeconds()` before and after `showPopup m`, in whole seconds |
 | `showButton(text, s)` used as a value (seconds until the click) | `(showButton text, timeout: s) / 1 s` (#531) |
 | `showButton(text, 0)` (the button stayed for its 10 ms safety margin; the result was 0) | `showButton text, timeout: 10 ms`, with a note, also for a timeout known before the run (`def t = 0`, `1 - 1`); a used result is `0` |
@@ -372,6 +376,25 @@ Concrete points the migration surfaced in TeaseScript itself:
   returns, and a commented dead test; 2 Domme3; 1 DisciplineClinic); they stay as written, with the compiler's
   warning.
 
+## Multi-file scripts (#570)
+
+Converting the corpus's script chains to ADR 0022 surfaced:
+
+- **Shared helpers multiply.** Functions are local to their file (ADR 0022 §3), so every script that uses a helper
+  needs its own copy: Domme3's 19 shared helpers are copied 165 times, 146 of them redundant (`sexscriptLegacyRandom`
+  23 times, `percentChance` and `getImagePath` 22, `image` 18, `punish` 17). Several of them present things (`image`
+  shows a picture, `punish` and `popup` talk and wait), so a synchronous `.ts` library cannot hold them.
+- **Localized variants are chosen by language.** The legacy player looked for `name_<language>_<country>` and
+  `name_<language>` before `name`. ADR 0022 selects no file by language, so the converted chains follow the English
+  scripts, the distribution's 4 localized targets (`mensclothes_de`, `toys_de`, `toys_fr`, `womensclothes_de`) are not
+  reached, and its menu offers the localized introductions as scripts of their own.
+- **References outside the package.** 8 script names point outside their package or nowhere: Domme3 chains to the
+  distribution's `fontconfiguration` and to `system/config` and `system/restart` of the legacy player, DisciplineClinic
+  to its `DCAfterDark` add-on, and four names are typos or missing files (`Domme`, `null`, `Domme3/masturbate`,
+  `Domme3/training`). The legacy player ended the chain quietly when it found no file; a path cannot leave the package
+  (ADR 0022 §1), so these become `exit` with a note.
+- **Explicit endings** need an `exit` at the end of every converted script, since the legacy chain ended there.
+
 ## Legacy baggage
 
 Reported for manual work and intentionally not reproduced: reflection and `GroovyClassLoader` outside resolved
@@ -395,13 +418,14 @@ Emily persona; the code's default owner `ancilla` is not included.
 ## Accepted but not implemented
 
 The importer emits these accepted forms although `main` does not implement them yet; the compiler gate replaces them
-with stand-ins that keep their accepted result types and counts them separately: `run`/`end`, `showPopup`,
+with stand-ins that keep their accepted result types and counts them separately: `goto` to a file and `goto script(...)`
+(ADR 0022, #570), `showPopup`,
 `askBoolean`, `askBooleans`, `openUrl`, and `takePhoto()` (camera, #475). `dict` with `get(key, default:)` (#555), date
 and time (`getDateTime()`, `getDate()`, `getTime()`, `getTimestamp()`, `toSeconds()`, `toISO()`, the formats,
 `toDate()`, `.days`; #532), `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger`
 (#548), rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526),
-and `load "key", default:` (#545) are compiled and run as `main` implements them. `run`/`end` dominates: it blocks 23
-otherwise compiler-clean corpus scripts.
+and `load "key", default:` (#545) are compiled and run as `main` implements them. File transfers dominate: they block
+22 otherwise compiler-clean corpus scripts.
 
 ## Remaining gaps by workaround class
 
@@ -440,7 +464,7 @@ accepted implementation is still wanted. Each workaround the importer emits carr
 
 | Gap | Corpus | Why |
 | --- | --- | --- |
-| Script transfers `run`/`call`/`goto`/`end` (syntax under re-evaluation in the tracker) | blocks 23 scripts (distribution 9, Domme3 12, DisciplineClinic 2) | A package is several scripts that transfer to each other. Imitating that means merging every script into one file with a dispatcher loop, with every function passing a pending transfer up to it: a rewrite of the whole package. Only `call` alone maps to a function call within one file. |
+| File transfers `goto "file"` and `goto script(...)` (ADR 0022) | blocks 22 scripts (distribution 8, Domme3 12, DisciplineClinic 2) | Accepted and emitted; they wait for #570 parts 4, 5, and 7. Imitating them in one file would merge the whole package into a dispatcher loop. The 23rd script before, a distribution example, only ended its chain, which `exit` now does. |
 | Desktop and Java APIs: `java.time` formatting and zones (5), files (4), `java.util.Random` (4), JSON and Base64 (2), `Eval.me`, `java.util.function.Function`, `System.getProperty`, OS processes (1 each), Java objects, the Cornertime exchange | Toy 19 of its 53 dynamic calls and 8 constructors, distribution | Outside the product boundary by design (see Legacy baggage). `Random.nextInt(n)` alone could become `randomInteger()`, without the seed. |
 | Legacy bugs (variables nothing assigns, helpers without the script host) | Domme3 3 and 7, DisciplineClinic 1 | Need an author's repair; reporting them is correct. Six more sit in functions nothing calls and are notes now. |
 

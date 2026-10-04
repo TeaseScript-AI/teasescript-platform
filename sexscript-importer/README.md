@@ -45,14 +45,16 @@ node src/cli.ts report [--compile | --run] /path/to/legacy/scripts > report.json
 node src/cli.ts inventory /path/to/legacy/scripts > inventory.json
 ```
 
-`convert-package` writes text `.tease` files only; it never copies legacy media, JARs, or archives. Package-local
+`convert-package` writes text `.tease` files only; it never copies legacy media, JARs, or archives. The package starts
+at `main.tease` (ADR 0022): the only script in the package root becomes it, and a root with several scripts gets a
+generated menu over them. Package-local
 auxiliary Groovy classes (such as `Domme3Class`) are migration input: their transitively used methods are embedded as
 ordinary TeaseScript functions so the result depends on neither Groovy nor the old runtime. `report` and `inventory`
 accept `.groovy` files, directories, or parser JSON; inputs of one invocation form one package.
 
-`report --run` also smoke-runs the compiler-clean output in the real runtime: from each script in the package's top
-directory, following script transfers with shared storage, then each runnable script no run reached in isolation (with
-empty storage, so a failure there can come from missing setup). Answers are deterministic: buttons are pressed, each
+`report --run` also smoke-runs the compiler-clean output in the real runtime: from the package's `main.tease`,
+following file transfers with shared storage, then each runnable script no run reached in isolation (with empty
+storage, so a failure there can come from missing setup). Answers are deterministic: buttons are pressed, each
 visit of a choice takes the next option, text and number inputs cycle through fixed values, and time and media advance
 in simulation; the wall clock starts at 2026-10-02 12:00 UTC and follows that time. Pending capabilities use host
 stand-ins with the same answer rotation. A run proves one

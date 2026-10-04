@@ -40,8 +40,9 @@ several types. Only M1 remains a proposal (`--proposed`).
 
 ## Corpus evaluation
 
-Measured on 2026-10-04 at importer commit `5e9e33e8` with `node src/cli.ts report --run [--proposed=<id>] <package
-scripts>`, after merging `main` at `242ada7a`; the merge of `dict` (#555) and date and time (#532) changed no cell. The importer emits a working syntax of its own choosing for the
+Measured on 2026-10-04 at importer commit `df3cd3be` with `node src/cli.ts report --run [--proposed=<id>] <package
+scripts>`, after merging `main` at `2ea87216`; the merge of `dict` (#555) and date and time (#532), and script chains
+converted to ADR 0022's `goto` and `exit`, changed no cell. The importer emits a working syntax of its own choosing for the
 remaining proposal; the report compiles and smoke-runs it through stand-ins in current TeaseScript, so "converted"
 means converted, compiled, and run, not just emitted. Each cell: root errors / lowered scripts / compiler-clean except
 pending / scripts reached by smoke runs.
@@ -334,6 +335,6 @@ work as a `.ts` system library, and localized script variants too; one language 
 
 ## Next steps
 
-- **Re-measure the corpus** as script transfers, `showPopup`, `askBooleans`, `openUrl`, and the camera land (their
+- **Re-measure the corpus** as file transfers (#570), `showPopup`, `askBooleans`, `openUrl`, and the camera land (their
   stand-ins then go away).
 - **M1** stays for later, after tagged media exists.
