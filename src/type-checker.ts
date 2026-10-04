@@ -59,6 +59,7 @@ import {
   containsType,
   copyType,
   coversType,
+  DATETIME_TYPE,
   decidedType,
   describeValue,
   DURATION_TYPE,
@@ -90,6 +91,7 @@ import {
   resolved,
   settle,
   STRING_TYPE,
+  TIMESTAMP_TYPE,
   typeFromAnnotation,
   typeName,
   union,
@@ -2541,6 +2543,15 @@ class TypeChecker {
         this.#keepFirstDiagnostics(before);
         return memberResults.length === 1 ? memberResults[0]! : union(memberResults);
       }
+      // The methods of date and time values take no arguments; a format follows the player's settings.
+      if (all.every(isTemporal) && expression.arguments.length > 0)
+        this.#report(
+          typeCode.argumentCount,
+          method.startsWith("format")
+            ? `${method}() takes no arguments: it shows the value in the player's own date and time format.`
+            : `${method}() takes no arguments.`,
+          callee.property.span,
+        );
       return all.length === 1 ? results[0]! : union(results.map((result) => result!));
     }
     const failing = resolved(all.find((_, index) => results[index] === undefined)!);
@@ -2849,7 +2860,12 @@ class TypeChecker {
         ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'; use length, first, last, or random.`
         : value.kind === "timer" || value.kind === "media"
           ? handleMemberMessage(value.kind, name, "read")
-          : `${capitalize(describeValue(value))} has no property '${name}'.`,
+          : `${capitalize(describeValue(value))} has no property '${name}'.${
+              // A timestamp has no local fields until it is converted through the player's zone.
+              isScalar(value, "timestamp") && temporalFieldType("datetime", name) !== undefined
+                ? ` Convert it first, as in '${expressionLabel(expression.object) ?? "value"}.toDateTime().${name}'.`
+                : ""
+            }`,
       expression.property.span,
     );
     return UNKNOWN_TYPE;
@@ -4298,7 +4314,8 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
     case "media":
       return handlePropertyType(value.kind, name, "read");
     case "scalar":
-      return isScalar(value, "string") && name === "length" ? INTEGER_TYPE : undefined;
+      if (isScalar(value, "string")) return name === "length" ? INTEGER_TYPE : undefined;
+      return temporalFieldType(value.name, name);
     case "range":
     case "null":
       return undefined;
@@ -4319,6 +4336,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     const member = TEXT_MEMBERS.get(method);
     return member?.parameters ? textResultType(member) : undefined;
   }
+  if (value.kind === "scalar") return temporalMethodType(value.name, method);
   if (value.kind !== "list" && value.kind !== "set") return undefined;
   switch (method) {
     case "join":
@@ -4348,6 +4366,72 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     case "removeLast":
       // The removed element leaves the list, so its type is a copy for the place that keeps it.
       return value.kind === "list" ? copyType(value.element) : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/** The weekday names a date's `weekday` field is, from Monday (V30 §35). */
+const WEEKDAY_TYPE = withValues(STRING_TYPE, [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+]);
+
+/** A date's ISO `weekdayNumber`: Monday is 1 and Sunday is 7. */
+const WEEKDAY_NUMBER_TYPE = withValues(INTEGER_TYPE, [1, 2, 3, 4, 5, 6, 7]);
+
+const TEMPORAL_KINDS: ReadonlySet<ScalarTypeName> = new Set([
+  "date",
+  "time",
+  "datetime",
+  "timestamp",
+]);
+
+/** Whether a value of this type is a date, time, date and time, or timestamp. */
+function isTemporal(type: StaticType): boolean {
+  const value = resolved(type);
+  return value.kind === "scalar" && TEMPORAL_KINDS.has(value.name);
+}
+
+/** The type of a read-only field of a date or time value (V30 §35); a timestamp has none. */
+function temporalFieldType(kind: ScalarTypeName, name: string): StaticType | undefined {
+  if (kind === "date" || kind === "datetime") {
+    if (name === "year" || name === "month" || name === "day") return INTEGER_TYPE;
+    if (name === "weekday") return WEEKDAY_TYPE;
+    if (name === "weekdayNumber") return WEEKDAY_NUMBER_TYPE;
+  }
+  if (
+    (kind === "time" || kind === "datetime") &&
+    ["hour", "minute", "second", "millisecond"].includes(name)
+  )
+    return INTEGER_TYPE;
+  return undefined;
+}
+
+/** The result of a method of a date or time value, or `undefined` when it has none (V30 §35). */
+function temporalMethodType(kind: ScalarTypeName, method: string): StaticType | undefined {
+  if (!TEMPORAL_KINDS.has(kind)) return undefined;
+  switch (method) {
+    case "toISO":
+      return STRING_TYPE;
+    case "formatDate":
+      return kind === "time" ? undefined : STRING_TYPE;
+    case "formatTime":
+      return kind === "date" ? undefined : STRING_TYPE;
+    case "formatDateTime":
+      return kind === "datetime" || kind === "timestamp" ? STRING_TYPE : undefined;
+    case "toTimestamp":
+      return kind === "datetime" ? TIMESTAMP_TYPE : undefined;
+    case "toDateTime":
+      return kind === "timestamp" ? DATETIME_TYPE : undefined;
+    case "toSeconds":
+    case "toMilliseconds":
+      return kind === "timestamp" ? INTEGER_TYPE : undefined;
     default:
       return undefined;
   }
@@ -4384,6 +4468,10 @@ function assignableProperty(
   if (member.kind === "speaker" || member.kind === "unknown" || member.kind === "open")
     return { type: null };
   if (member.kind === "object" && member.properties === null) return { type: null };
+  if (member.kind === "scalar" && temporalFieldType(member.name, name) !== undefined)
+    return {
+      problem: `Property '${name}' of ${describeValue(member)} cannot be assigned; date and time values do not change.`,
+    };
   // A problem with the receiver itself points at the receiver.
   if (["scalar", "list", "set", "range", "null"].includes(member.kind))
     return {
