@@ -30,6 +30,7 @@ const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
   "call",
   "end",
   "exit",
+  "fallback",
   "global",
   "save",
   "load",

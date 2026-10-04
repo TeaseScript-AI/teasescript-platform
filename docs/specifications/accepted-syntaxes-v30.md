@@ -942,12 +942,13 @@ global answer: string? = null
 
 Rules:
 
-- A global is declared at the top level of any file, at any position, not inside `if`, loops, functions, or handlers.
+- A global may be declared anywhere in any file, including inside `if`, loops, and functions.
 - It is visible in all files. Its name is unique in the project, and no other name may shadow it.
-- Globals are initialized once at session start, before the story runs: `main.tease` first, then the other files in
-  path order, each in source order. Reaching the declaration later does nothing.
+- Declarations are collected at compile time. Globals are initialized once at session start, before the story runs,
+  whether or not the surrounding block ever runs: `main.tease` first, then the other files in path order, each in
+  source order. Reaching the declaration later does nothing.
 - An initializer may use literals, earlier globals, side-effect-free operators, and `load … , default:`. It may not use
-  interactions, calls, or random numbers, or read a global initialized after it.
+  local values, interactions, calls, or random numbers, or read a global initialized after it.
 - Types follow the `let` rules above, across all files. Values are checkpointed and live for the session; `save` and
   `load` keep a value beyond it.
 
@@ -2880,15 +2881,26 @@ Finish the session:
 exit
 ```
 
+Set the destination for an `end` without a caller, with the same targets as `goto` ([§29](#29-script-files-and-paths)):
+
+```text
+fallback "menu.tease"
+fallback "menu.tease" start
+if chapter > 3 { fallback script("chapters/${chapter}.tease", label: "recap") }
+```
+
 Behavior:
 
-- `exit` is the only normal way to finish the session. It works anywhere, including in a called file or a function, and
-  never returns.
+- `exit` is the only normal way to finish the session, and it is always required, in `main.tease` too. It works
+  anywhere, including in a called file or a function, and never returns. A project with no reachable `exit` does not
+  compile.
 - `end` ends the current file, also from inside a function or block, and returns to the file that `call`ed it.
-- Reaching `end` with no caller is an error, unless the author declared a fallback destination; execution then
-  continues there. The fallback is never implicit, and its syntax is not yet decided.
-- A reachable end of a file without `end`, `exit`, or a transfer is a compile error. Branches that all end or transfer
-  need nothing after them:
+- Reaching `end` with no caller continues at the fallback destination when one is set, and is an error otherwise. The
+  fallback is never implicit.
+- `fallback` may run any number of times, anywhere, including inside `if`; the latest one executed wins. It is session
+  state and is checkpointed. Whether a fallback can be cleared again is not yet decided.
+- A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. Branches that all
+  end or transfer need nothing after them:
 
 ```text
 if passed {
@@ -4009,6 +4021,7 @@ goto
 call
 end
 exit
+fallback
 global
 save
 load
@@ -4308,5 +4321,5 @@ Other open API and runtime decisions:
 - define the standard and script-owned hygiene-pause APIs;
 - decide the technical fallback when a speaker has no `displayName` and all of `title`, `firstName`, and `lastName` are empty;
 - define the initial string-method library and future speaker-specific LLM context fields;
-- define the syntax of the explicit fallback destination for an `end` without a caller
+- decide whether a `fallback` destination can be cleared again
   ([ADR 0022](../decisions/0022-multi-file-scripts.md)).

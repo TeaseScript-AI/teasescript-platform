@@ -50,13 +50,23 @@ goto script("rooms/${room}.tease", label: "start")
 
 ### 4. Endings
 
-1. `exit` is the only normal way to finish the session.
+1. `exit` is the only normal way to finish the session, and it is always required, in `main.tease` too: the author marks
+   the end of a script deliberately. A project with no reachable `exit` does not compile.
 2. `end` ends the current file and returns to the file that `call`ed it.
-3. A reachable end of a file without `end`, `exit`, or a transfer is a compile error, with a friendly message. Branches
-   that all end or transfer need nothing extra.
-4. Reaching `end` or the end of a file with no caller is an error, unless the author explicitly declared a fallback
-   destination, such as a menu script; execution then continues there. The fallback is never implicit. Its syntax is
-   still being designed and will be recorded here when accepted.
+3. A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file, with a friendly
+   message. Branches that all end or transfer need nothing extra.
+4. Reaching `end` with no caller continues at the fallback destination when one is set, and is an error otherwise. The
+   fallback is never implicit.
+5. `fallback` sets the fallback destination. It takes the same target forms as `goto`:
+
+   ```tease
+   fallback "menu.tease"
+   fallback "menu.tease" start
+   if chapter > 3 { fallback script("chapters/${chapter}.tease", label: "recap") }
+   ```
+
+   It may run any number of times, anywhere, including inside `if`; the latest one executed wins. It is session state
+   and is checkpointed, not metadata. Whether a fallback can be cleared again is not yet decided.
 
 ### 5. Transfers
 
@@ -75,7 +85,9 @@ global strictness = 2
 global level = load "level", default: 1
 ```
 
-1. A `global` is declared at the top level of any file, at any position, not inside `if`, loops, functions, or handlers.
+1. A `global` may be declared anywhere in any file, including inside `if`, loops, and functions. Declarations are
+   collected at compile time and initialized at session start, whether or not the surrounding block ever runs, so an
+   initializer cannot use local values.
 2. It is visible in all files. Global names are unique in the project, and no other name may shadow one.
 3. Globals are initialized once at session start, before the story runs, in a deterministic order: `main.tease` first,
    then the other files in path order, each in source order. An initializer that reads a global initialized after it

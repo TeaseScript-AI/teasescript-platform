@@ -102,8 +102,8 @@ test("text known only at runtime converts, falls back to default:, or fails with
         [
           'say toDate(dynamic("2026-10-04")).toISO()',
           'say toDate(dynamic("2026-02-30"), default: toDate("2000-01-01")).toISO()',
-          'let fallback = toTimestamp("2000-01-01T00:00:00Z")',
-          'say toTimestamp(dynamic("2026-10-04T12:30"), default: fallback).toISO()',
+          'let backup = toTimestamp("2000-01-01T00:00:00Z")',
+          'say toTimestamp(dynamic("2026-10-04T12:30"), default: backup).toISO()',
         ].join("\n"),
     ),
     ["2026-10-04", "2000-01-01", "2000-01-01T00:00:00Z"],

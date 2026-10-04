@@ -19,8 +19,8 @@ test("timestamp is a type name for annotations and type tests, and a protected n
   assert.deepEqual(
     codes(
       [
-        "function latest(moments: timestamp[], fallback: timestamp?): timestamp? {",
-        "    return fallback",
+        "function latest(moments: timestamp[], backup: timestamp?): timestamp? {",
+        "    return backup",
         "}",
         "function kind(value: date | time | datetime | timestamp): string {",
         '    if value is timestamp { return "moment" }',
