@@ -87,7 +87,6 @@ global level = load "level", default: 1
 
 ## Consequences
 
-- Every file states how it ends. A single-file script ends with `exit` instead of running off its last line.
 - Plans, snapshots, and checkpoints record which file each position, frame, and call return belongs to.
 - Scripts that relied on `run` or rotation are rewritten with explicit `goto`, `call`, and globs.
 - Tag-based selection (`goto tagged …`, `findScripts`) is a separate decision that builds on these targets.
@@ -95,8 +94,6 @@ global level = load "level", default: 1
 ## Alternatives considered
 
 - Keeping `run` with engine rotation: less to write, but the flow between files is hidden from the author.
-- Treating the end of a file as `end`, and `end` without a caller as finishing the session: less to write, but a file
-  that runs off its end by mistake silently finishes the session.
 - Requiring every file of a glob to have the requested label: catches typos, but forces placeholder labels into files
   that do not take part.
 - Plain text as a jump target: one form less, but a text meant as an image path or message could be passed by mistake,
