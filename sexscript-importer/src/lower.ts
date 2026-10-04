@@ -1610,8 +1610,11 @@ function findDeferred(
   if (node.kind === "closure") return null;
   // A collection method with a closure becomes a loop before the statement (lowerCollectionAssignment), as does a
   // regular expression with a workaround (lowerRegexWorkaround).
-  if (!inputOptions && (isCollectionLoop(node, context) || regexWorkaround(node) !== null))
-    return node;
+  if (!inputOptions && (isCollectionLoop(node, context) || regexWorkaround(node) !== null)) {
+    // The receiver runs first, so a part of it that needs its own statement comes first.
+    const receiver = asNode(node.object);
+    return (receiver === null ? null : findDeferred(receiver, context)) ?? node;
+  }
   if ((node.kind === "ternary" || node.kind === "elvis") && dictDefault(node, context) === null)
     return node;
   if (node.kind === "binary" && (node.operator === "&&" || node.operator === "||")) {
@@ -1846,8 +1849,12 @@ function deferredMayChange(part: AstNode, deferred: AstNode, context: LowerConte
     )
       calls = true;
   });
+  // Locals of the current function and generated temporaries are out of reach of other functions.
   const locals = context.currentFunction?.locals ?? new Set<string>();
-  return writes || (calls && [...reads].some((name) => !locals.has(name)));
+  return (
+    writes ||
+    (calls && [...reads].some((name) => !locals.has(name) && !context.generatedNames.has(name)))
+  );
 }
 
 /** Collection methods that read their receiver without changing it. */
