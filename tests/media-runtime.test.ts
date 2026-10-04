@@ -3,12 +3,15 @@ import test from "node:test";
 
 import {
   completeAction,
+  createCheckpoint,
   createFreshRuntimeSnapshot,
+  deserializeCheckpoint,
   executeInstruction,
   mediaPlaybackProjection,
   observeTime,
   reportMediaLoad,
   run,
+  serializeCheckpoint,
   stageProjection,
   validateRuntimeSnapshot,
   type InstructionPlan,
@@ -664,6 +667,32 @@ test("an interrupt before an async media assignment keeps a valid, resumable sta
     'timer async 0 s {\n  say "timer"\n}\nlet m = playAudio async "a.mp3"\nsay "${m.state}"\nwait 2',
     { mediaDurationMs: 1_000 },
   );
+});
+
+test("a host builtin cannot hand out the handle of media that is still loading", () => {
+  const compiled = plan('timer async 1 s {\n  host().pause()\n}\nlet m = playAudio async "a.mp3"', {
+    builtins: ["host"],
+  });
+  // The play holds media ID 1 while it waits for the load; only the host could name it before the binding.
+  const capabilities = { builtins: { host: () => ({ kind: "mediaHandle" as const, mediaId: 1 }) } };
+  let snapshot = run(
+    compiled,
+    createImmediatePacingRuntimeSnapshot(compiled),
+    capabilities,
+  ).snapshot;
+  assert.equal(snapshot.foregroundAction?.kind, "mediaPlayback");
+  snapshot = run(compiled, observeTime(compiled, snapshot, 1_000).snapshot, capabilities).snapshot;
+  assert.equal(snapshot.status, "failed");
+  assert.equal(snapshot.failure?.code, "TSR013");
+  const media = snapshot.backgroundActions.find(
+    (action): action is RuntimeMediaActionSnapshot => action.kind === "media",
+  )?.media;
+  assert.deepEqual(
+    [media?.state, media?.loaded, media?.segment, media?.points],
+    ["running", false, 0, []],
+  );
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, snapshot)));
+  assert.deepEqual(restored.snapshot, snapshot);
 });
 
 test("restore validation rejects malformed media state", () => {

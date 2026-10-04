@@ -655,6 +655,11 @@ export function pruneMediaPoints(media: RuntimeMediaSnapshot, atMs: number): voi
   if (keepFrom > 0) media.points.splice(0, keepFrom);
 }
 
+/**
+ * Script controls reach only loaded or settled media: a play binds its handle after the load report, and host values
+ * cannot carry handles. Pause, resume, and seeks therefore always have a timeline; before the load, only Stage
+ * replacement or the end of the session stops media.
+ */
 export function pauseMedia(media: RuntimeMediaSnapshot, atMs: number): MediaWarning | null {
   if (media.state === "paused") return null;
   if (media.state !== "running") return settledWarning(media, "pause()");

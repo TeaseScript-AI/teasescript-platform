@@ -775,7 +775,8 @@ The current boundaries are:
 - only explicitly registered own builtin names are callable; inherited JavaScript prototype names do not create capabilities;
 - core built-ins retain precedence over injected capabilities with the same names;
 - low-level named builtin arguments use an immutable prototype-free record and duplicate detection uses own properties;
-- values entering globals or returning from builtins are copied and validated as serializable runtime values;
+- values entering globals or returning from builtins are copied and validated as serializable runtime values, and may
+  not contain timer handles, media handles, or speaker references, which only the runtime creates;
 - invalid builtin return values become structured runtime failures, including `TSR013` for invalid values;
 - normally declared TeaseScript speakers remain runtime-managed state and continue to use stable serialized speaker IDs.
 

@@ -35,6 +35,7 @@ import {
   addSerializableSetValue,
   cloneCapturedSerializableValue,
   cloneSerializableValue,
+  containsRuntimeIdentity,
   createCapturedSerializableList,
   createCapturedSerializableSet,
   getSerializableProperty,
@@ -1081,8 +1082,9 @@ export class Evaluator {
           expression.span,
         );
       }
+      let copied: SerializableRuntimeValue;
       try {
-        return cloneSerializableValue(returned);
+        copied = cloneSerializableValue(returned);
       } catch (error) {
         if (error instanceof SerializableValueError) {
           throw fault(
@@ -1093,6 +1095,15 @@ export class Evaluator {
         }
         throw error;
       }
+      // Handles and speaker references name records that only the runtime creates; a host cannot hand one out.
+      if (containsRuntimeIdentity(copied)) {
+        throw fault(
+          "TSR013",
+          `Built-in '${expression.callee.name}' returned an invalid value: it contains a timer handle, media handle, or speaker reference, which only the runtime creates.`,
+          expression.span,
+        );
+      }
+      return copied;
     }
     if (expression.callee.kind === "property" && isTimerHandle(receiver)) {
       return this.#callTimer(receiver, expression.callee.name, positional, named, expression.span);

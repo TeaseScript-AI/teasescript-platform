@@ -39,6 +39,7 @@ import {
 } from "./random.js";
 import {
   cloneCapturedSerializableValue,
+  containsRuntimeIdentity,
   validateCapturedSerializableValue,
   type SerializableRuntimeProperty,
   type SerializableRuntimeList,
@@ -396,11 +397,14 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     if (name.length === 0) throw new TypeError("Global binding names must not be empty.");
     const failure = validateCapturedSerializableValue(value, `globals.${name}`);
     if (failure !== null) throw new TypeError(failure);
-    bindings.push({
-      name,
-      // EVIDENCE: validation: validateCapturedSerializableValue accepted this captured global value above.
-      value: value as SerializableRuntimeValue,
-    });
+    // EVIDENCE: validation: validateCapturedSerializableValue accepted this captured global value above.
+    const valid = value as SerializableRuntimeValue;
+    if (containsRuntimeIdentity(valid)) {
+      throw new TypeError(
+        `globals.${name} contains a timer handle, media handle, or speaker reference, which only the runtime creates.`,
+      );
+    }
+    bindings.push({ name, value: valid });
   }
   return {
     format: RUNTIME_SNAPSHOT_FORMAT,
