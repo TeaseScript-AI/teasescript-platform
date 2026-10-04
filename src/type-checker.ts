@@ -1,9 +1,11 @@
 import type {
   AssignmentStatement,
   Block,
+  CallArgument,
   CallExpression,
   Expression,
   FunctionDeclaration,
+  FunctionParameter,
   Identifier,
   LetStatement,
   MediaParts,
@@ -20,6 +22,7 @@ import {
   isValidInteractionPrefill,
   numberAnswerText,
 } from "./interaction-answers.js";
+import type { TypeCheckPlan } from "./plan/model.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
 import { staticChoiceValue, staticNumber, staticVisibleText } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
@@ -63,6 +66,7 @@ import {
   type Origin,
   type StaticType,
 } from "./static-types.js";
+import { typePlan } from "./type-plans.js";
 
 export interface TypeCheckOptions {
   readonly globals?: readonly string[];
@@ -71,7 +75,21 @@ export interface TypeCheckOptions {
 
 export interface TypeCheckResult {
   readonly diagnostics: readonly Diagnostic[];
+  /** The runtime checks of values the compiler cannot know, by the source of the instruction that stores them. */
+  readonly runtimeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
 }
+
+/**
+ * Where a value is stored in a place of known type: a `let` or assignment, a list or set `add` call, an argument of an
+ * author function, a parameter default, or a `return`.
+ */
+export type RuntimeCheckSite =
+  | LetStatement
+  | AssignmentStatement
+  | CallExpression
+  | CallArgument
+  | FunctionParameter
+  | Extract<Statement, { kind: "returnStatement" }>;
 
 const typeCode = {
   invalidSetElement: "TSV006",
@@ -98,7 +116,10 @@ export function checkTypes(program: Program, options: TypeCheckOptions = {}): Ty
     const checker = new TypeChecker(options, widened);
     checker.check(program);
     if (!checker.widenedMore)
-      return Object.freeze({ diagnostics: Object.freeze([...checker.diagnostics]) });
+      return Object.freeze({
+        diagnostics: Object.freeze([...checker.diagnostics]),
+        runtimeChecks: checker.runtimeChecks(),
+      });
     checker.widenFollowers();
   }
 }
@@ -240,6 +261,13 @@ class TypeChecker {
   /** The variable names of unannotated `let` statements by initializer, for messages that suggest a declaration. */
   readonly #declaredBy = new Map<Expression, string>();
 
+  /** Stores of values the compiler cannot know, kept until every type they depend on is decided. */
+  readonly #runtimeChecks: {
+    readonly site: RuntimeCheckSite;
+    readonly place: StaticType;
+    readonly label: string;
+  }[] = [];
+
   /** Whether this check found a variable to widen that earlier checks did not. */
   widenedMore = false;
 
@@ -311,6 +339,19 @@ class TypeChecker {
       this.#function = null;
       runCompileTask(this.#statementsTask(handler.block.statements, scope));
     }
+  }
+
+  /**
+   * The recorded runtime checks in plan form. Call it after {@link check}: a place can still be decided after a store
+   * into it was checked, as by a later first value or a property that assignment adds.
+   */
+  public runtimeChecks(): ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> {
+    const checks = new Map<RuntimeCheckSite, TypeCheckPlan>();
+    for (const check of this.#runtimeChecks) {
+      const type = typePlan(check.place);
+      if (type !== null) checks.set(check.site, { type, place: check.label });
+    }
+    return checks;
   }
 
   // Statements -------------------------------------------------------------------------------------------------------
@@ -538,6 +579,7 @@ class TypeChecker {
       } else {
         yield* compileChild(this.#storeTask(place, statement.initializer, value));
       }
+      this.#recordRuntimeCheck(statement, type, `'${name}'`, value);
     }
     const declaration = statement.typeAnnotation === null ? statement : undefined;
     scope.declare(name, { kind: "variable", variable: { name, type, declaration } });
@@ -580,6 +622,8 @@ class TypeChecker {
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
     if (shownField !== null) this.#checkShownText(statement.value, value, shownField);
     if (place === undefined) return;
+    // For `+=` and `-=`, the runtime checks the computed result, which is unknown when the operand is.
+    this.#recordRuntimeCheck(statement, place.type, runtimePlace(target), value);
     if (statement.operator === "=") {
       yield* compileChild(this.#storeTask(place, statement.value, value));
       return;
@@ -786,6 +830,7 @@ class TypeChecker {
     const name = context.fn.declaration.name.name;
     if (context.declared !== null) {
       const declared = context.declared;
+      this.#recordRuntimeCheck(statement, declared, `the result of '${name}'`, value);
       yield* compileChild(
         this.#storeTask(
           {
@@ -944,6 +989,12 @@ class TypeChecker {
               value,
             ),
           );
+          this.#recordRuntimeCheck(
+            parameter,
+            declared,
+            `parameter '${name}' of '${fn.declaration.name.name}'`,
+            value,
+          );
         }
       }
       const declaration =
@@ -1017,6 +1068,12 @@ class TypeChecker {
             : parameterFix(parameter.name, parameter.type, rejected, value),
       };
       yield* compileChild(this.#storeTask(place, argument.value, values[argumentIndex]!, false));
+      this.#recordRuntimeCheck(
+        argument,
+        parameter.type,
+        `parameter '${parameter.name}' of '${name}'`,
+        values[argumentIndex]!,
+      );
     }
   }
 
@@ -1284,7 +1341,7 @@ class TypeChecker {
       const argument = expression.arguments[0];
       if (argument !== undefined && expression.arguments.length === 1) {
         const type = yield* compileChild(this.#expressionTask(argument.value, scope));
-        if (value.kind === "list" || this.#checkSetElement(argument.value, type))
+        if (value.kind === "list" || this.#checkSetElement(argument.value, type)) {
           yield* compileChild(
             this.#storeTask(
               elementPlace(value, expressionLabel(callee.object), isNullable(receiver)),
@@ -1292,6 +1349,13 @@ class TypeChecker {
               type,
             ),
           );
+          this.#recordRuntimeCheck(
+            expression,
+            value.element,
+            elementLabel(expressionLabel(callee.object), value.kind),
+            type,
+          );
+        }
         return NULL_TYPE;
       }
     }
@@ -1856,6 +1920,20 @@ class TypeChecker {
     this.#reportUnless(type, accepts(nonNullTypeForUse(type)), expression, rule);
   }
 
+  /**
+   * Records a runtime check where a value whose type has unknown parts is stored in a place (ADR 0021 rule 1.7). The
+   * place's type is read after the whole check, because a later value can still decide it.
+   */
+  #recordRuntimeCheck(
+    site: RuntimeCheckSite,
+    place: StaticType,
+    label: string,
+    value: StaticType,
+  ): void {
+    if (containsType(value, (part) => part.kind === "unknown"))
+      this.#runtimeChecks.push({ site, place, label });
+  }
+
   // Reports ----------------------------------------------------------------------------------------------------------
 
   /** Conditions and `and`/`or`/`not` operands must be true or false; there is no truthiness. */
@@ -1971,6 +2049,18 @@ function propertyPlace(type: StaticType, label: string | null, name: string): Pl
       return conversion ?? " Use a separate property for a value of another type.";
     },
   };
+}
+
+/** How a runtime type error names an assignment target, such as `'count'` or `property 'door.locked'`. */
+function runtimePlace(target: AssignmentStatement["target"]): string {
+  if (target.kind === "identifier") return `'${target.name}'`;
+  const object = expressionLabel(target.object);
+  if (target.kind === "indexExpression") return elementLabel(object, "list");
+  return `property '${object === null ? "" : `${object}.`}${target.property.name}'`;
+}
+
+function elementLabel(collection: string | null, kind: "list" | "set"): string {
+  return collection === null ? `an element of this ${kind}` : `an element of '${collection}'`;
 }
 
 /** `' from line 3'` when the first value stored decided the type, so the message names both places. */

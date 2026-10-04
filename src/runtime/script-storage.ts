@@ -1,4 +1,4 @@
-import type { PlanSourceLocation, StorageTypePlan } from "../plan/model.js";
+import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
@@ -95,30 +95,6 @@ export function assertPersistable(
   }
 }
 
-/** Rejects a stored value that does not match the declared type of a direct `let x: T = load ...`. */
-export function assertStoredType(
-  entry: RuntimeScriptStorageEntrySnapshot,
-  type: StorageTypePlan,
-  span: SourceSpan | PlanSourceLocation,
-): void {
-  const value = entry.value;
-  const matches =
-    type.collection === null
-      ? matchesScalarType(value, type.name)
-      : typeof value === "object" &&
-        value !== null &&
-        value.kind === type.collection &&
-        value.items.every((item) => matchesScalarType(item, type.name));
-  if (!matches) {
-    const suffix = type.collection === "list" ? "[]" : type.collection === "set" ? " set" : "";
-    throw fault(
-      "TSR056",
-      `Stored value for ${JSON.stringify(entry.key)} does not match the declared type ${type.name}${suffix}.`,
-      span,
-    );
-  }
-}
-
 /**
  * Validates host-supplied or restored script storage: an array of `{ key, value }` entries with unique string keys
  * and persistable, non-null values. A runtime view (`sorted`) must also be in key order. Returns the first failure
@@ -172,29 +148,6 @@ export function cloneScriptStorage(
     key: entry.key,
     value: cloneCapturedSerializableValue(entry.value),
   }));
-}
-
-function matchesScalarType(
-  value: SerializableRuntimeValue,
-  name: StorageTypePlan["name"],
-): boolean {
-  switch (name) {
-    case "string":
-      return typeof value === "string";
-    case "boolean":
-      return typeof value === "boolean";
-    case "number":
-      return typeof value === "number";
-    case "integer":
-      return typeof value === "number" && Number.isInteger(value);
-    case "duration":
-      return typeof value === "object" && value !== null && value.kind === "duration";
-    case "date":
-    case "time":
-    case "datetime":
-      // These types have no runtime representation yet, so no stored value can match them.
-      return false;
-  }
 }
 
 function fault(code: string, message: string, span: SourceSpan | PlanSourceLocation): RuntimeFault {

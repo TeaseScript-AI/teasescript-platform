@@ -951,7 +951,12 @@ When the compiler can prove that a conversion is invalid, it reports a compile e
 toNumber("hello") // compile error
 ```
 
-Values obtained from input, storage, files, network data, or another runtime expression are not known during compilation and are validated at runtime.
+Values obtained from input, storage, files, network data, or another runtime expression are not known during
+compilation and are validated at runtime. When such a value is stored in a variable, list or set element, object
+property, parameter, or function result whose type is known, the runtime checks the value before storing it; a value
+that does not fit is runtime error `TSR058`, which names the place and the value. An `integer` place takes any whole
+number, including a stored `2.0`, because the runtime does not keep a number's spelling. A list or set fits when every
+element fits, and an object fits when each known property that it has fits.
 
 `toInteger` discards the fractional part toward zero:
 
@@ -2246,7 +2251,9 @@ Rules:
 
 - The engine preserves the stored TeaseScript type; scripts do not serialize every value to plain text manually.
 - The physical database representation is an implementation detail and may use typed columns, tagged JSON, or another typed serialization.
-- A stored value whose type is incompatible with the receiving explicit type raises runtime error `TSR056`.
+- A loaded value must fit the type of the place that receives it ([§13](#13-explicit-types)), or runtime error
+  `TSR058` is raised. This applies to the stored value, the default, and `null` for a missing key, so
+  `let level: integer = load "level"` needs `integer?` or a default when the key may be missing.
 - Persistent plain data is storable. Timer handles, media handles, and speaker references exist only in the current
   session and cannot be saved, including when nested inside lists or objects (`TSR055`). Nested `null` is allowed.
 - Saving and loading copy data: later changes to the saved variable or a loaded value do not change storage.
@@ -2260,10 +2267,8 @@ Rules:
 
 Storage currently supports strings, finite numbers, booleans, lists, objects, sets, ranges, and durations, including
 nested `null`. Wider persistent-data support is not yet implemented; this subset is not a permanent language limit.
-Persisted-value type checking is partially implemented: at runtime it currently checks only the stored value in a
-direct `let x: T = load ...` initializer (parentheses around `load` are allowed), not defaults, assignments, arguments,
-or returns. The compiler rejects a default whose type is known and does not match `T`. Full `integer`/`number` type preservation is not yet implemented because the runtime represents both as one
-number. Replacement-value recovery under [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
+The compiler rejects a default whose type is known and does not match. Replacement-value recovery under
+[§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
 
 Examples:
 

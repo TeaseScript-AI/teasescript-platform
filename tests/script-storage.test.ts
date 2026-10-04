@@ -664,34 +664,40 @@ test("save rejects session handles and speaker references at the top level and n
   }
 });
 
-test("direct typed load initializers reject incompatible stored values with TSR056", () => {
-  for (const [type, value] of [
-    ["number", "stored"],
-    ["integer", 1.5],
-    ["string[]", { kind: "list", items: ["a", 1] }],
-    ["integer set", { kind: "set", items: [1, 1.5] }],
-    ["date", "2026-10-02"],
-    ["time", "12:00"],
-    ["datetime", "2026-10-02T12:00:00Z"],
-  ] satisfies readonly (readonly [string, SerializableRuntimeValue])[]) {
+test("typed load initializers reject incompatible stored values with TSR058", () => {
+  for (const [type, value, message] of [
+    ["number", "stored", "holds a number, so it cannot take text (string)"],
+    ["integer", 1.5, "holds a whole number (integer), so it cannot take a number"],
+    [
+      "string[]",
+      { kind: "list", items: ["a", 1] },
+      "holds a list (string[]), so it cannot take a list with a whole number (integer) at [1]",
+    ],
+    [
+      "integer set",
+      { kind: "set", items: [1, 1.5] },
+      "holds a set (integer set), so it cannot take a set with a number at [1]",
+    ],
+    // These types have no runtime values yet, so no stored value fits them.
+    ["date", "2026-10-02", "holds a date, so it cannot take text (string)"],
+    ["time", "12:00", "holds a time, so it cannot take text (string)"],
+    ["datetime", "2026-10-02T12:00:00Z", "holds a date and time, so it cannot take text (string)"],
+  ] satisfies readonly (readonly [string, SerializableRuntimeValue, string])[]) {
     const compiled = plan(`let value: ${type} = load "k"`);
     const result = run(
       compiled,
       createFreshRuntimeSnapshot(compiled, { scriptStorage: [{ key: "k", value }] }),
     );
     assert.equal(result.snapshot.status, "failed", type);
-    assert.equal(result.snapshot.failure?.code, "TSR056", type);
-    assert.equal(
-      result.snapshot.failure?.message,
-      `Stored value for "k" does not match the declared type ${type}.`,
-    );
+    assert.equal(result.snapshot.failure?.code, "TSR058", type);
+    assert.equal(result.snapshot.failure?.message, `'value' ${message}.`);
   }
   const compiled = plan('let value: number = ((load "k"))');
   const result = run(
     compiled,
     createFreshRuntimeSnapshot(compiled, { scriptStorage: [{ key: "k", value: "stored" }] }),
   );
-  assert.equal(result.snapshot.failure?.code, "TSR056");
+  assert.equal(result.snapshot.failure?.code, "TSR058");
 });
 
 test("typed load initializers accept matching scalars, collections, integers, and optional types", () => {
@@ -715,28 +721,36 @@ test("typed load initializers accept matching scalars, collections, integers, an
   }
 });
 
-test("persisted-value type checks exclude missing keys, defaults, and non-direct loads", () => {
-  const compiled = plan(
-    [
-      "function identity(value) { return value }",
-      'let missing: number = load "missing"',
-      'let fallback: number = load "missing" default identity("fallback")',
-      "let assigned: number = 0",
-      'assigned = load "k"',
-      'let indirect: number = identity(load "k")',
-      "exit",
-    ].join("\n"),
-  );
-  const result = run(
-    compiled,
-    createFreshRuntimeSnapshot(compiled, { scriptStorage: [{ key: "k", value: "stored" }] }),
-  );
+test("loaded values are checked against the variable's type, including missing keys, defaults, and indirect loads", () => {
+  const storage = [{ key: "k", value: "stored" }];
+  const failure = (source: string) => {
+    const compiled = plan(`function identity(value) { return value }\n${source}\nexit`);
+    const result = run(compiled, createFreshRuntimeSnapshot(compiled, { scriptStorage: storage }));
+    return [result.snapshot.failure?.code, result.snapshot.failure?.message];
+  };
+  assert.deepEqual(failure('let missing: number = load "missing"'), [
+    "TSR058",
+    "'missing' holds a number, so it cannot take null.",
+  ]);
+  assert.deepEqual(failure('let fallback: number = load "missing" default identity("fallback")'), [
+    "TSR058",
+    "'fallback' holds a number, so it cannot take text (string).",
+  ]);
+  assert.deepEqual(failure('let assigned: number = 0\nassigned = load "k"'), [
+    "TSR058",
+    "'assigned' holds a number, so it cannot take text (string).",
+  ]);
+  assert.deepEqual(failure('let indirect: number = identity(load "k")'), [
+    "TSR058",
+    "'indirect' holds a number, so it cannot take text (string).",
+  ]);
+
+  const optional = plan('let missing: number? = load "missing"\nlet text: string = load "k"\nexit');
+  const result = run(optional, createFreshRuntimeSnapshot(optional, { scriptStorage: storage }));
   assert.equal(result.snapshot.status, "halted");
   assert.equal(binding(result.snapshot, "missing"), null);
-  assert.equal(binding(result.snapshot, "fallback"), "fallback");
-  assert.equal(binding(result.snapshot, "assigned"), "stored");
-  assert.equal(binding(result.snapshot, "indirect"), "stored");
-  assert.deepEqual(result.snapshot.scriptStorage, [{ key: "k", value: "stored" }]);
+  assert.equal(binding(result.snapshot, "text"), "stored");
+  assert.deepEqual(result.snapshot.scriptStorage, storage);
 });
 
 test("compact interactions end at the save 'as' and the load 'default' delimiters", () => {

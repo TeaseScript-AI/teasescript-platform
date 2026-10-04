@@ -27,11 +27,11 @@ import type {
   PrepareParameterDefaultInstruction,
   CallArgumentPlan,
   TemplatePartPlan,
-  StorageTypePlan,
   TemporaryExpressionPlan,
   InteractionChoiceOption,
   InteractionKind,
   InteractionResultDomain,
+  TypeCheckPlan,
   InteractionUiPayload,
   PreparedInteractionUiPayload,
   PlanSourceLocation,
@@ -40,6 +40,7 @@ import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralMilliseconds } from "../../duration.js";
+import type { RuntimeCheckSite } from "../../type-checker.js";
 import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
 import {
   expressionChildren as instructionEmissionChildren,
@@ -71,7 +72,10 @@ export class InstructionCompiler {
 
   #contextualSpeakerTemporary: number | null = null;
 
-  public constructor(private readonly declarations: readonly FunctionDeclaration[]) {
+  public constructor(
+    private readonly declarations: readonly FunctionDeclaration[],
+    private readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> = new Map(),
+  ) {
     this.#functionByName = new Map(
       declarations.map((declaration, index) => [
         declaration.name.name,
@@ -143,7 +147,7 @@ export class InstructionCompiler {
           name: statement.name.name,
           properties: statement.properties.map((property) => ({
             name: property.name.name,
-            value: compileExpression(property.value),
+            value: compileExpression(property.value, this.typeChecks),
             span: copySpan(property.span),
           })),
           span: copySpan(statement.span),
@@ -351,19 +355,12 @@ export class InstructionCompiler {
         if (initializer.kind === "playMediaExpression") {
           this.#selfHandleByInitializer.set(initializer, statement.name.name);
         }
-        const lowered =
-          initializer.kind === "loadExpression" && statement.typeAnnotation !== null
-            ? runCompileTask(
-                this.#lowerLoadTask(initializer, {
-                  name: statement.typeAnnotation.name,
-                  collection: statement.typeAnnotation.collection,
-                }),
-              )
-            : this.#lowerExpression(statement.initializer);
+        const lowered = this.#lowerExpression(statement.initializer);
         this.instructions.push({
           kind: "declareBinding",
           name: statement.name.name,
           value: lowered.plan,
+          ...withTypeCheck(this.typeChecks.get(statement)),
           span: copySpan(statement.span),
         });
         this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
@@ -405,6 +402,7 @@ export class InstructionCompiler {
           kind: "assign",
           target: target.plan,
           value: assigned,
+          ...withTypeCheck(this.typeChecks.get(statement)),
           span: copySpan(statement.span),
         });
         this.#emitTemporaryCleanup(
@@ -481,6 +479,7 @@ export class InstructionCompiler {
         this.instructions.push({
           kind: "returnValue",
           value: lowered.plan,
+          ...withTypeCheck(this.typeChecks.get(statement)),
           span: copySpan(statement.span),
         });
         return;
@@ -846,6 +845,7 @@ export class InstructionCompiler {
           functionId: registered.id,
           parameterIndex,
           value: lowered.plan,
+          ...withTypeCheck(this.typeChecks.get(parameter)),
           span: copySpan(parameter.span),
         });
         this.#emitTemporaryCleanup(lowered.temporaryIds, parameter.span);
@@ -894,7 +894,7 @@ export class InstructionCompiler {
       expression !== this.#barrierCall &&
       !this.#containsUserCall(expression)
     )
-      return { plan: compileExpression(expression), temporaryIds: [] };
+      return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
     if (expression.kind === "interactionExpression") {
       return yield* compileChild(this.#lowerInteractionTask(expression));
     }
@@ -921,7 +921,7 @@ export class InstructionCompiler {
       return yield* compileChild(this.#lowerUserFunctionCallTask(expression));
     }
     if (expression.kind === "loadExpression") {
-      return yield* compileChild(this.#lowerLoadTask(expression, null));
+      return yield* compileChild(this.#lowerLoadTask(expression));
     }
     if (
       expression.kind === "binaryExpression" &&
@@ -935,13 +935,13 @@ export class InstructionCompiler {
       case "nullLiteral":
       case "numberLiteral":
       case "durationLiteral":
-        return { plan: compileExpression(expression), temporaryIds: [] };
+        return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
       case "stringLiteral": {
         const interpolations = expression.parts
           .filter((part) => part.kind === "stringInterpolation")
           .map((part) => part.expression);
         if (interpolations.length === 0) {
-          return { plan: compileExpression(expression), temporaryIds: [] };
+          return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
         }
         const ids: number[] = [];
         const loweredInterpolations = yield* compileChild(
@@ -974,7 +974,7 @@ export class InstructionCompiler {
             temporaryIds: [],
           };
         }
-        return { plan: compileExpression(expression), temporaryIds: [] };
+        return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
       case "parenthesizedExpression":
         return yield* compileChild(this.#lowerExpressionTask(expression.expression));
       case "listLiteral":
@@ -1064,6 +1064,7 @@ export class InstructionCompiler {
                     span: copySpan(argument.span),
                   },
             ),
+            ...withTypeCheck(this.typeChecks.get(expression)),
             span: copySpan(expression.span),
           },
           temporaryIds: [
@@ -1094,7 +1095,7 @@ export class InstructionCompiler {
           !this.#containsUserCall(leftExpression) &&
           !this.#containsUserCall(rightExpression)
         ) {
-          return { plan: compileExpression(expression), temporaryIds: [] };
+          return { plan: compileExpression(expression, this.typeChecks), temporaryIds: [] };
         }
         const [left, right] = yield* compileChild(
           this.#lowerOrderedExpressionsTask([leftExpression, rightExpression]),
@@ -1601,7 +1602,12 @@ export class InstructionCompiler {
         }
         parameterName = parameter.name.name;
       }
-      planned.push({ parameterName, value: lowered.plan, span: copySpan(argument.span) });
+      planned.push({
+        parameterName,
+        value: lowered.plan,
+        span: copySpan(argument.span),
+        ...withTypeCheck(this.typeChecks.get(argument)),
+      });
     });
     const destinationTemporary = this.#allocateTemporary();
     const callIndex = this.instructions.length;
@@ -1636,7 +1642,6 @@ export class InstructionCompiler {
    */
   *#lowerLoadTask(
     expression: Extract<Expression, { kind: "loadExpression" }>,
-    expectedType: StorageTypePlan | null,
   ): CompileTask<LoweredExpression> {
     const key = yield* compileChild(this.#lowerExpressionTask(expression.key));
     const defaultValue = expression.defaultValue;
@@ -1648,7 +1653,6 @@ export class InstructionCompiler {
           kind: "storageLoad",
           key: key.plan,
           default: lowered?.plan ?? null,
-          expectedType,
           span: copySpan(expression.span),
         },
         temporaryIds: [...key.temporaryIds, ...(lowered?.temporaryIds ?? [])],
@@ -1658,13 +1662,7 @@ export class InstructionCompiler {
     this.instructions.push({
       kind: "storeTemporary",
       temporaryId: resultTemporary,
-      value: {
-        kind: "storageLoad",
-        key: key.plan,
-        default: null,
-        expectedType,
-        span: copySpan(expression.span),
-      },
+      value: { kind: "storageLoad", key: key.plan, default: null, span: copySpan(expression.span) },
       expectBoolean: false,
       span: copySpan(expression.span),
     });
@@ -1887,14 +1885,17 @@ function normalizeUnaryExpression(expression: Extract<Expression, { kind: "unary
   return { operand: current, operators: [negate ? "-" : "+"] };
 }
 
-function compileExpression(expression: Expression): ExpressionPlan {
+function compileExpression(
+  expression: Expression,
+  typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
+): ExpressionPlan {
   const plans = new WeakMap<Expression, ExpressionPlan>();
   const work: { expression: Expression; expanded: boolean }[] = [{ expression, expanded: false }];
   while (work.length) {
     const frame = work.pop()!;
     const current = unwrapParentheses(frame.expression);
     if (frame.expanded) {
-      plans.set(current, assembleExpression(current, child));
+      plans.set(current, assembleExpression(current, child, typeChecks));
       continue;
     }
     if (plans.has(current)) continue;
@@ -1981,6 +1982,11 @@ function staticInteractionUi(expression: InteractionExpression): InteractionUiPa
   };
 }
 
+/** The optional `typeCheck` field of a receiving instruction or plan, present only when the value is checked. */
+function withTypeCheck(typeCheck: TypeCheckPlan | undefined): { typeCheck?: TypeCheckPlan } {
+  return typeCheck === undefined ? {} : { typeCheck };
+}
+
 function copySpan(span: SourceSpan): PlanSourceLocation {
   return sourceSpanToPlanLocation(span);
 }
@@ -1995,6 +2001,7 @@ const MEDIA_ASSIGNABLE_PROPERTIES: ReadonlySet<string> = new Set([
 function assembleExpression(
   expression: Expression,
   child: (expression: Expression) => ExpressionPlan,
+  typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
 ): ExpressionPlan {
   switch (expression.kind) {
     case "booleanLiteral":
@@ -2082,6 +2089,7 @@ function assembleExpression(
                 span: copySpan(argument.span),
               },
         ),
+        ...withTypeCheck(typeChecks.get(expression)),
         span: copySpan(expression.span),
       };
     case "unaryExpression": {
@@ -2118,7 +2126,6 @@ function assembleExpression(
         kind: "storageLoad",
         key: child(expression.key),
         default: expression.defaultValue === null ? null : child(expression.defaultValue),
-        expectedType: null,
         span: copySpan(expression.span),
       };
     case "interactionExpression":
