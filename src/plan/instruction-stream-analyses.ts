@@ -1396,11 +1396,16 @@ const FUNCTION_FIELDS = [
 
 const PARAMETER_FIELDS = ["name", "index", "hasDefault", "declarationSpan", "defaultSpan"];
 
+/** A plain destination, or a glob's list of them; a pick holds plain destinations only. */
 function isFileDestination(index: PlanValidationIndex, destination: unknown): boolean {
-  if (!isRecord(destination)) return false;
-  if (Array.isArray(destination.pick)) {
-    return destination.pick.every((option) => isFileDestination(index, option));
+  if (isRecord(destination) && Array.isArray(destination.pick)) {
+    return destination.pick.every((option) => isPlainFileDestination(index, option));
   }
+  return isPlainFileDestination(index, destination);
+}
+
+function isPlainFileDestination(index: PlanValidationIndex, destination: unknown): boolean {
+  if (!isRecord(destination)) return false;
   const { file, target } = destination;
   if (typeof file !== "number" || typeof target !== "number") return false;
   const boundaries = index.files[file];

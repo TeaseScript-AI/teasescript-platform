@@ -3143,6 +3143,19 @@ function validateRootPlacement(frames: unknown, callFrames: unknown, errors: str
   }
 }
 
+/** Destinations are equal by their files and targets; a glob's files in the same order, which its draws index. */
+function sameTransferDestination(planned: PlanTransferDestination, stored: unknown): boolean {
+  const samePlain = (left: { file: number; target: number }, right: unknown): boolean =>
+    isPlainRecord(right) && right.file === left.file && right.target === left.target;
+  if (!("pick" in planned)) return samePlain(planned, stored);
+  const options: unknown = isPlainRecord(stored) ? stored.pick : undefined;
+  return (
+    Array.isArray(options) &&
+    options.length === planned.pick.length &&
+    planned.pick.every((option, index) => samePlain(option, options[index]))
+  );
+}
+
 /** `fallback` holds the destination of a `fallback` statement: a file's entry or label, or a glob's files. */
 function validateFallback(
   value: unknown,
@@ -3169,7 +3182,7 @@ function validateFallback(
         (instruction) =>
           instruction.kind === "setFallback" &&
           instruction.destination !== null &&
-          JSON.stringify(instruction.destination) === JSON.stringify(value),
+          sameTransferDestination(instruction.destination, value),
       ))
   ) {
     errors.push("Runtime fallback is malformed.");

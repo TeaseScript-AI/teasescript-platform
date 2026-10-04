@@ -11,7 +11,7 @@ import {
   deserializeCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { run } from "../src/runtime/engine.js";
+import { executeInstruction, run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { validateRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
@@ -831,4 +831,53 @@ test("a photo taken in a called file or a global function of another file surviv
     `second ${photo}`,
     "exit",
   ]);
+});
+
+test("destinations compare by their values, and a pick holds plain destinations only", () => {
+  const plan = compiled(
+    project('fallback "ends/*.tease"\nend', { "ends/a.tease": "exit", "ends/b.tease": "exit" }),
+  );
+  // The same destinations written with their keys in another order.
+  const reordered: InstructionPlan = {
+    ...plan,
+    instructions: plan.instructions.map((instruction) =>
+      instruction.kind === "setFallback" &&
+      instruction.destination !== null &&
+      "pick" in instruction.destination
+        ? {
+            ...instruction,
+            destination: {
+              pick: instruction.destination.pick.map(({ file, target }) => ({ target, file })),
+            },
+          }
+        : instruction,
+    ),
+  };
+  assert.deepEqual(validateInstructionPlan(reordered).errors, []);
+  const set = executeInstruction(reordered, createImmediatePacingRuntimeSnapshot(reordered));
+  assert.deepEqual(validateRuntimeSnapshot(set.snapshot, reordered).errors, []);
+
+  // A pick nested in a pick is malformed, however deep.
+  type Nested = { readonly file: number; readonly target: number } | { readonly pick: Nested[] };
+  let nested: Nested = { file: 0, target: 0 };
+  for (let depth = 0; depth < 12_000; depth += 1) nested = { pick: [nested] };
+  const deep = {
+    ...plan,
+    instructions: plan.instructions.map((instruction) =>
+      instruction.kind === "setFallback" ? { ...instruction, destination: nested } : instruction,
+    ),
+  };
+  assert.equal(validateInstructionPlan(deep).valid, false);
+});
+
+test("a glob with many stars checks a near match without backtracking blowup", () => {
+  const result = compileProject(
+    project(`goto "rooms/${"*a".repeat(14)}*b.tease"`, {
+      [`rooms/${"a".repeat(40)}c.tease`]: "exit",
+    }),
+  );
+  assert.deepEqual(
+    result.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSV057"],
+  );
 });

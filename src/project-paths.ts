@@ -50,23 +50,43 @@ export function packageGlobProblem(pattern: string): string | null {
 
 /** The paths a glob matches, in project order. */
 export function globMatches(pattern: string, paths: Iterable<string>): string[] {
-  const segments = pattern.split("/").map(
-    (segment) =>
-      new RegExp(
-        `^${segment
-          .split("*")
-          .map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
-          .join(".*")}$`,
-        "su",
-      ),
-  );
+  const segments = pattern.split("/");
   return [...paths]
     .filter((path) => {
       const parts = path.split("/");
       return (
         parts.length === segments.length &&
-        parts.every((part, index) => segments[index]!.test(part))
+        parts.every((part, index) => segmentMatches(segments[index]!, part))
       );
     })
     .sort(compareProjectPaths);
+}
+
+/**
+ * Whether one folder or file name matches a glob segment, where `*` stands for any characters. Each `*` resumes from
+ * the latest one only, so the work stays proportional to the two lengths' product, without backtracking blowup.
+ */
+function segmentMatches(pattern: string, text: string): boolean {
+  let patternIndex = 0;
+  let textIndex = 0;
+  let star = -1;
+  let resume = 0;
+  while (textIndex < text.length) {
+    if (pattern[patternIndex] === "*") {
+      star = patternIndex;
+      patternIndex += 1;
+      resume = textIndex;
+    } else if (patternIndex < pattern.length && pattern[patternIndex] === text[textIndex]) {
+      patternIndex += 1;
+      textIndex += 1;
+    } else if (star >= 0) {
+      patternIndex = star + 1;
+      resume += 1;
+      textIndex = resume;
+    } else {
+      return false;
+    }
+  }
+  while (pattern[patternIndex] === "*") patternIndex += 1;
+  return patternIndex === pattern.length;
 }
