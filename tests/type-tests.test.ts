@@ -169,6 +169,20 @@ test("only plain variables narrow, and a call, wait, or shared assignment cancel
   );
   // Nothing else assigns `v`, so a wait keeps it narrowed.
   assert.deepEqual(errors(`${union}if v is integer {\n    wait 1\n    let i: integer = v\n}`), []);
+  // A button used as a value waits for the player too, also inside a loop condition.
+  const timer = 'timer async 1 s {\n    v = "x"\n}\n';
+  assert.deepEqual(
+    errors(
+      `${union}${timer}if v is integer {\n    let pressed = showButton "Go"\n    let i: integer = v\n}`,
+    ),
+    [["TSV041", "v"]],
+  );
+  assert.deepEqual(
+    errors(
+      `${union}${timer}if v is integer {\n    while (showButton "Go") < 1 s {\n        let i: integer = v\n    }\n}`,
+    ),
+    [["TSV041", "v"]],
+  );
   // An assignment in a loop cancels narrowing at the loop's start.
   assert.deepEqual(
     errors(
