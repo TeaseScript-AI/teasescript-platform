@@ -21,6 +21,7 @@ import {
   activatePlayerRuntimeButton,
   activePlayerRuntimeCapture,
   answerPlayerRuntimeCapture,
+  compilePlayerProject,
   completePlayerRuntimeStorageWrite,
   pendingPlayerRuntimeStorageWrite,
   continuePlayerRuntimeSession,
@@ -39,6 +40,47 @@ import {
   skipPlayerRuntimePacing,
   submitPlayerRuntimeComposer,
 } from "../player/runtime-adapter.js";
+
+test("a Player session starts at main.tease of a project, or of a single source", () => {
+  const files = [
+    {
+      path: "rooms/hall.tease",
+      source: 'global function enter {\n  say "In the hall.", instant\n}',
+    },
+    {
+      path: "main.tease",
+      source: 'say "At the door.", instant\nenter()\nshowButton "Leave"\nexit',
+    },
+  ];
+  const texts = (session: ReturnType<typeof createPlayerRuntimeSession>) =>
+    session.transcriptEntries.map((entry) => entry.text);
+  assert.deepEqual(texts(createPlayerRuntimeSession({ files })), ["At the door.", "In the hall."]);
+  // The plan of a compiled project starts the same session without compiling again.
+  const compilation = compilePlayerProject({ files });
+  assert.deepEqual(compilation.diagnostics, []);
+  assert.deepEqual(texts(createPlayerRuntimeSession(compilation.plan!)), [
+    "At the door.",
+    "In the hall.",
+  ]);
+  assert.deepEqual(
+    texts(createPlayerRuntimeSession('say "Alone.", instant\nshowButton "Leave"\nexit')),
+    ["Alone."],
+  );
+});
+
+test("a project that does not compile names the file and position of its error", () => {
+  const files = [
+    { path: "main.tease", source: "exit" },
+    { path: "rooms/hall.tease", source: "global function enter {\n  say missing\n}" },
+  ];
+  assert.throws(() => createPlayerRuntimeSession({ files }), {
+    message: "rooms/hall.tease:2:7: Unknown variable 'missing'.",
+  });
+  assert.deepEqual(
+    compilePlayerProject({ files: [] }).diagnostics.map(({ path, code }) => [path, code]),
+    [["main.tease", "TSC009"]],
+  );
+});
 
 test("runtime adapter delivers resolved authored presentation and preserves it on restore", () => {
   const session = createPlayerRuntimeSession(`

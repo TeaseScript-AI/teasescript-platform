@@ -158,6 +158,8 @@ textarea {
   tab-size: 2;
 }
 .source-revision { margin: -.35rem 0 .7rem; color: var(--muted); font-size: .85rem; }
+.package-file-row:not([hidden]) { display: flex; gap: .5rem; align-items: center; margin: -.35rem 0 .7rem; }
+.package-file-row select { min-width: 0; max-width: 100%; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .transcript, .diagnostics { margin: 0; padding: 0; list-style: none; }
 .transcript { display: grid; gap: .65rem; max-height: 31rem; overflow: auto; }
