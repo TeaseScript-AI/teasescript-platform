@@ -170,7 +170,7 @@ export async function loadRepositoryProjectRunner(): Promise<TeaseProjectRunner>
           api,
           compiled.plan,
           builtins,
-          options.maxSteps ?? 5000,
+          options.maxSteps ?? 2000,
           new Map(),
           { nowMs: 0 },
           new Map(),
