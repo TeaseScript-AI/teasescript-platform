@@ -715,85 +715,81 @@ export function expressionMayReferenceTemporary(value: unknown, temporaryId: num
   return referenced.has(temporaryId);
 }
 
+/** Uses an explicit worklist: validation reaches arbitrarily deep accepted expressions. */
 function collectExpressionTemporaryReferences(value: unknown, output: Set<number>): void {
-  if (!isRecord(value)) return;
-  switch (value.kind) {
-    case "temporary":
-      if (Number.isInteger(value.temporaryId)) {
-        // EVIDENCE: validation: Number.isInteger proved the numeric temporary ID above.
-        output.add(value.temporaryId as number);
-      }
-      return;
-    case "list":
-    case "set":
-      if (Array.isArray(value.elements)) {
-        for (const item of value.elements) collectExpressionTemporaryReferences(item, output);
-      }
-      return;
-    case "object":
-      if (Array.isArray(value.properties)) {
-        for (const property of value.properties) {
-          if (isRecord(property)) collectExpressionTemporaryReferences(property.value, output);
+  const pending = [value];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!isRecord(current)) continue;
+    switch (current.kind) {
+      case "temporary":
+        if (Number.isInteger(current.temporaryId)) {
+          // EVIDENCE: validation: Number.isInteger proved the numeric temporary ID above.
+          output.add(current.temporaryId as number);
         }
-      }
-      return;
-    case "dict":
-      if (Array.isArray(value.entries)) {
-        for (const entry of value.entries) {
-          if (isRecord(entry)) {
-            collectExpressionTemporaryReferences(entry.key, output);
-            collectExpressionTemporaryReferences(entry.value, output);
+        break;
+      case "list":
+      case "set":
+        if (Array.isArray(current.elements)) {
+          for (const item of current.elements) pending.push(item);
+        }
+        break;
+      case "object":
+        if (Array.isArray(current.properties)) {
+          for (const property of current.properties) {
+            if (isRecord(property)) pending.push(property.value);
           }
         }
-      }
-      return;
-    case "group":
-      collectExpressionTemporaryReferences(value.expression, output);
-      return;
-    case "template":
-      if (Array.isArray(value.parts)) {
-        for (const part of value.parts) {
-          if (isRecord(part) && part.kind === "expression") {
-            collectExpressionTemporaryReferences(part.expression, output);
+        break;
+      case "dict":
+        if (Array.isArray(current.entries)) {
+          for (const entry of current.entries) {
+            if (isRecord(entry)) pending.push(entry.key, entry.value);
           }
         }
-      }
-      return;
-    case "property":
-      collectExpressionTemporaryReferences(value.object, output);
-      return;
-    case "index":
-      collectExpressionTemporaryReferences(value.object, output);
-      collectExpressionTemporaryReferences(value.index, output);
-      return;
-    case "call":
-      if (isRecord(value.callee) && value.callee.kind === "property") {
-        collectExpressionTemporaryReferences(value.callee.object, output);
-      }
-      if (Array.isArray(value.arguments)) {
-        for (const argument of value.arguments) {
-          if (isRecord(argument)) collectExpressionTemporaryReferences(argument.value, output);
+        break;
+      case "group":
+        pending.push(current.expression);
+        break;
+      case "template":
+        if (Array.isArray(current.parts)) {
+          for (const part of current.parts) {
+            if (isRecord(part) && part.kind === "expression") pending.push(part.expression);
+          }
         }
-      }
-      return;
-    case "unary":
-      collectExpressionTemporaryReferences(value.operand, output);
-      return;
-    case "typeTest":
-      collectExpressionTemporaryReferences(value.value, output);
-      return;
-    case "binary":
-      collectExpressionTemporaryReferences(value.left, output);
-      collectExpressionTemporaryReferences(value.right, output);
-      return;
-    case "range":
-      collectExpressionTemporaryReferences(value.start, output);
-      collectExpressionTemporaryReferences(value.end, output);
-      return;
-    case "storageLoad":
-      collectExpressionTemporaryReferences(value.key, output);
-      collectExpressionTemporaryReferences(value.default, output);
-      return;
+        break;
+      case "property":
+        pending.push(current.object);
+        break;
+      case "index":
+        pending.push(current.object, current.index);
+        break;
+      case "call":
+        if (isRecord(current.callee) && current.callee.kind === "property") {
+          pending.push(current.callee.object);
+        }
+        if (Array.isArray(current.arguments)) {
+          for (const argument of current.arguments) {
+            if (isRecord(argument)) pending.push(argument.value);
+          }
+        }
+        break;
+      case "unary":
+        pending.push(current.operand);
+        break;
+      case "typeTest":
+        pending.push(current.value);
+        break;
+      case "binary":
+        pending.push(current.left, current.right);
+        break;
+      case "range":
+        pending.push(current.start, current.end);
+        break;
+      case "storageLoad":
+        pending.push(current.key, current.default);
+        break;
+    }
   }
 }
 

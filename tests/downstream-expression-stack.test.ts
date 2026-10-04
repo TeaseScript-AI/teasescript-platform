@@ -17,6 +17,8 @@ test("downstream expression frames traverse each public stage and resume on a co
     for(const depth of [256,1024]) {
       const families = [
         ['binary', 'let result='+Array(depth).fill('1').join('+')+'\\nexit', depth],
+        // A prepared say makes plan validation index every later payload.
+        ['binary after prepared say', 'function value {return 1}\\nsay value(), instant\\nlet result='+Array(depth).fill('1').join('+')+'\\nexit', depth],
         ['property', 'let x='+'{a:'.repeat(depth)+'1'+'}'.repeat(depth)+'\\nlet result=x'+'.a'.repeat(depth)+'\\nexit',1],
         ['index', 'let x='+'['.repeat(depth)+'1'+']'.repeat(depth)+'\\nlet result=x'+'[0]'.repeat(depth)+'\\nexit',1],
         ['property assignment', 'let x='+'{a:'.repeat(depth)+'1'+'}'.repeat(depth)+'\\nx'+'.a'.repeat(depth)+'=9\\nlet result=x'+'.a'.repeat(depth)+'\\nexit',9],
