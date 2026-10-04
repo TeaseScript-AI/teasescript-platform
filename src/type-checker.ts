@@ -95,6 +95,19 @@ interface Variable {
   readonly type: StaticType;
 }
 
+/**
+ * What reading a place gives: the type that a variable, property, or element itself keeps, which later stores may still
+ * decide or extend. Every other expression gives a type that belongs to it alone.
+ */
+interface PlaceRead {
+  readonly kind: "placeRead";
+  readonly type: StaticType;
+}
+
+function placeRead(type: StaticType): PlaceRead {
+  return { kind: "placeRead", type };
+}
+
 type Entry =
   | { readonly kind: "variable"; readonly variable: Variable }
   | { readonly kind: "speaker" | "global" }
@@ -178,6 +191,9 @@ class TypeChecker {
   #function: FunctionContext | null = null;
 
   readonly #types = new Map<Expression, StaticType>();
+
+  /** The checked expressions whose kept type is still the type of the place they read. */
+  readonly #placeReads = new Set<Expression>();
 
   /** One flag per enclosing loop: whether a reachable `break` leaves it. */
   readonly #loops: { broken: boolean; continued: boolean }[] = [];
@@ -440,7 +456,7 @@ class TypeChecker {
         : yield* compileChild(this.#expressionTask(statement.initializer, scope));
     let type: StaticType;
     if (statement.typeAnnotation === null) {
-      type = ownType(statement.initializer, value);
+      type = this.#newPlaceType(statement.initializer, value);
       if (initializer.kind === "listLiteral" || initializer.kind === "setLiteral")
         this.#declaredBy.set(initializer, name);
     } else {
@@ -489,7 +505,7 @@ class TypeChecker {
           if (statement.operator === "=")
             value.properties.set(
               name,
-              decidedSlot(ownType(statement.value, assigned), statement.value.span),
+              decidedSlot(this.#newPlaceType(statement.value, assigned), statement.value.span),
             );
           return;
         }
@@ -559,7 +575,7 @@ class TypeChecker {
         const known = properties.get(property.name.name);
         const type = this.#typeOf(property.value);
         if (known === undefined) {
-          added.push([property.name.name, ownType(property.value, type)]);
+          added.push([property.name.name, this.#newPlaceType(property.value, type)]);
           continue;
         }
         const before = this.diagnostics.length;
@@ -661,7 +677,8 @@ class TypeChecker {
       );
       return;
     }
-    context.returns.push({ type: value, span: statement.value.span });
+    // The result is joined once the body is complete; a later statement may still change the place a value was read from.
+    context.returns.push({ type: this.#capture(statement.value), span: statement.value.span });
   }
 
   // Functions --------------------------------------------------------------------------------------------------------
@@ -801,10 +818,10 @@ class TypeChecker {
   ): CompileTask<StaticType> {
     const values: StaticType[] = [];
     for (const argument of expression.arguments) {
-      const value = yield* compileChild(this.#expressionTask(argument.value, scope));
+      yield* compileChild(this.#expressionTask(argument.value, scope));
       // An argument is the value as it was evaluated: a later argument or the body may still add a property to an
       // object it was read from.
-      values.push(isBorrowed(argument.value) ? copyType(value) : value);
+      values.push(this.#capture(argument.value));
     }
     // The body is checked before the arguments, so they must fit the parameters as the body uses them.
     const result = copyType(yield* compileChild(this.#functionResultTask(fn)));
@@ -875,10 +892,13 @@ class TypeChecker {
 
   /**
    * The type of an expression; reports operations on values that do not support them. Each expression is checked once,
-   * and its type is kept for the stores that later check its parts.
+   * and its type is kept for the stores that later check its parts. The type of a place read is the place's own type:
+   * use it at once, or keep it through {@link #capture}.
    */
   *#expressionTask(expression: Expression, scope: Scope): CompileTask<StaticType> {
-    const type = yield* compileChild(this.#expressionTypeTask(expression, scope));
+    const result = yield* compileChild(this.#expressionTypeTask(expression, scope));
+    const type = result.kind === "placeRead" ? result.type : result;
+    if (result.kind === "placeRead") this.#placeReads.add(expression);
     this.#types.set(expression, type);
     return type;
   }
@@ -888,7 +908,25 @@ class TypeChecker {
     return this.#types.get(expression) ?? UNKNOWN_TYPE;
   }
 
-  *#expressionTypeTask(expression: Expression, scope: Scope): CompileTask<StaticType> {
+  /**
+   * The type of a value that is kept beyond its expression, such as an argument, a part of a literal, or a returned
+   * value, taken right after the expression was checked. A place read is copied as it is now (ADR 0014 copies values),
+   * so later stores to the place do not change it, and later checks of the expression see the copy.
+   */
+  #capture(expression: Expression): StaticType {
+    const type = this.#typeOf(expression);
+    if (!this.#placeReads.delete(expression)) return type;
+    const copy = copyType(type);
+    this.#types.set(expression, copy);
+    return copy;
+  }
+
+  /** The type a new place keeps for the value of a checked expression (rules 1.2–1.4), copied from a place read. */
+  #newPlaceType(expression: Expression, type: StaticType): StaticType {
+    return this.#placeReads.has(expression) ? placeType(type) : freshPlaceType(type);
+  }
+
+  *#expressionTypeTask(expression: Expression, scope: Scope): CompileTask<StaticType | PlaceRead> {
     switch (expression.kind) {
       case "booleanLiteral":
         return BOOLEAN_TYPE;
@@ -903,25 +941,24 @@ class TypeChecker {
           if (part.kind === "stringInterpolation")
             yield* compileChild(this.#interpolationTask(part.expression, scope));
         return STRING_TYPE;
-      case "parenthesizedExpression":
-        return yield* compileChild(this.#expressionTask(expression.expression, scope));
+      case "parenthesizedExpression": {
+        const type = yield* compileChild(this.#expressionTask(expression.expression, scope));
+        return this.#placeReads.has(expression.expression) ? placeRead(type) : type;
+      }
       case "identifier": {
         const entry = scope.resolve(expression.name);
-        if (entry?.kind === "variable") return entry.variable.type;
+        if (entry?.kind === "variable") return placeRead(entry.variable.type);
         if (entry?.kind === "speaker" || (entry === undefined && expression.name === "speaker"))
           return { kind: "speaker" };
         return UNKNOWN_TYPE;
       }
       case "listLiteral":
       case "setLiteral": {
-        // The literal owns its element types: a variable's type inside it is copied (ADR 0014 copies values).
+        // The literal owns its element types: each is the element as it was evaluated (ADR 0014 copies values).
         const types: StaticType[] = [];
         for (const item of expression.elements) {
-          const type = yield* compileChild(this.#expressionTask(item, scope));
-          // The copy is the element as it was evaluated, also for a later check of this literal's parts.
-          const owned = isBorrowed(item) ? copyType(type) : type;
-          if (owned !== type) this.#types.set(item, owned);
-          types.push(owned);
+          yield* compileChild(this.#expressionTask(item, scope));
+          types.push(this.#capture(item));
         }
         // Elements of known types must share one type; an element of unknown type leaves the element type unknown.
         const known = types.filter((type) => resolved(type).kind !== "unknown");
@@ -933,11 +970,8 @@ class TypeChecker {
       case "objectLiteral": {
         const properties = new Map<string, StaticType>();
         for (const property of expression.properties) {
-          const type = yield* compileChild(this.#expressionTask(property.value, scope));
-          // The copy is the value as it was evaluated, also for a later check of this literal's parts.
-          const owned = isBorrowed(property.value) ? copyType(type) : type;
-          if (owned !== type) this.#types.set(property.value, owned);
-          properties.set(property.name.name, freshPlaceType(owned));
+          yield* compileChild(this.#expressionTask(property.value, scope));
+          properties.set(property.name.name, freshPlaceType(this.#capture(property.value)));
         }
         return { kind: "object", properties };
       }
@@ -950,7 +984,7 @@ class TypeChecker {
         const index = yield* compileChild(this.#expressionTask(expression.index, scope));
         this.#checkIndex(object, expression.object, index, expression.index);
         const list = resolved(nonNullType(object));
-        return list.kind === "list" ? list.element : UNKNOWN_TYPE;
+        return list.kind === "list" ? placeRead(list.element) : UNKNOWN_TYPE;
       }
       case "callExpression":
         return yield* compileChild(this.#callTask(expression, scope));
@@ -1106,10 +1140,15 @@ class TypeChecker {
       switch (method) {
         case "contains":
           return BOOLEAN_TYPE;
+        // A conversion builds a new collection, so its elements decide their type apart from the original's.
         case "toSet":
-          return value.kind === "list" ? { kind: "set", element: value.element } : UNKNOWN_TYPE;
+          return value.kind === "list"
+            ? { kind: "set", element: copyType(value.element) }
+            : UNKNOWN_TYPE;
         case "toList":
-          return value.kind === "set" ? { kind: "list", element: value.element } : UNKNOWN_TYPE;
+          return value.kind === "set"
+            ? { kind: "list", element: copyType(value.element) }
+            : UNKNOWN_TYPE;
         case "removeAt":
         case "removeFirst":
         case "removeLast":
@@ -1211,22 +1250,25 @@ class TypeChecker {
   #propertyType(
     object: StaticType,
     expression: Extract<Expression, { kind: "propertyAccessExpression" }>,
-  ): StaticType {
+  ): StaticType | PlaceRead {
     const value = resolved(nonNullType(object));
     const name = expression.property.name;
     switch (value.kind) {
       case "list":
       case "set":
         if (name === "length") return INTEGER_TYPE;
-        if (name === "first" || name === "last" || name === "random") return value.element;
+        if (name === "first" || name === "last" || name === "random")
+          return placeRead(value.element);
         this.#report(
           typeCode.invalidOperand,
           `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'; use length, first, last, or random.`,
           expression.property.span,
         );
         return UNKNOWN_TYPE;
-      case "object":
-        return value.properties?.get(name) ?? UNKNOWN_TYPE;
+      case "object": {
+        const type = value.properties?.get(name);
+        return type === undefined ? UNKNOWN_TYPE : placeRead(type);
+      }
       case "timer":
       case "media": {
         const type = handlePropertyType(value.kind, name, "read");
@@ -1336,7 +1378,10 @@ class TypeChecker {
         // value or its text, so only scalar elements give a known result type.
         const element = resolved(value.element);
         values.push(
-          written ?? (isNullable(type) || element.kind === "object" ? UNKNOWN_TYPE : value.element),
+          written ??
+            (isNullable(type) || element.kind === "object"
+              ? UNKNOWN_TYPE
+              : copyType(value.element)),
         );
         continue;
       }
@@ -1864,19 +1909,6 @@ function expressionLabel(expression: Expression): string | null {
   return names.reverse().join(".");
 }
 
-/**
- * Whether an expression reads a value that another place holds, such as a variable or a property. A new place gets
- * its own copy of that value's type; the type of any other expression already belongs to the expression alone.
- */
-function isBorrowed(expression: Expression): boolean {
-  const node = unwrap(expression);
-  return (
-    node.kind === "identifier" ||
-    node.kind === "propertyAccessExpression" ||
-    node.kind === "indexExpression"
-  );
-}
-
 /** A slot already decided by its first value at `at`, so a later mismatch can name that line. */
 function decidedSlot(type: StaticType, at: SourceSpan): StaticType {
   // A place still undecided, such as one that so far took only null, is decided by its first other value instead.
@@ -1885,11 +1917,6 @@ function decidedSlot(type: StaticType, at: SourceSpan): StaticType {
   slot.resolved = type;
   slot.resolvedAt = at;
   return slot;
-}
-
-/** The type a new place keeps for the value of `expression` (rules 1.2–1.4), copied when another place holds it. */
-function ownType(expression: Expression, type: StaticType): StaticType {
-  return isBorrowed(expression) ? placeType(type) : freshPlaceType(type);
 }
 
 /** A literal list, set, or range that certainly has an element, so a loop over it runs at least once. */

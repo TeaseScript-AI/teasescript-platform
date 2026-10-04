@@ -713,6 +713,49 @@ test("a function result, a body, or a copy never changes the types another place
       [],
       empty,
     );
+  // A converted collection is a new one: in either order, each decides its element type on its own, and a first null
+  // stays a first null in both. One already decided keeps its type.
+  for (const [empty, convert, decided, nullFirst] of [
+    ["[]", "toSet", "[1]", '[null, "x"]'],
+    ["set[]", "toList", "set[1]", '[null, "x", null]'],
+  ]) {
+    for (const stores of ['a.add(1)\nb.add("x")', 'b.add("x")\na.add(1)'])
+      assert.deepEqual(
+        sayTexts(`let a = ${empty}\nlet b = a.${convert}()\n${stores}\nsay a\nsay b`),
+        ["[1]", '["x"]'],
+        stores,
+      );
+    assert.deepEqual(
+      sayTexts(
+        `let a = ${empty}\na.add(null)\nlet b = a.${convert}()\na.add(1)\nb.add("x")\nb.add(null)\nsay b`,
+      ),
+      [nullFirst],
+    );
+    assert.deepEqual(codes(`let a = ${decided}\nlet b = a.${convert}()\nb.add("x")`), [
+      ["TSV041", '"x"'],
+    ]);
+  }
+  // A return is the value as it was evaluated: a later statement of the body changes only the place it was read from.
+  for (const [setup, read, write] of [
+    ["let given = {}", "given", "given.flag = 1"],
+    ["let given = {}", "(given)", "given.flag = 1"],
+    ["let given = { nest: {} }", "given.nest", "given.nest.flag = 1"],
+    ["let given = [{}]", "given[0]", "given[0].flag = 1"],
+    ["", "local", "local.flag = 1"],
+  ])
+    assert.deepEqual(
+      sayTexts(
+        `${setup}\nfunction f(flag = false) {\n    let local = {}\n    if flag {\n        return ${read}\n    }\n    ${write}\n    return { flag: true }\n}\nsay f(true)\nsay f(false)`,
+      ),
+      ["{}", "{ flag: true }"],
+      read,
+    );
+  assert.deepEqual(
+    codes(
+      "let given = { flag: 1 }\nfunction f(flag = false) {\n    if flag {\n        return given\n    }\n    return { flag: true }\n}\nlet result = f(true)",
+    ),
+    [["TSV044", "{ flag: true }"]],
+  );
 });
 
 test("arguments are checked as they were evaluated, against the parameters of the whole body", () => {
@@ -721,16 +764,38 @@ test("arguments are checked as they were evaluated, against the parameters of th
   for (const [parameter, use, call] of [
     ["obj = {}, n = 0", "obj.flag", "f(given)"],
     ["obj = {}, n = 0", "obj.flag", "f(given, fill())"],
+    ["obj = {}, n = 0", "obj.flag", "f(holder.given, fill())"],
+    ["obj = {}, n = 0", "obj.flag", "f(row[0], fill())"],
     ["obj = { nest: {} }", "obj.nest.flag", "f({ nest: given })"],
     ["items = [{}]", "items[0].flag", "f([given])"],
   ])
     assert.deepEqual(
       sayTexts(
-        `${given}function f(${parameter}) {\n    ${use} = true\n    given.flag = 1\n    return ${use}\n}\nsay "\${${call}}"`,
+        `${given}let holder = { given: {} }\nlet row = [{}]\nfunction f(${parameter}) {\n    ${use} = true\n    given.flag = 1\n    holder.given.flag = 1\n    row[0].flag = 1\n    return ${use}\n}\nsay "\${${call}}"`,
       ),
       ["true"],
       call,
     );
+  // A converted collection is the elements as they were evaluated, also as a part of a literal argument; elements
+  // added before the conversion must fit.
+  for (const [empty, convert, typed, texts] of [
+    ["[]", "toSet", "string set", 'set["s"]'],
+    ["set[]", "toList", "string[]", '["s"]'],
+  ]) {
+    const functions = `let a = ${empty}\nfunction fill {\n    a.add(1)\n    return 0\n}\nfunction f(items: ${typed}, n = 0) {\n    return items.length\n}\nfunction g(obj = { items: ${texts}, tick: 0 }) {\n    return obj.items.length\n}\n`;
+    const converted = `a.${convert}()`;
+    for (const [call, earlier] of [
+      [`f(${converted}, fill())`, `f(${converted})`],
+      [`g({ items: ${converted}, tick: fill() })`, `g({ items: ${converted}, tick: 0 })`],
+    ]) {
+      assert.deepEqual(sayTexts(`${functions}say "\${${call}}"`), ["0"], call);
+      assert.deepEqual(
+        codes(`${functions}a.add(1)\nlet count = ${earlier}`),
+        [["TSV041", converted]],
+        earlier,
+      );
+    }
+  }
   // A property the argument already has when it is evaluated must fit.
   assert.deepEqual(
     codes(
