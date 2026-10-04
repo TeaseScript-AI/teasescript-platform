@@ -362,7 +362,9 @@ function candidateConversionProblem(
     if (type.kind === "scalar" || type.kind === "null") return undefined;
     return type.kind === "list" || type.kind === "set"
       ? `toString(...) cannot convert ${describeValue(type)}; use ${type.kind === "set" ? ".toList().join()" : ".join()"} to combine its elements as text.`
-      : `toString(...) converts text, numbers, true or false, null, durations, and date and time values, not ${describeValue(type)}.`;
+      : type.kind === "dict"
+        ? `toString(...) cannot convert ${describeValue(type)}; use .values.join() to combine its values as text.`
+        : `toString(...) converts text, numbers, true or false, null, durations, and date and time values, not ${describeValue(type)}.`;
   }
   if (isTemporalConversionResult(result)) {
     const conversion = TEMPORAL_CONVERSIONS[result];
