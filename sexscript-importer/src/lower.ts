@@ -4143,8 +4143,13 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       }
       return { kind: "property", target, name: propertyName };
     }
-    if (targetNode !== null && isKnownMapExpression(targetNode, context)) {
-      // A runtime key on a map: TeaseScript object properties are fixed, so only a dictionary can look it up.
+    if (
+      targetNode !== null &&
+      (isKnownMapExpression(targetNode, context) ||
+        onlyOf(inferType(indexNode, context.types), STRING))
+    ) {
+      // A runtime key on a map: TeaseScript object properties are fixed, so only a dictionary can look it up. A text
+      // key cannot index a list, so its receiver is a map too.
       if (!context.proposals.has("dictionaries")) {
         return unsupportedExpression(
           context,

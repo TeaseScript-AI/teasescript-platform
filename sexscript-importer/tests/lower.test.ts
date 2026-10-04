@@ -1120,6 +1120,33 @@ test("maps legacy getBooleans to accepted askBooleans", () => {
   );
 });
 
+test("reports a lookup with a text key as map access instead of list indexing", () => {
+  const declaration = (name: string, right: AstNode): AstNode =>
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable(name),
+      right,
+    });
+  const program = lowerParsedFile(
+    file([
+      declaration("key", constant("collar")),
+      declaration("found", {
+        kind: "binary",
+        span,
+        operator: "[",
+        left: variable("registry"),
+        right: variable("key"),
+      }),
+    ]),
+  );
+  assert.deepEqual(
+    program.diagnostics.map(({ code }) => code),
+    ["SX_DYNAMIC_MAP_ACCESS", "SX_UNSUPPORTED_DECLARATION_VALUE"],
+  );
+});
+
 test("counts an unsupported map key write once, at its root cause", () => {
   const position = (column: number, endColumn: number): SourceSpan => ({
     line: 1,
