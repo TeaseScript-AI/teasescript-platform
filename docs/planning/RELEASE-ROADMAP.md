@@ -106,6 +106,17 @@ and breaking changes remain acceptable.
   - **Reference:** [`TEASESCRIPT.md`](../TEASESCRIPT.md) and
     [`accepted-syntaxes-v30.md`](../specifications/accepted-syntaxes-v30.md).
 
+- [ ] **Review all author- and player-facing messages**
+  - **Outcome:** Review every compiler diagnostic, runtime error, developer warning, and Player error or status message
+    in one pass, so that each one uses plain language for non-programmers, names the problem and a concrete fix, and
+    fits the product's tone. No current message wording is owner-approved. Record the agreed message style once in its
+    canonical document and apply it consistently. An example is the Player's "Number completion is not an accepted
+    decimal or scientific number."
+  - **Trigger:** Start after the syntax work of tracker #512 has landed, so messages for the settled syntax are reviewed
+    once, and before Alpha testing with authors.
+  - **Reference:** Tracker #512, the diagnostic catalog in [`TEASESCRIPT.md`](../TEASESCRIPT.md), and
+    [`PLAYER-UI.md`](../ui/PLAYER-UI.md).
+
 - [ ] **Cross-origin Player host contract**
   - **Outcome:** Define the smallest coherent production contract between the application host shell and its cross-origin
     Player iframe: iframe creation/lifecycle, sandbox/CSP, validated parent/Player messages, capability negotiation,
