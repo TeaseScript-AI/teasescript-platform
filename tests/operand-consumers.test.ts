@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { run } from "../src/runtime/engine.js";
+import { completeAction } from "../src/runtime/operations/complete-action.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 
@@ -24,6 +28,24 @@ function says(source: string): string[] {
   const result = runValidSource(source);
   assert.equal(result.snapshot.failure, null, JSON.stringify(result.snapshot.failure));
   return sayTexts(result);
+}
+
+/** A source that opens one choice, run to its end after its first button is selected, with what it says then. */
+function saysAfterChoice(source: string): string[] {
+  const plan = compileValidPlan(source);
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  const action = pending.snapshot.foregroundAction;
+  assert.ok(action?.kind === "interaction", source);
+  const completed = completeAction(plan, pending.snapshot, {
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: "choice",
+    payload: { kind: "selectedOption", optionIndex: 0 },
+  });
+  assert.equal(completed.outcome.kind, "completed", source);
+  const finished = run(plan, completed.snapshot);
+  assert.equal(finished.snapshot.failure, null, JSON.stringify(finished.snapshot.failure));
+  return sayTexts(finished);
 }
 
 /** The operand sources: a statement that uses `@` becomes a program that gives `@` the value another way. */
@@ -72,6 +94,12 @@ test("a computed choice object's text that cannot be shown is an error", () => {
     errors('let options = [{ text: "A", value: 1 }]\nlet answer = choose options'),
     [],
   );
+  // A text that may still be null may give a button.
+  for (const source of [
+    'let options = [{ text: null }, { text: [1] }]\noptions.removeAt(1)\nlet answer = choose options\nsay "done"',
+    'let option = { text: null }\nif false {\n    option.text = [1]\n}\nlet answer = choose option\nsay "done"',
+  ])
+    assert.deepEqual(saysAfterChoice(source), ["done"], source);
 });
 
 test("join checks the element type of a computed list", () => {

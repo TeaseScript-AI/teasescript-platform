@@ -3363,7 +3363,7 @@ class TypeChecker {
                 option.expression.span,
               ),
           );
-        // A computed collection's choice objects may lack any property but text, whose known type must be shown.
+        // For a computed choice object, only text's known type is checked here; property presence is checked at runtime.
         for (const part of parts)
           if (part.kind === "list" || part.kind === "set")
             for (const element of members(part.element).map(resolved))
@@ -3452,7 +3452,7 @@ class TypeChecker {
     if (rejected) return UNKNOWN_TYPE;
     const literal = unwrap(entry);
     if (literal.kind !== "objectLiteral") {
-      // A computed choice object may lack any property but text, whose known type must be shown.
+      // For a computed choice object, only text's known type is checked here; property presence is checked at runtime.
       for (const member of members(nonNullType(type)).map(resolved))
         if (member.kind === "object" && member.properties !== null)
           this.#checkChoiceText(entry, member.properties);
@@ -3480,10 +3480,17 @@ class TypeChecker {
     return returned;
   }
 
-  /** A choice object's text that cannot be shown fails whether it is there or missing, so its type alone decides. */
+  /**
+   * A computed choice object's text that can never be shown fails whether it is there or missing, so its type alone
+   * decides. A text that may be null, unknown, or of a type that can be shown may still give a button.
+   */
   #checkChoiceText(expression: Expression, table: PropertyTable): void {
     const text = table.get("text");
-    if (text !== undefined) this.#checkShownText(expression, text, "the text of a choice option");
+    if (text === undefined) return;
+    const shown = (member: StaticType): boolean =>
+      !isKnown(member) || resolved(member).kind === "null" || isShowable(member);
+    if (!members(text).some(shown))
+      this.#checkShownText(expression, text, "the text of a choice option");
   }
 
   /** `${...}` shows a value, or one element of a list; a known value it cannot show is an error. */
