@@ -24,7 +24,7 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-04 at importer commit `71e4abc0`, after merging `main` at `b459787c` (#515), with `node src/cli.ts
+Measured on 2026-10-04 at importer commit `a9ce333b`, after merging `main` at `b459787c` (#515), with `node src/cli.ts
 report --run <package scripts>` (default conversion, without proposals). Toy's 21 runtime-loaded modules are part of its
 single script `toy.groovy`, so Toy counts as one script whose statements include all module code.
 
@@ -32,11 +32,11 @@ single script `toy.groovy`, so Toy counts as one script whose statements include
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Distribution | 14 | 12 | 12 | 12 | 8 | 8 |
 | Domme3 | 24 | 15 | 12 | 12 | 24 | 26 |
-| DisciplineClinic | 6 | 4 | 4 | 4 | 4 | 13 |
-| Toy expanded | 1 | 0 | 0 | 0 | 104 | 182 |
+| DisciplineClinic | 6 | 3 | 3 | 3 | 8 | 17 |
+| Toy expanded | 1 | 0 | 0 | 0 | 108 | 180 |
 
 Root errors count independent causes that need manual work; placeholders count unconverted statements. Converting a
-statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 104 come
+statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 108 come
 from about 4,800 source statements, mostly Java objects and APIs, collection methods on receivers the importer cannot
 prove to be lists (closure parameters, persona data, map entries), and closures that capture variables or are kept
 in data.
@@ -47,9 +47,9 @@ formatting, `getImage`, and lookup-table maps (as `dict`, #536; Toy 254 to 183) 
 DisciplineClinic's 8 variables that change type (#519) and 10 reads of never-assigned variables (legacy bugs in Domme3
 and DisciplineClinic) are newly reported; see [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md) and
 [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md). The third round (from 13, 24, 22, and 183) converts conditional
-expressions, inputs, and collection loops inside larger expressions through temporaries, splits variables reused for
-several types, notes what functions nothing calls cannot convert, and adds marked workarounds for two regular
-expressions and the system language.
+expressions, inputs, and collection loops inside larger expressions through temporaries, starts empty-text
+placeholders with their later type's empty value, notes what functions nothing references cannot convert, and adds
+marked workarounds for two regular expressions and the system language.
 
 Runtime smoke runs of the compiler-clean scripts (placeholder copies with host stand-ins):
 
@@ -61,15 +61,15 @@ Runtime smoke runs of the compiler-clean scripts (placeholder copies with host s
   line-writing loop (the typed text must match the shown line), `explain` returns to the entry flow, and six scripts
   (`confess`, `discipline`, `fun` through `spanking`, `maintenance`, `sleep`, `task`) fail comparing or calculating
   with settings that the introduction would have saved (see the null-comparison difference in `COMPATIBILITY-GAPS.md`).
-- DisciplineClinic: the entry flow runs through `DisciplineClinicMain` to `Exit` and ends. Its blockers were a menu
-  variable reused for text and lists (now split by type) and two test functions nothing calls (class loading,
-  never-assigned variables), which no longer block. Isolated, `WaitRoom` fails on a setting saved by the main script;
-  `Punish` and `OffenseSelect` are not converted (Java files, a never-assigned variable, a menu over a variable of
-  several types).
+- DisciplineClinic: the entry flow stops at the unconverted `DisciplineClinicMain`, where `dialog` holds text in most
+  functions and the option list of one menu; functions write it, so it is not split by type (`SX_TYPE_CHANGE`). Its
+  two test functions nothing references (class loading, never-assigned variables) no longer block. `Exit` runs to the
+  end; `WaitRoom` fails on a setting saved by the main script; `Punish` and `OffenseSelect` are not converted (Java
+  files, a never-assigned variable, and `response`, which holds text, yes/no answers, and menu positions).
 
 Smoke runs found two importer defects before they reached a snapshot: `getRandom(0)` (fixed with the legacy result)
-and range switch cases tested as lists. Going further into DisciplineClinic found a write by position into a list
-that starts empty, which Groovy grew (see `SX_LIST_GROWTH` in `COMPATIBILITY-GAPS.md`).
+and range switch cases tested as lists. A third-round run into DisciplineClinic's main script found a write by
+position into a list that starts empty, which Groovy grew (see `SX_LIST_GROWTH` in `COMPATIBILITY-GAPS.md`).
 
 One script compiles as generated (a distribution example; DisciplineClinic's `Exit` now uses `load "key", default:`,
 #541); script chaining is the main remaining gap. Scripts using each accepted-but-unimplemented capability, and how many
@@ -77,20 +77,20 @@ otherwise compiler-clean scripts use it (capabilities used by fewer than three s
 
 | Capability | Scripts using it | Otherwise compiler-clean scripts using it |
 | --- | ---: | ---: |
-| `run`/`end` | 41 | 24 |
-| `switch` (#528) | 26 | 12 |
-| `toInteger()` (#518) | 20 | 6 |
-| `getTimestamp().toSeconds()` (#532) | 18 | 5 |
+| `run`/`end` | 41 | 23 |
+| `switch` (#528) | 26 | 11 |
+| `toInteger()` (#518) | 20 | 5 |
+| `getTimestamp().toSeconds()` (#532) | 18 | 4 |
 | `showButton` timeout/elapsed (#531) | 14 | 5 |
-| `getDateTime()` (#532) | 14 | 5 |
+| `getDateTime()` (#532) | 14 | 4 |
 | `askBooleans()` | 10 | 8 |
 | `showPopup` | 10 | 4 |
-| `askInteger()` | 9 | 1 |
+| `askInteger()` | 9 | 0 |
 | `: number` for integer widening (#526) | 5 | 1 |
-| `load "key", default:` (#541) | 5 | 2 |
-| `round()` (#518) | 4 | 2 |
+| `load "key", default:` (#541) | 5 | 1 |
+| `round()` (#518) | 4 | 1 |
 | `getDate().toISO()`, `getTime().formatTime()` (#532) | 3 each | 1 each |
-| `openUrl()` | 3 | 1 |
+| `openUrl()` | 3 | 0 |
 
 The proposal mode's measurements are in [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md).
 

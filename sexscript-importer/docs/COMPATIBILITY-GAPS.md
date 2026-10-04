@@ -88,9 +88,9 @@ TeaseScript that the compiler gate replaces with stand-ins until it is implement
 | `a & f()`, `a \| f()` on booleans | `let earlier = a`, `let conditional = f()`, then `earlier and conditional` |
 | `list.findAll { }`, `any`, `every`, `collect`, `find`, `sum` inside a larger expression | the loop into `findAllResult` (and so on) before the statement |
 | `getSelectedValue(q, opts.collect { it.lbl })` inside a larger expression | the menu into `selected` before the statement |
-| `x.isEmpty()`, `n.times { }` on a value of unknown type | `x.length == 0` (text, lists, and dicts); the loop (Groovy has `times()` only on numbers) |
+| `x.isEmpty()`, `x.size()`, `n.times { }` on a value of unknown type | `x.length == 0`, `x.length` (text, lists, and dicts), with a note where the value may be an object, whose length fails (`SX_LENGTH_RECEIVER`, 20 sites); the loop (Groovy has `times()` only on numbers) |
 | `list = list.sort()` | `list.sort()` |
-| A script variable assigned before every read, with values of several types (`response = ""`, later `response = getBoolean(...)`) | one variable per type (`response`, `responseBoolean`, `responseNumber`) |
+| A script variable that holds values of several types where every write and read is straight-line code of the block that declares it, which no function writes (`x = "a"; say x; x = 1; ...`) | one variable per type (`x`, `xNumber`); otherwise a type change (`SX_TYPE_CHANGE`) |
 | `while (playBackgroundSound(s) \|\| true)` | `while true` with the call as its first statement |
 | `sleep(ms)`, `waitWithGauge(s)` | `wait ... ms`, `timer ...` |
 
@@ -142,7 +142,7 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   that may be missing becomes `if map.contains(key) { map.remove(key) }`. A fallback for a missing key (`m[k] ?: d`,
   `m.containsKey(k) ? m[k] : d`, read-then-default) becomes `m.get(k, default: d)`, with a note where Groovy's fallback
   also replaced a stored null, or with `?:` a stored false, 0, or empty value (`SX_DICT_DEFAULT`). Any other lookup
-  fails where Groovy continued with null, so it gets a note (`SX_DICT_MISSING_KEY`, 14 Toy sites) unless its key is
+  fails where Groovy continued with null, so it gets a note (`SX_DICT_MISSING_KEY`, 13 Toy sites) unless its key is
   proven present: a literal key that every map assigned to the variable has and nothing removes, a key a surrounding
   test found, a key written earlier in the same block, or the key of a loop over `keySet()`. Groovy kept a key's type,
   so `1` and `"1"` were different keys, while dict keys are text: number keys become text with a note
@@ -158,10 +158,12 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   (`SX_PLACEHOLDER_TYPE`, 5 DisciplineClinic sites). A write by position into a list that starts empty grew the Groovy
   list, padding with null; the conversion appends when the position is the length and notes the difference beyond it
   (`SX_LIST_GROWTH`, DisciplineClinic's `assignmentArrayList`).
-- What a function cannot convert does not block the script when nothing in the package calls the function or uses it as
-  a value, since Groovy never ran it: its diagnostics become notes (30 notes in the corpus, such as DisciplineClinic's
-  `testAllImages` and its class-loading `test`). A package with a call whose method name is computed keeps them
-  blocking, since such a call could reach any function.
+- What a function cannot convert does not block the script when nothing references the function: no call, action ID, or
+  use as a value in the generated program, which counts module loaders, setups, and the action dispatcher, and no
+  reference in the legacy code either, so a caller the conversion left unconverted still counts. Groovy never ran such a
+  function, so its diagnostics become notes (DisciplineClinic's `testAllImages` and its class-loading `test`, 9 notes;
+  Toy 1). A package with a call whose method name is computed keeps them blocking, since such a call could reach any
+  function.
 - Closures kept as values become action IDs called through one dispatcher. Unlike Groovy, the dispatcher ignores extra
   arguments and returns null for an unknown action; Groovy failed in both cases.
 - A `switch` case Groovy tested with `isCase` keeps its meaning only where the case value shows it: equality for
@@ -219,14 +221,14 @@ rules: the result types of PR #518, and the #504 decisions that a variable start
 of its first value (1a) and that an unannotated integer widens to `number` by itself (option B, built in #526). Where
 `main` needs another annotation, only the compiler gate writes it. Measured on the four corpus packages:
 
-- **Variables that change type: 8, all in DisciplineClinic.** Four start as an empty-text placeholder and later hold
-  a list (`def lineArray = ""`, then `lineArray = ["I need discipline, ...", ...]`, also `mantraArray`,
-  `lessonArray`, `adviceArray`); three reuse an answer variable for text and then booleans or menu positions
-  (`def response = ""`, later `response = getBoolean(...)` and `response = getSelectedValue(...)`); and `dialog` holds
-  the menu text and then the option list (`dialog = ["Back"] + mistressArray`), now seen because helper and function
-  results have types. Without union types they are reported at the declaration (`SX_TYPE_CHANGE`) and need separate
-  variables. That menu and one in OffenseSelect (whose option variable also holds a number) stay unconverted
-  (`SX_DYNAMIC_CHOICE_OPTIONS`). The other three packages reuse variables only with compatible types.
+- **Variables that change type: 8, all in DisciplineClinic.** Five start as an empty-text placeholder and later hold a
+  list or yes/no answers (`def lineArray = ""`, then `lineArray = ["I need discipline, ...", ...]`, also `mantraArray`,
+  `lessonArray`, `adviceArray`, and `answer`); they now start with the later type's empty value, with a note
+  (`SX_PLACEHOLDER_TYPE`). Three reuse a variable across functions: `response` (two scripts) for text, then booleans or
+  menu positions, and `dialog` for the menu text and then the option list (`dialog = ["Back"] + mistressArray`).
+  Functions write them, so splitting them by type would need flow analysis across calls; without union types they are
+  reported at the declaration (`SX_TYPE_CHANGE`), and the menus over `dialog` and over OffenseSelect's `answer` stay
+  unconverted (`SX_DYNAMIC_CHOICE_OPTIONS`). The other three packages reuse variables only with compatible types.
 - **Integer/number friction, resolved by #504 option B:** 18 declarations (Domme3 3, DisciplineClinic 9, Toy 6) start
   with a whole number and later hold a fraction (`def spankTempo = 1`, later `spankTempo = 0.75`). Under #519 alone
   each needed `: number`, which takes a whole-program view of every later assignment. The output now writes none;
@@ -264,7 +266,7 @@ showed:
   become `contains` tests, and 5 `remove` calls on keys that may be missing need `if map.contains(key) { ... }`. The
   default lookup that #536 added, `m.get(k, default: d)`, covers fallbacks for a missing key; Toy has one,
   `toynames[t] ?: t.replaceAll("_", " ")`, which becomes `toynames.get(t, default: t.replace("_", " "))` with a note,
-  since Groovy's `?:` also replaced a stored empty name. 14 Toy lookups have a key
+  since Groovy's `?:` also replaced a stored empty name. 13 Toy lookups have a key
   the importer cannot prove present (a parameter, a list element, a computed level) and get a note, since they stop
   the script where Groovy read null.
 - **Number keys:** Toy keeps two tables keyed by level (`[1: 1.25, 2: 1.1, ...][getLevel(DENIAL)]`), so their keys and
@@ -349,7 +351,7 @@ timeout and elapsed result (#531), `askInteger`, `askBooleans`, date and time (`
 `round`/`floor`/`ceil` and the conversions (#518), text operations and `join` (#518), list `sort()` (V30 §16),
 `takePhoto()` (camera, #475), integer widening (#504 option B, #526), for which the gate writes `: number`, `dict` with
 `get(key, default:)` (#536), and `load "key", default:` (#541), which the gate writes in the form `main` still
-implements. `run`/`end` dominates: it blocks 24 otherwise compiler-clean corpus scripts.
+implements. `run`/`end` dominates: it blocks 23 otherwise compiler-clean corpus scripts.
 
 ## Remaining gaps by workaround class
 
@@ -364,10 +366,10 @@ column "Before" gives the count at the `dict` round.
 | --- | --- | --- | --- |
 | Conditional expressions (`?:`, Elvis) inside larger expressions and conditions | Toy about 40 | 0 | a temporary computed before the statement, with earlier parts first (done) |
 | Inputs on the right of `&&`/`\|\|`, `&`/`\|` with effects on the right | Toy about 10, distribution 2 | Toy 1 (`goodToy & ...`, left side not proven boolean) | temporaries and an `if` (done) |
-| Collection methods with closures inside larger expressions; `times`, `isEmpty`, `sort` | Toy 36 of 59 dynamic calls | Toy 25 of 50, all on receivers the importer cannot prove to be lists | loops (done where the receiver is a list or range) |
-| Collection methods on unproven receivers: closure parameters (`texts.collect`), persona data (`DOMME.sessions.forEach`), map entries (`toys.any { s, t -> }`), plus `each`, `sum`, list appends | (in the row above) | Toy 25 dynamic calls, 7 `each`, 4 `sum`, 3 appends, 2 other | a loop once inference proves the list, or a key loop with a lookup for a dict |
+| Collection methods with closures inside larger expressions; `times`, `isEmpty`, `sort` | Toy 36 of 59 dynamic calls | Toy 27 of 53, all on receivers the importer cannot prove to be lists | loops (done where the receiver is a list or range) |
+| Collection methods on unproven receivers: closure parameters (`texts.collect`), persona data (`DOMME.sessions.forEach`), map entries (`toys.any { s, t -> }`), plus `each`, `sum`, list appends | (in the row above) | Toy 27 dynamic calls, 7 `each`, 4 `sum`, 3 appends, 2 other | a loop once inference proves the list, or a key loop with a lookup for a dict |
 | Menus built inside larger expressions | Toy 6 | Toy 2 (option lists not proven) | the menu into a temporary first (done) |
-| Variables that hold values of two types (valid dynamic Groovy) | DisciplineClinic 8 | 0; Toy 1 | one variable per type where every read follows its own assignment; an empty-text placeholder starts with the later type's empty value (done) |
+| Variables that hold values of two types (valid dynamic Groovy) | DisciplineClinic 8 | DisciplineClinic 3 (written by functions), Toy 1 | an empty-text placeholder starts with the later type's empty value (done, 5); one variable per type in straight-line code (done, none in the corpus); across functions, flow analysis or union types (#530) |
 | Closures that capture local state | Toy 10 | Toy 10 | explicit state parameters: feasible for 2 local helpers that call sibling local closures (`suck`, `suckBeat`); the other 8 are stored in registries, returned, or evaluate persona expressions |
 | Method pointers; calls of closures kept in data (`it.cond()`, `e.event.func(...)`) | Toy 3 and 4 | Toy 3 and 5 | action IDs with a dispatcher |
 | Persona data files with Groovy expression strings | Toy | Toy | data converted at import time |
@@ -390,8 +392,8 @@ accepted implementation is still wanted. Each workaround the importer emits carr
 
 | Gap | Corpus | Why |
 | --- | --- | --- |
-| Script transfers `run`/`call`/`goto`/`end` (syntax under re-evaluation in the tracker) | blocks 24 scripts (distribution 9, Domme3 12, DisciplineClinic 3) | A package is several scripts that transfer to each other. Imitating that means merging every script into one file with a dispatcher loop, with every function passing a pending transfer up to it: a rewrite of the whole package. Only `call` alone maps to a function call within one file. |
-| Desktop and Java APIs: `java.time` formatting and zones (5), files (4), `java.util.Random` (3), JSON and Base64 (2), `Eval.me`, `java.util.function.Function`, `System.getProperty`, OS processes (1 each), Java objects, the Cornertime exchange | Toy 18 of its 50 dynamic calls and 7 constructors, distribution | Outside the product boundary by design (see Legacy baggage). `Random.nextInt(n)` alone could become `randomInteger()`, without the seed. |
+| Script transfers `run`/`call`/`goto`/`end` (syntax under re-evaluation in the tracker) | blocks 23 scripts (distribution 9, Domme3 12, DisciplineClinic 2) | A package is several scripts that transfer to each other. Imitating that means merging every script into one file with a dispatcher loop, with every function passing a pending transfer up to it: a rewrite of the whole package. Only `call` alone maps to a function call within one file. |
+| Desktop and Java APIs: `java.time` formatting and zones (5), files (4), `java.util.Random` (4), JSON and Base64 (2), `Eval.me`, `java.util.function.Function`, `System.getProperty`, OS processes (1 each), Java objects, the Cornertime exchange | Toy 19 of its 53 dynamic calls and 8 constructors, distribution | Outside the product boundary by design (see Legacy baggage). `Random.nextInt(n)` alone could become `randomInteger()`, without the seed. |
 | Legacy bugs (variables nothing assigns, helpers without the script host) | Domme3 3 and 7, DisciplineClinic 1 | Need an author's repair; reporting them is correct. Six more sit in functions nothing calls and are notes now. |
 
 ### Third-round findings
@@ -407,12 +409,14 @@ Smoke runs that go further surface problems the static gates do not:
 - **`main` compiles method calls its runtime does not implement.** Text operations such as `trim()` pass the compiler
   and fail only at runtime (`TSR016`) until PR #518 lands, so the compiler gate alone would not catch them; the smoke
   runs do.
-- **Unreachable legacy code blocked whole scripts.** Test functions nothing calls held class loading and reads of
-  never-assigned variables (DisciplineClinic's `testAllImages` and `test`); as notes, DisciplineClinic's entry flow
-  now runs through its main script to the end.
-- **Variables reused for several types are scratch variables.** All three such variables (`dialog`, and `response` in
-  two scripts) are assigned before every read, so one variable per type is exact; five empty-text placeholders later
-  hold lists or yes/no answers.
+- **Unreachable legacy code blocked whole scripts.** Test functions nothing references held class loading and reads of
+  never-assigned variables (DisciplineClinic's `testAllImages` and `test`); they are notes now. Which functions are
+  unreferenced has to come from the generated program together with the legacy code: module loads and setups run
+  module code that no legacy name refers to, and an unconverted caller still calls.
+- **Variables reused for several types cross function boundaries.** DisciplineClinic's `dialog` and `response` are
+  written by many functions, each assigning before it reads, so a split by type would need flow analysis across calls,
+  `break`, and loops; they stay type changes, and `dialog` keeps the main script, and with it the entry flow, blocked.
+  Five empty-text placeholders later hold lists or yes/no answers and convert with a note.
 - **Isolated runs still fail on settings the introductions save** (Domme3 6 scripts, DisciplineClinic `WaitRoom`):
   Groovy compared a missing setting as null, which TeaseScript comparisons reject.
 
