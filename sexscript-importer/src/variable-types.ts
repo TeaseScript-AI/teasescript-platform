@@ -10,8 +10,9 @@ import type { IrExpression, IrFunctionParameter, IrStatement } from "./ir.ts";
  * types, such as text and a list, cannot be expressed without union types; those are returned as conflicts.
  *
  * Types follow the compiler (`src/static-types.ts` in the repository root) plus the accepted result types it does not
- * implement yet: text operations, `join`, conversions, and rounding (#518), `choose` values (#515), and the
- * `showButton` elapsed duration (#513). Values it cannot know, such as storage and function results, are not checked.
+ * implement yet: text operations, `join`, conversions, and rounding (#518), list `choose` values (#515), and the
+ * `showButton` elapsed duration (#513). A compact numeric `choose` keeps `main`'s `number` until PR #515 merges.
+ * Values it cannot know, such as storage and function results, are not checked.
  */
 export type TeaseType =
   | { kind: "unknown" }
@@ -31,6 +32,8 @@ export interface TypeConflict {
   /** The statement that stores the value of another type. */
   statement: IrStatement;
   message: string;
+  /** SX_TYPE_CHANGE, or SX_LIST_CONCATENATION for a list append of a value of unknown type. */
+  code: string;
 }
 
 export interface VariableTypeResult {
@@ -75,6 +78,7 @@ interface Conflict {
   /** Whether the declaration itself is fine and only this statement is invalid, such as `list += value`. */
   operation: boolean;
   message: string;
+  code: string;
 }
 
 export function enforceVariableTypes(statements: IrStatement[]): VariableTypeResult {
@@ -101,6 +105,7 @@ export function enforceVariableTypes(statements: IrStatement[]): VariableTypeRes
       binding,
       statement: binding.declaration,
       operation: false,
+      code: "SX_TYPE_CHANGE",
       message: `'${binding.name}' needs the type ${type === undefined ? "?" : typeName(type)} for its later values, which TeaseScript cannot write as an annotation`,
     });
     conflicting.add(binding);
@@ -132,6 +137,7 @@ export function enforceVariableTypes(statements: IrStatement[]): VariableTypeRes
       declaration,
       statement: declaration,
       message: declarationMessage(items),
+      code: "SX_TYPE_CHANGE",
     });
   }
   for (const conflict of statementConflicts.values()) {
@@ -139,6 +145,7 @@ export function enforceVariableTypes(statements: IrStatement[]): VariableTypeRes
       declaration: conflict.binding.declaration,
       statement: conflict.statement,
       message: conflict.message,
+      code: conflict.code,
     });
   }
 
@@ -288,8 +295,9 @@ function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>):
     statement: IrStatement,
     message: string,
     operation = false,
+    code = "SX_TYPE_CHANGE",
   ): void => {
-    analysis.conflicts.push({ binding: target, statement, operation, message });
+    analysis.conflicts.push({ binding: target, statement, operation, message, code });
   };
   const change = (apply: () => void): void => {
     apply();
@@ -345,6 +353,13 @@ function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>):
             analysis.truncations.add(item);
             return store(target, scalar("integer"), item);
           }
+          const list = type === undefined ? undefined : nonNull(type);
+          if (item.value.kind === "list" && list?.kind === "list") {
+            // Like the compiler, a list literal is checked element by element against a known element type.
+            for (const element of item.value.items)
+              storeElement(target, typeOf(element, scope), item);
+            return;
+          }
           return store(target, value, item);
         }
         const current = type ?? (target.integer ? scalar("integer") : UNKNOWN);
@@ -355,8 +370,20 @@ function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>):
           nonNull(current).kind === "list" &&
           value.kind !== "null"
         ) {
-          // Groovy `list += other` appended the other list's elements, or one value.
-          analysis.appends.set(item, nonNull(value).kind === "list");
+          // Groovy `list += other` appended the elements of a list or range, or else one value; a value that may be
+          // either cannot be converted.
+          const appended = nonNull(value);
+          if (value.kind === "optional" || appended.kind === "unknown") {
+            conflict(
+              target,
+              item,
+              `Groovy '+=' appended to the list '${target.name}' either the elements of a list or one value, and the type of this value is not proven; convert it manually`,
+              true,
+              "SX_LIST_CONCATENATION",
+            );
+            return;
+          }
+          analysis.appends.set(item, appended.kind === "list" || appended.kind === "range");
           return;
         }
         if (result === undefined) {
@@ -722,7 +749,9 @@ export function expressionType(
     case "load":
       return UNKNOWN;
     case "choice":
-      return value.labels === undefined ? scalar("integer") : scalar("string");
+      // PR #515 makes numeric choice values integers; until it merges, `main` types them as numbers, and a variable
+      // declared from a whole number that later receives one needs `: number` there.
+      return value.labels === undefined ? scalar("number") : scalar("string");
     case "listChoice": {
       const values: TeaseType[] = [];
       for (const option of value.options) {

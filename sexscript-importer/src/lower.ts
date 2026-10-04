@@ -155,6 +155,11 @@ interface LowerContext {
   /** List variables that Groovy shared with another variable by an assignment of one to the other. */
   aliasedLists: ReadonlySet<string>;
   proposals: ReadonlySet<ProposalId>;
+  /**
+   * Whether a read of a name nothing assigns is reported. Only with package context: a file converted alone, such
+   * as a mixin module, reads names that other package files define.
+   */
+  checksUndefinedVariables: boolean;
 }
 
 /** Source comments not yet emitted; shared by every context lowering the same file. */
@@ -242,6 +247,7 @@ export function lowerParsedFile(
     dateValues: new Set(),
     aliasedLists: new Set(),
     proposals: options.proposals ?? new Set(),
+    checksUndefinedVariables: options.packageFunctions !== undefined,
   };
   if (file.diagnostics.length > 0 || file.root === null) {
     for (const diagnostic of file.diagnostics) {
@@ -428,7 +434,7 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
   for (const conflict of result.conflicts) {
     const span = conflict.statement.span;
     const diagnostic: MigrationDiagnostic = {
-      code: "SX_TYPE_CHANGE",
+      code: conflict.code,
       severity: "error",
       message: conflict.message,
       span,
@@ -438,7 +444,7 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
     replaced.set(conflict.statement, [
       {
         kind: "comment",
-        text: `// TODO SX_TYPE_CHANGE${span === null ? "" : ` line ${span.line}`}: ${singleLine(conflict.message)}`,
+        text: `// TODO ${conflict.code}${span === null ? "" : ` line ${span.line}`}: ${singleLine(conflict.message)}`,
         trailing: false,
         span,
       },
@@ -567,6 +573,7 @@ function lowerHelperMethod(
     dateValues: new Set(),
     aliasedLists: new Set(),
     proposals: baseContext.proposals,
+    checksUndefinedVariables: baseContext.checksUndefinedVariables,
     currentFunction: {
       name,
       locals: functionLocalNames(
@@ -3561,9 +3568,11 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
   // A Groovy list case matches any of its elements, which a case with several values expresses (#528).
   const valueCases = cases.map((switchCase, index) => {
     const [match] = switchCase.matches;
+    // Only scalar literals: a range inside a list case is an element that `contains` compares, not a range case.
     const listCase =
       match?.kind === "list" &&
       match.items.length > 0 &&
+      match.items.every((item) => item.kind === "literal" && item.value !== null) &&
       onlyOf(inferType(matchNodes[index]!, context.types), LIST);
     return listCase ? { ...switchCase, matches: match.items } : switchCase;
   });
@@ -3890,6 +3899,7 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
         return { kind: "literal", value: name, action: true };
       }
       if (
+        context.checksUndefinedVariables &&
         !context.types.variables.has(name) &&
         !context.packageFunctions.has(name) &&
         !isLegacyGetterProperty(name)
@@ -6091,6 +6101,15 @@ function lowerSingleInput(
     );
   }
   if (prefill !== null) notePrefill(name, defaultNode!, node, context);
+  // Legacy text input showed `String.valueOf(default)`; a text default is text in TeaseScript too (null shows "null").
+  const textPrefill =
+    prefill === null ||
+    name !== "getString" ||
+    onlyOf(inferType(defaultNode!, context.types), STRING)
+      ? prefill
+      : prefill.kind === "literal"
+        ? { kind: "literal" as const, value: String(prefill.value) }
+        : templateOrLiteral([{ value: prefill }]);
   if (name === "getInteger") {
     // Accepted V30 integer input; compact syntax exists only for text and number input. A null legacy
     // message kept the current text, so the field gets no message of its own.
@@ -6106,14 +6125,15 @@ function lowerSingleInput(
   }
   if (!pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
   const input = name === "getString" ? "askText" : "askNumber";
-  return prefill === null
+  return textPrefill === null
     ? { kind: "input", input }
-    : { kind: "input", input, defaultValue: prefill };
+    : { kind: "input", input, defaultValue: textPrefill };
 }
 
 /**
- * A default TeaseScript rejects when the input opens: `null`, and for text input blank text (V30 §20). Legacy showed
- * "null" or an empty field instead, so a default that may be either gets a note.
+ * A default TeaseScript rejects when the input opens: `null` for numbers, and blank text for text input (V30 §20).
+ * Legacy showed "null" or an empty field instead, so a default that may be either gets a note. A text default that is
+ * not text becomes text, which is never blank.
  */
 function notePrefill(
   name: string,
@@ -6126,7 +6146,9 @@ function notePrefill(
   const valid =
     name === "getString"
       ? (typeof text === "string" && text.trim() !== "") ||
-        (defaultNode.kind === "gstring" && gstringHasText(defaultNode))
+        (text !== undefined && typeof text !== "string") ||
+        (defaultNode.kind === "gstring" && gstringHasText(defaultNode)) ||
+        onlyOf(type, NUMBER | BOOLEAN | NULL)
       : onlyOf(type, NUMBER);
   if (valid) return;
   addDiagnostic(
@@ -6134,7 +6156,7 @@ function notePrefill(
     "SX_INPUT_PREFILL",
     "warning",
     name === "getString"
-      ? `${name}() pre-filled its field with this value even when it was null or blank; a TeaseScript default must be non-blank text, or the input fails when it opens.`
+      ? `${name}() pre-filled its field with this value even when it was blank; a TeaseScript default must be non-blank text, or the input fails when it opens.`
       : `${name}() pre-filled its field with this value even when it was null; a TeaseScript default must be a number, or the input fails when it opens.`,
     node.span,
   );

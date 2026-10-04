@@ -175,6 +175,49 @@ test(
   },
 );
 
+// Appends, list literals, list cases, and text defaults whose Groovy meaning depends on a type.
+test(
+  "converts list appends, list cases, and text defaults only as far as their types are proven",
+  { skip: parserUnavailable },
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-proven-"));
+    try {
+      const sourcePath = path.join(directory, "proven.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          'def extra = { -> return ["b"] }',
+          "def build = { ->",
+          '  def items = ["a"]',
+          "  items += 1..3",
+          "  items += extra()",
+          "  return items",
+          "}",
+          "def other = { -> def items = extra(); return items }",
+          'def weights = [1, 2]; weights = [3, "four"]',
+          "switch (getRandom(9)) { case [1..3, 5]: show('hit'); break; case 7: show('seven') }",
+          'def code = getString("Code?", 42)',
+          "",
+        ].join("\n"),
+      );
+      const program = await convert(sourcePath);
+      const output = emitTease(program);
+      // A range is a list in Groovy, so its elements are appended.
+      assert.match(output, /^ {2}items = sexscriptLegacyConcat\(\[items, 1\.\.=3\]\)$/mu);
+      // A value that may be a list or one element is reported.
+      assert.match(output, /^ {2}\/\/ TODO SX_LIST_CONCATENATION line 5: /mu);
+      // A list literal is checked element by element, as the compiler does.
+      assert.match(output, /^\/\/ TODO SX_TYPE_CHANGE line 9: 'weights' holds integer values/mu);
+      // A list case holding a range keeps Groovy's membership test.
+      assert.match(output, /\[1\.\.=3, 5\]\.contains\(/u);
+      // Legacy showed a number default as text.
+      assert.match(output, /^let code = askText default: "42"$/mu);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 test(
   "package smoke run follows script transfers with shared storage",
   {

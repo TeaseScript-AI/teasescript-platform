@@ -4,13 +4,8 @@ import { emitTease } from "../src/emit-tease.ts";
 import { rootDiagnostics } from "../src/diagnostics.ts";
 import { lowerParsedFile } from "../src/lower.ts";
 import type { AstNode, ParsedGroovyFile, SourceSpan } from "../src/ast.ts";
-import { UNKNOWN } from "../src/types.ts";
 
 const span: SourceSpan = { line: 1, column: 1, endLine: 1, endColumn: 2 };
-/** Names a fragment reads without assigning them, defined elsewhere in its package. */
-const packageGlobals = (...names: string[]) => ({
-  globalTypes: new Map(names.map((name) => [name, UNKNOWN])),
-});
 const constant = (value: string | number | boolean | null): AstNode => ({
   kind: "constant",
   span,
@@ -111,7 +106,7 @@ test("maps Groovy inclusive ranges and removes terminal switch breaks", () => {
     },
   ]);
 
-  const program = lowerParsedFile(source, packageGlobals("value"));
+  const program = lowerParsedFile(source);
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),
@@ -146,7 +141,6 @@ test("keeps a switch whose cases overlap as an if chain, which keeps Groovy's fi
         default: { kind: "empty", span },
       },
     ]),
-    packageGlobals("value"),
   );
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
@@ -357,7 +351,7 @@ test("lowers indexing, primitive casts, and compound multiplication assignments"
     }),
   ]);
 
-  const program = lowerParsedFile(source, packageGlobals("items"));
+  const program = lowerParsedFile(source);
   assert.deepEqual(program.diagnostics, []);
   assert.equal(emitTease(program), "let value = toInteger(items[1])\nvalue = value * 2\n");
 });
@@ -775,7 +769,7 @@ test("lowers single-statement if, else, and else-if bodies", () => {
     },
   ]);
 
-  const program = lowerParsedFile(source, packageGlobals("first", "second"));
+  const program = lowerParsedFile(source);
   assert.deepEqual(
     program.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
     [],
@@ -904,7 +898,7 @@ test("expands Groovy switch fallthrough into explicit TeaseScript case bodies", 
     },
   ]);
 
-  const program = lowerParsedFile(source, packageGlobals("value"));
+  const program = lowerParsedFile(source);
   assert.deepEqual(
     program.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
     [],
@@ -1168,9 +1162,10 @@ test("maps legacy getBooleans to accepted askBooleans", () => {
   );
 });
 
-test("reports a read of a variable that nothing assigns, a legacy bug", () => {
+test("reports a read of a variable that nothing in the package assigns, a legacy bug", () => {
   const program = lowerParsedFile(
     file([statement(call("save", constant("spank"), variable("fun")))]),
+    { packageFunctions: new Set() },
   );
   assert.deepEqual(
     rootDiagnostics(program.diagnostics).map(({ code }) => code),
@@ -1198,7 +1193,6 @@ test("reports a lookup with a text key as map access instead of list indexing", 
         right: variable("key"),
       }),
     ]),
-    packageGlobals("registry"),
   );
   assert.deepEqual(
     program.diagnostics.map(({ code }) => code),

@@ -5,4 +5,7 @@ let name = askText default: "slave"
 let newLevel = askInteger("Set your level", default: level)
 say "Your weight in kg?"
 let weight = askNumber default: 70.5
-say "${name}: level ${newLevel}, ${weight} kg"
+// Legacy showed any default as text.
+say "Your code?"
+let code = askText default: "${level}"
+say "${name}: level ${newLevel}, ${weight} kg, code ${code}"

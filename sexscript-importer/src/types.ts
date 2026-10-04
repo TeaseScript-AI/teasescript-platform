@@ -320,6 +320,15 @@ function collectAssignments(
   unknownNames: Set<string>,
 ): void {
   if (node.kind === "declaration" || (node.kind === "binary" && node.operator === "=")) {
+    const left = asNode(node.left);
+    if (left?.kind === "arguments" && Array.isArray(left.items)) {
+      // `def (a, b) = list` assigns each name an element whose type is not tracked.
+      for (const item of left.items) {
+        const name = isAstNode(item) ? variableName(item) : null;
+        if (name !== null) unknownNames.add(name);
+      }
+      return;
+    }
     const name = variableName(node.left);
     const value = asNode(node.right);
     if (name === null || value === null) return;
