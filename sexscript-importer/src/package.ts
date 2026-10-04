@@ -29,6 +29,7 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "getDate",
   "getDateTime",
   "getTime",
+  "getTimestamp",
   "openUrl",
   "random",
   "randomInteger",
@@ -42,6 +43,7 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "toNumber",
   "toString",
   "toTime",
+  "toTimestamp",
 ]);
 
 export interface PackageOptions {

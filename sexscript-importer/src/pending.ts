@@ -28,13 +28,14 @@ const PENDING_CALLS = new Map<string, string>([
   ["showButton", "showButton timeout"],
   ["takePhoto", "takePhoto()"],
   ["toBoolean", "toBoolean()"],
+  ["toDate", "toDate()"],
   ["toInteger", "toInteger()"],
   ["toNumber", "toNumber()"],
   ["toString", "toString()"],
 ]);
 
 /** Current-time getters whose conversion and format methods (#532) the shim replaces together with the getter. */
-const TEMPORAL_GETTERS = new Set(["getDate", "getTime", "getDateTime"]);
+const TEMPORAL_GETTERS = new Set(["getDate", "getTime", "getDateTime", "getTimestamp"]);
 
 /** Calls that only a proposed language change defines, by the proposal (see proposals.ts). */
 const PROPOSED_CALLS = new Map<string, ProposalId>([["countImages", "media-tags"]]);
@@ -189,6 +190,17 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         }
         if (value.pending === true) {
           return call("text operations", `text.${value.name}`, [expression(value.target)]);
+        }
+        if (
+          value.name === "days" &&
+          value.target.kind === "binary" &&
+          value.target.operator === "-"
+        ) {
+          // Calendar days between two dates (#532), with the dates' stand-ins as arguments.
+          return call("(date - date).days", "(date - date).days", [
+            expression(value.target.left),
+            expression(value.target.right),
+          ]);
         }
         return { ...value, target: expression(value.target) };
       case "methodCall":
@@ -926,8 +938,43 @@ export function pendingHostFunctions(
     ["askIntegerPrompt", () => 0],
     ["askBoolean", () => next("askBoolean", [true, false])],
     ["askBooleans", (_, named) => named.defaults ?? emptyList],
-    ["getDateTime().toSeconds()", () => Math.floor((epochMs + state.clock.nowMs) / 1000)],
-    ["getDateTime().toMilliseconds()", () => epochMs + state.clock.nowMs],
+    ["getTimestamp().toSeconds()", () => Math.floor((epochMs + state.clock.nowMs) / 1000)],
+    ["getTimestamp().toMilliseconds()", () => epochMs + state.clock.nowMs],
+    // A date from strict ISO text, with the fields the getDate() stand-in has.
+    [
+      "toDate",
+      ([text]) => {
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(typeof text === "string" ? text : "");
+        if (match === null) throw new Error(`toDate() cannot convert ${JSON.stringify(text)}.`);
+        const fields: Array<[string, RuntimeValue]> = [
+          ["year", Number(match[1])],
+          ["month", Number(match[2])],
+          ["day", Number(match[3])],
+        ];
+        const value = {
+          kind: "object",
+          properties: fields.map(([name, item]) => ({ name, value: item })),
+        };
+        return value;
+      },
+    ],
+    // Whole calendar days between two dates: `(left - right).days`.
+    [
+      "(date - date).days",
+      ([left, right]) => {
+        const day = (value: RuntimeValue | undefined): number => {
+          const fields = new Map(
+            entries("(date - date).days", value).map((property) => [property.name, property.value]),
+          );
+          return Date.UTC(
+            Number(fields.get("year")),
+            Number(fields.get("month")) - 1,
+            Number(fields.get("day")),
+          );
+        };
+        return Math.round((day(left) - day(right)) / 86_400_000);
+      },
+    ],
     ["getDate().toISO()", () => new Date(epochMs + state.clock.nowMs).toISOString().slice(0, 10)],
     // The player's local presentation; the stand-in uses the ISO form.
     [

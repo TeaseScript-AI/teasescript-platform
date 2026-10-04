@@ -1,7 +1,8 @@
 import { TEASESCRIPT_PROTECTED_NAMES } from "../../src/protected-names.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 
-const PROTECTED: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);
+/** `timestamp` becomes a protected type name with the date and time values of #532, which main lacks yet. */
+const PROTECTED: ReadonlySet<string> = new Set([...TEASESCRIPT_PROTECTED_NAMES, "timestamp"]);
 
 /**
  * Renames legacy identifiers that TeaseScript rejects: names reserved by TeaseScript, and function parameters or

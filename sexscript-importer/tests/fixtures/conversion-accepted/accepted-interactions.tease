@@ -10,15 +10,15 @@ if elapsed >= 30 {
   say "Too slow"
 }
 openUrl("https://example.com")
-let start = getDateTime().toSeconds()
+let start = getTimestamp().toSeconds()
 if ready and sure {
   say "Starting ${count} rounds at ${start}"
 }
 // showPopup() returned the seconds until the player closed it.
-// NOTE SX_POPUP_ELAPSED line 12: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getDateTime().toSeconds(), in whole seconds.
-let popupStart = getDateTime().toSeconds()
+// NOTE SX_POPUP_ELAPSED line 12: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getTimestamp().toSeconds(), in whole seconds.
+let popupStart = getTimestamp().toSeconds()
 showPopup "Come here!"
-let late = getDateTime().toSeconds() - popupStart
+let late = getTimestamp().toSeconds() - popupStart
 if late > 60 {
   say "What took you so long?"
 }
@@ -26,11 +26,11 @@ function title {
   wait 1
   return "Ready?"
 }
-// NOTE SX_POPUP_ELAPSED line 15: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getDateTime().toSeconds(), in whole seconds.
+// NOTE SX_POPUP_ELAPSED line 15: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getTimestamp().toSeconds(), in whole seconds.
 let popupMessage2 = title()
-let popupStart2 = getDateTime().toSeconds()
+let popupStart2 = getTimestamp().toSeconds()
 showPopup popupMessage2
-let slow = getDateTime().toSeconds() - popupStart2
+let slow = getTimestamp().toSeconds() - popupStart2
 // getImage() took a webcam picture and returned its path, or null.
 // NOTE SX_CAMERA_FALLBACK line 17: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
 let photo = takePhoto()

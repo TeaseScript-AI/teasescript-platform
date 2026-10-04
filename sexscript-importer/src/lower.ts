@@ -655,9 +655,8 @@ function lowerStatementList(
 }
 
 /**
- * A loop that only redraws a countdown until `waited = getDateTime().toSeconds() - start` reaches a limit kept the
- * legacy player
- * busy for that time; TeaseScript runs it out of its instruction budget. Right after `waited` is computed, with a
+ * A loop that only redraws a countdown until `waited = getTimestamp().toSeconds() - start` reaches a limit kept the
+ * legacy player busy for that time; TeaseScript runs it out of its instruction budget. Right after `waited` is computed, with a
  * body that only shows text and sets its own locals before recomputing `waited`, it becomes a visible timer over the
  * limit (`timer`, as for waitWithGauge), whose display replaces the redrawn text.
  */
@@ -703,7 +702,7 @@ function withVisibleCountdowns(statements: IrStatement[], context: LowerContext)
   });
 }
 
-/** The start variable of `waited = getDateTime().toSeconds() - start` (declaration or assignment), or null. */
+/** The start variable of `waited = getTimestamp().toSeconds() - start` (declaration or assignment), or null. */
 function elapsedStart(statement: IrStatement, waited: string): string | null {
   const value =
     statement.kind === "let" && statement.name === waited
@@ -725,11 +724,14 @@ function elapsedStart(statement: IrStatement, waited: string): string | null {
   return value.right.name;
 }
 
-/** The current Unix time in seconds; #532 removed getSeconds() in favour of the datetime conversion. */
+/**
+ * The current Unix time in seconds, which legacy code used for elapsed time and "how long ago": a `timestamp` is the
+ * fixed moment for that, while local date and time values have no zone (#532).
+ */
 function currentSeconds(): IrExpression {
   return {
     kind: "methodCall",
-    target: { kind: "call", name: "getDateTime", positional: [], named: {} },
+    target: { kind: "call", name: "getTimestamp", positional: [], named: {} },
     name: "toSeconds",
     arguments: [],
   };
@@ -741,7 +743,7 @@ function isCurrentSeconds(value: IrExpression): boolean {
     value.name === "toSeconds" &&
     value.arguments.length === 0 &&
     value.target.kind === "call" &&
-    value.target.name === "getDateTime" &&
+    value.target.name === "getTimestamp" &&
     value.target.positional.length === 0
   );
 }
@@ -5352,7 +5354,7 @@ function dateFormat(
       context,
       node,
       "SX_DATE_FORMAT",
-      "This Java date is built from its arguments, such as a Unix time in milliseconds; TeaseScript has no conversion from Unix time to a date or datetime (#532). Store and load the datetime itself, then format it with formatDate() or toISO().",
+      "This Java date is built from its arguments, such as a Unix time in milliseconds; TeaseScript builds no timestamp or date from a number (#532). Store and load the timestamp or datetime itself, then format it.",
     );
   }
   const kind = pattern === null ? null : datePatternKind(pattern);
@@ -5452,6 +5454,37 @@ function dateTimeField(
         left: { kind: "binary", operator: "%", left: property("weekdayNumber"), right: literal(7) },
         right: literal(1),
       };
+    case "DAY_OF_YEAR": {
+      // Whole calendar days since January 1st, counted from one (#532: `date - date` and `.days`).
+      const date: IrExpression =
+        dateTime.kind === "call"
+          ? { kind: "call", name: "getDate", positional: [], named: {} }
+          : { kind: "call", name: "toDate", positional: [dateTime], named: {} };
+      const newYear: IrExpression = {
+        kind: "call",
+        name: "toDate",
+        positional: [
+          {
+            kind: "template",
+            parts: [
+              { value: { kind: "property", target: date, name: "year" } },
+              { text: "-01-01" },
+            ],
+          },
+        ],
+        named: {},
+      };
+      return {
+        kind: "binary",
+        operator: "+",
+        left: {
+          kind: "property",
+          target: { kind: "binary", operator: "-", left: date, right: newYear },
+          name: "days",
+        },
+        right: literal(1),
+      };
+    }
     default:
       return unsupportedExpression(
         context,
@@ -5937,7 +5970,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         context,
         "SX_POPUP_ELAPSED",
         "warning",
-        "showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getDateTime().toSeconds(), in whole seconds.",
+        "showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getTimestamp().toSeconds(), in whole seconds.",
         node.span,
       );
       // Legacy timing started once the message was computed.
@@ -5959,7 +5992,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       };
     }
     case "getTime":
-      // Legacy getTime() returned Unix seconds; TeaseScript getTime() is the time of day (#532).
+      // Legacy getTime() returned Unix seconds; TeaseScript getTime() is the local time of day (#532).
       return args.length === 0
         ? currentSeconds()
         : unsupportedExpression(
