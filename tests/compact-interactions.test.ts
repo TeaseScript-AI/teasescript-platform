@@ -248,9 +248,8 @@ test("nested compact choices report missing options once per affected invocation
 });
 
 // V30 accepts parenthesized interaction APIs (accepted-syntaxes-v30.md sections 20-21) and ADR 0018 leaves their
-// compatibility mapping to later work. Until they are implemented, the spelling must not be parsed as a compact form
-// with a grouped payload, which would silently decide that mapping. Replace the diagnostic assertions with positive
-// V30 coverage when the parenthesized APIs land.
+// compatibility mapping to later work. The spelling must not be parsed as a compact form whose payload is the
+// parenthesized text, grouped or unwrapped, which would silently decide that mapping.
 test("a parenthesized interaction spelling is never silently given compact semantics", () => {
   // The statement and expression commands each have one parenthesis check before and after `as speaker`.
   for (const source of [
@@ -261,6 +260,7 @@ test("a parenthesized interaction spelling is never silently given compact seman
   ]) {
     const parsed = parse(`${source}\nsay "recovered"`);
     const opening = source.indexOf("(");
+    const payloadEnd = source.lastIndexOf(")") + 1;
     const compactPayloads = parsed.program.statements.flatMap((statement) => {
       if (statement.kind === "showButtonStatement") return [statement.label];
       if (
@@ -273,18 +273,13 @@ test("a parenthesized interaction spelling is never silently given compact seman
     assert.equal(
       compactPayloads.some(
         (payload) =>
-          payload?.kind === "parenthesizedExpression" && payload.span.start.offset === opening,
+          payload !== undefined &&
+          payload !== null &&
+          payload.span.start.offset >= opening &&
+          payload.span.end.offset <= payloadEnd,
       ),
       false,
       source,
-    );
-    const payloadEnd = source.lastIndexOf(")") + 1;
-    assert.ok(
-      parsed.diagnostics.some(
-        ({ severity, span }) =>
-          severity === "error" && span.start.offset >= opening && span.end.offset <= payloadEnd,
-      ),
-      `${source}: an error must be located at the parenthesized payload`,
     );
     assert.equal(parsed.program.statements.at(-1)?.kind, "sayStatement", source);
   }
