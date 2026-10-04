@@ -243,7 +243,8 @@ rules that do not need new syntax: variables, list and set elements, object prop
 keep one type, including types decided by a first non-null value, a first element, a parameter default, or a function's
 returns; an inferred `integer` variable is a `number` when one of its assignments can store a non-whole number;
 `integer` to `number` is the only implicit conversion; and operators, conditions, indexes, members, and command
-operands get values of types they support. A mismatch is `TSV041`, an unsupported operand `TSV043`, and returns of
+operands get values of types they support, with some known operands still rejected only at runtime until #552. A
+mismatch is `TSV041`, an unsupported operand `TSV043`, and returns of
 different types or list elements of different types `TSV044`. Values the compiler cannot know, such as untyped
 storage, host data, and unknown parameters, are not yet checked at runtime, apart from the stored value of a direct
 `let x: T = load ...`. Union types, type tests, and narrowing are not implemented yet.

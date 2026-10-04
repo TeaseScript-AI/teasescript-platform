@@ -208,6 +208,12 @@ class TypeChecker {
   readonly #root = new Scope(null);
 
   readonly #functions: FunctionType[] = [];
+  /** The names of the script's top-level `let` variables, which function bodies may use before they are declared. */
+  readonly #scriptVariables = new Set<string>();
+  /** Whether the script's top-level statements are checked, so every script variable has its type. */
+  #scriptChecked = false;
+  /** The names each function's parameters and body mention, found when first needed. */
+  readonly #namesUsed = new Map<FunctionType, ReadonlySet<string>>();
 
   readonly #handlers: { readonly block: Block; readonly selfHandle: string | null }[] = [];
 
@@ -269,6 +275,8 @@ class TypeChecker {
   }
 
   public check(program: Program): void {
+    for (const statement of program.statements)
+      if (statement.kind === "letStatement") this.#scriptVariables.add(statement.name.name);
     for (const statement of program.statements) {
       if (statement.kind !== "functionDeclaration") continue;
       const fn: FunctionType = {
@@ -288,6 +296,8 @@ class TypeChecker {
         this.#root,
       ),
     );
+    // Every script variable has its type now, so every function body is checked, also one that waited for one.
+    this.#scriptChecked = true;
     for (const fn of this.#functions) runCompileTask(this.#functionResultTask(fn));
     for (let index = 0; index < this.#handlers.length; index += 1) {
       const handler = this.#handlers[index]!;
@@ -808,6 +818,18 @@ class TypeChecker {
 
   // Functions --------------------------------------------------------------------------------------------------------
 
+  /** Whether a function's parameters or body name a script variable that is not declared yet. */
+  #usesLaterVariable(fn: FunctionType): boolean {
+    let names = this.#namesUsed.get(fn);
+    if (names === undefined) {
+      names = namesIn(fn.declaration);
+      this.#namesUsed.set(fn, names);
+    }
+    for (const name of names)
+      if (this.#scriptVariables.has(name) && this.#root.resolve(name) === undefined) return true;
+    return false;
+  }
+
   /**
    * The result type of a function, checking its body the first time. A recursive call sees the declared result type,
    * or an unknown result while an unannotated result is still being inferred.
@@ -820,6 +842,9 @@ class TypeChecker {
         ? null
         : typeFromAnnotation(declaration.returnTypeAnnotation);
     if (fn.checking) return declared ?? UNKNOWN_TYPE;
+    // A body that uses a script variable declared after this call waits until that variable has its type, so its stores
+    // are checked against it; meanwhile a call sees the declared result, or an unknown one, as a recursive call does.
+    if (!this.#scriptChecked && this.#usesLaterVariable(fn)) return declared ?? UNKNOWN_TYPE;
     fn.checking = true;
     // A call in the middle of a statement checks the function; the statement's own literals are reported after it.
     const outerLiterals = this.#mixedLiterals;
@@ -959,7 +984,7 @@ class TypeChecker {
     }
     // The body is checked before the arguments, so they must fit the parameters as the body uses them.
     const result = copyType(yield* compileChild(this.#functionResultTask(fn)));
-    if (fn.checking)
+    if (fn.result === null)
       fn.pending.push({ call: expression, values, literals: this.#takeMixedLiterals(expression) });
     else yield* compileChild(this.#argumentsTask(fn, expression, values));
     return result;
@@ -1999,6 +2024,36 @@ function nonNullTypeForUse(type: StaticType): StaticType {
 function isSetElement(type: StaticType): boolean {
   const value = resolved(type);
   return value.kind === "null" || isScalar(value, "string", "boolean", "integer", "number");
+}
+
+/**
+ * Every name a function declaration uses as a value or an assignment target, also where a local variable of the same
+ * name hides it, which may only make the function wait longer than it needs to. Declared names, property names, and
+ * argument names are not uses. The tree is walked with an explicit stack.
+ */
+/** Syntax tree fields that hold a declared, property, or argument name, or a source position, not a use. */
+const NOT_USES: ReadonlySet<string> = new Set(["span", "name", "property", "variable"]);
+
+function namesIn(root: FunctionDeclaration): ReadonlySet<string> {
+  const names = new Set<string>();
+  const pending: unknown[] = [root];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (Array.isArray(node)) {
+      for (const item of node) pending.push(item);
+      continue;
+    }
+    if (typeof node !== "object" || node === null) continue;
+    if (
+      "kind" in node &&
+      node.kind === "identifier" &&
+      "name" in node &&
+      typeof node.name === "string"
+    )
+      names.add(node.name);
+    for (const [key, value] of Object.entries(node)) if (!NOT_USES.has(key)) pending.push(value);
+  }
+  return names;
 }
 
 function capitalize(text: string): string {

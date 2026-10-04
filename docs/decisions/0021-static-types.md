@@ -42,13 +42,17 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    list of elements of unknown type. A returned value of unknown type makes the result unknown; the known returned
    values must still agree.
 6. "First" follows the order in which the compiler checks the script: top-level statements in source order, a
-   function body when a call first needs its result (otherwise after the top level), then timer and media blocks.
+   function body when a call first needs its result (otherwise after the top level), then timer and media blocks. A
+   body that names a top-level variable declared after that call is checked after the top level, once the variable has
+   its type; until then the call's result is the declared result type, or unknown.
 7. A value whose type the compiler cannot know, such as untyped storage, host data, or an unknown parameter, is not
    rejected at compile time. When it is stored in a place of known type, it is checked at runtime with a
    source-located error.
 8. Operations are checked by the same principle: an operator, condition, index, member, or command operand of a known
    type that does not support it is a compile error, because it would fail at runtime. Conditions and the operands of
-   `and`, `or`, and `not` must be `true` or `false`; there is no truthiness.
+   `and`, `or`, and `not` must be `true` or `false`; there is no truthiness. The implementation does not reject every
+   such operand yet: some, such as an object element of a computed list in `${...}`, still fail only at runtime with a
+   source-located error; #552 completes the compile-time rejection.
 9. A possibly null value used where its non-null type is required follows V30 §34: compiler warnings and runtime
    recovery, not a compile error.
 

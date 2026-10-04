@@ -434,6 +434,35 @@ test("a set holds only text, numbers, true or false, and null, and only objects 
   ]);
 });
 
+test("a function called before a script variable is declared is checked once the variable has its type", () => {
+  // The first call skips the store; the body is checked against the variable when every script variable is typed.
+  const early = (body: string, declaration: string, use: string) =>
+    codes(
+      `function change(active = false) {\n    if active {\n        ${body}\n    }\n}\nchange()\n${declaration}\nchange(true)\n${use}`,
+    );
+  assert.deepEqual(early('score = "wrong"', "let score = 1", "say score + 1"), [
+    ["TSV041", '"wrong"'],
+  ]);
+  assert.deepEqual(early('items.add("wrong")', "let items = [1]", "say items[0] + 1"), [
+    ["TSV041", '"wrong"'],
+  ]);
+  assert.deepEqual(early('item.value = "wrong"', "let item = { value: 1 }", "say item.value + 1"), [
+    ["TSV041", '"wrong"'],
+  ]);
+  // A non-whole number widens the variable, so an integer-only use is reported.
+  assert.deepEqual(
+    early("index = index / 2", "let index = 1\nlet items = [10, 20]", "say items[index]"),
+    [["TSV043", "index"]],
+  );
+  // A valid store runs.
+  assert.deepEqual(
+    sayTexts(
+      "function change(active = false) {\n    if active {\n        score = 2\n    }\n}\nchange()\nlet score = 1\nchange(true)\nsay score + 1",
+    ),
+    ["3"],
+  );
+});
+
 test("function bodies check assignments to script variables", () => {
   assert.deepEqual(
     mismatches('let count = 0\nfunction reset {\n    count = "none"\n}')[0]?.[0],
