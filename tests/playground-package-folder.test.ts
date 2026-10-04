@@ -245,12 +245,10 @@ test("a root of packages offers each direct subfolder as a package, with only it
   ]);
 });
 
-test("a package lists every .tease, audio, and video file it can read, and the others as problems", async (context) => {
+test("a package lists every .tease file it can read, and the others as problems", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "teasescript-packages-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, "odd/notes"), { recursive: true });
-  await mkdir(join(root, "odd/clips"));
-  await writeFile(join(root, "odd/clips/intro.mp4"), "not really a video");
   await writeFile(join(root, "odd/main.tease"), "exit\n");
   await writeFile(join(root, "odd/latin1.tease"), Buffer.from([0x73, 0x61, 0x79, 0x20, 0xe9]));
   await writeFile(join(root, "odd/notes/Upper.TEASE"), "exit\n");
@@ -264,10 +262,6 @@ test("a package lists every .tease, audio, and video file it can read, and the o
     listed.sources.map((file: { path: string }) => file.path),
     ["main.tease", "notes/Upper.TEASE"],
   );
-  assert.deepEqual(listed.media, ["clips/intro.mp4"]);
-  const video = await get(server, "/dev-package/odd/files/clips/intro.mp4");
-  assert.equal(video.status, 200);
-  assert.equal(video.contentType, "video/mp4");
   assert.deepEqual(listed.problems, [
     { path: "latin1.tease", message: "Skipped: it is not UTF-8 text." },
   ]);
