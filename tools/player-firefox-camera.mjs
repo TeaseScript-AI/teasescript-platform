@@ -51,7 +51,9 @@ async function checks(page, url) {
           localStorage.getItem('player-storage:["development-camera","camera.photo"]') ?? "null",
         )?.value ?? null,
     );
-  async function start(unsizedMilliseconds) {
+  // `abortDetachedPlay` reproduces the Owner's Firefox with a real camera: `play()` on a video element outside the
+  // document rejects with an AbortError at once, although the element then plays.
+  async function start(unsizedMilliseconds, { abortDetachedPlay = false } = {}) {
     const tab = await context.newPage();
     const messages = [];
     tab.on(
@@ -59,6 +61,21 @@ async function checks(page, url) {
       (message) => message.text().startsWith("[player]") && messages.push(message.text()),
     );
     tab.on("pageerror", (error) => messages.push(`pageerror: ${error.message}`));
+    if (abortDetachedPlay)
+      await tab.addInitScript(() => {
+        const play = HTMLMediaElement.prototype.play;
+        HTMLMediaElement.prototype.play = function () {
+          const playing = play.call(this);
+          if (this.isConnected) return playing;
+          playing.catch(() => {});
+          return Promise.reject(
+            new DOMException(
+              "The fetching process for the media resource was aborted by the user agent at the user's request.",
+              "AbortError",
+            ),
+          );
+        };
+      });
     if (unsizedMilliseconds !== undefined) {
       // A real Firefox camera reports the video playable before its first frame has a size.
       await tab.addInitScript((milliseconds) => {
@@ -90,11 +107,14 @@ async function checks(page, url) {
     if (!value) throw new Error(message);
   };
 
-  // The Owner's failure: frames without a size for a while after the camera opens.
-  let { tab, messages } = await start(1_500);
+  // The Owner's Firefox camera: frames without a size for a while after the camera opens, and an aborted `play()`.
+  let { tab, messages } = await start(1_500, { abortDetachedPlay: true });
   await shows(tab, "Captured.");
   await tab.waitForFunction(decodedPhotos);
-  check(messages.length === 0, `A late-sized first frame reported: ${messages.join(" | ")}`);
+  check(
+    messages.length === 0,
+    `A late-sized first frame or an aborted play() reported: ${messages.join(" | ")}`,
+  );
   const first = await savedPhoto(tab);
   check(String(first).startsWith("captured-media:"), `The photo was not saved: ${first}`);
   await tab.close();
@@ -127,7 +147,7 @@ async function checks(page, url) {
   );
   check((await savedPhoto(tab)) === second, "A camera without frames replaced the saved photo");
   await tab.close();
-  return "PASS a late-sized first frame, the saved photo in a new run, and a camera without frames";
+  return "PASS a late-sized first frame with an aborted play(), the saved photo in a new run, and a camera without frames";
 }
 
 let passed = false;

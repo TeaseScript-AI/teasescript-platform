@@ -126,8 +126,9 @@ async function grabFrame(track: MediaStreamTrack, released: AbortSignal): Promis
   video.muted = true;
   video.playsInline = true;
   video.srcObject = new MediaStream([track]);
-  // Frames advance only while the element plays, but only a frame with dimensions decides. The cleanup below aborts a
-  // pending `play()`, which must not surface as an unhandled rejection.
+  // Only a frame with dimensions decides, not `play()`: Firefox may reject it for an element outside the document and
+  // play anyway, and an element that stays paused still receives the camera's current frame. The cleanup below
+  // aborts a pending `play()`, which must not surface as an unhandled rejection.
   const playing = video.play();
   playing.catch(() => {});
   try {
@@ -170,10 +171,7 @@ function firstFrame(video: HTMLVideoElement, playing: Promise<void>): Promise<vo
     }
     for (const event of events) video.addEventListener(event, check);
     video.addEventListener("error", failed);
-    playing.then(check, (error: unknown) => {
-      settle();
-      reject(error);
-    });
+    playing.then(check, check);
   });
 }
 
