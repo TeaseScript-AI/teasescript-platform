@@ -2901,7 +2901,7 @@ if passed {
 - A file may contain multiple reachable `end` or `exit` statements.
 - `finish` is not used as an alternative to `end`.
 
-Static analysis should warn, but not fail compilation, when:
+Static analysis should warn, but not necessarily fail compilation, when:
 
 - statements are unreachable;
 - an `exit` is declared but unreachable.
