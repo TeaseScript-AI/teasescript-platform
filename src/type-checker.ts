@@ -35,6 +35,7 @@ import type { TypeCheckPlan } from "./plan/model.js";
 import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
 import {
   builtinCallProblems,
+  builtinShapeProblems,
   COLLECTION_METHODS,
   collectionMethodProblems,
   expressionLabel,
@@ -95,7 +96,12 @@ import {
   type PossibleValue,
   type ScalarValue,
   TypeJoin,
+  markMaybeMissing,
+  markOpen,
   members,
+  mayHaveProperty,
+  type PropertyTable,
+  surelyHasProperty,
   misfitProperty,
   nonNullType,
   NULL_TYPE,
@@ -344,6 +350,15 @@ class TypeChecker {
 
   readonly #functions: FunctionType[] = [];
   /**
+   * Uses of a property that an object did not have when they were checked, by source position. A later store, such as
+   * one in a timer block or later in a loop, may still add it; one that is still missing after the whole check is never
+   * added, so the use fails (ADR 0021 rule 1.8).
+   */
+  readonly #absentProperties = new Map<
+    string,
+    { readonly table: PropertyTable; readonly name: string; readonly report: () => void }
+  >();
+  /**
    * The names of the script's top-level `let` variables and speakers, which function bodies may use before they are
    * declared.
    */
@@ -487,6 +502,9 @@ class TypeChecker {
       this.#flow = new Flow();
       runCompileTask(this.#statementsTask(handler.block.statements, scope));
     }
+    // Every store has been checked now, so a property that none of them adds is missing wherever it is read.
+    for (const absent of this.#absentProperties.values())
+      if (!mayHaveProperty(absent.table, absent.name)) absent.report();
   }
 
   /**
@@ -542,8 +560,7 @@ class TypeChecker {
         scope.declare(statement.name.name, { kind: "speaker" });
         for (const property of statement.properties) {
           const type = yield* compileChild(this.#expressionTask(property.value, scope));
-          if (SPEAKER_TEXT_PROPERTIES.has(property.name.name))
-            this.#checkShownText(property.value, type, `the speaker's ${property.name.name}`);
+          this.#checkSpeakerProperty(property.name.name, property.value, type);
         }
         return true;
       case "speakerSetterStatement":
@@ -936,8 +953,8 @@ class TypeChecker {
     let handle = false;
     /** For an element, the type it may hold now, which can be wider than what may be stored. */
     let read: StaticType | undefined;
-    /** A speaker text property shows its value as text. */
-    let shownField: string | null = null;
+    /** The name of a speaker property the store may write, which the runtime checks. */
+    let speakerProperty: string | null = null;
     /** A property without a static type, such as one of an `object` or of a value of unknown type. */
     let untyped = false;
     if (target.kind === "identifier") {
@@ -1031,6 +1048,8 @@ class TypeChecker {
               name,
               decidedSlot(this.#newPlaceType(statement.value, assigned), statement.value.span),
             );
+            // The store may not run before every use of the object, so the property may be missing there.
+            markMaybeMissing(value.properties, name);
             const owner = this.#pathOf(target.object, scope);
             if (owner !== undefined) {
               this.#follow(extendPath(owner, name), assigned, statement.value.span);
@@ -1044,8 +1063,7 @@ class TypeChecker {
         const speakers = members(nonNullType(object)).map(
           (member) => resolved(member).kind === "speaker",
         );
-        if (SPEAKER_TEXT_PROPERTIES.has(name) && speakers.includes(true))
-          shownField = `the speaker's ${name}`;
+        if (speakers.includes(true)) speakerProperty = name;
         // A speaker shows its text property; any other receiver keeps the value as it is.
         untyped =
           place === undefined && this.diagnostics.length === before && speakers.includes(false);
@@ -1055,7 +1073,11 @@ class TypeChecker {
       }
     }
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
-    if (shownField !== null) this.#checkShownText(statement.value, value, shownField);
+    // A mixed `choose` that C2 rejects for the other receivers needs no second message here.
+    if (speakerProperty !== null && !(untyped && this.#mixedChoices.has(unwrap(statement.value)))) {
+      if (statement.operator === "=" || speakerProperty !== "defaultSaySkippable")
+        this.#checkSpeakerProperty(speakerProperty, statement.value, value);
+    }
     // A timer or media property write may run a block at once, such as an expiry at `remaining = 0 s`.
     if (handle) this.#suspend();
     if (place === undefined) {
@@ -1191,7 +1213,11 @@ class TypeChecker {
         if (this.diagnostics.length > before) fits = false;
       }
       // New properties join the place only when the object fits it, so one mistake does not cause more.
-      if (decides && fits) for (const [name, type] of added) properties.set(name, type);
+      if (decides && fits)
+        for (const [name, type] of added) {
+          properties.set(name, type);
+          markMaybeMissing(properties, name);
+        }
       if (decides && fits && added.length > 0 && place.widening !== undefined)
         this.#rewiden(place.widening.root);
       return;
@@ -1831,6 +1857,8 @@ class TypeChecker {
         annotated: parameter.typeAnnotation !== null,
       };
       if (declaration !== undefined) this.#declared.set(declaration, variable);
+      // An argument may be an object with more properties than the parameter's default.
+      markOpen(type);
       parameters.push(variable);
       scope.declare(name, { kind: "variable", variable });
     }
@@ -2574,8 +2602,11 @@ class TypeChecker {
       const others = index === 0 ? rights : lefts;
       if (values.length === 1 && index === 1) continue;
       if (others.some((member) => member.kind !== "null" && isKnown(member))) continue;
+      // Null itself counts only when it is all the operand can be; a value that may be null needs a check instead.
+      const onlyNull = all.length === 1 && all[0]!.kind === "null";
       const impossible = all.find(
-        (member) => member.kind !== "null" && isKnown(member) && !possible(member, index),
+        (member) =>
+          (member.kind !== "null" || onlyNull) && isKnown(member) && !possible(member, index),
       );
       if (impossible === undefined) continue;
       // The members that work besides it are what a test keeps (ADR 0021 rule 3.5).
@@ -2861,6 +2892,16 @@ class TypeChecker {
     const problems = collectionMethodProblems(method, value, property, expression, typeOf);
     this.#reportProblems(problems);
     if (method === "sort" || method === "shuffle") return NULL_TYPE;
+    // A set operation's argument that may be null needs a check first (owner decision on #504 Q1).
+    const operand = expression.arguments[0]?.value;
+    if (operand !== undefined && problems.length === 0) {
+      const all = members(typeOf(operand));
+      const passing = all.filter((member) => member.kind !== "null");
+      if (passing.length > 0 && passing.length < all.length) {
+        this.#reportMayBe(operand, NULL_TYPE, passing);
+        return { kind: value.kind, element: UNKNOWN_TYPE };
+      }
+    }
     return this.#setOperationType(method, value, expression, problems.length === 0);
   }
 
@@ -2920,6 +2961,10 @@ class TypeChecker {
   ): StaticType {
     const argument = expression.arguments[0];
     const value = values[0];
+    // A built-in that takes fixed positional arguments checks their values only when their number is right.
+    const shape = builtinShapeProblems(name, expression);
+    this.#reportProblems(shape);
+    if (shape.length > 0) return FIXED_RESULTS.get(name) ?? UNKNOWN_TYPE;
     switch (name) {
       case "random":
         return NUMBER_TYPE;
@@ -3084,6 +3129,15 @@ class TypeChecker {
       }
     }
     const all = members(object);
+    for (const member of all.map(resolved))
+      if (member.kind === "object" && member.properties !== null && !member.properties.has(name))
+        this.#whenAbsent(member.properties, name, expression.property.span, () =>
+          this.#report(
+            typeCode.invalidOperand,
+            `${capitalize(describeValue(member))} has no property '${name}'.`,
+            expression.property.span,
+          ),
+        );
     const types = all.map((member) => memberPropertyType(member, name));
     const passing = all.filter((_, index) => types[index] !== undefined);
     if (passing.length === all.length) {
@@ -3308,7 +3362,7 @@ class TypeChecker {
         // The list or set is checked like any other: its elements share one type (ADR 0021 rule 1.3).
         yield* compileChild(this.#expressionTask(option.expression, scope));
         for (const element of content.elements) {
-          const value = this.#choiceEntry(element, this.#typeOf(element), true);
+          const value = this.#choiceEntry(element, this.#typeOf(element), true, written !== null);
           if (written === null) add(value, buttonLiteral(element));
         }
         // An empty list or set gives no buttons, so its written value is never returned.
@@ -3336,6 +3390,12 @@ class TypeChecker {
                 option.expression.span,
               ),
           );
+        // The choice objects of a computed collection are checked by their known properties.
+        for (const part of parts)
+          if (part.kind === "list" || part.kind === "set")
+            for (const element of members(part.element).map(resolved))
+              if (element.kind === "object" && element.properties !== null)
+                this.#checkChoiceObject(option.expression, element.properties, written !== null);
         const results = parts.map((part) => {
           const button =
             part.kind === "list" || part.kind === "set" ? resolved(part.element) : part;
@@ -3353,7 +3413,12 @@ class TypeChecker {
       }
       if (isKnown(value)) buttons += 1;
       // The option is kept as it was evaluated: a later option may still change the place it was read from.
-      const entry = this.#choiceEntry(option.expression, this.#capture(option.expression), false);
+      const entry = this.#choiceEntry(
+        option.expression,
+        this.#capture(option.expression),
+        false,
+        written !== null,
+      );
       add(written ?? entry, written === null ? buttonLiteral(option.expression) : writtenValue);
     }
     if (buttons > MAX_INTERACTION_OPTION_ENTRIES)
@@ -3398,7 +3463,7 @@ class TypeChecker {
    * Checks what gives one button: a value, or a choice object `{ value?, text, background? }` whose value, else its
    * text, the button returns. Returns that value's type; a computed choice object's value is not known.
    */
-  #choiceEntry(entry: Expression, type: StaticType, inList: boolean): StaticType {
+  #choiceEntry(entry: Expression, type: StaticType, inList: boolean, written = false): StaticType {
     const value = resolved(nonNullType(type));
     // A button comes from a value or a choice object; a list or set gives buttons only as a whole option.
     const accepted = (member: StaticType): boolean => {
@@ -3418,7 +3483,12 @@ class TypeChecker {
     );
     if (rejected) return UNKNOWN_TYPE;
     const literal = unwrap(entry);
-    if (literal.kind !== "objectLiteral") return value.kind === "object" ? UNKNOWN_TYPE : type;
+    if (literal.kind !== "objectLiteral") {
+      for (const member of members(nonNullType(type)).map(resolved))
+        if (member.kind === "object" && member.properties !== null)
+          this.#checkChoiceObject(entry, member.properties, written);
+      return value.kind === "object" ? UNKNOWN_TYPE : type;
+    }
     let returned: StaticType = UNKNOWN_TYPE;
     for (const property of literal.properties) {
       const propertyType = this.#typeOf(property.value);
@@ -3430,7 +3500,7 @@ class TypeChecker {
         this.#checkMembers(property.value, propertyType, isShowable, () =>
           this.#report(
             typeCode.invalidInteractionChoice,
-            "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
+            CHOICE_VALUE_MESSAGE,
             property.value.span,
           ),
         );
@@ -3439,6 +3509,53 @@ class TypeChecker {
         this.#checkBackground(property.value, propertyType);
     }
     return returned;
+  }
+
+  /**
+   * A choice object whose properties are known but not written in the option, checked as the runtime checks it when the
+   * choice opens: only value, text, and background, a text, a value a button can return, and a background. A store
+   * may add a property later, so a missing one is reported only if no store adds it, and a property a store added is
+   * checked only when its type fails whether or not it is there (ADR 0021 rule 1.8).
+   */
+  #checkChoiceObject(expression: Expression, table: PropertyTable, written: boolean): void {
+    const extra = [...table.keys()].find(
+      (name) => !CHOICE_OBJECT_PROPERTIES.has(name) && surelyHasProperty(table, name),
+    );
+    if (extra !== undefined) {
+      this.#report(
+        typeCode.invalidInteractionChoice,
+        `Choice objects support value, text, and background only, not '${extra}'.`,
+        expression.span,
+      );
+      return;
+    }
+    const text = table.get("text");
+    // A text that cannot be shown fails whether it is there or missing.
+    if (text !== undefined) this.#checkShownText(expression, text, "the text of a choice option");
+    else
+      this.#whenAbsent(table, "text", expression.span, () =>
+        this.#report(
+          typeCode.invalidInteractionChoice,
+          'A choice object requires text, as in { text: "Go", value: 1 }.',
+          expression.span,
+        ),
+      );
+    const value = table.get("value");
+    if (value !== undefined && surelyHasProperty(table, "value")) {
+      if (written)
+        this.#report(
+          typeCode.invalidInteractionChoice,
+          "This choice option has two values, one before ':' and one in its value property. Keep one.",
+          expression.span,
+        );
+      else
+        this.#checkMembers(expression, value, isShowable, () =>
+          this.#report(typeCode.invalidInteractionChoice, CHOICE_VALUE_MESSAGE, expression.span),
+        );
+    }
+    const background = table.get("background");
+    if (background !== undefined && surelyHasProperty(table, "background"))
+      this.#checkBackground(expression, background);
   }
 
   /** `${...}` shows a value, or one element of a list; a known value it cannot show is an error. */
@@ -3587,6 +3704,22 @@ class TypeChecker {
   }
 
   /** Only `${...}` selects from a list; a list in a text field is an error, at runtime when it is not known here. */
+  /**
+   * A speaker property that the runtime checks when it is set: `defaultSaySkippable` is true or false. A name part is
+   * shown as text; the runtime checks that it is text only when it prepares the speaker's messages.
+   */
+  #checkSpeakerProperty(name: string, expression: Expression, type: StaticType): void {
+    if (name === "defaultSaySkippable")
+      this.#reportUnless(
+        type,
+        (member) => isScalar(member, "boolean"),
+        expression,
+        "defaultSaySkippable is true or false (boolean)",
+      );
+    else if (SPEAKER_TEXT_PROPERTIES.has(name))
+      this.#checkShownText(expression, type, `the speaker's ${name}`);
+  }
+
   #checkShownText(expression: Expression, type: StaticType, field: string): void {
     this.#checkMembers(expression, type, isShowable, (member) =>
       member.kind === "list"
@@ -3851,8 +3984,11 @@ class TypeChecker {
     label: string,
     value: StaticType,
   ): void {
-    if (containsType(value, (part) => part.kind === "unknown"))
+    if (containsType(value, (part) => part.kind === "unknown")) {
       this.#runtimeChecks.push({ site, place, label });
+      // The runtime checks only the properties both have, so the place may hold an object with others.
+      markOpen(place);
+    }
   }
 
   // Reports ----------------------------------------------------------------------------------------------------------
@@ -3949,6 +4085,15 @@ class TypeChecker {
         `${problem.message}${problem.widened === undefined ? "" : this.#widenedNote(problem.widened)}${problem.fix ?? ""}`,
         problem.span,
       );
+  }
+
+  /** Reports a problem once the whole check is done, if no store ever added the property (see {@link #absentProperties}). */
+  #whenAbsent(table: PropertyTable, name: string, span: SourceSpan, report: () => void): void {
+    this.#absentProperties.set(`${span.start.offset} ${span.end.offset} ${name}`, {
+      table,
+      name,
+      report,
+    });
   }
 
   /**
@@ -5078,6 +5223,21 @@ function describeLiterals(values: readonly PossibleValue[]): string {
 function isShowable(member: StaticType): boolean {
   return !UNSHOWABLE_KINDS.has(resolved(member).kind);
 }
+
+/** The result types of the built-ins that take fixed positional arguments. */
+const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([
+  ["random", NUMBER_TYPE],
+  ["chance", BOOLEAN_TYPE],
+  ["randomInteger", INTEGER_TYPE],
+  ["escapeMarkup", STRING_TYPE],
+]);
+
+/** What a choice value may be, written or held in a choice object's value property. */
+const CHOICE_VALUE_MESSAGE =
+  "A choice value must be text, a number, true, false, null, a duration, or a date or time value.";
+
+/** The properties a choice object may have. */
+const CHOICE_OBJECT_PROPERTIES: ReadonlySet<string> = new Set(["value", "text", "background"]);
 
 /** Speaker properties shown as text: the display name and the parts it is derived from. */
 const SPEAKER_TEXT_PROPERTIES: ReadonlySet<string> = new Set([

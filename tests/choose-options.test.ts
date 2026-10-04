@@ -460,13 +460,23 @@ test("choice options known only at runtime are checked before the choice opens",
       'function dynamic(value) {\n    return value\n}\nlet o = [dynamic("a"), ["b"]]\nlet x = choose o',
       "not a list or set.",
     ],
-    ['let o = { text: "A", value: "a" }\nlet x = choose k: o', "Keep one."],
+    // A choice object whose properties the compiler knows is checked when compiling; `dynamic` hides them here.
     [
-      'function options {\n    return [{ text: "A", value: "a" }]\n}\nlet x = choose k: options()',
+      'function dynamic(value) {\n    return value\n}\nlet o = dynamic({ text: "A", value: "a" })\nlet x = choose k: o',
       "Keep one.",
     ],
-    ['let o = [{ value: "a" }]\nlet x = choose o', "A choice object requires text."],
-    ['let o = [{ text: "A", value: ["a"] }]\nlet x = choose o', "or a date or time value."],
+    [
+      'function dynamic(value) {\n    return value\n}\nfunction options {\n    return dynamic([{ text: "A", value: "a" }])\n}\nlet x = choose k: options()',
+      "Keep one.",
+    ],
+    [
+      'function dynamic(value) {\n    return value\n}\nlet o = [dynamic({ value: "a" })]\nlet x = choose o',
+      "A choice object requires text.",
+    ],
+    [
+      'function dynamic(value) {\n    return value\n}\nlet o = [dynamic({ text: "A", value: ["a"] })]\nlet x = choose o',
+      "or a date or time value.",
+    ],
     // The compiler rejects a known set or range element itself; `dynamic` hides it until the choice opens.
     [
       "function dynamic(value) {\n    return value\n}\nlet o = [dynamic(set[1])]\nlet x = choose o",
