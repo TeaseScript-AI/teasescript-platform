@@ -1222,7 +1222,8 @@ test("generates ordinary TeaseScript helpers for legacy loadFirstTrue and list i
   assert.match(output, /function sexscriptLegacyIndexOf\(itemsValue, value\)/);
   assert.match(output, /for keyValue in keys \{/);
   assert.match(output, /let index = sexscriptLegacyIndexOf\(items, "b"\)/);
-  assert.match(output, /let key = sexscriptLegacyLoadFirstTrue\(\["a", "b"\]\)/);
+  // No key may hold true, so the result may be null.
+  assert.match(output, /let key: string\? = sexscriptLegacyLoadFirstTrue\(\["a", "b"\]\)/);
 });
 
 test("maps legacy getBooleans to accepted askBooleans", () => {

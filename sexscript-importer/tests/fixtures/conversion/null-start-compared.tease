@@ -1,3 +1,12 @@
+function sexscriptLegacyLoadFirstTrue(keys) {
+  for key in keys {
+    let value = load key
+    if value == true {
+      return key
+    }
+  }
+  return null
+}
 // A list that the code compares with null keeps its null start, since null and an empty list differ there.
 let answers: string[]? = null
 function fill {
@@ -10,4 +19,8 @@ fill()
 if answers != null {
   say answers[0]
 }
+// loadFirstTrue gives null when no key holds true, so the variable it sets may hold null.
+let implement: string? = "hand"
+implement = sexscriptLegacyLoadFirstTrue(["toys.paddle", "toys.crop"])
+say "You get the ${implement}"
 exit

@@ -1303,6 +1303,11 @@ const CALL_RESULTS = new Map<string, TeaseType>([
   ["showButton", scalar("duration")],
 ]);
 
+/** Legacy helpers whose result their parameters do not show, such as the key of the first stored `true`, or null. */
+const HELPER_RESULTS = new Map<string, TeaseType>([
+  ["sexscriptLegacyLoadFirstTrue", { kind: "optional", value: scalar("string") }],
+]);
+
 export function expressionType(
   value: IrExpression,
   variable: (name: string) => TeaseType,
@@ -1407,6 +1412,8 @@ export function expressionType(
       if (!ARITHMETIC.has(value.operator)) return scalar("boolean");
       return arithmeticType(value.operator, type(value.left), type(value.right)) ?? UNKNOWN;
     case "call": {
+      const helper = HELPER_RESULTS.get(value.name);
+      if (helper !== undefined) return helper;
       // A function of the package returns what its `return` values share.
       const local = result(value.name);
       if (local !== undefined) return local;
