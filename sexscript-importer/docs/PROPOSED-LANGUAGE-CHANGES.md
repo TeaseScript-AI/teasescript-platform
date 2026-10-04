@@ -31,7 +31,7 @@ with the direction TeaseScript already took, and common practice in other langua
 | C5 | Warning when a choice result is compared with a value no option has | Merged as part of #504 (#535) |
 | T1 | Type enforcement, union types, type tests, narrowing | #504: merged (#519 enforcement, #526 type rules, #520 runtime checks, #530 unions, `is`, and narrowing) |
 | D1 | Dictionaries: lookup by runtime key (`toys[name]`) | Owner-decided as a separate `dict` type (#536); merged as #555 |
-| M1 | Media selected by tags (include/exclude tags, count matches) | Evaluated (counting); later |
+| M1 | Media selected by tags (include/exclude tags, count matches) | Evaluated (counting); likely succeeded by #572's tagged selection and XMP image tags (ADR 0023) |
 
 The importer emits L1 and C1–C3 in its default output as merged in #515, and the text operations, `join`, and
 conversions of #508 as merged in #518; the compiler gate and smoke runs check both with `main`'s implementation. It
@@ -40,8 +40,8 @@ several types. Only M1 remains a proposal (`--proposed`).
 
 ## Corpus evaluation
 
-Measured on 2026-10-04 at importer commit `125a2ecf` with `node src/cli.ts report --run [--proposed=<id>] <package
-scripts>`, after merging `main` at `540b8f2e`; the merge of `dict` (#555) and date and time (#532), and script chains
+Measured on 2026-10-04 at importer commit `1b2f8343` with `node src/cli.ts report --run [--proposed=<id>] <package
+scripts>`, after merging `main` at `df86064b`; the merge of `dict` (#555) and date and time (#532), and script chains
 converted to ADR 0022's `goto` and `exit` with shared helpers as `global function`s (#570), changed no cell. The importer emits a working syntax of its own choosing for the
 remaining proposal; the report compiles and smoke-runs it through stand-ins in current TeaseScript, so "converted"
 means converted, compiled, and run, not just emitted. Each cell: root errors / lowered scripts / compiler-clean except
@@ -331,10 +331,13 @@ work as a `.ts` system library, and localized script variants too; one language 
 
 - **M1 media by tags.** The owner plans to tag every image and select a random image matching included and excluded
   tags, with a count of matches. No tagged media exists yet. Evaluated above for counting; random selection by tags
-  and Toy's tag files come later.
+  and Toy's tag files come later. ADR 0023 (#572) decides tags for scripts and images: its later parts, tagged
+  selection (`showImage tagged ...`, `findImages(where: ...)`) and image tags as XMP keywords, are the likely successor
+  of M1's working syntax, and the importer switches to them when they land, mapping the legacy image folders to tags
+  once at import as ADR 0023 §5.3 allows.
 
 ## Next steps
 
 - **Re-measure the corpus** as file transfers (#570), `showPopup`, `askBooleans`, `openUrl`, and the camera land (their
   stand-ins then go away).
-- **M1** stays for later, after tagged media exists.
+- **M1** gives way to ADR 0023 (#572): the importer emits its tagged selection and XMP image tags when those parts land.

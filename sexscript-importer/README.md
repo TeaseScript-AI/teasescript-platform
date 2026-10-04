@@ -71,7 +71,8 @@ accepted TeaseScript: the report compiles and runs it through stand-ins in curre
 
 Generated files follow these conventions:
 
-- legacy comments and paragraph breaks are kept; `setInfos()` metadata becomes a header comment;
+- legacy comments and paragraph breaks are kept; `setInfos()` metadata becomes the `---` file header (V30 §41), with
+  the legacy fields that have no header field in a comment after it;
 - `// TODO CODE line N: ...` marks the root cause of something that needs manual migration, followed by the original
   Groovy as `// | ...` lines; `// NOTE CODE line N: ...` marks a converted construct whose behavior differs;
 - a file with unresolved errors starts with `// MIGRATION INCOMPLETE`.

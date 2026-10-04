@@ -185,7 +185,7 @@ Legacy semantics below are verified against the API contract (`ss/IScript.java`)
 | `playSound(f)` | `playAudio f` | Blocking. `playSound(null)` stopped every sound. |
 | `playBackgroundSound(f[, n])` | `playAudio async f` / with `repeat: n times` | Legacy plays `n` passes total and overlaps; `null` stops all sounds (no TeaseScript equivalent). |
 | `useUrl(u)` | `openUrl(u)` | Accepted, not implemented yet. |
-| `setInfos(...)` | header comment | No accepted manifest format yet. |
+| `setInfos(...)` | `---` file header | V30 §41, ADR 0023: title, author, and summary become `title`, `author`, and `description`, the legacy catalog tags `keywords`; version, status, color, language, and computed values stay a comment after the header. |
 | returned script name / `return null` | `goto "x.tease"` / `exit` | ADR 0022: paths from the package root, the entry is `main.tease`, a computed name becomes `goto script(name)`, a missing script `exit`; every file ends with a transfer or `exit`. Chaining is not a function call, so no `call`. |
 | `exit()`, `System.exit(n)` | `exit` | Ends the session; the Player stays open. |
 
