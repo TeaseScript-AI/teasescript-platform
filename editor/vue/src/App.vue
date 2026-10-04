@@ -41,7 +41,12 @@ onMounted(async () => {
   if (container.value === null) return;
   models = project.map(({ path, text }) => ({
     path,
-    model: monaco.editor.createModel(text, "teasescript", monaco.Uri.file(`/${path}`)),
+    // Not Uri.file: on Windows it turns a `\` into a folder separator, so two package files could share a model.
+    model: monaco.editor.createModel(
+      text,
+      "teasescript",
+      monaco.Uri.from({ scheme: "file", path: `/${path}` }),
+    ),
   }));
   const first = models.find((file) => file.path === MAIN_FILE_PATH) ?? models[0];
   activePath.value = first?.path ?? "";
