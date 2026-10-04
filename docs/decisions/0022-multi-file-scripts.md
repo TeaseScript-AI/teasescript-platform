@@ -47,6 +47,10 @@ goto script("rooms/${room}.tease", label: "start")
 1. A label stands only in a file's outer scope, not inside `if`, loops, functions, or handlers. A `goto` may appear
    anywhere.
 2. Functions and labels are local to their file. Two files may use the same function or label names.
+3. A `goto` back to an earlier label runs the top-level `let`s after it again, which set their variables anew.
+4. A variable of the file may be used after a label only when every way to the label has run its `let`; otherwise it
+   is a compile error. A goto has run what came before the statement it stands in, or before the call of its function
+   or the start of its handler.
 
 ### 4. Endings
 

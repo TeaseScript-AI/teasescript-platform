@@ -2599,6 +2599,9 @@ Rules:
   defines `goto` to another file.
 - Unknown labels and duplicate labels in one file are compile errors.
 - A `goto` discards the current function, loop, and block continuations.
+- A `goto` back to an earlier label runs the top-level `let`s after it again, which set their variables anew. A variable
+  of the file may be used after a label only when every way to the label has run its `let`; otherwise it is a compile
+  error.
 - A `goto` triggered by an event aborts the current execution path and does not return.
 
 ## 27. Timers
@@ -2687,7 +2690,8 @@ of the wrong type are rejected.
 - Every timer stops on `exit` and when the session ends.
 - On `goto`, `end`, and `call` transfers, non-persistent timers are removed and persistent timers remain active.
 
-The current runtime stores `persist` but it has no effect: `goto`, `end`, and `call` are not implemented.
+`goto` within a file applies these rules; `call`, an `end` that returns to a caller, and transfers to other files are
+not implemented yet.
 
 ### Expiry blocks
 
