@@ -52,6 +52,9 @@ test("built-ins with fixed arguments check their number and names", () => {
   assert.equal(says('let roll = randomInteger(1..=6)\nsay "${chance(50) or roll > 0}"').length, 1);
 });
 
+/** The sources that give an exact object (ADR 0021 rule 1.8): a variable, an element, and a property that keep a literal. */
+const EXACT = [SOURCES[1]!, SOURCES[3]!, SOURCES[4]!];
+
 test("a choice object that is not written in the option is checked by its known properties", () => {
   for (const [value, message] of [
     ["{ value: 1 }", "requires text"],
@@ -59,7 +62,10 @@ test("a choice object that is not written in the option is checked by its known 
     ['{ text: "A", value: [1] }', "A choice value must be"],
     ['{ text: "A", extra: 1 }', "value, text, and background only"],
   ] as const)
-    for (const source of SOURCES.slice(1).map((wrap) => wrap(value, "let answer = choose @"))) {
+    for (const source of [
+      ...EXACT.map((wrap) => wrap(value, "let answer = choose @")),
+      `let options = [${value}]\nlet answer = choose options`,
+    ]) {
       const diagnostics = compileSource(source).diagnostics;
       assert.ok(
         diagnostics.some((diagnostic) => diagnostic.message.includes(message)),
@@ -82,8 +88,8 @@ test("a choice object that is not written in the option is checked by its known 
     assert.deepEqual(errors(source), [], source);
 });
 
-test("a property that a known object never gets is an error where it is read", () => {
-  for (const source of SOURCES.slice(1).map((wrap) => wrap("{ a: 1 }", "say @.missing")))
+test("a property that an exact object never gets is an error where it is read", () => {
+  for (const source of EXACT.map((wrap) => wrap("{ a: 1 }", "say @.missing")))
     assert.deepEqual(errors(source), [["TSV043", "missing"]], source);
   // A store adds a property wherever it runs: later in a loop, in a timer block, or in a function. A parameter may
   // get an argument with more properties than its default.
@@ -101,28 +107,25 @@ test("a property that a known object never gets is an error where it is read", (
     assert.deepEqual(errors(source), [], source);
 });
 
-test("an object that a whole store, a dict, or an unknown value reaches may lack or have properties", () => {
-  // A whole object replaces the value: the properties it does not write may be missing, and the ones it adds too.
+test("an object that the script stores into, or that a parameter or an unknown value brings, keeps any properties", () => {
+  // A whole object replaces the value, also in a timer block, after a copy, or as one of several possible objects.
   for (const source of [
     'let option = { text: "A", value: [1] }\noption = { text: "B" }\nlet answer = choose option',
     'let option = { text: "A" }\nlet other = { text: "B", value: [1] }\nif false {\n    option = other\n}\nlet answer = choose option',
+    'let option = { text: "A", value: [1] }\ntimer async 1 s {\n    option = { text: "B" }\n}\nwait 2 s\nlet answer = choose option',
+    'let option = { text: "A", value: [1] }\nfunction copy {\n    return option\n}\nif false {\n    let ignored = copy()\n}\noption = { text: "B" }\nlet answer = choose copy()',
+    'let option = { text: "A", value: [1] }\nlet table = dict{ k: { text: "B" } }\noption = table.get("k", default: { text: "C" })\nlet answer = choose option',
   ])
     assert.deepEqual(errors(source), [], source);
-  assert.deepEqual(
-    errors(
-      'let option = { text: "A", value: [1] }\noption = { text: "B", value: [2] }\nlet answer = choose option',
-    ).map(([code]) => code),
-    ["TSV029"],
-  );
-  assert.deepEqual(errors("let box = { a: 1 }\nbox = { b: 2 }\nsay box.c"), [["TSV043", "c"]]);
-  // A dict parameter's objects, and a place that took an unknown value before a later value decided its type, may have
-  // more properties than the compiler knows.
+  // A dict parameter's objects, and a value the compiler cannot know, may have more properties than it knows, also when
+  // a later store decides the place's type or the place is copied first.
   const dynamic = "function dynamic(value) {\n    return value\n}\n";
   for (const source of [
     'function read(table = dict{ a: {} }) {\n    say table["a"].b\n}\nread(dict{ a: { b: 1 } })',
     `${dynamic}let items = []\nitems.add(dynamic({ b: 1 }))\nif false {\n    items.add({ a: 1 })\n}\nsay items[0].b`,
-    `${dynamic}let items = []\nitems.add(dynamic({ b: 1 }))\nlet copy = items\nif false {\n    copy.add({ a: 1 })\n}\nsay copy[0].b`,
     `${dynamic}let box = null\nbox = dynamic({ b: 1 })\nif false {\n    box = { a: 1 }\n}\nif box != null {\n    say box.b\n}`,
+    `${dynamic}let box = {}\nbox = dynamic({ inner: { b: 1 } })\nif false {\n    box.inner = { a: 1 }\n}\nsay box.inner.b`,
+    `${dynamic}let items = []\nfunction read {\n    let copy = items\n    if false {\n        copy.add({ a: 1 })\n    }\n    say copy[0].b\n}\nif false {\n    read()\n}\nitems.add(dynamic({ b: 1 }))\nread()`,
   ])
     assert.deepEqual(says(source), ["1"], source);
 });

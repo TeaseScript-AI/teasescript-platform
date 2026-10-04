@@ -68,93 +68,6 @@ export interface OpenType {
  */
 export type PropertyTable = Map<string, StaticType>;
 
-/**
- * For each property table, the properties that a store added after its object was built, or that only some of the
- * joined objects have: such a property may be missing when the object is used, because the store may not have run.
- * Copies keep the marks.
- */
-const maybeMissing = new WeakMap<PropertyTable, Set<string>>();
-
-/** Marks a property that an object may not have when it is used (see {@link maybeMissing}). */
-export function markMaybeMissing(table: PropertyTable, name: string): void {
-  const names = maybeMissing.get(table) ?? new Set<string>();
-  names.add(name);
-  maybeMissing.set(table, names);
-}
-
-/**
- * Property tables of places that may hold an object with other properties than the table knows: a parameter, whose
- * arguments may have more, and a place that took a value the compiler cannot know, which the runtime checks only by the
- * properties both have.
- */
-const openTables = new WeakSet<PropertyTable>();
-
-/** Undecided slots that took a value the compiler cannot know: the type a later value decides is open too. */
-const openSlots = new WeakSet<OpenType>();
-
-/** Marks every object table in a place's type as open (see {@link openTables}). */
-export function markOpen(type: StaticType): void {
-  const pending = [type];
-  const seen = new Set<StaticType>();
-  while (pending.length > 0) {
-    const value = resolved(pending.pop()!);
-    if (seen.has(value)) continue;
-    seen.add(value);
-    if (value.kind === "open") openSlots.add(value);
-    else if (value.kind === "union") pending.push(...value.members);
-    else if (isCollection(value)) pending.push(value.element);
-    else if (value.kind === "object" && value.properties !== null) {
-      openTables.add(value.properties);
-      pending.push(...value.properties.values());
-    }
-  }
-}
-
-/** Whether an object certainly has a property wherever it is used: it was built with it, and no other object reaches it. */
-export function surelyHasProperty(table: PropertyTable, name: string): boolean {
-  return (
-    table.has(name) && maybeMissing.get(table)?.has(name) !== true && !inLineage(table, isOpenTable)
-  );
-}
-
-function isOpenTable(table: PropertyTable): boolean {
-  return openTables.has(table);
-}
-
-/** For each property table made from others, by a copy or a join, the tables it was made from. */
-const madeFrom = new WeakMap<PropertyTable, PropertyTable[]>();
-
-function keepMaybeMissing(from: PropertyTable, to: PropertyTable): void {
-  if (from === to) return;
-  for (const name of maybeMissing.get(from) ?? []) markMaybeMissing(to, name);
-  const sources = madeFrom.get(to) ?? [];
-  if (!sources.includes(from)) sources.push(from);
-  madeFrom.set(to, sources);
-}
-
-/**
- * Whether an object may have a property when it is used: its own table, or a table it was copied or joined from, has
- * it. A store may add a property to the original after the copy was taken here, yet before the value is copied when the
- * script runs, such as in a timer block.
- */
-export function mayHaveProperty(table: PropertyTable, name: string): boolean {
-  return inLineage(table, (current) => current.has(name) || isOpenTable(current));
-}
-
-/** Whether a table, or a table it was copied or joined from, passes a test. */
-function inLineage(table: PropertyTable, test: (table: PropertyTable) => boolean): boolean {
-  const pending = [table];
-  const seen = new Set<PropertyTable>();
-  while (pending.length > 0) {
-    const current = pending.pop()!;
-    if (seen.has(current)) continue;
-    seen.add(current);
-    if (test(current)) return true;
-    pending.push(...(madeFrom.get(current) ?? []));
-  }
-  return false;
-}
-
 export const UNKNOWN_TYPE: StaticType = Object.freeze({ kind: "unknown" });
 const NEVER_TYPE: StaticType = Object.freeze({ kind: "never" });
 export const NULL_TYPE: StaticType = Object.freeze({ kind: "null" });
@@ -722,7 +635,6 @@ function* settleTask(
     const value = target.origins === undefined ? widened : replacedOrigins(widened, target.origins);
     target.resolved = target.sawNull ? optional(value) : value;
     target.resolvedAt = at;
-    if (openSlots.has(target)) markOpen(target.resolved);
     return;
   }
   if (target.kind === "union") {
@@ -746,16 +658,9 @@ function* settleTask(
     if (target.properties === null || source.properties === null) return;
     for (const [name, value] of source.properties) {
       const kept = target.properties.get(name);
-      if (kept === undefined) {
-        target.properties.set(name, yield* compileChild(placeTask(value)));
-        markMaybeMissing(target.properties, name);
-      } else yield* compileChild(settleTask(kept, value, at));
+      if (kept === undefined) target.properties.set(name, yield* compileChild(placeTask(value)));
+      else yield* compileChild(settleTask(kept, value, at));
     }
-    // The place may now hold this object instead: a property the object may lack may be missing, and it may have the
-    // object's other properties.
-    for (const name of target.properties.keys())
-      if (!surelyHasProperty(source.properties, name)) markMaybeMissing(target.properties, name);
-    keepMaybeMissing(source.properties, target.properties);
   }
 }
 
@@ -770,12 +675,9 @@ export function copyType(type: StaticType): StaticType {
 function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
   const type = resolved(typeToCopy);
   switch (type.kind) {
-    case "open": {
+    case "open":
       // A copy decides its type on its own, but keeps what the original saw: a first null stays a first null.
-      const slot: OpenType = { ...openType(), sawNull: type.sawNull };
-      if (openSlots.has(type)) openSlots.add(slot);
-      return slot;
-    }
+      return { ...openType(), sawNull: type.sawNull };
     case "list":
     case "set":
     case "dict":
@@ -785,7 +687,6 @@ function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
       const properties: PropertyTable = new Map();
       for (const [name, value] of type.properties)
         properties.set(name, yield* compileChild(copyTask(value)));
-      keepMaybeMissing(type.properties, properties);
       return { kind: "object", properties };
     }
     case "union": {
@@ -1052,7 +953,6 @@ function* decidedTask(typeToDecide: StaticType): CompileTask<StaticType> {
       const properties: PropertyTable = new Map();
       for (const [name, value] of type.properties)
         properties.set(name, yield* compileChild(decidedTask(value)));
-      keepMaybeMissing(type.properties, properties);
       return { kind: "object", properties };
     }
     default:
@@ -1170,14 +1070,8 @@ function* joinValuesTask(
       ? left.properties
       : new Map(left.properties);
     owned.add(properties);
-    // A property that only one of the objects has may be missing from the joined one.
-    keepMaybeMissing(left.properties, properties);
-    keepMaybeMissing(right.properties, properties);
-    for (const name of left.properties.keys())
-      if (!right.properties.has(name)) markMaybeMissing(properties, name);
     for (const [name, type] of right.properties) {
       const kept = properties.get(name);
-      if (kept === undefined) markMaybeMissing(properties, name);
       const joined =
         kept === undefined ? type : yield* compileChild(joinTask(kept, type, owned, changes));
       if (joined === undefined) return undefined;

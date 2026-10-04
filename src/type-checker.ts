@@ -96,12 +96,8 @@ import {
   type PossibleValue,
   type ScalarValue,
   TypeJoin,
-  markMaybeMissing,
-  markOpen,
   members,
-  mayHaveProperty,
   type PropertyTable,
-  surelyHasProperty,
   misfitProperty,
   nonNullType,
   NULL_TYPE,
@@ -350,14 +346,12 @@ class TypeChecker {
 
   readonly #functions: FunctionType[] = [];
   /**
-   * Uses of a property that an object did not have when they were checked, by source position. A later store, such as
-   * one in a timer block or later in a loop, may still add it; one that is still missing after the whole check is never
-   * added, so the use fails (ADR 0021 rule 1.8).
+   * For each variable declared with an exact value whose name nothing in the script assigns or changes, the literals
+   * that value is one of: values are copied, so the variable always holds what they build (ADR 0021 rule 1.8).
    */
-  readonly #absentProperties = new Map<
-    string,
-    { readonly table: PropertyTable; readonly name: string; readonly report: () => void }
-  >();
+  readonly #exactLiterals = new WeakMap<Variable, readonly Expression[]>();
+  /** For each identifier that reads such a variable, its literals. */
+  readonly #exactReads = new Map<Expression, readonly Expression[]>();
   /**
    * The names of the script's top-level `let` variables and speakers, which function bodies may use before they are
    * declared.
@@ -387,7 +381,7 @@ class TypeChecker {
   #flow = new Flow();
 
   /** What functions, blocks, and loops may change, collected before checking. */
-  #effects: ProgramEffects = { shared: new Set(), loops: new Map() };
+  #effects: ProgramEffects = { shared: new Set(), assigned: new Set(), loops: new Map() };
 
   /** Whether the statement being checked can run; a `break` after a `return` does not end its loop. */
   #reachable = true;
@@ -502,9 +496,6 @@ class TypeChecker {
       this.#flow = new Flow();
       runCompileTask(this.#statementsTask(handler.block.statements, scope));
     }
-    // Every store has been checked now, so a property that none of them adds is missing wherever it is read.
-    for (const absent of this.#absentProperties.values())
-      if (!mayHaveProperty(absent.table, absent.name)) absent.report();
   }
 
   /**
@@ -915,6 +906,11 @@ class TypeChecker {
       annotated: statement.typeAnnotation !== null,
     };
     if (statement.typeAnnotation === null) this.#declared.set(statement, variable);
+    const exact =
+      statement.typeAnnotation === null && !this.#effects.assigned.has(name)
+        ? this.#exactValues(initializer)
+        : undefined;
+    if (exact !== undefined) this.#exactLiterals.set(variable, exact);
     scope.declare(name, { kind: "variable", variable });
     this.#assigned(variable, value);
   }
@@ -1048,8 +1044,6 @@ class TypeChecker {
               name,
               decidedSlot(this.#newPlaceType(statement.value, assigned), statement.value.span),
             );
-            // The store may not run before every use of the object, so the property may be missing there.
-            markMaybeMissing(value.properties, name);
             const owner = this.#pathOf(target.object, scope);
             if (owner !== undefined) {
               this.#follow(extendPath(owner, name), assigned, statement.value.span);
@@ -1213,17 +1207,7 @@ class TypeChecker {
         if (this.diagnostics.length > before) fits = false;
       }
       // New properties join the place only when the object fits it, so one mistake does not cause more.
-      if (decides && fits)
-        for (const [name, type] of added) {
-          properties.set(name, type);
-          markMaybeMissing(properties, name);
-        }
-      // The place may now hold this object, which lacks the properties it does not write.
-      if (decides) {
-        const written = new Set(literal.properties.map((property) => property.name.name));
-        for (const name of properties.keys())
-          if (!written.has(name)) markMaybeMissing(properties, name);
-      }
+      if (decides && fits) for (const [name, type] of added) properties.set(name, type);
       if (decides && fits && added.length > 0 && place.widening !== undefined)
         this.#rewiden(place.widening.root);
       return;
@@ -1863,8 +1847,6 @@ class TypeChecker {
         annotated: parameter.typeAnnotation !== null,
       };
       if (declaration !== undefined) this.#declared.set(declaration, variable);
-      // An argument may be an object with more properties than the parameter's default.
-      markOpen(type);
       parameters.push(variable);
       scope.declare(name, { kind: "variable", variable });
     }
@@ -2032,6 +2014,10 @@ class TypeChecker {
       }
       case "identifier": {
         const entry = scope.resolve(expression.name);
+        const literals =
+          entry?.kind === "variable" ? this.#exactLiterals.get(entry.variable) : undefined;
+        if (literals === undefined) this.#exactReads.delete(expression);
+        else this.#exactReads.set(expression, literals);
         if (entry?.kind === "variable") return placeRead(this.#currentType(entry.variable));
         if (entry?.kind === "speaker" || (entry === undefined && expression.name === "speaker"))
           return { kind: "speaker" };
@@ -3121,6 +3107,30 @@ class TypeChecker {
   }
 
   /** The type of `object.name`; every member of a union must have the property (ADR 0021 rule 3.5). */
+  /**
+   * The object, list, or dict literals that an exact value is one of: such a literal, what a variable that keeps an exact
+   * value holds (see {@link #exactLiterals}), or a property, element, or dict value of an exact value that is such a
+   * literal itself. `undefined` for any other value, which may lack a property it was built with, or have others (ADR
+   * 0021 rule 1.8).
+   */
+  #exactValues(expression: Expression): readonly Expression[] | undefined {
+    // The properties and elements read, from the value back to its variable or literal, walked without recursion.
+    const steps: Expression[] = [];
+    let node = unwrap(expression);
+    while (node.kind === "propertyAccessExpression" || node.kind === "indexExpression") {
+      steps.push(node);
+      node = unwrap(node.object);
+    }
+    let values = isExactLiteral(node)
+      ? [node]
+      : node.kind === "identifier"
+        ? this.#exactReads.get(node)
+        : undefined;
+    for (let index = steps.length - 1; index >= 0 && values !== undefined; index -= 1)
+      values = exactParts(values, steps[index]!);
+    return values;
+  }
+
   #propertyType(
     object: StaticType,
     expression: Extract<Expression, { kind: "propertyAccessExpression" }>,
@@ -3141,15 +3151,20 @@ class TypeChecker {
       }
     }
     const all = members(object);
-    for (const member of all.map(resolved))
-      if (member.kind === "object" && member.properties !== null && !member.properties.has(name))
-        this.#whenAbsent(member.properties, name, expression.property.span, () =>
-          this.#report(
-            typeCode.invalidOperand,
-            `${capitalize(describeValue(member))} has no property '${name}'.`,
-            expression.property.span,
-          ),
-        );
+    // An exact object never gets a property its literals do not write. Its type has the properties they write.
+    const lacking = all.some((member) => {
+      const value = resolved(member);
+      return value.kind === "object" && value.properties !== null && !value.properties.has(name);
+    });
+    const exact = lacking ? this.#exactValues(expression.object) : undefined;
+    if (
+      exact?.every((literal) => literal.kind === "objectLiteral" && !writesProperty(literal, name))
+    )
+      this.#report(
+        typeCode.invalidOperand,
+        `An object has no property '${name}'.`,
+        expression.property.span,
+      );
     const types = all.map((member) => memberPropertyType(member, name));
     const passing = all.filter((_, index) => types[index] !== undefined);
     if (passing.length === all.length) {
@@ -3402,12 +3417,31 @@ class TypeChecker {
                 option.expression.span,
               ),
           );
-        // The choice objects of a computed collection are checked by their known properties.
-        for (const part of parts)
-          if (part.kind === "list" || part.kind === "set")
-            for (const element of members(part.element).map(resolved))
-              if (element.kind === "object" && element.properties !== null)
-                this.#checkChoiceObject(option.expression, element.properties, written !== null);
+        // The choice objects of a computed collection are checked by their known properties, and those of an exact list
+        // one by one, each by its literal.
+        const lists = this.#exactValues(option.expression);
+        const elements = lists?.every((list) => list.kind === "listLiteral")
+          ? lists.flatMap((list) => list.elements.map(unwrap))
+          : [];
+        if (elements.length > 0 && elements.every((element) => element.kind === "objectLiteral"))
+          for (const element of elements) {
+            const type = resolved(this.#typeOf(element));
+            if (type.kind === "object" && type.properties !== null)
+              this.#checkChoiceObject(option.expression, type.properties, written !== null, [
+                element,
+              ]);
+          }
+        else
+          for (const part of parts)
+            if (part.kind === "list" || part.kind === "set")
+              for (const element of members(part.element).map(resolved))
+                if (element.kind === "object" && element.properties !== null)
+                  this.#checkChoiceObject(
+                    option.expression,
+                    element.properties,
+                    written !== null,
+                    undefined,
+                  );
         const results = parts.map((part) => {
           const button =
             part.kind === "list" || part.kind === "set" ? resolved(part.element) : part;
@@ -3498,7 +3532,7 @@ class TypeChecker {
     if (literal.kind !== "objectLiteral") {
       for (const member of members(nonNullType(type)).map(resolved))
         if (member.kind === "object" && member.properties !== null)
-          this.#checkChoiceObject(entry, member.properties, written);
+          this.#checkChoiceObject(entry, member.properties, written, this.#exactValues(entry));
       return value.kind === "object" ? UNKNOWN_TYPE : type;
     }
     let returned: StaticType = UNKNOWN_TYPE;
@@ -3524,14 +3558,24 @@ class TypeChecker {
   }
 
   /**
-   * A choice object whose properties are known but not written in the option, checked as the runtime checks it when the
-   * choice opens: only value, text, and background, a text, a value a button can return, and a background. A store
-   * may add a property later, so a missing one is reported only if no store adds it, and a property a store added is
-   * checked only when its type fails whether or not it is there (ADR 0021 rule 1.8).
+   * A choice object that is not written in the option, checked as the runtime checks it when the choice opens. A text
+   * that cannot be shown fails whether it is there or missing. The other checks need to know which properties the
+   * object has, so they apply only to an exact object, whose literals are `exact` (ADR 0021 rule 1.8): only value, text,
+   * and background, a text, a value a button can return, and a background.
    */
-  #checkChoiceObject(expression: Expression, table: PropertyTable, written: boolean): void {
+  #checkChoiceObject(
+    expression: Expression,
+    table: PropertyTable,
+    written: boolean,
+    exact: readonly Expression[] | undefined,
+  ): void {
+    const text = table.get("text");
+    if (text !== undefined) this.#checkShownText(expression, text, "the text of a choice option");
+    if (exact === undefined || !exact.every((literal) => literal.kind === "objectLiteral")) return;
+    const always = (name: string): boolean =>
+      exact.every((literal) => writesProperty(literal, name));
     const extra = [...table.keys()].find(
-      (name) => !CHOICE_OBJECT_PROPERTIES.has(name) && surelyHasProperty(table, name),
+      (name) => !CHOICE_OBJECT_PROPERTIES.has(name) && always(name),
     );
     if (extra !== undefined) {
       this.#report(
@@ -3541,19 +3585,14 @@ class TypeChecker {
       );
       return;
     }
-    const text = table.get("text");
-    // A text that cannot be shown fails whether it is there or missing.
-    if (text !== undefined) this.#checkShownText(expression, text, "the text of a choice option");
-    else
-      this.#whenAbsent(table, "text", expression.span, () =>
-        this.#report(
-          typeCode.invalidInteractionChoice,
-          'A choice object requires text, as in { text: "Go", value: 1 }.',
-          expression.span,
-        ),
+    if (exact.every((literal) => !writesProperty(literal, "text")))
+      this.#report(
+        typeCode.invalidInteractionChoice,
+        'A choice object requires text, as in { text: "Go", value: 1 }.',
+        expression.span,
       );
     const value = table.get("value");
-    if (value !== undefined && surelyHasProperty(table, "value")) {
+    if (value !== undefined && always("value")) {
       if (written)
         this.#report(
           typeCode.invalidInteractionChoice,
@@ -3566,7 +3605,7 @@ class TypeChecker {
         );
     }
     const background = table.get("background");
-    if (background !== undefined && surelyHasProperty(table, "background"))
+    if (background !== undefined && always("background"))
       this.#checkBackground(expression, background);
   }
 
@@ -3996,11 +4035,8 @@ class TypeChecker {
     label: string,
     value: StaticType,
   ): void {
-    if (containsType(value, (part) => part.kind === "unknown")) {
+    if (containsType(value, (part) => part.kind === "unknown"))
       this.#runtimeChecks.push({ site, place, label });
-      // The runtime checks only the properties both have, so the place may hold an object with others.
-      markOpen(place);
-    }
   }
 
   // Reports ----------------------------------------------------------------------------------------------------------
@@ -4097,15 +4133,6 @@ class TypeChecker {
         `${problem.message}${problem.widened === undefined ? "" : this.#widenedNote(problem.widened)}${problem.fix ?? ""}`,
         problem.span,
       );
-  }
-
-  /** Reports a problem once the whole check is done, if no store ever added the property (see {@link #absentProperties}). */
-  #whenAbsent(table: PropertyTable, name: string, span: SourceSpan, report: () => void): void {
-    this.#absentProperties.set(`${span.start.offset} ${span.end.offset} ${name}`, {
-      table,
-      name,
-      report,
-    });
   }
 
   /**
@@ -4332,6 +4359,8 @@ const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
 interface ProgramEffects {
   /** Names that function bodies and timer or media blocks assign. */
   readonly shared: ReadonlySet<string>;
+  /** Names that any assignment or list or set change in the program stores into. */
+  readonly assigned: ReadonlySet<string>;
   /** The effects of each loop, by its body; a `while` loop includes its condition. */
   readonly loops: ReadonlyMap<Block, LoopEffects>;
 }
@@ -4353,6 +4382,7 @@ type EffectWork =
  */
 function programEffects(program: Program): ProgramEffects {
   const shared = new Set<string>();
+  const assigned = new Set<string>();
   const nodes: LoopNode[] = [];
   const work: EffectWork[] = [];
   const enter = (
@@ -4394,6 +4424,7 @@ function programEffects(program: Program): ProgramEffects {
       ) {
         const root = rootName(callee.object);
         if (root !== null) {
+          assigned.add(root);
           if (inside) shared.add(root);
           loop?.assigned.add(root);
         }
@@ -4408,6 +4439,7 @@ function programEffects(program: Program): ProgramEffects {
       // A store into an element or property changes the variable that holds it, too.
       const root = rootName(statement.target);
       if (root !== null) {
+        assigned.add(root);
         if (inside) shared.add(root);
         loop?.assigned.add(root);
       }
@@ -4444,6 +4476,7 @@ function programEffects(program: Program): ProgramEffects {
   }
   return {
     shared,
+    assigned,
     loops: new Map(
       nodes.map((node) => [node.body, { assigned: node.assigned, suspends: node.suspends }]),
     ),
@@ -5247,6 +5280,49 @@ const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([
 /** What a choice value may be, written or held in a choice object's value property. */
 const CHOICE_VALUE_MESSAGE =
   "A choice value must be text, a number, true, false, null, a duration, or a date or time value.";
+
+/** Whether an expression is an object, list, or dict literal, whose value an exact value may be. */
+function isExactLiteral(expression: Expression): boolean {
+  return (
+    expression.kind === "objectLiteral" ||
+    expression.kind === "listLiteral" ||
+    expression.kind === "dictLiteral"
+  );
+}
+
+/**
+ * The literals that a property, element, or dict value read from exact literals may be, or `undefined` when one of them
+ * is not such a literal.
+ */
+function exactParts(
+  owners: readonly Expression[],
+  step: Expression,
+): readonly Expression[] | undefined {
+  const parts: Expression[] = [];
+  for (const owner of owners) {
+    if (step.kind === "propertyAccessExpression" && owner.kind === "objectLiteral") {
+      const property = owner.properties.find(
+        (candidate) => candidate.name.name === step.property.name,
+      );
+      if (property === undefined) return undefined;
+      parts.push(unwrap(property.value));
+    } else if (step.kind === "indexExpression" && owner.kind === "listLiteral")
+      // An element may be any of the list's elements, and a dict value any of the dict's values.
+      parts.push(...owner.elements.map(unwrap));
+    else if (step.kind === "indexExpression" && owner.kind === "dictLiteral")
+      parts.push(...owner.entries.map((entry) => unwrap(entry.value)));
+    else return undefined;
+  }
+  return parts.length > 0 && parts.every(isExactLiteral) ? parts : undefined;
+}
+
+/** Whether an object literal writes a property. */
+function writesProperty(literal: Expression, name: string): boolean {
+  return (
+    literal.kind === "objectLiteral" &&
+    literal.properties.some((property) => property.name.name === name)
+  );
+}
 
 /** The properties a choice object may have. */
 const CHOICE_OBJECT_PROPERTIES: ReadonlySet<string> = new Set(["value", "text", "background"]);
