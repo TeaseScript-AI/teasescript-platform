@@ -111,30 +111,27 @@ or binding. See [timer semantics](specifications/accepted-syntaxes-v30.md#27-tim
 
 ### Compact choices
 
-Unlabelled choices return visible text:
+`choose` returns the value of the selected button. A value may be written before an option's `:`; an option without
+one returns itself, with its own type. A list option gives one button per element:
 
 ```tease
 let result = choose "Bratty", "Very submissive"
-let result = choose as mistress "Bratty", "Very submissive"
-```
-
-Labelled choices return the authored label:
-
-```tease
-let result = choose bratty: "Bratty", submissive: "Very submissive"
 let result = choose as mistress first: "Mystery", second: "Mystery"
 let result = choose 1: "Open the door", 2: "Walk away"
+let rounds = choose 5, 10, 15
+let offenses = [{ value: "spank", text: "Spanking" }, { text: "Corner" }]
+let answer = choose back: "Back", offenses
 ```
 
-The compact form keeps every option in one statement and separates options with commas. Labelled and unlabelled options may not be mixed. Identifier labels and finite numeric-literal labels are accepted, but one `choose` may not mix the two label types. Identifier labels return `string`; numeric labels return `number`. Labels must be unique. Repeated visible text is allowed only for labelled choices; an unlabelled duplicate is a compile error.
+The compact form keeps every option in one statement and separates options with commas. Options with and without a written value may be mixed; until union types arrive (#504), one `choose` may not mix identifier and numeric values before `:`. Buttons may repeat values and visible text. [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices) defines the complete option rules.
 
 `choose` is the author-facing construct. `choice` is the internal interaction/action noun.
 
 Existing downstream interaction and validation guards remain boundary-local technical constraints; compact `choose` does not promote them into a TeaseScript source-capacity promise.
 
-Selecting a labelled button or dropdown entry supplies its label to the engine; selecting an unlabelled entry supplies its visible text. The engine validates the selection and derives the canonical visible player-transcript text from the active choice. Manually typed input uses exact, unambiguous visible-text matching.
+Selecting a button or dropdown entry supplies its position to the engine. The engine validates the selection and derives the returned value and the canonical visible player-transcript text from the active choice. Manually typed input uses exact, unambiguous visible-text matching.
 
-This compact form supersedes the V30 split between `{...}` labelled bodies and `[...]` unlabelled bodies. The question itself is normally emitted with `say`.
+This compact form supersedes the V30 split between `{...}` bodies with values and `[...]` bodies without. The question itself is normally emitted with `say`.
 
 ### Dynamic choice presentation
 
@@ -193,7 +190,7 @@ nesting, recovery, and link rules.
 
 ### Bounded-data boundary
 
-ADR 0018 does not assign separate author-facing character limits to text answers, hints, buttons, or choice labels. Interaction definitions and completions remain subject to justified current platform constraints for strings, collections, messages, plans, snapshots, checkpoints, nesting, and validation work.
+ADR 0018 does not assign separate author-facing character limits to text answers, hints, buttons, or choice texts. Interaction definitions and completions remain subject to justified current platform constraints for strings, collections, messages, plans, snapshots, checkpoints, nesting, and validation work.
 
 Over-limit data is rejected deterministically without truncation or partial state mutation. The editor may warn earlier about impractically long labels or large choice sets.
 

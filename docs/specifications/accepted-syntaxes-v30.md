@@ -368,7 +368,7 @@ Division returns a `number` when necessary:
 
 ### Randomness
 
-All random operations use one deterministic session RNG. This includes list `.random`, automatic visible-text list selection, random ranges, script globs, and the built-in random functions.
+All random operations use one deterministic session RNG. This includes list `.random`, list selection in `${...}` interpolation, random ranges, script globs, and the built-in random functions.
 
 ```text
 let value = random()
@@ -574,15 +574,15 @@ say """
 
 Backticks have no delimiter role. A raw backtick inside either quoted form is ordinary text.
 
-When an eligible list is interpolated into a string, the engine selects one random element for that evaluation:
+When a list is interpolated into a string, the engine selects one random element for that evaluation:
 
 ```text
 let greetings = ["Hello", "Hi", "Welcome"]
 say "${greetings}, ${playerName}"
 ```
 
-This automatic selection is limited to approved visible-text contexts. It is not a general list-to-string conversion.
-The complete rules are defined under [Lists](#16-lists).
+Only `${...}` interpolation selects from a list; it is not a general list-to-string conversion. The complete rules are
+defined under [Lists](#16-lists).
 
 ### String escape sequences
 
@@ -687,7 +687,8 @@ wait 2
 playAudio "door.mp3"
 ```
 
-For `say`, an eligible list expression selects one random text value. Other commands do not gain this behavior unless their API explicitly defines the argument as a visible-text field.
+`say` shows a list, set, or object in code-like notation; only `${...}` interpolation selects one random element
+from a list ([§16](#16-lists)).
 
 Only engine-provided built-ins use command syntax. User-defined behavior uses normal functions.
 
@@ -1015,49 +1016,73 @@ let chosenName = player.petNames.random
 let stranger = speakers.random
 ```
 
-### Automatic random selection in visible text
+### Lists in text
 
-When a list is used in an approved visible-text context, the engine automatically selects one random element for that evaluation.
-
-Accepted contexts include:
-
-```text
-say player.petNames
-say "${player.petNames}"
-```
-
-Other visible-text fields may opt into the same behavior when their API documentation explicitly says so.
-
-Automatic text selection accepts list elements of these types:
-
-```text
-string
-integer
-number
-```
-
-Those types may be mixed in one text-selection list:
-
-```text
-let values = [
-    "Level",
-    2,
-    3.5
-]
-
-say values
-```
-
-A selected `integer` or `number` is converted to text for that visible-text use.
-
-Each evaluation selects again:
+Interpolation is the only place where a list turns into one random element. Each `${...}` evaluation selects one
+element with the deterministic session RNG:
 
 ```text
 say "Good ${player.petNames}"
 say "Come closer, ${player.petNames}"
 ```
 
-The two evaluations may choose different elements. Selection uses the deterministic session RNG, so replay and debugging can reproduce the same session sequence.
+The two evaluations may choose different elements. Replay and debugging reproduce the same session sequence.
+
+An interpolated list may contain any value that `${...}` shows on its own, mixed: text, numbers, `true` and `false`,
+`null`, and durations. The selected element is shown as that value would be:
+
+```text
+let values = [
+    "Level",
+    2,
+    3.5,
+    90 seconds
+]
+
+say "Current: ${values}"  // for example "Current: 1 min 30 s"
+```
+
+The whole list is checked before the selection, so a list that also contains a list, a set, an object, or a media or
+resource reference is rejected whichever element would have been selected. Object lists remain valid lists; select from
+them explicitly:
+
+```text
+let stranger = speakers.random
+```
+
+`say` is also a debugging aid for whole values. Like Python's `print`, it shows text, numbers, `true` and `false`,
+`null`, and durations as it does on their own, and every other value in a code-like notation:
+
+```text
+let petNames = ["pet", "puppy", "toy"]
+say petNames                   // ["pet", "puppy", "toy"]
+say "Good ${petNames}"         // one random element
+say [2.5, true, null]          // [2.5, true, null]
+say [["a"], ["b"]]             // [["a"], ["b"]]
+say [{ name: "Bo", age: 3 }]   // [{ name: "Bo", age: 3 }]
+say { name: "Bo" }             // { name: "Bo" }
+say ["He said \"hi\""]         // ["He said \"hi\""]
+say []                         // []
+say [90 seconds]               // [1 min 30 s]
+say 1..=5                      // 1..=5
+say mistress                   // <speaker mistress>
+say music                      // <media "music.mp3", playing at 12 s>
+say beat                       // <timer "Beat", 7 s left>
+```
+
+In this notation, text is quoted with the string escapes of [§8](#8-strings-and-interpolation), durations use their
+short form, a set shows like a list, an object shows its properties in order, and a range shows as written. A speaker
+shows its identifier. A media handle shows its file and state: `playing at` or `paused at` its position, `stopped`, or
+`finished`. A timer handle shows its label when it has one and its state: the time left (after `paused,` when paused),
+`stopped`, or `finished`. Handles show the state at the moment `say` runs. Message markup is not applied to the
+notation.
+
+Other text fields, such as a button label, an input hint, the `text` of a choice object, a timer label, or a speaker's
+name or title, do not select from a list. A list there is a compile error when the compiler can see it, such as a list
+literal or a variable that holds a list, and a runtime error otherwise; the message points to `"${list}"` and
+`list.random`. Another value a text field cannot show, such as an object or a range, is likewise a compile error when
+the compiler can see it. A list as a whole `choose` option instead gives
+one button per element ([§19](#19-choices)).
 
 To choose a specific element, use its index:
 
@@ -1090,7 +1115,8 @@ copiedNames.add("new")
 
 `originalNames` remains unchanged.
 
-Automatic random selection is deliberately not a general list-to-string conversion. It does not apply implicitly to paths, storage keys, URLs, media references, resource references, ordinary type inference, or other program-control values:
+Interpolation is deliberately not a general list-to-string conversion. Paths, storage keys, URLs, media references,
+resource references, ordinary type inference, and other program-control values never select from a list:
 
 ```text
 run scriptPaths
@@ -1101,29 +1127,15 @@ playVideo videos
 
 Those examples require an explicit element or `.random` where the receiving API permits the selected element type.
 
-Automatic visible-text selection also does not accept lists containing:
-
-```text
-boolean
-null
-objects
-nested lists
-media references
-resource references
-```
-
-Object lists remain valid, but selection from them must be explicit:
-
-```text
-let stranger = speakers.random
-```
-
 Runtime behavior:
 
 - An invalid index raises a runtime error rather than returning `null`. The compiler reports an index that it can see
   is negative or not a whole number, such as `items[-1]` or `items.removeAt(0.5)`.
-- Automatic visible-text selection from an empty list raises a runtime error because no element can be selected.
-- The empty-list error identifies the list expression and explains that the visible-text context requires at least one eligible element.
+- Interpolating an empty list raises a runtime error because no element can be selected.
+- The empty-list error identifies the interpolated expression and explains that interpolation needs at least one
+  element to select from.
+- A value `${...}` cannot show, or a list literal inside it that is empty or holds such a value, is a compile error
+  when the compiler can see it.
 - Two lists are equal (`==`) when they have the same length and equal elements in the same order; two sets are equal
   when they have the same members in any order; two ranges are equal when they are written with the same bounds and
   the same inclusiveness, so `1..=2 != 1..3` although both produce `1` and `2`. Values of different kinds, such as a
@@ -1208,50 +1220,55 @@ Potentially nullable use without an explicit check follows the compiler-warning 
 ## 19. Choices
 **Status:** Accepted
 
-`choose` returns the selected label directly.
-
-Named choices:
-
-```text
-let action = choose "What do you do?" {
-    open: "Open the door"
-    leave: "Walk away"
-}
-```
-
-The result is the selected label:
+`choose` shows one button per option and returns the value of the selected button. A button shows its text; its value
+is what `choose` returns. Options are comma-separated; the interaction itself (presentation, typed answers,
+transcript) is defined in [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#choose).
 
 ```text
+let action = choose open: "Open the door", leave: "Walk away"
+
 if action == "open" {
     openDoor()
 }
 ```
 
-Numeric labels are allowed:
+An option may have a value written before `:`. An identifier returns text and a numeric literal returns its number, an
+`integer` or a `number` as written. An option without a written value returns itself, with its own type:
 
 ```text
-let action = choose "What do you do?" {
-    1: "Open the door"
-    2: "Walk away"
-}
+let answer = choose back: "Back", "Spanking", "Lines"   // "back", "Spanking", or "Lines"
+let rounds = choose 5, 10                               // 5 or 10, an integer
 ```
 
-When no explicit label is supplied, the visible text itself is returned:
+A list used as an option gives one button per element, in order. An element is a value, or a choice object
+`{ value?, text, background? }`: the button shows `text`, returns `value` (or the `text` value when `value` is
+omitted), and uses `background` as its colour ([§37](#authored-colours)). A choice object may also be a whole option.
+A value written before a list option is the value of every button from that list:
 
 ```text
-let action = choose "What do you do?" [
-    "Open the door",
-    "Walk away"
-]
+let offenses = [{ value: "spank", text: "Spanking" }, { text: "Corner" }]
+let answer = choose back: "Back", offenses   // "back", "spank", or "Corner"
+let n = choose [5, 10, 15]                   // n is an integer
+let door = choose win: "Open a door", lose: ["Open a door", "Open a door"]   // 3 buttons; the last two return "lose"
 ```
 
 Rules:
 
-- A choice may use labeled entries or unlabeled entries.
-- Labeled and unlabeled entries may not be mixed in one `choose`.
-- A labeled choice returns the selected label.
-- An unlabeled choice returns the selected visible text.
+- A button shows its option, or its choice object's `text`, as `${...}` shows it: text, a number, `true` or `false`,
+  `null`, or a duration.
+- Options with and without a written value may be mixed.
+- When all values have the same type, the result has that type; integers and numbers together are numbers.
+- The elements of a list option are values or choice objects, not lists.
+- A choice object has `text`, and optionally `value` and `background`. It has no `value` property when a value is
+  written before its option's `:`, also as an element of a list option.
+- An empty list contributes no buttons. A `choose` without any button is an error: a compile error when it is visible
+  in the source, such as `choose []`, and a runtime error otherwise.
+- Buttons may repeat a value or a text: `choose win: "Open a door", lose: "Open a door", lose: "Open a door"` shows
+  three buttons. A selected button is identified by its position, so each returns its own value.
 - `choose` does not return a result object.
+- Planned with union types (#504): mixing number and text results in one `choose` is allowed only into an explicitly
+  union-typed variable, and comparing a choice result with a value no option has is a compiler warning. Until then, one
+  `choose` may not mix identifier and numeric values before `:`.
 
 ## 20. Input functions
 **Status:** Accepted
@@ -2608,13 +2625,13 @@ let item = items[99]
 
 A replacement value may be supplied for `item`.
 
-### Empty list in visible-text selection
+### Empty list in interpolation
 
 ```text
 say "${names}"
 ```
 
-When `names` is empty, execution reports that no eligible text value can be selected. A replacement text value may be supplied when runtime recovery is enabled.
+When `names` is empty, execution reports that no element can be selected. A replacement text value may be supplied when runtime recovery is enabled.
 
 Recovered errors should record:
 
@@ -2997,7 +3014,10 @@ degradingNames
 lovingNames
 ```
 
-The engine supplies a default list for each player field. The player may customize these account-wide defaults. If a built-in list has nevertheless been emptied, its visible-text fallback is the literal category label: `"pet name"`, `"degrading name"`, or `"loving name"`. This special fallback does not change the general empty-list runtime-error rule for ordinary lists.
+The engine supplies a default list for each player field. The player may customize these account-wide defaults. The
+player's settings require at least one name in each list, and the Player and engine validate this where a profile
+enters them; no profile input exists yet, so the validation arrives with it. There is no fallback text: a list that a
+script empties follows the ordinary empty-list rules.
 
 ```text
 player.petNames
@@ -3005,7 +3025,7 @@ player.degradingNames
 player.lovingNames
 ```
 
-In an approved visible-text context, a list automatically returns one random eligible element according to the list rules:
+Interpolation selects one random element according to the list rules:
 
 ```text
 say "Come here, ${player.petNames}."

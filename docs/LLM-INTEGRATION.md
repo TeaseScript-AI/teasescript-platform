@@ -14,12 +14,12 @@ A later optional interpreter may receive only bounded structured context relevan
 requesting speaker
 active question or recent relevant transcript
 expected result type
-allowed choice labels and visible texts
+allowed choice values and visible texts
 submitted player text
 validation failure
 ```
 
-For `choose`, the LLM may propose exactly one currently allowed label or visible option, or a typed `needsClarification` outcome. For `askNumber`, it may propose one finite number or `needsClarification`, for example when interpreting natural language such as “about twenty”. It may also generate speaker-styled clarification text through the normal validated chat-output path.
+For `choose`, the LLM may propose exactly one currently offered button or visible option, or a typed `needsClarification` outcome. For `askNumber`, it may propose one finite number or `needsClarification`, for example when interpreting natural language such as “about twenty”. It may also generate speaker-styled clarification text through the normal validated chat-output path.
 
 The deterministic engine remains authoritative:
 
