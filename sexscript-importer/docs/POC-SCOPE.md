@@ -27,7 +27,7 @@ stable enough to test lowering independently from a particular Groovy parser imp
 ## Target policy
 
 The importer targets accepted TeaseScript (V30 plus accepted ADRs, the owner storage decision below, and owner
-decisions recorded on issues whose implementation is still open, such as #515, #518, #528, #531, and #532), not the
+decisions recorded on issues whose implementation is still open, such as #518, #528, #531, #532, and #536), not the
 subset the current compiler implements. Script chaining, for example, has no faithful implemented substitute, so
 avoiding accepted-but-unimplemented forms would only trade compiler errors for wrong behavior. Within that target:
 

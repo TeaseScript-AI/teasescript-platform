@@ -130,22 +130,22 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 - A Groovy map in a condition tests emptiness, which `map != {}` expresses now that objects compare structurally
   (#517), or `dict.length > 0` for a dict; a map that may also be null is tested with `map != null and map != {}`, and
   reported when the expression cannot be evaluated twice (`SX_MAP_TRUTHINESS`).
-- A Groovy map read a missing key as null; a dict reports it (#536). `map[key] == null` and a lookup used as a
-  condition therefore test `contains(key)` first (with `or map[key] == null` when a value may be null), and
-  `remove(key)` of a key that may be missing becomes `if map.contains(key) { map.remove(key) }`. A fallback for a
-  missing key (`m[k] ?: d`, `m.containsKey(k) ? m[k] : d`, read-then-default) becomes `m.get(k, default: d)`, with a
-  note where Groovy's fallback also replaced a stored null, or with `?:` a stored false, 0, or empty value
-  (`SX_DICT_DEFAULT`). Any other lookup fails where Groovy continued with null, so it gets a note (`SX_DICT_MISSING_KEY`,
-  26 Toy sites) unless its key is proven present: a literal key that every map assigned to the variable has and
-  nothing removes, a key a surrounding test found, a key written earlier in the same block, or the key of a loop over
-  `keySet()`. Groovy kept a key's type, so `1` and `"1"` were different keys, while dict keys are text: number keys
-  become text with a note (`SX_DICT_KEY_TEXT`), at every number key of a dict that text keys reach too, and a key of
-  unknown type becomes text in a dict that number keys reach. A repeated literal key kept its first position and its
-  last value, which the dict literal merges with a note (`SX_DICT_DUPLICATE_KEY`). A map whose values have different
-  types (also through property writes or lists with different element types), a runtime key on a map not held in a
-  variable, and a dict compared with a map that may be an object are reported (`SX_DICT_VALUE_TYPE`,
-  `SX_DYNAMIC_MAP_ACCESS`, `SX_DICT_EQUALITY`); a map literal or variable compared with a dict becomes a dict, since a
-  dict never equals an object. Dict analysis follows bindings, so a closure's own `def m` is apart from a script `m`.
+- A Groovy map read a missing key as null; a dict reports it (#536). `map[key] == null` and a lookup used as a condition
+  therefore test `contains(key)` first (with `or map[key] == null` when a value may be null), and `remove(key)` of a key
+  that may be missing becomes `if map.contains(key) { map.remove(key) }`. A fallback for a missing key (`m[k] ?: d`,
+  `m.containsKey(k) ? m[k] : d`, read-then-default) becomes `m.get(k, default: d)`, with a note where Groovy's fallback
+  also replaced a stored null, or with `?:` a stored false, 0, or empty value (`SX_DICT_DEFAULT`). Any other lookup
+  fails where Groovy continued with null, so it gets a note (`SX_DICT_MISSING_KEY`, 26 Toy sites) unless its key is
+  proven present: a literal key that every map assigned to the variable has and nothing removes, a key a surrounding
+  test found, a key written earlier in the same block, or the key of a loop over `keySet()`. Groovy kept a key's type,
+  so `1` and `"1"` were different keys, while dict keys are text: number keys become text with a note
+  (`SX_DICT_KEY_TEXT`), at every number key of a dict that text keys reach too, and a key of unknown type becomes text
+  in a dict that number keys reach. A repeated literal key kept its first position and its last value, which the dict
+  literal merges with a note (`SX_DICT_DUPLICATE_KEY`). A map whose values have different types (also through property
+  writes or lists with different element types), a runtime key on a map not held in a variable, and a dict compared with
+  a map that may be an object are reported (`SX_DICT_VALUE_TYPE`, `SX_DYNAMIC_MAP_ACCESS`, `SX_DICT_EQUALITY`); a map
+  literal or variable compared with a dict becomes a dict, since a dict never equals an object. Dict analysis follows
+  bindings, so a closure's own `def m` is apart from a script `m`.
 - Closures kept as values become action IDs called through one dispatcher. Unlike Groovy, the dispatcher ignores extra
   arguments and returns null for an unknown action; Groovy failed in both cases.
 - A `switch` case Groovy tested with `isCase` keeps its meaning only where the case value shows it: equality for
@@ -199,7 +199,7 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 
 `main` rejects a value of another type than a variable's declared or inferred one (`TSV041`), and only `integer`
 widens to `number`. The importer follows the compiler's static types over the generated program, under the accepted
-rules: the result types of PRs #515 and #518, and the #504 decisions that a variable starting as `null` keeps the type
+rules: the result types of PR #518, and the #504 decisions that a variable starting as `null` keeps the type
 of its first value (1a) and that an unannotated integer widens to `number` by itself (option B, built in #526). Where
 `main` needs another annotation, only the compiler gate writes it. Measured on the four corpus packages:
 
@@ -212,10 +212,11 @@ of its first value (1a) and that an unannotated integer widens to `number` by it
   variables. That menu and one in OffenseSelect (whose option variable also holds a number) stay unconverted
   (`SX_DYNAMIC_CHOICE_OPTIONS`). The other three packages reuse variables only with compatible types.
 - **Integer/number friction, resolved by #504 option B:** 18 declarations (Domme3 3, DisciplineClinic 9, Toy 6) start
-  with a whole number and later hold a fraction (`def spankTempo = 1`, later `spankTempo = 0.75`), and 14 more receive
-  a numeric `choose` result, which `main` still types as `number`. Under #519 alone each needed `: number`, which takes
-  a whole-program view of every later assignment. The output now writes none; until #526 and PR #515 land, the
-  compiler gate writes `: number` on 42 declarations (counted as the pending capability "number annotations").
+  with a whole number and later hold a fraction (`def spankTempo = 1`, later `spankTempo = 0.75`). Under #519 alone
+  each needed `: number`, which takes a whole-program view of every later assignment. The output now writes none;
+  until #526 lands, the compiler gate writes `: number` on 30 declarations (counted as the pending capability "number
+  annotations"). The 14 that only received a numeric `choose` result need none since `main` types it as an integer
+  (#515).
 - **Optional types:** one variable starts with text and is later set to null (`let block: string? = "begin"`).
   Variables that start as `null` are no longer annotated from Groovy's number evidence, which cannot tell an integer
   from a fraction; they keep the type of their first value.
@@ -263,7 +264,7 @@ showed:
 
 ## Capability candidates
 
-Evidence for owner evaluation, ordered by corpus weight. Choices from runtime lists (C1–C3, PR #515), text
+Evidence for owner evaluation, ordered by corpus weight. Choices from runtime lists (C1–C3, merged as #515), text
 operations (#508, PR #518), single-field prefill (#510, merged as #514), and dictionaries (D1, decided as `dict` in
 #536) were candidates here and are now accepted; the importer emits them by default.
 
@@ -328,7 +329,7 @@ The importer emits these accepted forms although the current compiler rejects th
 separately: `run`/`end`, `switch` (#528, PR #529), `showPopup`, the `showButton` timeout and elapsed result (#531),
 `askInteger`, `askBooleans`, date and time (`getDateTime()`, `getDate()`, `getTime()`, `getTimestamp()`,
 `toSeconds()`, `toISO()`, `formatTime()`, `toDate()`, `.days`; #532), `openUrl`, `round`/`floor`/`ceil` and the
-conversions (#518), text operations and `join` (#518), `choose` with list options (#515), `takePhoto()` (camera,
+conversions (#518), text operations and `join` (#518), `takePhoto()` (camera,
 #475), integer widening (#504 option B, #526), for which the gate writes `: number`, and `dict` (#536). `run`/`end`
 dominates: it blocks 21 otherwise compiler-clean corpus scripts.
 

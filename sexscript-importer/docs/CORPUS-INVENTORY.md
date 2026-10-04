@@ -79,9 +79,8 @@ scripts use it (capabilities used by fewer than three scripts are omitted):
 | `askBooleans()` | 10 | 8 |
 | `showPopup` | 10 | 4 |
 | `askInteger()` | 9 | 0 |
-| `: number` for integer widening (#526, #515) | 7 | 1 |
+| `: number` for integer widening (#526) | 5 | 1 |
 | `dict` (#536) | 1 | 0 |
-| `choose` list options (#515) | 5 | 0 |
 | `load "key", default:` (#541) | 5 | 1 |
 | `round()` (#518) | 4 | 1 |
 | `getDate().toISO()`, `getTime().formatTime()` (#532) | 3 each | 1 each |
