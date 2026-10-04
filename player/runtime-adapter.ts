@@ -1,8 +1,10 @@
 import {
+  captureTemporalContext,
   compileSource,
   completeAction,
   createCheckpoint,
   createFreshRuntimeSnapshot,
+  DEFAULT_TEMPORAL_CONTEXT,
   deserializeCheckpoint,
   interactionDeadlineMs,
   mediaPlaybackProjection,
@@ -25,6 +27,7 @@ import {
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSnapshot,
   type RuntimeStorageWriteActionSnapshot,
+  type TemporalContext,
   type TimeObservationOutcome,
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
@@ -62,6 +65,31 @@ export interface PlayerRuntimeSessionOptions {
    * through `completePlayerRuntimeStorageWrite`; otherwise storage is session-local.
    */
   readonly persistentScriptStorage?: boolean;
+  /** The player's zone and date and time presentation, captured when the session starts. */
+  readonly temporalContext?: TemporalContext;
+}
+
+/**
+ * Captures the player's time zone and date and time presentation for a new session: the account settings when the host
+ * has them, else the browser's. A setting this browser cannot use falls back to the browser's own, and then to UTC and
+ * locale-neutral text.
+ */
+export function playerTemporalContext(
+  account: { readonly timeZone?: string; readonly locale?: string } = {},
+): TemporalContext {
+  const browser = Intl.DateTimeFormat().resolvedOptions();
+  const locale = globalThis.navigator?.language ?? browser.locale;
+  for (const [timeZone, language] of [
+    [account.timeZone ?? browser.timeZone, account.locale ?? locale],
+    [browser.timeZone, locale],
+  ] as const) {
+    try {
+      return captureTemporalContext(timeZone, language);
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error;
+    }
+  }
+  return DEFAULT_TEMPORAL_CONTEXT;
 }
 
 /** Runtime checkpoint plus an in-memory presentation cache; only checkpointJson is canonical save data. */
@@ -87,6 +115,7 @@ export function createPlayerRuntimeSession(
   const snapshot = createFreshRuntimeSnapshot(compilation.plan, {
     ...(options.scriptStorage === undefined ? {} : { scriptStorage: options.scriptStorage }),
     persistentScriptStorage: options.persistentScriptStorage ?? false,
+    ...(options.temporalContext === undefined ? {} : { temporalContext: options.temporalContext }),
   });
   const operation = run(compilation.plan, snapshot);
   return applyOperation(
