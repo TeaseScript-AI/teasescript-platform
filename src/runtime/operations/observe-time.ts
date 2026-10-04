@@ -1,4 +1,4 @@
-import type { InstructionPlan } from "../../plan/model.js";
+import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
 import {
   MAX_RUNTIME_SESSION_TIME_MS,
   type RuntimeCallFrameSnapshot,
@@ -339,7 +339,7 @@ function settleSuspendedDelay(
       kind: "actionCompleted",
       sequence: completionEventSequence,
       settlement,
-      span: copySpan(plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan),
+      span: copySpan(plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan)),
     } satisfies ActionCompletedEvent),
   );
 }
@@ -367,7 +367,7 @@ function settleForegroundTimedAction(
     snapshot.nextInstruction = action.continuationInstruction;
   }
   // A gate promoted by a pacing barrier carries no prepared output; the barrier runs again and then advances.
-  const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
+  const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   const completionEvent: ActionCompletedEvent = Object.freeze({
     kind: "actionCompleted",
     sequence: completionEventSequence,

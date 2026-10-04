@@ -1,4 +1,4 @@
-import type { InstructionPlan, PlanSourceLocation } from "../../plan/model.js";
+import { type InstructionPlan, type PlanSourceLocation, mainSourceSpan } from "../../plan/model.js";
 import type { SourceSpan } from "../../source.js";
 import type {
   RuntimeTimerActionSnapshot,
@@ -215,6 +215,6 @@ function drawWholeSeconds(snapshot: RuntimeSnapshot, range: RuntimeTimerRangeSna
 
 export function timerSpan(plan: InstructionPlan, owningInstruction: number): SourceSpan {
   const location: PlanSourceLocation =
-    plan.instructions[owningInstruction]?.span ?? plan.sourceSpan;
+    plan.instructions[owningInstruction]?.span ?? mainSourceSpan(plan);
   return copySpan(location);
 }

@@ -1072,7 +1072,7 @@ test("terminal button completion remains inspectable and continuation runs only 
   });
   const plan = {
     ...withExit,
-    rootEndInstruction: 1,
+    files: [{ ...withExit.files[0]!, rootEndInstruction: 1, endInstruction: 1 }],
     instructions: withExit.instructions.slice(0, 1),
   };
   assert.equal(validateInstructionPlan(plan).valid, true);
@@ -1112,7 +1112,7 @@ test("result-bearing interactions require an in-region continuation", () => {
     const root = interactionPlan(kind, ui);
     const terminalRoot = {
       ...root,
-      rootEndInstruction: 1,
+      files: [{ ...root.files[0]!, rootEndInstruction: 1, endInstruction: 1 }],
       instructions: root.instructions.slice(0, 1),
     };
     assert.equal(validateInstructionPlan(terminalRoot).valid, false, kind);

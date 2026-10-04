@@ -53,11 +53,13 @@ import {
   showButtonOptions,
 } from "../../expression-children.js";
 
+/** Plan-wide numbering shared by the compilers of a project's files: loop and temporary IDs are unique in a plan. */
+export interface LoweringCounters {
+  nextLoopId: number;
+  nextTemporaryId: number;
+}
+
 export class InstructionCompiler {
-  public readonly instructions: Instruction[] = [];
-
-  public readonly functions: CompiledFunctionDefinition[] = [];
-
   readonly #loops: Array<{
     readonly loopId: number;
     readonly continueTarget: number;
@@ -71,26 +73,29 @@ export class InstructionCompiler {
 
   readonly #instructionEmissionByExpression = new WeakMap<Expression, boolean>();
 
-  #nextLoopId = 1;
-
-  #nextTemporaryId = 1;
-
   #contextualSpeakerTemporary: number | null = null;
 
+  /** Functions of earlier files come first, so this file's IDs continue after theirs. */
+  readonly #functionIdBase: number;
+
+  /**
+   * Compiles one file. The files of a project share `instructions`, `functions`, and `counters`, and each compiles
+   * its root statements and then its functions before the next file starts.
+   */
   public constructor(
     private readonly declarations: readonly FunctionDeclaration[],
     private readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> = new Map(),
+    public readonly instructions: Instruction[] = [],
+    public readonly functions: CompiledFunctionDefinition[] = [],
+    private readonly counters: LoweringCounters = { nextLoopId: 1, nextTemporaryId: 1 },
   ) {
+    this.#functionIdBase = functions.length;
     this.#functionByName = new Map(
       declarations.map((declaration, index) => [
         declaration.name.name,
-        { id: index + 1, declaration },
+        { id: this.#functionIdBase + index + 1, declaration },
       ]),
     );
-  }
-
-  public get temporaryCount(): number {
-    return this.#nextTemporaryId - 1;
   }
 
   public compileFunctions(): void {
@@ -99,7 +104,10 @@ export class InstructionCompiler {
     }
     // Handlers found while compiling a handler are appended and compiled in ID order.
     for (let index = 0; index < this.#handlers.length; index += 1) {
-      this.#compileHandler(this.#handlers[index]!, this.declarations.length + index + 1);
+      this.#compileHandler(
+        this.#handlers[index]!,
+        this.#functionIdBase + this.declarations.length + index + 1,
+      );
     }
   }
 
@@ -642,8 +650,8 @@ export class InstructionCompiler {
     variable: string | null,
     span: SourceSpan,
   ): CompileTask<void> {
-    const loopId = this.#nextLoopId;
-    this.#nextLoopId += 1;
+    const loopId = this.counters.nextLoopId;
+    this.counters.nextLoopId += 1;
     const continueTarget = this.instructions.length;
     const lowered = this.#lowerExpression(expression);
     const start = this.instructions.length;
@@ -867,7 +875,7 @@ export class InstructionCompiler {
 
   /** Reserves the next function ID; the region is compiled after all user functions. */
   #registerHandler(block: Block, owner: "timer" | "media", selfHandle: string | null): number {
-    const id = this.declarations.length + this.#handlers.length + 1;
+    const id = this.#functionIdBase + this.declarations.length + this.#handlers.length + 1;
     this.#handlers.push({ block, owner, selfHandle });
     return id;
   }
@@ -1976,8 +1984,8 @@ export class InstructionCompiler {
   }
 
   #allocateTemporary(): number {
-    const id = this.#nextTemporaryId;
-    this.#nextTemporaryId += 1;
+    const id = this.counters.nextTemporaryId;
+    this.counters.nextTemporaryId += 1;
     return id;
   }
 

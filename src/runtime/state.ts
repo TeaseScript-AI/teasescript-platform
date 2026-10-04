@@ -21,12 +21,13 @@ import type {
   RuntimePendingActionSnapshot,
   RuntimePreparedSayOutputSnapshot,
 } from "./actions/model.js";
-import type {
-  ExpressionPlan,
-  Instruction,
-  InstructionPlan,
-  InteractionChoiceValue,
-  InteractionUiPayload,
+import {
+  type ExpressionPlan,
+  type Instruction,
+  type InstructionPlan,
+  type InteractionChoiceValue,
+  type InteractionUiPayload,
+  mainRootEnd,
 } from "../plan/model.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { cloneMessageMarkup } from "../message-markup.js";
@@ -499,7 +500,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     settledMedia: [],
     nextMediaId: 1,
     maxCallDepth,
-    status: plan.rootEndInstruction === 0 ? "halted" : "ready",
+    status: mainRootEnd(plan) === 0 ? "halted" : "ready",
     failure: null,
   };
 }
@@ -902,10 +903,27 @@ export function classifyCapturedRuntimeSnapshot(
   return validateCapturedRuntimeSnapshotDetails(value, plan);
 }
 
+/**
+ * The part of a plan that a session can run: `main.tease`, its functions, and its handlers. Until `goto` and `call`
+ * reach other files, a snapshot that refers to another file's instructions or functions is malformed, so every check
+ * of a snapshot sees only this part. It is built per validation, like the other analyses of external plan data.
+ */
+function runnablePlan(plan: InstructionPlan): InstructionPlan {
+  if (plan.files.length === 1) return plan;
+  const end = plan.files[0]!.endInstruction;
+  return {
+    ...plan,
+    files: [plan.files[0]!],
+    instructions: plan.instructions.slice(0, end),
+    functions: plan.functions.filter((definition) => definition.endInstruction <= end),
+  };
+}
+
 function validateCapturedRuntimeSnapshotDetails(
   value: unknown,
-  plan?: InstructionPlan,
+  fullPlan?: InstructionPlan,
 ): ClassifiedSnapshotValidationResult {
+  const plan = fullPlan === undefined ? undefined : runnablePlan(fullPlan);
   const errors: string[] = [];
   if (!isPlainRecord(value)) {
     return Object.freeze({
@@ -1948,7 +1966,7 @@ function validateCallFrames(
           ? analysis?.functionsById.get(caller.functionId)
           : undefined;
       if (
-        (frameIndex === 0 && callIndex >= plan.rootEndInstruction) ||
+        (frameIndex === 0 && callIndex >= mainRootEnd(plan)) ||
         (frameIndex > 0 &&
           (callerDefinition === undefined ||
             callIndex < callerDefinition.entryInstruction ||
@@ -2057,7 +2075,7 @@ function validateTimerHandlerFrame(
     !nonNegativeSafeInteger(resume) ||
     (plan !== undefined &&
       (frameIndex === 0
-        ? resume > plan.rootEndInstruction
+        ? resume > mainRootEnd(plan)
         : callerDefinition === undefined ||
           resume < callerDefinition.entryInstruction ||
           resume >= callerDefinition.endInstruction))
@@ -2354,7 +2372,7 @@ interface SnapshotValidationAnalysis {
 
 function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
   const functionsById = new Map<number, InstructionPlan["functions"][number]>();
-  const regionEnds = new Array<number>(plan.instructions.length).fill(plan.rootEndInstruction);
+  const regionEnds = new Array<number>(plan.instructions.length).fill(mainRootEnd(plan));
   const functionIdsByInstruction = new Array<number | null>(plan.instructions.length).fill(null);
   for (const definition of plan.functions) {
     functionsById.set(definition.id, definition);
@@ -2599,8 +2617,7 @@ function validateStatusConsistency(
     if (
       plan !== undefined &&
       calls === 0 &&
-      (!nonNegativeSafeInteger(value.nextInstruction) ||
-        value.nextInstruction > plan.rootEndInstruction)
+      (!nonNegativeSafeInteger(value.nextInstruction) || value.nextInstruction > mainRootEnd(plan))
     ) {
       errors.push("Root execution position is outside the root instruction range.");
     }
@@ -2621,7 +2638,7 @@ function validateRootEndTransition(
   if (
     plan === undefined ||
     value.status !== "running" ||
-    value.nextInstruction !== plan.rootEndInstruction ||
+    value.nextInstruction !== mainRootEnd(plan) ||
     !Array.isArray(value.callFrames) ||
     value.callFrames.length !== 0
   )
@@ -2716,7 +2733,7 @@ function positiveSafeInteger(value: unknown): value is number {
 
 function isLegalHaltPosition(nextInstruction: unknown, plan: InstructionPlan): boolean {
   if (!nonNegativeSafeInteger(nextInstruction)) return false;
-  if (nextInstruction === plan.rootEndInstruction) return true;
+  if (nextInstruction === mainRootEnd(plan)) return true;
   return nextInstruction > 0 && plan.instructions[nextInstruction - 1]?.kind === "exit";
 }
 

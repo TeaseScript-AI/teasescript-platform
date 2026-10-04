@@ -1,4 +1,4 @@
-import type { InstructionPlan } from "../../plan/model.js";
+import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import {
   currentTemporalContext,
@@ -174,7 +174,7 @@ function completePacingGate(
     current.preparedSayOutput = action.preparedOutput;
     current.nextInstruction = action.preparedOutput.owningInstruction;
   }
-  const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
+  const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   const completionEvent: ActionCompletedEvent = Object.freeze({
     kind: "actionCompleted",
     sequence: completionEventSequence,
@@ -214,7 +214,7 @@ function completeStorageWrite(
   }
   const outcome = payload.kind;
   assertEventSequenceCapacity(current, outcome === "failed" ? 2 : 1);
-  const span = copySpan(plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan);
+  const span = copySpan(plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan));
   const events: InterpreterEvent[] = [];
   if (outcome === "stored") {
     writeScriptStorage(current, action.key, action.value);
@@ -312,7 +312,7 @@ function completeInteraction(
     result,
     transcriptText: resolved.transcriptText,
   });
-  const span = plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan;
+  const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   const events: InterpreterEvent[] = [
     Object.freeze({
       kind: "playerTranscript",
@@ -359,7 +359,7 @@ export function timeOutButton(
       kind: "actionCompleted",
       sequence: completionSequence,
       settlement,
-      span: copySpan(plan.instructions[action.owningInstruction]?.span ?? plan.sourceSpan),
+      span: copySpan(plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan)),
     } satisfies ActionCompletedEvent),
   );
 }
