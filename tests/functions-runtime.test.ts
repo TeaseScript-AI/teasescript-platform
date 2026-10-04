@@ -19,10 +19,11 @@ import {
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runValidSource as runSource } from "./helpers/run-valid-source.js";
+import { runValidSourceUntilExit } from "./helpers/run-until-exit.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 
 test("executes positional and named function calls with returned values", () => {
-  const result = runSource(
+  const result = runValidSourceUntilExit(
     [
       "function add(left, right) { return left + right }",
       "function subtract(left, right) { return left - right }",
@@ -160,7 +161,7 @@ test("speaker parameters preserve speaker identity", () => {
 });
 
 test("early return unwinds if and every loop kind", () => {
-  const result = runSource(
+  const result = runValidSourceUntilExit(
     [
       "function fromIf { if true { return 1 }\nreturn 9 }",
       "function fromRepeat { repeat 3 { return 2 }\nreturn 9 }",

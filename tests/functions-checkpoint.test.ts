@@ -172,9 +172,7 @@ test("preserves prepared earlier arguments through a later suspension and a susp
     "combine(random(), later())",
     "exit",
   ].join("\n");
-  const { boundaries, finalSnapshot } = assertRuntimeResumeEquivalent(source, {
-    seed: 0x2468_ace1,
-  });
+  const { boundaries, events } = assertRuntimeResumeEquivalent(source, { seed: 0x2468_ace1 });
 
   // While `later` waits, the caller retains the already evaluated first argument.
   assert.ok(
@@ -194,8 +192,11 @@ test("preserves prepared earlier arguments through a later suspension and a susp
       snapshot.callFrames.at(-1)?.arguments.every((argument) => argument.supplied),
   );
   assert.ok(combineWaiting !== undefined);
-  assert.equal(finalSnapshot.callFrames.length, 0);
-  assert.equal(finalSnapshot.temporaries.length, 0);
+  // The last boundary runs the exit, which clears frames and temporaries, so the one before it shows what the call left.
+  assert.equal(events.at(-1)?.kind, "exit");
+  const beforeExit = boundaries.at(-2)!;
+  assert.equal(beforeExit.callFrames.length, 0);
+  assert.equal(beforeExit.temporaries.length, 0);
 
   const compiled = plan(source);
   const forgedWaiting = mutableCheckpoint(createCheckpoint(compiled, combineWaiting));

@@ -5,6 +5,7 @@ import type { Instruction, InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runValidSource as runSource } from "./helpers/run-valid-source.js";
+import { runValidSourceUntilExit } from "./helpers/run-until-exit.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 
 test("assigns deterministic function and temporary IDs", () => {
@@ -58,7 +59,7 @@ test("embeds synchronous call arguments without preparation instructions", () =>
 });
 
 test("evaluates composite and nested user-call arguments in source order", () => {
-  const result = runSource(
+  const result = runValidSourceUntilExit(
     [
       "let order = []",
       "function mark(value) { order.add(value)\nreturn value }",
@@ -70,7 +71,6 @@ test("evaluates composite and nested user-call arguments in source order", () =>
     ].join("\n"),
   );
 
-  assert.equal(result.snapshot.status, "halted");
   assert.deepEqual(sayTexts(result), ["3-5", "3-8", "234"]);
   assert.deepEqual(result.snapshot.temporaries, []);
 });
