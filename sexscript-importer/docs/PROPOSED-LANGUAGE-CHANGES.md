@@ -41,7 +41,7 @@ compiler gate. Only M1 remains a proposal (`--proposed`).
 
 ## Corpus evaluation
 
-Measured on 2026-10-04 at the third-round head with `node src/cli.ts report --run [--proposed=<id>] <package
+Measured on 2026-10-04 at importer commit `71e4abc0` with `node src/cli.ts report --run [--proposed=<id>] <package
 scripts>`, after merging `main` at `b459787c` (#515). The importer emits a working syntax of its own choosing for the
 remaining proposal; the report compiles and smoke-runs it through stand-ins in current TeaseScript, so "converted"
 means converted, compiled, and run, not just emitted. Each cell: root errors / lowered scripts / compiler-clean except
