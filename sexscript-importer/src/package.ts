@@ -119,9 +119,27 @@ export function lowerPackage(
     uncalled[index] = uncalledDiagnostics(script, legacyUnreferencedFunctions(groups[index]!));
     return withUncalledNotes(script, uncalled[index]!);
   });
+  // A module's own program takes the notes every script that loads it gives the same code.
+  const loading = (program: MigrationProgram): number[] =>
+    lowered.flatMap((script, index) =>
+      program.module !== undefined &&
+      (script.loadsModuleDirectories ?? []).includes(program.module.directory)
+        ? [index]
+        : [],
+    );
+  const notes = (program: MigrationProgram, index: number): MigrationDiagnostic[] => {
+    if (program.module === undefined) return uncalled[index]!;
+    const scripts = loading(program);
+    if (scripts.length === 0) return [];
+    return uncalled[scripts[0]!]!.filter((diagnostic) =>
+      scripts.every((script) => uncalled[script]!.includes(diagnostic)),
+    );
+  };
   return {
-    lowered: lowered.map((program, index) => withUncalledNotes(program, uncalled[index]!)),
-    composed,
+    lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
+    composed: composed.map((program, index) =>
+      program.module === undefined ? program : withUncalledNotes(program, notes(program, index)),
+    ),
   };
 }
 
