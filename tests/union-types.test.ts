@@ -76,7 +76,7 @@ test("type names cover null, any list, set, or object, and program-control value
   assert.deepEqual(diagnostics("let groups: integer[] set = set[]"), [
     [
       "TSV006",
-      "A set holds only text, numbers, true or false, durations, date and time values, or null, so it cannot hold integer[] values. Use a list instead, as in 'integer[][]'.",
+      "A set holds only text, numbers, true or false, date and time values, or null, so it cannot hold integer[] values. Use a list instead, as in 'integer[][]'.",
       "integer[] set",
     ],
   ]);

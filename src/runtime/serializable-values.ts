@@ -25,9 +25,8 @@ export interface SerializableRuntimeSet {
   readonly items: SerializableSetElement[];
 }
 
-/** A value a set can hold: a scalar, a date or time value, or a duration. Membership compares kind and value. */
-export type SerializableSetElement =
-  SerializableRuntimeScalar | SerializableRuntimeTemporal | SerializableRuntimeDuration;
+/** A value a set can hold: a scalar or a date or time value. Membership compares kind and value. */
+export type SerializableSetElement = SerializableRuntimeScalar | SerializableRuntimeTemporal;
 
 export interface SerializableSpeakerReference {
   readonly kind: "speakerReference";
@@ -358,15 +357,12 @@ export function serializableSetContains(
 
 /** Whether a value can be a set member. */
 export function isSetElement(value: SerializableRuntimeValue): value is SerializableSetElement {
-  return (
-    value === null ||
-    typeof value !== "object" ||
-    value.kind === "duration" ||
-    value.kind === "date" ||
-    value.kind === "time" ||
-    value.kind === "datetime" ||
-    value.kind === "timestamp"
-  );
+  return value === null || typeof value !== "object" || isSetElementKind(value.kind);
+}
+
+/** The kinds of non-scalar values a set holds. */
+function isSetElementKind(kind: unknown): boolean {
+  return kind === "date" || kind === "time" || kind === "datetime" || kind === "timestamp";
 }
 
 /** A text that is equal for two set members exactly when they are the same kind and `==` value. */
@@ -376,8 +372,6 @@ function setMemberKey(value: SerializableSetElement): string {
   if (typeof value === "number") return `n${value === 0 ? 0 : value}`;
   if (typeof value === "boolean") return `b${value}`;
   switch (value.kind) {
-    case "duration":
-      return `u${value.milliseconds === 0 ? 0 : value.milliseconds}`;
     case "date":
       return `d${value.year}-${value.month}-${value.day}`;
     case "time":
@@ -663,7 +657,10 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         if (typeof nested === "number" && !Number.isFinite(nested))
           return `${path()}.items[${index}] must be a finite number.`;
         if (!isScalar(nested)) {
-          const problem = isPlainRecord(nested) ? setElementObjectProblem(nested) : "a value";
+          const problem =
+            isPlainRecord(nested) && isSetElementKind(nested.kind)
+              ? setElementObjectProblem(nested)
+              : "a value of another kind";
           if (problem !== null) return `${path()}.items[${index}] is not a set member: ${problem}.`;
         }
         // EVIDENCE: validation: the member is a finite scalar or passed setElementObjectProblem above.
@@ -708,7 +705,7 @@ function assertSetElement(
   if (!isSetElement(value)) {
     throw new SerializableValueError(
       "setElement",
-      "Sets may contain only string, boolean, integer, number, duration, date, time, datetime, timestamp, or null values.",
+      "Sets may contain only string, boolean, integer, number, date, time, datetime, timestamp, or null values.",
     );
   }
 }
