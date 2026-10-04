@@ -207,9 +207,10 @@ The exact syntax for detailed result objects, advanced accessibility overrides, 
 
 ## Currently implemented language subset
 
-The repository includes core values, variables, assignments including `+=`/`-=`, speakers, output, collections,
-expressions, comments, ranges, deterministic random built-ins, the `round`, `floor`, and `ceil` built-ins, conditionals
-including `switch`, loops, and loop control.
+The repository includes core values, variables, assignments including `+=`/`-=`, speakers, output, collections
+including dicts ([§40](specifications/accepted-syntaxes-v30.md#40-dictionaries)), expressions, comments, ranges,
+deterministic random built-ins, the `round`, `floor`, and `ceil` built-ins, conditionals including `switch`, loops, and
+loop control.
 
 Implemented script storage includes `save`, `load` with an optional lazy default, and `delete`, with a checkpointed
 session view and host-acknowledged atomic writes. Accepted semantics and current type-checking limits are defined in
@@ -248,8 +249,8 @@ argument type is known, misuse is compile error `TSV043`, or `TSV020`/`TSV022` f
 values are checked when the operation runs.
 
 A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021:
-variables, list and set elements, object properties, parameters, and function results keep one type, including types
-decided by a first non-null value, a first element, a parameter default, or a function's returns; an inferred `integer`
+variables, list and set elements, dict values, object properties, parameters, and function results keep one type,
+including types decided by a first non-null value, a first element, a parameter default, or a function's returns; an inferred `integer`
 variable, element, or property is a `number` when one of its assignments can store a non-whole number; `integer` to `number` is the only
 implicit conversion; operators, conditions, indexes, members, and command operands get values of types they
 support, and on a union every member must support them, with some known operands still rejected only at runtime until

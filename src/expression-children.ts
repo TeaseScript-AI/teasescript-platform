@@ -21,6 +21,9 @@ export function expressionChildren(expression: Expression): readonly Expression[
       return expression.elements;
     case "objectLiteral":
       return expression.properties.map((property) => property.value);
+    case "dictLiteral":
+      // Each key is evaluated before its value.
+      return expression.entries.flatMap((entry) => [entry.key, entry.value]);
     case "propertyAccessExpression":
       return [expression.object];
     case "indexExpression":

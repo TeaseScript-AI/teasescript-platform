@@ -23,7 +23,7 @@ import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./e
 import { copySpan, takeSequence } from "./operations/support.js";
 import {
   detachPreparedReferencesForMutation,
-  freezePreparedReferenceListDescendants,
+  freezePreparedReferenceDescendants,
   preparePreparedReferencesForListRemoval,
   preparePreparedReferencesForListReorder,
   preparedReferenceSpeakerPath,
@@ -58,12 +58,17 @@ import {
   containsRuntimeIdentity,
   createCapturedSerializableList,
   createCapturedSerializableSet,
+  dictProperty,
+  getSerializableDictEntry,
   getSerializableProperty,
+  removeSerializableDictEntry,
   removeSerializableSetValue,
   serializableEquals,
   serializableSetContains,
   SerializableValueError,
+  setCapturedSerializableDictValue,
   setCapturedSerializableProperty,
+  type SerializableRuntimeDict,
   type SerializableRuntimeDuration,
   type SerializableRuntimeList,
   type SerializableRuntimeObject,
@@ -81,6 +86,7 @@ import type {
 } from "./state.js";
 import {
   describeRuntimeValue,
+  isDict,
   isDuration,
   isList,
   isObject,
@@ -91,7 +97,11 @@ import {
   isTimerHandle,
   isMediaHandle,
 } from "./value-predicates.js";
-import { assertValueType, matchesValueType } from "./value-types.js";
+import {
+  assertValueType,
+  describeValue as describeTypedValue,
+  matchesValueType,
+} from "./value-types.js";
 import {
   mediaEndMs,
   mediaProperty,
@@ -309,18 +319,27 @@ export class Evaluator {
               pending.pop();
               continue;
             }
-            if (isSet(frame.value))
-              throw fault("TSR004", "Sets are not indexable.", expression.span);
-            if (!isList(frame.value))
-              throw fault("TSR008", "Only lists support numeric indexing.", expression.span);
+            this.#assertIndexable(frame.value, expression.span);
             frame.epoch = this.#referenceEpoch;
             frame.stage = 2;
             pending.push(evaluationFrame(expression.index));
             continue;
           }
-          // EVIDENCE: invariant: index reference stage 1 validates and retains the list receiver.
-          const object = frame.value as SerializableRuntimeList;
           if (expression.kind !== "index") throw new TypeError("Invalid reference continuation.");
+          if (isDict(frame.value)) {
+            const key = this.#dictKey(result.value, expression.index.span);
+            frame.descriptor!.path.push({ kind: "key", key });
+            result = {
+              value: this.#dictValue(frame.value, key, expression),
+              owned: false,
+              descriptor: frame.descriptor,
+              epoch: frame.epoch,
+            };
+            pending.pop();
+            continue;
+          }
+          // EVIDENCE: invariant: index reference stage 1 validates and retains the list or dict receiver.
+          const object = frame.value as SerializableRuntimeList;
           const index = this.#index(result.value, expression.index.span);
           this.#assertIndex(object, index, expression.index.span);
           frame.descriptor!.path.push({ kind: "index", index });
@@ -456,6 +475,35 @@ export class Evaluator {
             };
           break;
         }
+        case "dict": {
+          if (frame.stage === 1) {
+            // The key was evaluated; its value follows.
+            frame.key = this.#dictKey(result.value, expression.entries[frame.index]!.key.span);
+            frame.stage = 2;
+            pending.push(evaluationFrame(expression.entries[frame.index]!.value));
+            continue;
+          }
+          if (frame.stage === 2) {
+            // A later entry with an equal key replaces the earlier one in its position.
+            const entryValue = result.owned
+              ? result.value
+              : cloneCapturedSerializableValue(result.value);
+            const existing = getSerializableDictEntry(frame.dict!, frame.key!);
+            if (existing === undefined)
+              frame.dict!.entries.push({ key: frame.key!, value: entryValue });
+            else existing.value = entryValue;
+            frame.index += 1;
+          }
+          if (frame.index < expression.entries.length) {
+            frame.stage = 1;
+            pending.push(evaluationFrame(expression.entries[frame.index]!.key));
+            continue;
+          }
+          // Values were captured when evaluated (ADR 0014), so the literal owns them.
+          owned = true;
+          value = frame.dict!;
+          break;
+        }
         case "template":
           if (frame.stage === 1) {
             const part = expression.parts[frame.index - 1]!;
@@ -494,13 +542,18 @@ export class Evaluator {
           }
           if (frame.stage === 1) {
             frame.value = result.value;
-            if (isSet(frame.value))
-              throw fault("TSR004", "Sets are not indexable.", expression.span);
-            if (!isList(frame.value))
-              throw fault("TSR008", "Only lists support numeric indexing.", expression.span);
+            this.#assertIndexable(frame.value, expression.span);
             frame.stage = 2;
             pending.push(evaluationFrame(expression.index));
             continue;
+          }
+          if (isDict(frame.value)) {
+            value = this.#dictValue(
+              frame.value,
+              this.#dictKey(result.value, expression.index.span),
+              expression,
+            );
+            break;
           }
           {
             const index = this.#index(result.value, expression.index.span);
@@ -552,7 +605,10 @@ export class Evaluator {
             if (
               (expression.operator === "==" || expression.operator === "!=") &&
               !result.owned &&
-              (isList(frame.value) || isSet(frame.value) || isObject(frame.value)) &&
+              (isList(frame.value) ||
+                isSet(frame.value) ||
+                isObject(frame.value) ||
+                isDict(frame.value)) &&
               mayRunCall(expression.right)
             )
               frame.value = cloneCapturedSerializableValue(frame.value);
@@ -720,8 +776,25 @@ export class Evaluator {
       );
     }
     if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", target.span);
+    if (isDict(object)) {
+      // A new key is added at the end; an existing key keeps its position.
+      const key = this.#dictKey(this.evaluate(target.index), target.index.span);
+      if (receiverDescriptor !== null && !receiverDescriptor.detached) {
+        const mutationStep: PreparedReferenceStep = { kind: "key", key };
+        detachPreparedReferencesForMutation(this.snapshot, {
+          rootFrameId: receiverDescriptor.rootFrameId,
+          rootName: receiverDescriptor.rootName,
+          path: [...receiverDescriptor.path, mutationStep],
+          speakerPath: preparedReferenceSpeakerPath(this.snapshot, receiverDescriptor, [
+            mutationStep,
+          ]),
+        });
+      }
+      setCapturedSerializableDictValue(object, key, value);
+      return;
+    }
     if (!isList(object))
-      throw fault("TSR005", "Only lists have assignable numeric indexes.", target.span);
+      throw fault("TSR005", "Only lists and dicts have assignable indexes.", target.span);
     const index = this.#index(this.evaluate(target.index), target.index.span);
     this.#assertIndex(object, index, target.index.span);
     if (receiverDescriptor !== null && !receiverDescriptor.detached) {
@@ -762,8 +835,12 @@ export class Evaluator {
       return;
     }
     if (isSet(object)) throw fault("TSR004", "Sets are not indexable.", target.span);
+    if (isDict(object)) {
+      this.#dictKey(this.evaluate(target.index), target.index.span);
+      return;
+    }
     if (!isList(object)) {
-      throw fault("TSR005", "Only lists have assignable numeric indexes.", target.span);
+      throw fault("TSR005", "Only lists and dicts have assignable indexes.", target.span);
     }
     const index = this.#index(this.evaluate(target.index), target.index.span);
     this.#assertIndex(object, index, target.index.span);
@@ -794,25 +871,27 @@ export class Evaluator {
         throw fault("TSR016", `Unsupported method '${method}'.`, span);
       return;
     }
-    if (!isList(receiver) && !isSet(receiver)) {
+    if (!isList(receiver) && !isSet(receiver) && !isDict(receiver)) {
       throw fault("TSR016", missingMemberMessage(receiver, method, "method"), span);
     }
-    const supported = isSet(receiver)
-      ? new Set(["add", "remove", "clear", "contains", "toList", ...SET_OPERATIONS])
-      : new Set([
-          ...SET_OPERATIONS,
-          "sort",
-          "shuffle",
-          "add",
-          "remove",
-          "removeAt",
-          "removeFirst",
-          "removeLast",
-          "clear",
-          "contains",
-          "toSet",
-          "join",
-        ]);
+    const supported = isDict(receiver)
+      ? DICT_METHODS
+      : isSet(receiver)
+        ? new Set(["add", "remove", "clear", "contains", "toList", ...SET_OPERATIONS])
+        : new Set([
+            ...SET_OPERATIONS,
+            "sort",
+            "shuffle",
+            "add",
+            "remove",
+            "removeAt",
+            "removeFirst",
+            "removeLast",
+            "clear",
+            "contains",
+            "toSet",
+            "join",
+          ]);
     if (!supported.has(method)) {
       throw fault("TSR016", `Unsupported method '${method}'.`, span);
     }
@@ -857,6 +936,13 @@ export class Evaluator {
     for (const step of descriptor.path) {
       if (step.kind === "property") {
         value = this.#getProperty(value, step.name, span);
+        continue;
+      }
+      if (step.kind === "key") {
+        const entry = isDict(value) ? getSerializableDictEntry(value, step.key) : undefined;
+        if (entry === undefined)
+          throw fault("TSR053", "Prepared reference key no longer addresses a dict entry.", span);
+        value = entry.value;
         continue;
       }
       if (isList(value) || isSet(value)) {
@@ -953,6 +1039,7 @@ export class Evaluator {
 
   /** `${...}` text. A list selects one element with the session RNG, again at every evaluation. */
   public interpolationText(value: SerializableRuntimeValue, span: SourceSpan): string {
+    if (isDict(value)) throw fault("TSR021", DICT_TEXT_MESSAGE, span);
     if (!isList(value)) return visibleText(value, span, this.snapshot.temporalContext);
     if (value.items.length === 0)
       throw fault(
@@ -1233,6 +1320,10 @@ export class Evaluator {
         expression.span,
       );
     }
+    if (expression.callee.kind === "property" && isDict(receiver)) {
+      this.#referenceEpoch++;
+      return this.#callDict(receiver, expression, positional, named);
+    }
     if (expression.callee.kind === "property") {
       return this.#callCollection(
         receiver!,
@@ -1242,7 +1333,7 @@ export class Evaluator {
         expression.span,
         expression.typeCheck === undefined
           ? null
-          : // Plan validation accepts a type check only on an `add` call with one argument.
+          : // Plan validation accepts a type check only on an `add` call with one argument here.
             { check: expression.typeCheck, span: expression.arguments[0]!.value.span },
       );
     }
@@ -1360,7 +1451,7 @@ export class Evaluator {
         case "clear":
           expect(0);
           if (receiver.items.length > 0) {
-            freezePreparedReferenceListDescendants(this.snapshot, receiver);
+            freezePreparedReferenceDescendants(this.snapshot, receiver);
             receiver.items.length = 0;
           }
           return null;
@@ -1403,6 +1494,60 @@ export class Evaluator {
     } catch (error) {
       if (error instanceof RuntimeFault) throw error;
       throw this.#translateValueError(error, span);
+    }
+  }
+
+  /** `contains`, `remove`, `clear`, and `get` of a dict, each with a text key except `clear`. */
+  #callDict(
+    receiver: SerializableRuntimeDict,
+    expression: Extract<ExpressionPlan, { kind: "call" }>,
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+  ): SerializableRuntimeValue {
+    // EVIDENCE: invariant: #call dispatches here only for a property callee.
+    const callee = expression.callee as Extract<ExpressionPlan, { kind: "property" }>;
+    const name = callee.name;
+    const span = expression.span;
+    if (!DICT_METHODS.has(name)) throw fault("TSR016", `Dicts have no method '${name}'.`, span);
+    const names = Object.keys(named);
+    const expected = name === "clear" ? 0 : 1;
+    if (
+      positional.length !== expected ||
+      (name === "get" ? names.length !== 1 || names[0] !== "default" : names.length !== 0)
+    )
+      throw fault(
+        "TSR028",
+        name === "get"
+          ? "dict.get(key, default: value) takes a key and a 'default:' value."
+          : `dict.${name}(${name === "clear" ? "" : "key"}) takes ${expected === 0 ? "no arguments" : "one key"}.`,
+        span,
+      );
+    if (name === "clear") {
+      if (receiver.entries.length > 0) {
+        freezePreparedReferenceDescendants(this.snapshot, receiver);
+        receiver.entries.length = 0;
+      }
+      return null;
+    }
+    const keyPlan = expression.arguments[0]!.value;
+    const key = this.#dictKey(positional[0]!, keyPlan.span);
+    // A default the compiler could not know must be a value the dict could hold (ADR 0021 rule 1.7).
+    if (name === "get" && expression.typeCheck !== undefined)
+      assertValueType(named.default!, expression.typeCheck, expression.arguments[1]!.value.span);
+    switch (name) {
+      case "contains":
+        return getSerializableDictEntry(receiver, key) !== undefined;
+      case "get": {
+        // A stored null is a value, so only a missing entry gives the default.
+        const entry = getSerializableDictEntry(receiver, key);
+        return entry === undefined ? named.default! : entry.value;
+      }
+      default: {
+        if (getSerializableDictEntry(receiver, key) === undefined)
+          throw missingKey(key, this.#receiverLabel(callee.object), keyPlan, span);
+        freezePreparedReferenceDescendants(this.snapshot, receiver, key);
+        return removeSerializableDictEntry(receiver, key)!.value;
+      }
     }
   }
 
@@ -1899,6 +2044,16 @@ export class Evaluator {
       if (name === "length") return stringLength(value);
       throw fault("TSR017", unknownTextMemberMessage(name, "property"), span);
     }
+    if (isDict(value)) {
+      const property = dictProperty(value, name);
+      if (property === undefined)
+        throw fault(
+          "TSR017",
+          `Dicts have no property '${name}'; use length, keys, or values, or read a value as dict[key].`,
+          span,
+        );
+      return property;
+    }
     if (isMediaHandle(value)) {
       const property = mediaProperty(
         this.#media(value, span),
@@ -1934,6 +2089,55 @@ export class Evaluator {
     throw fault("TSR017", missingMemberMessage(value, name, "property"), span);
   }
 
+  /** Only lists and dicts are indexed. */
+  #assertIndexable(value: SerializableRuntimeValue, span: SourceSpan): void {
+    if (isSet(value)) throw fault("TSR004", "Sets are not indexable.", span);
+    if (!isList(value) && !isDict(value))
+      throw fault("TSR008", "Only lists and dicts can be indexed.", span);
+  }
+
+  #dictKey(value: SerializableRuntimeValue, span: SourceSpan): string {
+    if (typeof value !== "string")
+      throw fault(
+        "TSR062",
+        `A dict key is text (string), but this is ${describeTypedValue(value)}.${typeof value === "number" ? ' Write a number key as text, as in "${id}".' : ""}`,
+        span,
+      );
+    return value;
+  }
+
+  /** The value of `dict[key]`; a missing key is an error that names the check. */
+  #dictValue(
+    dict: SerializableRuntimeDict,
+    key: string,
+    expression: Extract<ExpressionPlan, { kind: "index" }>,
+  ): SerializableRuntimeValue {
+    const entry = getSerializableDictEntry(dict, key);
+    if (entry === undefined)
+      throw missingKey(
+        key,
+        this.#receiverLabel(expression.object),
+        expression.index,
+        expression.span,
+      );
+    return entry.value;
+  }
+
+  /** How the source spells a dict receiver, also one prepared before the rest of its statement, or `null`. */
+  #receiverLabel(plan: ExpressionPlan): string | null {
+    if (plan.kind !== "preparedReference") return planLabel(plan);
+    const descriptor = readPreparedReference(
+      readTemporary(this.snapshot.temporaries, plan.temporaryId, plan.span),
+      plan.span,
+    );
+    const names: string[] = [];
+    for (const step of descriptor.path) {
+      if (step.kind !== "property") return null;
+      names.push(step.name);
+    }
+    return descriptor.rootName === null ? null : [descriptor.rootName, ...names].join(".");
+  }
+
   #index(value: SerializableRuntimeValue, span: SourceSpan): number {
     if (typeof value !== "number" || !Number.isInteger(value))
       throw fault("TSR024", "A list index must be an integer.", span);
@@ -1962,6 +2166,47 @@ export class Evaluator {
     }
     throw error;
   }
+}
+
+const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
+
+const DICT_TEXT_MESSAGE =
+  '"${...}" cannot show a dict. Select one value with dict[key], or show every value with dict.values.join().';
+
+/**
+ * The error for a key a dict does not have, with the check that avoids it, such as `Check toys.contains(name) first.`
+ * The key is named as the source spells it where the plan still shows it, and otherwise by its text.
+ */
+function missingKey(
+  key: string,
+  owner: string | null,
+  keyPlan: ExpressionPlan,
+  span: SourceSpan,
+): RuntimeFault {
+  const check = `contains(${planLabel(keyPlan) ?? quotedText(key)})`;
+  return fault(
+    "TSR061",
+    `Dictionary has no key ${quotedText(key)}. Check ${owner === null ? `it with ${check}` : `${owner}.${check}`} first.`,
+    span,
+  );
+}
+
+/** The source spelling of a variable, property path, or text literal plan, or `null` for anything else. */
+function planLabel(plan: ExpressionPlan): string | null {
+  const names: string[] = [];
+  let current = plan;
+  for (;;) {
+    if (current.kind === "group") current = current.expression;
+    else if (current.kind === "property") {
+      names.push(current.name);
+      current = current.object;
+    } else break;
+  }
+  if (current.kind === "literal" && typeof current.value === "string" && names.length === 0)
+    return quotedText(current.value);
+  if (current.kind !== "identifier") return null;
+  names.push(current.name);
+  return names.reverse().join(".");
 }
 
 /** A running round must end at a supported session time strictly after a positive remaining time starts. */
@@ -2095,6 +2340,9 @@ interface EvaluationFrame {
   set: SerializableRuntimeSet | null;
   /** The member keys of `set`, for duplicate checks while its elements are added. */
   membership: Set<string> | null;
+  /** A dict literal's entries so far, and the key of the entry whose value is being evaluated. */
+  dict: SerializableRuntimeDict | null;
+  key: string | null;
   positional: SerializableRuntimeValue[] | null;
   named: Record<string, SerializableRuntimeValue> | null;
 }
@@ -2138,6 +2386,8 @@ function evaluationFrame(expression: ExpressionPlan, reference = false): Evaluat
     text: "",
     set: expression.kind === "set" ? createCapturedSerializableSet([]) : null,
     membership: expression.kind === "set" ? new Set() : null,
+    dict: expression.kind === "dict" ? { kind: "dict", entries: [] } : null,
+    key: null,
     positional: expression.kind === "call" ? [] : null,
     named: expression.kind === "call" ? Object.create(null) : null,
   };

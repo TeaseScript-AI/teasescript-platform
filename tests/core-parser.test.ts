@@ -168,12 +168,57 @@ test("parses list, object, and set literals", () => {
   }
 });
 
-test("parses type names, unions, grouping, and postfix list, set, and optional types in source order", () => {
+test("parses dict literals with written, quoted, and computed keys, and reports a malformed entry", () => {
+  const result = parse(
+    'let toys = dict{ collar: 1, "soft cuffs": 2, [key]: 3, in: 4 }\nlet none = dict{}',
+  );
+  assert.deepEqual(result.diagnostics, []);
+  const initializer = initializerFromResult(result);
+  assert.ok(initializer.kind === "dictLiteral");
+  // A written name is the key's own text, like quoted text; a computed key is any expression.
+  assert.deepEqual(
+    initializer.entries.map(({ key, value }) => [
+      key.kind === "stringLiteral"
+        ? key.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("")
+        : key.kind,
+      value.kind === "numberLiteral" ? value.value : null,
+    ]),
+    [
+      ["collar", 1],
+      ["soft cuffs", 2],
+      ["identifier", 3],
+      ["in", 4],
+    ],
+  );
+  for (const [source, code, message] of [
+    ["let d = dict{ a: 1, }", "TSP004", "Expected a dict entry after ','."],
+    ["let d = dict{ a 1 }", "TSP005", "Expected ':' after the dict key."],
+    [
+      "let d = dict{ 1: 2 }",
+      "TSP004",
+      "Expected a dict key: a name, quoted text, or [expression].",
+    ],
+    ["let d = dict{ [a: 1 }", "TSP017", "Expected ']' after the computed dict key."],
+  ] as const) {
+    const diagnostics = parse(source).diagnostics;
+    assert.deepEqual(
+      diagnostics.slice(0, 1).map((diagnostic) => [diagnostic.code, diagnostic.message]),
+      [[code, message]],
+      source,
+    );
+  }
+});
+
+test("parses type names, unions, grouping, and postfix list, set, dict, and optional types in source order", () => {
   const types = [
     "number",
     "string[]",
     "string?",
     "integer set",
+    "integer dict?",
+    "(integer | string) dict",
+    "integer[] dict",
+    "integer dict[]",
     "integer | string[]",
     "(integer | string)[]",
     "integer? set",
@@ -181,7 +226,7 @@ test("parses type names, unions, grouping, and postfix list, set, and optional t
     "integer?[]",
     "integer[]?",
     "integer[][]",
-    "list | set | object | null",
+    "list | set | dict | object | null",
     "range | speaker | timer | media",
     "(integer |\n    string)?",
   ];
@@ -199,6 +244,10 @@ test("parses type names, unions, grouping, and postfix list, set, and optional t
       "string[]",
       "string?",
       "integer set",
+      "integer dict?",
+      "(integer | string) dict",
+      "integer[] dict",
+      "integer dict[]",
       "(integer | string[])",
       "(integer | string)[]",
       "integer? set",
@@ -206,7 +255,7 @@ test("parses type names, unions, grouping, and postfix list, set, and optional t
       "integer?[]",
       "integer[]?",
       "integer[][]",
-      "(list | set | object | null)",
+      "(list | set | dict | object | null)",
       "(range | speaker | timer | media)",
       "(integer | string)?",
     ],
@@ -356,6 +405,8 @@ function writtenType(type: TypeAnnotation): string {
       return `${writtenType(type.element)}[]`;
     case "setType":
       return `${writtenType(type.element)} set`;
+    case "dictType":
+      return `${writtenType(type.element)} dict`;
     case "optionalType":
       return `${writtenType(type.value)}?`;
     case "unionType":

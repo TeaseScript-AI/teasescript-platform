@@ -74,7 +74,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 32;
+export const RUNTIME_SNAPSHOT_VERSION = 33;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -1233,7 +1233,8 @@ function validateTemporaries(
 
 type PreparedReferencePathStep =
   | { readonly kind: "property"; readonly name: string }
-  | { readonly kind: "index"; readonly index: number };
+  | { readonly kind: "index"; readonly index: number }
+  | { readonly kind: "key"; readonly key: string };
 
 const preparedReferencePropertyNames = Object.freeze([
   "marker",
@@ -1552,6 +1553,17 @@ function serializedObjectPropertyMap(value: unknown): ReadonlyMap<string, unknow
   return output;
 }
 
+function serializedDictEntryMap(value: unknown): ReadonlyMap<string, unknown> | null {
+  if (!isPlainRecord(value) || value.kind !== "dict" || !Array.isArray(value.entries)) return null;
+  const output = new Map<string, unknown>();
+  for (const entry of value.entries) {
+    if (!isPlainRecord(entry) || typeof entry.key !== "string" || output.has(entry.key))
+      return null;
+    output.set(entry.key, entry.value);
+  }
+  return output;
+}
+
 function parsePreparedReferencePath(value: unknown): readonly PreparedReferencePathStep[] | null {
   if (!isPlainRecord(value) || value.kind !== "list" || !Array.isArray(value.items)) {
     return null;
@@ -1565,6 +1577,12 @@ function parsePreparedReferencePath(value: unknown): readonly PreparedReferenceP
       const name = properties.get("name");
       if (typeof name !== "string" || name.length === 0) return null;
       output.push({ kind, name });
+      continue;
+    }
+    if (kind === "key" && properties.size === 2 && properties.has("key")) {
+      const key = properties.get("key");
+      if (typeof key !== "string") return null;
+      output.push({ kind, key });
       continue;
     }
     if (kind === "index" && properties.size === 2 && properties.has("index")) {
@@ -1615,6 +1633,12 @@ function preparedReferencePathResolves(
       current = current.items[step.index];
       continue;
     }
+    if (step.kind === "key") {
+      const entries = serializedDictEntryMap(current);
+      if (entries === null || !entries.has(step.key)) return false;
+      current = entries.get(step.key);
+      continue;
+    }
 
     if (isPlainRecord(current) && current.kind === "object") {
       const properties = serializedObjectPropertyMap(current);
@@ -1629,6 +1653,16 @@ function preparedReferencePathResolves(
     ) {
       if (step.name !== "length") return false;
       current = current.items.length;
+      continue;
+    }
+    if (isPlainRecord(current) && current.kind === "dict" && Array.isArray(current.entries)) {
+      const entries = serializedDictEntryMap(current);
+      if (entries === null) return false;
+      // `keys` and `values` read new lists derived from the entries.
+      if (step.name === "length") current = entries.size;
+      else if (step.name === "keys") current = { kind: "list", items: [...entries.keys()] };
+      else if (step.name === "values") current = { kind: "list", items: [...entries.values()] };
+      else return false;
       continue;
     }
     if (
@@ -3013,6 +3047,11 @@ function collectSpeakerReferenceIds(
       for (let index = current.properties.length - 1; index >= 0; index -= 1) {
         const property = current.properties[index];
         if (isPlainRecord(property)) work.push(property.value);
+      }
+    } else if (current.kind === "dict" && Array.isArray(current.entries)) {
+      for (let index = current.entries.length - 1; index >= 0; index -= 1) {
+        const entry = current.entries[index];
+        if (isPlainRecord(entry)) work.push(entry.value);
       }
     }
   }

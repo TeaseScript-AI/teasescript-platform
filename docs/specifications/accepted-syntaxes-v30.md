@@ -44,6 +44,7 @@ This table is generated from the current section order.
 - [37. Dynamic speaker terms](#37-dynamic-speaker-terms)
 - [38. Keywords and protected built-ins](#38-keywords-and-protected-built-ins)
 - [39. Rejected and reserved syntax](#39-rejected-and-reserved-syntax)
+- [40. Dictionaries](#40-dictionaries)
 - [Remaining open decisions](#remaining-open-decisions)
 
 ## Status legend
@@ -748,7 +749,7 @@ wait 2
 playAudio "door.mp3"
 ```
 
-`say` shows a list, set, or object in code-like notation; only `${...}` interpolation selects one random element
+`say` shows a list, set, dict, or object in code-like notation; only `${...}` interpolation selects one random element
 from a list ([§16](#16-lists)).
 
 Only engine-provided built-ins use command syntax. User-defined behavior uses normal functions.
@@ -953,13 +954,14 @@ timestamp
 duration
 ```
 
-The other type names are `null`; `list`, `set`, and `object` for any list, set, or object; and the program-control
-types `range`, `speaker`, `timer` (a timer handle), and `media` (a media handle). A type is a type name or one of
-these forms ([ADR 0021](../decisions/0021-static-types.md)):
+The other type names are `null`; `list`, `set`, `dict`, and `object` for any list, set, dict, or object; and the
+program-control types `range`, `speaker`, `timer` (a timer handle), and `media` (a media handle). A type is a type name
+or one of these forms ([ADR 0021](../decisions/0021-static-types.md)):
 
 ```text
 integer[]            // a list of integers
 integer set          // a set of integers
+integer dict         // a dict of integers by text key (§40)
 integer?             // an integer or null: integer | null
 integer | string     // an integer or text
 (integer | string)[] // a list whose elements are integers or text
@@ -968,14 +970,14 @@ integer?[]           // a list of integers or nulls
 integer[]?           // a list of integers, or null
 ```
 
-`[]`, `set`, and `?` follow a type and bind tighter than `|`; parentheses group. A set holds only `string`,
+`[]`, `set`, `dict`, and `?` follow a type and bind tighter than `|`; parentheses group. A set holds only `string`,
 `boolean`, `integer`, `number`, and `null` values, so `integer[] set` is a compile error.
 
 ### Union types
 
 A union `A | B` holds a value of either type. Unions may be used wherever a type is allowed: variables, list and set
-elements, parameters, and return types. The compiler never infers a union; mixing types without a declared union is an
-error whose message names the union form:
+elements, dict values, parameters, and return types. The compiler never infers a union; mixing types without a declared
+union is an error whose message names the union form:
 
 ```text
 let reward: integer | string = 10
@@ -1096,11 +1098,11 @@ toNumber("hello") // compile error
 ```
 
 Values obtained from input, storage, files, network data, or another runtime expression are not known during
-compilation and are validated at runtime. When such a value is stored in a variable, list or set element, object
-property, parameter, or function result whose type is known, the runtime checks the value before storing it; a value
-that does not fit is runtime error `TSR058`, which names the place and the value. An `integer` place takes any whole
-number, including a stored `2.0`, because the runtime does not keep a number's spelling. A list or set fits when every
-element fits, and an object fits when each known property that it has fits.
+compilation and are validated at runtime. When such a value is stored in a variable, list or set element, dict value,
+object property, parameter, or function result whose type is known, the runtime checks the value before storing it; a
+value that does not fit is runtime error `TSR058`, which names the place and the value. An `integer` place takes any
+whole number, including a stored `2.0`, because the runtime does not keep a number's spelling. A list, set, or dict
+fits when every element or value fits, and an object fits when each known property that it has fits.
 
 `toString`, `toNumber`, `toInteger`, and `toBoolean` convert these values:
 
@@ -1200,6 +1202,9 @@ Properties use dot access:
 say door.name
 door.locked = false
 ```
+
+Properties have fixed names, so an object is not indexed: `door[name]` is a compile error that points to a dict for
+lookup by a name known only at runtime ([§40](#40-dictionaries)), and `door["name"]` to `door.name`.
 
 A property keeps the type of its first value, like a variable ([§12](#12-variable-declarations)); an `integer`
 property becomes a `number` when one of its assignments can store a non-whole number. Assignment may add a property,
@@ -1341,6 +1346,7 @@ say [2.5, 3, null]             // [2.5, 3, null]
 say [["a"], ["b"]]             // [["a"], ["b"]]
 say [{ name: "Bo", age: 3 }]   // [{ name: "Bo", age: 3 }]
 say { name: "Bo" }             // { name: "Bo" }
+say dict{ collar: "leather" }  // dict{ "collar": "leather" }
 say ["He said \"hi\""]         // ["He said \"hi\""]
 say []                         // []
 say [90 seconds]               // [1 min 30 s]
@@ -1351,11 +1357,11 @@ say beat                       // <timer "Beat", 7 s left>
 ```
 
 In this notation, text is quoted with the string escapes of [§8](#8-strings-and-interpolation), durations use their
-short form, a set shows like a list, an object shows its properties in order, and a range shows as written. A speaker
-shows its identifier. A media handle shows its file and state: `playing at` or `paused at` its position, `stopped`, or
-`finished`. A timer handle shows its label when it has one and its state: the time left (after `paused,` when paused),
-`stopped`, or `finished`. Handles show the state at the moment `say` runs. Message markup is not applied to the
-notation.
+short form, a set shows like a list, an object shows its properties in order, a dict shows its quoted keys and values in
+order, and a range shows as written. A speaker shows its identifier. A media handle shows its file and state:
+`playing at` or `paused at` its position, `stopped`, or `finished`. A timer handle shows its label when it has one and
+its state: the time left (after `paused,` when paused), `stopped`, or `finished`. Handles show the state at the moment
+`say` runs. Message markup is not applied to the notation.
 
 Other text fields, such as a button label, an input hint, the `text` of a choice object, a timer label, or a speaker's
 name or title, do not select from a list. A list there is a compile error when the compiler can see it, such as a list
@@ -2385,6 +2391,9 @@ for item in items {
 }
 ```
 
+`for` goes through the elements of a list or set, the keys of a dict ([§40](#40-dictionaries)), or the whole numbers of
+a range, as they were when the loop started: changing the source inside the loop does not change what the loop visits.
+
 ```text
 while player.health > 0 {
     wait 1
@@ -2507,10 +2516,10 @@ Rules:
 - Dots and slashes inside a key are naming conventions only.
 - The complete string is treated as one key.
 
-Storage currently supports strings, finite numbers, booleans, lists, objects, sets, ranges, durations, and date and time
-values, including nested `null`. Wider persistent-data support is not yet implemented; this subset is not a permanent
-language limit. The compiler rejects a default whose type is known and does not match. Replacement-value recovery under
-[§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
+Storage currently supports strings, finite numbers, booleans, lists, objects, sets, dicts, ranges, durations, and date
+and time values, including nested `null`. Wider persistent-data support is not yet implemented; this subset is not a
+permanent language limit. The compiler rejects a default whose type is known and does not match. Replacement-value
+recovery under [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
 
 Examples:
 
@@ -3940,12 +3949,14 @@ datetime
 timestamp
 duration
 list
+dict
 object
 range
 media
 ```
 
-The type names `null`, `set`, `speaker`, and `timer` are protected as grammar keywords or engine names.
+The type names `null`, `set`, `speaker`, and `timer` are protected as grammar keywords or engine names. `dict` also
+starts a dict literal when `{` follows it ([§40](#40-dictionaries)).
 
 ### Protected engine names
 
@@ -4106,6 +4117,60 @@ They are not currently executable syntax. Media and timers are controlled throug
 ### Reserved for later design
 
 `available when` is reserved for future requirements or suitability metadata and is not executable syntax.
+
+## 40. Dictionaries
+**Status:** Accepted (#536)
+
+A dict is a lookup table from text keys to values of one type, for names known only when the script runs. An object
+([§15](#15-objects)) is one thing with fixed properties, each with its own type.
+
+```text
+let spare = "spare"
+let toys = dict{ collar: "leather collar", "soft cuffs": "wrist cuffs", [spare]: "spare gag" }
+let counts: integer dict = dict{}
+
+say toys[name]                          // a missing key is an error
+toys[name] = "ball gag"                 // adds the key, or replaces its value in place
+if toys.contains(name) { ... }          // whether the key exists
+let old = toys.remove(name)             // the removed value; a missing key is an error
+toys.clear()
+let n = counts.get(name, default: 0)    // the value, or the default when the key is missing
+toys.length                             // the number of entries
+toys.keys                               // a new list of the keys, in entry order
+toys.values                             // a new list of the values, in the same order
+for name in toys { ... }                // the keys
+```
+
+- **Keys** are text. In a literal, `collar:` is the key `"collar"`, quoted text is any key, and `[expr]:` computes one.
+  Entries are evaluated in source order, each key before its value. A key that is not text, such as a number, is a
+  compile error when the compiler can see it and runtime error `TSR062` otherwise; write a number key as text, as in
+  `toys["${id}"]`.
+- **Duplicate keys:** a key the literal shows twice, also through computed keys whose text is known, is a compile
+  error. Equal keys known only at runtime let the later entry replace the earlier one in its position.
+- **Order:** entries keep insertion order. Assigning to an existing key keeps its position; a new key comes last.
+- **Value type:** values share one type by the rules for list elements ([§12](#12-variable-declarations)), so integers
+  and numbers together are numbers, an empty dict takes the type of its first value, and an integer dict without a
+  written type widens to numbers. Values of different types need a declared union, such as `(integer | string) dict`.
+  `T dict` is written like `T[]` and `T set`, and `dict` alone holds any values ([§13](#13-explicit-types)).
+- **Missing keys:** reading or removing a key that the dict does not have is runtime error `TSR061`, which names the
+  check, such as `Dictionary has no key "collar". Check toys.contains(name) first.` A missing key is visible to the
+  compiler only for a literal dict, so `dict{ a: 1 }["b"]` is a compile error; for any other dict, check
+  `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key; its `default:`
+  is required and must fit the value type like a value stored in the dict, also when the script runs (`TSR058`), and
+  its result has the value type. Like any argument, the default is evaluated before the lookup.
+- **Iteration:** `for key in toys` goes through the keys as they were when the loop started
+  ([§23](#23-loops)), so changing the dict inside the loop is safe. There is no two-variable `for`.
+- **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an
+  object are never equal.
+- **Text:** `say` shows a dict as `dict{ "collar": "leather collar" }` ([§16](#lists-in-text)). `${toys}` is an error
+  that names the fix: select one value with `toys[key]`, or show every value with `toys.values.join()`. A dict is not a
+  text field, a set element, or a `choose` option.
+- **Copies and storage:** dicts are copied like lists ([ADR 0014](../decisions/0014-core-runtime-value-semantics.md)),
+  and `keys` and `values` are new lists. Storage ([§25](#25-persistent-storage-and-keys)) and checkpoints keep a dict
+  with its entry order.
+- **Type tests:** `is dict` and `is T dict` test the value; `is T dict` checks every value.
+
+Deferred: keys other than text, merging dicts, a two-variable `for`, and sorted dicts.
 
 ## Remaining open decisions
 The accepted core syntax is consolidated in this document. Remaining work is primarily detailed API payloads and engine/account behavior.

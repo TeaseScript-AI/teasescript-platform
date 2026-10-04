@@ -109,6 +109,7 @@ export function registerTeaseScriptLanguage(): void {
         "duration",
         "list",
         "set",
+        "dict",
         "object",
         "range",
         "media",

@@ -176,6 +176,7 @@ const EXPRESSION_FIELDS = fieldsByKind([
   ["list", "elements"],
   ["set", "elements"],
   ["object", "properties"],
+  ["dict", "entries"],
   ["group", "expression"],
   ["template", "parts"],
   ["property", "object", "name"],
@@ -1158,7 +1159,7 @@ function validateInteractionAccessibleName(
 
 type ExpressionValidationWork =
   | { value: unknown; path: string; assignmentTarget: boolean }
-  | { kind: "property"; value: unknown; path: string }
+  | { kind: "property" | "entry"; value: unknown; path: string }
   | {
       kind: "span" | "string" | "inclusive" | "parts" | "arguments" | "part" | "argument";
       value: unknown;
@@ -1208,7 +1209,9 @@ function validateExpression(
               ? "Template part must be an object."
               : current.kind === "argument"
                 ? "Argument must be an object."
-                : "Property must be an object.",
+                : current.kind === "entry"
+                  ? "Dict entry must be an object."
+                  : "Property must be an object.",
             current.path,
           ),
         );
@@ -1242,6 +1245,19 @@ function validateExpression(
         pending.push({
           value: current.value.value,
           path: `${current.path}.value`,
+          assignmentTarget: false,
+        });
+      } else if (current.kind === "entry") {
+        rejectUnknownFields(current.value, ["key", "value", "span"], current.path, errors);
+        pending.push({ kind: "span", value: current.value.span, path: `${current.path}.span` });
+        pending.push({
+          value: current.value.value,
+          path: `${current.path}.value`,
+          assignmentTarget: false,
+        });
+        pending.push({
+          value: current.value.key,
+          path: `${current.path}.key`,
           assignmentTarget: false,
         });
       } else {
@@ -1299,6 +1315,7 @@ function validateTypePlan(root: unknown, rootPath: string, errors: PlanValidatio
     switch (type.kind) {
       case "list":
       case "set":
+      case "dict":
         rejectUnknownFields(type, ["kind", "element"], typePath, errors);
         if (type.element !== null)
           pending.push({ value: type.element, path: `${typePath}.element` });
@@ -1446,6 +1463,17 @@ function validateExpressionNode(
             path: `${path}.properties[${index}]`,
           });
       return;
+    case "dict":
+      if (!Array.isArray(value.entries))
+        errors.push(planError("TSC002", "Dict entries must be an array.", `${path}.entries`));
+      else
+        for (let index = value.entries.length - 1; index >= 0; index -= 1)
+          pending.push({
+            kind: "entry",
+            value: value.entries[index],
+            path: `${path}.entries[${index}]`,
+          });
+      return;
     case "group":
       pending.push({
         value: value.expression,
@@ -1472,15 +1500,19 @@ function validateExpressionNode(
         !(
           isRecord(value.callee) &&
           value.callee.kind === "property" &&
-          value.callee.name === "add" &&
           Array.isArray(value.arguments) &&
-          value.arguments.length === 1
+          ((value.callee.name === "add" && value.arguments.length === 1) ||
+            (value.callee.name === "get" &&
+              value.arguments.length === 2 &&
+              isRecord(value.arguments[1]) &&
+              value.arguments[1].kind === "named" &&
+              value.arguments[1].name === "default"))
         )
       )
         errors.push(
           planError(
             "TSC002",
-            "Only a list or set 'add' call with one argument checks a type.",
+            "Only a list or set 'add' call with one argument, or a dict 'get' call with a 'default:', checks a type.",
             `${path}.typeCheck`,
           ),
         );

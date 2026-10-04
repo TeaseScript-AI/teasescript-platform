@@ -9,6 +9,7 @@ import type {
   SerializableRuntimeObject,
   SerializableRuntimeRange,
   SerializableRuntimeSet,
+  SerializableRuntimeDict,
   SerializableRuntimeValue,
   SerializableSpeakerReference,
   SerializableTimerHandle,
@@ -21,6 +22,10 @@ export function isList(value: SerializableRuntimeValue): value is SerializableRu
 
 export function isSet(value: SerializableRuntimeValue): value is SerializableRuntimeSet {
   return typeof value === "object" && value !== null && value.kind === "set";
+}
+
+export function isDict(value: SerializableRuntimeValue): value is SerializableRuntimeDict {
+  return typeof value === "object" && value !== null && value.kind === "dict";
 }
 
 export function isObject(value: SerializableRuntimeValue): value is SerializableRuntimeObject {
