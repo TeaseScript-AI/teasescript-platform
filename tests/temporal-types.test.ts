@@ -65,20 +65,23 @@ test("constant text that is not a valid value is a compile error, also with a de
   const cases = [
     [
       'toDate("4-10-2026")',
-      'toDate(...) needs ISO date text such as "2026-10-04", not "4-10-2026".',
+      'toDate(...) cannot convert "4-10-2026"; the text must be ISO date text such as "2026-10-04".',
     ],
     [
       'toDate("2026-02-30", default: toDate("2026-01-01"))',
       'toDate(...) cannot convert "2026-02-30": February 2026 has 28 days.',
     ],
-    ['toTime("2:30 PM")', 'toTime(...) needs ISO time text such as "14:30", not "2:30 PM".'],
+    [
+      'toTime("2:30 PM")',
+      'toTime(...) cannot convert "2:30 PM"; the text must be ISO time text such as "14:30".',
+    ],
     [
       'toDateTime("2026-10-04T18:00Z")',
-      'toDateTime(...) needs local ISO date and time text without an offset, such as "2026-10-04T18:00", not "2026-10-04T18:00Z".',
+      'toDateTime(...) cannot convert "2026-10-04T18:00Z"; the text must be local ISO date and time text without an offset, such as "2026-10-04T18:00".',
     ],
     [
       'toTimestamp("2026-10-04T12:30")',
-      'toTimestamp(...) needs ISO timestamp text with Z or an offset, such as "2026-10-04T12:30:00Z", not "2026-10-04T12:30".',
+      'toTimestamp(...) cannot convert "2026-10-04T12:30"; the text must be ISO timestamp text with Z or an offset, such as "2026-10-04T12:30:00Z".',
     ],
   ] as const;
   for (const [call, message] of cases) {
@@ -103,29 +106,25 @@ test("conversions report wrong arguments, argument counts, and named arguments",
     [
       [
         "TSV043",
-        "toDate(...) takes date text, a date, or a date and time, but this is a whole number (integer).",
+        "toDate(...) converts text, a date, or a date and time, not a whole number (integer).",
         "5",
       ],
       [
         "TSV043",
-        "toTimestamp(...) takes timestamp text or a timestamp, but this is a date and time. Convert it with 'dinner.toTimestamp()'.",
+        "toTimestamp(...) converts text or a timestamp, not a date and time. Convert it with 'dinner.toTimestamp()'.",
         "dinner",
       ],
       [
         "TSV043",
-        "toDateTime(...) takes date and time text, a date and time, or a date and a time, but this is a timestamp. Convert it with 'started.toDateTime()'.",
+        "toDateTime(...) converts text, a date and time, or a date and a time, not a timestamp. Convert it with 'started.toDateTime()'.",
         "started",
       ],
       [
         "TSV043",
-        "toDateTime(date, time) takes a date first, but this is text (string). Convert the text first, as in 'toDate(...)'.",
+        "toDateTime(date, time) needs a date first, not text (string). Convert the text first with toDate(...).",
         '"2026-10-04"',
       ],
-      [
-        "TSV043",
-        "toDate(...) takes a date as its 'default:', but this is text (string).",
-        '"2026-10-04"',
-      ],
+      ["TSV043", "toDate(...) needs a date as its default:, not text (string).", '"2026-10-04"'],
     ],
   );
   assert.deepEqual(
@@ -137,9 +136,9 @@ test("conversions report wrong arguments, argument counts, and named arguments",
       ].join("\n"),
     ).map(([code, message]) => [code, message]),
     [
-      ["TSV020", "toDate(...) takes one value, received 0."],
-      ["TSV020", "toDateTime(...) takes one value, or a date and a time, received 3."],
-      ["TSV022", "toDate(...) has no parameter 'fallback'; its only named argument is 'default:'."],
+      ["TSV020", "toDate(...) takes 1 argument (value), received 0."],
+      ["TSV020", "toDateTime(...) takes 1 argument (value) or 2 (date, time), received 3."],
+      ["TSV022", "toDate(...) has no parameter 'fallback'; its only named argument is default:."],
     ],
   );
   assert.deepEqual(diagnostics('let day: date = "2026-10-04"'), [

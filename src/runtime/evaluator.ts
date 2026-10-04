@@ -1,8 +1,8 @@
 import {
+  combinedDateAndTime,
   hasTemporalMethod,
-  TEMPORAL_CONVERSIONS,
   temporalBinary,
-  temporalConversion,
+  temporalConverted,
   temporalMethod,
   temporalProperty,
 } from "./temporal-operations.js";
@@ -131,10 +131,12 @@ import {
   describeConversionResult,
   isConversionName,
   isConversionResult,
+  isTemporalConversionResult,
   numberFromText,
   rounded,
   MIN_MAX_BUILTINS,
   ROUNDING_BUILTINS,
+  temporalTextProblem,
   withoutNegativeZero,
   type ConversionName,
   type ConversionResult,
@@ -1146,8 +1148,6 @@ export class Evaluator {
           expression.callee.span,
         );
       }
-      if (TEMPORAL_CONVERSIONS.has(name))
-        return temporalConversion(name, positional, named, expression.span);
       const call = Object.freeze({
         positional: Object.freeze(positional),
         named: Object.freeze(named),
@@ -1687,13 +1687,15 @@ export class Evaluator {
     span: SourceSpan,
   ): SerializableRuntimeValue {
     const extra = Object.keys(named).find((key) => key !== "default");
-    if (positional.length !== 1 || extra !== undefined)
+    const result = CONVERSION_RESULTS.get(name)!;
+    // A date and a time combine into one date and time (V30 §35).
+    const parts = result === "datetime" && positional.length === 2;
+    if ((positional.length !== 1 && !parts) || extra !== undefined)
       throw fault(
         "TSR028",
         `${name}(...) takes one value and an optional default:, such as ${name}(value, default: ...).`,
         span,
       );
-    const result = CONVERSION_RESULTS.get(name)!;
     const fallback = Object.hasOwn(named, "default") ? named.default : undefined;
     if (fallback !== undefined && !isConversionResult(result, fallback))
       throw fault(
@@ -1702,13 +1704,25 @@ export class Evaluator {
         span,
       );
     const value = positional[0]!;
-    const converted = this.#converted(result, value, span);
+    const converted = parts
+      ? combinedDateAndTime(value, positional[1]!)
+      : this.#converted(result, value, span);
     if (converted !== undefined) return converted;
     if (fallback !== undefined) return fallback;
+    if (parts)
+      throw fault(
+        "TSR058",
+        `toDateTime(date, time) combines a date and a time, not ${describeRuntimeValue(value)} and ${describeRuntimeValue(positional[1]!)}.`,
+        span,
+      );
     const shown = typeof value === "string" ? ` ${JSON.stringify(value)}` : "";
+    const reason =
+      typeof value === "string" && isTemporalConversionResult(result)
+        ? (temporalTextProblem(result, value) ?? "")
+        : "";
     throw fault(
       "TSR058",
-      `${name}(...) cannot convert ${describeRuntimeValue(value)}${shown} to ${describeConversionResult(result)}. Give a fallback with default: if the value may not convert.`,
+      `${name}(...) cannot convert ${describeRuntimeValue(value)}${shown} to ${describeConversionResult(result)}${reason}. Give a fallback with default: if the value may not convert.`,
       span,
     );
   }
@@ -1719,6 +1733,7 @@ export class Evaluator {
     value: SerializableRuntimeValue,
     span: SourceSpan,
   ): SerializableRuntimeValue | undefined {
+    if (isTemporalConversionResult(result)) return temporalConverted(result, value);
     if (result === "string")
       return isVisibleScalar(value)
         ? visibleText(value, span, this.snapshot.temporalContext)

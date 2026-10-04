@@ -31,11 +31,12 @@ import {
   numberAnswerText,
 } from "./interaction-answers.js";
 import type { TypeCheckPlan } from "./plan/model.js";
-import { CONVERSION_RESULTS } from "./conversions.js";
+import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
 import {
   builtinCallProblems,
   COLLECTION_METHODS,
   collectionMethodProblems,
+  expressionLabel,
   memberProblems,
   type OperationProblem,
 } from "./operation-checks.js";
@@ -46,13 +47,6 @@ import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 import { impossibleCaseMessage } from "./switch-cases.js";
 import type { SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
-import {
-  parseIsoDate,
-  parseIsoDateTime,
-  parseIsoTime,
-  parseIsoTimestamp,
-  type TemporalResult,
-} from "./temporal.js";
 import {
   arithmeticType,
   BOOLEAN_TYPE,
@@ -2735,6 +2729,10 @@ class TypeChecker {
       case "toNumber":
       case "toInteger":
       case "toBoolean":
+      case "toDate":
+      case "toTime":
+      case "toDateTime":
+      case "toTimestamp":
         this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
         return scalarType(CONVERSION_RESULTS.get(name)!);
       case "escapeMarkup":
@@ -2746,92 +2744,9 @@ class TypeChecker {
             "escapeMarkup(...) takes text (string)",
           );
         return STRING_TYPE;
-      case "toDate":
-      case "toTime":
-      case "toDateTime":
-      case "toTimestamp":
-        return this.#temporalConversionType(name, expression, values);
       default:
         return UNKNOWN_TYPE;
     }
-  }
-
-  /**
-   * Checks a conversion to a date or time value (V30 §35): one value, or a date and a time for `toDateTime`, and an
-   * optional `default:` of the result type. Text known here must be a valid value, also when a default is given; other
-   * text is checked when it is converted.
-   */
-  #temporalConversionType(
-    name: keyof typeof TEMPORAL_CONVERSIONS,
-    expression: CallExpression,
-    values: readonly StaticType[],
-  ): StaticType {
-    const conversion = TEMPORAL_CONVERSIONS[name];
-    const result: StaticType = { kind: "scalar", name: conversion.result };
-    const positional: { readonly value: Expression; readonly type: StaticType }[] = [];
-    for (const [index, argument] of expression.arguments.entries()) {
-      const type = values[index]!;
-      if (argument.kind === "positionalArgument") positional.push({ value: argument.value, type });
-      else if (argument.name.name === "default")
-        this.#reportUnless(
-          type,
-          (member) => isScalar(member, conversion.result),
-          argument.value,
-          `${name}(...) takes ${describeValue(result)} as its 'default:'`,
-        );
-      else
-        this.#report(
-          typeCode.unknownNamedArgument,
-          `${name}(...) has no parameter '${argument.name.name}'; its only named argument is 'default:'.`,
-          argument.name.span,
-        );
-    }
-    const [first, second] = positional;
-    if (name === "toDateTime" && positional.length === 2) {
-      // A date and a time combine into one date and time.
-      for (const [part, kind, position] of [
-        [first!, "date", "first"],
-        [second!, "time", "second"],
-      ] as const)
-        this.#reportUnless(
-          part.type,
-          (member) => isScalar(member, kind),
-          part.value,
-          `toDateTime(date, time) takes a ${kind} ${position}`,
-          () =>
-            isScalar(part.type, "string")
-              ? ` Convert the text first, as in '${kind === "date" ? "toDate" : "toTime"}(...)'.`
-              : "",
-        );
-      return result;
-    }
-    if (positional.length !== 1 || first === undefined) {
-      this.#report(
-        typeCode.argumentCount,
-        `${name}(...) takes ${name === "toDateTime" ? "one value, or a date and a time" : "one value"}, received ${positional.length}.`,
-        expression.span,
-      );
-      return result;
-    }
-    this.#reportUnless(
-      first.type,
-      (member) => isScalar(member, "string", ...conversion.from),
-      first.value,
-      `${name}(...) takes ${conversion.takes}`,
-      () => conversionMethodFix(name, first.type, first.value),
-    );
-    const text = staticChoiceValue(first.value)?.value;
-    if (typeof text !== "string") return result;
-    const parsed: TemporalResult<unknown> = conversion.parse(text);
-    if (!parsed.ok)
-      this.#report(
-        typeCode.invalidOperand,
-        parsed.reason === null
-          ? `${name}(...) needs ${conversion.text}, not ${JSON.stringify(text)}.`
-          : `${name}(...) cannot convert ${JSON.stringify(text)}: ${parsed.reason}.`,
-        first.value.span,
-      );
-    return result;
   }
 
   /** The type of `object.name`; every member of a union must have the property (ADR 0021 rule 3.5). */
@@ -4097,64 +4012,6 @@ function timerOperands(timer: TimerParts): readonly Expression[] {
   ];
 }
 
-/** The built-in conversions to date and time values: what each converts, and the ISO text it reads (V30 §35). */
-const TEMPORAL_CONVERSIONS = {
-  toDate: {
-    result: "date",
-    from: ["date", "datetime"],
-    takes: "date text, a date, or a date and time",
-    text: 'ISO date text such as "2026-10-04"',
-    parse: parseIsoDate,
-  },
-  toTime: {
-    result: "time",
-    from: ["time", "datetime"],
-    takes: "time text, a time, or a date and time",
-    text: 'ISO time text such as "14:30"',
-    parse: parseIsoTime,
-  },
-  toDateTime: {
-    result: "datetime",
-    from: ["datetime"],
-    takes: "date and time text, a date and time, or a date and a time",
-    text: 'local ISO date and time text without an offset, such as "2026-10-04T18:00"',
-    parse: parseIsoDateTime,
-  },
-  toTimestamp: {
-    result: "timestamp",
-    from: ["timestamp"],
-    takes: "timestamp text or a timestamp",
-    text: 'ISO timestamp text with Z or an offset, such as "2026-10-04T12:30:00Z"',
-    parse: parseIsoTimestamp,
-  },
-} as const satisfies Record<
-  string,
-  {
-    readonly result: ScalarTypeName;
-    readonly from: readonly ScalarTypeName[];
-    readonly takes: string;
-    readonly text: string;
-    readonly parse: (text: string) => TemporalResult<unknown>;
-  }
->;
-
-/** A local date and time and a timestamp convert into each other with a method, through the player's zone. */
-function conversionMethodFix(
-  name: keyof typeof TEMPORAL_CONVERSIONS,
-  type: StaticType,
-  expression: Expression,
-): string {
-  const method =
-    name === "toTimestamp" && isScalar(type, "datetime")
-      ? "toTimestamp"
-      : name === "toDateTime" && isScalar(type, "timestamp")
-        ? "toDateTime"
-        : null;
-  return method === null
-    ? ""
-    : ` Convert it with '${expressionLabel(expression) ?? "value"}.${method}()'.`;
-}
-
 const PURE_BUILTINS: ReadonlySet<string> = new Set([
   ...CORE_RUNTIME_BUILTINS,
   ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
@@ -4723,19 +4580,6 @@ function unwrap(expression: Expression): Expression {
   return expression;
 }
 
-/** The source spelling of a variable or property path, such as `items` or `door.keys`. */
-function expressionLabel(expression: Expression): string | null {
-  const names: string[] = [];
-  let current = unwrap(expression);
-  while (current.kind === "propertyAccessExpression") {
-    names.push(current.property.name);
-    current = unwrap(current.object);
-  }
-  if (current.kind !== "identifier") return null;
-  names.push(current.name);
-  return names.reverse().join(".");
-}
-
 /** A slot already decided by its first value at `at`, so a later mismatch can name that line. */
 function decidedSlot(type: StaticType, at: SourceSpan): StaticType {
   // A place still undecided, such as one that so far took only null, is decided by its first other value instead.
@@ -4890,8 +4734,8 @@ function conversionFix(
   if (isScalar(kept, "integer") && isScalar(value, "number")) return `${ROUND_FIX}.`;
   if (isScalar(kept, "duration") && isNumeric(value)) return ` ${unitFix(expression)}`;
   // Date and time values are written as ISO text and converted.
-  const conversion = Object.entries(TEMPORAL_CONVERSIONS).find(([, { result }]) =>
-    isScalar(kept, result),
+  const conversion = [...CONVERSION_RESULTS].find(
+    ([, result]) => isTemporalConversionResult(result) && isScalar(kept, result),
   );
   if (conversion !== undefined && isScalar(value, "string"))
     return ` Convert the text with ${conversion[0]}(...).`;
@@ -5053,6 +4897,6 @@ function textResultType(member: TextMember): StaticType {
     : scalarType(member.result);
 }
 
-function scalarType(name: "string" | "integer" | "number" | "boolean"): StaticType {
+function scalarType(name: ScalarTypeName): StaticType {
   return { kind: "scalar", name };
 }

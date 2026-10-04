@@ -135,9 +135,14 @@ test("text known only at runtime converts, falls back to default:, or fails with
     ["2026-10-04", "2000-01-01", "2000-01-01T00:00:00Z"],
   );
   const failure = failureOf(`${DYNAMIC}let day = toDate(dynamic("2026-02-30"))`);
-  assert.equal(failure?.code, "TSR063");
-  assert.match(failure?.message ?? "", /February 2026 has 28 days/u);
-  assert.equal(failureOf(`${DYNAMIC}let day = toTime(dynamic("2:30 PM"))`)?.code, "TSR063");
+  assert.equal(failure?.code, "TSR058");
+  assert.match(failure?.message ?? "", /to a date: February 2026 has 28 days\./u);
+  const notIso = failureOf(`${DYNAMIC}let day = toTime(dynamic("2:30 PM"))`);
+  assert.equal(notIso?.code, "TSR058");
+  assert.equal(
+    notIso?.message,
+    'toTime(...) cannot convert text (string) "2:30 PM" to a time; the text must be ISO time text such as "14:30". Give a fallback with default: if the value may not convert.',
+  );
 });
 
 test("say, interpolation, and format methods use the captured presentation; collections use fixed notation", () => {

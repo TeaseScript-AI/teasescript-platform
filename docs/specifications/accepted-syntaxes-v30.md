@@ -1106,7 +1106,7 @@ element fits, and an object fits when each known property that it has fits.
 
 | Conversion | Converts | Result |
 | --- | --- | --- |
-| `toString(value)` | text, numbers, `true` and `false`, `null`, and durations | the same text as `"${value}"` |
+| `toString(value)` | text, numbers, `true` and `false`, `null`, durations, and date and time values | the same text as `"${value}"` |
 | `toNumber(value)` | numbers, and number text | a `number` |
 | `toInteger(value)` | numbers, and number text | an `integer` |
 | `toBoolean(value)` | `true` and `false`, and the text `"true"` or `"false"` | a `boolean` |
@@ -1273,8 +1273,8 @@ let newest = tasks.removeLast()
 
 `items.join(separator)` returns the elements as text, separated by the text `separator`, which defaults to `", "`:
 `["pet", "puppy"].join()` is `"pet, puppy"`. Use `${items.join()}` to show every element where `${items}` selects one.
-Elements may be text, numbers, `true` or `false`, `null`, and durations, shown as `${...}` shows them; any other element
-raises an error.
+Elements may be text, numbers, `true` or `false`, `null`, durations, and date and time values, shown as `${...}` shows
+them; any other element raises an error.
 
 List properties:
 

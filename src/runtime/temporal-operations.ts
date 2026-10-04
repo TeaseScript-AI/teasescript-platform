@@ -51,69 +51,14 @@ type SourceSpan = RichSourceSpan | PlanSourceLocation;
 /** Failed temporal conversion or arithmetic: invalid text, a result outside the years 0000–9999 or the zone rules. */
 const TEMPORAL_FAILURE = "TSR063";
 
-export const TEMPORAL_CONVERSIONS: ReadonlySet<string> = new Set([
-  "toDate",
-  "toTime",
-  "toDateTime",
-  "toTimestamp",
-]);
-
-/** `toDate`, `toTime`, `toDateTime`, or `toTimestamp` (V30 §35), with the optional `default:` fallback. */
-export function temporalConversion(
-  name: string,
-  positional: readonly SerializableRuntimeValue[],
-  named: Readonly<Record<string, SerializableRuntimeValue>>,
-  span: SourceSpan,
-): SerializableRuntimeValue {
-  const extra = Object.keys(named).find((key) => key !== "default");
-  const combines = name === "toDateTime" && positional.length === 2;
-  if (extra !== undefined || (positional.length !== 1 && !combines))
-    throw fault(
-      "TSR015",
-      `${name}(...) takes one value and an optional default:, such as ${name}(text, default: ...).`,
-      span,
-    );
-  const fallback = Object.hasOwn(named, "default") ? named.default : undefined;
-  const result = KIND_OF_CONVERSION[name]!;
-  if (fallback !== undefined && !isKind(fallback, result))
-    throw fault(
-      TEMPORAL_FAILURE,
-      `${name}(...) needs ${describeKind(result)} as its default:, not ${describeValue(fallback)}.`,
-      span,
-    );
-  const converted = combines
-    ? combineDateAndTime(positional[0]!, positional[1]!)
-    : convert(result, positional[0]!);
-  if (typeof converted !== "string") return converted;
-  if (fallback !== undefined) return { ...fallback };
-  throw fault(TEMPORAL_FAILURE, `${name}(...) ${converted}`, span);
-}
-
-const KIND_OF_CONVERSION: Readonly<Record<string, SerializableRuntimeTemporal["kind"]>> = {
-  toDate: "date",
-  toTime: "time",
-  toDateTime: "datetime",
-  toTimestamp: "timestamp",
-};
-
-const ISO_EXAMPLES: Readonly<Record<SerializableRuntimeTemporal["kind"], string>> = {
-  date: '"2026-10-04"',
-  time: '"14:30"',
-  datetime: '"2026-10-04T18:00", without an offset',
-  timestamp: '"2026-10-04T12:30:00Z", with Z or an offset',
-};
-
-/** The converted value, or the end of a sentence explaining why the value does not convert. */
-function convert(
+/** `value` converted to a date or time value of `kind` (V30 §35), or `undefined` when it does not convert. */
+export function temporalConverted(
   kind: SerializableRuntimeTemporal["kind"],
   value: SerializableRuntimeValue,
-): SerializableRuntimeTemporal | string {
+): SerializableRuntimeTemporal | undefined {
   if (typeof value === "string") {
     const parsed = parseText(kind, value);
-    if (parsed.ok) return parsed.value;
-    return parsed.reason === null
-      ? `needs ISO ${kind === "datetime" ? "date and time" : kind} text such as ${ISO_EXAMPLES[kind]}, not ${JSON.stringify(value)}. Give a fallback with default: if the text may not convert.`
-      : `cannot convert ${JSON.stringify(value)}: ${parsed.reason}.`;
+    return parsed.ok ? parsed.value : undefined;
   }
   if (isKind(value, kind)) return { ...value };
   if (isDateTime(value) && kind === "date")
@@ -126,7 +71,7 @@ function convert(
       second: value.second,
       millisecond: value.millisecond,
     };
-  return `cannot convert ${describeValue(value)} to ${describeKind(kind)}.`;
+  return undefined;
 }
 
 function parseText(
@@ -153,12 +98,12 @@ function parseText(
   }
 }
 
-function combineDateAndTime(
+/** A date and a time combined into one date and time, or `undefined` when the values are not a date and a time. */
+export function combinedDateAndTime(
   date: SerializableRuntimeValue,
   time: SerializableRuntimeValue,
-): SerializableRuntimeDateTime | string {
-  if (!isDate(date) || !isTime(time))
-    return `combines a date and a time, not ${describeValue(date)} and ${describeValue(time)}.`;
+): SerializableRuntimeDateTime | undefined {
+  if (!isDate(date) || !isTime(time)) return undefined;
   return {
     kind: "datetime",
     year: date.year,
