@@ -220,7 +220,9 @@ test("uses scalar equality for set uniqueness and retains insertion order", () =
   const captured: unknown[] = [];
   const result = executeSource(
     [
-      'let values = set["a", "a", true, true, 1, 1.0, null, null, false]',
+      // `dynamic` hides each value's type, so the set may hold values of several kinds.
+      "function dynamic(value) { return value }",
+      'let values = set["a", "a", dynamic(true), dynamic(true), dynamic(1), dynamic(1.0), null, null, dynamic(false)]',
       "capture(values.toList())",
     ],
     { capture: captureInto(captured) },

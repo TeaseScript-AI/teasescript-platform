@@ -32,9 +32,11 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    A function that can end without returning a value has an optional result. Annotated parameters and result types are
    checked. An unannotated parameter with a default takes the default's type by exactly the `let` rule, so
    `times = 1` is an `integer`. Parameters without an annotation or a default stay unknown; a parameter's type is never
-   inferred from its call sites, so a default that does not decide a type, such as `null` or `[]`, leaves it unknown.
-6. "First" follows the order in which the compiler checks the script: top-level statements in source order, then
-   function bodies, then timer and media blocks.
+   inferred from its call sites, so what a default leaves open stays unknown: `null` gives an unknown type, and `[]` a
+   list of elements of unknown type. A returned value of unknown type makes the result unknown; the known returned
+   values must still agree.
+6. "First" follows the order in which the compiler checks the script: top-level statements in source order, a
+   function body when a call first needs its result (otherwise after the top level), then timer and media blocks.
 7. A value whose type the compiler cannot know, such as untyped storage, host data, or an unknown parameter, is not
    rejected at compile time. When it is stored in a place of known type, it is checked at runtime with a
    source-located error.
@@ -47,9 +49,10 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
 ### 2. Conversions
 
 1. `integer` to `number` is the only implicit type conversion.
-2. Literal spelling decides the numeric type: `2` is an `integer`; `2.0`, `.5`, and `1e3` are `number` values. `/`
-   always gives a `number`. Storing a `number` where an `integer` is required is an error that suggests `floor(...)`,
-   `round(...)`, `ceil(...)`, or a `number` declaration; nothing truncates silently.
+2. Literal spelling decides the numeric type: `2` is an `integer`; `2.0`, `.5`, and `1e3` are `number` values.
+   Dividing numbers always gives a `number`; a duration divided by a number stays a duration (V30 §35). Storing a
+   `number` where an `integer` is required is an error that suggests `floor(...)`, `round(...)`, `ceil(...)`, or a
+   `number` declaration; nothing truncates silently.
 3. A duration needs a unit. Bare numbers count as seconds only in commands that expect a time: `wait`, `timer`, the
    `showButton` timeout, and media positions.
 4. Text and numbers, numbers and booleans, and numbers and durations never convert into each other implicitly. Values

@@ -298,7 +298,7 @@ test("a shallow-frozen external plan is recaptured after nested mutation", () =>
 });
 
 test("checkpoint entries return deeply frozen plans detached from the caller", () => {
-  const source = "let value = [1, { nested: 2 }]\nexit";
+  const source = "let value = [{ nested: 1 }, { nested: 2 }]\nexit";
   const plan = mutablePlan(source);
   const created = createCheckpoint(plan, createFreshRuntimeSnapshot(compiledPlan(source)));
   const json = JSON.stringify(created);

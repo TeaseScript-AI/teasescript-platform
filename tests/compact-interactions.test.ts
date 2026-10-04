@@ -616,7 +616,9 @@ test("dynamic interaction UI uses the established visible-text conversion once b
     "12.5",
   );
 
-  const listPlan = compiled('let result = choose ["left", 2], ["right", 3]');
+  const listPlan = compiled(
+    'function dynamic(value) {\n  return value\n}\nlet result = choose [dynamic("left"), 2], [dynamic("right"), 3]',
+  );
   const randomValues = [0.75, 0.75];
   let randomCalls = 0;
   const listPending = run(listPlan, createFreshRuntimeSnapshot(listPlan), {
@@ -908,7 +910,10 @@ test("blocking interactions resume through ordinary expression contexts and para
     assert.equal(validateInstructionPlan(defaultResult.plan).valid, true);
   }
 
-  const pairPlan = compiled("let pair = [askText, askNumber]");
+  // `dynamic` hides the number's type, so the list may hold text and a number.
+  const pairPlan = compiled(
+    "function dynamic(value) {\n  return value\n}\nlet pair = [askText, dynamic(askNumber)]",
+  );
   const firstPending = run(pairPlan, createFreshRuntimeSnapshot(pairPlan));
   assert.equal(firstPending.snapshot.status, "waiting");
   assert.equal(

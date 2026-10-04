@@ -4,6 +4,7 @@ import type {
   CallExpression,
   Expression,
   FunctionDeclaration,
+  Identifier,
   LetStatement,
   MediaParts,
   Program,
@@ -19,6 +20,7 @@ import {
   numberAnswerText,
 } from "./interaction-answers.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
+import { staticNumber } from "./static-evaluation.js";
 import type { SourceSpan } from "./source.js";
 import { staticVisibleText } from "./static-evaluation.js";
 import {
@@ -40,13 +42,13 @@ import {
   joinTypes,
   members,
   misfitProperty,
-  NEVER_TYPE,
   nonNullType,
   NULL_TYPE,
   NUMBER_TYPE,
   openType,
   optional,
   placeType,
+  freshPlaceType,
   resolved,
   settle,
   STRING_TYPE,
@@ -158,8 +160,20 @@ class TypeChecker {
 
   readonly #types = new Map<Expression, StaticType>();
 
-  /** One flag per enclosing loop: whether a `break` leaves it. */
+  /** One flag per enclosing loop: whether a reachable `break` leaves it. */
   readonly #loops: boolean[] = [];
+
+  /** Whether the statement being checked can run; a `break` after a `return` does not end its loop. */
+  #reachable = true;
+
+  /**
+   * List and set literals whose elements mix types, with those types. A literal stored in a place of a declared element
+   * type is checked element by element instead; every other one is reported at the end of its statement (rule 1.3).
+   */
+  readonly #mixedLiterals = new Map<Expression, readonly StaticType[]>();
+
+  /** The variable names of unannotated `let` statements by initializer, for messages that suggest a declaration. */
+  readonly #declaredBy = new Map<Expression, string>();
 
   public constructor(options: TypeCheckOptions) {
     this.#builtins = new Set([
@@ -188,7 +202,7 @@ class TypeChecker {
         this.#root,
       ),
     );
-    for (const fn of this.#functions) this.#functionResult(fn);
+    for (const fn of this.#functions) runCompileTask(this.#functionResultTask(fn));
     for (let index = 0; index < this.#handlers.length; index += 1) {
       const handler = this.#handlers[index]!;
       const scope = new Scope(this.#root);
@@ -197,10 +211,8 @@ class TypeChecker {
           kind: "variable",
           variable: { name: handler.selfHandle, type: { kind: "media" } },
         });
-      const outer = this.#function;
       this.#function = null;
       runCompileTask(this.#statementsTask(handler.block.statements, scope));
-      this.#function = outer;
     }
   }
 
@@ -209,9 +221,12 @@ class TypeChecker {
   /** Checks statements in order and returns whether execution can continue after them. */
   *#statementsTask(statements: readonly Statement[], scope: Scope): CompileTask<boolean> {
     let continues = true;
+    const reachable = this.#reachable;
     for (const statement of statements) {
+      this.#reachable = reachable && continues;
       if (!(yield* compileChild(this.#statementTask(statement, scope)))) continues = false;
     }
+    this.#reachable = reachable;
     return continues;
   }
 
@@ -221,6 +236,12 @@ class TypeChecker {
 
   /** Checks one statement and returns whether execution can continue after it. */
   *#statementTask(statement: Statement, scope: Scope): CompileTask<boolean> {
+    const continues = yield* compileChild(this.#statementKindTask(statement, scope));
+    this.#reportMixedLiterals();
+    return continues;
+  }
+
+  *#statementKindTask(statement: Statement, scope: Scope): CompileTask<boolean> {
     switch (statement.kind) {
       case "letStatement":
         yield* compileChild(this.#letTask(statement, scope));
@@ -326,9 +347,11 @@ class TypeChecker {
             "A repeat count is a whole number (integer)",
           );
         this.#loops.push(false);
-        yield* compileChild(this.#blockTask(statement.body, scope));
-        this.#loops.pop();
-        return true;
+        const repeats = yield* compileChild(this.#blockTask(statement.body, scope));
+        const repeatBroken = this.#loops.pop()!;
+        // A loop that certainly runs once ends normally only when its body or a `break` does.
+        const times = staticNumber(statement.count);
+        return times === undefined || times < 1 || repeats || repeatBroken;
       }
       case "forStatement": {
         const iterable = yield* compileChild(this.#expressionTask(statement.iterable, scope));
@@ -348,12 +371,14 @@ class TypeChecker {
           },
         });
         this.#loops.push(false);
-        yield* compileChild(this.#statementsTask(statement.body.statements, loopScope));
-        this.#loops.pop();
-        return true;
+        const iterates = yield* compileChild(
+          this.#statementsTask(statement.body.statements, loopScope),
+        );
+        const forBroken = this.#loops.pop()!;
+        return !isNonEmptyLiteral(statement.iterable) || iterates || forBroken;
       }
       case "breakStatement":
-        if (this.#loops.length > 0) this.#loops[this.#loops.length - 1] = true;
+        if (this.#reachable && this.#loops.length > 0) this.#loops[this.#loops.length - 1] = true;
         return false;
       case "continueStatement":
       case "exitStatement":
@@ -375,7 +400,9 @@ class TypeChecker {
         : yield* compileChild(this.#expressionTask(statement.initializer, scope));
     let type: StaticType;
     if (statement.typeAnnotation === null) {
-      type = placeType(value);
+      type = ownType(statement.initializer, value);
+      if (initializer.kind === "listLiteral" || initializer.kind === "setLiteral")
+        this.#declaredBy.set(initializer, name);
     } else {
       type = typeFromAnnotation(statement.typeAnnotation);
       const place: Place = {
@@ -407,12 +434,21 @@ class TypeChecker {
       const object = yield* compileChild(this.#expressionTask(target.object, scope));
       if (target.kind === "indexExpression") {
         const index = yield* compileChild(this.#expressionTask(target.index, scope));
-        this.#checkIndex(object, index, target.index);
+        this.#checkIndex(object, target.object, index, target.index);
         const list = resolved(nonNullType(object));
         if (list.kind === "list")
           place = elementPlace(list, expressionLabel(target.object), isNullable(object));
       } else {
-        place = this.#propertyPlace(object, target.object, target.property.name);
+        const value = resolved(nonNullType(object));
+        const name = target.property.name;
+        // A new property takes its type from its first value, by the same rule as `let` (rule 1.4).
+        if (value.kind === "object" && value.properties !== null && !value.properties.has(name)) {
+          const assigned = yield* compileChild(this.#expressionTask(statement.value, scope));
+          if (statement.operator === "=")
+            value.properties.set(name, ownType(statement.value, assigned));
+          return;
+        }
+        place = this.#propertyPlace(object, target.object, target.property);
       }
     }
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
@@ -445,38 +481,56 @@ class TypeChecker {
 
   /**
    * Stores a value in a place that keeps a type: reports a mismatch, or records what the value decides. A list, set, or
-   * object literal is checked part by part, so the message points at the element or property that does not fit.
+   * object literal is checked part by part, so the message points at the element or property that does not fit. A
+   * place that is only checked, such as a parameter at a call, keeps its type unchanged: `decides` is false.
    */
-  *#storeTask(place: Place, expression: Expression, value: StaticType): CompileTask<void> {
+  *#storeTask(
+    place: Place,
+    expression: Expression,
+    value: StaticType,
+    decides = true,
+  ): CompileTask<void> {
     const literal = unwrap(expression);
     const kept = resolved(nonNullType(place.type));
     if (
       (kept.kind === "list" && literal.kind === "listLiteral") ||
       (kept.kind === "set" && literal.kind === "setLiteral")
     ) {
+      // A declared element type decides what the literal may mix (rule 1.3).
+      if (resolved(kept.element).kind !== "open") this.#mixedLiterals.delete(literal);
       const elements = elementPlace(kept, place.label, isNullable(place.type));
       for (const element of literal.elements)
-        yield* compileChild(this.#storeTask(elements, element, this.#typeOf(element)));
+        yield* compileChild(this.#storeTask(elements, element, this.#typeOf(element), decides));
       return;
     }
     if (kept.kind === "object" && literal.kind === "objectLiteral" && kept.properties !== null) {
+      const properties = kept.properties;
+      const added: [string, StaticType][] = [];
+      let fits = true;
       for (const property of literal.properties) {
-        const known = kept.properties.get(property.name.name);
+        const known = properties.get(property.name.name);
         const type = this.#typeOf(property.value);
-        if (known === undefined) kept.properties.set(property.name.name, placeType(type));
-        else
-          yield* compileChild(
-            this.#storeTask(
-              nestedPropertyPlace(known, place, property.name.name),
-              property.value,
-              type,
-            ),
-          );
+        if (known === undefined) {
+          added.push([property.name.name, ownType(property.value, type)]);
+          continue;
+        }
+        const before = this.diagnostics.length;
+        yield* compileChild(
+          this.#storeTask(
+            nestedPropertyPlace(known, place, property.name.name),
+            property.value,
+            type,
+            decides,
+          ),
+        );
+        if (this.diagnostics.length > before) fits = false;
       }
+      // New properties join the place only when the object fits it, so one mistake does not cause more.
+      if (decides && fits) for (const [name, type] of added) properties.set(name, type);
       return;
     }
     if (isAssignable(place.type, value)) {
-      settle(place.type, value, expression.span);
+      if (decides) settle(place.type, value, expression.span);
       return;
     }
     const property = misfitProperty(kept, value);
@@ -495,25 +549,28 @@ class TypeChecker {
     );
   }
 
-  /** The place of `object.name`: a known object property keeps its type, and a new property starts a new entry. */
+  /** The place of a known property, or of a timer or media handle property, which must exist and be assignable. */
   #propertyPlace(
     object: StaticType,
     objectExpression: Expression,
-    name: string,
+    property: Identifier,
   ): Place | undefined {
     const value = resolved(nonNullType(object));
+    const name = property.name;
     const label = `${expressionLabel(objectExpression) ?? "this object"}.${name}`;
     if (value.kind === "timer" || value.kind === "media") {
       const type = handlePropertyType(value.kind, name, "assign");
+      if (type === undefined)
+        this.#report(
+          typeCode.invalidOperand,
+          handleMemberMessage(value.kind, name, "assign"),
+          property.span,
+        );
       return type === undefined ? undefined : propertyPlace(type, label, `'${label}'`);
     }
     if (value.kind !== "object" || value.properties === null) return undefined;
-    let type = value.properties.get(name);
-    if (type === undefined) {
-      type = openType();
-      value.properties.set(name, type);
-    }
-    return propertyPlace(type, label, `'${label}'`);
+    const type = value.properties.get(name);
+    return type === undefined ? undefined : propertyPlace(type, label, `'${label}'`);
   }
 
   *#returnTask(
@@ -561,26 +618,32 @@ class TypeChecker {
 
   // Functions --------------------------------------------------------------------------------------------------------
 
-  /** The result type of a function, checking its body the first time. A recursive call sees an unknown result. */
-  #functionResult(fn: FunctionType): StaticType {
+  /**
+   * The result type of a function, checking its body the first time. A recursive call sees the declared result type,
+   * or an unknown result while an unannotated result is still being inferred.
+   */
+  *#functionResultTask(fn: FunctionType): CompileTask<StaticType> {
     if (fn.result !== null) return fn.result;
-    if (fn.checking) return UNKNOWN_TYPE;
-    fn.checking = true;
     const declaration = fn.declaration;
-    const parameters = this.#parameters(fn);
-    const scope = new Scope(this.#root);
-    for (const parameter of parameters)
-      scope.declare(parameter.name, { kind: "variable", variable: parameter });
     const declared =
       declaration.returnTypeAnnotation === null
         ? null
         : typeFromAnnotation(declaration.returnTypeAnnotation);
+    if (fn.checking) return declared ?? UNKNOWN_TYPE;
+    fn.checking = true;
+    const parameters = yield* compileChild(this.#parametersTask(fn));
+    const scope = new Scope(this.#root);
+    for (const parameter of parameters)
+      scope.declare(parameter.name, { kind: "variable", variable: parameter });
     const context: FunctionContext = { fn, declared, returns: [], returnsNull: false };
     const outer = this.#function;
     const outerLoops = this.#loops.splice(0);
+    const outerReachable = this.#reachable;
     this.#function = context;
-    const continues = runCompileTask(this.#statementsTask(declaration.body.statements, scope));
+    this.#reachable = true;
+    const continues = yield* compileChild(this.#statementsTask(declaration.body.statements, scope));
     this.#function = outer;
+    this.#reachable = outerReachable;
     this.#loops.push(...outerLoops);
     if (continues) context.returnsNull = true;
     fn.result = declared ?? this.#inferredResult(context);
@@ -599,7 +662,10 @@ class TypeChecker {
     return fn.result;
   }
 
-  /** One type for every `return` value (ADR 0021 rule 1.5); a function that can end without a value may give null. */
+  /**
+   * One type for every `return` value (ADR 0021 rule 1.5); a function that can end without a value may give null. A
+   * return value of unknown type makes the result unknown, but the known values must still agree.
+   */
   #inferredResult(context: FunctionContext): StaticType {
     let result: StaticType | undefined;
     let first: { readonly type: StaticType; readonly span: SourceSpan } | undefined;
@@ -621,20 +687,18 @@ class TypeChecker {
       }
       result = joined;
     }
-    if (
-      context.returns.some((returned) => resolved(returned.type).kind === "unknown") &&
-      result === undefined
-    )
+    if (context.returns.some((returned) => resolved(returned.type).kind === "unknown"))
       return UNKNOWN_TYPE;
     if (result === undefined) return NULL_TYPE;
     return context.returnsNull ? optional(result) : result;
   }
 
   /**
-   * Parameter types: an annotation, else the type a default gives a `let` variable, else unknown. A default that does
-   * not decide a type, such as `null` or `[]`, leaves the parameter unknown, because call sites never decide it.
+   * Parameter types: an annotation, else the type a default gives a `let` variable, else unknown. A part that the
+   * default does not decide, such as the elements of `[]` or the type of `null`, stays unknown, because call sites
+   * never decide a parameter's type.
    */
-  #parameters(fn: FunctionType): readonly Variable[] {
+  *#parametersTask(fn: FunctionType): CompileTask<readonly Variable[]> {
     if (fn.parameters !== null) return fn.parameters;
     const parameters: Variable[] = [];
     fn.parameters = parameters;
@@ -644,11 +708,11 @@ class TypeChecker {
       let type: StaticType = UNKNOWN_TYPE;
       if (parameter.typeAnnotation !== null) type = typeFromAnnotation(parameter.typeAnnotation);
       if (parameter.defaultValue !== null) {
-        const value = runCompileTask(this.#expressionTask(parameter.defaultValue, scope));
+        const value = yield* compileChild(this.#expressionTask(parameter.defaultValue, scope));
         if (parameter.typeAnnotation === null) type = decidedType(placeType(value));
         else {
           const declared = type;
-          runCompileTask(
+          yield* compileChild(
             this.#storeTask(
               {
                 type: declared,
@@ -667,16 +731,17 @@ class TypeChecker {
       parameters.push(variable);
       scope.declare(name, { kind: "variable", variable });
     }
+    this.#reportMixedLiterals();
     return parameters;
   }
 
-  /** Checks the arguments of a call to an author function against its parameter types. */
+  /** Checks the arguments of a call to an author function against its parameter types, which they do not change. */
   *#functionCallTask(
     expression: CallExpression,
     fn: FunctionType,
     scope: Scope,
   ): CompileTask<StaticType> {
-    const parameters = this.#parameters(fn);
+    const parameters = yield* compileChild(this.#parametersTask(fn));
     const declarations = fn.declaration.parameters;
     let position = 0;
     for (const argument of expression.arguments) {
@@ -709,10 +774,11 @@ class TypeChecker {
           },
           argument.value,
           value,
+          false,
         ),
       );
     }
-    return copyType(this.#functionResult(fn));
+    return copyType(yield* compileChild(this.#functionResultTask(fn)));
   }
 
   // Expressions ------------------------------------------------------------------------------------------------------
@@ -758,20 +824,24 @@ class TypeChecker {
       }
       case "listLiteral":
       case "setLiteral": {
-        let element: StaticType | undefined = NEVER_TYPE;
+        // The literal owns its element types: a variable's type inside it is copied (ADR 0014 copies values).
+        const types: StaticType[] = [];
         for (const item of expression.elements) {
           const type = yield* compileChild(this.#expressionTask(item, scope));
-          element = element === undefined ? undefined : joinTypes(element, type);
+          types.push(isBorrowed(item) ? copyType(type) : type);
         }
-        if (expression.elements.length === 0) element = openType();
-        const kind = expression.kind === "listLiteral" ? "list" : "set";
-        return { kind, element: element ?? UNKNOWN_TYPE };
+        // Elements of known types must share one type; an element of unknown type leaves the element type unknown.
+        const known = types.filter((type) => resolved(type).kind !== "unknown");
+        let element = types.length === 0 ? openType() : joinTypes(...known);
+        if (element === undefined) this.#mixedLiterals.set(expression, known);
+        if (element === undefined || known.length < types.length) element = UNKNOWN_TYPE;
+        return { kind: expression.kind === "listLiteral" ? "list" : "set", element };
       }
       case "objectLiteral": {
         const properties = new Map<string, StaticType>();
         for (const property of expression.properties) {
           const type = yield* compileChild(this.#expressionTask(property.value, scope));
-          properties.set(property.name.name, placeType(type));
+          properties.set(property.name.name, ownType(property.value, type));
         }
         return { kind: "object", properties };
       }
@@ -782,7 +852,7 @@ class TypeChecker {
       case "indexExpression": {
         const object = yield* compileChild(this.#expressionTask(expression.object, scope));
         const index = yield* compileChild(this.#expressionTask(expression.index, scope));
-        this.#checkIndex(object, index, expression.index);
+        this.#checkIndex(object, expression.object, index, expression.index);
         const list = resolved(nonNullType(object));
         return list.kind === "list" ? list.element : UNKNOWN_TYPE;
       }
@@ -957,7 +1027,21 @@ class TypeChecker {
       );
       return UNKNOWN_TYPE;
     }
-    if (value.kind === "timer" || value.kind === "media") return NULL_TYPE;
+    if (value.kind === "timer" || value.kind === "media") {
+      if (!["pause", "resume", "stop"].includes(method))
+        this.#report(
+          typeCode.invalidOperand,
+          handleMemberMessage(value.kind, method, "call"),
+          callee.property.span,
+        );
+      else if (expression.arguments.length > 0)
+        this.#report(
+          typeCode.invalidOperand,
+          `${value.kind === "timer" ? "Timer" : "Media"} ${method}() takes no arguments.`,
+          callee.property.span,
+        );
+      return NULL_TYPE;
+    }
     if (value.kind !== "unknown" && value.kind !== "open" && value.kind !== "never")
       this.#report(
         typeCode.invalidOperand,
@@ -1041,8 +1125,16 @@ class TypeChecker {
       case "object":
         return value.properties?.get(name) ?? UNKNOWN_TYPE;
       case "timer":
-      case "media":
-        return handlePropertyType(value.kind, name, "read") ?? UNKNOWN_TYPE;
+      case "media": {
+        const type = handlePropertyType(value.kind, name, "read");
+        if (type === undefined)
+          this.#report(
+            typeCode.invalidOperand,
+            handleMemberMessage(value.kind, name, "read"),
+            expression.property.span,
+          );
+        return type ?? UNKNOWN_TYPE;
+      }
       case "scalar":
       case "range":
       case "null":
@@ -1057,13 +1149,18 @@ class TypeChecker {
     }
   }
 
-  #checkIndex(object: StaticType, index: StaticType, expression: Expression): void {
+  #checkIndex(
+    object: StaticType,
+    objectExpression: Expression,
+    index: StaticType,
+    expression: Expression,
+  ): void {
     const value = resolved(nonNullType(object));
     if (value.kind !== "unknown" && value.kind !== "open" && value.kind !== "list") {
       this.#report(
         typeCode.invalidOperand,
         `Only a list can be indexed, but this is ${describeValue(value)}.`,
-        expression.span,
+        objectExpression.span,
       );
       return;
     }
@@ -1150,6 +1247,11 @@ class TypeChecker {
   /** A time in a command that expects one: a duration, or a number of seconds; with an explicit unit, a number. */
   *#timeTask(expression: Expression, unit: boolean, scope: Scope): CompileTask<StaticType> {
     const type = yield* compileChild(this.#expressionTask(expression, scope));
+    this.#reportTime(expression, type, unit);
+    return type;
+  }
+
+  #reportTime(expression: Expression, type: StaticType, unit: boolean): void {
     if (unit)
       this.#reportUnless(type, isNumeric(type), expression, "A time before a unit is a number");
     else
@@ -1159,7 +1261,6 @@ class TypeChecker {
         expression,
         "A time is a duration such as '30 s', or a number of seconds",
       );
-    return type;
   }
 
   *#timerTask(timer: TimerParts, scope: Scope): CompileTask<void> {
@@ -1172,9 +1273,10 @@ class TypeChecker {
           "A timer display is text (string)",
         ),
       );
-    if (unwrap(timer.duration).kind === "rangeExpression")
-      yield* compileChild(this.#expressionTask(timer.duration, scope));
-    else yield* compileChild(this.#timeTask(timer.duration, timer.unit !== null, scope));
+    // A timer also accepts a range of whole seconds, written directly or held in a variable.
+    const duration = yield* compileChild(this.#expressionTask(timer.duration, scope));
+    if (resolved(nonNullType(duration)).kind !== "range")
+      this.#reportTime(timer.duration, duration, timer.unit !== null);
     if (timer.label !== null)
       yield* compileChild(
         this.#requireTask(
@@ -1284,6 +1386,21 @@ class TypeChecker {
       `${rule}, but this is ${describeValue(nonNullTypeForUse(type))}.`,
       expression.span,
     );
+  }
+
+  /** Reports list and set literals that mix types and were not stored in a place of a declared element type. */
+  #reportMixedLiterals(): void {
+    for (const [literal, types] of this.#mixedLiterals) {
+      const kind = literal.kind === "setLiteral" ? "set" : "list";
+      const first = types[0]!;
+      const other = types.find((type) => joinTypes(first, type) === undefined) ?? types[1]!;
+      this.#report(
+        typeCode.mixedTypes,
+        `This ${kind} mixes ${mixDescription(first, other)}. A ${kind} holds one type; keep values of different types in separate ${kind}s.`,
+        literal.span,
+      );
+    }
+    this.#mixedLiterals.clear();
   }
 
   #report(code: string, message: string, span: SourceSpan): void {
@@ -1453,13 +1570,66 @@ function unwrap(expression: Expression): Expression {
 
 /** The source spelling of a variable or property path, such as `items` or `door.keys`. */
 function expressionLabel(expression: Expression): string | null {
-  expression = unwrap(expression);
-  if (expression.kind === "identifier") return expression.name;
-  if (expression.kind === "propertyAccessExpression") {
-    const object = expressionLabel(expression.object);
-    return object === null ? null : `${object}.${expression.property.name}`;
+  const names: string[] = [];
+  let current = unwrap(expression);
+  while (current.kind === "propertyAccessExpression") {
+    names.push(current.property.name);
+    current = unwrap(current.object);
   }
-  return null;
+  if (current.kind !== "identifier") return null;
+  names.push(current.name);
+  return names.reverse().join(".");
+}
+
+/**
+ * Whether an expression reads a value that another place holds, such as a variable or a property. A new place gets
+ * its own copy of that value's type; the type of any other expression already belongs to the expression alone.
+ */
+function isBorrowed(expression: Expression): boolean {
+  const node = unwrap(expression);
+  return (
+    node.kind === "identifier" ||
+    node.kind === "propertyAccessExpression" ||
+    node.kind === "indexExpression"
+  );
+}
+
+/** The type a new place keeps for the value of `expression` (rules 1.2–1.4), copied when another place holds it. */
+function ownType(expression: Expression, type: StaticType): StaticType {
+  return isBorrowed(expression) ? placeType(type) : freshPlaceType(type);
+}
+
+/** A literal list, set, or range that certainly has an element, so a loop over it runs at least once. */
+function isNonEmptyLiteral(expression: Expression): boolean {
+  const node = unwrap(expression);
+  if (node.kind === "listLiteral" || node.kind === "setLiteral") return node.elements.length > 0;
+  if (node.kind !== "rangeExpression") return false;
+  const start = staticNumber(node.start);
+  const end = staticNumber(node.end);
+  return start !== undefined && end !== undefined && (node.inclusive ? end >= start : end > start);
+}
+
+/** Two kinds a literal mixes; for two objects, the property whose types differ. */
+function mixDescription(first: StaticType, other: StaticType): string {
+  const property = misfitProperty(first, other);
+  if (property !== undefined)
+    return `objects whose property '${property.name}' holds ${describeValue(property.kept)} in one and ${describeValue(property.value)} in another`;
+  return `${describeValue(first)} and ${describeValue(other)}`;
+}
+
+/** The message for a timer or media handle member that does not exist or cannot be assigned. */
+function handleMemberMessage(
+  handle: "timer" | "media",
+  name: string,
+  use: "read" | "assign" | "call",
+): string {
+  const kind = handle === "timer" ? "Timer" : "Media";
+  if (use === "call")
+    return `${kind} handles have no method '${name}'; use pause(), resume(), or stop().`;
+  if (use === "read") return `${kind} handles have no property '${name}'.`;
+  return handle === "timer"
+    ? `Timer handle property '${name}' cannot be assigned; assign remaining, display, or repeatDuration.`
+    : `Media handle property '${name}' cannot be assigned; assign position, remaining, or volume.`;
 }
 
 function operatorMessage(

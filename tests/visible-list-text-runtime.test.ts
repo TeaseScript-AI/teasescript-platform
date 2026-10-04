@@ -7,12 +7,17 @@ import { compileValidPlan as compile } from "./helpers/compile-valid-plan.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 
 test("selects an eligible visible list value exactly once", () => {
-  const direct = runSource('say ["left", 2]', 0.75);
+  // `dynamic` hides the text's type, so one list may offer text and a number.
+  const dynamic = "function dynamic(value) {\n  return value\n}\n";
+  const direct = runSource(`${dynamic}say [dynamic("left"), 2]`, 0.75);
   assert.equal(direct.result.snapshot.failure, null);
   assert.equal(direct.randomCalls, 1);
   assert.deepEqual(sayTexts(direct.result), ["2"]);
 
-  const template = runSource(['let values = ["left", 2]', 'say "Value: ${values}"'].join("\n"), 0);
+  const template = runSource(
+    `${dynamic}${['let values = [dynamic("left"), 2]', 'say "Value: ${values}"'].join("\n")}`,
+    0,
+  );
   assert.equal(template.result.snapshot.failure, null);
   assert.equal(template.randomCalls, 1);
   assert.deepEqual(sayTexts(template.result), ["Value: left"]);

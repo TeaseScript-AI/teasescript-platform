@@ -28,6 +28,8 @@ export interface OpenType {
   resolved: StaticType | null;
   /** Where the first value decided the type, for messages that name both places. */
   resolvedAt: SourceSpan | null;
+  /** Whether `null` was stored before the first other value, which then makes the decided type optional. */
+  sawNull: boolean;
 }
 
 /**
@@ -53,7 +55,7 @@ export const NUMBER_TYPE = scalar("number");
 export const DURATION_TYPE = scalar("duration");
 
 export function openType(): OpenType {
-  return { kind: "open", resolved: null, resolvedAt: null };
+  return { kind: "open", resolved: null, resolvedAt: null, sawNull: false };
 }
 
 /** Follows decided open slots. An undecided slot stays `open`. */
@@ -265,9 +267,13 @@ function* settleTask(
       yield* compileChild(settleTask(target.resolved, source, at));
       return;
     }
-    const value = nonNullType(source);
-    if (value.kind === "never") return;
-    target.resolved = yield* compileChild(copyTask(value));
+    if (nonNullType(source).kind === "never") {
+      target.sawNull = true;
+      return;
+    }
+    // The first other value decides the type by the `let` rule; an earlier null keeps it optional.
+    const value = yield* compileChild(placeTask(source));
+    target.resolved = target.sawNull ? optional(value) : value;
     target.resolvedAt = at;
     return;
   }
@@ -292,7 +298,7 @@ function* settleTask(
     if (target.properties === null || source.properties === null) return;
     for (const [name, value] of source.properties) {
       const kept = target.properties.get(name);
-      if (kept === undefined) target.properties.set(name, yield* compileChild(copyTask(value)));
+      if (kept === undefined) target.properties.set(name, yield* compileChild(placeTask(value)));
       else yield* compileChild(settleTask(kept, value, at));
     }
   }
@@ -337,16 +343,24 @@ function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
  * of `[null]`.
  */
 export function placeType(type: StaticType): StaticType {
-  return runCompileTask(placeTask(type));
+  return runCompileTask(placeTask(type, true));
 }
 
-function* placeTask(typeToPlace: StaticType): CompileTask<StaticType> {
+/**
+ * Like {@link placeType} for a type that no other place shares, such as the type of a literal that was just built: it
+ * is used as it is instead of being copied.
+ */
+export function freshPlaceType(type: StaticType): StaticType {
+  return runCompileTask(placeTask(type, false));
+}
+
+function* placeTask(typeToPlace: StaticType, copy = true): CompileTask<StaticType> {
   const type = resolved(typeToPlace);
   if (type.kind === "null") return optional(openType());
   if (type.kind === "never") return openType();
   if (type.kind === "list" || type.kind === "set")
-    return { kind: type.kind, element: yield* compileChild(placeTask(type.element)) };
-  return yield* compileChild(copyTask(type));
+    return { kind: type.kind, element: yield* compileChild(placeTask(type.element, copy)) };
+  return copy ? yield* compileChild(copyTask(type)) : type;
 }
 
 /** The type with every undecided part unknown, for a place that no later value may decide, such as a parameter. */
@@ -438,10 +452,16 @@ function* joinTask(
   return isNullable(left) || isNullable(right) ? optional(value) : value;
 }
 
+/** Property tables that a join built; joining more objects into one extends it instead of copying it again. */
+const joinedTables = new WeakSet<PropertyTable>();
+
 function* joinValuesTask(left: StaticType, right: StaticType): CompileTask<StaticType | undefined> {
   if (left.kind === "object" && right.kind === "object") {
     if (left.properties === null || right.properties === null) return ANY_OBJECT_TYPE;
-    const properties: PropertyTable = new Map(left.properties);
+    const properties: PropertyTable = joinedTables.has(left.properties)
+      ? left.properties
+      : new Map(left.properties);
+    joinedTables.add(properties);
     for (const [name, type] of right.properties) {
       const kept = properties.get(name);
       const joined = kept === undefined ? type : yield* compileChild(joinTask(kept, type));

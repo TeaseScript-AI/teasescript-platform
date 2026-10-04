@@ -793,8 +793,8 @@ Rules:
 - An annotated parameter keeps its type; every argument and default must fit it.
 - A parameter with a default but no annotation takes the default's type by the same rule as `let`
   ([§12](#12-variable-declarations)): with `times = 1`, `times` is an `integer`, and a call that passes `0.5` is a compile
-  error that suggests `times: number = 1`. A default that does not decide a type, such as `null` or `[]`, leaves the
-  parameter's type unknown.
+  error that suggests `times: number = 1`. What a default leaves open stays unknown: `null` gives an unknown type,
+  and `[]` a list of elements of unknown type.
 - A parameter without an annotation or a default has an unknown type. Its arguments are not checked, because a
   parameter's type is never inferred from its call sites.
 
@@ -1108,19 +1108,16 @@ integer
 number
 ```
 
-Those types may be mixed in one text-selection list:
+A list holds one element type ([§12](#12-variable-declarations)); integers and numbers together are numbers:
 
 ```text
-let values = [
-    "Level",
-    2,
-    3.5
-]
+let amounts = [2, 3.5]
 
-say values
+say amounts
 ```
 
-A selected `integer` or `number` is converted to text for that visible-text use.
+A list literal that mixes text and numbers is a compile error. A selected `integer` or `number` is converted to text for
+that visible-text use.
 
 Each evaluation selects again:
 
@@ -1253,8 +1250,8 @@ function calculateDamage(
 A function's result type comes from its `return` values, so callers keep it like any other value
 ([§12](#12-variable-declarations)). Integers and numbers together give a `number`. Returns of different types are a
 compile error that names both. A function that can end without returning a value, by reaching its end or through a
-bare `return`, returns `null` there, so its result may be `null`. A function whose returns have unknown types has an
-unknown result.
+bare `return`, returns `null` there, so its result may be `null`. A returned value of unknown type, such as an
+unannotated parameter, makes the result unknown; the other returned values must still agree.
 
 With a return-type annotation, every returned value must fit the annotation, and a function that can end without a
 value needs an optional result type such as `number?`.

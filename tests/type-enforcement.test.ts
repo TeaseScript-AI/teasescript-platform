@@ -169,10 +169,7 @@ test("a list or set literal is checked element by element against a known elemen
   ]);
   assert.deepEqual(mismatches('let scores = [1, 2]\nscores = ["a", 3]')[0]?.[2], '"a"');
   assert.deepEqual(mismatches('let tags: string set = set["a", 2]')[0]?.[2], "2");
-  assert.deepEqual(
-    mismatches('let mixed = ["Level", 2, 3.5]\nlet ratios: number[] = [1, 2.5]'),
-    [],
-  );
+  assert.deepEqual(mismatches("let ratios: number[] = [1, 2.5]\nlet marks = [null, 1]"), []);
 });
 
 test("optional types keep their non-null type in operations, elements, and loops", () => {
@@ -325,7 +322,7 @@ test("an object property keeps the type of its first value, and assignment may a
       ],
       [
         "TSV041",
-        "'door.color' holds text (string) since line 3, so it cannot be set to a whole number (integer). To show it as text, write \"${5}\".",
+        "'door.color' holds text (string), so it cannot be set to a whole number (integer). To show it as text, write \"${5}\".",
         "5",
       ],
     ],
@@ -550,4 +547,106 @@ test("an error inside a stored literal or a typed load default is reported once"
   assert.deepEqual(codes('let level: integer = load "k" default (1 + "x")'), [
     ["TSV043", '1 + "x"'],
   ]);
+});
+
+test("a list or set literal of known types holds one type, also in nested lists and objects", () => {
+  assert.deepEqual(mismatches('let values = ["Level", 2, 3.5]'), [
+    [
+      "TSV044",
+      "This list mixes text (string) and a whole number (integer). A list holds one type; keep values of different types in separate lists.",
+      '["Level", 2, 3.5]',
+    ],
+  ]);
+  assert.deepEqual(codes('let nested = [[1], ["x"]]\nlet tags = set["a", true]'), [
+    ["TSV044", '[[1], ["x"]]'],
+    ["TSV044", 'set["a", true]'],
+  ]);
+  assert.deepEqual(
+    mismatches('let people = [{ name: 1 }, { name: "Ada" }]')[0]?.[1],
+    "This list mixes objects whose property 'name' holds a whole number (integer) in one and text (string) in another. A list holds one type; keep values of different types in separate lists.",
+  );
+  // A declared element type checks each element instead, and unknown elements leave the element type unknown.
+  assert.deepEqual(
+    codes(
+      'function pick(value) {\n    return value\n}\nlet mixed = [1, pick("x")]\nmixed.add(true)',
+    ),
+    [],
+  );
+});
+
+test("a first null is remembered wherever a first value decides a type", () => {
+  assert.deepEqual(
+    codes("let door = {}\ndoor.owner = null\ndoor.owner = 1\ndoor.owner = null"),
+    [],
+  );
+  assert.deepEqual(codes("let x = null\nx = [null]\nx[0] = 1"), []);
+  assert.deepEqual(
+    codes("let items = []\nitems.add(null)\nitems.add(1)\nitems.add(null)\nitems.add(true)"),
+    [["TSV041", "true"]],
+  );
+});
+
+test("calls never decide parameter types, and an unknown return makes a result unknown", () => {
+  assert.deepEqual(
+    codes(
+      'function get(record = {}) {\n    return record.item\n}\nlet a = get({ item: 1 })\nget({ item: "x" })\nlet b: string = get({ item: 1 })',
+    ),
+    [],
+  );
+  assert.deepEqual(
+    codes(
+      'function f(value) {\n    if chance(50) {\n        return 1\n    }\n    return value\n}\nlet a: string = f("x")',
+    ),
+    [],
+  );
+  // A recursive call keeps the declared result type.
+  assert.deepEqual(
+    codes(
+      'function f(n: integer): string {\n    if n == 0 {\n        return "x"\n    }\n    return f(n - 1) + 1\n}\nlet a = f(1)',
+    ),
+    [["TSV043", "f(n - 1) + 1"]],
+  );
+});
+
+test("a loop that certainly runs, or ends only through a return, ends the function", () => {
+  for (const body of [
+    "repeat 1 {\n        return 1\n    }",
+    "for n in [1] {\n        return n\n    }",
+    "for n in 1..=3 {\n        return n\n    }",
+    "while true {\n        return 1\n        break\n    }",
+  ])
+    assert.deepEqual(codes(`function f: integer {\n    ${body}\n}\nlet a = f()`), [], body);
+  assert.deepEqual(codes("function f(n): integer {\n    repeat n {\n        return 1\n    }\n}"), [
+    ["TSV041", "f"],
+  ]);
+});
+
+test("timer ranges and handle members are checked by type, wherever the value comes from", () => {
+  assert.deepEqual(codes("let span = 1..=3\nlet t = timer async span"), []);
+  assert.deepEqual(
+    mismatches(
+      "function make {\n    return timer async 1\n}\nlet t = make()\nt.nope()\nt.elapsed = 1 s\nsay t.colour",
+    ).map(([code, message, text]) => [code, text, message]),
+    [
+      ["TSV043", "nope", "Timer handles have no method 'nope'; use pause(), resume(), or stop()."],
+      [
+        "TSV043",
+        "elapsed",
+        "Timer handle property 'elapsed' cannot be assigned; assign remaining, display, or repeatDuration.",
+      ],
+      ["TSV043", "colour", "Timer handles have no property 'colour'."],
+    ],
+  );
+});
+
+test("an object that does not fit adds no properties, and annotated functions run", () => {
+  assert.deepEqual(codes('let x = { a: 1 }\nx = { b: true, a: "x" }\nx.b = 1'), [
+    ["TSV041", '"x"'],
+  ]);
+  assert.deepEqual(
+    sayTexts(
+      'function scale(value: number, by: integer = 2): number {\n    return value * by\n}\nsay "${scale(1.5)} ${scale(1, by: 3)}"',
+    ),
+    ["3 3"],
+  );
 });

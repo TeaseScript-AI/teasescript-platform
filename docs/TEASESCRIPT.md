@@ -246,8 +246,9 @@ rules that do not need new syntax: variables, list and set elements, object prop
 keep one type, including types decided by a first non-null value, a first element, a parameter default, or a function's
 returns; `integer` to `number` is the only implicit conversion; and operators, conditions, indexes, members, and command
 operands get values of types they support. A mismatch is `TSV041`, an unsupported operand `TSV043`, and returns of
-different types `TSV044`. Values the compiler cannot know, such as untyped storage, host data, and unknown parameters,
-are not yet checked at runtime. Union types, type tests, and narrowing are not implemented yet.
+different types or list elements of different types `TSV044`. Values the compiler cannot know, such as untyped
+storage, host data, and unknown parameters, are not yet checked at runtime, apart from the stored value of a direct
+`let x: T = load ...`. Union types, type tests, and narrowing are not implemented yet.
 
 The wider V30 Standard Library/runtime APIs are not implemented yet.
 

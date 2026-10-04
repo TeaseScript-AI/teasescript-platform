@@ -156,8 +156,8 @@ test("reports each invalid builtin value once in deterministic source order", ()
 test("preserves direct builtin calls in every supported nested context", () => {
   const result = compileSource(
     [
-      "let values = [random(), chance(50), randomInteger(1..=6), customBuiltin()]",
-      "let objectValue = { core: random(), injected: customBuiltin() }",
+      "let values = [random(), randomInteger(1..=6), customBuiltin()]",
+      "let objectValue = { core: random(), coin: chance(50), injected: customBuiltin() }",
       'say "${random()}:${customBuiltin()}"',
       "function sample(core = random(), injected = customBuiltin()) {",
       "  return core",

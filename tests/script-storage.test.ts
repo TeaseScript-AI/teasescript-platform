@@ -45,7 +45,9 @@ test("host-acknowledged saves seed a new session without losing stored value typ
       'save "Ada" as "name"',
       'save 2.5 as "score"',
       'save false as "enabled"',
-      'save [1, null, "two"] as "list"',
+      // `dynamic` hides the text's type, so the saved list may hold numbers and text.
+      "function dynamic(value) {\n  return value\n}",
+      'save [1, null, dynamic("two")] as "list"',
       'save { nested: [true, null] } as "object"',
       'save set["a", "b"] as "set"',
       'save 2..=5 as "range"',

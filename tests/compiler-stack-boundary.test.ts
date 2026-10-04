@@ -197,6 +197,46 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
   });
 });
 
+test("type checking follows long function, default, and property chains with a constrained host stack", () => {
+  const functions = Array.from(
+    { length: 512 },
+    (_, index) => `function f${index} { return ${index === 511 ? "1" : `f${index + 1}()`} }`,
+  );
+  const defaults = Array.from(
+    { length: 512 },
+    (_, index) => `function f${index}(x = ${index === 511 ? "1" : `f${index + 1}()`}) { return x }`,
+  );
+  const sources = [
+    `${functions.join("\n")}\nlet result = f0()`,
+    `${defaults.join("\n")}\nlet result = f0()`,
+    `function f(obj) { obj${".x".repeat(4_096)}.p = 1 }\nexit`,
+  ];
+  const compilerUrl = new URL("../src/compiler.js", import.meta.url).href;
+  const script = `
+    const { compileSource } = await import(${JSON.stringify(compilerUrl)});
+    const sources = JSON.parse(process.env.TEASESCRIPT_SOURCES);
+    process.stdout.write(JSON.stringify(sources.map((source) => {
+      const compiled = compileSource(source);
+      return { codes: compiled.diagnostics.map((diagnostic) => diagnostic.code), plan: compiled.plan !== null };
+    })));
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ["--stack-size=256", "--input-type=module", "--eval", script],
+    {
+      encoding: "utf8",
+      timeout: 60_000,
+      maxBuffer: 256 * 1024,
+      env: { ...process.env, TEASESCRIPT_SOURCES: JSON.stringify(sources) },
+    },
+  );
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(
+    JSON.parse(child.stdout),
+    sources.map(() => ({ codes: [], plan: true })),
+  );
+});
+
 test("compiler containment recognizes native stack failures without relying on a failure depth", () => {
   const source = "let value = 1";
   for (const error of [
