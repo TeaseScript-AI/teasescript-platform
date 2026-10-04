@@ -412,11 +412,16 @@ export function collectionMethodProblems(
         span: argument.span,
       },
     ];
-  // A set holds only scalar values (ADR 0013), so its union cannot take a list's objects or lists.
+  // A set holds only text, numbers, true or false, and null (ADR 0013), so its union cannot take other list elements.
   if (name === "union" && receiverType.kind === "set" && type.kind === "list") {
     const element = members(type.element)
       .map(resolved)
-      .find((member) => isKnown(member) && member.kind !== "scalar" && member.kind !== "null");
+      .find(
+        (member) =>
+          isKnown(member) &&
+          member.kind !== "null" &&
+          !isScalar(member, "string", "boolean", "integer", "number"),
+      );
     if (element !== undefined)
       return [
         {
