@@ -74,7 +74,7 @@ import {
 } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
-import type { SourceSpan } from "./source.js";
+import { createSourceSpan, type SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
 import {
   arithmeticType,
@@ -199,6 +199,7 @@ const typeCode = {
   emptyTagQuery: "TST002",
   invalidCaptureTag: "TST005",
   randomStartValue: "TSV055",
+  closedLoop: "TSV058",
 } as const;
 
 /**
@@ -222,15 +223,19 @@ export function checkTypes(
   for (;;) {
     const checker = new TypeChecker(options, widened, programs.length, onFile, lines);
     checker.check(programs);
-    if (!checker.widenedMore)
+    if (!checker.widenedMore) {
+      const closedLoops = closedLoopWarnings(programs, checker.unreachable);
       return Object.freeze({
         diagnostics: Object.freeze(
-          checker.fileDiagnostics.map((diagnostics) => Object.freeze([...diagnostics])),
+          checker.fileDiagnostics.map((diagnostics, file) =>
+            Object.freeze([...diagnostics, ...closedLoops[file]!]),
+          ),
         ),
         runtimeChecks: checker.runtimeChecks(),
         reachesExit: checker.reachesExit,
         flow: Object.freeze({ unreachable: checker.unreachable, continuing: checker.continuing }),
       });
+    }
     checker.widenFollowers();
   }
 }
@@ -4885,6 +4890,146 @@ function programEffects(program: Program): ProgramEffects {
       nodes.map((node) => [node.body, { assigned: node.assigned, suspends: node.suspends }]),
     ),
   };
+}
+
+/** The statements that leave a loop or the session, or may: one of them is a way out of the loop it stands in. */
+const LOOP_EXITS: ReadonlySet<Statement["kind"]> = new Set([
+  "breakStatement",
+  "returnStatement",
+  "endStatement",
+  "exitStatement",
+  "gotoStatement",
+  "callFileStatement",
+]);
+
+/** The engine functions, which only compute a value; a call of any other function may leave a loop. */
+const ENGINE_FUNCTIONS: ReadonlySet<string> = new Set(CORE_RUNTIME_BUILTINS);
+
+/** A `while true` loop, and whether its body has a way out. */
+interface EndlessLoop {
+  readonly statement: Extract<Statement, { kind: "whileStatement" }>;
+  readonly parent: EndlessLoop | null;
+  exits: boolean;
+}
+
+/** A node to walk, with the innermost `while true` around it and whether it stands in a timer or media block. */
+type ExitWork = { readonly loop: EndlessLoop | null; readonly handler: boolean } & (
+  { readonly statement: Statement } | { readonly expression: Expression }
+);
+
+/**
+ * Warns about each loop with no way out once it starts (#578): a `while true`, and a top-level `goto` back to an earlier
+ * label of its file, whose loop is the statements between them. A `break`, `return`, `end`, `exit`, any other `goto`, a
+ * `call` of a file, or a call of a function other than an engine function is a way out wherever it stands in the loop,
+ * also in a branch that no value takes. A timer or media block may run during any loop, so when a block of the project
+ * has a way out, no loop is reported. Neither is a loop that never runs by the flow of the type check.
+ */
+function closedLoopWarnings(
+  programs: readonly Program[],
+  unreachable: ReadonlySet<Statement>,
+): readonly (readonly Diagnostic[])[] {
+  let blockExits = false;
+  const loops: { readonly file: number; readonly loop: EndlessLoop }[] = [];
+  const closed = programs.map((): SourceSpan[] => []);
+  /** Walks a top-level statement and returns whether it has a way out. */
+  const walk = (file: number, root: Statement): boolean => {
+    let found = false;
+    const work: ExitWork[] = [{ statement: root, loop: null, handler: false }];
+    const enter = (
+      statements: readonly Statement[],
+      loop: EndlessLoop | null,
+      handler: boolean,
+    ): void => {
+      for (let index = statements.length - 1; index >= 0; index -= 1)
+        work.push({ statement: statements[index]!, loop, handler });
+    };
+    const wayOut = (loop: EndlessLoop | null, handler: boolean): void => {
+      found = true;
+      blockExits ||= handler;
+      // A way out of an inner loop is one of the loops around it too.
+      for (let node = loop; node !== null && !node.exits; node = node.parent) node.exits = true;
+    };
+    while (work.length > 0) {
+      const item = work.pop()!;
+      const { loop, handler } = item;
+      // A timer or media block runs later, outside the loop that starts it.
+      for (const block of handlerBlocks("expression" in item ? item.expression : item.statement))
+        enter(block.statements, null, true);
+      if ("expression" in item) {
+        const expression = item.expression;
+        if (
+          expression.kind === "callExpression" &&
+          !(expression.callee.kind === "identifier" && ENGINE_FUNCTIONS.has(expression.callee.name))
+        )
+          wayOut(loop, handler);
+        for (const part of expressionParts(expression))
+          work.push({ expression: part, loop, handler });
+        continue;
+      }
+      const statement = item.statement;
+      if (LOOP_EXITS.has(statement.kind)) wayOut(loop, handler);
+      if (statement.kind === "functionDeclaration") {
+        enter(statement.body.statements, null, false);
+        for (const parameter of statement.parameters)
+          if (parameter.defaultValue !== null)
+            work.push({ expression: parameter.defaultValue, loop: null, handler: false });
+        continue;
+      }
+      let inner = loop;
+      if (isWhileTrue(statement)) {
+        inner = { statement, parent: loop, exits: false };
+        loops.push({ file, loop: inner });
+      }
+      enter(nestedStatements(statement), inner, handler);
+      for (const expression of statementExpressions(statement))
+        work.push({ expression, loop, handler });
+    }
+    return found;
+  };
+  for (const [file, program] of programs.entries()) {
+    // The number of top-level statements with a way out before each label.
+    const labels = new Map<string, number>();
+    let count = 0;
+    for (const statement of program.statements) {
+      if (statement.kind === "labelStatement") labels.set(statement.name.name, count);
+      else if (
+        statement.kind === "gotoStatement" &&
+        statement.target.kind === "labelTarget" &&
+        labels.get(statement.target.label.name) === count &&
+        !unreachable.has(statement)
+      )
+        closed[file]!.push(statement.span);
+      // A function runs where it is called, and a call is a way out.
+      if (walk(file, statement) && statement.kind !== "functionDeclaration") count += 1;
+    }
+  }
+  if (blockExits) return programs.map(() => []);
+  for (const { file, loop } of loops)
+    if (!loop.exits && !unreachable.has(loop.statement))
+      closed[file]!.push(
+        createSourceSpan(loop.statement.span.start, loop.statement.condition.span.end),
+      );
+  return closed.map((spans) =>
+    spans
+      .sort((left, right) => left.start.offset - right.start.offset)
+      .map((span) =>
+        createDiagnostic(
+          DiagnosticSeverity.Warning,
+          typeCode.closedLoop,
+          "If this loop starts, it has no way to stop. Add a condition with `break` to leave the loop, or use `exit` to finish the session.",
+          span,
+        ),
+      ),
+  );
+}
+
+/** Whether a statement is `while true`, with or without parentheses. */
+function isWhileTrue(
+  statement: Statement,
+): statement is Extract<Statement, { kind: "whileStatement" }> {
+  if (statement.kind !== "whileStatement") return false;
+  const condition = unwrap(statement.condition);
+  return condition.kind === "booleanLiteral" && condition.value;
 }
 
 /** Methods that change the list or set they are called on. */
