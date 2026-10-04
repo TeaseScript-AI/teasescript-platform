@@ -159,9 +159,11 @@ function firstFrame(video: HTMLVideoElement, playing: Promise<void>): Promise<vo
       settle();
       resolve();
     };
+    // Without a frame, a refused `play()` is the better explanation.
+    let refused: unknown = null;
     const failed = () => {
       settle();
-      reject(new DOMException("The camera delivered no frame.", "NotReadableError"));
+      reject(refused ?? new DOMException("The camera delivered no frame.", "NotReadableError"));
     };
     const timeout = setTimeout(failed, FIRST_FRAME_TIMEOUT_MS);
     function settle() {
@@ -171,7 +173,10 @@ function firstFrame(video: HTMLVideoElement, playing: Promise<void>): Promise<vo
     }
     for (const event of events) video.addEventListener(event, check);
     video.addEventListener("error", failed);
-    playing.then(check, check);
+    playing.then(check, (error: unknown) => {
+      refused = error;
+      check();
+    });
   });
 }
 
