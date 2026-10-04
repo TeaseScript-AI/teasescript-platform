@@ -351,7 +351,7 @@ class Parser {
 
   #parseSpeakerStatement(): SpeakerDeclaration | SpeakerSetterStatement | null {
     const keyword = this.#advance();
-    if (!this.#check(TokenKind.Identifier)) {
+    if (!this.#checkDeclarationName()) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedSpeakerIdentifier,
         "Expected a speaker identifier after 'speaker'.",
@@ -1315,7 +1315,7 @@ class Parser {
 
   #parseLetStatement(): LetStatement | null {
     const keyword = this.#advance();
-    if (!this.#check(TokenKind.Identifier)) {
+    if (!this.#checkDeclarationName()) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedIdentifier,
         "Expected a variable identifier after 'let'.",
@@ -1448,7 +1448,7 @@ class Parser {
 
   *#parseForStatement(): ParseTask<ForStatement | null> {
     const keyword = this.#advance();
-    if (!this.#check(TokenKind.Identifier)) {
+    if (!this.#checkDeclarationName()) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedIdentifier,
         "Expected a loop-variable identifier after 'for'.",
@@ -1509,7 +1509,7 @@ class Parser {
 
   *#parseFunctionDeclaration(): ParseTask<FunctionDeclaration | null> {
     const keyword = this.#advance();
-    if (!this.#check(TokenKind.Identifier) && !this.#check(TokenKind.KeywordWait)) {
+    if (!this.#checkDeclarationName() && !this.#check(TokenKind.KeywordWait)) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedFunctionName,
         "Expected a function identifier after 'function'.",
@@ -1574,7 +1574,7 @@ class Parser {
   }
 
   #parseFunctionParameter(): FunctionParameter | null {
-    if (!this.#check(TokenKind.Identifier)) {
+    if (!this.#checkDeclarationName()) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedParameter,
         "Expected a function parameter identifier.",
@@ -2042,7 +2042,8 @@ class Parser {
 
   *#finishCall(callee: Expression, left: Token): ParseTask<CallExpression> {
     const argumentsList: CallArgument[] = [];
-    let style: "none" | "positional" | "named" = "none";
+    let sawPositional = false;
+    let sawNamed = false;
     this.#skipNewlines();
     while (!this.#check(TokenKind.RightParenthesis) && !this.#check(TokenKind.EndOfFile)) {
       let argument: CallArgument | null = null;
@@ -2058,8 +2059,7 @@ class Parser {
             span: spanFrom(name.span, value.span),
           } satisfies NamedArgument);
         }
-        if (style === "positional") this.#reportMixedArguments(name.span);
-        style = "named";
+        sawNamed = true;
       } else {
         const value = yield* parseChild(this.#parseRequiredExpressionTask());
         if (value !== null) {
@@ -2069,10 +2069,8 @@ class Parser {
             span: copySpan(value.span),
           } satisfies PositionalArgument);
         }
-        if (style === "named" && value !== null) {
-          this.#reportMixedArguments(value.span);
-        }
-        style = "positional";
+        if (sawNamed && value !== null) this.#reportPositionalAfterNamed(value.span);
+        sawPositional = true;
       }
       if (argument !== null) argumentsList.push(argument);
       this.#skipNewlines();
@@ -2100,7 +2098,13 @@ class Parser {
       kind: "callExpression",
       callee,
       arguments: Object.freeze(argumentsList),
-      argumentStyle: style,
+      argumentStyle: sawNamed
+        ? sawPositional
+          ? "mixed"
+          : "named"
+        : sawPositional
+          ? "positional"
+          : "none",
       span: spanFrom(callee.span, end),
     });
   }
@@ -2241,9 +2245,32 @@ class Parser {
 
     if (interactionKind !== "choice") {
       const hint =
-        isExpressionStart(this.#peek()) && !this.#atStorageDelimiter()
+        isExpressionStart(this.#peek()) &&
+        !this.#atStorageDelimiter() &&
+        !this.#atInteractionDefault(0)
           ? yield* parseChild(this.#parseOr())
           : null;
+      let defaultValue: Expression | null = null;
+      let defaultOffset = hint === null ? 0 : this.#interactionDefaultAfterComma();
+      if (defaultOffset === null && this.#atInteractionDefault(0)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedDelimiter,
+          "Expected ',' between the hint and 'default:'.",
+        );
+        defaultOffset = 0;
+      }
+      if (defaultOffset !== null && this.#atInteractionDefault(defaultOffset)) {
+        for (let skipped = 0; skipped < defaultOffset + 2; skipped += 1) this.#advance();
+        defaultValue = yield* parseChild(this.#parseColonValueTask(false));
+        if (defaultValue === null) {
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedInteractionText,
+            "Expected a default answer after 'default:'.",
+          );
+          if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
+            this.#recoveredAtStatementBoundary = true;
+        }
+      }
       if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
         this.#reportSpan(
           parserDiagnosticCode.unsupportedInteractionForm,
@@ -2252,7 +2279,7 @@ class Parser {
         );
         this.#synchronizeStatement();
       }
-      const end = hint?.span ?? speaker?.span ?? command.span;
+      const end = defaultValue?.span ?? hint?.span ?? speaker?.span ?? command.span;
       return Object.freeze({
         kind: "interactionExpression",
         interactionKind,
@@ -2260,6 +2287,7 @@ class Parser {
         asSpan,
         speaker,
         hint,
+        defaultValue,
         options: Object.freeze([]),
         span: spanFrom(command.span, end),
       });
@@ -2355,6 +2383,7 @@ class Parser {
       asSpan,
       speaker,
       hint: null,
+      defaultValue: null,
       options: Object.freeze(options),
       span: spanFrom(command.span, end),
     });
@@ -2370,6 +2399,24 @@ class Parser {
       this.#check(TokenKind.InterpolationEnd) ||
       this.#atStorageDelimiter()
     );
+  }
+
+  /** `default:` at `offset` tokens ahead, the named default answer of `askText` or `askNumber`. */
+  #atInteractionDefault(offset: number): boolean {
+    const token = this.#peek(offset);
+    return (
+      token.kind === TokenKind.Identifier &&
+      token.lexeme === "default" &&
+      this.#peek(offset + 1).kind === TokenKind.Colon
+    );
+  }
+
+  /** The offset of the token after a `,` and any continuation newlines, or `null` without a comma. */
+  #interactionDefaultAfterComma(): number | null {
+    if (!this.#check(TokenKind.Comma)) return null;
+    let offset = 1;
+    while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
+    return offset;
   }
 
   #atStorageDelimiter(): boolean {
@@ -2768,10 +2815,10 @@ class Parser {
     this.#skipNewlines();
   }
 
-  #reportMixedArguments(span: SourceSpan): void {
+  #reportPositionalAfterNamed(span: SourceSpan): void {
     this.#reportSpan(
       parserDiagnosticCode.mixedArguments,
-      "Positional and named arguments may not be mixed in one call.",
+      "A positional argument may not follow a named argument. Move it before the named arguments, or name it too.",
       span,
     );
   }
@@ -2819,6 +2866,11 @@ class Parser {
 
   #checkIdentifier(name: string): boolean {
     return this.#check(TokenKind.Identifier) && this.#peek().lexeme === name;
+  }
+
+  /** The protected keyword `set` parses as a declared name so that its declaration gets the protected-name diagnostic. */
+  #checkDeclarationName(): boolean {
+    return this.#check(TokenKind.Identifier) || this.#check(TokenKind.KeywordSet);
   }
 
   #advance(): Token {

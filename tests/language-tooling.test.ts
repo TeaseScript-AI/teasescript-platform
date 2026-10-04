@@ -44,6 +44,11 @@ test("completion exposes accepted compact commands", () => {
 test("completion exposes optional speaker and current say modifiers", () => {
   const speakers = labels('speaker mistress { name: "Mistress" }\nlet answer = askText as');
   assert.ok(speakers.includes("mistress"));
+  const protectedSpeaker = labels(
+    'speaker set { name: "Set" }\nspeaker mistress { name: "Mistress" }\nsay as',
+  );
+  assert.ok(protectedSpeaker.includes("mistress"));
+  assert.ok(!protectedSpeaker.includes("set"));
   const say = labels("say");
   assert.ok(say.includes("as"));
   assert.ok(say.includes("skippable"));
@@ -63,7 +68,7 @@ test("context, hover, and signature help select the compact command and its slot
     end: languagePositionAt(document, start + "askText".length),
   });
   const signature = languageSignatureHelp(document, position);
-  assert.deepEqual(signature?.parameters, ["speaker", "hint"]);
+  assert.deepEqual(signature?.parameters, ["speaker", "hint", "default"]);
   assert.equal(signature?.activeParameter, 1);
 });
 
@@ -180,6 +185,10 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
   assert.equal(activeSlot("askText as mistress"), "speaker");
   assert.equal(activeSlot("askText as mistress "), "hint");
   assert.equal(activeSlot("askNumber as mistress "), "hint");
+  assert.equal(activeSlot('askText "Name?", default: '), "default");
+  assert.equal(activeSlot("askNumber default: "), "default");
+  assert.equal(activeSlot('askText { default: "Name?" }.default'), "hint");
+  assert.equal(activeSlot('let answer = askText "${askNumber default: 3}"'), "hint");
   assert.equal(activeSlot("showButton as mistress "), "label");
   assert.equal(activeSlot("choose as mistress "), "options");
   assert.equal(activeSlot('say ["Hello", "there"]'), "text");

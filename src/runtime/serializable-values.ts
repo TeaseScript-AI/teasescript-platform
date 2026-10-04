@@ -66,7 +66,7 @@ export type SerializableRuntimeValue =
 
 export class SerializableValueError extends Error {
   public constructor(
-    readonly code: "cyclic" | "invalid" | "setElement" | "equality",
+    readonly code: "cyclic" | "invalid" | "setElement",
     message: string,
   ) {
     super(message);
@@ -299,39 +299,99 @@ export function serializableSetContains(
   return new Set(set.items).has(value);
 }
 
+/**
+ * Structural equality. Objects compare property names and values regardless of property order, lists compare elements
+ * in order, and sets compare members regardless of insertion order. Handles and speaker references compare identity.
+ * Scalar children are compared as soon as their container is visited, before any nested list, object, or set, and
+ * nested values use an explicit stack, so deep values never exhaust the native call stack.
+ */
 export function serializableEquals(
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
 ): boolean {
-  if (typeof left !== typeof right) return false;
-  if (left === null || right === null) return left === right;
-  if (typeof left !== "object" || typeof right !== "object") return left === right;
-  if (left.kind === "speakerReference" && right.kind === "speakerReference") {
-    return left.speakerId === right.speakerId;
+  const pending: DeferredComparison[] = [];
+  if (!equalsOrDefer(left, right, pending)) return false;
+  while (pending.length > 0) {
+    const next = pending.pop()!;
+    if (next.kind === "set") {
+      const members = new Set(next.right.items);
+      if (!next.left.items.every((item) => members.has(item))) return false;
+    } else if (next.kind === "list") {
+      for (let index = 0; index < next.left.items.length; index += 1) {
+        if (!equalsOrDefer(next.left.items[index]!, next.right.items[index]!, pending))
+          return false;
+      }
+    } else {
+      const rightValues = new Map(
+        next.right.properties.map((property) => [property.name, property.value]),
+      );
+      for (const property of next.left.properties) {
+        if (!rightValues.has(property.name)) return false;
+        if (!equalsOrDefer(property.value, rightValues.get(property.name)!, pending)) return false;
+      }
+    }
   }
-  if (left.kind === "duration" && right.kind === "duration") {
-    return left.milliseconds === right.milliseconds;
+  return true;
+}
+
+type DeferredComparison =
+  | {
+      readonly kind: "list";
+      readonly left: SerializableRuntimeList;
+      readonly right: SerializableRuntimeList;
+    }
+  | {
+      readonly kind: "object";
+      readonly left: SerializableRuntimeObject;
+      readonly right: SerializableRuntimeObject;
+    }
+  | {
+      readonly kind: "set";
+      readonly left: SerializableRuntimeSet;
+      readonly right: SerializableRuntimeSet;
+    };
+
+/**
+ * Compares two values without descending: a pair of lists or sets of equal length or objects with equal property
+ * counts is queued in `pending`, and everything else is decided now.
+ */
+function equalsOrDefer(
+  left: SerializableRuntimeValue,
+  right: SerializableRuntimeValue,
+  pending: DeferredComparison[],
+): boolean {
+  if (left === null || right === null || typeof left !== "object" || typeof right !== "object")
+    return left === right;
+  switch (left.kind) {
+    case "list":
+      if (right.kind !== "list" || right.items.length !== left.items.length) return false;
+      pending.push({ kind: "list", left, right });
+      return true;
+    case "object":
+      if (right.kind !== "object" || right.properties.length !== left.properties.length)
+        return false;
+      pending.push({ kind: "object", left, right });
+      return true;
+    case "set":
+      if (right.kind !== "set" || right.items.length !== left.items.length) return false;
+      pending.push({ kind: "set", left, right });
+      return true;
+    case "range":
+      return (
+        right.kind === "range" &&
+        right.start === left.start &&
+        right.end === left.end &&
+        right.inclusive === left.inclusive
+      );
+    case "duration":
+      return right.kind === "duration" && right.milliseconds === left.milliseconds;
+    case "timerHandle":
+      return right.kind === "timerHandle" && right.timerId === left.timerId;
+    case "mediaHandle":
+      return right.kind === "mediaHandle" && right.mediaId === left.mediaId;
+    case "speakerReference":
+      return right.kind === "speakerReference" && right.speakerId === left.speakerId;
   }
-  if (left.kind === "timerHandle" && right.kind === "timerHandle") {
-    return left.timerId === right.timerId;
-  }
-  if (left.kind === "mediaHandle" && right.kind === "mediaHandle") {
-    return left.mediaId === right.mediaId;
-  }
-  if (
-    left.kind === "duration" ||
-    right.kind === "duration" ||
-    left.kind === "timerHandle" ||
-    right.kind === "timerHandle" ||
-    left.kind === "mediaHandle" ||
-    right.kind === "mediaHandle"
-  ) {
-    return false;
-  }
-  throw new SerializableValueError(
-    "equality",
-    "Equality for object, list, and set values is not accepted in this milestone.",
-  );
 }
 
 export function validateSerializableValue(value: unknown, path = "$"): string | null {

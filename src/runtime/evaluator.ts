@@ -6,6 +6,7 @@ import type {
   PlanSourceLocation,
 } from "../plan/model.js";
 import { escapeMarkup } from "../message-markup.js";
+import { expressionPlanChildren } from "../plan/expression-children.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
 import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
@@ -499,6 +500,15 @@ export class Evaluator {
           }
           if (frame.stage === 1) {
             frame.value = result.value;
+            // An operand is read when it is evaluated: copy a shared list, set, or object before a call in the right
+            // operand can change it.
+            if (
+              (expression.operator === "==" || expression.operator === "!=") &&
+              !result.owned &&
+              (isList(frame.value) || isSet(frame.value) || isObject(frame.value)) &&
+              mayRunCall(expression.right)
+            )
+              frame.value = cloneCapturedSerializableValue(frame.value);
             if (expression.operator === "and" || expression.operator === "or") {
               if (typeof frame.value !== "boolean")
                 throw fault("TSR026", "Expected a boolean value.", expression.left.span);
@@ -734,7 +744,16 @@ export class Evaluator {
     }
     const supported = isSet(receiver)
       ? new Set(["add", "remove", "clear", "contains", "toList"])
-      : new Set(["add", "remove", "removeFirst", "removeLast", "clear", "contains", "toSet"]);
+      : new Set([
+          "add",
+          "remove",
+          "removeAt",
+          "removeFirst",
+          "removeLast",
+          "clear",
+          "contains",
+          "toSet",
+        ]);
     if (!supported.has(method)) {
       throw fault("TSR016", `Unsupported method '${method}'.`, span);
     }
@@ -897,13 +916,8 @@ export class Evaluator {
       return right;
     }
     if (expression.operator === "==" || expression.operator === "!=") {
-      try {
-        const equal = serializableEquals(left, right);
-        return expression.operator === "==" ? equal : !equal;
-      } catch (error) {
-        if (error instanceof RuntimeFault) throw error;
-        throw this.#translateValueError(error, expression.span);
-      }
+      const equal = serializableEquals(left, right);
+      return expression.operator === "==" ? equal : !equal;
     }
     if (isDuration(left) || isDuration(right)) return this.#durationBinary(expression, left, right);
     if (["<", "<=", ">", ">="].includes(expression.operator)) {
@@ -1121,12 +1135,9 @@ export class Evaluator {
           return null;
         case "remove": {
           expect(1);
-          const index = this.#findValue(receiver.items, positional[0]!, span);
-          if (index >= 0) {
-            const rebased = preparePreparedReferencesForListRemoval(this.snapshot, receiver, index);
-            receiver.items.splice(index, 1);
-            refreshPreparedReferenceFallbacks(this.snapshot, rebased);
-          } else {
+          const index = this.#findValue(receiver.items, positional[0]!);
+          if (index >= 0) this.#removeListItem(receiver, index);
+          else {
             this.#warn(
               "TSW002",
               "list.remove(value) found no matching value; the list was left unchanged.",
@@ -1135,27 +1146,25 @@ export class Evaluator {
           }
           return null;
         }
+        case "removeAt": {
+          expect(1);
+          const index = this.#index(positional[0]!, span);
+          this.#assertIndex(receiver, index, span);
+          return this.#removeListItem(receiver, index);
+        }
         case "removeFirst":
-          expect(0);
-          if (receiver.items.length > 0) {
-            const rebased = preparePreparedReferencesForListRemoval(this.snapshot, receiver, 0);
-            receiver.items.shift();
-            refreshPreparedReferenceFallbacks(this.snapshot, rebased);
-          }
-          return null;
         case "removeLast":
           expect(0);
-          if (receiver.items.length > 0) {
-            const removedIndex = receiver.items.length - 1;
-            const rebased = preparePreparedReferencesForListRemoval(
-              this.snapshot,
-              receiver,
-              removedIndex,
+          if (receiver.items.length === 0)
+            throw fault(
+              "TSR018",
+              `Cannot call ${name}() on an empty list. Check that the list's length is above 0 first.`,
+              span,
             );
-            receiver.items.pop();
-            refreshPreparedReferenceFallbacks(this.snapshot, rebased);
-          }
-          return null;
+          return this.#removeListItem(
+            receiver,
+            name === "removeFirst" ? 0 : receiver.items.length - 1,
+          );
         case "clear":
           expect(0);
           if (receiver.items.length > 0) {
@@ -1165,7 +1174,7 @@ export class Evaluator {
           return null;
         case "contains":
           expect(1);
-          return this.#findValue(receiver.items, positional[0]!, span) >= 0;
+          return this.#findValue(receiver.items, positional[0]!) >= 0;
         case "toSet":
           expect(0);
           return createCapturedSerializableSet(receiver.items);
@@ -1468,17 +1477,17 @@ export class Evaluator {
     }
   }
 
-  #findValue(
-    items: readonly SerializableRuntimeValue[],
-    value: SerializableRuntimeValue,
-    span: SourceSpan,
-  ): number {
+  /** Removes one list element, rebasing or freezing prepared references into the list, and returns it. */
+  #removeListItem(list: SerializableRuntimeList, index: number): SerializableRuntimeValue {
+    const rebased = preparePreparedReferencesForListRemoval(this.snapshot, list, index);
+    const removed = list.items.splice(index, 1)[0]!;
+    refreshPreparedReferenceFallbacks(this.snapshot, rebased);
+    return removed;
+  }
+
+  #findValue(items: readonly SerializableRuntimeValue[], value: SerializableRuntimeValue): number {
     for (let index = 0; index < items.length; index += 1) {
-      try {
-        if (serializableEquals(items[index]!, value)) return index;
-      } catch (error) {
-        throw this.#translateValueError(error, span);
-      }
+      if (serializableEquals(items[index]!, value)) return index;
     }
     return -1;
   }
@@ -1550,9 +1559,7 @@ export class Evaluator {
 
   #translateValueError(error: unknown, span: SourceSpan): RuntimeFault {
     if (error instanceof SerializableValueError) {
-      const code =
-        error.code === "setElement" ? "TSR032" : error.code === "equality" ? "TSR029" : "TSR031";
-      return fault(code, error.message, span);
+      return fault(error.code === "setElement" ? "TSR032" : "TSR031", error.message, span);
     }
     throw error;
   }
@@ -1685,6 +1692,33 @@ interface EvaluationFrame {
   positional: SerializableRuntimeValue[] | null;
   named: Record<string, SerializableRuntimeValue> | null;
 }
+const callingExpressions = new WeakMap<ExpressionPlan, boolean>();
+
+/** Whether evaluating an expression can run a call. Results are cached per plan node, so nested checks stay linear. */
+function mayRunCall(expression: ExpressionPlan): boolean {
+  // A node is decided after its children, which are pushed above it.
+  const work: { expression: ExpressionPlan; children: readonly ExpressionPlan[] | null }[] = [
+    { expression, children: null },
+  ];
+  while (work.length > 0) {
+    const current = work.pop()!;
+    if (callingExpressions.has(current.expression)) continue;
+    if (current.expression.kind === "call") {
+      callingExpressions.set(current.expression, true);
+    } else if (current.children !== null) {
+      callingExpressions.set(
+        current.expression,
+        current.children.some((child) => callingExpressions.get(child) === true),
+      );
+    } else {
+      const children = expressionPlanChildren(current.expression);
+      work.push({ expression: current.expression, children });
+      for (const child of children) work.push({ expression: child, children: null });
+    }
+  }
+  return callingExpressions.get(expression)!;
+}
+
 function evaluationFrame(expression: ExpressionPlan, reference = false): EvaluationFrame {
   return {
     expression,

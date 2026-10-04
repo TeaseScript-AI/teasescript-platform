@@ -22,7 +22,25 @@ import {
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
+import {
+  isBlankTextAnswer,
+  isValidInteractionPrefill,
+  numberAnswerText,
+} from "./interaction-answers.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
+import {
+  ARITHMETIC_OPERATORS,
+  arithmeticType,
+  describeValue,
+  elementType,
+  expressionType,
+  isAnnotatable,
+  isAssignable,
+  nonNullType,
+  typeFromAnnotation,
+  typeName,
+  type StaticType,
+} from "./static-types.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 import { expressionChildren, mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
 import { durationLiteralMilliseconds } from "./duration.js";
@@ -42,6 +60,8 @@ interface Binding {
   readonly kind: BindingKind;
   /** Set while a variable statically holds an async timer or media handle. */
   handle?: "timer" | "media" | null;
+  /** A variable's declared or inferred type, which it keeps (V30 §12); absent when unknown. */
+  type?: StaticType | undefined;
 }
 
 const TIMER_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
@@ -90,7 +110,6 @@ const semanticCode = {
   unknownFunction: "TSV018",
   nonCallable: "TSV019",
   argumentCount: "TSV020",
-  mixedArguments: "TSV021",
   unknownNamedArgument: "TSV022",
   duplicateNamedArgument: "TSV023",
   missingNamedArgument: "TSV024",
@@ -107,6 +126,9 @@ const semanticCode = {
   invalidMedia: "TSV036",
   invalidMediaHandleMember: "TSV037",
   invalidStorageKey: "TSV038",
+  invalidInteractionDefault: "TSV039",
+  typeMismatch: "TSV041",
+  invalidListIndex: "TSV045",
 } as const;
 
 export function validateSemantics(
@@ -237,7 +259,11 @@ class SemanticValidator {
     try {
       const scope = new SemanticScope(this.#root);
       if (handler.selfHandle !== null) {
-        scope.bindings.set(handler.selfHandle, { kind: "variable", handle: "media" });
+        scope.bindings.set(handler.selfHandle, {
+          kind: "variable",
+          handle: "media",
+          type: { kind: "mediaHandle" },
+        });
       }
       runCompileTask(this.#validateStatements(handler.block.statements, scope, 0));
     } finally {
@@ -624,8 +650,11 @@ class SemanticValidator {
         } else {
           this.#validateExpression(statement.initializer, scope, null);
         }
+        const type = this.#declarationType(statement, scope);
         if (this.#declare(statement.name.name, "variable", statement.name.span, scope)) {
-          scope.bindings.get(statement.name.name)!.handle = handleKind(statement.initializer);
+          const binding = scope.bindings.get(statement.name.name)!;
+          binding.handle = handleKind(statement.initializer);
+          binding.type = type;
         }
         return;
       }
@@ -741,6 +770,7 @@ class SemanticValidator {
       case "assignmentStatement":
         this.#validateAssignmentTarget(statement.target, scope);
         this.#validateExpression(statement.value, scope, null);
+        this.#validateAssignmentType(statement, scope);
         if (statement.target.kind === "identifier") {
           const binding = scope.resolve(statement.target.name);
           // Reassignment may happen on any path, so the variable is no longer known to hold a handle.
@@ -809,7 +839,10 @@ class SemanticValidator {
           );
         }
         const loopScope = new SemanticScope(scope);
-        this.#declare(statement.variable.name, "variable", statement.variable.span, loopScope);
+        if (this.#declare(statement.variable.name, "variable", statement.variable.span, loopScope))
+          loopScope.bindings.get(statement.variable.name)!.type = elementType(
+            nonNullType(this.#expressionType(statement.iterable, scope)),
+          );
         yield* compileChild(
           this.#validateStatements(statement.body.statements, loopScope, loopDepth + 1),
         );
@@ -975,6 +1008,29 @@ class SemanticValidator {
     this.#validateExpression(target.object, scope, null);
     if (target.kind === "indexExpression") {
       this.#validateExpression(target.index, scope, null);
+      this.#validateListIndex(target.index, scope);
+    }
+  }
+
+  /** Reports a list index the compiler can see is negative, fractional, or not a number. */
+  #validateListIndex(index: Expression, scope: SemanticScope): void {
+    const known = staticNumber(index);
+    if (known !== undefined && known < 0) {
+      this.#report(
+        semanticCode.invalidListIndex,
+        "A list index cannot be negative. The first element is at index 0, and the last at length - 1.",
+        index.span,
+      );
+    } else if (
+      known !== undefined
+        ? !Number.isInteger(known)
+        : isDefinitelyNonNumeric(index) || !mayBeNumber(this.#expressionType(index, scope))
+    ) {
+      this.#report(
+        semanticCode.invalidListIndex,
+        "A list index must be a whole number, such as 0 for the first element.",
+        index.span,
+      );
     }
   }
 
@@ -1014,10 +1070,22 @@ class SemanticValidator {
         const contextualSpeaker = this.#interactionSpeaker(expression.speaker, scope);
         if (expression.interactionKind === "choice") {
           yield* compileChild(this.#validateChoiceTask(expression, scope, contextualSpeaker));
-        } else if (expression.hint !== null) {
-          yield* compileChild(
-            this.#validateExpressionTask(expression.hint, scope, contextualSpeaker),
-          );
+        } else {
+          if (expression.hint !== null) {
+            yield* compileChild(
+              this.#validateExpressionTask(expression.hint, scope, contextualSpeaker),
+            );
+          }
+          if (expression.defaultValue !== null) {
+            yield* compileChild(
+              this.#validateExpressionTask(expression.defaultValue, scope, contextualSpeaker),
+            );
+            this.#validateInteractionDefault(
+              expression.interactionKind,
+              expression.defaultValue,
+              scope,
+            );
+          }
         }
         return;
       }
@@ -1087,8 +1155,15 @@ class SemanticValidator {
         yield* compileChild(
           this.#validateExpressionTask(expression.index, scope, contextualSpeaker),
         );
+        this.#validateListIndex(expression.index, scope);
         return;
-      case "callExpression":
+      case "callExpression": {
+        const authorFunction =
+          expression.callee.kind === "identifier" &&
+          scope.resolve(expression.callee.name)?.kind === "function" &&
+          this.#functions.has(expression.callee.name);
+        // Only an author function's parameters are known here; for every other callee a repeated name is still an error.
+        if (!authorFunction) this.#validateDistinctNamedArguments(expression);
         if (expression.callee.kind === "identifier") {
           const name = expression.callee.name;
           const binding = scope.resolve(name);
@@ -1096,7 +1171,7 @@ class SemanticValidator {
           if (declaration !== undefined && binding?.kind === "function") {
             this.#validateFunctionCall(expression, declaration);
           } else if (this.#builtins.has(name)) {
-            // Injected and core built-ins validate their values at runtime.
+            // Built-ins validate their parameter names and values at runtime.
           } else if (binding !== undefined) {
             this.#report(
               semanticCode.nonCallable,
@@ -1132,6 +1207,15 @@ class SemanticValidator {
             this.#validateExpressionTask(argument.value, scope, contextualSpeaker),
           );
         }
+        this.#validateAddedElementType(expression, scope);
+        const method = unwrapParentheses(expression.callee);
+        if (
+          method.kind === "propertyAccessExpression" &&
+          method.property.name === "removeAt" &&
+          expression.arguments.length === 1 &&
+          expression.arguments[0]!.kind === "positionalArgument"
+        )
+          this.#validateListIndex(expression.arguments[0]!.value, scope);
         if (
           expression.callee.kind === "identifier" &&
           expression.callee.name === "randomInteger" &&
@@ -1150,6 +1234,7 @@ class SemanticValidator {
           }
         }
         return;
+      }
       case "binaryExpression": {
         yield* compileChild(
           this.#validateExpressionTask(expression.left, scope, contextualSpeaker),
@@ -1199,6 +1284,211 @@ class SemanticValidator {
     expression satisfies never;
   }
 
+  #expressionType(expression: Expression, scope: SemanticScope): StaticType {
+    return expressionType(expression, {
+      identifier: (name) => {
+        const binding = scope.resolve(name);
+        if (binding === undefined || binding.kind === "function") return undefined;
+        return binding.kind === "speaker" ? { kind: "speaker" } : binding.type;
+      },
+      isBuiltin: (name) => this.#builtins.has(name),
+    });
+  }
+
+  /**
+   * The type a new variable keeps: its annotation, else its initializer's type. `null` and unknown initializers give no
+   * inferred type, so the compiler never invents an optional or union type.
+   */
+  #declarationType(
+    statement: Extract<Statement, { kind: "letStatement" }>,
+    scope: SemanticScope,
+  ): StaticType | undefined {
+    const name = statement.name.name;
+    const initializer = this.#expressionType(statement.initializer, scope);
+    if (statement.typeAnnotation === null)
+      return initializer.kind === "unknown" || initializer.kind === "null"
+        ? undefined
+        : initializer;
+    const declared = typeFromAnnotation(statement.typeAnnotation);
+    const load = unwrapParentheses(statement.initializer);
+    const checked =
+      load.kind === "loadExpression" && load.defaultValue !== null
+        ? { expression: load.defaultValue, type: this.#expressionType(load.defaultValue, scope) }
+        : { expression: statement.initializer, type: initializer };
+    if (
+      !this.#validateLiteralElements(declared, checked.expression, scope, name) &&
+      !isAssignable(declared, checked.type)
+    )
+      this.#report(
+        semanticCode.typeMismatch,
+        `'${name}' is declared as ${typeName(declared)}, so it cannot start as ${describeValue(checked.type)}.${typeFix(name, declared, checked.type)}`,
+        checked.expression.span,
+      );
+    return declared;
+  }
+
+  /**
+   * Checks each element of a list or set literal against a known element type, so a mixed literal cannot slip into a
+   * typed collection. Returns whether the literal was checked element by element.
+   */
+  #validateLiteralElements(
+    target: StaticType,
+    expression: Expression,
+    scope: SemanticScope,
+    variable: string,
+  ): boolean {
+    const collection = nonNullType(target);
+    const literal = unwrapParentheses(expression);
+    if (
+      !(collection.kind === "list" && literal.kind === "listLiteral") &&
+      !(collection.kind === "set" && literal.kind === "setLiteral")
+    )
+      return false;
+    if (collection.element.kind === "unknown") return true;
+    for (const element of literal.elements) {
+      const type = this.#expressionType(element, scope);
+      if (!isAssignable(collection.element, type))
+        this.#report(
+          semanticCode.typeMismatch,
+          `'${variable}' holds ${typeName(collection.element)} values (${typeName(collection)}), so it cannot contain ${describeValue(type)}.${elementFix(variable, collection, type, target.kind === "optional")}`,
+          element.span,
+        );
+    }
+    return true;
+  }
+
+  #validateAssignmentType(
+    statement: Extract<Statement, { kind: "assignmentStatement" }>,
+    scope: SemanticScope,
+  ): void {
+    const target = statement.target;
+    const value = this.#expressionType(statement.value, scope);
+    if (target.kind === "indexExpression") {
+      const declared = this.#expressionType(target.object, scope);
+      const list = nonNullType(declared);
+      if (list.kind !== "list" || list.element.kind === "unknown") return;
+      const optional = declared.kind === "optional";
+      if (statement.operator === "=") {
+        if (!isAssignable(list.element, value))
+          this.#reportElementMismatch(target.object, list, optional, value, statement.value.span);
+        return;
+      }
+      const subject = `${subjectName(target.object, "This list")} holds ${typeName(list.element)} values (${typeName(list)})`;
+      this.#validateStoredType(
+        statement,
+        scope,
+        list.element,
+        value,
+        subject,
+        "an element",
+        (result) => elementFix(variableName(target.object), list, result, optional),
+      );
+      return;
+    }
+    if (target.kind !== "identifier") return;
+    const binding = scope.resolve(target.name);
+    const type = binding?.kind === "variable" ? binding.type : undefined;
+    if (type === undefined || value.kind === "unknown") return;
+    this.#validateStoredType(
+      statement,
+      scope,
+      type,
+      value,
+      `'${target.name}' holds ${describeValue(type)}`,
+      "it",
+      (result) => typeFix(target.name, type, result),
+      target.name,
+    );
+  }
+
+  /** Checks `=`, `+=`, or `-=` of `value` into a place of `type`; `subject` and `place` phrase the message. */
+  #validateStoredType(
+    statement: Extract<Statement, { kind: "assignmentStatement" }>,
+    scope: SemanticScope,
+    type: StaticType,
+    value: StaticType,
+    subject: string,
+    place: string,
+    fix: (result: StaticType) => string,
+    variable?: string,
+  ): void {
+    if (statement.operator === "=") {
+      if (
+        variable !== undefined &&
+        this.#validateLiteralElements(type, statement.value, scope, variable)
+      )
+        return;
+      if (!isAssignable(type, value))
+        this.#report(
+          semanticCode.typeMismatch,
+          `${subject}, so ${place === "it" ? "it" : place} cannot be set to ${describeValue(value)}.${fix(value)}`,
+          statement.value.span,
+        );
+      return;
+    }
+    const result = arithmeticType(statement.operator === "+=" ? "+" : "-", type, value);
+    if (result === undefined) {
+      const operand = nonNullType(type);
+      // Only `integer`, `number`, and `duration` combinations support `+=`/`-=`; a known value of any other kind fails.
+      if (operand.kind !== "unknown" && nonNullType(value).kind !== "unknown")
+        this.#report(
+          semanticCode.typeMismatch,
+          `${subject}, so ${describeValue(value)} cannot be ${statement.operator === "+=" ? "added to" : "subtracted from"} ${place}.${operandFix(operand)}`,
+          statement.value.span,
+        );
+      return;
+    }
+    if (!isAssignable(type, result))
+      this.#report(
+        semanticCode.typeMismatch,
+        `${subject}, so '${statement.operator}' cannot make ${place} ${describeValue(result)}.${fix(result)}`,
+        statement.value.span,
+      );
+  }
+
+  /** `list.add(value)` and `set.add(value)` keep the collection's element type. */
+  #validateAddedElementType(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+    scope: SemanticScope,
+  ): void {
+    const callee = unwrapParentheses(expression.callee);
+    if (
+      callee.kind !== "propertyAccessExpression" ||
+      callee.property.name !== "add" ||
+      expression.arguments.length !== 1 ||
+      expression.arguments[0]!.kind !== "positionalArgument"
+    )
+      return;
+    const declared = this.#expressionType(callee.object, scope);
+    const collection = nonNullType(declared);
+    if (collection.kind !== "list" && collection.kind !== "set") return;
+    const argument = expression.arguments[0]!.value;
+    const value = this.#expressionType(argument, scope);
+    if (!isAssignable(collection.element, value))
+      this.#reportElementMismatch(
+        callee.object,
+        collection,
+        declared.kind === "optional",
+        value,
+        argument.span,
+      );
+  }
+
+  #reportElementMismatch(
+    collectionExpression: Expression,
+    collection: StaticType & { readonly kind: "list" | "set" },
+    optional: boolean,
+    value: StaticType,
+    span: SourceSpan,
+  ): void {
+    const subject = subjectName(collectionExpression, `This ${collection.kind}`);
+    this.#report(
+      semanticCode.typeMismatch,
+      `${subject} holds ${typeName(collection.element)} values (${typeName(collection)}), so it cannot contain ${describeValue(value)}.${elementFix(variableName(collectionExpression), collection, value, optional)}`,
+      span,
+    );
+  }
+
   #validateStorageKey(key: Expression, scope: SemanticScope, message: string): void {
     this.#validateExpression(key, scope, null);
     if (isDefinitelyNonString(key)) this.#report(semanticCode.invalidStorageKey, message, key.span);
@@ -1213,6 +1503,59 @@ class SemanticValidator {
       : this.#validateSpeakerReference(speaker.name, speaker.span, scope)
         ? speaker.name
         : null;
+  }
+
+  /**
+   * A default answer must be an answer the field accepts: text for askText, a number for askNumber. The compiler rejects
+   * a default it knows is wrong; the runtime checks the others when the field opens.
+   */
+  #validateInteractionDefault(
+    kind: "text" | "number",
+    expression: Expression,
+    scope: SemanticScope,
+  ): void {
+    const type = this.#expressionType(expression, scope);
+    const name = variableName(expression);
+    const holds =
+      type.kind === "unknown"
+        ? ""
+        : name === null
+          ? `, not ${describeValue(type)}`
+          : `, but '${name}' holds ${describeValue(type)}`;
+    const fix =
+      type.kind === "null"
+        ? EMPTY_FIELD_FIX
+        : kind === "number"
+          ? numberDefaultFix(expression)
+          : textDefaultFix(expression);
+    if (kind === "number") {
+      if (!isAssignable(NUMBER_TYPE, type) || isDefinitelyNonNumeric(expression))
+        this.#report(
+          semanticCode.invalidInteractionDefault,
+          `The default answer of askNumber must be a number${holds}.${fix}`,
+          expression.span,
+        );
+      return;
+    }
+    if (
+      !isAssignable(STRING_TYPE, type) ||
+      isDefinitelyNonString(expression) ||
+      isArithmetic(expression)
+    ) {
+      this.#report(
+        semanticCode.invalidInteractionDefault,
+        `The default answer of askText must be text${holds}.${fix}`,
+        expression.span,
+      );
+      return;
+    }
+    const text = staticVisibleText(expression);
+    if (text !== undefined && isBlankTextAnswer(text))
+      this.#report(
+        semanticCode.invalidInteractionDefault,
+        `The default answer of askText must contain a non-whitespace character.${EMPTY_FIELD_FIX}`,
+        expression.span,
+      );
   }
 
   #validateButtonBackground(expression: Expression): void {
@@ -1342,6 +1685,10 @@ class SemanticValidator {
     }
   }
 
+  /**
+   * Positional arguments fill parameters from left to right; named arguments that follow them fill parameters by name.
+   * Each parameter receives at most one value, and every parameter without a default needs one.
+   */
   #validateFunctionCall(
     expression: Extract<Expression, { kind: "callExpression" }>,
     declaration: FunctionDeclaration,
@@ -1350,55 +1697,79 @@ class SemanticValidator {
       (argument) => argument.kind === "positionalArgument",
     );
     const named = expression.arguments.filter((argument) => argument.kind === "namedArgument");
-    if (positional.length > 0 && named.length > 0) {
+    const functionName = declaration.name.name;
+    const parameterNames = declaration.parameters.map((parameter) => parameter.name.name);
+    const required = declaration.parameters.filter(
+      (parameter) => parameter.defaultValue === null,
+    ).length;
+    if (positional.length > parameterNames.length) {
       this.#report(
-        semanticCode.mixedArguments,
-        "Positional and named arguments may not be mixed in one call.",
+        semanticCode.argumentCount,
+        `Function '${functionName}' takes ${argumentRange(required, parameterNames)}, received ${positional.length} positional argument${positional.length === 1 ? "" : "s"}. Remove the extra positional arguments.`,
         expression.span,
       );
       return;
     }
-    const required = declaration.parameters.filter(
-      (parameter) => parameter.defaultValue === null,
-    ).length;
     if (named.length === 0) {
-      if (positional.length < required || positional.length > declaration.parameters.length) {
+      if (positional.length < required)
         this.#report(
           semanticCode.argumentCount,
-          `Function '${declaration.name.name}' expects ${required} through ${declaration.parameters.length} positional argument(s), received ${positional.length}.`,
+          `Function '${functionName}' takes ${argumentRange(required, parameterNames)}, received ${positional.length}. Add the missing arguments.`,
           expression.span,
         );
-      }
       return;
     }
-    const parameters = new Map(
-      declaration.parameters.map((parameter) => [parameter.name.name, parameter]),
-    );
-    const supplied = new Set<string>();
+    const indexes = new Map(parameterNames.map((name, index) => [name, index]));
+    const supplied = new Set(parameterNames.slice(0, positional.length));
     for (const argument of named) {
-      if (!parameters.has(argument.name.name)) {
+      const name = argument.name.name;
+      const index = indexes.get(name);
+      if (index === undefined) {
         this.#report(
           semanticCode.unknownNamedArgument,
-          `Unknown argument '${argument.name.name}' for function '${declaration.name.name}'.`,
+          `Function '${functionName}' has no parameter '${name}'. ${parameterNames.length === 0 ? "It takes no arguments." : `Its parameters are ${parameterNames.join(", ")}.`}`,
           argument.name.span,
         );
-      } else if (supplied.has(argument.name.name)) {
+      } else if (index < positional.length) {
         this.#report(
           semanticCode.duplicateNamedArgument,
-          `Duplicate named argument '${argument.name.name}'.`,
+          `Parameter '${name}' already receives positional argument ${index + 1}. Remove one of the two.`,
+          argument.name.span,
+        );
+      } else if (supplied.has(name)) {
+        this.#report(
+          semanticCode.duplicateNamedArgument,
+          `Argument '${name}' is given twice. Remove one of them.`,
           argument.name.span,
         );
       }
-      supplied.add(argument.name.name);
+      supplied.add(name);
     }
     for (const parameter of declaration.parameters) {
       if (parameter.defaultValue === null && !supplied.has(parameter.name.name)) {
         this.#report(
           semanticCode.missingNamedArgument,
-          `Missing required named argument '${parameter.name.name}'.`,
+          `Function '${functionName}' needs a value for '${parameter.name.name}'. Add it by position or as '${parameter.name.name}: ...'.`,
           expression.span,
         );
       }
+    }
+  }
+
+  /** Reports a parameter name given twice in a call whose parameters only the callee knows. */
+  #validateDistinctNamedArguments(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+  ): void {
+    const names = new Set<string>();
+    for (const argument of expression.arguments) {
+      if (argument.kind !== "namedArgument") continue;
+      if (names.has(argument.name.name))
+        this.#report(
+          semanticCode.duplicateNamedArgument,
+          `Argument '${argument.name.name}' is given twice. Remove one of them.`,
+          argument.name.span,
+        );
+      names.add(argument.name.name);
     }
   }
 
@@ -1452,6 +1823,68 @@ function literalKind(expression: Expression): Expression["kind"] {
     current = unwrapParentheses(current.operand);
   }
   return current.kind;
+}
+
+/** "2 arguments (a, b)" or "1 to 3 arguments (a, b, c)", naming the parameters so the author sees what is expected. */
+function argumentRange(required: number, parameterNames: readonly string[]): string {
+  const total = parameterNames.length;
+  const count =
+    required === total
+      ? `${total} argument${total === 1 ? "" : "s"}`
+      : `${required} to ${total} arguments`;
+  return total === 0 ? "no arguments" : `${count} (${parameterNames.join(", ")})`;
+}
+
+/** How to make an operand fit `+=`/`-=` on a variable of `operand` type. */
+function operandFix(operand: StaticType): string {
+  if (operand.kind !== "scalar") return "";
+  if (operand.name === "integer" || operand.name === "number") return " Use a number instead.";
+  if (operand.name === "duration") return " Use a duration such as '2 s' instead.";
+  return "";
+}
+
+/** How to make a value fit a list or set: allow fractions, or keep other values in a separate collection. */
+function elementFix(
+  variable: string | null,
+  collection: StaticType & { readonly kind: "list" | "set" },
+  value: StaticType,
+  optional: boolean,
+): string {
+  const element = collection.element;
+  if (
+    variable !== null &&
+    element.kind === "scalar" &&
+    element.name === "integer" &&
+    value.kind === "scalar" &&
+    value.name === "number"
+  )
+    return ` To allow fractions, declare it as 'let ${variable}: ${collection.kind === "list" ? "number[]" : "number set"}${optional ? "?" : ""} = ...'.`;
+  return ` Use a separate ${collection.kind} for values of another type.`;
+}
+
+function variableName(expression: Expression): string | null {
+  return expression.kind === "identifier" ? expression.name : null;
+}
+
+function subjectName(expression: Expression, fallback: string): string {
+  return expression.kind === "identifier" ? `'${expression.name}'` : fallback;
+}
+
+/** A short suggestion for the most common mismatches: null, and fractions in a whole-number variable. */
+function typeFix(name: string, target: StaticType, value: StaticType): string {
+  if (value.kind === "null" && target.kind !== "optional")
+    return isAnnotatable(target)
+      ? ` To allow null, declare it as 'let ${name}: ${typeName(target)}? = ...'.`
+      : " Use a separate variable for null.";
+  const nonNull = nonNullType(target);
+  if (
+    nonNull.kind === "scalar" &&
+    nonNull.name === "integer" &&
+    value.kind === "scalar" &&
+    value.name === "number"
+  )
+    return ` To allow fractions, declare it as 'let ${name}: number${target.kind === "optional" ? "?" : ""} = ...'.`;
+  return " Use a separate variable for a value of another type.";
 }
 
 /** The handle kind statically held by a variable initialized from `expression`. */
@@ -1567,6 +2000,15 @@ function unwrapParentheses(expression: Expression): Expression {
   return expression;
 }
 
+/** Whether a value of this type can be a number; an optional number may be one when it is not `null`. */
+function mayBeNumber(type: StaticType): boolean {
+  const value = nonNullType(type);
+  return (
+    value.kind === "unknown" ||
+    (value.kind === "scalar" && (value.name === "integer" || value.name === "number"))
+  );
+}
+
 function isDefinitelyNonNumeric(expression: Expression): boolean {
   expression = unwrapParentheses(expression);
   if (expression.kind === "interactionExpression") {
@@ -1586,6 +2028,35 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression"
   );
+}
+
+const STRING_TYPE: StaticType = Object.freeze({ kind: "scalar", name: "string" });
+const NUMBER_TYPE: StaticType = Object.freeze({ kind: "scalar", name: "number" });
+
+/** Arithmetic yields a number or a duration, never text, even when its operand types are unknown. */
+function isArithmetic(expression: Expression): boolean {
+  expression = unwrapParentheses(expression);
+  return expression.kind === "binaryExpression" && ARITHMETIC_OPERATORS.has(expression.operator);
+}
+
+const EMPTY_FIELD_FIX = " Remove 'default:' to start with an empty field.";
+
+/** How to offer a non-text default as text: interpolate it explicitly. */
+function textDefaultFix(expression: Expression): string {
+  const name = variableName(expression);
+  if (name !== null) return ` Write it as text: 'default: "\${${name}}"'.`;
+  const literal = unwrapParentheses(expression);
+  if (literal.kind === "numberLiteral")
+    return ` Write it as text: 'default: "${numberAnswerText(literal.value)}"'.`;
+  return " Write it as text with interpolation: 'default: \"${...}\"'.";
+}
+
+/** How to offer a number default: write number text as a number. */
+function numberDefaultFix(expression: Expression): string {
+  const text = staticVisibleText(expression);
+  return text !== undefined && isValidInteractionPrefill("number", text)
+    ? ` Write it as a number: 'default: ${text.trim()}'.`
+    : " Use a number, such as 'default: 10'.";
 }
 
 const LOAD_KEY_MESSAGE =
@@ -1658,6 +2129,7 @@ function visitExpression(
         ? [
             ...(current.speaker === null ? [] : [current.speaker]),
             ...(current.hint === null ? [] : [current.hint]),
+            ...(current.defaultValue === null ? [] : [current.defaultValue]),
             ...current.options.map((option) => option.value),
           ]
         : expressionChildren(current);

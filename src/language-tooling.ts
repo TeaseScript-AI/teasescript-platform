@@ -12,6 +12,7 @@ import { compileSource } from "./compiler.js";
 import { mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
+import { TEASESCRIPT_PROTECTED_NAMES } from "./protected-names.js";
 import {
   createSourcePosition,
   createSourceSpan,
@@ -76,14 +77,14 @@ const HELP = Object.freeze({
   askText: Object.freeze({
     command: "askText" as const,
     summary:
-      "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The optional hint is UI guidance, not transcript text.",
-    syntax: "askText [as speaker] [hint]",
+      "Waits for submitted text. Line endings are normalized while other whitespace is preserved; whitespace-only input is rejected and retried. The optional hint is UI guidance, not transcript text. An optional default answer prefills the field; submitting it unchanged returns it.",
+    syntax: "askText [as speaker] [hint | hint, default: answer | default: answer]",
   }),
   askNumber: Object.freeze({
     command: "askNumber" as const,
     summary:
-      "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript.",
-    syntax: "askNumber [as speaker] [hint]",
+      "Waits for numeric text, trims surrounding whitespace, accepts the TeaseScript numeric grammar, requires a finite value, and returns negative zero as canonical numeric 0 while preserving the trimmed submitted text in the transcript. An optional default number prefills the field.",
+    syntax: "askNumber [as speaker] [hint | hint, default: number | default: number]",
   }),
   choose: Object.freeze({
     command: "choose" as const,
@@ -351,9 +352,14 @@ function tokenToCompactCommand(token: Token): CompactCommand | null {
   return null;
 }
 
+const protectedNames: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES);
+
+/** Declared speaker names; a protected name such as `set` is an invalid declaration, not a suggestion. */
 function declaredSpeakers(source: string): readonly string[] {
   const speakers = compileSource(source).program.statements.flatMap((statement) =>
-    statement.kind === "speakerDeclaration" ? [statement.name.name] : [],
+    statement.kind === "speakerDeclaration" && !protectedNames.has(statement.name.name)
+      ? [statement.name.name]
+      : [],
   );
   return Object.freeze([...new Set(speakers)]);
 }
@@ -424,13 +430,26 @@ function signatureParameters(command: CompactCommand): readonly string[] {
       return Object.freeze(["speaker", "label"]);
     case "askText":
     case "askNumber":
-      return Object.freeze(["speaker", "hint"]);
+      return Object.freeze(["speaker", "hint", "default"]);
     case "choose":
       return Object.freeze(["speaker", "options"]);
     case "say":
       return Object.freeze(["speaker", "skip policy", "text", "pacing"]);
   }
 }
+
+const OPENING_DELIMITERS: ReadonlySet<TokenKind> = new Set([
+  TokenKind.LeftParenthesis,
+  TokenKind.LeftBracket,
+  TokenKind.LeftBrace,
+  TokenKind.InterpolationStart,
+]);
+const CLOSING_DELIMITERS: ReadonlySet<TokenKind> = new Set([
+  TokenKind.RightParenthesis,
+  TokenKind.RightBracket,
+  TokenKind.RightBrace,
+  TokenKind.InterpolationEnd,
+]);
 
 function activeParameterFor(
   source: string,
@@ -451,21 +470,28 @@ function activeParameterFor(
     (tail.length === asIndex + 1 || (tail.length === asIndex + 2 && !cursorAfterLastToken))
   )
     return 0;
+  if (command === "askText" || command === "askNumber") {
+    let depth = 0;
+    for (const [index, token] of tail.entries()) {
+      if (OPENING_DELIMITERS.has(token.kind)) depth += 1;
+      else if (CLOSING_DELIMITERS.has(token.kind)) depth = Math.max(0, depth - 1);
+      else if (
+        depth === 0 &&
+        token.kind === TokenKind.Identifier &&
+        token.lexeme === "default" &&
+        tail[index + 1]?.kind === TokenKind.Colon
+      )
+        return 2;
+    }
+    return 1;
+  }
   if (command !== "say") return 1;
 
   let depth = 0;
   for (const token of tail) {
-    if (
-      token.kind === TokenKind.LeftParenthesis ||
-      token.kind === TokenKind.LeftBracket ||
-      token.kind === TokenKind.LeftBrace
-    ) {
+    if (OPENING_DELIMITERS.has(token.kind)) {
       depth += 1;
-    } else if (
-      token.kind === TokenKind.RightParenthesis ||
-      token.kind === TokenKind.RightBracket ||
-      token.kind === TokenKind.RightBrace
-    ) {
+    } else if (CLOSING_DELIMITERS.has(token.kind)) {
       depth = Math.max(0, depth - 1);
     } else if (token.kind === TokenKind.Comma && depth === 0) {
       return 3;
@@ -646,6 +672,8 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
     case "interactionExpression":
       visitor.interaction(expression);
       if (expression.hint !== null) children.push({ kind: "expression", node: expression.hint });
+      if (expression.defaultValue !== null)
+        children.push({ kind: "expression", node: expression.defaultValue });
       for (const option of expression.options)
         children.push({ kind: "expression", node: option.value });
       return;

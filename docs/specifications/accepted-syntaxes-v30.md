@@ -725,6 +725,13 @@ moveTo(
 )
 ```
 
+Positional arguments may be followed by named arguments:
+
+```text
+moveTo(10, y: 20)
+let amount = toNumber(text, default: 0)
+```
+
 Rules:
 
 - Positional arguments fill parameters from left to right.
@@ -732,7 +739,9 @@ Rules:
 - Trailing parameters with defaults may be omitted.
 - To skip an earlier parameter while setting a later one, use named arguments.
 - Named arguments use `name: value`.
-- Positional and named arguments may not be mixed in one call.
+- Positional arguments come first; named arguments may follow them. A positional argument after a named one is an
+  error: `moveTo(x: 10, 20)`.
+- A parameter receives at most one value: naming a parameter that a positional argument already fills is an error.
 - A grammar keyword may still be used as an API field label when it appears in the unambiguous `name:` position of a named argument, object property, or engine configuration block. This permits accepted labels such as `default:`, `repeat:`, and account-operation labels such as `save:` without permitting those words as variable or function identifiers.
 
 ## 11. Function definitions
@@ -873,7 +882,19 @@ toInteger(2.7)   // 2
 toInteger(-2.7)  // -2
 ```
 
-Use `round`, `floor`, or `ceil` when that rounding intent is required explicitly.
+Use `round`, `floor`, or `ceil` when that rounding intent is required explicitly. `round` returns the nearest whole
+number; a value exactly halfway between two whole numbers rounds away from zero. `floor` rounds toward negative
+infinity and `ceil` toward positive infinity, so they have no tie case:
+
+```text
+round(2.4)   // 2
+round(2.5)   // 3
+round(-2.5)  // -3
+round(0.5)   // 1
+round(-0.5)  // -1
+floor(-2.5)  // -3
+ceil(-2.5)   // -2
+```
 
 ## 14. Scope
 **Status:** Accepted
@@ -925,6 +946,14 @@ say door.name
 door.locked = false
 ```
 
+Two objects are equal (`==`) when they have the same property names with equal values, in any property order. A
+property set to `null` differs from a missing property:
+
+```text
+{ name: "door", locked: true } == { locked: true, name: "door" }  // true
+{ name: "door" } == { name: "door", locked: null }                // false
+```
+
 Custom structured type declarations are not required in the initial language. Advanced developers may extend the engine through TypeScript libraries.
 
 ## 16. Lists
@@ -955,11 +984,19 @@ List methods:
 ```text
 items.add("sword")
 items.remove("key")
+items.removeAt(1)
 items.removeFirst()
 items.removeLast()
 items.clear()
 items.sort()
 items.contains("map")
+```
+
+`removeAt`, `removeFirst`, and `removeLast` return the removed element; the result may be ignored:
+
+```text
+let next = tasks.removeAt(0)
+let newest = tasks.removeLast()
 ```
 
 List properties:
@@ -1083,12 +1120,23 @@ let stranger = speakers.random
 
 Runtime behavior:
 
-- An invalid index raises a runtime error rather than returning `null`.
+- An invalid index raises a runtime error rather than returning `null`. The compiler reports an index that it can see
+  is negative or not a whole number, such as `items[-1]` or `items.removeAt(0.5)`.
 - Automatic visible-text selection from an empty list raises a runtime error because no element can be selected.
 - The empty-list error identifies the list expression and explains that the visible-text context requires at least one eligible element.
+- Two lists are equal (`==`) when they have the same length and equal elements in the same order; two sets are equal
+  when they have the same members in any order; two ranges are equal when they are written with the same bounds and
+  the same inclusiveness, so `1..=2 != 1..3` although both produce `1` and `2`. Values of different kinds, such as a
+  list and a set, are never equal. List `contains(value)` and `remove(value)` use this equality, so they also find
+  objects and nested lists; `remove(value)` removes the first equal element. Set elements remain scalar values.
+- The operands of `==` and `!=` are read when they are evaluated, left to right, so a change made while evaluating the
+  right operand does not affect the left one: `items == [items.removeAt(0)]` is `true` for `items = [1]`.
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
-- `removeFirst()` and `removeLast()` on an empty list, and set `remove(value)` of an absent value, are no-ops: the
-  collection stays unchanged and execution continues without an error or warning.
+- `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
+  raises the same runtime error as indexing.
+- `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`.
+- `add(value)`, `remove(value)`, and `clear()` return `null`. Set `remove(value)` of an absent value is a no-op: the
+  set stays unchanged and execution continues without an error or warning.
 - Mutating methods change the existing list.
 - Recoverable index and empty-selection errors follow the runtime recovery rules described later in this document.
 
@@ -1258,6 +1306,7 @@ Supported options:
 - `allowAutocorrect`: `boolean`
 - `allowSpellcheck`: `boolean`
 - `scope`: `"input"` or `"teasePlayer"`
+- `default`: `string`; see [Default answers](#default-answers)
 
 Rules:
 
@@ -1373,6 +1422,43 @@ askDateTime(...)  // datetime
 ```
 
 These inputs use structured date and time controls and do not return unparsed free text. Like the other blocking `ask...` functions, they only complete with a valid value.
+
+### Default answers
+
+Every single-field input accepts an optional named `default:` answer that prefills its field:
+
+```text
+let name = askText("What is your name?", default: "Ada")
+let minutes = askNumber("Corner time?", default: cornerBase + playerLevel)
+let count = askInteger("How many?", default: 10)
+let answer = askBoolean("Continue?", default: true)
+let day = askDate("Which date?", default: getDate())
+```
+
+| Function | `default:` value |
+|---|---|
+| `askText(...)`, `askTyping(...)` | `string` with a non-whitespace character |
+| `askNumber(...)` | `number` or `integer` |
+| `askInteger(...)` | `integer` |
+| `askBoolean(...)` | `boolean` |
+| `askDate(...)`, `askTime(...)`, `askDateTime(...)` | `date`, `time`, and `datetime` respectively |
+
+Rules:
+
+- The input opens with the default as its editable answer, and the player still submits explicitly. A submitted
+  default is an ordinary answer: its result, validation, and transcript text are those of the same answer entered by
+  hand.
+- Clearing the field never falls back to the default; a blank answer is rejected and asked again.
+- The default must be an answer the input accepts. There is no implicit conversion except `integer` to `number`: write
+  `default: "${count}"` to offer a number as text. A non-whole `askInteger` default is an error, never rounded.
+- The compiler rejects a default that it knows is invalid, and its error names the fix. Any other default is checked
+  when the input opens; an invalid one is a runtime error, and the input does not open.
+- `askTyping` applies its `allow...` restrictions to the prefilled text as to typed text.
+- Restoring a checkpoint shows the original default again; edits the player had not submitted are dropped.
+- `choose` has no preselected option: a choice is an explicit decision, and a choice button completes when activated.
+  An author can style the preferred option instead, for example with `background:`. File, folder, image, video, and
+  audio pickers have no prefill because a browser cannot preset a file input. Multi-field inputs keep their
+  `defaults:` lists.
 
 ### File input
 
@@ -1623,14 +1709,25 @@ let elapsed = showButton(
 )
 ```
 
+The elapsed time is a `duration` ([§35](#35-date-time-durations-and-unix-time)), so it is compared with duration
+values:
+
+```text
+let elapsed = showButton("Continue", 5)
+if elapsed < 2 s {
+    say "That was quick."
+}
+```
+
 Rules:
 
-- `timeout` is optional.
+- `timeout` is optional. A bare number counts seconds, as for `wait` and `timer` ([§27](#27-timers)); an elapsed
+  duration such as `500 ms` or `2 min` may also be used. `5` and `5 s` are the same timeout.
 - Without a timeout, the command waits until the user clicks.
 - With a timeout, execution continues after the click or when the timeout is reached.
-- The function returns the actual elapsed waiting time.
+- The function returns the actual elapsed waiting time as a `duration`.
 - If the caller does not need the elapsed time, the return value may be ignored.
-- When the timeout is reached, the returned value equals the timeout.
+- When the timeout is reached, the returned duration equals the timeout; a timeout of `5` returns `5 s`.
 - `showButton` belongs to the core language/runtime API, not specifically to the browser-picker API.
 
 ## 22. Stage image, audio, and video
@@ -2070,9 +2167,9 @@ Rules:
 
 Storage currently supports strings, finite numbers, booleans, lists, objects, sets, ranges, and durations, including
 nested `null`. Wider persistent-data support is not yet implemented; this subset is not a permanent language limit.
-Persisted-value type checking is partially implemented: it currently checks only the stored value in a direct
-`let x: T = load ...` initializer (parentheses around `load` are allowed), not defaults, assignments, arguments, or
-returns. Full `integer`/`number` type preservation is not yet implemented because the runtime represents both as one
+Persisted-value type checking is partially implemented: at runtime it currently checks only the stored value in a
+direct `let x: T = load ...` initializer (parentheses around `load` are allowed), not defaults, assignments, arguments,
+or returns. The compiler rejects a default whose type is known and does not match `T`. Full `integer`/`number` type preservation is not yet implemented because the runtime represents both as one
 number. Replacement-value recovery under [§34](#34-runtime-warnings-and-recoverable-values) is not yet implemented.
 
 Examples:
@@ -3425,6 +3522,7 @@ continue
 and
 or
 not
+set
 true
 false
 null

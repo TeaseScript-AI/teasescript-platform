@@ -134,12 +134,14 @@ export function playerRuntimeForeground(
         kind: "ask-text",
         accessibleName,
         hint: action.ui.hint ?? "Type your response…",
+        ...(action.ui.prefill === undefined ? {} : { prefill: action.ui.prefill }),
       });
     case "number":
       return Object.freeze({
         kind: "ask-number",
         accessibleName,
         hint: action.ui.hint ?? "Type your response…",
+        ...(action.ui.prefill === undefined ? {} : { prefill: action.ui.prefill }),
       });
     case "choice":
       return Object.freeze({

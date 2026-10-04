@@ -10,6 +10,7 @@ import type {
   PreparedInteractionUiPayload,
 } from "../plan/model.js";
 import { parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
+import { isBlankTextAnswer, numberAnswerText } from "../interaction-answers.js";
 import {
   boundedInteractionUtf8ByteLength,
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
@@ -863,9 +864,17 @@ function materializeInteractionUi(
       accessibleName: prepared.accessibleName,
     };
   } else if (prepared.kind === "text" || prepared.kind === "number") {
+    const hint = prepared.hintTemporary === null ? null : readText(prepared.hintTemporary);
+    let prefill: string | undefined;
+    if (prepared.prefillTemporary !== undefined) {
+      const temporary = read(prepared.prefillTemporary);
+      prefill = interactionPrefill(prepared.kind, temporary.value, span);
+      stagedWrites.push({ temporaryId: temporary.id, value: prefill });
+    }
     ui = {
       kind: prepared.kind,
-      hint: prepared.hintTemporary === null ? null : readText(prepared.hintTemporary),
+      hint,
+      ...(prefill === undefined ? {} : { prefill }),
       accessibleName: prepared.accessibleName,
     };
   } else {
@@ -952,6 +961,36 @@ function materializeInteractionUi(
   });
 }
 
+/** The prefill text of a default answer, which must be an answer the field accepts. */
+function interactionPrefill(
+  kind: "text" | "number",
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): string {
+  if (kind === "number") {
+    if (typeof value !== "number" || !Number.isFinite(value))
+      throw fault(
+        "TSR052",
+        "The default answer of askNumber must be a finite number. Ask without 'default:' when there is no number to offer.",
+        span,
+      );
+    return numberAnswerText(value);
+  }
+  if (typeof value !== "string")
+    throw fault(
+      "TSR052",
+      "The default answer of askText must be text. Write the value as text with interpolation: 'default: \"${...}\"'.",
+      span,
+    );
+  if (isBlankTextAnswer(value))
+    throw fault(
+      "TSR052",
+      "The default answer of askText must contain a non-whitespace character. Ask without 'default:' when there is no answer to offer.",
+      span,
+    );
+  return value;
+}
+
 function commitInteractionMaterialization(
   snapshot: RuntimeSnapshot,
   stagedWrites: readonly {
@@ -978,6 +1017,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   if (ui.kind === "button") strings.push(ui.buttonLabel);
   else if (ui.kind === "text" || ui.kind === "number") {
     if (ui.hint !== null) strings.push(ui.hint);
+    if (ui.prefill !== undefined) strings.push(ui.prefill);
   } else {
     for (const option of ui.options) {
       strings.push(option.text);
@@ -1450,7 +1490,12 @@ function cloneInteractionUi(
       ...(ui.background === undefined ? {} : { background: ui.background }),
       accessibleName,
     };
-  return { kind: ui.kind, hint: ui.hint, accessibleName };
+  return {
+    kind: ui.kind,
+    hint: ui.hint,
+    ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
+    accessibleName,
+  };
 }
 
 function cloneInteractionAction(
@@ -1499,7 +1544,7 @@ function executeSayAtomically(
   evaluator: Evaluator,
   events: InterpreterEvent[],
 ): void {
-  const stagedSnapshot = cloneCapturedRuntimeSnapshot(snapshot);
+  const stagedSnapshot = stagingClone(snapshot);
   const stagedEvents: InterpreterEvent[] = [];
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
 
@@ -1527,13 +1572,23 @@ function validateTerminalCompletionCapacityAfterSay(
   assertEventSequenceCapacity(snapshot, requiredEventSequencesForRootCompletion(snapshot), span);
 }
 
+/**
+ * A private clone for atomic staging. Retained settlements are replaced, never changed in place, so the clone shares
+ * the current one instead of copying its recorded UI for every staged output.
+ */
+function stagingClone(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+  const staged = cloneCapturedRuntimeSnapshot({ ...snapshot, lastSettlement: null });
+  staged.lastSettlement = snapshot.lastSettlement;
+  return staged;
+}
+
 function executeSpeakerAtomically(
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
   events: InterpreterEvent[],
   operation: (stagedSnapshot: RuntimeSnapshot, stagedEvaluator: Evaluator) => void,
 ): void {
-  const stagedSnapshot = cloneCapturedRuntimeSnapshot(snapshot);
+  const stagedSnapshot = stagingClone(snapshot);
   const stagedEvents: InterpreterEvent[] = [];
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
 

@@ -1,4 +1,5 @@
 import { isNormalizedOpaqueColor, normalizeOpaqueColor } from "../color.js";
+import { isValidInteractionPrefill } from "../interaction-answers.js";
 import { capturedChoicePresentation } from "./interaction-presentation.js";
 import { isOneOf } from "../plan/validation-support.js";
 import { isMessagePresentation } from "../message-presentation.js";
@@ -1291,7 +1292,11 @@ function preparedInteractionUiMatchesAction(
       prepared.hintTemporary === null
         ? null
         : runtimeTemporaryValue(temporaries, prepared.hintTemporary);
-    return hint === actual.hint;
+    const prefill =
+      prepared.prefillTemporary === undefined
+        ? undefined
+        : runtimeTemporaryValue(temporaries, prepared.prefillTemporary);
+    return hint === actual.hint && prefill === actual.prefill;
   }
   const raw = runtimeTemporaryValue(temporaries, prepared.optionsTemporary);
   if (
@@ -1370,7 +1375,7 @@ function validInteractionUiShape(
     kind === "button"
       ? ["kind", "buttonLabel", "accessibleName", ...("background" in value ? ["background"] : [])]
       : kind === "text" || kind === "number"
-        ? ["kind", "hint", "accessibleName"]
+        ? ["kind", "hint", "accessibleName", ...("prefill" in value ? ["prefill"] : [])]
         : ["kind", "labelType", "options", "accessibleName"];
   if (!hasExactKeys(value, expectedUiKeys)) return false;
   let aggregate = 0;
@@ -1422,7 +1427,12 @@ function validInteractionUiShape(
     );
   }
   if (kind === "text" || kind === "number") {
-    return (value.hint === null || count(value.hint)) && !measurementExhausted;
+    return (
+      (value.hint === null || count(value.hint)) &&
+      (!("prefill" in value) ||
+        (count(value.prefill) && isValidInteractionPrefill(kind, value.prefill))) &&
+      !measurementExhausted
+    );
   }
   if (
     !Array.isArray(value.options) ||
@@ -1481,7 +1491,8 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
   } else if (actual.accessibleName.key !== expected.accessibleName.key) return false;
   if (expected.kind === "button")
     return actual.buttonLabel === expected.buttonLabel && actual.background === expected.background;
-  if (expected.kind === "text" || expected.kind === "number") return actual.hint === expected.hint;
+  if (expected.kind === "text" || expected.kind === "number")
+    return actual.hint === expected.hint && actual.prefill === expected.prefill;
   if (expected.kind !== "choice") return false;
   if (actual.labelType !== expected.labelType) return false;
   if (!Array.isArray(actual.options)) return false;
@@ -1587,6 +1598,7 @@ function validSettlementKindData(
       "completionEventSequence",
       "result",
       "transcriptText",
+      "ui",
     ])
   )
     return false;
@@ -1599,6 +1611,13 @@ function validSettlementKindData(
     !positiveSafeInteger(settlement.completionEventSequence) ||
     settlement.requestEventSequence >= settlement.transcriptEventSequence ||
     settlement.transcriptEventSequence >= settlement.completionEventSequence
+  )
+    return false;
+  const interactionKind = settlement.interactionKind;
+  if (
+    !isInteractionKind(interactionKind) ||
+    !validInteractionUiShape(interactionKind, settlement.ui) ||
+    !settlementMatchesPresentedUi(settlement)
   )
     return false;
   const settlementInstruction =
@@ -1676,23 +1695,61 @@ function validSettlementKindData(
     !validInteractionSettlementOwner(settlement, snapshot, analysis)
   )
     return false;
-  if ("preparedUi" in instruction) {
-    return preparedInteractionSettlementMatches(
-      instruction.preparedUi,
-      settlement.result,
-      settlement.transcriptText,
-      Array.isArray(snapshot.temporaries) ? snapshot.temporaries : [],
+  return "preparedUi" in instruction
+    ? preparedUiFitsPresentedUi(instruction.preparedUi, settlement.ui)
+    : interactionUiEqual(instruction.ui, settlement.ui);
+}
+
+function isInteractionKind(value: unknown): value is "button" | "text" | "number" | "choice" {
+  return isOneOf(value, ["button", "text", "number", "choice"]);
+}
+
+/**
+ * The settled transcript and result must be what the recorded UI offered. The settlement carries that UI because the
+ * instruction's prepared temporaries are cleared after completion and may be prepared anew by a later run.
+ */
+function settlementMatchesPresentedUi(settlement: Record<string, unknown>): boolean {
+  const ui = settlement.ui;
+  if (!isPlainRecord(ui)) return false;
+  if (ui.kind === "button") return settlement.transcriptText === ui.buttonLabel;
+  if (ui.kind !== "choice") return true;
+  return (
+    Array.isArray(ui.options) &&
+    ui.options.some(
+      (option) =>
+        isPlainRecord(option) &&
+        option.text === settlement.transcriptText &&
+        (option.label ?? option.text) === settlement.result,
+    )
+  );
+}
+
+/** The recorded UI has the shape the prepared instruction produces: kind, accessible name, labels, and option count. */
+function preparedUiFitsPresentedUi(
+  prepared: import("../plan/model.js").PreparedInteractionUiPayload,
+  ui: unknown,
+): boolean {
+  if (
+    !isPlainRecord(ui) ||
+    ui.kind !== prepared.kind ||
+    !accessibleNameEqual(prepared.accessibleName, ui.accessibleName)
+  )
+    return false;
+  if (prepared.kind === "button")
+    return "background" in ui === (prepared.backgroundTemporary !== undefined);
+  if (prepared.kind === "text" || prepared.kind === "number")
+    return (
+      (ui.hint === null) === (prepared.hintTemporary === null) &&
+      "prefill" in ui === (prepared.prefillTemporary !== undefined)
     );
-  }
-  if (instruction.ui.kind === "button")
-    return settlement.transcriptText === instruction.ui.buttonLabel;
-  if (instruction.ui.kind === "text") return settlement.result === settlement.transcriptText;
-  if (instruction.ui.kind === "number") return true;
-  if (instruction.ui.kind !== "choice") return false;
-  return instruction.ui.options.some(
-    (option) =>
-      option.text === settlement.transcriptText &&
-      (option.label ?? option.text) === settlement.result,
+  if (
+    ui.labelType !== prepared.labelType ||
+    !Array.isArray(ui.options) ||
+    ui.options.length !== prepared.optionCount
+  )
+    return false;
+  return ui.options.every(
+    (option, index) => isPlainRecord(option) && option.label === (prepared.labels?.[index] ?? null),
   );
 }
 
@@ -1772,47 +1829,6 @@ function validNonTimePacingSettlementChronology(
     settlement.completedAtMs <= settlement.deadlineMs &&
     settlement.completedAtMs <= snapshot.currentSessionTimeMs
   );
-}
-
-function preparedInteractionSettlementMatches(
-  prepared: import("../plan/model.js").PreparedInteractionUiPayload,
-  result: unknown,
-  transcriptText: string,
-  temporaries: readonly unknown[],
-): boolean {
-  if (prepared.kind === "button") {
-    const label = runtimeTemporaryValue(temporaries, prepared.buttonLabelTemporary);
-    return label === undefined || label === transcriptText;
-  }
-  if (prepared.kind === "text") return result === transcriptText;
-  if (prepared.kind === "number") return true;
-
-  const labels = prepared.labelType === "none" ? null : prepared.labels;
-  if (prepared.labelType === "identifier") {
-    if (typeof result !== "string" || labels?.includes(result) !== true) return false;
-  } else if (prepared.labelType === "number") {
-    if (typeof result !== "number" || labels?.includes(result) !== true) return false;
-  } else if (result !== transcriptText) {
-    return false;
-  }
-
-  const raw = runtimeTemporaryValue(temporaries, prepared.optionsTemporary);
-  if (raw === undefined) return true;
-  if (
-    !isPlainRecord(raw) ||
-    raw.kind !== "list" ||
-    !Array.isArray(raw.items) ||
-    raw.items.length !== prepared.optionCount
-  )
-    return false;
-  return raw.items.some((value, index) => {
-    const presentation = capturedChoicePresentation(value);
-    return (
-      presentation !== null &&
-      presentation.text === transcriptText &&
-      (labels?.[index] ?? presentation.text) === result
-    );
-  });
 }
 
 function validInteractionSettlementOwner(
