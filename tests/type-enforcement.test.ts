@@ -41,7 +41,7 @@ test("integer values widen to number, but not the reverse", () => {
     mismatches("let ratio: number = 3\nratio = 2\nratio = ratio / 4\nratio += 1"),
     [],
   );
-  assert.deepEqual(mismatches("let count = 10\ncount = count / 4"), [
+  assert.deepEqual(mismatches("let count: integer = 10\ncount = count / 4"), [
     [
       "TSV041",
       "'count' holds a whole number (integer), so it cannot be set to a number. Round it with floor(...), round(...), or ceil(...), or declare it as 'let count: number = ...'.",
@@ -57,9 +57,70 @@ test("integer values widen to number, but not the reverse", () => {
   ]);
 });
 
+test("an unannotated integer variable is a number when one of its assignments can store a non-whole number", () => {
+  assert.deepEqual(sayTexts("let speed = 1\nspeed = speed * 1.5\nsay speed"), ["1.5"]);
+  assert.deepEqual(sayTexts("let total = 0\ntotal += 0.5\nsay total"), ["0.5"]);
+  assert.deepEqual(
+    sayTexts('let items = ["a", "b"]\nlet count = 0\ncount += 1\nsay items[count]'),
+    ["b"],
+  );
+  // The variable is a number everywhere, also before the assignment, so an integer-only use names that assignment.
+  assert.deepEqual(mismatches("let items = [1, 2]\nlet i = 0\nsay items[i]\ni = i / 2"), [
+    [
+      "TSV043",
+      "A list index must be a whole number (integer), but this is a number. 'i' is a number because line 4 can store a non-whole number in it. Round it with floor(...), round(...), or ceil(...).",
+      "i",
+    ],
+  ]);
+  assert.deepEqual(mismatches("let speed = 1\nlet steps: integer = speed\nspeed = speed * 1.5"), [
+    [
+      "TSV041",
+      "'steps' is declared as integer, so it cannot start as a number. 'speed' is a number because line 3 can store a non-whole number in it. Round it with floor(...), round(...), or ceil(...), or declare it as 'let steps: number = ...'.",
+      "speed",
+    ],
+  ]);
+  for (const [source, use] of [
+    ["let items = [1, 2]\nlet i = 1\ni = i * 0.5\nlet x = items.removeAt(i)", "i"],
+    ['let n = 2\nn = n / 2\nrepeat n {\n    say "x"\n}', "n"],
+    ["let items = [1]\nlet x = null\nx = 0\nx = 0.5\nsay items[x]", "x"],
+    ["let items = [1]\nfor i in [0] {\n    i = i / 2\n    say items[i]\n}", "i"],
+  ] as const)
+    assert.deepEqual(codes(source), [["TSV043", use]], source);
+  // A variable that takes another widened variable widens too, wherever the assignment is checked.
+  assert.deepEqual(codes("let b = 0\nlet a = 1\na = a / 2\nb = a\nlet k: integer = b"), [
+    ["TSV041", "b"],
+  ]);
+  assert.deepEqual(
+    codes(
+      "let speed = 1\nlet k: integer = speed\nfunction faster {\n    speed = speed * 1.5\n}\nfaster()",
+    ),
+    [["TSV041", "speed"]],
+  );
+  // A long chain of copies widens in either order.
+  const names = Array.from({ length: 2_000 }, (_, index) => `v${index}`);
+  const declarations = names.map((name) => `let ${name} = 0`).join("\n");
+  const copies = names.slice(1).map((name, index) => `${names[index]} = ${name} + 1`);
+  for (const order of [copies, [...copies].reverse()])
+    assert.deepEqual(
+      codes(`${declarations}\n${order.join("\n")}\nv1999 = 0.5\nlet k: integer = v0`),
+      [["TSV041", "v0"]],
+    );
+  // Assignments in its body widen a parameter's default, but calls never do; properties and elements keep their type.
+  assert.deepEqual(
+    sayTexts(
+      "function half(times = 1) {\n    times = times / 2\n    return times\n}\nsay half(3)\nsay half(2.5)",
+    ),
+    ["1.5", "1.25"],
+  );
+  assert.deepEqual(codes("function f(times = 1) {\n    return times\n}\nlet r = f(2.5)"), [
+    ["TSV041", "2.5"],
+  ]);
+  assert.deepEqual(codes("let o = { n: 1 }\no.n = 1.5"), [["TSV041", "1.5"]]);
+});
+
 test("compound assignment keeps the variable's type", () => {
   assert.deepEqual(mismatches("let count = 1\ncount += 2\ncount -= 1"), []);
-  assert.deepEqual(mismatches("let count = 1\ncount += 0.5"), [
+  assert.deepEqual(mismatches("let count: integer = 1\ncount += 0.5"), [
     [
       "TSV041",
       "'count' holds a whole number (integer), so '+=' cannot make it a number. Round it with floor(...), round(...), or ceil(...), or declare it as 'let count: number = ...'.",
@@ -388,7 +449,7 @@ test("a function's result type comes from its return values, and returns of diff
   ]);
   assert.deepEqual(
     codes(
-      "function fact(n: integer): integer {\n    if n <= 1 {\n        return 1\n    }\n    return n * fact(n - 1)\n}\nlet x = fact(5)\nx = 2.5",
+      "function fact(n: integer): integer {\n    if n <= 1 {\n        return 1\n    }\n    return n * fact(n - 1)\n}\nlet x: integer = fact(5)\nx = 2.5",
     ),
     [["TSV041", "2.5"]],
   );
@@ -854,9 +915,9 @@ test("a loop that may end through continue can still reach the function's end", 
 });
 
 test("a choice result has the type of its values, and an option without a written value returns itself", () => {
-  assert.deepEqual(codes("let n = choose [5, 10, 15]\nn = 2.5"), [["TSV041", "2.5"]]);
+  assert.deepEqual(codes("let n: integer = choose [5, 10, 15]\nn = 2.5"), [["TSV041", "2.5"]]);
   assert.deepEqual(codes("let n = choose 5, 10\nn = 20"), []);
-  assert.deepEqual(codes("let n = choose set[5, 10]\nn = 2.5"), [["TSV041", "2.5"]]);
+  assert.deepEqual(codes("let n: integer = choose set[5, 10]\nn = 2.5"), [["TSV041", "2.5"]]);
   // An empty list or set gives no buttons, so its written value is never the result.
   assert.deepEqual(codes('let n: integer = choose 1.5: [], 2: ["Only"]'), []);
   assert.deepEqual(codes('let n: integer = choose 1.5: set[], 2: ["Only"]'), []);

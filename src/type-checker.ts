@@ -3,7 +3,9 @@ import type {
   Block,
   CallExpression,
   Expression,
+  ForStatement,
   FunctionDeclaration,
+  FunctionParameter,
   Identifier,
   LetStatement,
   MediaParts,
@@ -56,6 +58,7 @@ import {
   typeFromAnnotation,
   typeName,
   UNKNOWN_TYPE,
+  widenedType,
   type StaticType,
 } from "./static-types.js";
 
@@ -84,15 +87,31 @@ const typeCode = {
  * name resolves; a value it cannot know has the type `unknown` and is never rejected.
  */
 export function checkTypes(program: Program, options: TypeCheckOptions = {}): TypeCheckResult {
-  const checker = new TypeChecker(options);
-  checker.check(program);
-  return Object.freeze({ diagnostics: Object.freeze([...checker.diagnostics]) });
+  // An integer variable is a number when one of its assignments can store a non-whole number, also an assignment
+  // after its uses (rule 1.2). A check that finds a new one starts again with that variable declared as a number, so
+  // the last check, which finds none, sees every variable with its final type and alone reports.
+  const widened: Widened = new Map();
+  for (;;) {
+    const checker = new TypeChecker(options, widened);
+    checker.check(program);
+    if (!checker.widenedMore)
+      return Object.freeze({ diagnostics: Object.freeze([...checker.diagnostics]) });
+    checker.widenFollowers();
+  }
 }
+
+/** The declaration of a variable without a type annotation: `let`, a parameter with a default, or a loop variable. */
+type Declaration = LetStatement | FunctionParameter | ForStatement;
+
+/** The variables that one of their assignments gives a non-whole number, with the first such assignment. */
+type Widened = Map<Declaration, SourceSpan>;
 
 /** A variable and the type it keeps. Open slots and object property tables inside `type` record later decisions. */
 interface Variable {
   readonly name: string;
   readonly type: StaticType;
+  /** For a variable without a type annotation, its declaration, so a non-whole number can widen its integer type. */
+  readonly declaration?: Declaration | undefined;
 }
 
 /**
@@ -165,6 +184,8 @@ interface FunctionContext {
 /** A place that keeps a type, and the words that describe it in a mismatch message. */
 interface Place {
   readonly type: StaticType;
+  /** For a variable without a type annotation, its declaration: a non-whole number widens it instead of failing. */
+  readonly declaration?: Declaration | undefined;
   /** The source spelling of the place, such as `items` or `door.locked`, when it has one. */
   readonly label: string | null;
   /** For the elements of a collection, the collection's spelling, so element properties can be named. */
@@ -210,7 +231,39 @@ class TypeChecker {
   /** The variable names of unannotated `let` statements by initializer, for messages that suggest a declaration. */
   readonly #declaredBy = new Map<Expression, string>();
 
-  public constructor(options: TypeCheckOptions) {
+  /** Whether this check found a variable to widen that earlier checks did not. */
+  widenedMore = false;
+
+  /** Widens every variable that follows a widened one (see {@link #followers}). */
+  public widenFollowers(): void {
+    const pending = [...this.#widened.keys()];
+    while (pending.length > 0)
+      for (const { declaration, at } of this.#followers.get(pending.pop()!) ?? []) {
+        if (this.#widened.has(declaration)) continue;
+        this.#widened.set(declaration, at);
+        pending.push(declaration);
+      }
+  }
+
+  readonly #widened: Widened;
+
+  /** Reads of widened variables, with the assignment that widened them, for messages about integer-only uses. */
+  readonly #widenedReads = new Map<Expression, SourceSpan>();
+
+  /** The declarations of the variables that identifier expressions read. */
+  readonly #reads = new Map<Expression, Declaration>();
+
+  /**
+   * For each integer variable, the integer variables that store its value, directly or through arithmetic, with where:
+   * when it widens, they widen too, without one more check per step of a chain.
+   */
+  readonly #followers = new Map<
+    Declaration,
+    { readonly declaration: Declaration; readonly at: SourceSpan }[]
+  >();
+
+  public constructor(options: TypeCheckOptions, widened: Widened) {
+    this.#widened = widened;
     this.#builtins = new Set([
       ...CORE_RUNTIME_BUILTINS,
       ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
@@ -378,7 +431,7 @@ class TypeChecker {
         if (isScalar(count, "number"))
           this.#report(
             typeCode.invalidOperand,
-            `A repeat count must be a whole number (integer), but this is ${describeValue(count)}.${ROUND_FIX}.`,
+            `A repeat count must be a whole number (integer), but this is ${describeValue(count)}.${this.#widenedNote(statement.count)}${ROUND_FIX}.`,
             statement.count.span,
           );
         else
@@ -408,11 +461,13 @@ class TypeChecker {
           "A for-loop goes through a list, a set, or a range",
         );
         const loopScope = new Scope(scope);
+        const loopType = element === undefined ? UNKNOWN_TYPE : copyType(element);
         loopScope.declare(statement.variable.name, {
           kind: "variable",
           variable: {
             name: statement.variable.name,
-            type: element === undefined ? UNKNOWN_TYPE : copyType(element),
+            type: this.#widened.has(statement) ? widenedType(loopType) : loopType,
+            declaration: statement,
           },
         });
         this.#loops.push({ broken: false, continued: false });
@@ -457,6 +512,7 @@ class TypeChecker {
     let type: StaticType;
     if (statement.typeAnnotation === null) {
       type = this.#newPlaceType(statement.initializer, value);
+      if (this.#widened.has(statement)) type = widenedType(type);
       if (initializer.kind === "listLiteral" || initializer.kind === "setLiteral")
         this.#declaredBy.set(initializer, name);
     } else {
@@ -477,7 +533,8 @@ class TypeChecker {
         yield* compileChild(this.#storeTask(place, statement.initializer, value));
       }
     }
-    scope.declare(name, { kind: "variable", variable: { name, type } });
+    const declaration = statement.typeAnnotation === null ? statement : undefined;
+    scope.declare(name, { kind: "variable", variable: { name, type, declaration } });
   }
 
   *#assignmentTask(statement: AssignmentStatement, scope: Scope): CompileTask<void> {
@@ -535,6 +592,8 @@ class TypeChecker {
       );
       return;
     }
+    if (this.#widens(place, result, statement.value)) return;
+    this.#follow(place, result, statement.value);
     if (!isAssignable(place.type, result))
       this.#report(
         typeCode.typeMismatch,
@@ -595,8 +654,10 @@ class TypeChecker {
     }
     if (isAssignable(place.type, value)) {
       if (decides) settle(place.type, value, expression.span);
+      this.#follow(place, value, expression);
       return;
     }
+    if (this.#widens(place, value, expression)) return;
     const property = misfitProperty(kept, value);
     if (property !== undefined) {
       this.#report(
@@ -608,9 +669,52 @@ class TypeChecker {
     }
     this.#report(
       typeCode.typeMismatch,
-      `${place.subject}, so it cannot ${place.verb} ${describeValue(value)}.${place.fix(value, expression)}`,
+      `${place.subject}, so it cannot ${place.verb} ${describeValue(value)}.${this.#widenedNote(expression)}${place.fix(value, expression)}`,
       expression.span,
     );
+  }
+
+  /**
+   * Whether storing a value widens an integer variable without a type annotation to a number (rule 1.2). The check then
+   * starts again with the variable declared as a number, so this check reports nothing about the store.
+   */
+  #widens(place: Place, value: StaticType, expression: Expression): boolean {
+    if (place.declaration === undefined) return false;
+    if (!isScalar(nonNullType(place.type), "integer") || !isScalar(nonNullType(value), "number"))
+      return false;
+    if (!this.#widened.has(place.declaration)) {
+      this.#widened.set(place.declaration, expression.span);
+      this.widenedMore = true;
+    }
+    return true;
+  }
+
+  /**
+   * Records that an integer variable stores the value of other integer variables, read directly or through arithmetic
+   * that stays whole only while they do, so it widens together with them.
+   */
+  #follow(place: Place, value: StaticType, expression: Expression): void {
+    if (place.declaration === undefined || !isScalar(nonNullType(value), "integer")) return;
+    const pending = [expression];
+    while (pending.length > 0) {
+      const node = unwrap(pending.pop()!);
+      const source = this.#reads.get(node);
+      if (source !== undefined && source !== place.declaration) {
+        const followers = this.#followers.get(source) ?? [];
+        followers.push({ declaration: place.declaration, at: expression.span });
+        this.#followers.set(source, followers);
+      } else if (node.kind === "binaryExpression" && WHOLE_ARITHMETIC.has(node.operator))
+        pending.push(node.left, node.right);
+      else if (node.kind === "unaryExpression" && node.operator === "-") pending.push(node.operand);
+    }
+  }
+
+  /** Why a variable that a non-whole number widened is a number, naming that assignment, or nothing. */
+  #widenedNote(expression: Expression | null): string {
+    const read = expression === null ? null : unwrap(expression);
+    const at = read === null ? undefined : this.#widenedReads.get(read);
+    if (read?.kind !== "identifier" || at === undefined) return "";
+    return ` '${read.name}' is a number because line ${at.start.line + 1} can store a non-whole number in it.`;
   }
 
   /** The place of a known property, or of a timer or media handle property, which must exist and be assignable. */
@@ -703,7 +807,7 @@ class TypeChecker {
     const scope = new Scope(this.#root);
     // The body works on its own copies, so checking an argument never changes what the body assumes.
     const accepted = parameters.map((parameter) => ({
-      name: parameter.name,
+      ...parameter,
       type: copyType(parameter.type),
     }));
     fn.accepted = accepted;
@@ -781,8 +885,11 @@ class TypeChecker {
       if (parameter.typeAnnotation !== null) type = typeFromAnnotation(parameter.typeAnnotation);
       if (parameter.defaultValue !== null) {
         const value = yield* compileChild(this.#expressionTask(parameter.defaultValue, scope));
-        if (parameter.typeAnnotation === null) type = decidedType(placeType(value));
-        else {
+        // Assignments in the body may widen an integer default, but calls never do (rule 1.5).
+        if (parameter.typeAnnotation === null) {
+          type = decidedType(placeType(value));
+          if (this.#widened.has(parameter)) type = widenedType(type);
+        } else {
           const declared = type;
           yield* compileChild(
             this.#storeTask(
@@ -799,7 +906,11 @@ class TypeChecker {
           );
         }
       }
-      const variable = { name, type };
+      const declaration =
+        parameter.typeAnnotation === null && parameter.defaultValue !== null
+          ? parameter
+          : undefined;
+      const variable = { name, type, declaration };
       parameters.push(variable);
       scope.declare(name, { kind: "variable", variable });
     }
@@ -947,7 +1058,15 @@ class TypeChecker {
       }
       case "identifier": {
         const entry = scope.resolve(expression.name);
-        if (entry?.kind === "variable") return placeRead(entry.variable.type);
+        if (entry?.kind === "variable") {
+          const declaration = entry.variable.declaration;
+          if (declaration !== undefined) {
+            this.#reads.set(expression, declaration);
+            const widened = this.#widened.get(declaration);
+            if (widened !== undefined) this.#widenedReads.set(expression, widened);
+          }
+          return placeRead(entry.variable.type);
+        }
         if (entry?.kind === "speaker" || (entry === undefined && expression.name === "speaker"))
           return { kind: "speaker" };
         return UNKNOWN_TYPE;
@@ -1313,7 +1432,7 @@ class TypeChecker {
     if (isScalar(position, "number"))
       this.#report(
         typeCode.invalidOperand,
-        `A list index must be a whole number (integer), but this is ${describeValue(position)}.${ROUND_FIX}.`,
+        `A list index must be a whole number (integer), but this is ${describeValue(position)}.${this.#widenedNote(expression)}${ROUND_FIX}.`,
         expression.span,
       );
     else
@@ -1717,6 +1836,7 @@ function variablePlace(variable: Variable): Place {
   const type = variable.type;
   return {
     type,
+    declaration: variable.declaration,
     label: name,
     subject: `'${name}' holds ${describeValue(type)}${decidedAt(type)}`,
     verb: "be set to",
@@ -1836,6 +1956,9 @@ function capitalize(text: string): string {
 }
 
 const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
+
+/** Arithmetic whose result is whole when its operands are, and a number when one of them is. */
+const WHOLE_ARITHMETIC: ReadonlySet<string> = new Set(["+", "-", "*", "%"]);
 
 /** Value kinds that `${...}` cannot show. */
 const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([

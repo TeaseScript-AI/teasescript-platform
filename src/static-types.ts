@@ -30,6 +30,8 @@ export interface OpenType {
   resolvedAt: SourceSpan | null;
   /** Whether `null` was stored before the first other value, which then makes the decided type optional. */
   sawNull: boolean;
+  /** Whether an integer decides the slot as a number, for a variable that also takes non-whole numbers. */
+  widens?: boolean;
 }
 
 /**
@@ -272,7 +274,8 @@ function* settleTask(
       return;
     }
     // The first other value decides the type by the `let` rule; an earlier null keeps it optional.
-    const value = yield* compileChild(placeTask(source));
+    const placed = yield* compileChild(placeTask(source));
+    const value = target.widens === true && isScalar(placed, "integer") ? NUMBER_TYPE : placed;
     target.resolved = target.sawNull ? optional(value) : value;
     target.resolvedAt = at;
     return;
@@ -362,6 +365,18 @@ function* placeTask(typeToPlace: StaticType, copy = true): CompileTask<StaticTyp
   if (type.kind === "list" || type.kind === "set")
     return { kind: type.kind, element: yield* compileChild(placeTask(type.element, copy)) };
   return copy ? yield* compileChild(copyTask(type)) : type;
+}
+
+/**
+ * The type of a variable that one of its assignments gives a non-whole number (ADR 0021 rule 1.2): an integer type is a
+ * number, and an undecided slot that an integer decides becomes a number. Call it only on a new place's own type.
+ */
+export function widenedType(type: StaticType): StaticType {
+  const value = resolved(type);
+  if (isScalar(value, "integer")) return NUMBER_TYPE;
+  if (value.kind === "open") value.widens = true;
+  if (value.kind !== "union") return value;
+  return union(value.members.map(widenedType));
 }
 
 /** The type with every undecided part unknown, for a place that no later value may decide, such as a parameter. */

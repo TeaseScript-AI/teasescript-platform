@@ -794,8 +794,9 @@ Rules:
 - An annotated parameter keeps its type; every argument and default must fit it.
 - A parameter with a default but no annotation takes the default's type by the same rule as `let`
   ([§12](#12-variable-declarations)): with `times = 1`, `times` is an `integer`, and a call that passes `0.5` is a compile
-  error that suggests `times: number = 1`. What a default leaves open stays unknown: `null` gives an unknown type,
-  and `[]` a list of elements of unknown type.
+  error that suggests `times: number = 1`. Only an assignment in the body can make it a `number`, by the §12 rule for
+  non-whole numbers. What a default leaves open stays unknown: `null` gives an unknown type, and `[]` a list of
+  elements of unknown type.
 - A parameter without an annotation or a default has an unknown type. Its arguments are not checked, because a
   parameter's type is never inferred from its call sites.
 
@@ -852,6 +853,20 @@ picks.add("three")    // compile error
 
 - A variable that starts as `null` takes the type of its first non-null value and may still hold `null`. The compiler
   infers no other combination of types.
+- A variable without a type whose type is `integer` is a `number` when any of its assignments can store a non-whole
+  number, wherever that assignment is. A declared `integer` stays strict, list or set elements and object properties
+  keep the type of their first value, and an integer-only use of such a variable, such as a list index, `removeAt`, or
+  a repeat count, is a compile error that names the assignment:
+
+  ```text
+  let speed = 1
+  speed = speed * 1.5   // speed is a number, also on the lines above
+  let count = 0
+  count += 1            // count stays an integer
+  let i = 0
+  i = i / 2             // i is a number, so items[i] is a compile error
+  ```
+
 - An empty list or set takes its element type from the first element added or assigned. In a list or set literal,
   integers and numbers together are numbers, and `null` elements make the element type optional.
 - "First" follows checking order: top-level statements in source order, then function bodies that were not yet
@@ -889,7 +904,8 @@ Lists and optional values continue to use `type[]` and `type?`.
 
 `integer` to `number` is the only implicit type conversion: an integer may be stored where a number is expected, and
 arithmetic on an integer and a number gives a number. Literal spelling decides the numeric type: `2` is an `integer`,
-while `2.0`, `.5`, and `1e3` are `number` values.
+while `2.0`, `.5`, and `1e3` are `number` values. A variable without a type that one of its assignments gives a
+non-whole number is a `number` ([§12](#12-variable-declarations)); a declared `integer` is not widened.
 
 ```text
 let ratio: number = 3                 // valid
@@ -1008,8 +1024,8 @@ say door.name
 door.locked = false
 ```
 
-A property keeps the type of its first value, like a variable ([§12](#12-variable-declarations)). Assignment may add a
-property, which then keeps its type:
+A property keeps the type of its first value, like a variable ([§12](#12-variable-declarations)), but an `integer`
+property does not become a `number`. Assignment may add a property, which then keeps its type:
 
 ```text
 door.locked = "yes"    // compile error: locked holds true or false (boolean)
