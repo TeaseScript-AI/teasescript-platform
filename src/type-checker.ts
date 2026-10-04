@@ -3539,15 +3539,16 @@ class TypeChecker {
   }
 
   /**
-   * Reports a value that a set cannot hold: a set holds only text, numbers, true or false, and null (V30 §16). A value
-   * of unknown type is checked when the script runs. Returns whether the value may be held.
+   * Reports a value that a set cannot hold: a set holds only text, numbers, true or false, durations, date and time
+   * values, and null (V30 §16). A value of unknown type is checked when the script runs. Returns whether the value may
+   * be held.
    */
   #checkSetElement(expression: Expression, type: StaticType): boolean {
     const rejected = members(type).find((member) => isKnown(member) && !isSetElement(member));
     if (rejected === undefined) return true;
     this.#report(
       typeCode.invalidSetElement,
-      `A set holds only text, numbers, true or false, or null, so it cannot hold ${describeValue(rejected)}.`,
+      `A set holds only text, numbers, true or false, durations, date and time values, or null, so it cannot hold ${describeValue(rejected)}.`,
       expression.span,
     );
     return false;
