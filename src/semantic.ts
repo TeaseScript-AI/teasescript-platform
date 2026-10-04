@@ -128,6 +128,7 @@ const semanticCode = {
   invalidStorageKey: "TSV038",
   invalidInteractionDefault: "TSV039",
   typeMismatch: "TSV041",
+  invalidListIndex: "TSV045",
 } as const;
 
 export function validateSemantics(
@@ -1007,6 +1008,25 @@ class SemanticValidator {
     this.#validateExpression(target.object, scope, null);
     if (target.kind === "indexExpression") {
       this.#validateExpression(target.index, scope, null);
+      this.#validateListIndex(target.index);
+    }
+  }
+
+  /** Reports a list index the compiler can see is negative, fractional, or not a number. */
+  #validateListIndex(index: Expression): void {
+    const known = staticNumber(index);
+    if (known !== undefined && known < 0) {
+      this.#report(
+        semanticCode.invalidListIndex,
+        "A list index cannot be negative. The first element is at index 0, and the last at length - 1.",
+        index.span,
+      );
+    } else if (known !== undefined ? !Number.isInteger(known) : isDefinitelyNonNumeric(index)) {
+      this.#report(
+        semanticCode.invalidListIndex,
+        "A list index must be a whole number, such as 0 for the first element.",
+        index.span,
+      );
     }
   }
 
@@ -1131,6 +1151,7 @@ class SemanticValidator {
         yield* compileChild(
           this.#validateExpressionTask(expression.index, scope, contextualSpeaker),
         );
+        this.#validateListIndex(expression.index);
         return;
       case "callExpression": {
         const authorFunction =
@@ -1183,6 +1204,14 @@ class SemanticValidator {
           );
         }
         this.#validateAddedElementType(expression, scope);
+        const method = unwrapParentheses(expression.callee);
+        if (
+          method.kind === "propertyAccessExpression" &&
+          method.property.name === "removeAt" &&
+          expression.arguments.length === 1 &&
+          expression.arguments[0]!.kind === "positionalArgument"
+        )
+          this.#validateListIndex(expression.arguments[0]!.value);
         if (
           expression.callee.kind === "identifier" &&
           expression.callee.name === "randomInteger" &&

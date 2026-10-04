@@ -992,6 +992,13 @@ items.sort()
 items.contains("map")
 ```
 
+`removeAt`, `removeFirst`, and `removeLast` return the removed element; the result may be ignored:
+
+```text
+let next = tasks.removeAt(0)
+let newest = tasks.removeLast()
+```
+
 List properties:
 
 ```text
@@ -1113,19 +1120,21 @@ let stranger = speakers.random
 
 Runtime behavior:
 
-- An invalid index raises a runtime error rather than returning `null`.
+- An invalid index raises a runtime error rather than returning `null`. The compiler reports an index that it can see
+  is negative or not a whole number, such as `items[-1]` or `items.removeAt(0.5)`.
 - Automatic visible-text selection from an empty list raises a runtime error because no element can be selected.
 - The empty-list error identifies the list expression and explains that the visible-text context requires at least one eligible element.
 - Two lists are equal (`==`) when they have the same length and equal elements in the same order; two sets are equal
-  when they have the same members in any order; two ranges are equal when they have the same bounds and the same
-  inclusiveness. Values of different kinds, such as a list and a set, are never equal. List `contains(value)` and
-  `remove(value)` use this equality, so they also find objects and nested lists; `remove(value)` removes the first equal
-  element. Set elements remain scalar values.
+  when they have the same members in any order; two ranges are equal when they are written with the same bounds and
+  the same inclusiveness, so `1..=2 != 1..3` although both produce `1` and `2`. Values of different kinds, such as a
+  list and a set, are never equal. List `contains(value)` and `remove(value)` use this equality, so they also find
+  objects and nested lists; `remove(value)` removes the first equal element. Set elements remain scalar values.
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
-- `removeAt(index)` removes the element at a zero-based index and moves later elements forward. Like the other mutating
-  methods, it returns `null`. An invalid index raises the same runtime error as indexing.
-- `removeFirst()` and `removeLast()` on an empty list, and set `remove(value)` of an absent value, are no-ops: the
-  collection stays unchanged and execution continues without an error or warning.
+- `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
+  raises the same runtime error as indexing.
+- `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`.
+- `add(value)`, `remove(value)`, and `clear()` return `null`. Set `remove(value)` of an absent value is a no-op: the
+  set stays unchanged and execution continues without an error or warning.
 - Mutating methods change the existing list.
 - Recoverable index and empty-selection errors follow the runtime recovery rules described later in this document.
 

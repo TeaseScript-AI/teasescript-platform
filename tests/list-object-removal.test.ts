@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { compileSource } from "../src/compiler.js";
 import {
   serializableEquals,
   type SerializableRuntimeValue,
@@ -58,32 +59,50 @@ test("list contains and remove find an object by value", () => {
   );
 });
 
-test("removeAt removes the element at an index and shifts later elements", () => {
+test("removeAt, removeFirst, and removeLast remove and return an element", () => {
   const result = runValidSource(
     [
-      'let items = ["key", { name: "map" }, "potion"]',
-      "items.removeAt(1)",
-      'say "${items.length} ${items[1]}"',
-      "items.removeAt(items.length - 1)",
-      "items.removeAt(0)",
-      'say "${items.length}"',
+      'let tasks = ["wash", "feed", "walk", "sleep", "read"]',
+      "let first = tasks.removeFirst()",
+      "let middle = tasks.removeAt(1)",
+      "let last = tasks.removeLast()",
+      'say "${first} ${middle} ${last} ${tasks[0]} ${tasks[1]}"',
+      "tasks.removeAt(tasks.length - 1)",
+      "tasks.removeFirst()",
+      'say "${tasks.length}"',
+      'let offenses = [{ label: "late" }, { label: "rude" }]',
+      "let picked = offenses.removeAt(1)",
+      'say "${picked.label} ${offenses.length}"',
     ].join("\n"),
   );
   assert.equal(result.snapshot.failure, null);
-  assert.deepEqual(sayTexts(result), ["2 potion", "0"]);
+  assert.deepEqual(sayTexts(result), ["wash walk read feed sleep", "0", "rude 1"]);
 });
 
-test("removeAt rejects an index that indexing would reject", () => {
+test("removal fails at runtime for an invalid index or an empty list", () => {
   const cases = [
     ['let items = ["a"]\nitems.removeAt(1)', "TSR025", "List index 1 is outside the valid range."],
     [
-      'let items = ["a"]\nitems.removeAt(-1)',
+      'let items = ["a"]\nlet index = 0 - 1\nitems.removeAt(index)',
       "TSR025",
       "List index -1 is outside the valid range.",
     ],
     ["let items = []\nitems.removeAt(0)", "TSR025", "List index 0 is outside the valid range."],
-    ['let items = ["a"]\nitems.removeAt(0.5)', "TSR024", "A list index must be an integer."],
-    ['let items = ["a"]\nitems.removeAt("0")', "TSR024", "A list index must be an integer."],
+    [
+      'let items = ["a"]\nlet index = 1 / 2\nitems.removeAt(index)',
+      "TSR024",
+      "A list index must be an integer.",
+    ],
+    [
+      "let items = []\nitems.removeFirst()",
+      "TSR018",
+      "Cannot call removeFirst() on an empty list. Check that the list's length is above 0 first.",
+    ],
+    [
+      'let items = ["a"]\nitems.removeLast()\nlet gone = items.removeLast()',
+      "TSR018",
+      "Cannot call removeLast() on an empty list. Check that the list's length is above 0 first.",
+    ],
     [
       'let items = ["a"]\nitems.removeAt()',
       "TSR028",
@@ -97,18 +116,59 @@ test("removeAt rejects an index that indexing would reject", () => {
   }
 });
 
+test("the compiler reports a list index it can see is invalid", () => {
+  const negative =
+    "TSV045 A list index cannot be negative. The first element is at index 0, and the last at length - 1.";
+  const fractional = "TSV045 A list index must be a whole number, such as 0 for the first element.";
+  const cases = [
+    ["items.removeAt(-1)", negative],
+    ["items.removeAt(0.5)", fractional],
+    ['items.removeAt("0")', fractional],
+    ["say items[-1]", negative],
+    ["say items[1 / 2]", fractional],
+    ["items[-(1)] = 2", negative],
+    ["items.removeAt(1.0)", null],
+  ] as const;
+  for (const [statement, expected] of cases) {
+    const diagnostics = compileSource(`let items = [1]\n${statement}`).diagnostics;
+    assert.deepEqual(
+      diagnostics.map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`),
+      expected === null ? [] : [expected],
+      statement,
+    );
+  }
+});
+
+test("a removed element has the static type of the list's elements", () => {
+  const cases = [
+    'let next = [1, 2].removeFirst()\nnext = "x"',
+    "let last: string = [1, 2].removeLast()",
+    'let items = [1]\nitems.add(["x"].removeAt(0))',
+  ];
+  for (const source of cases) {
+    assert.deepEqual(
+      compileSource(source).diagnostics.map((diagnostic) => diagnostic.code),
+      ["TSV041"],
+      source,
+    );
+  }
+});
+
 test("removal by value and position is checkpoint and resume equivalent", () => {
   assertRuntimeResumeEquivalent(
     [
       "let offenses = [",
       '    { label: "late", text: "I was late" },',
       '    { label: "rude", text: "I was rude" },',
-      '    { label: "lazy", text: "I was lazy" }',
+      '    { label: "lazy", text: "I was lazy" },',
+      '    { label: "loud", text: "I was loud" }',
       "]",
       'offenses.remove({ label: "rude", text: "I was rude" })',
       'say "${offenses.length}"',
-      "offenses.removeAt(0)",
-      'say "${offenses[0].label} ${offenses == [{ text: "I was lazy", label: "lazy" }]}"',
+      "let gone = offenses.removeAt(0)",
+      "let newest = offenses.removeLast()",
+      'say "${gone.label} ${newest.label} ${offenses == [{ text: "I was lazy", label: "lazy" }]}"',
+      'say "${offenses.removeFirst().label} ${offenses.length}"',
     ].join("\n"),
   );
 });

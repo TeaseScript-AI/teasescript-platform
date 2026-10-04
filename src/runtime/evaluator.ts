@@ -1126,11 +1126,8 @@ export class Evaluator {
         case "remove": {
           expect(1);
           const index = this.#findValue(receiver.items, positional[0]!);
-          if (index >= 0) {
-            const rebased = preparePreparedReferencesForListRemoval(this.snapshot, receiver, index);
-            receiver.items.splice(index, 1);
-            refreshPreparedReferenceFallbacks(this.snapshot, rebased);
-          } else {
+          if (index >= 0) this.#removeListItem(receiver, index);
+          else {
             this.#warn(
               "TSW002",
               "list.remove(value) found no matching value; the list was left unchanged.",
@@ -1143,32 +1140,21 @@ export class Evaluator {
           expect(1);
           const index = this.#index(positional[0]!, span);
           this.#assertIndex(receiver, index, span);
-          const rebased = preparePreparedReferencesForListRemoval(this.snapshot, receiver, index);
-          receiver.items.splice(index, 1);
-          refreshPreparedReferenceFallbacks(this.snapshot, rebased);
-          return null;
+          return this.#removeListItem(receiver, index);
         }
         case "removeFirst":
-          expect(0);
-          if (receiver.items.length > 0) {
-            const rebased = preparePreparedReferencesForListRemoval(this.snapshot, receiver, 0);
-            receiver.items.shift();
-            refreshPreparedReferenceFallbacks(this.snapshot, rebased);
-          }
-          return null;
         case "removeLast":
           expect(0);
-          if (receiver.items.length > 0) {
-            const removedIndex = receiver.items.length - 1;
-            const rebased = preparePreparedReferencesForListRemoval(
-              this.snapshot,
-              receiver,
-              removedIndex,
+          if (receiver.items.length === 0)
+            throw fault(
+              "TSR018",
+              `Cannot call ${name}() on an empty list. Check that the list's length is above 0 first.`,
+              span,
             );
-            receiver.items.pop();
-            refreshPreparedReferenceFallbacks(this.snapshot, rebased);
-          }
-          return null;
+          return this.#removeListItem(
+            receiver,
+            name === "removeFirst" ? 0 : receiver.items.length - 1,
+          );
         case "clear":
           expect(0);
           if (receiver.items.length > 0) {
@@ -1479,6 +1465,14 @@ export class Evaluator {
         call.span,
       );
     }
+  }
+
+  /** Removes one list element, rebasing or freezing prepared references into the list, and returns it. */
+  #removeListItem(list: SerializableRuntimeList, index: number): SerializableRuntimeValue {
+    const rebased = preparePreparedReferencesForListRemoval(this.snapshot, list, index);
+    const removed = list.items.splice(index, 1)[0]!;
+    refreshPreparedReferenceFallbacks(this.snapshot, rebased);
+    return removed;
   }
 
   #findValue(items: readonly SerializableRuntimeValue[], value: SerializableRuntimeValue): number {
