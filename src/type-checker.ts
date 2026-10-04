@@ -10,7 +10,6 @@ import type {
   InteractionExpression,
   LetStatement,
   MediaParts,
-  ObjectLiteral,
   Program,
   ScalarTypeName,
   ShowButtonParts,
@@ -347,14 +346,6 @@ class TypeChecker {
 
   readonly #functions: FunctionType[] = [];
   /**
-   * For each variable declared with an exact value whose name nothing in the script assigns, changes, or tests, the
-   * literals that value is one of: values are copied, so the variable always holds what they build, and no test keeps
-   * them from code that reads it (ADR 0021 rule 1.8).
-   */
-  readonly #exactLiterals = new WeakMap<Variable, readonly Expression[]>();
-  /** For each identifier that reads such a variable, its literals. */
-  readonly #exactReads = new Map<Expression, readonly Expression[]>();
-  /**
    * The names of the script's top-level `let` variables and speakers, which function bodies may use before they are
    * declared.
    */
@@ -383,12 +374,7 @@ class TypeChecker {
   #flow = new Flow();
 
   /** What functions, blocks, and loops may change, collected before checking. */
-  #effects: ProgramEffects = {
-    shared: new Set(),
-    assigned: new Set(),
-    tested: new Set(),
-    loops: new Map(),
-  };
+  #effects: ProgramEffects = { shared: new Set(), loops: new Map() };
 
   /** Whether the statement being checked can run; a `break` after a `return` does not end its loop. */
   #reachable = true;
@@ -913,11 +899,6 @@ class TypeChecker {
       annotated: statement.typeAnnotation !== null,
     };
     if (statement.typeAnnotation === null) this.#declared.set(statement, variable);
-    const exact =
-      this.#effects.assigned.has(name) || this.#effects.tested.has(name)
-        ? undefined
-        : this.#exactValues(initializer);
-    if (exact !== undefined) this.#exactLiterals.set(variable, exact);
     scope.declare(name, { kind: "variable", variable });
     this.#assigned(variable, value);
   }
@@ -2021,12 +2002,7 @@ class TypeChecker {
       }
       case "identifier": {
         const entry = scope.resolve(expression.name);
-        this.#exactReads.delete(expression);
-        if (entry?.kind === "variable") {
-          const literals = this.#exactLiterals.get(entry.variable);
-          if (literals !== undefined) this.#exactReads.set(expression, literals);
-          return placeRead(this.#currentType(entry.variable));
-        }
+        if (entry?.kind === "variable") return placeRead(this.#currentType(entry.variable));
         if (entry?.kind === "speaker" || (entry === undefined && expression.name === "speaker"))
           return { kind: "speaker" };
         return UNKNOWN_TYPE;
@@ -3115,30 +3091,6 @@ class TypeChecker {
   }
 
   /** The type of `object.name`; every member of a union must have the property (ADR 0021 rule 3.5). */
-  /**
-   * The object, list, or dict literals that an exact value is one of: such a literal, what a variable that keeps an exact
-   * value holds (see {@link #exactLiterals}), or a property, element, or dict value of an exact value that is such a
-   * literal itself. `undefined` for any other value, which may lack a property it was built with, or have others (ADR
-   * 0021 rule 1.8).
-   */
-  #exactValues(expression: Expression): readonly Expression[] | undefined {
-    // The properties and elements read, from the value back to its variable or literal, walked without recursion.
-    const steps: Expression[] = [];
-    let node = unwrap(expression);
-    while (node.kind === "propertyAccessExpression" || node.kind === "indexExpression") {
-      steps.push(node);
-      node = unwrap(node.object);
-    }
-    let values = isExactLiteral(node)
-      ? [node]
-      : node.kind === "identifier"
-        ? this.#exactReads.get(node)
-        : undefined;
-    for (let index = steps.length - 1; index >= 0 && values !== undefined; index -= 1)
-      values = exactParts(values, steps[index]!);
-    return values;
-  }
-
   #propertyType(
     object: StaticType,
     expression: Extract<Expression, { kind: "propertyAccessExpression" }>,
@@ -3159,25 +3111,6 @@ class TypeChecker {
       }
     }
     const all = members(object);
-    // An exact object never gets a property its literals do not write. Its type has the properties they write, unless a
-    // written type such as `object` hides them.
-    const lacking = all.some((member) => {
-      const value = resolved(member);
-      return (
-        value.kind === "unknown" ||
-        value.kind === "open" ||
-        (value.kind === "object" && value.properties?.has(name) !== true)
-      );
-    });
-    const exact = lacking ? this.#exactValues(expression.object) : undefined;
-    if (
-      exact?.every((literal) => literal.kind === "objectLiteral" && !writesProperty(literal, name))
-    )
-      this.#report(
-        typeCode.invalidOperand,
-        `An object has no property '${name}'.`,
-        expression.property.span,
-      );
     const types = all.map((member) => memberPropertyType(member, name));
     const passing = all.filter((_, index) => types[index] !== undefined);
     if (passing.length === all.length) {
@@ -3402,7 +3335,7 @@ class TypeChecker {
         // The list or set is checked like any other: its elements share one type (ADR 0021 rule 1.3).
         yield* compileChild(this.#expressionTask(option.expression, scope));
         for (const element of content.elements) {
-          const value = this.#choiceEntry(element, this.#typeOf(element), true, written !== null);
+          const value = this.#choiceEntry(element, this.#typeOf(element), true);
           if (written === null) add(value, buttonLiteral(element));
         }
         // An empty list or set gives no buttons, so its written value is never returned.
@@ -3430,16 +3363,12 @@ class TypeChecker {
                 option.expression.span,
               ),
           );
-        // The text of a computed collection's choice objects that are not one exact list is checked by their type.
-        if (
-          !parts.some((part) => part.kind === "list") ||
-          !this.#checkExactChoiceList(option.expression, written !== null)
-        )
-          for (const part of parts)
-            if (part.kind === "list" || part.kind === "set")
-              for (const element of members(part.element).map(resolved))
-                if (element.kind === "object" && element.properties !== null)
-                  this.#checkChoiceText(option.expression, element.properties);
+        // A computed collection's choice objects may lack any property but text, whose known type must be shown.
+        for (const part of parts)
+          if (part.kind === "list" || part.kind === "set")
+            for (const element of members(part.element).map(resolved))
+              if (element.kind === "object" && element.properties !== null)
+                this.#checkChoiceText(option.expression, element.properties);
         const results = parts.map((part) => {
           const button =
             part.kind === "list" || part.kind === "set" ? resolved(part.element) : part;
@@ -3457,12 +3386,7 @@ class TypeChecker {
       }
       if (isKnown(value)) buttons += 1;
       // The option is kept as it was evaluated: a later option may still change the place it was read from.
-      const entry = this.#choiceEntry(
-        option.expression,
-        this.#capture(option.expression),
-        false,
-        written !== null,
-      );
+      const entry = this.#choiceEntry(option.expression, this.#capture(option.expression), false);
       add(written ?? entry, written === null ? buttonLiteral(option.expression) : writtenValue);
     }
     if (buttons > MAX_INTERACTION_OPTION_ENTRIES)
@@ -3507,7 +3431,7 @@ class TypeChecker {
    * Checks what gives one button: a value, or a choice object `{ value?, text, background? }` whose value, else its
    * text, the button returns. Returns that value's type; a computed choice object's value is not known.
    */
-  #choiceEntry(entry: Expression, type: StaticType, inList: boolean, written = false): StaticType {
+  #choiceEntry(entry: Expression, type: StaticType, inList: boolean): StaticType {
     const value = resolved(nonNullType(type));
     // A button comes from a value or a choice object; a list or set gives buttons only as a whole option.
     const accepted = (member: StaticType): boolean => {
@@ -3528,20 +3452,10 @@ class TypeChecker {
     if (rejected) return UNKNOWN_TYPE;
     const literal = unwrap(entry);
     if (literal.kind !== "objectLiteral") {
-      // An exact value's literals decide where the type may still be an object, also when a written type such as
-      // `object` hides what they hold; a test that narrowed the type to another kind keeps them from reaching here.
-      const exact = mayBeKind(type, "object") ? this.#exactValues(entry) : undefined;
-      const literals = exact?.filter(isObjectLiteral);
-      if (literals !== undefined && literals.length === exact!.length)
-        this.#checkExactChoiceObjects(entry, literals, written);
-      else {
-        for (const member of members(nonNullType(type)).map(resolved))
-          if (member.kind === "object" && member.properties !== null)
-            this.#checkChoiceText(entry, member.properties);
-        // A known list or set is checked as a computed collection; one whose type is hidden may still be an exact list.
-        if (!inList && mayBeKind(type, "list") && !members(type).some(isCollectionOption))
-          this.#checkExactChoiceList(entry, written);
-      }
+      // A computed choice object may lack any property but text, whose known type must be shown.
+      for (const member of members(nonNullType(type)).map(resolved))
+        if (member.kind === "object" && member.properties !== null)
+          this.#checkChoiceText(entry, member.properties);
       return value.kind === "object" ? UNKNOWN_TYPE : type;
     }
     let returned: StaticType = UNKNOWN_TYPE;
@@ -3555,7 +3469,7 @@ class TypeChecker {
         this.#checkMembers(property.value, propertyType, isShowable, () =>
           this.#report(
             typeCode.invalidInteractionChoice,
-            CHOICE_VALUE_MESSAGE,
+            "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
             property.value.span,
           ),
         );
@@ -3566,87 +3480,10 @@ class TypeChecker {
     return returned;
   }
 
-  /**
-   * When an option is one exact list of choice objects, each element gives a button, so each is checked by its literal.
-   * Returns whether it is one.
-   */
-  #checkExactChoiceList(expression: Expression, written: boolean): boolean {
-    const lists = this.#exactValues(expression);
-    const elements =
-      lists?.length === 1 && lists[0]!.kind === "listLiteral" ? lists[0]!.elements.map(unwrap) : [];
-    if (elements.length === 0 || !elements.every(isObjectLiteral)) return false;
-    for (const element of elements) this.#checkExactChoiceObjects(expression, [element], written);
-    return true;
-  }
-
   /** A choice object's text that cannot be shown fails whether it is there or missing, so its type alone decides. */
   #checkChoiceText(expression: Expression, table: PropertyTable): void {
     const text = table.get("text");
     if (text !== undefined) this.#checkShownText(expression, text, "the text of a choice option");
-  }
-
-  /**
-   * The choice objects that an exact value may be (ADR 0021 rule 1.8), checked as the runtime checks them when the
-   * choice opens, each by its literal: only value, text, and background, a text that can be shown, a value a button can
-   * return, and a background. A problem is reported when every one of them has it.
-   */
-  #checkExactChoiceObjects(
-    expression: Expression,
-    literals: readonly ObjectLiteral[],
-    written: boolean,
-  ): void {
-    const others = literals.map((literal) =>
-      literal.properties.find((property) => !CHOICE_OBJECT_PROPERTIES.has(property.name.name)),
-    );
-    if (others.every((other) => other !== undefined)) {
-      const names = [...new Set(others.map((other) => `'${other!.name.name}'`))];
-      this.#report(
-        typeCode.invalidInteractionChoice,
-        `Choice objects support value, text, and background only, not ${names.join(" or ")}.`,
-        expression.span,
-      );
-      return;
-    }
-    const all = (name: string) =>
-      literals.map((literal) => literal.properties.find((property) => property.name.name === name));
-    const texts = all("text");
-    if (texts.every((text) => text === undefined))
-      this.#report(
-        typeCode.invalidInteractionChoice,
-        'A choice object requires text, as in { text: "Go", value: 1 }.',
-        expression.span,
-      );
-    else if (
-      texts.every((text) => text !== undefined && fails(this.#typeOf(text.value), isShowable))
-    )
-      this.#checkShownText(
-        expression,
-        this.#typeOf(texts[0]!.value),
-        "the text of a choice option",
-      );
-    const values = all("value");
-    if (values.every((value) => value !== undefined)) {
-      if (written)
-        this.#report(
-          typeCode.invalidInteractionChoice,
-          "This choice option has two values, one before ':' and one in its value property. Keep one.",
-          expression.span,
-        );
-      else if (values.every((value) => fails(this.#typeOf(value!.value), isShowable)))
-        this.#report(typeCode.invalidInteractionChoice, CHOICE_VALUE_MESSAGE, expression.span);
-    }
-    const background = (member: StaticType): boolean =>
-      isScalar(member, "string") || resolved(member).kind === "null";
-    if (
-      all("background").every(
-        (property) => property !== undefined && fails(this.#typeOf(property.value), background),
-      )
-    )
-      this.#report(
-        typeCode.invalidInteractionChoice,
-        "Expected an opaque CSS button background colour.",
-        expression.span,
-      );
   }
 
   /** `${...}` shows a value, or one element of a list; a known value it cannot show is an error. */
@@ -3794,7 +3631,6 @@ class TypeChecker {
     return true;
   }
 
-  /** Only `${...}` selects from a list; a list in a text field is an error, at runtime when it is not known here. */
   /**
    * A speaker property that the runtime checks when it is set: `defaultSaySkippable` is true or false. A name part is
    * shown as text; the runtime checks that it is text only when it prepares the speaker's messages.
@@ -3811,6 +3647,7 @@ class TypeChecker {
       this.#checkShownText(expression, type, `the speaker's ${name}`);
   }
 
+  /** Only `${...}` selects from a list; a list in a text field is an error, at runtime when it is not known here. */
   #checkShownText(expression: Expression, type: StaticType, field: string): void {
     this.#checkMembers(expression, type, isShowable, (member) =>
       member.kind === "list"
@@ -4399,13 +4236,6 @@ const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
 interface ProgramEffects {
   /** Names that function bodies and timer or media blocks assign. */
   readonly shared: ReadonlySet<string>;
-  /** Names that any assignment or list or set change in the program stores into. */
-  readonly assigned: ReadonlySet<string>;
-  /**
-   * Names whose value, or a part of it, a type test, comparison, or `switch` examines, with the names of variables
-   * declared from them and those they are declared from: code behind such a test may never get their value.
-   */
-  readonly tested: ReadonlySet<string>;
   /** The effects of each loop, by its body; a `while` loop includes its condition. */
   readonly loops: ReadonlyMap<Block, LoopEffects>;
 }
@@ -4427,14 +4257,6 @@ type EffectWork =
  */
 function programEffects(program: Program): ProgramEffects {
   const shared = new Set<string>();
-  const assigned = new Set<string>();
-  const examined = new Set<string>();
-  /** For each variable declared from another name's value or a part of it, that name. */
-  const declaredFrom: [string, string][] = [];
-  const examine = (expression: Expression): void => {
-    const root = rootName(expression);
-    if (root !== null) examined.add(root);
-  };
   const nodes: LoopNode[] = [];
   const work: EffectWork[] = [];
   const enter = (
@@ -4459,14 +4281,6 @@ function programEffects(program: Program): ProgramEffects {
     const { loop, inside } = item;
     if ("expression" in item) {
       const expression = item.expression;
-      if (expression.kind === "typeTestExpression") examine(expression.value);
-      if (
-        expression.kind === "binaryExpression" &&
-        (expression.operator === "==" || expression.operator === "!=")
-      ) {
-        examine(expression.left);
-        examine(expression.right);
-      }
       if (
         loop !== null &&
         (expression.kind === "interactionExpression" ||
@@ -4484,7 +4298,6 @@ function programEffects(program: Program): ProgramEffects {
       ) {
         const root = rootName(callee.object);
         if (root !== null) {
-          assigned.add(root);
           if (inside) shared.add(root);
           loop?.assigned.add(root);
         }
@@ -4494,17 +4307,11 @@ function programEffects(program: Program): ProgramEffects {
       continue;
     }
     const statement = item.statement;
-    if (statement.kind === "switchStatement") examine(statement.subject);
-    if (statement.kind === "letStatement") {
-      const root = rootName(statement.initializer);
-      if (root !== null) declaredFrom.push([statement.name.name, root]);
-    }
     if (loop !== null && SUSPENDING_STATEMENTS.has(statement.kind)) loop.suspends = true;
     if (statement.kind === "assignmentStatement") {
       // A store into an element or property changes the variable that holds it, too.
       const root = rootName(statement.target);
       if (root !== null) {
-        assigned.add(root);
         if (inside) shared.add(root);
         loop?.assigned.add(root);
       }
@@ -4541,33 +4348,10 @@ function programEffects(program: Program): ProgramEffects {
   }
   return {
     shared,
-    assigned,
-    tested: linkedNames(examined, declaredFrom),
     loops: new Map(
       nodes.map((node) => [node.body, { assigned: node.assigned, suspends: node.suspends }]),
     ),
   };
-}
-
-/** The names linked to any of `names` through pairs of names, in either direction. */
-function linkedNames(
-  names: ReadonlySet<string>,
-  pairs: readonly (readonly [string, string])[],
-): ReadonlySet<string> {
-  const neighbours = new Map<string, string[]>();
-  for (const [first, second] of pairs) {
-    neighbours.set(first, [...(neighbours.get(first) ?? []), second]);
-    neighbours.set(second, [...(neighbours.get(second) ?? []), first]);
-  }
-  const linked = new Set(names);
-  const pending = [...names];
-  while (pending.length > 0)
-    for (const next of neighbours.get(pending.pop()!) ?? [])
-      if (!linked.has(next)) {
-        linked.add(next);
-        pending.push(next);
-      }
-  return linked;
 }
 
 /** Methods that change the list or set they are called on. */
@@ -5363,82 +5147,6 @@ const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([
   ["randomInteger", INTEGER_TYPE],
   ["escapeMarkup", STRING_TYPE],
 ]);
-
-/** What a choice value may be, written or held in a choice object's value property. */
-const CHOICE_VALUE_MESSAGE =
-  "A choice value must be text, a number, true, false, null, a duration, or a date or time value.";
-
-/** Whether an expression is an object, list, or dict literal, whose value an exact value may be. */
-function isExactLiteral(expression: Expression): boolean {
-  return (
-    expression.kind === "objectLiteral" ||
-    expression.kind === "listLiteral" ||
-    expression.kind === "dictLiteral"
-  );
-}
-
-/**
- * The literals that a property, element, or dict value read from exact literals may be, or `undefined` when one of them
- * is not such a literal.
- */
-function exactParts(
-  owners: readonly Expression[],
-  step: Expression,
-): readonly Expression[] | undefined {
-  const parts: Expression[] = [];
-  for (const owner of owners) {
-    if (step.kind === "propertyAccessExpression" && owner.kind === "objectLiteral") {
-      const property = owner.properties.find(
-        (candidate) => candidate.name.name === step.property.name,
-      );
-      if (property === undefined) return undefined;
-      parts.push(unwrap(property.value));
-    } else if (step.kind === "indexExpression" && owner.kind === "listLiteral")
-      // An element may be any of the list's elements, and a dict value any of the dict's values.
-      parts.push(...owner.elements.map(unwrap));
-    else if (step.kind === "indexExpression" && owner.kind === "dictLiteral")
-      parts.push(...owner.entries.map((entry) => unwrap(entry.value)));
-    else return undefined;
-  }
-  return parts.length > 0 && parts.every(isExactLiteral) ? parts : undefined;
-}
-
-/** Whether a value of this type certainly fails a test: it is known, and none of its members passes. */
-function fails(type: StaticType, accepts: (member: StaticType) => boolean): boolean {
-  const known = members(type).filter(isKnown);
-  return known.length > 0 && !known.some(accepts);
-}
-
-/**
- * Whether a value of this type may be of a kind: a member is of it, or is not known yet. `never`, what remains of a
- * type without its null, is no value at all.
- */
-function mayBeKind(type: StaticType, kind: "object" | "list"): boolean {
-  return members(type).some((member) => {
-    const value = resolved(member);
-    return value.kind === kind || value.kind === "unknown" || value.kind === "open";
-  });
-}
-
-/** Whether a member of an option's type is a list or set, whose elements give the buttons. */
-function isCollectionOption(member: StaticType): boolean {
-  const value = resolved(member);
-  return value.kind === "list" || value.kind === "set";
-}
-
-function isObjectLiteral(expression: Expression): expression is ObjectLiteral {
-  return expression.kind === "objectLiteral";
-}
-
-/** Whether an object literal writes a property. */
-function writesProperty(literal: Expression, name: string): boolean {
-  return (
-    isObjectLiteral(literal) && literal.properties.some((property) => property.name.name === name)
-  );
-}
-
-/** The properties a choice object may have. */
-const CHOICE_OBJECT_PROPERTIES: ReadonlySet<string> = new Set(["value", "text", "background"]);
 
 /** Speaker properties shown as text: the display name and the parts it is derived from. */
 const SPEAKER_TEXT_PROPERTIES: ReadonlySet<string> = new Set([

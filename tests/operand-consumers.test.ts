@@ -52,130 +52,26 @@ test("built-ins with fixed arguments check their number and names", () => {
   assert.equal(says('let roll = randomInteger(1..=6)\nsay "${chance(50) or roll > 0}"').length, 1);
 });
 
-/**
- * The sources that give an exact object (ADR 0021 rule 1.8): a variable, also with a written type, an element, and a
- * property that keep a literal, also where a written type hides what the parent holds.
- */
-const EXACT = [
-  SOURCES[1]!,
-  (value: string, use: string) => `let held: object = ${value}\n${use.replaceAll("@", "held")}`,
-  SOURCES[3]!,
-  SOURCES[4]!,
-  (value: string, use: string) =>
-    `let box: object = { part: ${value} }\n${use.replaceAll("@", "box.part")}`,
-];
-
-test("a choice object that is not written in the option is checked by its known properties", () => {
-  for (const [value, message] of [
-    ["{ value: 1 }", "requires text"],
-    ["{ text: [1], value: 1 }", "A list cannot be the text"],
-    ['{ text: "A", value: [1] }', "A choice value must be"],
-    ['{ text: "A", extra: 1 }', "value, text, and background only"],
-  ] as const)
-    for (const source of [
-      ...EXACT.map((wrap) => wrap(value, "let answer = choose @")),
-      `let options = [${value}]\nlet answer = choose options`,
-      `let box: object = { options: [${value}] }\nlet answer = choose box.options`,
-    ]) {
-      const diagnostics = compileSource(source).diagnostics;
-      assert.ok(
-        diagnostics.some((diagnostic) => diagnostic.message.includes(message)),
-        `${source}\n${JSON.stringify(diagnostics)}`,
-      );
-    }
+test("a computed choice object's text that cannot be shown is an error", () => {
+  // The object may lack any other property when the choice opens, which the runtime checks (ADR 0021 rule 1.8); a text
+  // of a known type that cannot be shown fails whether it is there or missing.
+  for (const source of SOURCES.slice(1).map((wrap) =>
+    wrap("{ text: [1], value: 1 }", "let answer = choose @"),
+  ))
+    assert.ok(
+      errors(source).some(([code]) => code === "TSV040"),
+      `${source}\n${JSON.stringify(errors(source))}`,
+    );
   assert.deepEqual(
-    errors('let option = { text: "A", value: 1 }\nlet answer = choose k: option').map(
+    errors("let options = [{ text: [1], value: 1 }]\nlet answer = choose options").map(
       ([code]) => code,
     ),
-    ["TSV029"],
-  );
-  // An element may be any of its list's elements: each may fail in its own way, or one alone.
-  assert.deepEqual(
-    errors(
-      'let options = [{ text: "A", x: 1 }, { text: "B", y: 1 }]\nlet answer = choose options[0]',
-    ),
-    [["TSV029", "options[0]"]],
-  );
-  // A valid computed choice object, and properties that a store adds later or may not add at all, still compile.
-  for (const source of [
-    'let options = [{ text: "A", value: 1 }]\nlet answer = choose options',
-    'let options = [{ text: "A", value: null }, { text: "B", value: [1] }]\nlet answer = choose options[0]',
-    'let lists = [[{ text: "A" }], [{ text: "B", value: [1] }]]\nlet answer = choose lists[0]',
-    'let option = { value: 1 }\ntimer async 1 s {\n    option.text = "late"\n}\nwait 2 s\nlet answer = choose option',
-    'let option = { text: "A" }\nif false {\n    option.value = [1]\n}\nlet answer = choose option',
-    'function pick(option = { value: 1 }) {\n    let answer = choose option\n}\npick({ text: "A", value: 1 })',
-  ])
-    assert.deepEqual(errors(source), [], source);
-  // Code behind a test of a value, of a part of it, or of a copy may never get it, so its literals are not checked there.
-  const tested = (value: string, test: string, option = "part") =>
-    `let box: object = { part: ${value} }\nlet part = box.part\nif ${test} {\n    let answer = choose ${option}\n}\nsay "done"`;
-  for (const source of [
-    tested("{ value: 1 }", "part is integer"),
-    tested("[{ value: 1 }]", "part is set"),
-    tested("[{ value: 1 }]", "part is null"),
-    tested("[{ value: 1 }]", "part is integer[]"),
-    tested("[{ value: 1 }]", "part is not object[]"),
-    tested("[{ value: 1 }]", "box.part is integer[]", "box.part"),
-    'let part: object[] = [{ value: 1 }, { value: "x" }]\nif part is integer[] {\n    let answer = choose part\n}\nsay "done"',
-    'let part = [{ value: 1 }]\nlet copy = part\nif copy is integer[] {\n    let answer = choose part\n}\nsay "done"',
-    'let box: object = { part: [{ value: 1 }] }\nlet part = box.part\nif part is integer[] {\n    let copy: list = part\n    let answer = choose copy\n}\nsay "done"',
-  ])
-    assert.deepEqual(says(source), ["done"], source);
-});
-
-test("a property that an exact object never gets is an error where it is read", () => {
-  for (const source of EXACT.map((wrap) => wrap("{ a: 1 }", "say @.missing")))
-    assert.deepEqual(errors(source), [["TSV043", "missing"]], source);
-  // A store adds a property wherever it runs: later in a loop, in a timer block, or in a function. A parameter may
-  // get an argument with more properties than its default.
-  assert.deepEqual(
-    says(
-      'let box = { a: 1 }\nrepeat 2 {\n    if box.a > 1 {\n        say "${box.b}"\n    }\n    box.a = 2\n    box.b = 3\n}',
-    ),
-    ["3"],
-  );
-  for (const source of [
-    'let box = { a: 1 }\ntimer async 1 s {\n    box.b = 2\n}\nwait 2 s\nsay "${box.b}"',
-    'let box = { a: 1 }\nfunction add {\n    box.b = 2\n}\nadd()\nsay "${box.b}"',
-    'function read(record = {}) {\n    return record.item\n}\nsay "${read({ item: 1 })}"',
-  ])
-    assert.deepEqual(errors(source), [], source);
-  // A test that narrows a hidden exact value to another type keeps its literals from a copy taken there.
-  assert.deepEqual(
-    says(
-      'let box: object = { part: dict{ k: { a: 1 } } }\nlet part = box.part\nif part is integer dict {\n    let copy: dict = part\n    say copy["k"].missing\n}\nsay "done"',
-    ),
-    ["done"],
+    ["TSV040"],
   );
   assert.deepEqual(
-    says(
-      'let part: object dict = dict{ a: { a: 1 }, b: { a: "x" } }\nif part is integer dict {\n    let copy: dict = part\n    say copy["a"].missing\n}\nsay "done"',
-    ),
-    ["done"],
+    errors('let options = [{ text: "A", value: 1 }]\nlet answer = choose options'),
+    [],
   );
-});
-
-test("an object that the script stores into, or that a parameter or an unknown value brings, keeps any properties", () => {
-  // A whole object replaces the value, also in a timer block, after a copy, or as one of several possible objects.
-  for (const source of [
-    'let option = { text: "A", value: [1] }\noption = { text: "B" }\nlet answer = choose option',
-    'let option = { text: "A" }\nlet other = { text: "B", value: [1] }\nif false {\n    option = other\n}\nlet answer = choose option',
-    'let option = { text: "A", value: [1] }\ntimer async 1 s {\n    option = { text: "B" }\n}\nwait 2 s\nlet answer = choose option',
-    'let option = { text: "A", value: [1] }\nfunction copy {\n    return option\n}\nif false {\n    let ignored = copy()\n}\noption = { text: "B" }\nlet answer = choose copy()',
-    'let option = { text: "A", value: [1] }\nlet table = dict{ k: { text: "B" } }\noption = table.get("k", default: { text: "C" })\nlet answer = choose option',
-  ])
-    assert.deepEqual(errors(source), [], source);
-  // A dict parameter's objects, and a value the compiler cannot know, may have more properties than it knows, also when
-  // a later store decides the place's type or the place is copied first.
-  const dynamic = "function dynamic(value) {\n    return value\n}\n";
-  for (const source of [
-    'function read(table = dict{ a: {} }) {\n    say table["a"].b\n}\nread(dict{ a: { b: 1 } })',
-    `${dynamic}let items = []\nitems.add(dynamic({ b: 1 }))\nif false {\n    items.add({ a: 1 })\n}\nsay items[0].b`,
-    `${dynamic}let box = null\nbox = dynamic({ b: 1 })\nif false {\n    box = { a: 1 }\n}\nif box != null {\n    say box.b\n}`,
-    `${dynamic}let box = {}\nbox = dynamic({ inner: { b: 1 } })\nif false {\n    box.inner = { a: 1 }\n}\nsay box.inner.b`,
-    `${dynamic}let items = []\nfunction read {\n    let copy = items\n    if false {\n        copy.add({ a: 1 })\n    }\n    say copy[0].b\n}\nif false {\n    read()\n}\nitems.add(dynamic({ b: 1 }))\nread()`,
-  ])
-    assert.deepEqual(says(source), ["1"], source);
 });
 
 test("join checks the element type of a computed list", () => {
