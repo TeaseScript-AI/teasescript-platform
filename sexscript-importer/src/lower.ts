@@ -23,6 +23,7 @@ import {
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { enforceVariableTypes, functionResultTypes, type TeaseType } from "./variable-types.ts";
 import type { ProposalId } from "./proposals.ts";
+import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
   BOOLEAN,
@@ -94,6 +95,10 @@ export interface LowerOptions {
   renameIdentifiers?: boolean;
   /** Proposed language changes to emit in their working syntax instead of reporting the construct. */
   proposals?: ReadonlySet<ProposalId>;
+  /** Accepted forms to emit instead of their workarounds in implemented TeaseScript (workarounds.ts). */
+  accepted?: ReadonlySet<AcceptedForm>;
+  /** The package's images, which a legacy image count reads at conversion time. */
+  media?: readonly MediaFile[];
   /** How the script and the modules it loads use their maps (packageMapUses); without it, the file decides. */
   mapUses?: MapUses;
   /** Legacy result types of the functions of the script and its modules (packageFunctionResults). */
@@ -178,6 +183,9 @@ interface LowerContext {
   /** Assignment targets being lowered, which are written rather than read. */
   writeTargets: Set<AstNode>;
   proposals: ReadonlySet<ProposalId>;
+  accepted: ReadonlySet<AcceptedForm>;
+  /** Null without the package's images. */
+  media: readonly MediaFile[] | null;
   /**
    * Whether a read of a name nothing assigns is reported. Only with package context: a file converted alone, such
    * as a mixin module, reads names that other package files define.
@@ -787,6 +795,8 @@ export function lowerParsedFile(
     knownKeys: [],
     writeTargets: new Set(),
     proposals: options.proposals ?? new Set(),
+    accepted: options.accepted ?? new Set(),
+    media: options.media ?? null,
     checksUndefinedVariables: options.packageFunctions !== undefined,
   };
   if (file.diagnostics.length > 0 || file.root === null) {
@@ -1227,6 +1237,8 @@ function lowerHelperMethod(
     knownKeys: [],
     writeTargets: new Set(),
     proposals: baseContext.proposals,
+    accepted: baseContext.accepted,
+    media: baseContext.media,
     checksUndefinedVariables: baseContext.checksUndefinedVariables,
     currentFunction: {
       name,
@@ -3933,11 +3945,11 @@ function lowerCallStatement(
       return [{ kind: "showButton", label, timeout: legacyTimeout ?? timeout, span }];
     }
     case "showPopup":
-      return oneArgumentStatement(args, context, node, (message) => ({
-        kind: "showPopup",
-        message,
-        span,
-      }));
+      return oneArgumentStatement(args, context, node, (message) =>
+        popupStatements(message, span, context),
+      );
+    case "useUrl":
+      return oneArgumentStatement(args, context, node, (url) => urlStatements(url, span, context));
     case "setImage":
       if (args.length !== 1)
         return [
@@ -7320,6 +7332,9 @@ function lowerObjectMethodCallExpression(
   if (context.proposals.has("media-tags")) {
     const proposed = proposedImageCount(node, name, argumentsNodes, context);
     if (proposed !== undefined) return proposed;
+  } else if (context.media !== null) {
+    const counted = conversionTimeImageCount(node, name, argumentsNodes, context, context.media);
+    if (counted !== undefined) return counted;
   }
   if (targetNode !== null && isDictionary(targetNode, context)) {
     const operation = dictOperation(node, targetNode, name, argumentsNodes, context);
@@ -8636,17 +8651,22 @@ function isKnownMapExpression(node: AstNode, context: LowerContext): boolean {
 }
 
 /**
- * `new File(folder).listFiles()`, optionally filtered by file name, then `.size()`, over a package image folder as a
- * proposed tag count (media-tags, M1): every folder below `images/` is a tag of the images it holds (matched without
- * regard to case), so `images/Domme3/Domme${pack}/` counts images tagged `Domme3` and `Domme<pack>`. Tags cannot
- * filter by file name, so a name filter is dropped with a note. Returns undefined for other shapes.
+ * A legacy count of the images in a package folder, `new File("images/...").listFiles()` with an optional
+ * `.findAll { it.name ==~ /pattern/ }` before `.size()`: the folders below `images/` as lowered text and value parts,
+ * and the name filter. Returns null when a part cannot be lowered and undefined for other shapes.
  */
-function proposedImageCount(
+function imageListing(
   node: AstNode,
   name: string,
   argumentsNodes: AstNode[],
   context: LowerContext,
-): IrExpression | null | undefined {
+):
+  | {
+      segments: Array<Array<{ text: string } | { value: IrExpression }>>;
+      nameFilter: AstNode | null;
+    }
+  | null
+  | undefined {
   if (name !== "size" || argumentsNodes.length !== 0) return undefined;
   let receiver = asNode(node.object);
   const filter = receiver === null ? null : callParts(receiver);
@@ -8678,10 +8698,10 @@ function proposedImageCount(
   }
   const pathArguments = nodeArray(asNode(file.arguments)?.items);
   if (pathArguments.length !== 1) return undefined;
-  const segments = imagePathSegments(pathArguments[0]!);
-  if (segments === null || segments.length === 0) return undefined;
-  const tags: IrExpression[] = [];
-  for (const segment of segments) {
+  const pathSegments = imagePathSegments(pathArguments[0]!);
+  if (pathSegments === null || pathSegments.length === 0) return undefined;
+  const segments: Array<Array<{ text: string } | { value: IrExpression }>> = [];
+  for (const segment of pathSegments) {
     const parts: Array<{ text: string } | { value: IrExpression }> = [];
     for (const part of segment) {
       if ("text" in part) {
@@ -8692,13 +8712,29 @@ function proposedImageCount(
       if (value === null) return null;
       parts.push({ value });
     }
-    tags.push(templateOrLiteral(parts));
+    segments.push(parts);
   }
+  return { segments, nameFilter };
+}
+
+/**
+ * The proposed tag count (media-tags, M1) of a legacy image count (imageListing): every folder below `images/` is a
+ * tag of the images it holds (matched without regard to case), so `images/Domme3/Domme${pack}/` counts images tagged
+ * `Domme3` and `Domme<pack>`. Tags cannot filter by file name, so a name filter is dropped with a note.
+ */
+function proposedImageCount(
+  node: AstNode,
+  name: string,
+  argumentsNodes: AstNode[],
+  context: LowerContext,
+): IrExpression | null | undefined {
+  const listing = imageListing(node, name, argumentsNodes, context);
+  if (listing === null || listing === undefined) return listing;
   addDiagnostic(
     context,
     "SX_IMAGE_COUNT",
     "warning",
-    nameFilter === null
+    listing.nameFilter === null
       ? "The legacy count listed every entry directly in the folder; the proposed tag count counts the images tagged with the folder names, including images in subfolders."
       : "The legacy count included only files directly in the folder whose names matched a pattern; the proposed tag count counts every image tagged with the folder names, including images in subfolders.",
     node.span,
@@ -8707,8 +8743,96 @@ function proposedImageCount(
     kind: "call",
     name: "countImages",
     positional: [],
-    named: { tags: { kind: "list", items: tags } },
+    named: {
+      tags: { kind: "list", items: listing.segments.map((parts) => templateOrLiteral(parts)) },
+    },
   };
+}
+
+/**
+ * A legacy image count (imageListing) as the number of images of the package, counted when it is converted, since the
+ * player cannot list package folders: a number for a fixed folder, and for a folder that depends on values, a dict of
+ * the matching folders' counts read with the folder's lower-case path. A name filter whose pattern is literal text
+ * applies at conversion time.
+ */
+function conversionTimeImageCount(
+  node: AstNode,
+  name: string,
+  argumentsNodes: AstNode[],
+  context: LowerContext,
+  media: readonly MediaFile[],
+): IrExpression | null | undefined {
+  const listing = imageListing(node, name, argumentsNodes, context);
+  if (listing === null || listing === undefined) return listing;
+  const pattern =
+    listing.nameFilter === null ? null : namePattern(asNode(listing.nameFilter.right));
+  if (listing.nameFilter !== null && pattern === null) return undefined;
+  const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const folderPattern = new RegExp(
+    `^${listing.segments
+      .map((parts) => parts.map((part) => ("text" in part ? escape(part.text) : "[^/]*")).join(""))
+      .join("/")}$`,
+    "iu",
+  );
+  const counts = new Map<string, number>();
+  for (const file of media) {
+    const slash = file.path.replaceAll("\\", "/").lastIndexOf("/");
+    const folder = slash < 0 ? "" : file.path.replaceAll("\\", "/").slice(0, slash);
+    const fileName = file.path.replaceAll("\\", "/").slice(slash + 1);
+    if (!folderPattern.test(folder)) continue;
+    const key = folder.toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + (pattern === null || pattern.test(fileName) ? 1 : 0));
+  }
+  addDiagnostic(
+    context,
+    "SX_IMAGE_COUNT_WORKAROUND",
+    "warning",
+    "Workaround for counting package images, which TeaseScript cannot list: the images of each folder were counted at conversion time, so images added to the package later are not counted, and only image files count. Tag the images (findImages, V30 §41) or update the counts when the package changes.",
+    node.span,
+  );
+  const fixed = listing.segments.every((parts) => parts.every((part) => "text" in part));
+  if (fixed) {
+    const folder = listing.segments
+      .map((parts) => parts.map((part) => ("text" in part ? part.text : "")).join(""))
+      .join("/")
+      .toLowerCase();
+    return { kind: "literal", value: counts.get(folder) ?? 0 };
+  }
+  const path = templateOrLiteral(
+    listing.segments.flatMap((parts, index) => (index === 0 ? parts : [{ text: "/" }, ...parts])),
+  );
+  return {
+    kind: "methodCall",
+    target: {
+      kind: "object",
+      dict: true,
+      properties: [...counts]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([folder, count]) => ({
+          name: folder,
+          key: { kind: "literal", value: folder },
+          value: { kind: "literal", value: count },
+        })),
+    },
+    name: "get",
+    arguments: [
+      { kind: "methodCall", target: path, name: "lowercase", arguments: [] },
+      { kind: "literal", value: 0 },
+    ],
+    dict: true,
+  };
+}
+
+/** A Groovy name pattern whose regular expression is literal text, as a whole-name JavaScript pattern. */
+function namePattern(node: AstNode | null): RegExp | null {
+  const source = node === null ? null : constantString(node);
+  if (source === null) return null;
+  const insensitive = source.startsWith("(?i)");
+  try {
+    return new RegExp(`^(?:${insensitive ? source.slice(4) : source})$`, insensitive ? "iu" : "u");
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -9154,7 +9278,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       }
       context.prelude.push(
         { kind: "let", name: start, value: seconds, span: node.span },
-        { kind: "showPopup", message, span: node.span },
+        ...popupStatements(message, node.span, context),
       );
       return {
         kind: "binary",
@@ -9194,19 +9318,28 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       };
     }
     case "getBooleans":
-      return args.length === 3
-        ? {
-            kind: "call",
-            name: "askBooleans",
-            positional: [],
-            named: { message: args[0]!, texts: args[1]!, defaults: args[2]! },
-          }
-        : unsupportedExpression(
-            context,
-            node,
-            "SX_BOOLEANS_ARITY",
-            "getBooleans() must have exactly three arguments.",
-          );
+      if (args.length !== 3)
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_BOOLEANS_ARITY",
+          "getBooleans() must have exactly three arguments.",
+        );
+      if (context.accepted.has("askBooleans"))
+        return {
+          kind: "call",
+          name: "askBooleans",
+          positional: [],
+          named: { message: args[0]!, texts: args[1]!, defaults: args[2]! },
+        };
+      addDiagnostic(
+        context,
+        "SX_ASK_BOOLEANS_WORKAROUND",
+        "warning",
+        "Workaround for askBooleans(), which main does not implement yet: one yes/no choice per item, the preset marked, and a confirmation that can start over. Switch back to askBooleans(message:, texts:, defaults:) when it is implemented.",
+        node.span,
+      );
+      return useHelper(context, "askBooleans", args);
     case "showButton": {
       // Legacy returned the seconds until the click; TeaseScript returns the elapsed duration (V30 §21, #531).
       const legacyTimeout =
@@ -9246,10 +9379,57 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
             "showButton() must have one or two arguments.",
           );
     }
-    case "useUrl":
-      return args.length === 1
-        ? { kind: "call", name: "openUrl", positional: args, named: {} }
-        : unsupportedExpression(context, node, "SX_URL_ARITY", "useUrl() must have one argument.");
+    case "useUrl": {
+      if (args.length !== 1)
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_URL_ARITY",
+          "useUrl() must have one argument.",
+        );
+      if (context.accepted.has("openUrl"))
+        return { kind: "call", name: "openUrl", positional: args, named: {} };
+      // Legacy useUrl returned nothing; the link and its button run before the statement.
+      context.prelude.push(...urlStatements(args[0]!, node.span, context));
+      return { kind: "literal", value: null };
+    }
+    case "getFile": {
+      if (args.length !== 1)
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_CALL_ARITY",
+          "getFile() must have one argument.",
+        );
+      if (context.accepted.has("chooseFile")) {
+        addDiagnostic(
+          context,
+          "SX_FILE_TITLE",
+          "warning",
+          "getFile() titled its file chooser with this message; chooseFile() has no title.",
+          node.span,
+        );
+        return { kind: "call", name: "chooseFile", positional: [], named: {} };
+      }
+      // As when the player cancels the chooser: the legacy result was null.
+      addDiagnostic(
+        context,
+        "SX_CHOOSE_FILE_WORKAROUND",
+        "warning",
+        "Workaround for chooseFile(), which main does not implement yet: the script continues as if the player cancelled the file chooser, with null. Switch back to chooseFile() when it is implemented.",
+        node.span,
+      );
+      if (!pushPrompt(context, node, call.arguments[0]!, args[0]!)) return null;
+      context.prelude.push({
+        kind: "say",
+        value: {
+          kind: "literal",
+          value: "(Choosing a file is not available here, so none was chosen.)",
+        },
+        span: node.span,
+      });
+      return { kind: "literal", value: null };
+    }
     case "getString":
     case "getInteger":
     case "getFloat":
@@ -9631,7 +9811,7 @@ function oneArgumentStatement(
   args: AstNode[],
   context: LowerContext,
   node: AstNode,
-  build: (value: IrExpression) => IrStatement,
+  build: (value: IrExpression) => IrStatement | IrStatement[],
 ): IrStatement[] {
   if (args.length !== 1)
     return [unsupportedStatement(context, node, "SX_CALL_ARITY", "Expected one argument.")];
@@ -9645,7 +9825,7 @@ function oneArgumentStatement(
           "Argument could not be migrated.",
         ),
       ]
-    : [build(value)];
+    : [build(value)].flat();
 }
 
 /**
@@ -10588,6 +10768,60 @@ function actionCall(
     positional: [action, { kind: "list", items: args }],
     named: {},
   };
+}
+
+/** A popup, or its workaround while main does not implement showPopup: the message and an OK button. */
+function popupStatements(
+  message: IrExpression,
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] {
+  if (context.accepted.has("showPopup")) return [{ kind: "showPopup", message, span }];
+  addDiagnostic(
+    context,
+    "SX_POPUP_WORKAROUND",
+    "warning",
+    "Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.",
+    span,
+  );
+  return [
+    { kind: "say", value: message, span },
+    { kind: "showButton", label: { kind: "literal", value: "OK" }, timeout: null, span },
+  ];
+}
+
+/** openUrl(), or its workaround while main does not implement it: the link in the chat and a button to continue. */
+function urlStatements(
+  url: IrExpression,
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] {
+  if (context.accepted.has("openUrl"))
+    return [
+      {
+        kind: "expression",
+        expression: { kind: "call", name: "openUrl", positional: [url], named: {} },
+        span,
+      },
+    ];
+  addDiagnostic(
+    context,
+    "SX_OPEN_URL_WORKAROUND",
+    "warning",
+    "Workaround for openUrl(), which main does not implement yet: the link in the chat, which the player can open, and a button to continue. Switch back to openUrl() when it is implemented.",
+    span,
+  );
+  return [
+    {
+      kind: "say",
+      value:
+        url.kind === "literal" && typeof url.value === "string"
+          ? { kind: "literal", value: `Open this link: ${url.value}` }
+          : { kind: "template", parts: [{ text: "Open this link: " }, { value: url }] },
+      span,
+    },
+    { kind: "showButton", label: { kind: "literal", value: "Continue" }, timeout: null, span },
+  ];
 }
 
 function useHelper(context: LowerContext, name: HelperName, args: IrExpression[]): IrExpression {

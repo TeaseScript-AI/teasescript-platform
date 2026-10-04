@@ -23,9 +23,9 @@ import {
 } from "../src/compile-check.ts";
 import { emitTease } from "../src/emit-tease.ts";
 import type { MigrationProgram } from "../src/ir.ts";
-import { lowerPackage, lowerSelfContainedPackage } from "../src/package.ts";
+import { lowerPackage, lowerSelfContainedPackage, type PackageOptions } from "../src/package.ts";
 import { pendingHostFunctions, shimPendingCapabilities } from "../src/pending.ts";
-import type { ProposalId } from "../src/proposals.ts";
+import { ACCEPTED_FORMS } from "../src/workarounds.ts";
 import { analyzeFeasibility } from "../src/report.ts";
 import {
   loadRepositoryProjectRunner,
@@ -60,15 +60,15 @@ const projectResult = await Promise.all([
 
 // Output that uses only implemented TeaseScript must compile as generated.
 registerFixtures("conversion", false);
-// Output that deliberately targets accepted TeaseScript the current compiler does not implement yet
-// (storage, script chaining, popups, boolean/integer input, ...) must compile once those capabilities are
-// replaced by placeholder calls, so everything except the pending capabilities is compiler-checked.
-registerFixtures("conversion-accepted", true);
+// The accepted forms the importer otherwise replaces with workarounds (popups, boolean lists, URLs, files), which the
+// current compiler does not implement yet, must compile once they are replaced by placeholder calls, so everything
+// except the pending capabilities is compiler-checked.
+registerFixtures("conversion-accepted", true, { accepted: new Set(ACCEPTED_FORMS) });
 
 function registerFixtures(
   directoryName: string,
   usesPendingCapabilities: boolean,
-  proposals: ReadonlySet<ProposalId> = new Set(),
+  options: PackageOptions = {},
 ): void {
   const directory = fileURLToPath(new URL(`./fixtures/${directoryName}/`, import.meta.url));
   const names = readdirSync(directory)
@@ -83,7 +83,7 @@ function registerFixtures(
       `converts ${directoryName}/${name}.groovy to the expected TeaseScript`,
       { skip: parserUnavailable },
       async () => {
-        assert.equal(emitTease(await convert(sourcePath, proposals)), expected);
+        assert.equal(emitTease(await convert(sourcePath, options)), expected);
       },
     );
 
@@ -98,7 +98,7 @@ function registerFixtures(
         let source = expected;
         let builtins: string[] = [];
         if (usesPendingCapabilities) {
-          const shim = shimPendingCapabilities(await convert(sourcePath, proposals));
+          const shim = shimPendingCapabilities(await convert(sourcePath, options));
           assert.ok(shim.capabilities.size > 0, "fixture group expects pending capabilities");
           source = shim.source;
           builtins = shim.builtins;
@@ -123,7 +123,7 @@ function registerFixtures(
         let source = expected;
         let builtins: Record<string, HostFunction> = {};
         if (usesPendingCapabilities) {
-          const shim = shimPendingCapabilities(await convert(sourcePath, proposals));
+          const shim = shimPendingCapabilities(await convert(sourcePath, options));
           source = shim.source;
           builtins = pendingHostFunctions(shim);
         }
@@ -136,6 +136,57 @@ function registerFixtures(
     );
   }
 }
+
+// The player cannot list package folders, so a legacy image count becomes the counts of the package's images at
+// conversion time: a number for a fixed folder, and a dict of the matching folders for a computed one.
+test(
+  "counts package images at conversion time where the legacy script listed an images folder",
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
+  async () => {
+    if (!("compiler" in projectResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-images-"));
+    try {
+      const sourcePath = path.join(directory, "packs.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          "def pack = 2",
+          'def count = new File("images/Mistress/Pack${pack}/").listFiles().size()',
+          'def photos = new File("images/Mistress/Pack1/").listFiles().findAll { it.name ==~ /(?i).*\\.jpg/ }.size()',
+          'show("Pack ${pack}: ${count} images, ${photos} photos")',
+          "",
+        ].join("\n"),
+      );
+      const media = [
+        "Mistress/Pack1/a.jpg",
+        "Mistress/Pack1/b.png",
+        "Mistress/Pack2/c.JPG",
+        "Other/d.jpg",
+      ].map((file) => ({
+        path: file,
+        tags: file
+          .split("/")
+          .slice(0, -1)
+          .map((tag) => tag.toLowerCase()),
+      }));
+      const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { media });
+      const source = emitTease(program!);
+      assert.match(
+        source,
+        /^let count = dict\{ "mistress\/pack1": 2, "mistress\/pack2": 1 \}\.get\("Mistress\/Pack\$\{pack\}"\.lowercase\(\), default: 0\)$/mu,
+      );
+      assert.match(source, /^let photos = 1$/mu);
+      assert.match(source, /NOTE SX_IMAGE_COUNT_WORKAROUND/u);
+      const result = projectResult.runner([{ path: "main.tease", source }], {});
+      assert.deepEqual(
+        { status: result.status, failure: result.failure },
+        { status: "halted", failure: null },
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 /** A fixture as the main.tease of a project, with a file that just ends for each file it transfers to. */
 function withTransferTargets(source: string): Array<{ path: string; source: string }> {
@@ -866,9 +917,9 @@ test(
 
 async function convert(
   sourcePath: string,
-  proposals: ReadonlySet<ProposalId> = new Set(),
+  options: PackageOptions = {},
 ): Promise<MigrationProgram> {
-  const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { proposals });
+  const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], options);
   assert.ok(program !== undefined);
   return program;
 }

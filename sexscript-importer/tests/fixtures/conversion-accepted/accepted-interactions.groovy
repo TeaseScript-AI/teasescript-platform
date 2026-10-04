@@ -25,3 +25,8 @@ int slow = showPopup(title())
 // getImage() took a webcam picture and returned its path, or null.
 def photo = getImage("Smile")
 if (photo != null) setImage(photo)
+// With the accepted forms selected, getBooleans asks every question in one form and getFile opens the file chooser.
+def kit = getBooleans("Which toys do you have?", ["Paddle", "Crop"], [true, false])
+if (kit[1] == true) show("Bring the crop")
+def picture = getFile("Pick a photo")
+if (picture == null) show("No photo")

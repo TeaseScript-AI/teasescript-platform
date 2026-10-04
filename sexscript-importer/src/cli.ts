@@ -7,6 +7,7 @@ import { inventoryFiles } from "./inventory.ts";
 import { lowerParsedFile } from "./lower.ts";
 import { lowerPackage } from "./package.ts";
 import { parseProposals, type ProposalId } from "./proposals.ts";
+import { parseAcceptedForms, type AcceptedForm } from "./workarounds.ts";
 import type { MediaFile } from "./pending.ts";
 import { analyzeFeasibility, type FeasibilityOptions } from "./report.ts";
 import { loadRepositoryProjectRunner } from "./runtime-check.ts";
@@ -21,8 +22,15 @@ const proposedArgument = rawArgs.find(
 );
 const proposals: ReadonlySet<ProposalId> =
   proposedArgument === undefined ? new Set() : parseProposals(proposedArgument.slice(11));
+// `--accepted` emits every accepted form instead of its workaround, `--accepted=a,b` the listed ones.
+const acceptedArgument = rawArgs.find(
+  (arg) => arg === "--accepted" || arg.startsWith("--accepted="),
+);
+const accepted: ReadonlySet<AcceptedForm> =
+  acceptedArgument === undefined ? new Set() : parseAcceptedForms(acceptedArgument.slice(11));
 const args = rawArgs.filter(
-  (arg) => arg !== "--compile" && arg !== "--run" && arg !== proposedArgument,
+  (arg) =>
+    arg !== "--compile" && arg !== "--run" && arg !== proposedArgument && arg !== acceptedArgument,
 );
 
 if (command === "inventory") {
@@ -34,11 +42,11 @@ if (command === "inventory") {
 } else if (command === "report") {
   if (args.length === 0) {
     fail(
-      "Usage: node src/cli.ts report [--compile | --run] [--proposed[=ids]] <ast.json|script.groovy|source-dir> [...]",
+      "Usage: node src/cli.ts report [--compile | --run] [--proposed[=ids]] [--accepted[=ids]] <ast.json|script.groovy|source-dir> [...]",
     );
   }
   const files = await readReportInputs(args);
-  const options: FeasibilityOptions = { proposals };
+  const options: FeasibilityOptions = { proposals, accepted };
   if (compileRequested) options.compiler = await loadRepositoryProjectCompiler();
   if (runRequested) options.runner = await loadRepositoryProjectRunner();
   // A scripts folder's sibling images folder holds the media that proposed media tags count.
@@ -48,17 +56,22 @@ if (command === "inventory") {
   const report = analyzeFeasibility(files, options);
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } else if (command === "convert") {
-  if (args.length !== 1) fail("Usage: node src/cli.ts convert <script.groovy|ast.json>");
+  if (args.length !== 1)
+    fail(
+      "Usage: node src/cli.ts convert [--proposed[=ids]] [--accepted[=ids]] <script.groovy|ast.json>",
+    );
   const input = args[0]!;
   const parsed = input.toLowerCase().endsWith(".groovy")
     ? await parseGroovySource(input)
     : await readParsedFile(input);
-  const program = lowerParsedFile(parsed, { proposals });
+  const program = lowerParsedFile(parsed, { proposals, accepted });
   process.stdout.write(emitTease(program));
   reportDiagnostics(program);
 } else if (command === "convert-package") {
   if (args.length !== 2) {
-    fail("Usage: node src/cli.ts convert-package [--compile] <source-dir> <output-dir>");
+    fail(
+      "Usage: node src/cli.ts convert-package [--compile] [--proposed[=ids]] [--accepted[=ids]] <source-dir> <output-dir>",
+    );
   }
   const compiler = compileRequested ? await loadRepositoryProjectCompiler() : undefined;
   await convertPackage(args[0]!, args[1]!, compiler);
@@ -98,7 +111,9 @@ async function convertPackage(
   const sourcePaths = await findGroovyFiles(sourceRoot);
   if (sourcePaths.length === 0) fail(`No .groovy files found under ${sourceRoot}`);
   const parsed = await parseGroovyFiles(sourcePaths);
-  const lowered = lowerPackage(parsed, { proposals });
+  // The images folder beside the scripts folder holds the media that legacy image counts read.
+  const media = await packageMedia(path.join(sourceRoot, "..", "images"));
+  const lowered = lowerPackage(parsed, { proposals, accepted, media });
   const programs = lowered.composed;
   // The package starts at main.tease (ADR 0022): its entry script, or a generated menu over the scripts it lists.
   const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;

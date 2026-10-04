@@ -20,6 +20,7 @@ import { helperDefinitionOrder, withActionDispatcher } from "./helpers.ts";
 import { promoteGlobalFunctions, type GlobalPromotion } from "./globals.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import type { ProposalId } from "./proposals.ts";
+import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 
 const ACCEPTED_EXTERNAL_CALLS = new Set([
   "askBoolean",
@@ -55,6 +56,10 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
 export interface PackageOptions {
   /** Proposed language changes to emit in their working syntax (see proposals.ts). */
   proposals?: ReadonlySet<ProposalId>;
+  /** Accepted forms to emit instead of their workarounds (see workarounds.ts). */
+  accepted?: ReadonlySet<AcceptedForm>;
+  /** The package's images, which legacy image counts read at conversion time. */
+  media?: readonly MediaFile[];
   /**
    * A lone file converted on its own, without a package around it: it keeps its name, and a transfer names the
    * converted file of any legacy script name. Otherwise a package's only script becomes its main.tease.
@@ -277,6 +282,8 @@ export function lowerPackage(
       ...(scripts === null ? {} : { scriptPaths: scripts.paths }),
       renameIdentifiers: false,
       ...(options.proposals === undefined ? {} : { proposals: options.proposals }),
+      ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
+      ...(options.media === undefined ? {} : { media: options.media }),
     }),
   );
   const helperPrograms = lowered.filter(
