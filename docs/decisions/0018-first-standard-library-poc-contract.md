@@ -180,7 +180,7 @@ interaction whose UI only accepts whole numbers, so completion, prefill, checkpo
 
 ### `askDate`, `askTime`, and `askDateTime`
 
-Extension for #532's typed date and time input: `askDate`, `askTime`, and `askDateTime` copy the compact `askNumber`
+Owner-approved extension (2026-10-04, #532): `askDate`, `askTime`, and `askDateTime` copy the compact `askNumber`
 forms, including `as speaker`, the hint, and `default:`, and return `date`, `time`, and `datetime`.
 
 ```tease
