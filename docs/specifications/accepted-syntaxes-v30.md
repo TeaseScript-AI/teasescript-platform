@@ -977,9 +977,10 @@ Rules:
 - Declarations are collected at compile time. Globals and speakers ([§37](#37-dynamic-speaker-terms)) are initialized
   once at session start, before the story runs, whether or not the surrounding block ever runs: `main.tease` first, then
   the other files in path order, each in source order. Reaching the declaration later does nothing.
-- An initializer may use literals, earlier globals, side-effect-free operators, and `load … , default:`. It may not use
-  local values, interactions, calls, or random numbers, including the element that `.random` or a list in `${...}`
-  selects, or read a global initialized after it. These rules also hold inside a `load` default.
+- An initializer may use literals, earlier globals, side-effect-free operators, and `load … , default:`. A
+  `script(...)` reference ([§29](#29-script-files-and-paths)) counts as a literal, with arguments under the same rules.
+  It may not use local values, interactions, other calls, or random numbers, including the element that `.random` or a
+  list in `${...}` selects, or read a global initialized after it. These rules also hold inside a `load` default.
 - Types follow the `let` rules above, across all files. Values are checkpointed and live for the session; `save` and
   `load` keep a value beyond it.
 
@@ -1179,7 +1180,7 @@ fits when every element or value fits, and an object fits when each known proper
 
 | Conversion | Converts | Result |
 | --- | --- | --- |
-| `toString(value)` | text, numbers, `true` and `false`, `null`, durations, and date and time values | the same text as `"${value}"` |
+| `toString(value)` | text, numbers, `true` and `false`, `null`, durations, date and time values, and script references | the same text as `"${value}"` |
 | `toNumber(value)` | numbers, and number text | a `number` |
 | `toInteger(value)` | numbers, and number text | an `integer` |
 | `toBoolean(value)` | `true` and `false`, and the text `"true"` or `"false"` | a `boolean` |
@@ -1352,8 +1353,8 @@ let newest = tasks.removeLast()
 
 `items.join(separator)` returns the elements as text, separated by the text `separator`, which defaults to `", "`:
 `["pet", "puppy"].join()` is `"pet, puppy"`. Use `${items.join()}` to show every element where `${items}` selects one.
-Elements may be text, numbers, `true` or `false`, `null`, durations, and date and time values, shown as `${...}` shows
-them; any other element raises an error.
+Elements may be text, numbers, `true` or `false`, `null`, durations, date and time values, and script references,
+shown as `${...}` shows them; any other element raises an error.
 
 List properties:
 
@@ -1384,7 +1385,7 @@ say "Come closer, ${player.petNames}"
 The two evaluations may choose different elements. Replay and debugging reproduce the same session sequence.
 
 An interpolated list may contain any value that `${...}` shows on its own: text, numbers, `true` and `false`, `null`,
-durations, and date and time values. A list holds one element type ([§12](#12-variable-declarations)), and integers and
+durations, date and time values, and script references ([§29](#29-script-files-and-paths)). A list holds one element type ([§12](#12-variable-declarations)), and integers and
 numbers together are numbers. The selected element is shown as that value would be:
 
 ```text
@@ -1502,8 +1503,8 @@ Runtime behavior:
   list and a set, are never equal. List `contains(value)` and `remove(value)` use this equality, so they also find
   objects and nested lists; `remove(value)` removes the first equal element.
 - A set may hold any value a list may hold: text, numbers, `true` and `false`, `null`, durations, date and time values
-  ([§35](#35-date-time-durations-and-timestamps)), lists, objects, dicts, sets, ranges, speakers, and timer and media
-  handles. Collections nest in every direction, such as sets of lists, sets in dicts, and lists in lists. A set keeps
+  ([§35](#35-date-time-durations-and-timestamps)), lists, objects, dicts, sets, ranges, speakers, timer and media
+  handles, and script references. Collections nest in every direction, such as sets of lists, sets in dicts, and lists in lists. A set keeps
   the first of members that are equal (`==`), in insertion order, so `set[[1, 2], [1, 2]]` has one member, and its
   `contains(value)` and `remove(value)` use the same equality. A member is copied when it is added, and `.first`,
   `.last`, `.random`, and a `for` loop give copies, so changing one does not change the set.
@@ -2927,10 +2928,20 @@ Rules:
   declarations only. A glob with no such file is a compile error. A glob may pick the file it stands in.
 - Each time a glob target runs, one draw from the session random generator picks the file; a glob `fallback` draws
   each time the fallback is used. Restoring a checkpoint never draws again.
-- `script(path)` returns a `script` reference to a file, and `script(path, label: name)` one to a label in it. Plain
-  text is not a jump target. References can be stored in variables, lists, dicts, and globals; a variable as a target is
-  grouped, as in `goto (next)`. A missing file or label is a compile error when the compiler knows the path and label,
-  and otherwise a runtime error.
+- `script(path)` returns a `script` reference to a file, and `script(path, label: name)` one to a label in it; the path
+  and the name are text. Plain text is not a jump target. A reference is a value: it can be stored in variables, lists,
+  dicts, sets, and globals, saved with `save`, and compared with `==` by path and label. It shows as the call that makes
+  it, such as `script("rooms/hall.tease", label: "start")`, has no properties or methods, and is not a `choose` value.
+  A computed target, a `script(...)` call or a grouped expression such as `goto (next)`, must be a reference.
+- A `script(...)` whose path is literal, quoted text without `${...}`, is checked like a file target: a path that leaves
+  the package, a missing file, a missing literal label, a glob, and a `goto` or `fallback` to a file of declarations
+  only are compile errors. Any other reference is checked when a transfer uses it, a computed `fallback` when the
+  statement runs: a missing file or label, or a `goto` or `fallback` to a file of declarations only, is a runtime error.
+- For the check of variables after labels ([§26](#26-labels-and-goto)), the compiler reads from the source alone which
+  labels references may enter afresh: a `script(...)` with a literal label enters that label of its file, or with a
+  computed path that label of every file that has it, and one with a computed label every label of its file, or of
+  every file. Reading or assigning a variable of the file whose `let` has not run in this entry into the file, as
+  after a label that a reference from `load` entered, or in a function called before the `let`, is a runtime error.
 - Functions and labels are local to their file.
 - There is no `run` and no automatic selection of a next file; the script states every transfer.
 

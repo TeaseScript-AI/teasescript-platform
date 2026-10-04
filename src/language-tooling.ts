@@ -796,15 +796,18 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "deleteStatement":
       children.push({ kind: "expression", node: statement.key });
       return;
+    case "gotoStatement":
+    case "callFileStatement":
+    case "fallbackStatement":
+      if (statement.target?.kind === "scriptTarget")
+        children.push({ kind: "expression", node: statement.target.expression });
+      return;
     case "hideImageStatement":
     case "speakerSetterStatement":
     case "waitStatement":
     case "exitStatement":
     case "endStatement":
     case "labelStatement":
-    case "gotoStatement":
-    case "callFileStatement":
-    case "fallbackStatement":
     case "breakStatement":
     case "continueStatement":
       return;

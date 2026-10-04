@@ -17,6 +17,7 @@ import type {
   TagQueryExpression,
   TypeTestExpression,
   FileTarget,
+  LabelTarget,
   TransferTarget,
 } from "../../ast.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
@@ -132,7 +133,9 @@ export class InstructionCompiler {
     return this.#destinations;
   }
 
-  #destinationOf(target: TransferTarget): Pick<PendingDestination, "paths" | "label" | "pick"> {
+  #destinationOf(
+    target: LabelTarget | FileTarget,
+  ): Pick<PendingDestination, "paths" | "label" | "pick"> {
     if (target.kind === "labelTarget") {
       return { paths: [this.path], label: target.label.name, pick: false };
     }
@@ -145,6 +148,18 @@ export class InstructionCompiler {
   }
 
   #emitTransfer(mode: "goto" | "call", target: TransferTarget, span: SourceSpan): void {
+    if (target.kind === "scriptTarget") {
+      const lowered = this.#lowerExpression(target.expression);
+      this.instructions.push({
+        kind: "transfer",
+        mode,
+        destination: { value: lowered.plan },
+        span: copySpan(span),
+      });
+      // A call returns here with the temporaries of its target; a goto leaves them behind.
+      if (mode === "call") this.#emitTemporaryCleanup(lowered.temporaryIds, span);
+      return;
+    }
     this.#destinations.push({
       instruction: this.instructions.length,
       ...this.#destinationOf(target),
@@ -503,6 +518,16 @@ export class InstructionCompiler {
             destination: null,
             span: copySpan(statement.span),
           });
+          return;
+        }
+        if (statement.target.kind === "scriptTarget") {
+          const lowered = this.#lowerExpression(statement.target.expression);
+          this.instructions.push({
+            kind: "setFallback",
+            destination: { value: lowered.plan },
+            span: copySpan(statement.span),
+          });
+          this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
           return;
         }
         this.#destinations.push({

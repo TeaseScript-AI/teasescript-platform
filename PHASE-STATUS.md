@@ -22,7 +22,7 @@ accept syntax, architecture, or implementation details.
   `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `sort`/`shuffle` and set operations, top-level
   user-defined functions, labels and `goto`, and explicit endings with a required `exit` (ADR 0022). Projects of several
   `.tease` files compile into one plan, with globals, global functions, and speakers shared by all files, `goto`,
-  `call`, and `end` between files with a `fallback`, and glob targets.
+  `call`, and `end` between files with a `fallback`, glob targets, and computed targets from `script(...)` references.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
 - **Script storage:** `save`/`load`/`delete`, optional lazy defaults, a validated checkpointed session view, and

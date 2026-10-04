@@ -39,7 +39,8 @@ goto script("rooms/${room}.tease", label: "start")
    each time the fallback is used. Restoring a checkpoint never draws again.
 4. `script(path, label:)` returns a script reference, of type `script`. Plain text is not a jump target. References can
    be stored in lists, dicts, and globals. A bare variable as a target is grouped: `goto (next)`. A missing file or label
-   is a compile error when known, otherwise a runtime error.
+   is a compile error when known, otherwise a runtime error. A reference names its file by path, so it keeps its meaning
+   when saved; a transfer checks it when it runs, and a computed `fallback` when the statement runs.
 5. `run` is removed. There is no automatic rotation or category selection; composition logic is visible in the script.
 
 ### 3. Labels, file-local names, global functions, and speakers
@@ -57,6 +58,9 @@ goto script("rooms/${room}.tease", label: "start")
    a function that a call which can run reaches, or in a block started where code can run. A call in such a statement
    counts, even in an operand that a constant `and` or `or` skips, or in a parameter default that every call supplies.
    Globals and speakers are not variables of a file: they have their values from the start of the session (§6).
+   Which labels a `script(...)` reference may enter, the compiler reads from the source alone, by whether its path and
+   label are literal text (V30 §29), where the reference can run; other early uses, such as after a label that a
+   reference from `load` entered, are runtime errors when they run.
 5. A `global function` is callable from every file, without an import:
 
    ```tease
@@ -132,9 +136,9 @@ global level = load "level", default: 1
    `main.tease` first, then the other files in path order, each in source order. An initializer that reads a global
    initialized after it is a compile error.
 4. Initializers, including speaker properties, may use literals, earlier globals, side-effect-free operators, and
-   `load … , default:`. They may not use local values, interactions, calls, or random numbers, including the random
-   element that `.random` or a list in `${...}` selects. Nested and lazy parts, such as a `load` default, follow the
-   same rules.
+   `load … , default:`; a `script(...)` reference counts as a literal, with arguments under the same rules. They may
+   not use local values, interactions, other calls, or random numbers, including the random element that `.random` or
+   a list in `${...}` selects. Nested and lazy parts, such as a `load` default, follow the same rules.
 5. With `default:`, the global gets the `default:` value at session start, and the declaration assigns its initializer,
    which may be any expression, each time it runs:
 

@@ -57,6 +57,11 @@ export function requiredInstructionTemporaries(
         collectExpressionTemporaries(argument.value, output),
       );
       break;
+    case "transfer":
+    case "setFallback":
+      if (instruction.destination !== null && "value" in instruction.destination)
+        collect(instruction.destination.value);
+      break;
     case "setDefaultSpeaker":
     case "prepareInteractionSpeaker":
     case "enterScope":

@@ -1,16 +1,22 @@
 import type {
   EndInstruction,
   GotoInstruction,
+  InstructionPlan,
+  PlanComputedDestination,
   PlanDestination,
   PlanTransferDestination,
   PlanSourceLocation,
   SetFallbackInstruction,
   TransferInstruction,
 } from "../../plan/model.js";
+import { runsNothing } from "../activation-validation.js";
 import { innermostFileCallIndex } from "../activations.js";
 import { RuntimeFault } from "../errors.js";
+import type { Evaluator } from "../evaluator.js";
 import { nextXorShift32 } from "../random.js";
 import { cloneTransferDestination } from "../state.js";
+import { isScriptReference } from "../value-predicates.js";
+import { describeValue } from "../value-types.js";
 import type { InterpreterEvent } from "../events.js";
 import type { RuntimeTimerSnapshot } from "../timers.js";
 import type {
@@ -62,8 +68,10 @@ export function executeGoto(
 
 /** `goto` or `call` naming a file, or `call label`: a fresh activation of the destination's file. */
 export function executeTransfer(
+  plan: InstructionPlan,
   instruction: TransferInstruction,
   snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
   events: InterpreterEvent[],
 ): void {
   assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
@@ -77,7 +85,16 @@ export function executeTransfer(
     }
     assertCounterCanAdvance(snapshot.nextCallFrameId, "nextCallFrameId");
   }
-  const destination = drawDestination(snapshot, instruction.destination);
+  const destination =
+    "value" in instruction.destination
+      ? resolveComputed(
+          plan,
+          instruction.destination,
+          instruction.mode,
+          evaluator,
+          instruction.span,
+        )
+      : drawDestination(snapshot, instruction.destination);
   const root = freshRoot(snapshot, destination);
   if (instruction.mode === "goto") {
     const left = activationRootsFrom(snapshot, innermostFileCallIndex(snapshot));
@@ -143,14 +160,63 @@ export function executeEnd(
   sweepRetainedScopes(snapshot);
 }
 
-/** `fallback target` and `fallback none`: the latest one executed wins. */
+/**
+ * `fallback target` and `fallback none`: the latest one executed wins. A computed target is resolved now, so the
+ * fallback always names a file and its entry or label.
+ */
 export function executeSetFallback(
+  plan: InstructionPlan,
   instruction: SetFallbackInstruction,
   snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
 ): void {
   const destination = instruction.destination;
-  snapshot.fallback = destination === null ? null : cloneTransferDestination(destination);
+  snapshot.fallback =
+    destination === null
+      ? null
+      : "value" in destination
+        ? resolveComputed(plan, destination, "fallback", evaluator, instruction.span)
+        : cloneTransferDestination(destination);
   snapshot.nextInstruction += 1;
+}
+
+/**
+ * A computed target goes where its script reference names, checked against the plan each time it runs (ADR 0022
+ * §2.4): the file must exist and have the label, and a `goto` or fallback needs a file that runs something.
+ */
+function resolveComputed(
+  plan: InstructionPlan,
+  destination: PlanComputedDestination,
+  keyword: "goto" | "call" | "fallback",
+  evaluator: Evaluator,
+  span: PlanSourceLocation,
+): PlanDestination {
+  const value = evaluator.evaluate(destination.value);
+  if (!isScriptReference(value)) {
+    throw new RuntimeFault(
+      "TSR058",
+      `${keyword} needs a script reference here, made with script(...), but this is ${describeValue(value)}.`,
+      copySpan(span),
+    );
+  }
+  const { path, label } = value;
+  const file = plan.files.findIndex((candidate) => candidate.path === path);
+  const target =
+    file < 0
+      ? undefined
+      : label === null
+        ? plan.files[file]!.entryInstruction
+        : plan.files[file]!.labels.find((candidate) => candidate.name === label)?.instruction;
+  const problem =
+    file < 0
+      ? `This ${keyword} names the file '${path}', but the project has no such file. Paths start at the package root, such as "rooms/hall.tease".`
+      : target === undefined
+        ? `This ${keyword} names label '${label}' of '${path}', but that file has no such label.`
+        : keyword !== "call" && runsNothing(plan, file)
+          ? `'${path}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`
+          : null;
+  if (problem !== null) throw new RuntimeFault("TSR069", problem, copySpan(span));
+  return { file, target: target! };
 }
 
 /** A glob target picks one of its files with one draw from the session random generator, each time it runs. */
@@ -232,7 +298,12 @@ function freshRoot(
   snapshot: RuntimeSnapshot,
   destination: PlanDestination,
 ): RuntimeScopeFrameSnapshot {
-  const root = { id: snapshot.nextScopeId, file: destination.file, bindings: [] };
+  const root = {
+    id: snapshot.nextScopeId,
+    file: destination.file,
+    entry: destination.target,
+    bindings: [],
+  };
   snapshot.nextScopeId += 1;
   return root;
 }

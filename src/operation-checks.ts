@@ -99,7 +99,7 @@ export function memberProblems(
     if (element !== undefined)
       problems.push({
         kind: "invalidOperand",
-        message: `join() can only join text, numbers, true or false, null, durations, and date and time values, not ${describeValue(element.type)}. Select an element or a property first.`,
+        message: `join() can only join text, numbers, true or false, null, durations, date and time values, and script references, not ${describeValue(element.type)}. Select an element or a property first.`,
         span: element.expression.span,
       });
     return problems;
@@ -423,7 +423,7 @@ function candidateConversionProblem(
       ? `toString(...) cannot convert ${describeValue(type)}; use ${type.kind === "set" ? ".toList().join()" : ".join()"} to combine its elements as text.`
       : type.kind === "dict"
         ? `toString(...) cannot convert ${describeValue(type)}; use .values.join() to combine its values as text.`
-        : `toString(...) converts text, numbers, true or false, null, durations, and date and time values, not ${describeValue(type)}.`;
+        : `toString(...) converts text, numbers, true or false, null, durations, date and time values, and script references, not ${describeValue(type)}.`;
   }
   if (isTemporalConversionResult(result)) {
     const conversion = TEMPORAL_CONVERSIONS[result];

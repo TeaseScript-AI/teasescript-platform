@@ -234,8 +234,11 @@ function startValueAccepted(
       continue;
     }
     if (!isRecord(node)) continue;
+    // A script reference is made without effects, like a literal (ADR 0022 §6).
+    const scriptReference =
+      isRecord(node.callee) && node.callee.kind === "identifier" && node.callee.name === "script";
     if (
-      node.kind === "call" ||
+      (node.kind === "call" && !scriptReference) ||
       node.kind === "tagQuery" ||
       node.kind === "temporary" ||
       node.kind === "preparedReference"
@@ -322,13 +325,20 @@ const FILE_FIELDS = [
 
 const LABEL_FIELDS = ["name", "instruction"];
 
-/** A destination's file and target must also name that file's entry or a label; the stream analysis checks that. */
-/** A file and its entry or label, or for a glob a non-empty list of them to pick from. */
+/**
+ * A file and its entry or label, for a glob a non-empty list of them to pick from, or a computed target's expression.
+ * A destination's file and target must also name that file's entry or a label; the stream analysis checks that.
+ */
 function validateDestinationShape(
   value: unknown,
   path: string,
   errors: PlanValidationError[],
+  temporaryCount: number,
 ): void {
+  if (isRecord(value) && hasExactKeys(value, ["value"])) {
+    validateExpression(value.value, `${path}.value`, errors, false, temporaryCount);
+    return;
+  }
   const single = (candidate: unknown): boolean =>
     isRecord(candidate) &&
     hasExactKeys(candidate, ["file", "target"]) &&
@@ -631,11 +641,11 @@ function validateInstruction(
       if (value.mode !== "goto" && value.mode !== "call") {
         errors.push(planError("TSC002", "Transfer mode is invalid.", `${path}.mode`));
       }
-      validateDestinationShape(value.destination, `${path}.destination`, errors);
+      validateDestinationShape(value.destination, `${path}.destination`, errors, temporaryCount);
       return;
     case "setFallback":
       if (value.destination !== null) {
-        validateDestinationShape(value.destination, `${path}.destination`, errors);
+        validateDestinationShape(value.destination, `${path}.destination`, errors, temporaryCount);
       }
       return;
     case "declareBinding":
@@ -1834,6 +1844,7 @@ const TYPE_PLAN_NAMES = [
   "speaker",
   "timer",
   "media",
+  "script",
 ];
 
 function validateExpressionNode(

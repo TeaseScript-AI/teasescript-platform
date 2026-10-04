@@ -202,6 +202,15 @@ function projectDiagnostic(path: string, message: string): ProjectDiagnostic {
   });
 }
 
+/** The labels of a file's outer scope. */
+function fileLabels(program: Program): ReadonlySet<string> {
+  return new Set(
+    program.statements.flatMap((statement) =>
+      statement.kind === "labelStatement" ? [statement.name.name] : [],
+    ),
+  );
+}
+
 function parseFile(path: string, source: string): CompiledProjectFile {
   let parsed: ReturnType<typeof parse>;
   try {
@@ -263,14 +272,26 @@ function checkProject(
       options,
       track,
     );
-    // A transfer that can run enters its label afresh, which has then run nothing of its file.
+    // A transfer or script reference that can run enters its label afresh, which has then run nothing of its file. As
+    // the source shows it, a computed path stands for every file and a computed label for every label.
+    const labels = new Map(
+      files.map((file) => [file.result.path, fileLabels(file.result.program)]),
+    );
     const freshLabels = new Map<string, Set<string>>();
+    const marked = new Set<string>();
     for (const result of names) {
-      for (const entry of result.reachableEntries(types.flow)) {
-        if (entry.label === null) continue;
-        const fresh = freshLabels.get(entry.path) ?? new Set<string>();
-        fresh.add(entry.label);
-        freshLabels.set(entry.path, fresh);
+      for (const { path, label } of result.reachableEntries(types.flow)) {
+        // Many references mark the same labels; each mark is followed once.
+        const mark = JSON.stringify([path, label]);
+        if (label === null || marked.has(mark)) continue;
+        marked.add(mark);
+        for (const entered of path === null ? labels.keys() : [path]) {
+          const known = labels.get(entered) ?? new Set<string>();
+          const fresh = freshLabels.get(entered) ?? new Set<string>();
+          if (label === true) for (const name of known) fresh.add(name);
+          else if (known.has(label)) fresh.add(label);
+          freshLabels.set(entered, fresh);
+        }
       }
     }
     // The initialization check at labels follows the flow of the type check.

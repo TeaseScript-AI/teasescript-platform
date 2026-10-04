@@ -21,7 +21,7 @@ import type {
   SpeakerDeclaration,
   Statement,
   FileTarget,
-  TransferTarget,
+  LabelTarget,
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import type { SourceSpan } from "./source.js";
@@ -71,10 +71,14 @@ export interface SemanticValidationResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
-/** A place where a `goto`, `call`, or `fallback` enters a file with fresh top-level variables: its top or a label. */
+/**
+ * A place where a `goto`, `call`, or `fallback`, or a `script(...)` reference, may enter a file with fresh top-level
+ * variables: its top (`label` null) or a label. As the source shows it, a computed path stands for every file (`path`
+ * null) and a computed label for every label of those files (`label` true) (ADR 0022 §3.4).
+ */
 export interface FileEntry {
-  readonly path: string;
-  readonly label: string | null;
+  readonly path: string | null;
+  readonly label: string | null | true;
 }
 
 /** `global` is a name the host configures; a `global` declared in a script is a project `variable`. */
@@ -467,6 +471,12 @@ class SemanticValidator {
   /** The innermost statement being checked, which decides whether what it holds can run. */
   #statement: Statement | null = null;
 
+  /** The `script(...)` call that a transfer statement being checked names directly, as in `goto script("a.tease")`. */
+  #directTarget: {
+    readonly call: Expression;
+    readonly transfer: "gotoStatement" | "callFileStatement" | "fallbackStatement";
+  } | null = null;
+
   readonly #gotos: {
     readonly label: string;
     readonly context: FlowContext;
@@ -518,12 +528,18 @@ class SemanticValidator {
   /** The files each glob target may pick. */
   readonly picks = new Map<FileTarget, readonly string[]>();
 
-  /** Where transfers of this file enter files afresh, with the code that runs them. */
+  /** Where transfers and `script(...)` references of this file enter files afresh, with the code that runs them. */
   readonly #entries: {
     readonly entry: FileEntry;
     readonly context: FlowContext;
     readonly statement: Statement;
   }[] = [];
+
+  /** Where `script(...)` references in start values enter files afresh; start values always run. */
+  readonly #startEntries: FileEntry[] = [];
+
+  /** Set while a start value is validated. */
+  #startValue = false;
 
   public validate(program: Program): void {
     // The configuration belongs to the project, so its problems are reported once, in main.tease.
@@ -1327,6 +1343,15 @@ class SemanticValidator {
       case "callFileStatement":
       case "fallbackStatement": {
         const target = statement.target;
+        if (target?.kind === "scriptTarget") {
+          this.#directTarget = {
+            call: unwrapParentheses(target.expression),
+            transfer: statement.kind,
+          };
+          this.#validateExpression(target.expression, scope, null);
+          this.#directTarget = null;
+          return;
+        }
         if (target === null || !this.#validateTransferTarget(target, statement.kind)) return;
         if (target.kind === "fileTarget") {
           for (const path of this.picks.get(target) ?? [target.path]) {
@@ -1359,7 +1384,7 @@ class SemanticValidator {
 
   /** Reports a missing file or label; a label alone names one of this file. */
   #validateTransferTarget(
-    target: TransferTarget,
+    target: LabelTarget | FileTarget,
     transfer: "gotoStatement" | "callFileStatement" | "fallbackStatement",
   ): boolean {
     if (target.kind === "labelTarget") {
@@ -1407,6 +1432,63 @@ class SemanticValidator {
       return false;
     }
     return true;
+  }
+
+  /**
+   * A `script(...)` call whose path is literal text is checked like a file target. Whatever its arguments, it marks the
+   * labels it may enter afresh, by whether its path and label are literal text (ADR 0022 §3.4).
+   */
+  #validateScriptReference(call: Extract<Expression, { kind: "callExpression" }>): void {
+    const positional = call.arguments.filter((argument) => argument.kind === "positionalArgument");
+    // The type check reports another number of paths.
+    if (positional.length !== 1) return;
+    const pathArgument = positional[0]!.value;
+    const labelArgument = call.arguments.find(
+      (argument) => argument.kind === "namedArgument" && argument.name.name === "label",
+    )?.value;
+    const path = literalText(pathArgument) ?? null;
+    const label = labelArgument === undefined ? null : (literalText(labelArgument) ?? true);
+    if (path !== null) {
+      const transfer = this.#directTarget?.call === call ? this.#directTarget.transfer : null;
+      const keyword =
+        transfer === "callFileStatement"
+          ? "call"
+          : transfer === "fallbackStatement"
+            ? "fallback"
+            : "goto";
+      const pathProblem = packagePathProblem(path);
+      const problem = isPathGlob(path)
+        ? `A glob cannot be inside script(...). To pick a random file, write ${keyword} ${JSON.stringify(path)}${typeof label === "string" ? ` ${label}` : ""} directly.`
+        : pathProblem !== null
+          ? `'${path}' is not a package file path: ${pathProblem}.`
+          : !this.project.labels.has(path)
+            ? `The project has no file '${path}'. Paths start at the package root, such as "rooms/hall.tease".`
+            : transfer !== null &&
+                transfer !== "callFileStatement" &&
+                this.project.declarationsOnly.has(path)
+              ? `'${path}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`
+              : null;
+      if (problem !== null) {
+        this.#report(semanticCode.invalidFileTarget, problem, pathArgument.span);
+        return;
+      }
+      if (typeof label === "string" && !this.project.labels.get(path)!.has(label)) {
+        this.#report(
+          semanticCode.invalidLabel,
+          `'${path}' has no label '${label}'.`,
+          labelArgument!.span,
+        );
+        return;
+      }
+    }
+    // A start value runs at the start of every session, wherever its global is declared.
+    if (this.#startValue) this.#startEntries.push({ path, label });
+    else
+      this.#entries.push({
+        entry: { path, label },
+        context: this.#context,
+        statement: this.#statement!,
+      });
   }
 
   /**
@@ -1746,6 +1828,7 @@ class SemanticValidator {
             this.#validateFunctionCall(expression, binding.declaration);
           } else if (this.#builtins.has(name)) {
             // The type check checks the arguments of the core built-ins it knows.
+            if (name === "script") this.#validateScriptReference(expression);
           } else if (binding !== undefined) {
             this.#report(
               semanticCode.nonCallable,
@@ -2199,14 +2282,20 @@ class SemanticValidator {
     });
   }
 
-  /** The entries of this file's transfers whose code can run, given the code reachable in the project. */
+  /**
+   * The entries of this file's transfers and script references whose code can run, given the code reachable in the
+   * project, and those of its start values, which always run.
+   */
   reachableEntries(flow: StatementFlow, reachable: ReadonlySet<string>): readonly FileEntry[] {
-    return this.#entries.flatMap(({ entry, context, statement }) => {
-      const owner = this.#codeNode(context, flow);
-      return !flow.unreachable.has(statement) && owner !== undefined && reachable.has(owner)
-        ? [entry]
-        : [];
-    });
+    return [
+      ...this.#startEntries,
+      ...this.#entries.flatMap(({ entry, context, statement }) => {
+        const owner = this.#codeNode(context, flow);
+        return !flow.unreachable.has(statement) && owner !== undefined && reachable.has(owner)
+          ? [entry]
+          : [];
+      }),
+    ];
   }
 
   /**
@@ -2376,7 +2465,9 @@ class SemanticValidator {
     owner: GlobalStatement | SpeakerDeclaration,
     contextualSpeaker: string | null,
   ): void {
+    this.#startValue = true;
     this.#validateExpression(value, scope, contextualSpeaker);
+    this.#startValue = false;
     const speaker = owner.kind === "speakerDeclaration";
     const subject = speaker
       ? `The properties of speaker '${owner.name.name}'`
@@ -2398,6 +2489,15 @@ class SemanticValidator {
           continue;
         case "callExpression":
         case "tagQueryExpression":
+          // A script reference is made without effects, like a literal; its arguments follow the same rules.
+          if (
+            expression.kind === "callExpression" &&
+            expression.callee.kind === "identifier" &&
+            expression.callee.name === "script"
+          ) {
+            for (const argument of expression.arguments) work.push(argument.value);
+            continue;
+          }
           this.#report(
             semanticCode.invalidStartValue,
             `${subject} cannot call a function: ${speaker ? "a speaker is set up" : "it is set"} at the start of the session, before the story runs. Use literals, globals declared before it, operators, and 'load ..., default:'.`,
@@ -2460,6 +2560,18 @@ class SemanticValidator {
   #report(code: string, message: string, span: SourceSpan): void {
     this.project.report(this.file, code, message, span);
   }
+}
+
+/** The text of a string literal without interpolation, looking through parentheses. */
+function literalText(expression: Expression): string | undefined {
+  const literal = unwrapParentheses(expression);
+  if (literal.kind !== "stringLiteral") return undefined;
+  let text = "";
+  for (const part of literal.parts) {
+    if (part.kind !== "stringText") return undefined;
+    text += part.value;
+  }
+  return text;
 }
 
 /** The literal kind of an operand, looking through parentheses and unary signs. */

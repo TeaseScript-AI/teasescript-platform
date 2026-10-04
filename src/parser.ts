@@ -793,6 +793,15 @@ class Parser {
   }
 
   *#parseTransferTarget(keyword: Token): ParseTask<TransferTarget | null> {
+    // A computed target is a `script(...)` call or a grouped expression, as in `goto (next)`.
+    if (
+      this.#check(TokenKind.LeftParenthesis) ||
+      (this.#checkIdentifier("script") && this.#peek(1).kind === TokenKind.LeftParenthesis)
+    ) {
+      const expression = this.#parseExpression();
+      if (expression === null) return null;
+      return Object.freeze({ kind: "scriptTarget", expression, span: copySpan(expression.span) });
+    }
     if (this.#check(TokenKind.Identifier)) {
       const label = this.#identifier(this.#advance());
       return Object.freeze({ kind: "labelTarget", label, span: copySpan(label.span) });
@@ -3820,6 +3829,7 @@ const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
       "range",
       "timer",
       "media",
+      "script",
     ] as const
   ).map((name) => [name, name]),
 );

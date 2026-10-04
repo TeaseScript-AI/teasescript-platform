@@ -66,6 +66,7 @@ import {
 import {
   contextHoldsInstruction,
   rootFitsFunction,
+  runsNothing,
   serializedContext,
   serializedRootFiles,
   serializedScopes,
@@ -95,7 +96,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 43;
+export const RUNTIME_SNAPSHOT_VERSION = 44;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -161,6 +162,11 @@ export interface RuntimeScopeFrameSnapshot {
    * for a block or function scope.
    */
   readonly file: number | null;
+  /**
+   * Where the activation of a root started: its file's entry or one of its labels, which a `goto` to a label of the
+   * file keeps; `null` for a block or function scope.
+   */
+  readonly entry: number | null;
   readonly bindings: RuntimeBindingSnapshot[];
 }
 
@@ -497,7 +503,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     format: RUNTIME_SNAPSHOT_FORMAT,
     version: RUNTIME_SNAPSHOT_VERSION,
     nextInstruction: 0,
-    frames: [{ id: 0, file: 0, bindings: [] }],
+    frames: [{ id: 0, file: 0, entry: plan.files[0]!.entryInstruction, bindings: [] }],
     globals: hostGlobals,
     retainedScopes: [],
     fallback: null,
@@ -665,7 +671,12 @@ export function cloneTransferDestination(
 }
 
 function cloneScopeFrame(frame: RuntimeScopeFrameSnapshot): RuntimeScopeFrameSnapshot {
-  return { id: frame.id, file: frame.file, bindings: frame.bindings.map(cloneBinding) };
+  return {
+    id: frame.id,
+    file: frame.file,
+    entry: frame.entry,
+    bindings: frame.bindings.map(cloneBinding),
+  };
 }
 
 function cloneFunctionFrame(frame: RuntimeCallFrameSnapshot): RuntimeCallFrameSnapshot {
@@ -3091,12 +3102,14 @@ function validateScopes(
   for (const [index, frame] of [...frames, ...retainedScopes].entries()) {
     if (
       !isPlainRecord(frame) ||
-      !hasExactKeys(frame, ["id", "file", "bindings"]) ||
+      !hasExactKeys(frame, ["id", "file", "entry", "bindings"]) ||
       !nonNegativeSafeInteger(frame.id) ||
       !Array.isArray(frame.bindings) ||
-      (frame.file !== null &&
-        (!nonNegativeSafeInteger(frame.file) ||
-          (plan !== undefined && frame.file >= plan.files.length))) ||
+      (frame.file === null
+        ? frame.entry !== null
+        : !nonNegativeSafeInteger(frame.file) ||
+          !nonNegativeSafeInteger(frame.entry) ||
+          (plan !== undefined && !isFileEntry(plan, frame.file, frame.entry))) ||
       (index >= frames.length && frame.file === null)
     ) {
       errors.push("Runtime scope frame is malformed.");
@@ -3120,6 +3133,16 @@ function validateScopes(
       if (failure !== null) errors.push(failure);
     }
   }
+}
+
+/** Whether an activation of a file may start at an instruction: the file's entry or one of its labels. */
+function isFileEntry(plan: InstructionPlan, file: number, entry: number): boolean {
+  const planFile = plan.files[file];
+  return (
+    planFile !== undefined &&
+    (entry === planFile.entryInstruction ||
+      planFile.labels.some((label) => label.instruction === entry))
+  );
 }
 
 /** An activation's root stands at the bottom of the stack and above each file call; no other scope is a root. */
@@ -3156,7 +3179,11 @@ function sameTransferDestination(planned: PlanTransferDestination, stored: unkno
   );
 }
 
-/** `fallback` holds the destination of a `fallback` statement: a file's entry or label, or a glob's files. */
+/**
+ * `fallback` holds the destination of a `fallback` statement: a file's entry or label, or a glob's files. A computed
+ * `fallback` resolves when it runs, so with one in the plan it may also be any label, or the entry of a file that runs
+ * something.
+ */
 function validateFallback(
   value: unknown,
   plan: InstructionPlan | undefined,
@@ -3182,11 +3209,30 @@ function validateFallback(
         (instruction) =>
           instruction.kind === "setFallback" &&
           instruction.destination !== null &&
+          // A computed destination holds an expression, never a stored fallback.
+          !("value" in instruction.destination) &&
           sameTransferDestination(instruction.destination, value),
-      ))
+      ) &&
+      !(isPlainRecord(value) && resolvedFallbackFits(value, plan)))
   ) {
     errors.push("Runtime fallback is malformed.");
   }
+}
+
+/** Whether a fallback is one that a computed `fallback` of the plan may have resolved to. */
+function resolvedFallbackFits(value: Record<string, unknown>, plan: InstructionPlan): boolean {
+  return (
+    plan.instructions.some(
+      (instruction) =>
+        instruction.kind === "setFallback" &&
+        instruction.destination !== null &&
+        "value" in instruction.destination,
+    ) &&
+    nonNegativeSafeInteger(value.file) &&
+    nonNegativeSafeInteger(value.target) &&
+    isFileEntry(plan, value.file, value.target) &&
+    !runsNothing(plan, value.file)
+  );
 }
 
 function validateSpeakers(value: unknown, errors: string[]): Set<number> {

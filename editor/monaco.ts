@@ -119,6 +119,7 @@ export function registerTeaseScriptLanguage(): void {
         "object",
         "range",
         "media",
+        "script",
       ],
       commands: [
         "showButton",

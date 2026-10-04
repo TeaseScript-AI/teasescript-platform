@@ -255,6 +255,7 @@ export {
   type SerializableRuntimeValue,
   type SerializableSpeakerReference,
   type SerializableMediaHandle,
+  type SerializableScriptReference,
   type SerializableRuntimeDate,
   type SerializableRuntimeDateTime,
   type SerializableRuntimeTime,

@@ -145,6 +145,12 @@ export function rootFitsFunction(
   );
 }
 
+/** Whether a file holds declarations only: its root region holds nothing after its entry but its closing `end`. */
+export function runsNothing(plan: InstructionPlan, file: number): boolean {
+  const { entryInstruction, rootEndInstruction } = plan.files[file]!;
+  return rootEndInstruction - entryInstruction === 1;
+}
+
 /** Whether an instruction is code of a global function or one of its blocks, which runs for any file's activation. */
 export function inGlobalCode(plan: InstructionPlan, instruction: number): boolean {
   return plan.functions.some(
