@@ -40,7 +40,7 @@ export interface OpenType {
 export type PropertyTable = Map<string, StaticType>;
 
 export const UNKNOWN_TYPE: StaticType = Object.freeze({ kind: "unknown" });
-export const NEVER_TYPE: StaticType = Object.freeze({ kind: "never" });
+const NEVER_TYPE: StaticType = Object.freeze({ kind: "never" });
 export const NULL_TYPE: StaticType = Object.freeze({ kind: "null" });
 const ANY_OBJECT_TYPE: StaticType = Object.freeze({ kind: "object", properties: null });
 
