@@ -39,12 +39,13 @@ fields are not duplicated automatically because fields may carry shared state; t
 
 ## Existing TeaseScript is sufficient
 
-These corpus patterns looked like gaps but are importer work; the generated form is ordinary TeaseScript:
+These corpus patterns looked like gaps but are importer work; the generated form is ordinary TeaseScript, or accepted
+TeaseScript that the compiler gate replaces with stand-ins until it is implemented:
 
 | Legacy pattern | TeaseScript form |
 | --- | --- |
 | `"Hi " + name` (string `+`) | `"Hi ${name}"`; TeaseScript `+` is numeric only |
-| Groovy truthiness (`if (name)`, `!count`) | explicit comparisons chosen from inferred types (`name != ""`, `count == null or count == 0`) |
+| Groovy truthiness (`if (name)`, `!count`, `if (map)`) | explicit comparisons chosen from inferred types (`name != ""`, `count == null or count == 0`, `map != {}`) |
 | ternary / Elvis | `if` statements with one assignment or statement per branch |
 | implicit last-expression return | explicit `return`, also in the last statements of `if`/`else` branches |
 | `list[getRandom(list.size())]`, `list[-1]` | `list.random`, `list.last` / `list[list.length - n]` |
@@ -53,16 +54,27 @@ These corpus patterns looked like gaps but are importer work; the generated form
 | `return new Object() { fields; methods }.main()` | globals, functions, and the entry method's statements as the script flow |
 | runtime-loaded `metaClass` mixin modules (`Eval.me` over a script directory) | the injected methods as functions and direct calls to each module's load and setup function |
 | a `break` in the middle of a `switch` case | break-free case paths |
-| switch cases that are variables or lists | an `if`/`else if` chain with `==` or `contains()` |
-| `getSelectedValue(text, [...])` | `say text` plus `choose 0: ..., 1: ...` (numeric labels return the index) |
+| switch cases that are literal lists | a case with several values, `case 0, 1 { ... }` (#528) |
+| switch cases that are variables, or that overlap | an `if`/`else if` chain with `==` or `contains()` |
+| `getSelectedValue(text, [...])` | `say text` plus `choose 0: ..., 1: ...` (numeric values return the index) |
+| `getSelectedValue(text, ["Back"] + list)` | `say text` plus `choose 0: "Back", sexscriptLegacyMenuOptions(list, 1)`, whose `{ value, text }` choice objects return the index (PR #515) |
 | `getBoolean(text, yes, no)` | `say text` plus `(choose yes: ..., no: ...) == "yes"` |
-| `getString` / `getFloat` | `say text` plus compact `askText` / `askNumber` |
+| `getString` / `getFloat` / `getInteger` with a default | `say text` plus `askText default: value` / `askNumber default: value`; `askInteger(text, default: value)` |
 | `Calendar.getInstance().get(Calendar.HOUR_OF_DAY)` and other fields | `getDateTime().hour`, with month and weekday-number conversions |
-| `list + other`, `list << x`, `list.push(x)` | a generated concatenation helper and `add()` |
+| `getTime()` (Unix seconds) | `getDateTime().toSeconds()` (#532) |
+| `new Date().format("yyyy-MM-dd")`, `new Date().format("HH:mm")` | `getDate().toISO()`; `getTime().formatTime()`, with a note (#532) |
+| `list + other`, `list << x`, `list.push(x)`, `list += other` | a generated concatenation helper and `add()` |
+| `list.remove(index)`, `list.remove(value)` | `list.removeAt(index)`, also as a value; `list.remove(value)` with structural equality (#517) |
+| Groovy string methods (`size()`, `trim()`, `toUpperCase()`, `replace()`, `split()`, ...) | text operations (`text.length`, `trim()`, `uppercase()`, ...; PR #518) |
+| `list.join(separator)`, `"${list}"` | `list.join(separator)`; `"[${list.join(", ")}]"` (PR #518) |
 | `def x` / `int x` without initializer | `let x: string? = null` (or `string[]?`, ...), and `0` or `false` for primitives |
+| `def x = 0` that later holds a fraction, or `null` | `let x: number = 0`, `let x: integer? = 0` (#519) |
+| `int x = 7 / 2`, and later numbers stored in `x` | `let x = toInteger(7 / 2)` (Groovy stores 3) |
 | `new Boolean[n]`, `x in list`, boolean `&`/`|` | a generated list helper, `list.contains(x)`, `and`/`or` with a side-effect-free right side |
 | `System.exit(0)` | `exit` (the Player stays open) |
-| `int t = showPopup(m)` (seconds until closed) | `getSeconds()` before and after `showPopup m`, in whole seconds |
+| `int t = showPopup(m)` (seconds until closed) | `getDateTime().toSeconds()` before and after `showPopup m`, in whole seconds |
+| `showButton(text, s)` used as a value (seconds until the click) | `(showButton text, timeout: s) / 1 s` (#531) |
+| `getImage(message)` (webcam picture path or null) | `takePhoto()`, with a note (V30 §33) |
 | `playBackgroundSound(null)`, `stopSoundThreads()` | handles of the async sounds kept in a list and stopped by a generated helper |
 | `f(x++)`, `continue` in a C-style `for`, `return` inside `each()` | `f(x)` then `x += 1`; the update step before each `continue`; `continue` |
 | `while (playBackgroundSound(s) \|\| true)` | `while true` with the call as its first statement |
@@ -76,8 +88,18 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   dropped. Input functions showed their text like `show()`; a `null` text kept the current text.
 - `say` text is message markup: legacy `*emphasis*` renders as formatting and URLs become links. Line-start list,
   heading, or quote markers and backslash escapes get a `NOTE` (`escapeMarkup()` keeps text literal).
-- Single-field input had a pre-filled value; TeaseScript input has none, so the player types it (`SX_INPUT_PREFILL`).
-- Groovy turned lists into text as `[a, b]`; TeaseScript interpolation shows one random element (`SX_COLLECTION_TEXT`).
+- Single-field input prefilled its field with the default, also when the default was null (the field showed "null")
+  or empty. TeaseScript prefills with `default:` but rejects a null or blank default when the input opens, so a
+  default that may be either gets a note (`SX_INPUT_PREFILL`); a literal empty or null default is dropped. A default
+  computed with side effects stays manual work for text and number input (`SX_INPUT_PREFILL_EFFECT`): legacy computed
+  it before showing the question, and the converted question is a `say` before the input.
+- Groovy turned a list into text as `[a, b]`; TeaseScript `${list}` selects one element and `say list` shows a quoted
+  notation (PR #515). A list of text, numbers, and booleans becomes `"[${list.join(", ")}]"`; other lists are reported
+  (`SX_COLLECTION_TEXT`). Groovy printed a whole `double` as `2.0`, where `${...}` shows `2`. Groovy `join()` had no
+  separator, so it becomes `join("")`, as TeaseScript's default separator is `", "`.
+- Text operations follow Unicode code points and full case mapping (PR #518): lengths and positions count code points
+  where Java counted UTF-16 units, `trim()` also removes non-breaking spaces, and `uppercaseFirst()` turns a leading
+  `ß` into `SS`. Java `split()` drops trailing empty parts and TeaseScript `split()` keeps them (`NOTE`).
 - Legacy `save(key, null)` deleted the key and every dotted sub-key (`key.*`), and generic `load()` decoded a stored
   string `"null"` as null. Generated reads therefore compare with `null` explicitly, which treats a stored null and a
   missing key alike; `load ... default` is not used because it would keep a stored null (see the specification
@@ -89,8 +111,9 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   at runtime. Conversions keep plain comparisons: guarding every comparison of a stored number would bury the intent,
   and the corpus scripts that compare a missing key (isolated smoke runs of Domme3 `discipline` and `maintenance`)
   depend on settings saved by the package's introduction anyway.
-- A Groovy map in a condition tests emptiness; records have no emptiness test, so such conditions are manual work
-  (`SX_MAP_TRUTHINESS`).
+- A Groovy map in a condition tests emptiness, which `map != {}` expresses now that objects compare structurally
+  (#517); a map that may also be null is tested with `map != null and map != {}`, and reported when the expression
+  cannot be evaluated twice (`SX_MAP_TRUTHINESS`).
 - Closures kept as values become action IDs called through one dispatcher. Unlike Groovy, the dispatcher ignores extra
   arguments and returns null for an unknown action; Groovy failed in both cases.
 - A `switch` case Groovy tested with `isCase` keeps its meaning only where the case value shows it: equality for
@@ -109,40 +132,76 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   collide with generated helpers.
 - Groovy maps are shared references; TeaseScript records copy. A field write through a copy gets a `NOTE`
   (`SX_SHARED_MAP_WRITE`). Picking from an empty list returned null in Groovy and fails in TeaseScript.
-- Groovy lists and maps alias by reference; TeaseScript composite values copy (ADR 0014). Groovy `def` may change type.
-- Java `Math.round` rounds `.5` toward positive infinity; TeaseScript `round()` does not specify ties yet.
-- Java date pattern formatting (`new Date().format("yyyy-MM-dd")`) has no equivalent; typed `date`/`datetime` values
-  compare and store directly, and `formatDate()`/`formatTime()` cover display (`SX_DATE_FORMAT`).
+- Groovy lists and maps alias by reference; TeaseScript composite values copy (ADR 0014). Groovy `def` variables may
+  change type; TeaseScript variables keep one (#519, see the findings below).
+- `list.removeAt(index)` with an invalid index fails like Groovy's `remove(int)`. The importer emits no `removeFirst()`
+  or `removeLast()` (an error on an empty list). The corpus removes no list element by position: of its 6 `remove`
+  calls, 5 act on Toy's maps and one removes a text value inside a Toy closure chain.
+- Java `Math.round` rounds `.5` toward positive infinity; TeaseScript `round()` rounds ties away from zero (V30 §13),
+  so `round(-2.5)` is `-3` where Java gave `-2` (`SX_ROUNDING_TIES`, 7 corpus sites).
+- Legacy `showButton()` returned the seconds until the click as a number; the TeaseScript result is a duration
+  (#513, #531), so a used result is divided by `1 s`, 49 corpus sites. A Groovy `int` that stores it truncates, as
+  Groovy did: `t = toInteger((showButton "Done") / 1 s)`, 25 sites in Domme3.
+- Java date pattern formatting (#532): `yyyy-MM-dd` is a machine format and becomes `toISO()`, exactly; a display
+  pattern of a whole date or time becomes `formatDate()`, `formatTime()`, or `formatDateTime()`, which show the
+  player's local form instead of the legacy pattern, a deliberate difference with a `NOTE`. Of the corpus's 9
+  formatting sites, 3 use `toISO()` and 3 `formatTime()`; the 3 that format a date built from stored Unix seconds stay
+  reported (`SX_DATE_FORMAT`), see the observations below.
+- Legacy `getImage()` took a webcam picture without asking and returned its path, or null; only without a webcam did
+  it open a file chooser titled with the message. `takePhoto()` returns a photo reference or null; the file-chooser
+  fallback and the message are dropped with a `NOTE`, and the Player decides how the photo is taken (3 corpus sites).
 - Rewrites that move evaluation (ternary branches, input prompts) are applied only when the expression is not behind
   `&&`/`||`/`?:` and nothing with side effects is evaluated earlier in the statement; otherwise the statement is
   reported (`SX_CONDITIONAL_POSITION`, `SX_PROMPT_POSITION`).
 
+## Type enforcement findings (#519)
+
+`main` rejects a value of another type than a variable's declared or inferred one (`TSV041`), and only `integer`
+widens to `number`. The importer follows the compiler's static types over the generated program (plus the accepted
+result types of PRs #515 and #518) and repairs what a declaration can express. Measured on the four corpus packages:
+
+- **Variables that change type: 7, all in DisciplineClinic.** Four start as an empty-text placeholder and later hold
+  a list (`def lineArray = ""`, then `lineArray = ["I need discipline, ...", ...]`, also `mantraArray`,
+  `lessonArray`, `adviceArray`); three reuse an answer variable for text and then booleans or menu positions
+  (`def response = ""`, later `response = getBoolean(...)` and `response = getSelectedValue(...)`). Without union
+  types they are reported at the declaration (`SX_TYPE_CHANGE`) and need separate variables. Two more DisciplineClinic
+  menus use one variable for the menu text or a number and for the option list, so they stay unconverted
+  (`SX_DYNAMIC_CHOICE_OPTIONS`). The other three packages reuse variables only with compatible types.
+- **Integer/number friction: 18 declarations** (Domme3 3, DisciplineClinic 9, Toy 6) start with a whole number and
+  later hold a fraction, so they become `let spankTempo: number = 1`; Groovy `def` never cared. Deciding that needs a
+  whole-program view of every later assignment, which an author editing one line does not have.
+- **Optional types:** one variable starts with text and is later set to null (`let block: string? = "begin"`).
+- **Groovy integer declarations truncate:** `int` locals store whole numbers, so 27 values truncate with
+  `toInteger` (25 of them `showButton` seconds stored in Domme3's `int t`, and `int tt = (t - 720) / 60`).
+- **Numeric `choose` values:** PR #515 types `choose 0: ..., 1: ...` as `integer`, while `main` still types it as
+  `number`, so the common `def answer = 0` followed by `answer = getSelectedValue(...)` is valid under PR #515 but
+  rejected by `main` (4 corpus scripts); the compiler gate hides that type behind a placeholder.
+- **Importer defects the checks exposed:** 13 Toy `lines += [...]` appends were emitted as numeric `+=` because the
+  per-file Groovy type inference could not prove the list; the type pass now appends with the concatenation helper.
+  A text key on a receiver of unknown type was emitted as list indexing, which `main` now rejects; it is reported as
+  map access.
+- **Coming with #526:** an unannotated parameter takes its default's type, so a legacy default such as `amount = 1`
+  that callers pass fractions would need `amount: number = 1`; 101 generated functions have defaults, and `main` does
+  not compile typed function signatures yet.
+
 ## Capability candidates
 
-Evidence for owner evaluation, ordered by corpus weight:
+Evidence for owner evaluation, ordered by corpus weight. Choices from runtime lists (C1–C3, PR #515), text
+operations (#508, PR #518), and single-field prefill (#510, merged as #514) were candidates here and are now accepted;
+the importer emits them by default.
 
-1. **Choice from a runtime list.** DisciplineClinic builds menus from data (`getSelectedValue(dialog, ["Back"] +
-   offenseTextArray)`), and Toy builds its menus from registered options; 23 corpus calls. Each compact `choose` option
-   may be any expression (`choose back, offenses[0]`), but the number of options is fixed in the source, and
-   `choose someList` presents one button with one random element (visible-text list conversion). For a
-   bounded package a helper that branches on the list length (`choose 0: rows[0].label, 1: rows[1].label, ...` per
-   length) works, so this is an ergonomic gap rather than an inexpressible one; menus over data are ordinary script
-   logic, which makes it the strongest candidate. Proposed change: C1–C4 in
-   [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md).
-2. **Text utilities.** Toy measures typed lines (`line.size()` for typing speed) and transforms input text; 13 corpus
-   string-method calls (`SX_STRING_METHOD`) have no accepted equivalent, not even string length. The corpus does not
-   argue for new syntax: a small synchronous `.ts` library of length/case/trim/split functions, once package-library
-   linkage exists, would cover these cases.
-3. **Dictionaries.** Toy keeps registries keyed by runtime strings: toys, events, session parameters, and
-   requestable actions (`events.remove(name)`, `positions.keySet()`, `toys.containsKey(t)`, `map[key]`); about 30
-   Toy sites stay manual work (`containsKey` 13, dynamic keys 5, `keySet`/`values` 5, `remove`/`clear` on maps).
+1. **Dictionaries.** Toy keeps registries keyed by runtime strings: toys, events, session parameters, and
+   requestable actions (`events.remove(name)`, `positions.keySet()`, `toys.containsKey(t)`, `map[key]`); 71 Toy root
+   errors convert with the proposed working syntax (D1 in
+   [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md)).
    TeaseScript objects have fixed, dot-accessed properties. A list of `{ key, value }` records with small lookup
    functions expresses the behavior, at a clear cost in readability. The evidence comes from one package written by an
-   experienced Groovy programmer; the other three packages use maps only as fixed records.
-4. **Single-field input prefill.** About 30 corpus calls pass a meaningful default, typically to edit a current
-   setting (`getInteger("...", cornerBase + playerLevel)`). Accepted multi-field `askIntegers`/`askNumbers` have
-   `defaults`; single-field input has none. Lower priority: the player can still type the value.
-5. **Localized script variants.** The distribution ships language variants per script (`intro`, `intro_de`,
+   experienced Groovy programmer; the other three packages use maps only as fixed records. The owner takes it up in
+   the language tracker, where a separate `dict` type design awaits a decision.
+2. **Regular expressions.** Toy's `replaceAll(/<[^>]*>/, "")` and a pattern `split` remain manual work, as does a
+   locale argument (`toLowerCase(Locale.ENGLISH)`); a synchronous `.ts` text library, once package-library linkage
+   exists, would cover the patterns. Toy's 4 other string-method errors are `size()` calls on values that may be maps.
+3. **Localized script variants.** The distribution ships language variants per script (`intro`, `intro_de`,
    `intro_fr`, ...) selected by the legacy player. The repository has no localization decision; this is a package-level
    product question, not syntax.
 
@@ -154,30 +213,33 @@ calls; exceptions only guard desktop APIs.
 
 Concrete points the migration surfaced in TeaseScript itself:
 
-- **`set` as a protected name, the `round()` tie rule, and the `showButton` elapsed type** are owner-decided and
-  tracked in #507: `set` becomes protected, ties round away from zero (`-0.5` is `-1`; Java rounded `-0.5` to `0`),
-  and the elapsed result is a `duration`.
-- **Storage** now matches the owner decision on `main` (#484): `load` never writes, and `save null` removes the key.
-- **Positional and named arguments.** V30 section 10 forbids mixing them in one call, but section 13's example
-  `toNumber(text, default: 0)` mixes them, and the parser rejects it (TSP019). The owner chose to allow positional
-  arguments followed by named ones (#522).
-- **Types are not enforced.** `let score: number = "high"` compiles and runs, against V30 sections 12 and 13 (#504).
-  Two DisciplineClinic menus stay unconverted because one variable holds text in one place and a list in another.
-- **Runtime defect: a `choose` reached again with other option texts.** The runtime revalidates the retained
-  settlement of the last choice against the option texts its instruction currently holds, so the next completion
-  fails with TSR101 ("Runtime lastSettlement is malformed") once the same `choose` ran again with other texts, as in
-  `for pair in [["Low", "High"], ["Plug", "Clamps"]] { let pick = choose 0: pair[0], 1: pair[1] }`. The proposal
-  shim works around it; accepted output with computed option texts in a loop hits it (#521).
+- **Storage** matches the owner decision on `main` (#484): `load` never writes, and `save null` removes the key.
+- **Prefill if available.** 27 of the corpus's 62 input defaults come from settings loaded from storage, which may be
+  null (`askInteger(dialog, default: playerLevel)`). TeaseScript rejects a null default when the input opens, so a
+  faithful conversion would need an `if` around two inputs; the output keeps one input with a note. A form that
+  prefills only when the value is present would fit these settings dialogs.
+- **No conversion from Unix time to a datetime (#532).** Domme3 stores the chastity start as Unix seconds
+  (`save("domme3.chastitystart", getTime())`) and later formats it (`new Date((long)chastitystart * 1000)`, 3 sites).
+  #532 converts a datetime to seconds but not back, so these stay manual work; storing the datetime itself is the
+  TeaseScript way, which needs a package-wide rewrite of the saved value.
+- **Calendar day counts.** Domme3 seeds a pseudo-random choice with `Calendar.DAY_OF_YEAR` (1 site). #532's
+  `date - date` gives whole calendar days, but division accepts only exact durations, so the number of days between
+  two dates cannot be read as a number.
+- **Compact interactions as values.** A used `showButton` result needs parentheses and a duration division,
+  `(showButton "Done", timeout: 30) / 1 s`, 49 corpus sites; most compare the seconds with a number.
 
 ## Legacy baggage
 
 Reported for manual work and intentionally not reproduced: reflection and `GroovyClassLoader` outside resolved
 package helpers, `java.io.File` access and directory listing other than a recognized module loader,
-`System.getProperty`, OS processes (Toy's speech output), webcam/file pickers (`getImage`, `getFile`), `openCdTrays`,
-`useEmailAddress`, `useFile`, the old online `send`/`receive` service, and `try`/`catch` around desktop APIs.
-`Locale.getDefault()` serves the localization question above. Scripts also contain plain legacy bugs the importer
-reports instead of repairing: calls to undefined functions, helper calls with missing arguments, and closures
-referenced without `()` (which Groovy evaluated as a no-op or as `true`).
+`System.getProperty`, OS processes (Toy's speech output), the file picker `getFile` (no corpus site; accepted
+`chooseFile()` would be its counterpart), `openCdTrays`, `useEmailAddress`, `useFile`, the old online
+`send`/`receive` service, and `try`/`catch` around desktop APIs. The webcam `getImage` converts to `takePhoto()` (see
+above; the Player side is in draft PRs #475 and #516). `Locale.getDefault()` serves the localization question above.
+Scripts also contain plain legacy bugs the importer reports instead of repairing: calls to undefined functions, reads
+of variables that nothing assigns (10 sites, such as `save("domme3.spank", fun)`; SexScript failed with a missing
+property when they ran), helper calls with missing arguments, and closures referenced without `()` (which Groovy
+evaluated as a no-op or as `true`).
 
 Toy-specific owner decisions (2026-10-03): speech output is ignored for now; the Cornertime workflow (custom
 punishment and report files exchanged with the external Cornertime webcam tool) stays manual work, and showing the
@@ -189,23 +251,22 @@ Emily persona; the code's default owner `ancilla` is not included.
 ## Accepted but not implemented
 
 The importer emits these accepted forms although the current compiler rejects them; the compiler gate counts them
-separately: `run`/`end`, `switch`, `showPopup`, `showButton` with timeout or elapsed result, `askInteger`,
-`askBooleans`, `getSeconds`/`getDateTime`, `openUrl`, `round`/`floor`/`ceil`, and conversions. `run`/`end` dominates:
-it blocks 19 otherwise compiler-clean corpus scripts.
+separately: `run`/`end`, `switch` (#528, PR #529), `showPopup`, the `showButton` timeout and elapsed result (#531),
+`askInteger`, `askBooleans`, date and time (`getDateTime()`, `getDate()`, `getTime()`, `toSeconds()`, `toISO()`,
+`formatTime()`; #532), `openUrl`, `round`/`floor`/`ceil` and the conversions (#518), text operations and `join`
+(#518), `choose` with list options (#515), and `takePhoto()` (camera, #475). `run`/`end` dominates: it blocks 20
+otherwise compiler-clean corpus scripts.
 
 ## Open importer work
 
 Found while evaluating the proposals; none needs a language decision:
 
-- **`int` declarations lose truncation.** `int m = 7 / 2` becomes `let m = 7 / 2`, but Groovy stores `3`; the cast form
-  `(int) (7 / 2)` is already converted with `toInteger`. Domme3's countdown helper uses the declaration form.
-- **Two DisciplineClinic menus** stay unconverted because one variable holds text in one place and a list in another;
-  the flow-insensitive type inference cannot prove the list.
 - **Toy menus built inside larger expressions,** whose `collect` cannot move before the statement.
 - **Toy imagery** (outfit folders with tag files) could map to proposed media tags once tags are ingested from those
   files.
-- **Regular expressions** in `replaceAll`, `split`, and `tokenize` remain manual work (Toy).
+- **Regular expressions** in `replaceAll` and `split` remain manual work (Toy).
 - **`load "key" default value`** is now exact for legacy read-then-default code, because `save null` removes the key on
   `main` (#484); the importer does not use it for that pattern yet.
-- **The stand-in `choose` alternation** in `src/pending.ts` works around the runtime defect #521; remove it once #521
-  is fixed on `main`.
+- **Groovy type inference is per file and flow-insensitive:** a name used in two functions shares one type set, which
+  hides lists (the Toy appends above) and makes `size()` on values of unknown type look like possible maps. The
+  never-assigned-variable check is name-based in the same way.

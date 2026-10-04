@@ -126,8 +126,9 @@ value-position assignment, and a date built from Unix time, which TeaseScript ca
 (outfit folders with tag files, random selection by persona, outfit, and tags) fits the owner's tag idea but needs tag
 ingestion from those files; not converted yet.
 
-**No corpus evidence:** removing objects or positions from lists (#509) has zero sites, and no output depends on
-`say` of a whole list (L1). Both were language-consistency decisions.
+**Little corpus evidence:** removing positions from lists (#509) has zero sites and removing a value one, inside a
+Toy closure chain that stays unconverted for other reasons; no output depends on `say` of a whole list (L1). Both
+were language-consistency decisions.
 
 ## L1. Random list selection only inside `${...}`
 
