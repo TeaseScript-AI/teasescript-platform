@@ -56,6 +56,19 @@ Compilation then searches these images for `showImage tagged` and `findImages`, 
 picked image. This temporary development folder serves every image in it to anyone who can reach the server; Laravel
 stores uploaded images and their tags later.
 
+To open whole packages (#570), point the server instead at a folder whose direct subfolders are packages; the two
+settings cannot be combined:
+
+```shell
+PLAYGROUND_PACKAGES=/path/to/packages npm run playground
+```
+
+Open a package by its folder name: `/player/?package=<name>` plays it, `/?package=<name>` opens it in the playground,
+and `/editor/?package=<name>` in the browser editor. All its `.tease` files compile as one project that starts at
+`main.tease`, with its images as above; a package that does not compile lists each diagnostic with its file and line.
+Edits in the playground and the editor stay in the page. Hidden folders and links are not packages, a package's images
+are served only from that package, and other media files are not served.
+
 Fresh playground runs use the fixed unsigned seed `0x6d2b79f5` (`1831565813`) with the versioned `xorshift32-v1` runtime RNG. It is deterministic and serializable, not cryptographically secure and not a permanent syntax guarantee.
 
 The POC uses pinned development dependencies for the TypeScript compiler, agent codemods, and Node.js types.

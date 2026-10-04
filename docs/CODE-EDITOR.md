@@ -4,18 +4,23 @@ The future browser editor owns source authoring: syntax highlighting, diagnostic
 and integration with compiler/runtime tooling. Runtime inspection and diagnostic execution belong to
 [`DEBUGGER.md`](DEBUGGER.md); the editor may embed those controls without owning debugger semantics.
 
-The Monaco browser editor POC is a separate editor-owned Vue/Vite surface under `editor/vue/`; it consumes the
+The Monaco browser editor POC is a separate editor-owned Vue/Vite surface under `editor/vue/`, whose build the
+playground server serves on `/editor/`; it consumes the
 editor-neutral tooling through thin Monaco providers and registers `.tease` presentation without becoming a second
 correctness grammar. It follows the [language design intent](TEASESCRIPT.md#language-design-intent) for the
 [creator audience](PRODUCT.md), keeping the beginner-facing surface focused instead of exposing every Monaco feature.
-It opens a small sample project and compiles all files as one project after every edit. A file overview lists each
+It opens a small sample project, or with `?package=<id>` a package of the playground server's development package root
+(see the repository `README.md`), and compiles all files as one project, with the package's images, after every edit;
+edits stay in the page. A file overview lists each
 file with the title, author, description, and tags of its header ([V30 §41](specifications/accepted-syntaxes-v30.md#41-headers-and-tags))
 and its diagnostic count; selecting a file opens it.
 The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
 textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and
 validated checkpoint save/restore. Its Player panel provides the first Standard interaction and chat-pacing control POC
 through the DOM-free workspace controller. With a development package folder (see the repository `README.md`), it
-compiles with that folder's tagged images and shows the Stage image. It deliberately has no Monaco integration,
+compiles with that folder's tagged images and shows the Stage image. With a root of packages, `?package=<id>` opens one
+package as a project at its `main.tease`: a file selector switches the file shown, a diagnostic names its file and opens
+it, and checkpoints are kept per package. It deliberately has no Monaco integration,
 package authoring, library-aware completion, or cross-origin production-player shell.
 
 The technical workspace/controller implementation lives at `playground/workspace/controller.ts`; browser and server
@@ -28,8 +33,8 @@ controller shares its action lookup/completion path without creating a second ca
 [`player/README.md`](../player/README.md) for local inspection; that route does not define the future cross-origin
 production Player/host protocol.
 
-The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key. Drafts are
-separate from runtime checkpoints. Storage failures are bounded technical messages; explicit example reload discards the
+The browser stores authoring text under the versioned `teasescript-playground-draft-v1` localStorage key; edits of an
+open package stay in the page and are not drafts. Drafts are separate from runtime checkpoints. Storage failures are bounded technical messages; explicit example reload discards the
 draft and never overwrites repository examples. A local `.tease` file may be imported or exported without repository or
 server writes.
 
