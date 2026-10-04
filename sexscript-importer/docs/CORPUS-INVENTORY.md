@@ -24,7 +24,7 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-04 at importer commit `c72e3637`, after merging `main` at `66f0a750`, with `node src/cli.ts
+Measured on 2026-10-04 at importer commit `f0d02e3c`, after merging `main` at `66f0a750`, with `node src/cli.ts
 report --run <package scripts>` (default conversion, without proposals). Toy's 21 runtime-loaded modules are part of
 its single script `toy.groovy`, so Toy counts as one script whose statements include all module code.
 
@@ -80,7 +80,6 @@ scripts use it (capabilities used by fewer than three scripts are omitted):
 | `toInteger()` (#518) | 9 | 1 |
 | `choose` list options (#515) | 5 | 0 |
 | `round()` (#518) | 4 | 1 |
-| `choose` integer values (#515) | 4 | 0 |
 | `getDate().toISO()`, `getTime().formatTime()` (#532) | 3 each | 1 each |
 | `openUrl()` | 3 | 0 |
 

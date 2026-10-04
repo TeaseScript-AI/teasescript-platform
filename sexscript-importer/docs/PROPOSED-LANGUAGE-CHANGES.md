@@ -40,7 +40,7 @@ options` and `text operations`. Only D1 and M1 remain proposals (`--proposed`).
 
 ## Corpus evaluation
 
-Measured on 2026-10-04 at importer commit `c72e3637` with `node src/cli.ts report --run [--proposed=<id>] <package
+Measured on 2026-10-04 at importer commit `f0d02e3c` with `node src/cli.ts report --run [--proposed=<id>] <package
 scripts>`, after merging `main` at `66f0a750`. The importer emits a working syntax of its own choosing for the two
 remaining proposals; the report compiles and smoke-runs it through stand-ins in current TeaseScript, so "converted"
 means converted, compiled, and run, not just emitted. Each cell: root errors / lowered scripts / compiler-clean except
@@ -209,8 +209,8 @@ an explicitly union-typed variable. The owner takes that, and C5, up with #504. 
 
 Importer consequence: the legacy menus convert with numeric values, whose type is `integer` under PR #515 while `main`
 still types a numeric `choose` as `number`. A legacy variable that starts at `0` and later receives a menu result is
-therefore valid under PR #515 but rejected by `main`; the compiler gate hides that type behind a placeholder (pending
-capability `choose integer values`, 4 corpus scripts).
+valid under PR #515 but rejected by `main`, so until PR #515 merges the importer follows `main` and declares such a
+variable `let answer: number = 0` (14 corpus declarations).
 
 ## C3. Values from a list: choice objects
 

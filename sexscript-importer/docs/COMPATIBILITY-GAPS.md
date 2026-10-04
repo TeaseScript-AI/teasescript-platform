@@ -129,7 +129,9 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   value; a `times` count or list index that is fractional or negative only at runtime fails in TeaseScript; two
   scripts that load the same module directory share one set of function and field facts; a variable that shadows
   `Calendar` is still read as the Calendar class; functions authored with the importer's `sexscriptLegacy` prefix
-  collide with generated helpers.
+  collide with generated helpers; a closure parameter declared `int` does not truncate later stores, as a typed local
+  does (the corpus's one typed parameter is never reassigned); and `remove(x)` with a fractional number removed by
+  value in Groovy, while the conversion removes by position (no corpus site).
 - Groovy maps are shared references; TeaseScript records copy. A field write through a copy gets a `NOTE`
   (`SX_SHARED_MAP_WRITE`). Picking from an empty list returned null in Groovy and fails in TeaseScript.
 - Groovy lists and maps alias by reference; TeaseScript composite values copy (ADR 0014). Groovy `def` variables may
@@ -173,9 +175,9 @@ result types of PRs #515 and #518) and repairs what a declaration can express. M
 - **Optional types:** one variable starts with text and is later set to null (`let block: string? = "begin"`).
 - **Groovy integer declarations truncate:** `int` locals store whole numbers, so 27 values truncate with
   `toInteger` (25 of them `showButton` seconds stored in Domme3's `int t`, and `int tt = (t - 720) / 60`).
-- **Numeric `choose` values:** PR #515 types `choose 0: ..., 1: ...` as `integer`, while `main` still types it as
-  `number`, so the common `def answer = 0` followed by `answer = getSelectedValue(...)` is valid under PR #515 but
-  rejected by `main` (4 corpus scripts); the compiler gate hides that type behind a placeholder.
+- **Numeric `choose` values:** `main` types `choose 0: ..., 1: ...` as `number`, while PR #515 makes it `integer`.
+  Until PR #515 merges, the common `def answer = 0` followed by `answer = getSelectedValue(...)` therefore needs
+  `let answer: number = 0`: 14 more declarations (DisciplineClinic 13, Toy 1), which PR #515 makes unnecessary.
 - **Importer defects the checks exposed:** 13 Toy `lines += [...]` appends were emitted as numeric `+=` because the
   per-file Groovy type inference could not prove the list; the type pass now appends with the concatenation helper.
   A text key on a receiver of unknown type was emitted as list indexing, which `main` now rejects; it is reported as
