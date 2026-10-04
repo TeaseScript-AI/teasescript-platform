@@ -15,18 +15,20 @@ produces a structured runtime error instead of recursing indefinitely. Future
 opaque engine references are outside this decision. An implementation may use
 copy-on-write later only if observable deep-copy behavior remains unchanged.
 
-Sets contain only scalar values in the current language version:
+Sets contain only these values in the current language version:
 
 - `string`;
 - `boolean`;
 - `integer`;
 - `number`;
-- `null`.
+- `null`;
+- `duration`, `date`, `time`, `datetime`, and `timestamp` (#532).
 
-Lists, objects, sets, speakers, and future opaque engine references are not
-valid set elements. Composite set elements produce a deterministic structured
+Lists, objects, sets, ranges, speakers, and opaque engine references are not
+valid set elements. Other set elements produce a deterministic structured
 runtime error associated with the relevant source span. Set uniqueness uses
-normal scalar `==` equality and retains the first insertion order.
+`==` equality, which compares kind and value, and retains the first insertion
+order.
 
 For empty lists and sets, `.first`, `.last`, and `.random` produce structured
 runtime errors and never return `null`. Empty `.random` does not consume the

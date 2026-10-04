@@ -39,7 +39,7 @@ This table is generated from the current section order.
 - [32. Switch statements](#32-switch-statements)
 - [33. Browser API: file, folder, camera, and URL references](#33-browser-api-file-folder-camera-and-url-references)
 - [34. Runtime warnings and recoverable values](#34-runtime-warnings-and-recoverable-values)
-- [35. Date, time, durations, and Unix time](#35-date-time-durations-and-unix-time)
+- [35. Date, time, durations, and timestamps](#35-date-time-durations-and-timestamps)
 - [36. Scheduling](#36-scheduling)
 - [37. Dynamic speaker terms](#37-dynamic-speaker-terms)
 - [38. Keywords and protected built-ins](#38-keywords-and-protected-built-ins)
@@ -369,7 +369,7 @@ let shares: integer = 10 / 5          // compile error: a quotient is a number
 let shares: integer = floor(10 / 5)   // valid
 ```
 
-Arithmetic applies to numbers, and to durations as described in [§35](#35-date-time-durations-and-unix-time). It never
+Arithmetic applies to numbers, and to durations as described in [§35](#35-date-time-durations-and-timestamps). It never
 converts text or booleans: `"a" + "b"` is a compile error, and text is joined with interpolation, as in
 `"${first}${second}"`.
 
@@ -1076,7 +1076,10 @@ toBoolean(value)
 toDate(value)
 toTime(value)
 toDateTime(value)
+toTimestamp(value)
 ```
+
+The date and time conversions read strict ISO text; see [§35](#35-date-time-durations-and-timestamps).
 
 A conversion that cannot succeed raises a runtime error. A caller may provide an explicit fallback:
 
@@ -1416,7 +1419,8 @@ Runtime behavior:
   when they have the same members in any order; two ranges are equal when they are written with the same bounds and
   the same inclusiveness, so `1..=2 != 1..3` although both produce `1` and `2`. Values of different kinds, such as a
   list and a set, are never equal. List `contains(value)` and `remove(value)` use this equality, so they also find
-  objects and nested lists; `remove(value)` removes the first equal element. Set elements remain scalar values.
+  objects and nested lists; `remove(value)` removes the first equal element. Set elements are scalar values,
+  durations, and date and time values ([§35](#35-date-time-durations-and-timestamps)).
 - The operands of `==` and `!=` are read when they are evaluated, left to right, so a change made while evaluating the
   right operand does not affect the left one: `items == [items.removeAt(0)]` is `true` for `items = [1]`.
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
@@ -2050,7 +2054,7 @@ Rules:
 - Without a timeout, the command waits until the user clicks.
 - With a timeout, execution continues after the click or when the timeout is reached. A reached timeout removes the
   button without a chat message.
-- The command returns the elapsed waiting time as a `duration` ([§35](#35-date-time-durations-and-unix-time)),
+- The command returns the elapsed waiting time as a `duration` ([§35](#35-date-time-durations-and-timestamps)),
   measured in scene time like timers ([§27](#time)). When the timeout is reached, the returned duration equals the
   timeout; a timeout of `5` returns `5 s`.
 - If the caller does not need the elapsed time, the return value may be ignored.
@@ -2560,7 +2564,7 @@ comes first, then the presentation, the duration, an optional string-literal lab
 modifiers mean visible and blocking. `async`, `visible`, `mystery`, and `hidden` are recognized only directly after
 `timer`; write `timer (hidden)` to use a variable of that name as the duration.
 
-A duration is a bare number of seconds, a [§35](#35-date-time-durations-and-unix-time) elapsed duration such as
+A duration is a bare number of seconds, a [§35](#35-date-time-durations-and-timestamps) elapsed duration such as
 `500 ms` or `2 min`, or a number followed by a trailing unit as for `wait` (`timer n ms`). A range such as `5..10` or
 `5..=10` counts whole seconds and is drawn once per round from the session RNG after the timer's operands are
 evaluated. Ranges with other units, such as `5..10 min`, are not implemented yet. `timer 0` and `wait 0` continue
@@ -2999,168 +3003,161 @@ Recovered errors should record:
 
 Recovery is not offered for structural errors such as malformed syntax, unknown functions, invalid labels, or internal engine exceptions. The exact recovery interface and whether recovery is enabled are runtime implementation details, not syntax.
 
-## 35. Date, time, durations, and Unix time
-**Status:** Accepted direction; exact elapsed durations implemented
+## 35. Date, time, durations, and timestamps
+**Status:** Accepted (#532). Implemented: `date`, `time`, `datetime`, and `timestamp` values, their conversions,
+fields, comparison, exact arithmetic, presentation, collections, and storage. Deferred: the current-time getters,
+calendar duration units, and typed date and time input.
 
-TeaseScript has separate `date`, `time`, `datetime`, and `duration` types. The current runtime implements elapsed
-duration literals and values using `ms`, `s`, `min`, and `h`, including their singular and plural long forms.
-Calendar durations, date/time APIs, technical conversions, and locale-aware presentation remain deferred.
-Until calendar durations are implemented, a calendar unit fails compilation instead of being read as another value.
+TeaseScript has two kinds of time:
 
-Current values:
+| Type | Meaning |
+| --- | --- |
+| `date` | A local calendar date without a zone, such as `2026-10-04` |
+| `time` | A local clock time without a zone, such as `14:30` |
+| `datetime` | A local date and clock time without a zone. It follows the player: tomorrow 18:00 stays 18:00 wherever the player is, also after saving, loading, and travel |
+| `timestamp` | A fixed moment in UTC, like Unix time |
+| `duration` | Months, calendar days, and exact milliseconds |
+
+Use local values for "what clock time" and "which day", and `timestamp` for "how long ago" and "how much time
+passed". Unlike SQL, where `timestamp` names a local value, a TeaseScript `timestamp` is always an exact moment.
+
+### Current values
 
 ```text
-let today: date = getDate()
-let currentTime: time = getTime()
-let now: datetime = getDateTime()
+let today = getDate()
+let now = getTime()
+let dinner = toDateTime(getDate() + 1 day, toTime("18:00"))
+let started = getTimestamp()
 ```
 
-`getDateTime()` uses the effective player timezone from the account, with the device timezone as a fallback when no account timezone is available.
+`getDate()`, `getTime()`, and `getDateTime()` return the player's current local values; `getTimestamp()` returns the
+current moment. Within one start or continue, `getTimestamp()` never goes backwards. Local values can: after the
+autumn daylight-saving change, or after travelling west. The engine reads no clock and no host time-zone or locale
+data: the Player records the player's zone and presentation as session data (see
+[`RUNTIME.md`](../RUNTIME.md#date-and-time-context)).
 
-Available fields include:
+### Construction and conversion
+
+Temporal values are written as strict ISO text with a four-digit year; there are no date literals and no locale
+parsing:
+
+```text
+toDate("2026-10-04")
+toTime("14:30")                         // also "14:30:15" and "14:30:15.250"
+toDateTime("2026-10-04T18:00")
+toTimestamp("2026-10-04T12:30:00Z")     // also an offset, such as "2026-10-04T14:30:00+02:00"
+```
+
+Local text has no offset; timestamp text requires `Z` or an offset. Fractions have one to three digits. Text that is
+known at compile time and is not a valid value is a compile error, also when a `default:` is given; other text follows
+the [§13](#13-explicit-types) conversion rules.
+
+| Conversion | Converts |
+| --- | --- |
+| `toDate(value)` | date text, a `date`, or the date of a `datetime` |
+| `toTime(value)` | time text, a `time`, or the clock time of a `datetime` |
+| `toDateTime(value)` | datetime text or a `datetime` |
+| `toDateTime(date, time)` | a `date` and a `time` combined |
+| `toTimestamp(value)` | timestamp text or a `timestamp` |
+
+Local values and timestamps convert through the player's current zone:
+
+```text
+let deadline = dinner.toTimestamp()
+let local = started.toDateTime()
+```
+
+A local time that the spring daylight-saving change skips moves forward by the gap; a local time that the autumn
+change repeats takes the earlier moment. A `date` or `time` alone cannot become a timestamp.
+
+### Fields
 
 ```text
 today.year
 today.month
 today.day
-today.weekday
-today.weekdayNumber
+today.weekday           // "Saturday"
+today.weekdayNumber     // Monday is 1, Sunday is 7
 
-currentTime.hour
-currentTime.minute
-currentTime.second
-currentTime.millisecond
-
-now.year
-now.month
-now.day
 now.hour
 now.minute
 now.second
 now.millisecond
-now.weekday
-now.weekdayNumber
 ```
 
-`weekday` returns the English weekday name. `weekdayNumber` uses ISO numbering where Monday is `1` and Sunday is `7`.
+A `datetime` has all of these fields. `weekday` is the English weekday name; comparing it with text that is not an
+English weekday name gives a compile warning. Values hold whole milliseconds.
 
-### Duration literals
+### Durations
 
-Exact elapsed suffixes are `ms`/`millisecond`/`milliseconds`, `s`/`second`/`seconds`,
-`min`/`minute`/`minutes`, and `h`/`hour`/`hours`. The calendar examples below describe deferred accepted
-direction:
+| Kind | Units | Meaning |
+| --- | --- | --- |
+| Exact | `ms`/`millisecond`/`milliseconds`, `s`/`second`/`seconds`, `min`/`minute`/`minutes`, `h`/`hour`/`hours` | Elapsed time; `24 h` is always 24 elapsed hours |
+| Calendar | `d`/`day`/`days`, `w`/`week`/`weeks`, `mo`/`month`/`months`, `y`/`year`/`years` | The same local clock time that many days, weeks, months, or years later, never a fixed number of hours |
 
-```text
-500 milliseconds
-30 seconds
-10 minutes
-2 hours
-1 day
-3 weeks
-1 month
+Both long forms are accepted for any number: `1 seconds` and `2 day`. `m` is not a unit, because it would be ambiguous
+between minutes and months. A week is 7 days and a year is 12 months. Adding months or years to a day that the target
+month lacks gives that month's last day: January 31 plus one month is February 28, or 29 in a leap year, and
+February 29 plus one year is February 28.
 
-500 ms
-30 s
-10 min
-2 h
-1 d
-3 w
-1 mo
-```
+A duration keeps months, days, and exact time apart, so `1 week == 7 days` but `1 day != 24 h`. Durations order and
+divide within one family: exact with exact, days and weeks with days and weeks, months and years with months and years.
+`1 week >= 7 days` is true and `18 months / 1 year` is `1.5`; `1 day >= 24 h` and `1 month >= 30 days` are errors. Zero
+belongs to every family, and dividing by any zero duration is an error. `duration.days` is the whole number of days of a
+duration made only of days and weeks, and `duration.months` the whole number of months of one made only of months and
+years: `(getDate() - locked).days`.
 
-`m` is not used because it would be ambiguous between minutes and months. Duration units may be combined:
-
-```text
-let punishmentDuration = 1 day + 6 hours + 30 minutes
-```
-
-Elapsed-time units are exact:
-
-```text
-milliseconds
-seconds
-minutes
-hours
-```
-
-Calendar units preserve local clock time where possible:
-
-```text
-days
-weeks
-months
-```
-
-Consequently, `24 hours` is always exactly 24 elapsed hours, while `1 day` means the same local clock time on the next calendar day and may span 23, 24, or 25 elapsed hours around daylight-saving transitions.
-
-When adding a calendar month to a date whose day does not exist in the target month, use that month's last day. For
-example, January 31 plus one month is February 28, or February 29 in a leap year.
+`wait`, timers, and the `showButton` timeout accept exact durations only.
 
 ### Arithmetic and comparison
 
-Supported operations:
+| Operation | Result |
+| --- | --- |
+| `date ± calendar duration` | Calendar arithmetic; `date ± exact duration` is an error |
+| `datetime ± calendar duration` | The same local clock time that many days, weeks, months, or years later |
+| `datetime ± exact duration` | Elapsed time through the player's current zone |
+| `timestamp ± exact duration` | Elapsed time; a calendar duration is an error |
+| `date - date` | Whole calendar days, such as `5 days` |
+| `datetime - datetime` | The elapsed exact duration through the player's current zone |
+| `timestamp - timestamp` | The elapsed exact duration |
 
-```text
-datetime + duration -> datetime
-datetime - duration -> datetime
-datetime - datetime -> duration
-duration + duration -> duration
-duration - duration -> duration
-duration * number -> duration
-duration / number -> duration
-duration / duration -> number
-```
+A composed duration applies its months, then its days, then its exact time; source grouping is preserved. Across the
+spring daylight-saving night, `dinner + 24 h` is 19:00 the next day while `dinner + 1 day` is 18:00. Exact time added to
+a temporal value is rounded to whole milliseconds, with ties away from zero; `wait` and timers keep fractional
+milliseconds. Arithmetic on `time` is not available.
 
-Elapsed duration values support `==`, `!=`, `<`, `<=`, `>`, and `>=` across compatible units:
-`90 seconds > 1 minute` is true.
+A `date` orders by calendar, a `time` by clock (without wrapping at midnight), a `datetime` by calendar and clock, and a
+`timestamp` by moment. Ordering or arithmetic across temporal kinds is an error, and `==` between different kinds is
+`false`. Known invalid combinations are compile errors; others are runtime errors.
 
-A plain number never becomes a duration in these operations or when stored: `pause + 5` and
-`let pause: duration = 5` are compile errors that suggest `5 s` ([§13](#13-explicit-types)).
-
-Date/time values also support those comparisons; `datetime` comparisons use the represented exact moment.
+Local comparisons can reverse after the autumn daylight-saving change or after travelling west, and a day counter counts
+calendar-date boundaries. `datetime - datetime` measures through the current zone, so `(dinner + 24 h) - dinner` is
+`23 h` when `dinner + 24 h` falls in the repeated autumn hour. Measure elapsed time with `timestamp`.
 
 ### Display and technical conversion
 
-Current elapsed duration values use deterministic English visible-text formatting; `90 seconds` displays as
-`1 min 30 s`. Locale-aware duration formatting is deferred. Locale- and timezone-aware date/time presentation
-remains accepted future direction:
+`say`, `${...}`, and `toString` show every temporal value, including a timestamp, in the player's numeric local form:
+date field order, separators, and 12- or 24-hour clock follow the player's locale, such as `4-10-2026, 18:30` in Dutch
+and `10/4/2026, 6:30 PM` in US English. The exact punctuation follows the engine's locale data. Seconds appear only
+when they are not zero, and no month or weekday names appear. `formatDate()`, `formatTime()`, and `formatDateTime()`
+return the same text for part or all of a value. Durations display as `1 h 2 min 3.5 s`.
+
+Inside a list, set, or object, temporal values use a fixed notation: `<date 2026-10-04>`, `<time 14:30>`,
+`<datetime 2026-10-04 14:30>`, and `<timestamp 2026-10-04T12:30:00Z>`.
 
 ```text
-say "Your punishment ends ${chastityEnd}."
-say "You still have ${remaining} remaining."
+dinner.toISO()             // "2026-10-04T18:00", without an offset
+started.toISO()            // "2026-10-04T12:30:00Z", in UTC
+started.toSeconds()        // Unix seconds, rounded down
+started.toMilliseconds()   // Unix milliseconds
 ```
 
-The following explicit presentation methods are deferred; their accepted return type is `string`:
+There is no construction from a Unix number, because seconds and milliseconds would be ambiguous.
 
-```text
-chastityEnd.formatDate()
-chastityEnd.formatTime()
-chastityEnd.formatDateTime()
-remaining.format()
-```
+### Collections and storage
 
-Technical conversions:
-
-```text
-let localIso = chastityEnd.toISO()
-let utcIso = chastityEnd.toUTC()
-let timestamp = chastityEnd.toSeconds()
-let timestampMs = chastityEnd.toMilliseconds()
-```
-
-Current Unix time:
-
-```text
-let timestamp = getSeconds()
-let timestampMs = getMilliseconds()
-```
-
-Unix values are integers counted from `1970-01-01T00:00:00Z`.
-
-### Storage
-
-`date`, `time`, `datetime`, and `duration` values use ordinary typed storage. The engine preserves their type, exact moment or duration semantics, and relevant timezone information. The physical UTC, Unix-millisecond, tagged-JSON, or database representation is an implementation detail.
-
+Temporal values and durations can be list and set elements; a set compares kind and value. Typed storage keeps each
+kind distinct from the others and from text: local values without an offset, timestamps as moments in UTC.
 
 ## 36. Scheduling
 **Status:** Wanted capability; final syntax, authority, and Player UI deferred
@@ -3936,6 +3933,7 @@ number
 date
 time
 datetime
+timestamp
 duration
 list
 object
@@ -3966,11 +3964,11 @@ toBoolean
 toDate
 toTime
 toDateTime
+toTimestamp
 getDate
 getTime
 getDateTime
-getSeconds
-getMilliseconds
+getTimestamp
 schedule
 cancelSchedule
 askText
