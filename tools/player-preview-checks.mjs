@@ -1873,6 +1873,7 @@ async function markupLinkChecks(page) {
   const source = [
     'say "Literal <b>tags</b> & <img src=x onerror=window.markupInjected=1> [Docs](https://example.com/docs) and https://example.com/bare", instant',
     'showButton "Done"',
+    "exit",
   ].join("\n");
   await page.route("**/src/runtimeScenario.ts*", (route) => {
     // Plain string handling: the run-code sandbox that executes this check has no URL global.

@@ -50,28 +50,31 @@ function saysAfterChoice(source: string): string[] {
 
 /** The operand sources: a statement that uses `@` becomes a program that gives `@` the value another way. */
 const SOURCES: readonly ((value: string, use: string) => string)[] = [
-  (value, use) => use.replaceAll("@", value),
-  (value, use) => `let held = ${value}\n${use.replaceAll("@", "held")}`,
-  (value, use) => `function make {\n    return ${value}\n}\n${use.replaceAll("@", "make()")}`,
-  (value, use) => `let items = [${value}]\n${use.replaceAll("@", "items[0]")}`,
-  (value, use) => `let box = { part: ${value} }\n${use.replaceAll("@", "box.part")}`,
+  (value, use) => `${use.replaceAll("@", value)}\nexit`,
+  (value, use) => `let held = ${value}\n${use.replaceAll("@", "held")}\nexit`,
+  (value, use) => `function make {\n    return ${value}\n}\n${use.replaceAll("@", "make()")}\nexit`,
+  (value, use) => `let items = [${value}]\n${use.replaceAll("@", "items[0]")}\nexit`,
+  (value, use) => `let box = { part: ${value} }\n${use.replaceAll("@", "box.part")}\nexit`,
 ];
 
 test("built-ins with fixed arguments check their number and names", () => {
   for (const [source, code] of [
-    ["say chance()", "TSV020"],
-    ["say chance(1, 2)", "TSV020"],
-    ["say chance(percent: 5)", "TSV022"],
-    ["say randomInteger()", "TSV020"],
-    ['say escapeMarkup("a", "b")', "TSV020"],
-    ["say random(1)", "TSV020"],
+    ["say chance()\nexit", "TSV020"],
+    ["say chance(1, 2)\nexit", "TSV020"],
+    ["say chance(percent: 5)\nexit", "TSV022"],
+    ["say randomInteger()\nexit", "TSV020"],
+    ['say escapeMarkup("a", "b")\nexit', "TSV020"],
+    ["say random(1)\nexit", "TSV020"],
   ] as const)
     assert.deepEqual(
       errors(source).map(([found]) => found),
       [code],
       source,
     );
-  assert.equal(says('let roll = randomInteger(1..=6)\nsay "${chance(50) or roll > 0}"').length, 1);
+  assert.equal(
+    says('let roll = randomInteger(1..=6)\nsay "${chance(50) or roll > 0}"\nexit').length,
+    1,
+  );
 });
 
 test("a computed choice object's text that cannot be shown is an error", () => {
@@ -85,19 +88,19 @@ test("a computed choice object's text that cannot be shown is an error", () => {
       `${source}\n${JSON.stringify(errors(source))}`,
     );
   assert.deepEqual(
-    errors("let options = [{ text: [1], value: 1 }]\nlet answer = choose options").map(
+    errors("let options = [{ text: [1], value: 1 }]\nlet answer = choose options\nexit").map(
       ([code]) => code,
     ),
     ["TSV040"],
   );
   assert.deepEqual(
-    errors('let options = [{ text: "A", value: 1 }]\nlet answer = choose options'),
+    errors('let options = [{ text: "A", value: 1 }]\nlet answer = choose options\nexit'),
     [],
   );
   // A text that may still be null may give a button.
   for (const source of [
-    'let options = [{ text: null }, { text: [1] }]\noptions.removeAt(1)\nlet answer = choose options\nsay "done"',
-    'let option = { text: null }\nif false {\n    option.text = [1]\n}\nlet answer = choose option\nsay "done"',
+    'let options = [{ text: null }, { text: [1] }]\noptions.removeAt(1)\nlet answer = choose options\nsay "done"\nexit',
+    'let option = { text: null }\nif false {\n    option.text = [1]\n}\nlet answer = choose option\nsay "done"\nexit',
   ])
     assert.deepEqual(saysAfterChoice(source), ["done"], source);
 });
@@ -110,7 +113,7 @@ test("join checks the element type of a computed list", () => {
         ["TSV043"],
         source,
       );
-  assert.deepEqual(says('let names = ["a", "b"]\nsay names.join(", ")'), ["a, b"]);
+  assert.deepEqual(says('let names = ["a", "b"]\nsay names.join(", ")\nexit'), ["a, b"]);
 });
 
 test("a speaker's defaultSaySkippable is true or false where it is declared or set", () => {
@@ -132,12 +135,12 @@ test("a speaker's defaultSaySkippable is true or false where it is declared or s
     }
   assert.deepEqual(
     says(
-      'speaker guide {\n    defaultSaySkippable: true\n}\nguide.defaultSaySkippable = false\nsay as guide "hi"',
+      'speaker guide {\n    defaultSaySkippable: true\n}\nguide.defaultSaySkippable = false\nsay as guide "hi"\nexit',
     ),
     ["hi"],
   );
   // A value the compiler cannot know is checked when the script runs.
-  const plan = compileSource("speaker guide {\n    defaultSaySkippable: flag\n}", {
+  const plan = compileSource("speaker guide {\n    defaultSaySkippable: flag\n}\nexit", {
     globals: ["flag"],
   }).plan;
   assert.notEqual(plan, null);
@@ -145,33 +148,35 @@ test("a speaker's defaultSaySkippable is true or false where it is declared or s
 
 test("null beside an operand of unknown type is an impossible operand", () => {
   for (const [source, code] of [
-    ["function f(other) {\n    say null + other\n}\nf(1)", "TSV043"],
-    ["function f(other) {\n    say null < other\n}\nf(1)", "TSV043"],
-    ["function f(other) {\n    let total = null\n    total += other\n}\nf(1)", "TSV041"],
+    ["function f(other) {\n    say null + other\n}\nf(1)\nexit", "TSV043"],
+    ["function f(other) {\n    say null < other\n}\nf(1)\nexit", "TSV043"],
+    ["function f(other) {\n    let total = null\n    total += other\n}\nf(1)\nexit", "TSV041"],
   ] as const)
     assert.deepEqual(
       errors(source).map(([found]) => found),
       [code],
       source,
     );
-  assert.deepEqual(says("function f(other) {\n    say 1 + other\n}\nf(2)"), ["3"]);
+  assert.deepEqual(says("function f(other) {\n    say 1 + other\n}\nf(2)\nexit"), ["3"]);
 });
 
 test("a set operation's argument that may be null names the check", () => {
   const maybe = "function others: integer[]? {\n    return [2]\n}\nlet other = others()\n";
-  assert.deepEqual(errors(`${maybe}say [1].union(other)`), [["TSV043", "other"]]);
-  assert.deepEqual(says(`${maybe}if other != null {\n    say [1].union(other)\n}`), ["[1, 2]"]);
+  assert.deepEqual(errors(`${maybe}say [1].union(other)\nexit`), [["TSV043", "other"]]);
+  assert.deepEqual(says(`${maybe}if other != null {\n    say [1].union(other)\n}\nexit`), [
+    "[1, 2]",
+  ]);
 });
 
 test("on a union with a dict, contains and remove take a text key", () => {
   for (const method of ["contains", "remove"])
     assert.deepEqual(
-      errors(`function f(value: string[] | integer dict) {\n    say value.${method}(1)\n}`),
+      errors(`function f(value: string[] | integer dict) {\n    say value.${method}(1)\n}\nexit`),
       [["TSV043", "1"]],
       method,
     );
   assert.deepEqual(
-    errors('function f(value: string[] | integer dict) {\n    say value.contains("a")\n}'),
+    errors('function f(value: string[] | integer dict) {\n    say value.contains("a")\n}\nexit'),
     [],
   );
 });

@@ -96,6 +96,8 @@ export function registerTeaseScriptLanguage(): void {
         "function",
         "return",
         "is",
+        "label",
+        "goto",
       ],
       types: [
         "string",
@@ -130,6 +132,7 @@ export function registerTeaseScriptLanguage(): void {
         "load",
         "delete",
         "exit",
+        "end",
       ],
     });
     monaco.languages.setLanguageConfiguration(TEASE_LANGUAGE_ID, {

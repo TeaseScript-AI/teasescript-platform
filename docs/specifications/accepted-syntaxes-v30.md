@@ -2600,6 +2600,9 @@ Rules:
   defines `goto` to another file.
 - Unknown labels and duplicate labels in one file are compile errors.
 - A `goto` discards the current function, loop, and block continuations.
+- A `goto` back to an earlier label runs the top-level `let`s after it again, which set their variables anew. A variable
+  of the file may be used after a label only when every way to the label has run its `let`; otherwise it is a compile
+  error.
 - A `goto` triggered by an event aborts the current execution path and does not return.
 
 ## 27. Timers
@@ -2688,7 +2691,8 @@ of the wrong type are rejected.
 - Every timer stops on `exit` and when the session ends.
 - On `goto`, `end`, and `call` transfers, non-persistent timers are removed and persistent timers remain active.
 
-The current runtime stores `persist` but it has no effect: `goto`, `end`, and `call` are not implemented.
+`goto` within a file applies these rules; `call`, an `end` that returns to a caller, and transfers to other files are
+not implemented yet.
 
 ### Expiry blocks
 
@@ -2705,8 +2709,8 @@ is inert while the block runs, so there are never two active story paths:
 - if the block uses `exit`, the session halts and the interrupted action and source instruction are discarded:
   an interrupted `let answer = askText ...` completes nothing and binds no value.
 
-Future `goto` or `end` transfers must also discard the interrupted action and instruction; those commands are not
-implemented in the current runtime.
+A `goto` from the block, also from a function that the block calls, discards the interrupted action and instruction
+in the same way.
 
 Blocks run one at a time in due order. A block may itself wait; later expiries queue behind it.
 
@@ -2901,8 +2905,10 @@ Behavior:
   fallback is never implicit.
 - `fallback` may run any number of times, anywhere, including inside `if`; the latest one executed wins. It is session
   state and is checkpointed. `fallback none` clears it again.
-- A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. Branches that all
-  end or transfer need nothing after them:
+- A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file. A file of
+  declarations only runs nothing on its own and needs no ending; a `goto` into such a file is a compile error. A call
+  counts as returning, also of a function that always ends the session, so `exit` or `end` still follows it. Branches
+  that all end or transfer need nothing after them:
 
 ```text
 if passed {

@@ -46,6 +46,7 @@ import {
   isExactDuration,
 } from "./duration.js";
 import { validateSwitchCases } from "./switch-cases.js";
+import type { StatementFlow } from "./type-checker.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -125,7 +126,16 @@ const semanticCode = {
   invalidStorageKey: "TSV038",
   invalidListIndex: "TSV045",
   visibleOverflow: "TSV050",
+  invalidLabel: "TSV051",
+  skippedInitialization: "TSV054",
 } as const;
+
+/** Where code runs, for the initialization check: a top-level statement, a function, or a handler and its origin. */
+type FlowContext =
+  | { readonly kind: "root"; readonly statement: number }
+  | { readonly kind: "function"; readonly name: string }
+  /** A block runs where its timer or media started: in `origin`, when `created` runs. */
+  | { readonly kind: "handler"; readonly origin: FlowContext; readonly created: Statement };
 
 const OVERFLOW_MESSAGES = {
   zero: "This divides by zero, so it has no result. Divide by a value other than zero.",
@@ -137,9 +147,25 @@ export function validateSemantics(
   program: Program,
   options: SemanticValidationOptions = {},
 ): SemanticValidationResult {
+  return Object.freeze({ diagnostics: validateFileSemantics(program, options).diagnostics });
+}
+
+/** The name checks of one file; the initialization check at labels waits for the flow of the type check. */
+export interface FileSemanticResult {
+  readonly diagnostics: readonly Diagnostic[];
+  checkInitialization(flow: StatementFlow): readonly Diagnostic[];
+}
+
+export function validateFileSemantics(
+  program: Program,
+  options: SemanticValidationOptions = {},
+): FileSemanticResult {
   const validator = new SemanticValidator(options);
   validator.validate(program);
-  return Object.freeze({ diagnostics: Object.freeze([...validator.diagnostics]) });
+  return Object.freeze({
+    diagnostics: Object.freeze([...validator.diagnostics]),
+    checkInitialization: (flow: StatementFlow) => validator.checkInitialization(program, flow),
+  });
 }
 
 class SemanticScope {
@@ -187,6 +213,33 @@ class SemanticValidator {
     readonly block: Block;
     readonly owner: "timer" | "media";
     readonly selfHandle: string | null;
+    readonly origin: FlowContext;
+    readonly created: Statement;
+  }[] = [];
+
+  #context: FlowContext = { kind: "root", statement: 0 };
+
+  /** Reads and writes of top-level variables, with where they run. */
+  readonly #rootAccesses: {
+    readonly name: string;
+    readonly span: SourceSpan;
+    readonly context: FlowContext;
+    readonly statement: Statement;
+  }[] = [];
+
+  /** The innermost statement being checked, which decides whether what it holds can run. */
+  #statement: Statement | null = null;
+
+  readonly #gotos: {
+    readonly label: string;
+    readonly context: FlowContext;
+    readonly statement: Statement;
+  }[] = [];
+
+  readonly #calls: {
+    readonly name: string;
+    readonly context: FlowContext;
+    readonly statement: Statement;
   }[] = [];
 
   public constructor(options: SemanticValidationOptions) {
@@ -238,19 +291,42 @@ class SemanticValidator {
       }
     }
     for (const statement of program.statements) {
-      if (statement.kind !== "functionDeclaration") {
-        runCompileTask(this.#validateStatement(statement, this.#root, 0));
+      if (statement.kind !== "labelStatement") continue;
+      const name = statement.name.name;
+      if (this.#protectedNames.has(name)) {
+        this.#report(
+          semanticCode.duplicateDeclaration,
+          `Label '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Label'.`,
+          statement.name.span,
+        );
+      } else if (this.#labels.has(name)) {
+        this.#report(
+          semanticCode.invalidLabel,
+          `This file already has a label '${name}'. Give each label in a file its own name.`,
+          statement.name.span,
+        );
+      } else {
+        this.#labels.add(name);
       }
     }
+    program.statements.forEach((statement, index) => {
+      if (statement.kind !== "functionDeclaration") {
+        this.#context = { kind: "root", statement: index };
+        runCompileTask(this.#validateStatement(statement, this.#root, 0));
+      }
+    });
     for (const statement of program.statements) {
       if (
         statement.kind === "functionDeclaration" &&
         this.#functions.get(statement.name.name) === statement
       ) {
+        this.#context = { kind: "function", name: statement.name.name };
         this.#validateFunction(statement);
       }
     }
     for (let index = 0; index < this.#pendingHandlers.length; index += 1) {
+      const handler = this.#pendingHandlers[index]!;
+      this.#context = { kind: "handler", origin: handler.origin, created: handler.created };
       this.#validateHandler(this.#pendingHandlers[index]!);
     }
     for (const overflow of findVisibleOverflows(program))
@@ -282,6 +358,9 @@ class SemanticValidator {
   }
 
   #handlerDepth = 0;
+
+  /** The labels of the file, which stand only in its outer scope. */
+  readonly #labels = new Set<string>();
 
   #handlerOwner: "timer" | "media" = "timer";
 
@@ -391,7 +470,13 @@ class SemanticValidator {
       }
     }
     if (timer.handler !== null)
-      this.#pendingHandlers.push({ block: timer.handler, owner: "timer", selfHandle: null });
+      this.#pendingHandlers.push({
+        block: timer.handler,
+        owner: "timer",
+        selfHandle: null,
+        origin: this.#context,
+        created: this.#statement!,
+      });
   }
 
   /** Static checks of a play command; runtime validates the values that are not literals. */
@@ -522,6 +607,8 @@ class SemanticValidator {
         block,
         owner: "media",
         selfHandle: media.async ? selfHandle : null,
+        origin: this.#context,
+        created: this.#statement!,
       });
     }
   }
@@ -663,6 +750,20 @@ class SemanticValidator {
   }
 
   *#validateStatement(
+    statement: Statement,
+    scope: SemanticScope,
+    loopDepth: number,
+  ): CompileTask<void> {
+    const outer = this.#statement;
+    this.#statement = statement;
+    try {
+      yield* compileChild(this.#validateStatementKind(statement, scope, loopDepth));
+    } finally {
+      this.#statement = outer;
+    }
+  }
+
+  *#validateStatementKind(
     statement: Statement,
     scope: SemanticScope,
     loopDepth: number,
@@ -924,6 +1025,30 @@ class SemanticValidator {
         }
         return;
       case "exitStatement":
+      case "endStatement":
+        return;
+      case "labelStatement":
+        if (scope !== this.#root || this.#functionDepth > 0) {
+          this.#report(
+            semanticCode.invalidLabel,
+            `A label stands only in the outer level of a file, not inside a block, loop, function, or handler. Move 'label ${statement.name.name}' out of the block; a goto may still jump to it from anywhere in the file.`,
+            statement.span,
+          );
+        }
+        return;
+      case "gotoStatement":
+        this.#gotos.push({
+          label: statement.label.name,
+          context: this.#context,
+          statement: this.#statement!,
+        });
+        if (!this.#labels.has(statement.label.name)) {
+          this.#report(
+            semanticCode.invalidLabel,
+            `This file has no label '${statement.label.name}'. Add 'label ${statement.label.name}' in the outer level of the file.`,
+            statement.label.span,
+          );
+        }
         return;
     }
   }
@@ -1003,6 +1128,7 @@ class SemanticValidator {
   #validateAssignmentTarget(target: AssignmentTarget, scope: SemanticScope): void {
     if (target.kind === "identifier") {
       const binding = scope.resolve(target.name);
+      this.#recordRootAccess(target.name, binding, target.span);
       if (binding === undefined) {
         this.#report(
           semanticCode.unknownAssignment,
@@ -1096,6 +1222,7 @@ class SemanticValidator {
       case "identifier":
         if (expression.name === "speaker" && contextualSpeaker !== null) return;
         const binding = scope.resolve(expression.name);
+        this.#recordRootAccess(expression.name, binding, expression.span);
         if (binding === undefined) {
           if (this.#builtins.has(expression.name)) {
             this.#report(
@@ -1197,6 +1324,7 @@ class SemanticValidator {
           const binding = scope.resolve(name);
           const declaration = this.#functions.get(name);
           if (declaration !== undefined && binding?.kind === "function") {
+            this.#calls.push({ name, context: this.#context, statement: this.#statement! });
             this.#validateFunctionCall(expression, declaration);
           } else if (this.#builtins.has(name)) {
             // The type check checks the arguments of the core built-ins it knows.
@@ -1586,6 +1714,144 @@ class SemanticValidator {
     return false;
   }
 
+  #recordRootAccess(name: string, binding: Binding | undefined, span: SourceSpan): void {
+    if (
+      this.#statement !== null &&
+      binding?.kind === "variable" &&
+      this.#root.bindings.get(name) === binding
+    ) {
+      this.#rootAccesses.push({ name, span, context: this.#context, statement: this.#statement });
+    }
+  }
+
+  /**
+   * A goto can reach a label without running the top-level `let`s between the place it starts and the label. A use of
+   * a variable of the file is an error when a goto can make it miss its `let`: it has a value on every way there
+   * without gotos, but not on every way with them. A goto has run what came before the statement it stands in, or
+   * before the call of its function or the start of its handler. Which statements run and continue is the flow of the
+   * type check, so this check and the ending check agree. Other early uses, such as a function called before the
+   * `let`, are checked when they run.
+   */
+  checkInitialization(program: Program, flow: StatementFlow): readonly Diagnostic[] {
+    const diagnostics: Diagnostic[] = [];
+    if (this.#gotos.length === 0 || this.#rootAccesses.length === 0) return diagnostics;
+    // Only the variables that are used need following.
+    const used = new Set(this.#rootAccesses.map((access) => access.name));
+    const withGotos = this.#initializedVariables(program, flow, used, true);
+    const withoutGotos = this.#initializedVariables(program, flow, used, false);
+    const reported = new Set<string>();
+    for (const access of this.#rootAccesses) {
+      if (flow.unreachable.has(access.statement)) continue;
+      const known = withGotos(access.context);
+      const knownWithoutGotos = withoutGotos(access.context);
+      if (
+        known === null ||
+        known.has(access.name) ||
+        (knownWithoutGotos !== null && !knownWithoutGotos.has(access.name))
+      )
+        continue;
+      const key = `${access.span.start.offset}:${access.name}`;
+      if (reported.has(key)) continue;
+      reported.add(key);
+      diagnostics.push(
+        createDiagnostic(
+          DiagnosticSeverity.Error,
+          semanticCode.skippedInitialization,
+          `A goto can reach this line without running 'let ${access.name}' first, so ${access.name} may have no value here. Move the label that the goto jumps to before 'let ${access.name}', or set ${access.name} on every way here.`,
+          access.span,
+        ),
+      );
+    }
+    return diagnostics;
+  }
+
+  /**
+   * The top-level variables that have a value wherever code of a context runs, following gotos or not. `null` stands
+   * for "every variable": no way there is known, so nothing is missing.
+   */
+  #initializedVariables(
+    program: Program,
+    flow: StatementFlow,
+    used: ReadonlySet<string>,
+    followGotos: boolean,
+  ): (context: FlowContext) => ReadonlySet<string> | null {
+    type Known = ReadonlySet<string> | null;
+    const statements = program.statements;
+    const meet = (left: Known, right: Known): Known =>
+      left === null
+        ? right
+        : right === null
+          ? left
+          : new Set([...left].filter((name) => right.has(name)));
+    // Function declarations run nothing; the file starts at its first other statement.
+    const order = statements.flatMap((statement, index) =>
+      statement.kind === "functionDeclaration" ? [] : [index],
+    );
+    const before: Known[] = statements.map((_, index) => (index === order[0] ? new Set() : null));
+    const after = (index: number): Known => {
+      const known = before[index]!;
+      const statement = statements[index]!;
+      return known !== null &&
+        statement.kind === "letStatement" &&
+        used.has(statement.name.name) &&
+        !known.has(statement.name.name)
+        ? new Set([...known, statement.name.name])
+        : known;
+    };
+    const functionStart = new Map<string, Known>();
+    // A handler starts with what ran where it was created; handlers nest without limit, so this is a loop.
+    const atContext = (start: FlowContext): Known => {
+      let context = start;
+      while (context.kind === "handler") {
+        if (flow.unreachable.has(context.created)) return null;
+        context = context.origin;
+      }
+      return context.kind === "root"
+        ? before[context.statement]!
+        : (functionStart.get(context.name) ?? null);
+    };
+    const calls = this.#calls.filter((call) => !flow.unreachable.has(call.statement));
+    const gotos = this.#gotos.filter((goto) => !flow.unreachable.has(goto.statement));
+    for (let changed = true; changed;) {
+      changed = false;
+      // A function starts with what every call of it has run; one never called adds nothing.
+      for (let functionsChanged = true; functionsChanged;) {
+        functionsChanged = false;
+        const starts = new Map<string, Known>();
+        for (const call of calls) {
+          starts.set(
+            call.name,
+            starts.has(call.name)
+              ? meet(starts.get(call.name)!, atContext(call.context))
+              : atContext(call.context),
+          );
+        }
+        for (const [name, known] of starts) {
+          if (!sameKnown(functionStart.get(name) ?? null, known)) {
+            functionStart.set(name, known);
+            functionsChanged = true;
+          }
+        }
+      }
+      for (let position = 1; position < order.length; position += 1) {
+        const index = order[position]!;
+        const previous = order[position - 1]!;
+        let known: Known = flow.continuing.has(statements[previous]!) ? after(previous) : null;
+        const statement = statements[index]!;
+        if (followGotos && statement.kind === "labelStatement") {
+          for (const goto of gotos) {
+            if (goto.label === statement.name.name) known = meet(known, atContext(goto.context));
+          }
+        }
+        if (!sameKnown(before[index]!, known)) {
+          before[index] = known;
+          changed = true;
+        }
+      }
+    }
+    return atContext;
+  }
+
   #validateSpeakerReference(name: string, span: SourceSpan, scope: SemanticScope): boolean {
     if (scope.resolve(name)?.kind === "speaker") return true;
     this.#report(semanticCode.unknownSpeaker, `Unknown speaker '${name}'.`, span);
@@ -1862,4 +2128,9 @@ function visitExpression(
           : expressionChildren(current);
     for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
   }
+}
+
+function sameKnown(left: ReadonlySet<string> | null, right: ReadonlySet<string> | null): boolean {
+  if (left === null || right === null) return left === right;
+  return left.size === right.size && [...left].every((name) => right.has(name));
 }

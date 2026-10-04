@@ -121,7 +121,6 @@ export type {
   ActionRequestedEvent,
   PlayerTranscriptEvent,
   ExitEvent,
-  CompleteEvent,
   DeveloperWarningEvent,
   InterpreterEvent,
   OutputSpeaker,

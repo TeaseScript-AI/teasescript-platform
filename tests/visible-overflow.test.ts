@@ -54,7 +54,7 @@ test("a division by a zero the compiler can see fails at compile time whatever t
     assert.deepEqual(diagnostics(source), [`TSV050 ${at}`], source);
   }
   // A computed divisor is known only at runtime, where the same division fails.
-  const computed = runValidSource("let x = 5\nlet zero = 2 - 2\nsay x / zero");
+  const computed = runValidSource("let x = 5\nlet zero = 2 - 2\nsay x / zero\nexit");
   assert.equal(computed.snapshot.failure?.code, "TSR036");
 });
 
@@ -70,9 +70,9 @@ test("only the overflowing step is reported, once", () => {
 
 test("values the compiler cannot know stay runtime checks", () => {
   for (const source of [
-    "let big = 1e308\nsay big * 10",
-    "function grow(x) { return x * 10 }\nsay grow(1e308)",
-    "let zero = 0\nsay 1 / zero",
+    "let big = 1e308\nsay big * 10\nexit",
+    "function grow(x) { return x * 10 }\nsay grow(1e308)\nexit",
+    "let zero = 0\nsay 1 / zero\nexit",
   ]) {
     assert.deepEqual(diagnostics(source), [], source);
     const result = runValidSource(source);
@@ -83,12 +83,12 @@ test("values the compiler cannot know stay runtime checks", () => {
 
 test("large values that stay finite still compile", () => {
   for (const source of [
-    "say 1e308 * 1",
-    "say -1e308 - 1e307",
-    "say 9007199254740991 * 2",
-    "say 1e300 * 1e8",
-    "let d = 1 h * 1e9",
-    "wait 1e12",
+    "say 1e308 * 1\nexit",
+    "say -1e308 - 1e307\nexit",
+    "say 9007199254740991 * 2\nexit",
+    "say 1e300 * 1e8\nexit",
+    "let d = 1 h * 1e9\nexit",
+    "wait 1e12\nexit",
   ]) {
     assert.deepEqual(diagnostics(source), [], source);
   }

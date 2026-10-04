@@ -48,6 +48,7 @@ test("accepted media forms compile, each behind a pacing barrier", () => {
       'playAudio(file: "a.mp3", repeat: 3 times)',
       'playAudio(file: "a.mp3", repeat: 60 s)',
       'playAudio(file: "a.mp3", repeat: false)',
+      "exit",
     ].join("\n"),
   );
   const shown = kinds(compiled.instructions).filter((kind) =>
@@ -71,6 +72,7 @@ test("a media block may use its own handle, also inside a function, but not othe
       "  }",
       "}",
       "scene()",
+      "exit",
     ].join("\n"),
   );
   const otherLocal = [
@@ -105,6 +107,7 @@ test("cue words stay ordinary identifiers outside cue positions", () => {
       "}",
       'let async = "b.mp3"',
       "playAudio (async)",
+      "exit",
     ].join("\n"),
   );
 });
@@ -157,6 +160,7 @@ test("statement-level media handle operations get a receiver barrier; reads do n
       "music.position = 10 s",
       "music.remaining -= 5 s",
       'say "${music.position}"',
+      "exit",
     ].join("\n"),
   );
   const barriers = compiled.instructions.filter(
@@ -169,7 +173,7 @@ test("statement-level media handle operations get a receiver barrier; reads do n
 });
 
 test("cue detection needs a complete position and block; indexed and called uses stay ordinary", () => {
-  plan(["let at = [0]", 'playAudio async "a.mp3" {', "  at[0] = 1", "}"].join("\n"));
+  plan(["let at = [0]", 'playAudio async "a.mp3" {', "  at[0] = 1", "}", "exit"].join("\n"));
   const cueWithoutBlock = 'playAudio async "a.mp3" {\n  at 1 s\n}';
   assertRejected(cueWithoutBlock, "TSP001", lastSpan(cueWithoutBlock, "at"));
   plan(
@@ -181,6 +185,7 @@ test("cue detection needs a complete position and block; indexed and called uses
       "  at (1)",
       "  beforeEnd [1] = 2",
       "}",
+      "exit",
     ].join("\n"),
   );
 });
@@ -200,19 +205,21 @@ test("cue positions may start with an object literal and continue like other exp
       diagnostic && [diagnostic.code, diagnostic.span.start.offset, diagnostic.span.end.offset]
     );
   };
-  assert.deepEqual(offsets('playAudio "a" {\n  at { point: 1 s }.point { }\n}'), ["at"]);
+  assert.deepEqual(offsets('playAudio "a" {\n  at { point: 1 s }.point { }\n}\nexit'), ["at"]);
   assert.deepEqual(
-    offsets('playAudio "a" {\n  at 1 s +\n\n    2 s { }\n  beforeEnd (\n    1 s\n  ) { }\n}'),
+    offsets('playAudio "a" {\n  at 1 s +\n\n    2 s { }\n  beforeEnd (\n    1 s\n  ) { }\n}\nexit'),
     ["at", "beforeEnd"],
   );
   // The leading `{` is an object literal, not a cue block: the line stays an ordinary statement.
   const objectWithoutBlock = 'playAudio "a" {\n  at { say "x" }\n}';
   const atOffset = objectWithoutBlock.indexOf("at {");
   assert.deepEqual(firstError(objectWithoutBlock), ["TSP001", atOffset, atOffset + "at".length]);
-  assert.deepEqual(offsets('playAudio "a" {\n  at askNumber """${\n    1\n  }""" { }\n}'), ["at"]);
+  assert.deepEqual(offsets('playAudio "a" {\n  at askNumber """${\n    1\n  }""" { }\n}\nexit'), [
+    "at",
+  ]);
   assert.deepEqual(
     offsets(
-      'playAudio "a" {\n  beforeEnd choose 1: "One",\n\n    2: "Two" { }\n  at choose 3: "Three" { }\n}',
+      'playAudio "a" {\n  beforeEnd choose 1: "One",\n\n    2: "Two" { }\n  at choose 3: "Three" { }\n}\nexit',
     ),
     ["beforeEnd", "at"],
   );
@@ -280,6 +287,7 @@ test("deeply nested media operands compile without native recursion", () => {
     '  return "a.mp3"',
     "}",
     `let m = ${"playAudio async name(".repeat(depth)}"a.mp3"${")".repeat(depth)}`,
+    "exit",
   ].join("\n");
   const result = compileSource(source);
   assert.deepEqual(result.diagnostics, []);
@@ -292,7 +300,7 @@ test("nested cue positions compile without exponential reparsing", () => {
   for (let level = 0; level < 40; level += 1) {
     play = `playAudio async "a" { at point(${play}) { } }`;
   }
-  const result = compileSource(`function point(x) {\n  return 1 s\n}\nlet m = ${play}`);
+  const result = compileSource(`function point(x) {\n  return 1 s\n}\nlet m = ${play}\nexit`);
   assert.deepEqual(result.diagnostics, []);
   assert.notEqual(result.plan, null);
 });
@@ -311,7 +319,7 @@ test("statically evident invalid media values are compile errors", () => {
   for (const [source, code, offending] of cases) {
     assertRejected(source, code, lastSpan(source, offending));
   }
-  plan('let m = playAudio async "a"\nm.volume += 0.5\nm.volume -= 2');
+  plan('let m = playAudio async "a"\nm.volume += 0.5\nm.volume -= 2\nexit');
 });
 
 /** A mutable JSON copy of a compiled plan for corruption tests. */
@@ -321,7 +329,7 @@ function mutablePlan(compiled: InstructionPlan): { instructions: Record<string, 
 }
 
 test("plan validation accepts only compiler-shaped barrier receivers and no finish on indefinite media", () => {
-  const compiled = plan('let m = playAudio async "a"\nm.stop()');
+  const compiled = plan('let m = playAudio async "a"\nm.stop()\nexit');
   const barrierIndex = compiled.instructions.findIndex(
     (instruction) => instruction.kind === "pacingBarrier" && instruction.receiver !== null,
   );
@@ -335,7 +343,7 @@ test("plan validation accepts only compiler-shaped barrier receivers and no fini
   };
   assert.equal(validateInstructionPlan(corrupted).valid, false);
 
-  const repeating = plan('playAudio async repeat "a" {\n  at 1 s {\n  }\n}');
+  const repeating = plan('playAudio async repeat "a" {\n  at 1 s {\n  }\n}\nexit');
   const play = repeating.instructions.find(
     (instruction): instruction is PlayMediaInstruction => instruction.kind === "playMedia",
   )!;

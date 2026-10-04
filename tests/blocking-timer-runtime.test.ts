@@ -175,7 +175,7 @@ test("a pending timer checkpoint restores without a redraw or duplicate request"
   }
 });
 
-test("timer resume equivalence holds at every boundary in loops, calls, and at root end", () => {
+test("timer resume equivalence holds at every boundary in loops, calls, and before exit", () => {
   const result = assertRuntimeResumeEquivalent(
     [
       "function countdown(seconds) {",
@@ -190,6 +190,7 @@ test("timer resume equivalence holds at every boundary in loops, calls, and at r
       "}",
       'say "total ${total}"',
       "timer 4..8",
+      "exit",
     ].join("\n"),
     { scenarioName: "blocking timer equivalence" },
   );
@@ -199,7 +200,7 @@ test("timer resume equivalence holds at every boundary in loops, calls, and at r
     requested.every((event) => event.action.kind === "delay" && event.action.display === "visible"),
   );
   assert.equal(result.events.filter((event) => event.kind === "actionCompleted").length, 5);
-  assert.equal(result.events.at(-1)?.kind, "complete");
+  assert.equal(result.events.at(-1)?.kind, "exit");
 });
 
 test("a timer coexists with an older background pacing gate and settles in deadline order", () => {
@@ -296,7 +297,7 @@ test("accepted duration forms without an implementation are never read as anothe
   > = [
     // A calendar day spans 23, 24, or 25 elapsed hours around daylight-saving transitions.
     [
-      "timer 1 day",
+      "timer 1 day\nexit",
       "1 day",
       (deadlineMs) => deadlineMs >= 23 * 3_600_000 && deadlineMs <= 25 * 3_600_000,
     ],
@@ -335,12 +336,12 @@ test("invalid dynamic timer durations fail deterministically before any action",
   // the compiler, which rejects a known text or range duration before runtime.
   const dynamic = "function dynamic(value) {\n  return value\n}\n";
   const cases: ReadonlyArray<readonly [source: string, code: string, subject: string]> = [
-    [`${dynamic}let d = dynamic("soon")\ntimer d`, "TSR050", "d"],
-    ["let d = -1\ntimer d", "TSR050", "d"],
-    ["let a = 3\ntimer a..a", "TSR041", "a..a"],
-    ["let a = 0.5\ntimer a..3", "TSR045", "a..3"],
-    ["let a = -3\ntimer a..3", "TSR050", "a..3"],
-    [`${dynamic}let d = dynamic(1..3)\nwait d`, "TSR050", "d"],
+    [`${dynamic}let d = dynamic("soon")\ntimer d\nexit`, "TSR050", "d"],
+    ["let d = -1\ntimer d\nexit", "TSR050", "d"],
+    ["let a = 3\ntimer a..a\nexit", "TSR041", "a..a"],
+    ["let a = 0.5\ntimer a..3\nexit", "TSR045", "a..3"],
+    ["let a = -3\ntimer a..3\nexit", "TSR050", "a..3"],
+    [`${dynamic}let d = dynamic(1..3)\nwait d\nexit`, "TSR050", "d"],
   ];
   for (const [source, code, subject] of cases) {
     for (const seed of SEEDS) {

@@ -10,6 +10,7 @@ import {
 } from "../plan/model.js";
 import { freezeInstructionPlan } from "../plan/freeze.js";
 import { MAIN_FILE_PATH } from "../project-paths.js";
+import { createSourceSpan } from "../source.js";
 import { sourceSpanToPlanLocation } from "../plan/source-location.js";
 import type { RuntimeCheckSite } from "../type-checker.js";
 import { InstructionCompiler, type LoweringCounters } from "./lowering/compiler.js";
@@ -61,14 +62,19 @@ export function compileStableProject(
     compiler.compileStatements(
       program.statements.filter((statement) => statement.kind !== "functionDeclaration"),
     );
+    // The compiler rejects a reachable end of the file, so this `end` only closes the region.
+    const fileEnd = createSourceSpan(program.span.end, program.span.end);
+    instructions.push({ kind: "end", span: sourceSpanToPlanLocation(fileEnd) });
     const rootEndInstruction = instructions.length;
     compiler.compileFunctions();
+    compiler.resolveGotos();
     files.push({
       path,
       sourceSpan: sourceSpanToPlanLocation(program.span),
       startInstruction,
       rootEndInstruction,
       endInstruction: instructions.length,
+      labels: compiler.labels,
     });
   }
   return freezeInstructionPlan({

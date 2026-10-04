@@ -146,7 +146,7 @@ test("preserves typed signatures and never silently ignores declared types", () 
     [...source.matchAll(/number/gu)].map((match) => ["number", match.index]),
   );
 
-  const violating = "function echo(value: string): string { return value }\nsay echo(5)";
+  const violating = "function echo(value: string): string { return value }\nsay echo(5)\nexit";
   const compiled = compileSource(violating);
   assert.equal(compiled.plan, null);
   assert.deepEqual(

@@ -10,11 +10,12 @@ import {
 } from "../interaction-limits.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "../project-paths.js";
-import { INSTRUCTION_PLAN_FORMAT, INSTRUCTION_PLAN_VERSION } from "./model.js";
+import { INSTRUCTION_PLAN_FORMAT, INSTRUCTION_PLAN_VERSION, type Instruction } from "./model.js";
 import {
   type PlanFileBoundaries,
   analyzeInstructionStream,
   collectFunctionIds,
+  validateLabelPositions,
   expressionMayReferenceTemporary,
 } from "./instruction-stream-analyses.js";
 import {
@@ -76,7 +77,7 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
   if (!Array.isArray(value.instructions)) {
     errors.push(planError("TSC002", "Instructions must be an array.", "$.instructions"));
   } else {
-    const files = validatePlanFiles(value.files, value.instructions.length, errors);
+    const files = validatePlanFiles(value.files, value.instructions, errors);
     const functionIds = collectFunctionIds(value.functions);
     for (let index = 0; index < value.instructions.length; index += 1) {
       validateInstruction(
@@ -90,6 +91,10 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
       );
     }
     analyzeInstructionStream(value.instructions, value.functions, files, errors);
+    if (errors.length === 0 && files !== null) {
+      // EVIDENCE: validation: every instruction passed its shape check above, with no error.
+      validateLabelPositions(value.instructions as readonly Instruction[], files, errors);
+    }
   }
   return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
 }
@@ -104,17 +109,74 @@ const FILE_FIELDS = [
   "startInstruction",
   "rootEndInstruction",
   "endInstruction",
+  "labels",
 ];
+
+const LABEL_FIELDS = ["name", "instruction"];
 
 /**
  * Checks the file table: `main.tease` first, the other package paths in order, and blocks that cover the instruction
  * stream one after another. Returns the boundaries for the stream analyses, or `null` when they are unusable.
  */
+/** Label names are unique in their file and stand in source order inside its root region. */
+function validatePlanLabels(
+  value: unknown,
+  start: number,
+  rootEnd: number,
+  path: string,
+  errors: PlanValidationError[],
+): ReadonlySet<number> {
+  const instructions = new Set<number>();
+  if (!Array.isArray(value)) {
+    errors.push(planError("TSC002", "Plan file labels must be an array.", path));
+    return instructions;
+  }
+  const names = new Set<string>();
+  let previous = start;
+  value.forEach((label: unknown, index) => {
+    const labelPath = `${path}[${index}]`;
+    if (!isRecord(label)) {
+      errors.push(planError("TSC002", "Plan label must be an object.", labelPath));
+      return;
+    }
+    rejectUnknownFields(label, LABEL_FIELDS, labelPath, errors);
+    if (typeof label.name !== "string" || !IDENTIFIER.test(label.name) || names.has(label.name)) {
+      errors.push(
+        planError("TSC002", "Plan label names must be unique identifiers.", `${labelPath}.name`),
+      );
+    } else {
+      names.add(label.name);
+    }
+    const instruction = label.instruction;
+    if (
+      typeof instruction !== "number" ||
+      !Number.isSafeInteger(instruction) ||
+      instruction < previous ||
+      instruction >= rootEnd
+    ) {
+      errors.push(
+        planError(
+          "TSC002",
+          "Plan labels stand in source order inside their file's root region.",
+          `${labelPath}.instruction`,
+        ),
+      );
+      return;
+    }
+    previous = instruction;
+    instructions.add(previous);
+  });
+  return instructions;
+}
+
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+
 function validatePlanFiles(
   value: unknown,
-  instructionCount: number,
+  instructions: readonly unknown[],
   errors: PlanValidationError[],
 ): PlanFileBoundaries[] | null {
+  const instructionCount = instructions.length;
   if (!Array.isArray(value) || value.length === 0) {
     errors.push(planError("TSC002", "Plan files must be a non-empty array.", "$.files"));
     return null;
@@ -153,14 +215,29 @@ function validatePlanFiles(
       !validInstructionBoundary(rootEnd, instructionCount) ||
       !validInstructionBoundary(end, instructionCount) ||
       start !== expectedStart ||
-      rootEnd < start ||
+      rootEnd <= start ||
       end < rootEnd
     ) {
       errors.push(planError("TSC002", "Plan file instruction range is impossible.", path));
       expectedStart = -1;
       return;
     }
-    boundaries.push({ startInstruction: start, rootEndInstruction: rootEnd, endInstruction: end });
+    const closing = instructions[rootEnd - 1];
+    if (!isRecord(closing) || closing.kind !== "end") {
+      errors.push(
+        planError(
+          "TSC002",
+          "A file's root region must close with an end.",
+          `${path}.rootEndInstruction`,
+        ),
+      );
+    }
+    boundaries.push({
+      startInstruction: start,
+      rootEndInstruction: rootEnd,
+      endInstruction: end,
+      labelInstructions: validatePlanLabels(file.labels, start, rootEnd, `${path}.labels`, errors),
+    });
     expectedStart = end;
   });
   if (expectedStart !== instructionCount) {
@@ -182,6 +259,8 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["enterScope"],
   ["leaveScope"],
   ["exit"],
+  ["end"],
+  ["goto", "target"],
   ["declareBinding", "name", "value", "typeCheck"],
   ["prepareReference", "expression", "destinationTemporary"],
   ["validateAssignmentTarget", "target"],
@@ -289,6 +368,12 @@ function validateInstruction(
     case "enterScope":
     case "leaveScope":
     case "exit":
+    case "end":
+      return;
+    case "goto":
+      if (!validInstructionBoundary(value.target, instructionCount)) {
+        errors.push(planError("TSC002", "Goto target is outside the plan.", `${path}.target`));
+      }
       return;
     case "declareBinding":
       requireString(value.name, `${path}.name`, errors);

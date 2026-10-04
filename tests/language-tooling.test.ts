@@ -68,7 +68,10 @@ test("completion exposes optional speaker and current say modifiers", () => {
 });
 
 test("context, hover, and signature help select the compact command and its slots", () => {
-  const document = createLanguageDocument("file:///main.tease", 'let answer = askText "Type here"');
+  const document = createLanguageDocument(
+    "file:///main.tease",
+    'let answer = askText "Type here"\nexit',
+  );
   const start = document.text.indexOf("askText");
   const position = languagePositionAt(document, document.text.indexOf("Type"));
   assert.equal(languageContextHelp(document, position)?.command, "askText");
@@ -85,7 +88,7 @@ test("editor help and formatting cover showButton used as a value with a timeout
   const source = 'let elapsed = showButton   as   mistress "Go", timeout: 5';
   const document = createLanguageDocument(
     "file:///main.tease",
-    `speaker mistress { name: "Mistress" }\n${source}`,
+    `speaker mistress { name: "Mistress" }\n${source}\nexit`,
   );
   const start = document.text.indexOf("showButton");
   const hover = languageHover(document, languagePositionAt(document, document.text.indexOf("5")));
@@ -118,7 +121,7 @@ function assertDeepSayTooling(source: string): void {
     start: languagePositionAt(document, start),
     end: languagePositionAt(document, start + "say".length),
   });
-  const topLevel = createLanguageDocument("file:///top.tease", 'say "top"');
+  const topLevel = createLanguageDocument("file:///top.tease", 'say "top"\nexit');
   assert.deepEqual(
     hover?.contents,
     languageHover(topLevel, languagePositionAt(topLevel, 1))?.contents,
@@ -128,7 +131,7 @@ function assertDeepSayTooling(source: string): void {
 test("hover and formatting handle deeply nested source inside a timer expiry block", () => {
   const depth = 4_000;
   assertDeepSayTooling(
-    `timer async 1 {\n${"if true {\n".repeat(depth)}${DEEP_SAY}\n${"}\n".repeat(depth)}}\n`,
+    `timer async 1 {\n${"if true {\n".repeat(depth)}${DEEP_SAY}\n${"}\n".repeat(depth)}}\nexit\n`,
   );
 });
 
@@ -139,6 +142,7 @@ test("formatter normalizes compact owned whitespace and is idempotent", () => {
     'let answer = askText   as   mistress   "Type here"',
     'let result = choose   first :   "A"  ,\n   second  : "B"',
     'say as mistress skippable   "Good",   instant',
+    "exit",
   ].join("\n");
   const document = createLanguageDocument("file:///main.tease", source);
   const first = formatLanguageDocument(document);
@@ -156,6 +160,7 @@ test("formatter preserves strings, escapes, interpolation, comments, and choice 
     "// keep  comment spacing",
     'let prefix = "x  y"',
     'let result = choose   first :   "A  ${prefix}"  ,   second  :  "B\\n  C"',
+    "exit",
   ].join("\n");
   const result = formatLanguageDocument(createLanguageDocument("file:///main.tease", source));
   assert.notEqual(result.edits.length, 0);
@@ -167,7 +172,7 @@ test("formatter preserves strings, escapes, interpolation, comments, and choice 
 });
 
 test("formatter preserves block-string values and is idempotent", () => {
-  const source = 'say   """\r\n\tFirst\r\n\t  Second ${1 + 1}\r\n\t""",   instant';
+  const source = 'say   """\r\n\tFirst\r\n\t  Second ${1 + 1}\r\n\t""",   instant\nexit';
   const document = createLanguageDocument("file:///block.tease", source);
   const first = formatLanguageDocument(document);
   const second = formatLanguageDocument(createLanguageDocument(document.uri, first.text));
@@ -238,6 +243,6 @@ test("signature help ignores punctuation inside say strings and tracks grammar s
 test("editor tooling handles deeply nested media blocks without native recursion", () => {
   const depth = 2_500;
   assertDeepSayTooling(
-    `${'playAudio async "a" {\n'.repeat(depth)}${DEEP_SAY}\n${"}\n".repeat(depth)}`,
+    `${'playAudio async "a" {\n'.repeat(depth)}${DEEP_SAY}\n${"}\n".repeat(depth)}exit\n`,
   );
 });

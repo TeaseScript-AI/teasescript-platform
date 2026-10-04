@@ -10,12 +10,16 @@ import {
   validateSpan,
   validInstructionBoundary,
 } from "./validation-support.js";
+import type { Instruction } from "./model.js";
+import { instructionKilledTemporaries, requiredInstructionTemporaries } from "./temporary-uses.js";
 
 /** Validated instruction boundaries of one plan file. */
 export interface PlanFileBoundaries {
   readonly startInstruction: number;
   readonly rootEndInstruction: number;
   readonly endInstruction: number;
+  /** Where the file's labels stand: the only targets of a goto in the file. */
+  readonly labelInstructions: ReadonlySet<number>;
 }
 
 export function analyzeInstructionStream(
@@ -28,6 +32,103 @@ export function analyzeInstructionStream(
   validatePreparedReferenceStructure(instructions, errors);
   const validationIndex = validateFunctionDefinitions(functions, instructions, files, errors);
   validateInstructionControlFlowRegions(instructions, validationIndex, errors);
+}
+
+/**
+ * A goto leaves every block, loop, and temporary value behind, so the code from a label on may need none of them: no
+ * temporary that it reads before setting, no block that it leaves before entering, and no loop that it continues or
+ * breaks before starting. Checked backward along the root region's control flow; call only for an otherwise valid
+ * plan.
+ */
+export function validateLabelPositions(
+  instructions: readonly Instruction[],
+  files: readonly PlanFileBoundaries[],
+  errors: PlanValidationError[],
+): void {
+  files.forEach((file, fileIndex) => {
+    if (file.labelInstructions.size === 0) return;
+    const { startInstruction: start, rootEndInstruction: end } = file;
+    const length = end - start;
+    const temporaries = Array.from({ length }, () => new Set<number>());
+    const scopes = new Array<number>(length).fill(0);
+    const loops = Array.from({ length }, () => new Set<number>());
+    const inRegion = (index: number): boolean => index >= start && index < end;
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let index = end - 1; index >= start; index -= 1) {
+        const instruction = instructions[index]!;
+        const successors = rootSuccessors(instruction, index).filter(inRegion);
+        const neededTemporaries = new Set<number>();
+        let neededScopes = 0;
+        const neededLoops = new Set<number>();
+        for (const successor of successors) {
+          for (const id of temporaries[successor - start]!) neededTemporaries.add(id);
+          neededScopes = Math.max(neededScopes, scopes[successor - start]!);
+          // A loop that starts here is active on the way into its body.
+          const providesLoop =
+            instruction.kind === "loopStart" && successor === index + 1 ? instruction.loopId : null;
+          for (const id of loops[successor - start]!) if (id !== providesLoop) neededLoops.add(id);
+        }
+        for (const id of instructionKilledTemporaries(instruction)) neededTemporaries.delete(id);
+        for (const id of requiredInstructionTemporaries(instruction, null))
+          neededTemporaries.add(id);
+        if (instruction.kind === "enterScope") neededScopes = Math.max(neededScopes - 1, 0);
+        // More open blocks than instructions means a cycle that leaves blocks it never entered.
+        if (instruction.kind === "leaveScope")
+          neededScopes = Math.min(neededScopes + 1, length + 1);
+        if (instruction.kind === "loopControl") neededLoops.add(instruction.loopId);
+        const slot = index - start;
+        if (
+          !sameNumbers(temporaries[slot]!, neededTemporaries) ||
+          scopes[slot] !== neededScopes ||
+          !sameNumbers(loops[slot]!, neededLoops)
+        ) {
+          temporaries[slot] = neededTemporaries;
+          scopes[slot] = neededScopes;
+          loops[slot] = neededLoops;
+          changed = true;
+        }
+      }
+    }
+    for (const label of file.labelInstructions) {
+      const slot = label - start;
+      if (temporaries[slot]!.size > 0 || scopes[slot]! > 0 || loops[slot]!.size > 0) {
+        errors.push(
+          planError(
+            "TSC002",
+            "A label must stand between statements of its file's outer scope.",
+            `$.files[${fileIndex}].labels`,
+          ),
+        );
+      }
+    }
+  });
+}
+
+/** Where execution can continue from a root instruction; transfers and endings leave the region's flow. */
+function rootSuccessors(instruction: Instruction, index: number): readonly number[] {
+  switch (instruction.kind) {
+    case "jump":
+    case "loopControl":
+      return [instruction.target];
+    case "jumpIfFalse":
+    case "loopStart":
+      return [instruction.target, index + 1];
+    case "callFunction":
+      return [instruction.returnInstruction];
+    case "exit":
+    case "end":
+    case "goto":
+    case "returnValue":
+    case "returnVoid":
+      return [];
+    default:
+      return [index + 1];
+  }
+}
+
+function sameNumbers(left: ReadonlySet<number>, right: ReadonlySet<number>): boolean {
+  return left.size === right.size && [...left].every((value) => right.has(value));
 }
 
 function validatePreparedReferenceStructure(
@@ -261,6 +362,9 @@ interface ValidatedFunctionRange {
 interface PlanValidationIndex {
   readonly owners: readonly (InstructionExecutionRegion | undefined)[];
   readonly functionsById: ReadonlyMap<number, ValidatedFunctionRange>;
+  readonly files: readonly PlanFileBoundaries[];
+  /** Gotos leave their region, so any of them that lands inside a prepared value bypasses it. */
+  readonly gotoSources: ReadonlySet<number>;
 }
 
 function createPlanValidationIndex(
@@ -295,7 +399,11 @@ function createPlanValidationIndex(
       owners[index] = region;
     }
   }
-  return { owners, functionsById };
+  const gotoSources = new Set<number>();
+  instructions.forEach((instruction, index) => {
+    if (isRecord(instruction) && instruction.kind === "goto") gotoSources.add(index);
+  });
+  return { owners, functionsById, files, gotoSources };
 }
 
 function validateInstructionControlFlowRegions(
@@ -340,6 +448,20 @@ function validateInstructionControlFlowRegions(
           region,
           errors,
         );
+        return;
+      case "goto":
+        if (
+          typeof instruction.target !== "number" ||
+          !index.files[region.file]?.labelInstructions.has(instruction.target)
+        ) {
+          errors.push(
+            planError(
+              "TSC002",
+              "A goto must continue at a label of its own file.",
+              `${instructionPath}.target`,
+            ),
+          );
+        }
         return;
       case "callFunction":
         validateInstructionRegionTarget(
@@ -862,6 +984,7 @@ function preparedSayCanBeBypassed(
 ): boolean {
   for (let target = producerIndex + 1; target <= sayIndex; target += 1) {
     for (const sourceIndex of explicitIncomingSources[target] ?? []) {
+      if (index.gotoSources.has(sourceIndex)) return true;
       if (index.owners[sourceIndex] !== region) continue;
       if (sourceIndex < producerIndex || sourceIndex >= sayIndex) return true;
     }
@@ -961,7 +1084,13 @@ function validateCanonicalInteractionResultHandoffs(
     const handoff = instructions[continuation];
     if (!isRecord(handoff)) return;
     if (handoff.kind === "clearTemporary" && handoff.temporaryId === destinationTemporary) return;
-    if (handoff.kind === "exit" || handoff.kind === "returnVoid") return;
+    if (
+      handoff.kind === "exit" ||
+      handoff.kind === "end" ||
+      handoff.kind === "goto" ||
+      handoff.kind === "returnVoid"
+    )
+      return;
 
     if (!canonicalHandoffConsumesTemporary(handoff, destinationTemporary)) {
       errors.push(
@@ -1059,6 +1188,8 @@ function explicitInstructionTargets(instruction: Record<string, unknown>): reado
       return [instruction.continueTarget, instruction.target];
     case "callFunction":
       return [instruction.returnInstruction];
+    case "goto":
+      return [instruction.target];
     default:
       return [];
   }
@@ -1191,10 +1322,7 @@ function validateInstructionRegionTarget(
 ): void {
   if (!validInstructionBoundary(value, instructionCount)) return;
   const target = value;
-  const remainsInRegion =
-    region.kind === "root"
-      ? target >= region.startInstruction && target <= region.endInstruction
-      : target >= region.startInstruction && target < region.endInstruction;
+  const remainsInRegion = target >= region.startInstruction && target < region.endInstruction;
   if (!remainsInRegion) {
     errors.push(
       planError("TSC002", "Control-flow target leaves the instruction's execution region.", path),

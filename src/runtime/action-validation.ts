@@ -24,7 +24,6 @@ import {
   type InteractionTemporalKind,
   type InteractionUiPayload,
   type PlanSourceLocation,
-  mainRootEnd,
 } from "../plan/model.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -427,8 +426,7 @@ export function catchUpPaused(snapshot: Record<string, unknown>): boolean {
       (frame) => isPlainRecord(frame) && isPlainRecord(frame.timerInterruption),
     ) ||
     snapshot.preparedSayOutput !== null ||
-    snapshot.interactionResultHandoff !== null ||
-    snapshot.terminalContinuationHandoff !== null
+    snapshot.interactionResultHandoff !== null
   )
     return false;
   const foreground = snapshot.foregroundAction;
@@ -1027,83 +1025,6 @@ function validInteractionResultHandoffOwner(
   }
   const ownerFunctionId = analysis.functionIdsByInstruction[handoff.owningInstruction];
   return ownerFunctionId !== null && activeOwner.functionId === ownerFunctionId;
-}
-
-export function validateTerminalContinuationHandoffState(
-  snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
-  errors: string[],
-): void {
-  const handoff = snapshot.terminalContinuationHandoff;
-  if (handoff === null) return;
-  if (
-    !isPlainRecord(handoff) ||
-    !hasExactKeys(handoff, [
-      "actionId",
-      "actionKind",
-      "owningInstruction",
-      "continuationInstruction",
-    ]) ||
-    !positiveSafeInteger(handoff.actionId) ||
-    (handoff.actionKind !== "delay" &&
-      handoff.actionKind !== "interaction" &&
-      handoff.actionKind !== "mediaPlayback" &&
-      handoff.actionKind !== "storageWrite") ||
-    !nonNegativeSafeInteger(handoff.owningInstruction) ||
-    !nonNegativeSafeInteger(handoff.continuationInstruction) ||
-    !positiveSafeInteger(snapshot.nextActionId) ||
-    // An expiry block may have allocated newer actions before the terminal action settled.
-    handoff.actionId >= snapshot.nextActionId ||
-    snapshot.status !== "running" ||
-    snapshot.foregroundAction !== null ||
-    snapshot.interactionResultHandoff !== null ||
-    !validTerminalContinuationHandoffSettlement(handoff, snapshot.lastSettlement)
-  ) {
-    errors.push("Runtime terminal continuation handoff is malformed.");
-    return;
-  }
-  if (plan === undefined) return;
-  const instruction = plan.instructions[handoff.owningInstruction];
-  const terminalHandoffMatchesPlan =
-    handoff.continuationInstruction === mainRootEnd(plan) &&
-    snapshot.nextInstruction === mainRootEnd(plan) &&
-    handoff.owningInstruction + 1 === handoff.continuationInstruction &&
-    ((handoff.actionKind === "delay" && instruction?.kind === "wait") ||
-      (handoff.actionKind === "storageWrite" && instruction?.kind === "storageWrite") ||
-      (handoff.actionKind === "mediaPlayback" &&
-        instruction?.kind === "playMedia" &&
-        instruction.destinationTemporary === null) ||
-      (handoff.actionKind === "interaction" &&
-        instruction?.kind === "interaction" &&
-        instruction.interactionKind === "button" &&
-        instruction.destinationTemporary === null));
-  if (!terminalHandoffMatchesPlan) {
-    errors.push(
-      "Runtime terminal continuation handoff does not match its canonical terminal instruction.",
-    );
-  }
-}
-
-function validTerminalContinuationHandoffSettlement(
-  handoff: Record<string, unknown>,
-  settlement: unknown,
-): boolean {
-  if (!positiveSafeInteger(handoff.actionId) || !isPlainRecord(settlement)) return false;
-  if (settlement.actionId === handoff.actionId) {
-    return (
-      settlement.actionKind === handoff.actionKind &&
-      settlement.owningInstruction === handoff.owningInstruction &&
-      settlement.continuationInstruction === handoff.continuationInstruction
-    );
-  }
-
-  // Only a background pacing gate can settle after a terminal delay or storage write and replace bounded replay
-  // before root completion is entered; a gate created by an expiry block may be newer than the delay.
-  return (
-    (handoff.actionKind === "delay" || handoff.actionKind === "storageWrite") &&
-    settlement.actionKind === "chatPacingGate" &&
-    positiveSafeInteger(settlement.actionId)
-  );
 }
 
 function validInteractionResultForInstruction(
@@ -2152,7 +2073,7 @@ function validSettlementProvenance(
       owningInstruction < candidate.endInstruction,
   );
   return definition === undefined
-    ? continuationInstruction <= mainRootEnd(plan)
+    ? continuationInstruction < plan.files[0]!.rootEndInstruction
     : continuationInstruction < definition.endInstruction;
 }
 
@@ -2209,7 +2130,7 @@ function validForegroundActionOwnership(
   const activeFrame = callFrames.at(-1);
   if (definition === undefined) {
     return (
-      continuationInstruction <= mainRootEnd(plan) &&
+      continuationInstruction < plan.files[0]!.rootEndInstruction &&
       action.ownerCallFrameId === null &&
       callFrames.length === 0
     );

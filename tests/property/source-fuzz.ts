@@ -87,6 +87,7 @@ function literalsSource(choices: SourceChoices): ValidSourceCase {
       `let total = -start ${operator} 2 * 3`,
       `for item in start..=start + ${rangeLength} { total = total + item }`,
       `say "${text}:\${total}"`,
+      "exit",
     ],
   );
 }
@@ -109,6 +110,7 @@ function collectionsSource(choices: SourceChoices): ValidSourceCase {
       `let groups = set[source, [${first}, ${second}], copy]`,
       "say groups.length",
       "say source[0]",
+      "exit",
     ],
   );
 }
@@ -131,6 +133,7 @@ function controlFlowSource(choices: SourceChoices): ValidSourceCase {
       "}",
       `while total < ${target} { total = total + 1 }`,
       `if total == ${target} { say "done" } else { say "wrong" }`,
+      "exit",
     ],
   );
 }
@@ -153,6 +156,7 @@ function functionsSource(choices: SourceChoices): ValidSourceCase {
       '  return "${prefix}:${value}"',
       "}",
       `say describeValue(${call})`,
+      "exit",
     ],
   );
 }
@@ -170,6 +174,7 @@ function speakersSource(choices: SourceChoices): ValidSourceCase {
       `speaker ${speaker}`,
       `say "${defaultText}"`,
       `say as ${speaker} "${explicitText}"`,
+      "exit",
     ],
   );
 }
@@ -184,6 +189,7 @@ function randomSource(choices: SourceChoices): ValidSourceCase {
     `let roll = randomInteger(${range})`,
     `let lucky = chance(${chance})`,
     'say "${roll}:${lucky}:${random()}"',
+    "exit",
   ]);
 }
 
@@ -192,7 +198,7 @@ function missingIdentifierCase(
   family: "missing-declaration-identifier",
 ): NearValidSourceCase {
   const value = choices.integer(1, 9);
-  return nearValid(family, `literal=${value}`, `let = ${value}`, "TSP013");
+  return nearValid(family, `literal=${value}`, `let = ${value}\nexit`, "TSP013");
 }
 
 function missingStringExpressionCase(
@@ -200,17 +206,17 @@ function missingStringExpressionCase(
   family: "string-interpolation",
 ): NearValidSourceCase {
   const text = choices.pick(["Hello", "Count", "Value"] as const);
-  return nearValid(family, `text=${text}`, `say "${text} \${}"`, "TSP008");
+  return nearValid(family, `text=${text}`, `say "${text} \${}"\nexit`, "TSP008");
 }
 
 function outsideLoopCase(choices: SourceChoices, family: "loop-control"): NearValidSourceCase {
   const keyword = choices.pick(["break", "continue"] as const);
-  return nearValid(family, `outside-loop=${keyword}`, keyword, "TSV008");
+  return nearValid(family, `outside-loop=${keyword}`, `${keyword}\nexit`, "TSV008");
 }
 
 function unknownNameCase(choices: SourceChoices, family: "semantic-name"): NearValidSourceCase {
   const identifier = `unknownValue${choices.integer(1, 9)}`;
-  return nearValid(family, `identifier=${identifier}`, `say ${identifier}`, "TSV002");
+  return nearValid(family, `identifier=${identifier}`, `say ${identifier}\nexit`, "TSV002");
 }
 
 function duplicateParameterCase(
@@ -221,7 +227,7 @@ function duplicateParameterCase(
   return nearValid(
     family,
     `duplicate-parameter=${identifier}`,
-    `function sample(${identifier}, ${identifier}) { return ${identifier} }`,
+    `function sample(${identifier}, ${identifier}) { return ${identifier} }\nexit`,
     "TSV014",
   );
 }
@@ -232,7 +238,7 @@ function duplicateDictKeyCase(choices: SourceChoices, family: "dict-keys"): Near
   return nearValid(
     family,
     `duplicate-key=${key} quoted=${quoted}`,
-    `let values = dict{ ${key}: 1, ${quoted ? `"${key}"` : key}: 2 }`,
+    `let values = dict{ ${key}: 1, ${quoted ? `"${key}"` : key}: 2 }\nexit`,
     "TSV007",
   );
 }
