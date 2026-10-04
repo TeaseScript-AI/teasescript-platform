@@ -4156,8 +4156,8 @@ for name in toys { ... }                // the keys
   check, such as `Dictionary has no key "collar". Check toys.contains(name) first.` A missing key is visible to the
   compiler only for a literal dict, so `dict{ a: 1 }["b"]` is a compile error; for any other dict, check
   `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key; its `default:`
-  is required and must fit the value type like a value stored in the dict, and its result has the value type. Like any
-  argument, the default is evaluated before the lookup.
+  is required and must fit the value type like a value stored in the dict, also when the script runs (`TSR058`), and
+  its result has the value type. Like any argument, the default is evaluated before the lookup.
 - **Iteration:** `for key in toys` goes through the keys as they were when the loop started
   ([§23](#23-loops)), so changing the dict inside the loop is safe. There is no two-variable `for`.
 - **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an

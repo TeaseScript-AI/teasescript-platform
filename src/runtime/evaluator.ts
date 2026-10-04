@@ -1333,7 +1333,7 @@ export class Evaluator {
         expression.span,
         expression.typeCheck === undefined
           ? null
-          : // Plan validation accepts a type check only on an `add` call with one argument.
+          : // Plan validation accepts a type check only on an `add` call with one argument here.
             { check: expression.typeCheck, span: expression.arguments[0]!.value.span },
       );
     }
@@ -1531,6 +1531,9 @@ export class Evaluator {
     }
     const keyPlan = expression.arguments[0]!.value;
     const key = this.#dictKey(positional[0]!, keyPlan.span);
+    // A default the compiler could not know must be a value the dict could hold (ADR 0021 rule 1.7).
+    if (name === "get" && expression.typeCheck !== undefined)
+      assertValueType(named.default!, expression.typeCheck, expression.arguments[1]!.value.span);
     switch (name) {
       case "contains":
         return getSerializableDictEntry(receiver, key) !== undefined;

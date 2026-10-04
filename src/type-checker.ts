@@ -124,8 +124,8 @@ export interface TypeCheckResult {
 }
 
 /**
- * Where a value is stored in a place of known type: a `let` or assignment, a list or set `add` call, an argument of an
- * author function, a parameter default, or a `return`.
+ * Where a value is stored in a place of known type: a `let` or assignment, a list or set `add` call, the default of a
+ * dict `get` call, an argument of an author function, a parameter default, or a `return`.
  */
 export type RuntimeCheckSite =
   | LetStatement
@@ -2552,10 +2552,14 @@ class TypeChecker {
         this.#checkDictKey(values[0]!, key.value);
         if (method === "remove") this.#checkVisibleKey(callee.object, key.value);
       }
-      const defaultArgument = expression.arguments[1];
+      const defaultArgument = expression.arguments.find(
+        (argument) => argument.kind === "namedArgument",
+      );
       if (method === "get" && defaultArgument !== undefined) {
-        fallback = values[1]!;
-        // The default is a value the dict could hold: it must fit, and it decides an undecided value type.
+        // The result may be the default itself, so it is a copy that later stores to either cannot share.
+        fallback = this.#capture(defaultArgument.value);
+        // The default is a value the dict could hold: it must fit, and it decides an undecided value type. A default
+        // the compiler cannot know is checked when the script runs.
         const collection = this.#elementReceiver(callee.object, scope, receiver, fallback);
         yield* compileChild(
           this.#storeElementTask(
@@ -2566,6 +2570,12 @@ class TypeChecker {
             scope,
             "default to",
           ),
+        );
+        this.#recordRuntimeCheck(
+          expression,
+          elementStoreType(collection) ?? UNKNOWN_TYPE,
+          elementLabel(expressionLabel(callee.object), "dict"),
+          fallback,
         );
       }
     }

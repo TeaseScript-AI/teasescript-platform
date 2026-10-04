@@ -713,7 +713,7 @@ export interface CallExpressionPlan extends ExpressionPlanBase {
   readonly kind: "call";
   readonly callee: ExpressionPlan;
   readonly arguments: readonly ArgumentPlan[];
-  /** For a list or set `add`, the check of the added element. */
+  /** For a list or set `add`, the check of the added element; for a dict `get`, the check of its `default:`. */
   readonly typeCheck?: TypeCheckPlan;
 }
 

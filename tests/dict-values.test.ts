@@ -279,6 +279,7 @@ test("a checkpoint keeps dicts and prepared dict keys, and rejects malformed one
   const plan = compileValidPlan(
     [
       "let table = dict{ a: { n: 1 }, b: { n: 2 } }",
+      "let handles = dict{ beat: timer async 10 s }",
       "function pause {",
       "    wait 1 s",
       "    return 5",
@@ -336,6 +337,14 @@ test("a checkpoint keeps dicts and prepared dict keys, and rejects malformed one
     keyStep(snapshot).value = 7;
   });
   corrupt((snapshot) => {
+    // A handle inside a dict must refer to a timer the session issued.
+    const handles = snapshot.frames[0]!.bindings.find((entry) => entry.name === "handles")?.value;
+    assert.ok(typeof handles === "object" && handles !== null && handles.kind === "dict");
+    const beat = handles.entries[0]!.value;
+    assert.ok(typeof beat === "object" && beat !== null && beat.kind === "timerHandle");
+    Object.assign(beat, { timerId: 999_999 });
+  });
+  corrupt((snapshot) => {
     // A key that the attached dict does not have no longer addresses its entry.
     keyStep(snapshot).value = "missing";
   });
@@ -375,10 +384,25 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
     "0.5",
     'dict{ "a": 1 }',
   ]);
-  // A default of unknown type makes the result unknown, so a typed place checks it when the script runs.
+  // A default the compiler cannot know is checked when the script runs, also where nothing stores the result.
   assert.deepEqual(
-    failure(`${DYNAMIC}let c = dict{ a: 1 }\nlet n: integer = c.get("z", default: dynamic("x"))`),
-    ["TSR058", "'n' holds a whole number (integer), so it cannot take text (string)."],
+    failure(`${DYNAMIC}let c: integer dict = dict{}\nsay c.get("z", default: dynamic("x"))`),
+    ["TSR058", "A value of 'c' holds a whole number (integer), so it cannot take text (string)."],
+  );
+  // The result is a copy of the default: what decides one does not decide the other.
+  assert.deepEqual(
+    says(
+      [
+        "let fallback = []",
+        "let table = dict{}",
+        'let copy = table.get("missing", default: fallback)',
+        "copy.add(1)",
+        'fallback.add("text")',
+        "say copy",
+        "say fallback",
+      ].join("\n"),
+    ),
+    ["[1]", '["text"]'],
   );
   assert.deepEqual(
     diagnostics(

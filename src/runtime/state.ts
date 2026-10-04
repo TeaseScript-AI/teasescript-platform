@@ -3048,6 +3048,11 @@ function collectSpeakerReferenceIds(
         const property = current.properties[index];
         if (isPlainRecord(property)) work.push(property.value);
       }
+    } else if (current.kind === "dict" && Array.isArray(current.entries)) {
+      for (let index = current.entries.length - 1; index >= 0; index -= 1) {
+        const entry = current.entries[index];
+        if (isPlainRecord(entry)) work.push(entry.value);
+      }
     }
   }
 }

@@ -1500,15 +1500,19 @@ function validateExpressionNode(
         !(
           isRecord(value.callee) &&
           value.callee.kind === "property" &&
-          value.callee.name === "add" &&
           Array.isArray(value.arguments) &&
-          value.arguments.length === 1
+          ((value.callee.name === "add" && value.arguments.length === 1) ||
+            (value.callee.name === "get" &&
+              value.arguments.length === 2 &&
+              isRecord(value.arguments[1]) &&
+              value.arguments[1].kind === "named" &&
+              value.arguments[1].name === "default"))
         )
       )
         errors.push(
           planError(
             "TSC002",
-            "Only a list or set 'add' call with one argument checks a type.",
+            "Only a list or set 'add' call with one argument, or a dict 'get' call with a 'default:', checks a type.",
             `${path}.typeCheck`,
           ),
         );
