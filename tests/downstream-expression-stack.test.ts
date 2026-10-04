@@ -40,7 +40,7 @@ test("downstream expression frames traverse each public stage and resume on a co
           stage='fresh snapshot';const initial=createFreshRuntimeSnapshot(plan,{seed:42});
           stage='runtime';const whole=run(plan,initial,{}, {instructionBudget:20000});assert.equal(whole.snapshot.status,'halted');
           assert.equal(whole.snapshot.frames[0].bindings.find(binding=>binding.name==='result').value,expected);
-          stage='partial execution';const partial={snapshot:initial,events:[]};for(let step=0;step<Math.max(1,Math.min(5,Math.floor(plan.rootEndInstruction/2)));step++){const next=executeInstruction(plan,partial.snapshot);partial.snapshot=next.snapshot;partial.events.push(...next.events);}
+          stage='partial execution';const partial={snapshot:initial,events:[]};for(let step=0;step<Math.max(1,Math.min(5,Math.floor(plan.files[0].rootEndInstruction/2)));step++){const next=executeInstruction(plan,partial.snapshot);partial.snapshot=next.snapshot;partial.events.push(...next.events);}
           stage='checkpoint JSON capture/restore';const restored=deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan,partial.snapshot)));
           stage='resume';const resumed=run(restored.plan,restored.snapshot,{}, {instructionBudget:20000});
           assert.equal(resumed.snapshot.status,'halted');

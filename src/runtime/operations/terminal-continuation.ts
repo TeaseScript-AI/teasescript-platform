@@ -1,4 +1,4 @@
-import type { InstructionPlan } from "../../plan/model.js";
+import { type InstructionPlan, mainRootEnd } from "../../plan/model.js";
 import type {
   RuntimeDelayActionSnapshot,
   RuntimeInteractionActionSnapshot,
@@ -20,10 +20,7 @@ export function terminalContinuationHandoffFor(
     | RuntimeMediaPlaybackActionSnapshot
     | RuntimeStorageWriteActionSnapshot,
 ): RuntimeTerminalContinuationHandoffSnapshot | null {
-  if (
-    action.ownerCallFrameId !== null ||
-    action.continuationInstruction !== plan.rootEndInstruction
-  )
+  if (action.ownerCallFrameId !== null || action.continuationInstruction !== mainRootEnd(plan))
     return null;
 
   const instruction = plan.instructions[action.owningInstruction];

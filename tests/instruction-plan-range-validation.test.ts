@@ -41,25 +41,25 @@ test("rejects out-of-range, unsafe, negative, and fractional function boundaries
   }
 });
 
-test("rejects an extreme root boundary at the root boundary path", () => {
+test("rejects an extreme root boundary at the file's path", () => {
   const malformed = mutablePlan(functionPlan());
-  malformed.rootEndInstruction = Number.MAX_SAFE_INTEGER;
+  malformed.files[0]!.rootEndInstruction = Number.MAX_SAFE_INTEGER;
 
   const result = validateInstructionPlan(malformed);
 
   assert.equal(result.valid, false);
-  assert.ok(hasPlanError(result.errors, "$.rootEndInstruction"));
+  assert.ok(hasPlanError(result.errors, "$.files[0]"));
 });
 
 test("rejects unsafe persisted temporary and loop identities", () => {
   const unsafe = Number.MAX_SAFE_INTEGER + 1;
   const sourcePlan = mutablePlan(functionPlan());
   // EVIDENCE: fixture: mutate the cloned readonly source offset to an unsafe integer.
-  (sourcePlan.sourceSpan as { so: number }).so = unsafe;
+  (sourcePlan.files[0]!.sourceSpan as { so: number }).so = unsafe;
 
   const sourceValidation = validateInstructionPlan(sourcePlan);
   assert.equal(sourceValidation.valid, false);
-  assert.ok(hasPlanError(sourceValidation.errors, "$.sourceSpan"));
+  assert.ok(hasPlanError(sourceValidation.errors, "$.files[0].sourceSpan"));
 
   const temporaryPlan = mutablePlan(functionPlan());
   temporaryPlan.temporaryCount = unsafe;
@@ -136,7 +136,7 @@ test("rejects impossible ordering, gaps, overlaps, and pre-root entries", () => 
     [
       "$.functions[0]",
       (plan) => {
-        plan.functions[0]!.entryInstruction = plan.rootEndInstruction - 1;
+        plan.functions[0]!.entryInstruction = plan.files[0]!.rootEndInstruction - 1;
       },
     ],
     [
@@ -250,8 +250,12 @@ type MutableFunction = {
   endInstruction: number;
 };
 
-type MutablePlan = Omit<InstructionPlan, "functions"> & {
-  rootEndInstruction: number;
+type MutablePlan = Omit<InstructionPlan, "functions" | "files"> & {
+  files: {
+    -readonly [
+      Key in keyof InstructionPlan["files"][number]
+    ]: InstructionPlan["files"][number][Key];
+  }[];
   temporaryCount: number;
   functions: MutableFunction[];
 };

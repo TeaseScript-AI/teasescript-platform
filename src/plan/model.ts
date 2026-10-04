@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 42;
+export const INSTRUCTION_PLAN_VERSION = 43;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -23,11 +23,25 @@ export interface PlanSourceLocation {
 export interface InstructionPlan {
   readonly format: typeof INSTRUCTION_PLAN_FORMAT;
   readonly version: typeof INSTRUCTION_PLAN_VERSION;
-  readonly sourceSpan: PlanSourceLocation;
-  readonly rootEndInstruction: number;
+  /** `main.tease` first, then the other files in path order; their blocks follow each other in the same order. */
+  readonly files: readonly PlanFile[];
   readonly temporaryCount: number;
   readonly functions: readonly CompiledFunctionDefinition[];
   readonly instructions: readonly Instruction[];
+}
+
+/**
+ * One `.tease` file of the project: a contiguous block of instructions holding its root region, then its functions
+ * and handlers. Locations inside the block are offsets in this file's source.
+ */
+export interface PlanFile {
+  /** Path relative to the package root, with `/` between folders. */
+  readonly path: string;
+  readonly sourceSpan: PlanSourceLocation;
+  readonly startInstruction: number;
+  /** End of the root region; the file's functions and handlers follow up to {@link endInstruction}. */
+  readonly rootEndInstruction: number;
+  readonly endInstruction: number;
 }
 
 export interface CompiledFunctionParameter {
@@ -773,4 +787,14 @@ export interface RangeExpressionPlan extends ExpressionPlanBase {
   readonly start: ExpressionPlan;
   readonly end: ExpressionPlan;
   readonly inclusive: boolean;
+}
+
+/** End of the root region of `main.tease`, where a session that reaches it without `exit` completes. */
+export function mainRootEnd(plan: InstructionPlan): number {
+  return plan.files[0]!.rootEndInstruction;
+}
+
+/** The span of `main.tease`: the location of a plan-level fact that belongs to no single instruction. */
+export function mainSourceSpan(plan: InstructionPlan): PlanSourceLocation {
+  return plan.files[0]!.sourceSpan;
 }

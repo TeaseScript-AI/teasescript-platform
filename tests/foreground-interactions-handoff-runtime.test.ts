@@ -90,7 +90,7 @@ test("result interaction destinations are produced only by the interaction and a
   const span = base.instructions[0]!.span;
   const occupiedPlan: InstructionPlan = {
     ...base,
-    rootEndInstruction: 4,
+    files: [{ ...base.files[0]!, rootEndInstruction: 4, endInstruction: 4 }],
     instructions: [
       {
         kind: "storeTemporary",
@@ -257,11 +257,15 @@ function injectInteraction(
   const plan: InstructionPlan = {
     ...base,
     temporaryCount: callTransferTemporary ?? destinationTemporary,
-    rootEndInstruction: shiftBoundary(
-      base.rootEndInstruction,
-      targetIndex,
-      insertedInstructionCount,
-    ),
+    files: base.files.map((file) => ({
+      ...file,
+      rootEndInstruction: shiftBoundary(
+        file.rootEndInstruction,
+        targetIndex,
+        insertedInstructionCount,
+      ),
+      endInstruction: shiftBoundary(file.endInstruction, targetIndex, insertedInstructionCount),
+    })),
     functions: base.functions.map((definition) => ({
       ...definition,
       entryInstruction: shiftBoundary(
@@ -1259,7 +1263,7 @@ test("a failed canonical continuation retains the handoff atomically", () => {
     {
       kind: "storeTemporary",
       temporaryId: target,
-      value: temporaryExpression(injected.destinationTemporary, injected.plan.sourceSpan),
+      value: temporaryExpression(injected.destinationTemporary, injected.plan.files[0]!.sourceSpan),
       expectBoolean: true,
       span: handoffInstructionSpan(injected),
     },

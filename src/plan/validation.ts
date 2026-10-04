@@ -9,8 +9,10 @@ import {
   MAX_INTERACTION_OPTION_ENTRIES,
 } from "../interaction-limits.js";
 import { recordValidationTestWork } from "../validation-testing.js";
+import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "../project-paths.js";
 import { INSTRUCTION_PLAN_FORMAT, INSTRUCTION_PLAN_VERSION } from "./model.js";
 import {
+  type PlanFileBoundaries,
   analyzeInstructionStream,
   collectFunctionIds,
   expressionMayReferenceTemporary,
@@ -61,7 +63,6 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
   }
   // After the revision checks, so another revision's fields report that revision as unsupported first.
   rejectUnknownFields(value, PLAN_FIELDS, "$", errors);
-  validateSpan(value.sourceSpan, "$.sourceSpan", errors);
   const temporaryCount = nonNegativeSafeInteger(value.temporaryCount) ? value.temporaryCount : -1;
   if (temporaryCount < 0) {
     errors.push(
@@ -75,17 +76,7 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
   if (!Array.isArray(value.instructions)) {
     errors.push(planError("TSC002", "Instructions must be an array.", "$.instructions"));
   } else {
-    const rootEndInstruction = validInstructionBoundary(
-      value.rootEndInstruction,
-      value.instructions.length,
-    )
-      ? value.rootEndInstruction
-      : null;
-    if (rootEndInstruction === null) {
-      errors.push(
-        planError("TSC002", "Root execution boundary is invalid.", "$.rootEndInstruction"),
-      );
-    }
+    const files = validatePlanFiles(value.files, value.instructions.length, errors);
     const functionIds = collectFunctionIds(value.functions);
     for (let index = 0; index < value.instructions.length; index += 1) {
       validateInstruction(
@@ -98,22 +89,90 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
         errors,
       );
     }
-    analyzeInstructionStream(value.instructions, value.functions, rootEndInstruction, errors);
+    analyzeInstructionStream(value.instructions, value.functions, files, errors);
   }
   return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
 }
 
-const PLAN_FIELDS = [
-  "format",
-  "version",
-  "sourceSpan",
-  "rootEndInstruction",
-  "temporaryCount",
-  "functions",
-  "instructions",
-];
+const PLAN_FIELDS = ["format", "version", "files", "temporaryCount", "functions", "instructions"];
 
 const PROPERTY_FIELDS = ["name", "value", "span"];
+
+const FILE_FIELDS = [
+  "path",
+  "sourceSpan",
+  "startInstruction",
+  "rootEndInstruction",
+  "endInstruction",
+];
+
+/**
+ * Checks the file table: `main.tease` first, the other package paths in order, and blocks that cover the instruction
+ * stream one after another. Returns the boundaries for the stream analyses, or `null` when they are unusable.
+ */
+function validatePlanFiles(
+  value: unknown,
+  instructionCount: number,
+  errors: PlanValidationError[],
+): PlanFileBoundaries[] | null {
+  if (!Array.isArray(value) || value.length === 0) {
+    errors.push(planError("TSC002", "Plan files must be a non-empty array.", "$.files"));
+    return null;
+  }
+  const boundaries: PlanFileBoundaries[] = [];
+  let expectedStart = 0;
+  let previousPath: string | null = null;
+  value.forEach((file: unknown, fileIndex) => {
+    const path = `$.files[${fileIndex}]`;
+    if (!isRecord(file)) {
+      errors.push(planError("TSC002", "Plan file must be an object.", path));
+      expectedStart = -1;
+      return;
+    }
+    rejectUnknownFields(file, FILE_FIELDS, path, errors);
+    validateSpan(file.sourceSpan, `${path}.sourceSpan`, errors);
+    if (
+      typeof file.path !== "string" ||
+      packagePathProblem(file.path) !== null ||
+      (fileIndex === 0
+        ? file.path !== MAIN_FILE_PATH
+        : previousPath === null || compareProjectPaths(previousPath, file.path) >= 0)
+    ) {
+      errors.push(
+        planError(
+          "TSC002",
+          "Plan file paths must be package paths: main.tease first, then the others in order.",
+          `${path}.path`,
+        ),
+      );
+    }
+    previousPath = typeof file.path === "string" ? file.path : null;
+    const { startInstruction: start, rootEndInstruction: rootEnd, endInstruction: end } = file;
+    if (
+      !validInstructionBoundary(start, instructionCount) ||
+      !validInstructionBoundary(rootEnd, instructionCount) ||
+      !validInstructionBoundary(end, instructionCount) ||
+      start !== expectedStart ||
+      rootEnd < start ||
+      end < rootEnd
+    ) {
+      errors.push(planError("TSC002", "Plan file instruction range is impossible.", path));
+      expectedStart = -1;
+      return;
+    }
+    boundaries.push({ startInstruction: start, rootEndInstruction: rootEnd, endInstruction: end });
+    expectedStart = end;
+  });
+  if (expectedStart !== instructionCount) {
+    if (expectedStart >= 0) {
+      errors.push(
+        planError("TSC002", "Plan files do not cover the instruction stream.", "$.files"),
+      );
+    }
+    return null;
+  }
+  return boundaries;
+}
 
 /** Fields of instruction kinds whose case in validateInstruction does not already require exact keys. */
 const INSTRUCTION_FIELDS = fieldsByKind([

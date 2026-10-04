@@ -29,10 +29,16 @@ export { parse, type ParseResult } from "./parser.js";
 export {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
+  compileProject,
   compileSource,
   type CompilationResult,
   type CompileOptions,
+  type ProjectCompilationResult,
+  type ProjectDiagnostic,
+  type ProjectFileCompilation,
+  type ProjectSourceFile,
 } from "./compiler.js";
+export { MAIN_FILE_PATH } from "./project-paths.js";
 export {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
@@ -51,6 +57,7 @@ export {
   type PreparedInteractionUiPayload,
   type PreparedInteractionChoiceValue,
   type InstructionPlan,
+  type PlanFile,
   type PlanSourceLocation,
   type LoopControlInstruction,
   type LoopStartInstruction,

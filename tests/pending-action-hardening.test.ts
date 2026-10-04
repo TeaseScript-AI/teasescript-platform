@@ -97,7 +97,7 @@ test("rejects every forged running root-end shape outside the settled terminal d
   const second = run(compiled, observeTime(compiled, first.snapshot, 1).snapshot);
   const settled = observeTime(compiled, second.snapshot, 2).snapshot;
   assert.equal(settled.status, "running");
-  assert.equal(settled.nextInstruction, compiled.rootEndInstruction);
+  assert.equal(settled.nextInstruction, compiled.files[0]!.rootEndInstruction);
   assert.equal(validateRuntimeSnapshot(settled, compiled).valid, true);
 
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture table: callbacks deliberately violate distinct pending-delay snapshot invariants before validation.
@@ -142,7 +142,7 @@ test("rejects every forged running root-end shape outside the settled terminal d
 
   const arbitrary = mutable(createFreshRuntimeSnapshot(compiled));
   arbitrary.status = "running";
-  arbitrary.nextInstruction = compiled.rootEndInstruction;
+  arbitrary.nextInstruction = compiled.files[0]!.rootEndInstruction;
   assert.equal(validateRuntimeSnapshot(arbitrary, compiled).valid, false);
 });
 
@@ -155,10 +155,10 @@ test("rejects an earlier delay settlement forged onto a terminal positive or zer
     const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
     const earlierSettlement = observeTime(compiled, waiting.snapshot, 1).snapshot;
     assert.equal(earlierSettlement.status, "running");
-    assert.notEqual(earlierSettlement.nextInstruction, compiled.rootEndInstruction);
+    assert.notEqual(earlierSettlement.nextInstruction, compiled.files[0]!.rootEndInstruction);
 
     const forged = mutable(earlierSettlement);
-    forged.nextInstruction = compiled.rootEndInstruction;
+    forged.nextInstruction = compiled.files[0]!.rootEndInstruction;
     assert.equal(validateRuntimeSnapshot(forged, compiled).valid, false, source);
     assert.throws(
       () =>

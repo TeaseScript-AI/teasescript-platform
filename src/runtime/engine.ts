@@ -2,15 +2,17 @@ import { exactDurationMilliseconds } from "./temporal-operations.js";
 import { resolveMessagePresentation } from "./message-presentation.js";
 import type { MessagePresentation } from "../message-presentation.js";
 import type { TemporalContext } from "../temporal.js";
-import type {
-  DelayDisplay,
-  DurationUnitPlan,
-  Instruction,
-  InstructionPlan,
-  InteractionTemporalKind,
-  InteractionUiPayload,
-  PlanSourceLocation,
-  PreparedInteractionUiPayload,
+import {
+  type DelayDisplay,
+  type DurationUnitPlan,
+  type Instruction,
+  type InstructionPlan,
+  type InteractionTemporalKind,
+  type InteractionUiPayload,
+  type PlanSourceLocation,
+  type PreparedInteractionUiPayload,
+  mainRootEnd,
+  mainSourceSpan,
 } from "../plan/model.js";
 import { parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
 import { isBlankTextAnswer, numberAnswerText, temporalAnswerText } from "../interaction-answers.js";
@@ -193,7 +195,7 @@ function executeInstructionBoundary(
     return 1;
   }
   if (snapshot.status === "waiting") return 0;
-  if (snapshot.nextInstruction === plan.rootEndInstruction && snapshot.callFrames.length === 0) {
+  if (snapshot.nextInstruction === mainRootEnd(plan) && snapshot.callFrames.length === 0) {
     // A settled terminal action's commit window closes here; expiry blocks queued before the end still run first.
     if (snapshot.terminalContinuationHandoff !== null && snapshot.pendingTimerHandlers.length > 0) {
       snapshot.terminalContinuationHandoff = null;
@@ -225,7 +227,7 @@ function executeInstructionBoundary(
     if (
       snapshot.status === "running" &&
       snapshot.callFrames.length === 0 &&
-      snapshot.nextInstruction === plan.rootEndInstruction &&
+      snapshot.nextInstruction === mainRootEnd(plan) &&
       // Blocks queued before the script ends still run first, also behind a terminal commit window.
       !timerHandlerDispatchable(snapshot) &&
       !(snapshot.terminalContinuationHandoff !== null && snapshot.pendingTimerHandlers.length > 0)
@@ -1642,7 +1644,7 @@ function validateTerminalCompletionCapacityAfterSay(
   if (
     snapshot.status !== "running" ||
     snapshot.callFrames.length !== 0 ||
-    snapshot.nextInstruction !== plan.rootEndInstruction
+    snapshot.nextInstruction !== mainRootEnd(plan)
   )
     return;
   assertEventSequenceCapacity(snapshot, requiredEventSequencesForRootCompletion(snapshot), span);
@@ -1967,7 +1969,7 @@ function requiredEventSequencesForRootCompletion(snapshot: RuntimeSnapshot): num
 
 /** Completion is attributed to the script's last root instruction, however execution reached the end. */
 function rootCompletionSpan(plan: InstructionPlan): SourceSpan {
-  return plan.instructions[plan.rootEndInstruction - 1]?.span ?? plan.sourceSpan;
+  return plan.instructions[mainRootEnd(plan) - 1]?.span ?? mainSourceSpan(plan);
 }
 
 function createCompleteEvent(snapshot: RuntimeSnapshot, span: SourceSpan): CompleteEvent {
@@ -2004,7 +2006,7 @@ function failForBudget(
   snapshot: RuntimeSnapshot,
   events: InterpreterEvent[],
 ): void {
-  const span = plan.instructions[snapshot.nextInstruction]?.span ?? plan.sourceSpan;
+  const span = plan.instructions[snapshot.nextInstruction]?.span ?? mainSourceSpan(plan);
   failSnapshot(
     snapshot,
     { code: "TSR037", message: "Runtime instruction budget exceeded.", span: copySpan(span) },
