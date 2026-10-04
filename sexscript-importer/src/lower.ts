@@ -241,6 +241,8 @@ export interface MapUses {
   dictionaryKeys: Map<string, number>;
   /** Keys every value of a dict holds: the literal keys of every map assigned to it that nothing removes. */
   presentKeys: Map<string, Set<string>>;
+  /** Maps that stay objects and that `clear()` empties, so that every field may hold null. */
+  clearedRecords: Set<string>;
 }
 
 /** One analysed body: a script, an object script with its members, or a mixin module. */
@@ -353,6 +355,7 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
     nullableValues: new Set(),
     dictionaryKeys: new Map(),
     presentKeys: new Map(),
+    clearedRecords: new Set(),
   };
   const removed = new Map<string, Set<string> | "all">();
   for (const body of bodies) collectMapUses(body, uses, removed);
@@ -501,6 +504,8 @@ function collectMapUses(
       const method = constantString(node.method);
       const args = nodeArray(asNode(node.arguments)?.items);
       const name = keyOf(node.object);
+      if (name !== null && !isDict(name) && method === "clear" && args.length === 0)
+        uses.clearedRecords.add(name);
       if (isDict(name) && method !== null) {
         if (["get", "containsKey", "put", "remove"].includes(method) && args.length > 0)
           addKey(name, args[0]!);
@@ -854,8 +859,10 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
   helperResults ??= functionResultTypes(allHelperStatements());
   const result = enforceVariableTypes(statements, helperResults);
   if (result.appended.length > 0) context.syntheticHelpers.add("concat");
-  // A list append no longer needs the note that its `+` operands were not proven numeric.
-  const appendedLines = new Set(result.appended.map((statement) => statement.span?.line));
+  // A list or text append no longer needs the note that its `+` operands were not proven numeric.
+  const appendedLines = new Set(
+    [...result.appended, ...result.textAppended].map((statement) => statement.span?.line),
+  );
   const staleNotes = new Set(
     context.diagnostics.filter(
       (diagnostic) =>
@@ -2467,6 +2474,42 @@ function lowerDeclaration(
   }
   const optionalType =
     value.kind === "literal" && value.value === null ? nullableValueType(name, context) : null;
+  const key = bindingKey(asNode(node.left), context.bindings);
+  if (
+    value.kind === "object" &&
+    key !== null &&
+    context.mapUses.clearedRecords.has(key) &&
+    value.properties.some(
+      (property) => property.value.kind !== "literal" || property.value.value !== null,
+    )
+  ) {
+    // An object property keeps the type of its first value (ADR 0021 rule 1.4), so fields that clear() later sets to
+    // null start as null and take their values right after, in the literal's order.
+    const variable: IrExpression = { kind: "variable", name };
+    return [
+      {
+        kind: "let",
+        name,
+        value: {
+          ...value,
+          properties: value.properties.map((property) => ({
+            ...property,
+            value: { kind: "literal", value: null },
+          })),
+        },
+        span,
+      },
+      ...value.properties
+        .filter((property) => property.value.kind !== "literal" || property.value.value !== null)
+        .map((property): IrStatement => ({
+          kind: "assign",
+          target: { kind: "property", target: variable, name: property.name },
+          operator: "=",
+          value: property.value,
+          span,
+        })),
+    ];
+  }
   return [
     {
       kind: "let",

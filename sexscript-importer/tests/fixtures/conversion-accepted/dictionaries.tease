@@ -112,7 +112,8 @@ function tally {
 let seen = { name: "outer" }
 say "Seen ${tally()}, ${seen.name}"
 // A map with fixed names is an object: fields set later are declared, and clear() empties them.
-let session = { mood: "calm", aborted: null }
+let session = { mood: null, aborted: null }
+session.mood = "calm"
 // NOTE SX_SHARED_MAP_WRITE line 69: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 session.aborted = false
 // NOTE SX_SHARED_MAP_WRITE line 70: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).

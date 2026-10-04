@@ -1,3 +1,4 @@
+import { isRecord } from "./ast.ts";
 import { helperCall } from "./helpers.ts";
 import type { IrExpression, IrFunctionParameter, IrStatement } from "./ir.ts";
 
@@ -57,6 +58,8 @@ export interface VariableTypeResult {
    * append with the concatenation helper.
    */
   appended: IrStatement[];
+  /** `text += value` statements, emitted as numeric `+=` because the text was not proven while lowering. */
+  textAppended: IrStatement[];
 }
 
 const UNKNOWN: TeaseType = { kind: "unknown" };
@@ -118,6 +121,7 @@ interface Rounds {
   bindings: Map<BindingKey, Binding>;
   conflicts: Conflict[];
   appends: Map<IrStatement, boolean>;
+  textAppends: Set<IrStatement>;
   /** Statements whose stored number truncates to an integer. */
   truncations: Set<IrStatement>;
   integerLoads: Set<IrStatement>;
@@ -135,6 +139,7 @@ function runRounds(
     bindings: new Map(),
     conflicts: [],
     appends: new Map(),
+    textAppends: new Set(),
     truncations: new Set(),
     integerLoads: new Set(),
     textIntegers: new Set(),
@@ -145,6 +150,7 @@ function runRounds(
     const analysis = analyse(statements, rounds.bindings, results);
     rounds.conflicts = analysis.conflicts;
     rounds.appends = analysis.appends;
+    rounds.textAppends = analysis.textAppends;
     rounds.indexes = analysis.indexes;
     for (const statement of analysis.truncations) rounds.truncations.add(statement);
     for (const statement of analysis.integerLoads) rounds.integerLoads.add(statement);
@@ -165,7 +171,8 @@ export function enforceVariableTypes(
   knownResults: ReadonlyMap<string, TeaseType> = new Map(),
 ): VariableTypeResult {
   const accepted = runRounds(statements, knownResults);
-  const { bindings, appends, truncations, integerLoads, textIntegers, indexes } = accepted;
+  const { bindings, appends, textAppends, truncations, integerLoads, textIntegers, indexes } =
+    accepted;
   const conflicts = accepted.conflicts;
   // A repair that needs a type no annotation can write, such as an optional object, becomes a conflict too.
   const conflicting = new Set(conflicts.map((conflict) => conflict.binding));
@@ -206,6 +213,7 @@ export function enforceVariableTypes(
     annotated: 0,
     truncated: 0,
     appended: [],
+    textAppended: [],
   };
   for (const [declaration, items] of declarationConflicts) {
     result.conflicts.push({
@@ -251,8 +259,11 @@ export function enforceVariableTypes(
           const written = type === undefined ? null : annotation(type);
           // An unannotated variable widens from integer to number by itself (#504 option B); an optional type and a
           // widened list element type still need an annotation.
+          // The compiler narrows an initializer that may be null to its current type, so a variable that keeps such a
+          // value later needs its optional type written.
           const needed =
             binding.optional ||
+            binding.initial.kind === "optional" ||
             (binding.widened && type !== undefined && nonNull(type).kind === "list");
           if (needed && written !== null) {
             result.annotated += 1;
@@ -272,6 +283,26 @@ export function enforceVariableTypes(
           return rewritten;
         }
         case "assign": {
+          if (textAppends.has(statement)) {
+            // Groovy `text += value` appended the value's text.
+            result.textAppended.push(statement);
+            return {
+              ...statement,
+              operator: "=",
+              value: {
+                kind: "template",
+                parts: [
+                  { value: statement.target },
+                  ...(statement.value.kind === "template"
+                    ? statement.value.parts
+                    : statement.value.kind === "literal" &&
+                        typeof statement.value.value === "string"
+                      ? [{ text: statement.value.value }]
+                      : [{ value: statement.value }]),
+                ],
+              },
+            };
+          }
           const appendsList = appends.get(statement);
           if (appendsList !== undefined) {
             result.appended.push(statement);
@@ -370,6 +401,8 @@ interface Analysis {
   indexes: Set<IrExpression>;
   /** `list += value` statements, and whether the value is a list whose elements are appended. */
   appends: Map<IrStatement, boolean>;
+  /** `text += value` statements on a variable that holds text. */
+  textAppends: Set<IrStatement>;
 }
 
 function analyse(
@@ -386,9 +419,11 @@ function analyse(
     textIntegers: new Set(),
     indexes: new Set(),
     appends: new Map(),
+    textAppends: new Set(),
   };
   // The `return` value types of the function being walked; null for a bare `return` or falling off the end.
   let returns: TeaseType[] | null = null;
+  const nullTested = nullTestedNames(statements);
   for (const item of bindings.values()) item.inferred = undefined;
   const root = new Scope(null);
   const functions: Array<Extract<IrStatement, { kind: "function" }>> = [];
@@ -449,12 +484,27 @@ function analyse(
       target.inferred = value;
       return;
     }
-    if (value.kind === "unknown") return;
+    // A storage read is checked when stored; it may be null, which matters only where the program tests the variable
+    // for null and so expects one.
+    if (
+      nonNull(value).kind === "unknown" &&
+      !(value.kind === "optional" && nullTested.has(target.name))
+    )
+      return;
     const type = bindingType(target);
     if (type === undefined || isAssignable(type, value)) return;
     // Only a declaration can take an annotation; a loop variable keeps its element type.
     const declared = target.declaration !== null;
     if (declared && value.kind === "null" && type.kind !== "optional")
+      return change(() => (target.optional = true));
+    // A value that may be null, such as the result of a function that may return nothing, needs an optional type too
+    // (ADR 0021 rule 1.9).
+    if (
+      declared &&
+      value.kind === "optional" &&
+      type.kind !== "optional" &&
+      isAssignable(type, value.value)
+    )
       return change(() => (target.optional = true));
     if (declared && canWiden(type, value) && !target.widened)
       return change(() => (target.widened = true));
@@ -587,6 +637,11 @@ function analyse(
           analysis.appends.set(item, appended.kind === "list" || appended.kind === "range");
           return;
         }
+        // Groovy `text += value` appended the value's text, whatever its type.
+        if (item.operator === "+=" && current.kind === "scalar" && current.name === "string") {
+          analysis.textAppends.add(item);
+          return;
+        }
         if (
           target.integer &&
           (result === undefined ? nonNull(value).kind === "unknown" : needsInteger(result))
@@ -664,7 +719,7 @@ function analyse(
   const storeElement = (list: Binding, value: TeaseType, item: IrStatement): void => {
     const type = bindingType(list);
     const collection = type === undefined ? undefined : nonNull(type);
-    if (collection?.kind !== "list" || value.kind === "unknown") return;
+    if (collection?.kind !== "list" || nonNull(value).kind === "unknown") return;
     if (isAssignable(collection.element, value)) return;
     if (list.declaration !== null && canWiden(collection.element, value) && !list.widened)
       return change(() => (list.widened = true));
@@ -699,6 +754,33 @@ function analyse(
     returns = null;
   }
   return analysis;
+}
+
+/** Names of the variables the program compares with null (`x == null`, `x != null`). */
+function nullTestedNames(value: unknown, names = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) nullTestedNames(item, names);
+    return names;
+  }
+  if (!isRecord(value)) return names;
+  if (value.kind === "binary" && (value.operator === "==" || value.operator === "!=")) {
+    for (const [side, other] of [
+      [value.left, value.right],
+      [value.right, value.left],
+    ]) {
+      if (
+        isRecord(side) &&
+        side.kind === "variable" &&
+        typeof side.name === "string" &&
+        isRecord(other) &&
+        other.kind === "literal" &&
+        other.value === null
+      )
+        names.add(side.name);
+    }
+  }
+  for (const child of Object.values(value)) nullTestedNames(child, names);
+  return names;
 }
 
 /** The type a variable keeps, or undefined when the compiler does not check it (a null or unknown initializer). */
@@ -772,12 +854,15 @@ function nonNull(type: TeaseType): TeaseType {
   return type.kind === "optional" ? type.value : type;
 }
 
-/** Mirrors the compiler's isAssignable: only integer widens, to number. */
+/**
+ * Mirrors the compiler's isAssignable: only integer widens, to number, and a value that may be null fits only a place
+ * that takes null (ADR 0021 rule 1.9).
+ */
 export function isAssignable(target: TeaseType, source: TeaseType): boolean {
   if (target.kind === "unknown" || source.kind === "unknown") return true;
   if (target.kind === "optional")
     return source.kind === "null" || isAssignable(target.value, nonNull(source));
-  if (source.kind === "optional") return isAssignable(target, source.value);
+  if (source.kind === "optional") return false;
   switch (target.kind) {
     case "null":
       return source.kind === "null";
@@ -1053,8 +1138,10 @@ export function expressionType(
       return UNKNOWN;
     }
     case "load":
-      // A read with a default has the default's type (#541).
-      return value.defaultValue === undefined ? UNKNOWN : type(value.defaultValue);
+      // A read with a default has the default's type (#541); without one, a missing key reads null.
+      return value.defaultValue === undefined
+        ? { kind: "optional", value: UNKNOWN }
+        : type(value.defaultValue);
     case "choice":
       // Numeric choice values are integers (#515).
       return scalar(value.labels === undefined ? "integer" : "string");

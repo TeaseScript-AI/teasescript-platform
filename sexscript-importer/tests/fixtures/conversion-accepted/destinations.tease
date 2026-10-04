@@ -31,7 +31,7 @@ for it in [1] {
 }
 z = sumResult
 save z as "accumulator"
-let w = 7
+let w: integer? = 7
 w = load "missing"
 if w == null {
   if w == null or w == 0 {

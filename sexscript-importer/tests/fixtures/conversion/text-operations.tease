@@ -27,3 +27,10 @@ say "[${items.join(", ")}]"
 // Java counted an emoji as two characters.
 // NOTE SX_TEXT_CODE_POINTS line 23: Java counted this text in UTF-16 units, so a character such as an emoji counted twice; TeaseScript length counts code points, which changes the result here.
 say "Smile count: ${"😀!".length}"
+// Groovy += on text appended the value's text.
+let trail = ""
+for step in [1, 2] {
+  trail = "${trail}${step}"
+}
+trail = "${trail}!"
+say trail

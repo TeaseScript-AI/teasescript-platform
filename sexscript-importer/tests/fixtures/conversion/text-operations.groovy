@@ -21,3 +21,10 @@ show("Mixed: ${mixed}")
 show(items)
 // Java counted an emoji as two characters.
 show("Smile count: " + "😀!".length())
+// Groovy += on text appended the value's text.
+def trail = ""
+for (step in [1, 2]) {
+	trail += step
+}
+trail += "!"
+show(trail)
