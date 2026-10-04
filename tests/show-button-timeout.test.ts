@@ -160,6 +160,15 @@ test("options appear in either order and evaluate in source order", () => {
   }
 });
 
+test("a button works as a value inside interpolation", () => {
+  const session = observe(
+    createPlayerRuntimeSession('say "You waited ${showButton "Go", timeout: 1}.", instant'),
+    1_000,
+  );
+  assert.equal(session.snapshot.status, "halted");
+  assert.equal(session.transcriptEntries.at(-1)?.text, "You waited 1 s.");
+});
+
 test("the compiler rejects a timeout it can see is invalid and names the fix", () => {
   for (const { source, code, fix } of [
     { source: 'showButton "Go", timeout: 0', code: "TSV011", fix: "Remove 'timeout:'" },
@@ -204,6 +213,11 @@ test("the compiler rejects a timeout it can see is invalid and names the fix", (
     { source: 'showButton "Go", timeout:', code: "TSP028", fix: "timeout: 500 ms" },
     {
       source: 'function f(elapsed = showButton "Go") {\n}',
+      code: "TSV032",
+      fix: "parameter defaults",
+    },
+    {
+      source: 'function f(text = "${showButton "Go"}") {\n}',
       code: "TSV032",
       fix: "parameter defaults",
     },
@@ -433,6 +447,15 @@ test("plan and snapshot validation reject malformed button results and timing", 
     }),
     "a button without a timeout cannot time out",
   );
+
+  // A valued button's result is consumed right after it, as for any result interaction.
+  const consumed = compileValidPlan('let elapsed = showButton "Go", timeout: 1\nwait 1\nexit');
+  const at = consumed.instructions.findIndex((candidate) => candidate.kind === "interaction");
+  const wait = consumed.instructions.find((candidate) => candidate.kind === "wait")!;
+  const skipped = consumed.instructions.map((candidate, index) =>
+    index === at + 1 ? { ...wait, span: candidate.span } : candidate,
+  );
+  assert.equal(validateInstructionPlan({ ...consumed, instructions: skipped }).valid, false);
 
   const instruction = plan.instructions.find((candidate) => candidate.kind === "interaction")!;
   const index = plan.instructions.indexOf(instruction);
