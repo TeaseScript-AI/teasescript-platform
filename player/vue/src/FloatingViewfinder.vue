@@ -150,11 +150,14 @@ function keyboard(event: KeyboardEvent) {
   const growth = { "+": 1, "=": 1, "-": -1 }[event.key];
   if (!direction && !growth) return;
   event.preventDefault();
-  const step = event.shiftKey ? STEP * 4 : STEP;
   if (direction) {
     const [dx, dy] = direction as [number, number];
+    const step = event.shiftKey ? STEP * 4 : STEP;
     place.value = clamp({ ...current, x: current.x + dx * step, y: current.y + dy * step });
-  } else place.value = clamp({ ...current, width: current.width + growth! * step });
+    return;
+  }
+  // Typing + often needs Shift itself, so + and - keep one step.
+  place.value = clamp({ ...current, width: current.width + growth! * STEP });
 }
 function measured(next: number) {
   ratio.value = next;
