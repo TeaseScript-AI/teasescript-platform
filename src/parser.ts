@@ -973,7 +973,7 @@ class Parser {
       );
       return null;
     }
-    let defaultOffset = this.#interactionDefaultAfterComma();
+    let defaultOffset = this.#offsetAfterComma();
     if (defaultOffset === null && this.#checkIdentifier("default")) {
       // The removed V30 form `load "k" default v`, or a missing comma before `default:`.
       this.#reportToken(
@@ -2457,7 +2457,7 @@ class Parser {
           ? yield* parseChild(this.#parseOr())
           : null;
       let defaultValue: Expression | null = null;
-      let defaultOffset = hint === null ? 0 : this.#interactionDefaultAfterComma();
+      let defaultOffset = hint === null ? 0 : this.#offsetAfterComma();
       if (defaultOffset === null && this.#atInteractionDefault(0)) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedDelimiter,
@@ -2529,7 +2529,11 @@ class Parser {
         break;
       }
       let separatorSpan: SourceSpan | null = null;
-      if (this.#match(TokenKind.Comma)) {
+      // As for a default answer, a comma on the next line continues the options.
+      const commaOffset = this.#offsetAfterComma();
+      if (commaOffset !== null) {
+        while (this.#check(TokenKind.Newline)) this.#advance();
+        this.#advance();
         separatorSpan = copySpan(this.#previous().span);
       }
       options.push(
@@ -2622,7 +2626,7 @@ class Parser {
    * line never starts with `,`, so a comma on the next line continues the expression. Nested interactions that end at
    * the same token reuse one scan of the newlines.
    */
-  #interactionDefaultAfterComma(): number | null {
+  #offsetAfterComma(): number | null {
     if (this.#commaLookahead?.at === this.#current) return this.#commaLookahead.offset;
     let offset: number | null = 0;
     while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;

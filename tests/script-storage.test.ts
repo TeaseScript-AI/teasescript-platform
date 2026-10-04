@@ -908,9 +908,15 @@ test("a ', default:' belongs to the nearest load or ask before it", () => {
   );
 
   // A compact choice keeps `default:` as an option label; grouping gives the fallback to load.
-  const labelled = initializer('let v = load choose a: "x", b: "y", default: "z"');
-  assert.ok(labelled.kind === "loadExpression" && labelled.defaultValue === null);
-  assert.ok(labelled.key.kind === "interactionExpression" && labelled.key.options.length === 3);
+  for (const source of [
+    'let v = load choose a: "x", b: "y", default: "z"',
+    'let v = load choose a: "x", b: "y"\n, default: "z"',
+  ]) {
+    const labelled = initializer(source);
+    assert.ok(labelled.kind === "loadExpression" && labelled.defaultValue === null, source);
+    assert.ok(labelled.key.kind === "interactionExpression", source);
+    assert.equal(labelled.key.options.length, 3, source);
+  }
   const choiceKey = initializer('let v = load (choose a: "x", b: "y"), default: "z"');
   assert.ok(choiceKey.kind === "loadExpression" && choiceKey.defaultValue !== null);
 });
