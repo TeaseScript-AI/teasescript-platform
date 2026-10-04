@@ -3,9 +3,11 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import {
+  CheckpointError,
   completeAction,
   createCheckpoint,
   deserializeCheckpoint,
+  restoreCheckpoint,
   run,
   serializeCheckpoint,
   type InstructionPlan,
@@ -75,6 +77,12 @@ test("each typed place rejects a value of another type that the compiler cannot 
       'function rest(seconds: number = pick("long")) {\n    return seconds\n}\nrest()',
       "Parameter 'seconds' of 'rest' holds a number, so it cannot take text (string).",
       'pick("long")',
+    ],
+    [
+      // A `return` of an unknown value leaves an inferred result unknown, so the receiving place checks it.
+      'function level(known: boolean) {\n    if known {\n        return 1\n    }\n    return pick("high")\n}\nlet count: integer = level(false)',
+      "'count' holds a whole number (integer), so it cannot take text (string).",
+      "level(false)",
     ],
     [
       "function score(base): integer {\n    return pick(base)\n}\nscore(2.5)",
@@ -243,21 +251,37 @@ test("plan validation rejects malformed type checks at their paths", () => {
   const maybe = instruction(compiled, "declareBinding", "maybe");
   const door = `${instruction(compiled, "assign")}.typeCheck`;
   const add = `${instruction(compiled, "evaluate")}.expression`;
-  for (const [description, path, mutate, errorPath] of [
+  const checkpoint = createCheckpoint(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+  for (const [description, path, mutate, expected] of [
     [
       "unknown type kind",
       `${maybe}.typeCheck.type.members[0]`,
       (type: Mutable) => (type.kind = "whole"),
-      ".kind",
+      `${maybe}.typeCheck.type.members[0].kind`,
     ],
-    ["empty union", `${maybe}.typeCheck.type`, (type: Mutable) => (type.members = []), ".members"],
-    ["missing place", `${maybe}.typeCheck`, (check: Mutable) => delete check.place, ".place"],
-    ["empty place", `${maybe}.typeCheck`, (check: Mutable) => (check.place = ""), ".place"],
+    [
+      "empty union",
+      `${maybe}.typeCheck.type`,
+      (type: Mutable) => (type.members = []),
+      `${maybe}.typeCheck.type.members`,
+    ],
+    [
+      "missing place",
+      `${maybe}.typeCheck`,
+      (check: Mutable) => delete check.place,
+      `${maybe}.typeCheck.place`,
+    ],
+    [
+      "empty place",
+      `${maybe}.typeCheck`,
+      (check: Mutable) => (check.place = ""),
+      `${maybe}.typeCheck.place`,
+    ],
     [
       "missing element",
       `${add}.typeCheck.type`,
       (type: Mutable) => (type.kind = "list"),
-      ".element",
+      `${add}.typeCheck.type.element`,
     ],
     [
       "duplicate property",
@@ -266,22 +290,35 @@ test("plan validation rejects malformed type checks at their paths", () => {
         assert.ok(Array.isArray(type.properties));
         type.properties = [...type.properties, type.properties[0]];
       },
-      ".properties[2].name",
+      `${door}.type.properties[2].name`,
     ],
     [
       "property field",
       `${door}.type.properties[0]`,
       (property: Mutable) => (property.optional = true),
-      ".optional",
+      `${door}.type.properties[0].optional`,
     ],
-    ["check on another call", `${add}.callee`, (callee: Mutable) => (callee.name = "contains"), ""],
+    [
+      "check on another call",
+      `${add}.callee`,
+      (callee: Mutable) => (callee.name = "contains"),
+      `${add}.typeCheck`,
+    ],
+    // The runtime reads the checked element's location from the one argument of `add`.
+    ["add without its argument", add, (call: Mutable) => (call.arguments = []), `${add}.typeCheck`],
   ] as const) {
     const plan: unknown = structuredClone(compiled);
     mutate(locate(plan, path));
     const errors = validateInstructionPlan(plan).errors.map((error) => [error.code, error.path]);
-    const expected =
-      description === "check on another call" ? `${add}.typeCheck` : `${path}${errorPath}`;
     assert.deepEqual(errors, [["TSC002", expected]], description);
+    assert.throws(
+      () => restoreCheckpoint({ ...checkpoint, plan }),
+      (error: unknown) =>
+        error instanceof CheckpointError &&
+        error.info.code === "TSK002" &&
+        error.info.path === `$.plan${expected.slice(1)}`,
+      description,
+    );
   }
 });
 

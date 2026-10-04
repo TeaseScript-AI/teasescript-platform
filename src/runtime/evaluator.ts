@@ -1121,7 +1121,8 @@ export class Evaluator {
         expression.span,
         expression.typeCheck === undefined
           ? null
-          : { check: expression.typeCheck, span: expression.arguments[0]!.value.span },
+          : // Plan validation accepts a type check only on an `add` call with one argument.
+            { check: expression.typeCheck, span: expression.arguments[0]!.value.span },
       );
     }
     throw fault(

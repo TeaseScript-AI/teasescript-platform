@@ -1454,10 +1454,20 @@ function validateExpressionNode(
       validateOptionalTypeCheck(value, path, errors);
       if (
         "typeCheck" in value &&
-        !(isRecord(value.callee) && value.callee.kind === "property" && value.callee.name === "add")
+        !(
+          isRecord(value.callee) &&
+          value.callee.kind === "property" &&
+          value.callee.name === "add" &&
+          Array.isArray(value.arguments) &&
+          value.arguments.length === 1
+        )
       )
         errors.push(
-          planError("TSC002", "Only a list or set 'add' call checks a type.", `${path}.typeCheck`),
+          planError(
+            "TSC002",
+            "Only a list or set 'add' call with one argument checks a type.",
+            `${path}.typeCheck`,
+          ),
         );
       pending.push({ kind: "arguments", value: value.arguments, path: `${path}.arguments` });
       pending.push({ value: value.callee, path: `${path}.callee`, assignmentTarget: false });
