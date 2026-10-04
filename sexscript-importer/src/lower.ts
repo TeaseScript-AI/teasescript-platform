@@ -7703,7 +7703,13 @@ export function uncalledDiagnostics(
     if ((all.get(statement.name) ?? 0) > (own.get(statement.name) ?? 0)) continue;
     for (const diagnostic of statement.ownDiagnostics) uncalled.add(diagnostic);
   }
-  return [...uncalled].filter((diagnostic) => diagnostic.severity === "error");
+  // Each names the file it belongs to, so a module's diagnostic never matches another file's.
+  return [...uncalled]
+    .filter((diagnostic) => diagnostic.severity === "error")
+    .map((diagnostic) => ({
+      ...diagnostic,
+      sourceName: diagnostic.sourceName ?? program.sourceName,
+    }));
 }
 
 /** A program whose `uncalled` diagnostics (uncalledDiagnostics) are notes, also in its rendered comments. */
@@ -7713,41 +7719,55 @@ export function withUncalledNotes(
 ): MigrationProgram {
   if (uncalled.length === 0) return program;
   const suffix = " Nothing in the program references this function, so Groovy never ran this code.";
+  // A diagnostic without a file is the program's own.
   const key = (diagnostic: MigrationDiagnostic): string =>
-    `${diagnostic.code}|${diagnostic.message}|${JSON.stringify(diagnostic.span)}`;
+    `${diagnostic.sourceName ?? program.sourceName}|${diagnostic.code}|${diagnostic.message}|${JSON.stringify(diagnostic.span)}`;
   const keys = new Set(uncalled.map(key));
-  const todo = new Map(
-    uncalled.map((item) => [
-      `// TODO ${item.code}${item.span === null ? "" : ` line ${item.span.line}`}: ${singleLine(item.message)}`,
-      `// NOTE ${item.code}${item.span === null ? "" : ` line ${item.span.line}`}: ${singleLine(item.message + suffix)}`,
-    ]),
-  );
-  const rewrite = (statements: IrStatement[]): IrStatement[] =>
+  const todoText = (item: MigrationDiagnostic, label: string, message: string): string =>
+    `// ${label} ${item.code}${item.span === null ? "" : ` line ${item.span.line}`}: ${singleLine(message)}`;
+  const rewrite = (statements: IrStatement[], todo: ReadonlyMap<string, string>): IrStatement[] =>
     statements.map((statement): IrStatement => {
       switch (statement.kind) {
         case "comment":
           return { ...statement, text: todo.get(statement.text) ?? statement.text };
         case "function":
-          return { ...statement, body: rewrite(statement.body) };
+          return { ...statement, body: rewrite(statement.body, todo) };
         case "if":
-          return { ...statement, then: rewrite(statement.then), else: rewrite(statement.else) };
+          return {
+            ...statement,
+            then: rewrite(statement.then, todo),
+            else: rewrite(statement.else, todo),
+          };
         case "while":
         case "repeat":
         case "for":
-          return { ...statement, body: rewrite(statement.body) };
+          return { ...statement, body: rewrite(statement.body, todo) };
         case "switch":
           return {
             ...statement,
-            cases: statement.cases.map((item) => ({ ...item, body: rewrite(item.body) })),
-            default: rewrite(statement.default),
+            cases: statement.cases.map((item) => ({ ...item, body: rewrite(item.body, todo) })),
+            default: rewrite(statement.default, todo),
           };
         default:
           return statement;
       }
     });
+  // Comments change only inside the function whose diagnostics became notes.
+  const statements = program.statements.map((statement): IrStatement => {
+    if (statement.kind !== "function" || statement.ownDiagnostics === undefined) return statement;
+    const own = statement.ownDiagnostics.filter((diagnostic) => keys.has(key(diagnostic)));
+    if (own.length === 0) return statement;
+    const todo = new Map(
+      own.map((item) => [
+        todoText(item, "TODO", item.message),
+        todoText(item, "NOTE", item.message + suffix),
+      ]),
+    );
+    return { ...statement, body: rewrite(statement.body, todo) };
+  });
   return {
     ...program,
-    statements: rewrite(program.statements),
+    statements,
     diagnostics: program.diagnostics.map((diagnostic) =>
       keys.has(key(diagnostic))
         ? { ...diagnostic, severity: "warning", message: diagnostic.message + suffix }

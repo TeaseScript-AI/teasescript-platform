@@ -223,7 +223,20 @@ function withLoadedModules(
     }
     const renamed = renameConflictingIdentifiers({ ...module, statements }, taken, false);
     for (const name of rootNames(renamed.statements)) taken.add(name);
-    moduleStatements.push(...renamed.statements);
+    // A module function's own diagnostics name the module, as its diagnostics in the script do.
+    moduleStatements.push(
+      ...renamed.statements.map((statement) =>
+        statement.kind === "function" && statement.ownDiagnostics !== undefined
+          ? {
+              ...statement,
+              ownDiagnostics: statement.ownDiagnostics.map((diagnostic) => ({
+                ...diagnostic,
+                sourceName: diagnostic.sourceName ?? module.sourceName,
+              })),
+            }
+          : statement,
+      ),
+    );
     diagnostics.push(
       ...renamed.diagnostics.map((diagnostic) => ({
         ...diagnostic,

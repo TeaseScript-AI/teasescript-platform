@@ -684,10 +684,12 @@ test(
       // The module loader reads the scripts folder of the package.
       const scripts = path.join(directory, "scripts");
       mkdirSync(path.join(scripts, "demo"), { recursive: true });
-      const script = readFileSync(path.join(fixture, "scripts", "demo.groovy"), "utf8").replace(
-        "\tint rounds = 2",
-        '\tdef neverCalled = { -> new File("debug.txt").delete() }\n\tint rounds = 2',
-      );
+      const script = readFileSync(path.join(fixture, "scripts", "demo.groovy"), "utf8")
+        .replace(
+          "\tint rounds = 2",
+          '\tdef neverCalled = { -> new File("debug.txt").delete() }\n\tint rounds = 2',
+        )
+        .replace("\t\tgreet()", "\t\tgreet()\n\t\tlive()");
       writeFileSync(path.join(scripts, "demo.groovy"), script);
       for (const module of ["greeting", "later", "pause"]) {
         writeFileSync(
@@ -699,12 +701,21 @@ test(
         path.join(scripts, "demo", "broken.groovy"),
         '{ toy ->\n\tnew File("cache.txt").delete()\n\treturn null\n}\n',
       );
+      // Two modules with the same code at the same lines: only the one nothing calls gets notes.
+      for (const method of ["idle", "live"]) {
+        writeFileSync(
+          path.join(scripts, "demo", `${method}.groovy`),
+          `{ toy ->\n\ttoy.metaClass.${method} = {\n\t\tnew File("cache.txt").delete()\n\t}\n\treturn null\n}\n`,
+        );
+      }
       const files = await Promise.all(
         [
           "demo.groovy",
           "demo/broken.groovy",
           "demo/greeting.groovy",
+          "demo/idle.groovy",
           "demo/later.groovy",
+          "demo/live.groovy",
           "demo/pause.groovy",
         ].map((name) => parseGroovySource(path.join(scripts, name))),
       );
@@ -713,14 +724,18 @@ test(
         (diagnostic) => diagnostic.code === "SX_JAVA_OBJECT_CALL",
       );
       assert.deepEqual(
-        javaCalls.map(({ severity, sourceName }) => ({
-          severity,
-          module: sourceName?.endsWith("broken.groovy") === true,
-        })),
+        javaCalls
+          .map(({ severity, sourceName }) => ({
+            severity,
+            source: path.basename(sourceName ?? "demo.groovy"),
+          }))
+          .sort((left, right) => left.source.localeCompare(right.source)),
         [
-          { severity: "warning", module: false },
-          { severity: "error", module: true },
-        ].sort((left, right) => Number(left.module) - Number(right.module)),
+          { severity: "error", source: "broken.groovy" },
+          { severity: "warning", source: "demo.groovy" },
+          { severity: "warning", source: "idle.groovy" },
+          { severity: "error", source: "live.groovy" },
+        ],
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
