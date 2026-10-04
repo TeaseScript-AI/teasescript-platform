@@ -596,6 +596,18 @@ test("a choice that returns text and numbers needs a place declared with a union
     'function probe(p: speaker | object) {\n    p.firstName = choose "new", 2\n}',
   ])
     assert.deepEqual(spans(source), [["TSV044", 'choose "new", 2']], source);
+  // A function called before the speaker it stores into is declared is checked once the speaker is, so the store goes to
+  // a speaker, which shows the value as text.
+  const early =
+    'function change(active = false) {\n    if active {\n        voice.firstName = choose "new", 2\n    }\n}\nchange()\nspeaker voice { firstName: "Old" }\nchange(true)\nsay voice.firstName';
+  assert.deepEqual(spans(early), []);
+  for (const [index, said] of [
+    [0, "new"],
+    [1, "2"],
+  ] as const) {
+    const { plan, pending } = start(early);
+    assert.deepEqual(sayTexts(select(plan, pending.snapshot, index).finished), [said]);
+  }
   // A speaker shows its text property as text.
   assert.deepEqual(
     spans(

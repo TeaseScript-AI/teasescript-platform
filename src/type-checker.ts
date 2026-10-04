@@ -289,7 +289,10 @@ class TypeChecker {
   readonly #root = new Scope(null);
 
   readonly #functions: FunctionType[] = [];
-  /** The names of the script's top-level `let` variables, which function bodies may use before they are declared. */
+  /**
+   * The names of the script's top-level `let` variables and speakers, which function bodies may use before they are
+   * declared.
+   */
   readonly #scriptVariables = new Set<string>();
   /** Whether the script's top-level statements are checked, so every script variable has its type. */
   #scriptChecked = false;
@@ -377,7 +380,8 @@ class TypeChecker {
 
   public check(program: Program): void {
     for (const statement of program.statements)
-      if (statement.kind === "letStatement") this.#scriptVariables.add(statement.name.name);
+      if (statement.kind === "letStatement" || statement.kind === "speakerDeclaration")
+        this.#scriptVariables.add(statement.name.name);
     this.#effects = programEffects(program);
     for (const statement of program.statements) {
       if (statement.kind !== "functionDeclaration") continue;
