@@ -72,13 +72,15 @@ test("mixing plain numbers with durations fails instead of guessing a unit", () 
     ["let n = 2", "n / 1 s"],
     ["let n = 2", "1 s < n"],
     ["let d = 1 s", "d * d"],
-    ["let n = 2", "1 s % n"],
   ] as const) {
     const source = `${declaration}\nsay "\${${expression}}"`;
     assert.deepEqual(diagnostics(source), ["TSV043"], source);
     const dynamic = `${DYNAMIC}${declaration.replace(/= (.*)$/, "= dynamic($1)")}\nsay "\${${expression}}"`;
     assert.equal(runtimeFailure(dynamic), "TSR009", dynamic);
   }
+  // `%` takes no duration whatever the other operand is, so the compiler rejects it also beside an unknown value.
+  for (const declaration of ["let n = 2", `${DYNAMIC}let n = dynamic(2)`])
+    assert.deepEqual(diagnostics(`${declaration}\nsay "\${1 s % n}"`), ["TSV043"], declaration);
   assert.equal(runtimeFailure('let n = 0\nsay "${1 s / n}"'), "TSR036");
   assert.equal(runtimeFailure('let d = 0 s\nsay "${d / d}"'), "TSR036");
   for (const source of [

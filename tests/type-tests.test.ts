@@ -194,6 +194,7 @@ test("only plain variables narrow, and a call, wait, or shared assignment cancel
   for (const body of [
     'function change {\n    xs[0] = "x"\n}\nif xs is integer[] {\n    change()\n    let n: integer = xs[0]\n}',
     'if xs is integer[] {\n    repeat 2 {\n        let n: integer = xs[0]\n        xs[0] = "x"\n    }\n}',
+    'function change {\n    (xs.add)("x")\n}\nif xs is integer[] {\n    change()\n    let n: integer = xs[1]\n}',
   ])
     assert.equal(runValidSource(`${list}${body}`).snapshot.failure?.code, "TSR058", body);
   assert.equal(
@@ -255,6 +256,13 @@ test("tests on undecided places and on collections keep every value that may pas
     "let xs = set[]\nif xs is string set {\n    xs.add(1)\n}",
   ])
     assert.deepEqual(errors(source), [], source);
+  // A first store that fits the test still decides the element type, so a later store of another type fails.
+  for (const test of ["integer[]", "(integer | string)[]"])
+    assert.deepEqual(
+      errors(`let xs = []\nif xs is ${test} {\n    xs.add(1)\n}\nxs.add("x")`),
+      [["TSV041", '"x"']],
+      test,
+    );
 });
 
 test("a write that may break a narrowed collection, and an impossible test outcome, are followed exactly", () => {
@@ -276,6 +284,13 @@ test("a write that may break a narrowed collection, and an impossible test outco
   assert.deepEqual(
     errors(
       "function f(items: integer[]?) {\n    if items != null {\n        items.add(2)\n        items[0] += 1\n        say items.first\n    }\n}",
+    ),
+    [],
+  );
+  // A call while a store is evaluated ends the test's facts but not the variable's type, which takes the store.
+  assert.deepEqual(
+    errors(
+      "let p: number[] = [1]\nfunction amount {\n    p.add(2)\n    return 1.5\n}\nif p is integer[] {\n    p.add(amount())\n}",
     ),
     [],
   );

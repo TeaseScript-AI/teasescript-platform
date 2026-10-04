@@ -1116,9 +1116,22 @@ class TypeChecker {
   ): StaticType {
     const node = unwrap(expression);
     const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
-    if (entry?.kind !== "variable" || this.#flow.get(entry.variable) === undefined) return current;
-    // The fact stays only when the stored value certainly keeps it; a value of unknown type may not.
-    if (coversType(elementStoreType(current) ?? UNKNOWN_TYPE, element)) return current;
+    if (entry?.kind !== "variable") return current;
+    // A call while the store was evaluated may have ended the narrowing: the variable's own members that the evaluated
+    // receiver may be check it then, which keeps what was known, such as that it is not null.
+    if (this.#flow.get(entry.variable) === undefined) {
+      const kept = members(entry.variable.type).filter(
+        (member) => narrowTo(member, current).kind !== "never",
+      );
+      return kept.length === 0 ? current : union(kept);
+    }
+    // The fact stays only when the stored value certainly keeps it; a value of unknown type may not. A first store
+    // into a collection whose element type is still undecided decides it, which a test never does.
+    if (
+      coversType(elementStoreType(current) ?? UNKNOWN_TYPE, element) &&
+      !hasUndecidedElements(entry.variable.type)
+    )
+      return current;
     this.#relaxNarrowing(entry.variable);
     return this.#currentType(entry.variable);
   }
@@ -1875,6 +1888,24 @@ class TypeChecker {
     const rights = values.length > 1 ? members(values[1]!) : [];
     const apply = (left: StaticType, right: StaticType | undefined): StaticType | undefined =>
       right === undefined ? result(left) : result(left, right);
+    // A known member that no value could combine with, such as text in `+`, fails whatever the unknown other operand
+    // is, so it is reported as it is, not as a missing null check.
+    const possible = (member: StaticType, index: number): boolean =>
+      values.length === 1
+        ? apply(member, undefined) !== undefined
+        : OPERAND_KINDS.some(
+            (other) => (index === 0 ? apply(member, other) : apply(other, member)) !== undefined,
+          );
+    for (const [index, all] of [lefts, rights].entries()) {
+      const others = index === 0 ? rights : lefts;
+      if (values.length === 1 && index === 1) continue;
+      if (others.some((member) => member.kind !== "null" && isKnown(member))) continue;
+      const impossible = all.find(
+        (member) => member.kind !== "null" && isKnown(member) && !possible(member, index),
+      );
+      if (impossible !== undefined)
+        return { failed: index === 0 ? [impossible, UNKNOWN_TYPE] : [UNKNOWN_TYPE, impossible] };
+    }
     // An operand that may be null needs a check first (owner decision on #504 Q1), whatever the other operand is.
     const named = new Set<string>();
     for (const [index, all] of [lefts, rights].entries()) {
@@ -2253,7 +2284,7 @@ class TypeChecker {
             () =>
               this.#report(
                 typeCode.invalidInteractionChoice,
-                "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
+                "A choice list element must be text, a number, true, false, null, a duration, or a choice object { value?, text, background? }.",
                 option.expression.span,
               ),
           );
@@ -2437,7 +2468,11 @@ class TypeChecker {
     const passing: StaticType[] = [];
     const failing: StaticType[] = [];
     for (const member of members(nonNullType(type)).map(resolved)) {
-      if (member.kind !== "list" && member.kind !== "set") continue;
+      // A member that is not a collection passed the check of the whole value, so it is a way the value is accepted.
+      if (member.kind !== "list" && member.kind !== "set") {
+        if (isKnown(member)) passing.push(member);
+        continue;
+      }
       for (const element of members(member.element).filter(isKnown))
         (accepts(element) ? passing : failing).push({ kind: member.kind, element });
     }
@@ -3075,13 +3110,13 @@ function programEffects(program: Program): ProgramEffects {
           (expression.kind === "callExpression" && !isPureBuiltinCall(expression)))
       )
         loop.suspends = true;
-      // A method that changes a list or set changes the variable that holds it.
+      // A method that changes a list or set changes the variable that holds it, also called in parentheses.
+      const callee = expression.kind === "callExpression" ? unwrap(expression.callee) : null;
       if (
-        expression.kind === "callExpression" &&
-        expression.callee.kind === "propertyAccessExpression" &&
-        COLLECTION_CHANGES.has(expression.callee.property.name)
+        callee?.kind === "propertyAccessExpression" &&
+        COLLECTION_CHANGES.has(callee.property.name)
       ) {
-        const root = rootName(expression.callee.object);
+        const root = rootName(callee.object);
         if (root !== null) {
           if (inside) shared.add(root);
           loop?.assigned.add(root);
@@ -3140,6 +3175,25 @@ function programEffects(program: Program): ProgramEffects {
 }
 
 /** Methods that change the list or set they are called on. */
+/** The value kinds an operand of unknown type might be, to tell whether a known operand could combine with any. */
+const OPERAND_KINDS: readonly StaticType[] = [
+  INTEGER_TYPE,
+  NUMBER_TYPE,
+  STRING_TYPE,
+  BOOLEAN_TYPE,
+  DURATION_TYPE,
+];
+
+/** Whether a variable of this type holds a list or set whose element type no value decided yet. */
+function hasUndecidedElements(type: StaticType): boolean {
+  return members(nonNullType(type)).some((member) => {
+    const value = resolved(member);
+    return (
+      (value.kind === "list" || value.kind === "set") && resolved(value.element).kind === "open"
+    );
+  });
+}
+
 const COLLECTION_CHANGES: ReadonlySet<string> = new Set([
   "add",
   "remove",

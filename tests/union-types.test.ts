@@ -199,6 +199,12 @@ test("display, choice, and speaker text checks look at every member of a union",
     "function f(xs: string[] | timer[]) {\n    let answer = choose xs\n}",
   ])
     assert.deepEqual(codes(source), [["TSV043", "xs"]], source);
+  // A value that may also be text names the test for text.
+  for (const source of [
+    'function f(n: string | object[]) {\n    say "${n}"\n}',
+    "function f(n: string | timer[]) {\n    let answer = choose n\n}",
+  ])
+    assert.match(diagnostics(source)[0]?.[1] ?? "", /Check it first: if n is string/, source);
   assert.deepEqual(codes("function f(xs: timer[]) {\n    let answer = choose xs\n}"), [
     ["TSV029", "xs"],
   ]);

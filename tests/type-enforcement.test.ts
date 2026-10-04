@@ -348,6 +348,15 @@ test("optional types keep their non-null type in operations, elements, and loops
   assert.deepEqual(codes("let box = null\nbox = {}\nfunction f {\n    box.extra = 1\n}"), [
     ["TSV043", "box"],
   ]);
+  // A member that no value could combine with is reported as it is, not as a missing check.
+  assert.deepEqual(
+    mismatches("function f(n: string?, other) {\n    return n + other\n}")[0]?.[0],
+    "TSV043",
+  );
+  assert.match(
+    mismatches("function f(n: string?, other) {\n    return n + other\n}")[0]?.[1] ?? "",
+    /does not join text/,
+  );
 });
 
 test("number times duration is a duration, and a media cue's own handle keeps its type", () => {
