@@ -52,11 +52,14 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    rejected at compile time. When it is stored in a place of known type, it is checked at runtime with a
    source-located error.
 8. Operations are checked by the same principle: an operator, condition, index, member, or command operand of a known
-   type that does not support it is a compile error, because it would fail at runtime. Conditions and the operands of
-   `and`, `or`, and `not` must be `true` or `false`; there is no truthiness. A list index is a whole number and a dict
-   key is text; an object, whose properties have fixed names, is not indexed. The implementation does not reject every
-   such operand yet: some, such as an object element of a computed list in `${...}`, still fail only at runtime with a
-   source-located error; #552 completes the compile-time rejection.
+   type that does not support it is a compile error, because it would fail at runtime. Type checks apply to all code,
+   reachable or not. Conditions and the operands of `and`, `or`, and `not` must be `true` or `false`; there is no
+   truthiness. A list index is a whole number and a dict key is text; an object, whose properties have fixed names, is
+   not indexed. Whether an object has a property is a fact about its value, not its type: a store may add one first, and
+   a parameter or a value the compiler cannot know may bring others. Reading a property an object lacks, and a computed
+   choice object's missing `text`, other property, or `value` or `background` that its button cannot use, therefore stay
+   runtime errors; only a `text` whose known type can never be shown fails at compile time, because it fails whether the
+   property is there or missing. A choice object written in the option is checked as written.
 9. A possibly null value used where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
    error whose message names the check, `if n != null { ... }` (owner decision of 2026-10-04 on #504). The check
    narrows the value (rule 5.1). Places and operands that accept `null` themselves still take it.

@@ -579,11 +579,23 @@ test("say skip policy follows explicit, speaker, and fallback precedence", () =>
   assert.equal(replacement?.kind, "chatPacingGate");
   if (replacement?.kind === "chatPacingGate") assert.equal(replacement.skippable, true);
 
-  const invalid = plan("speaker vera { defaultSaySkippable: random() }");
-  const rejected = run(invalid, createFreshRuntimeSnapshot(invalid, { seed: 77 }));
+  // A host value hides the number from the compiler, which rejects a known non-boolean value itself (#552); the
+  // random title shows that the failed declaration commits no random draw either.
+  const invalid = plan(
+    'speaker vera {\n    title: "${random()}"\n    defaultSaySkippable: flag\n}',
+    { globals: ["flag"] },
+  );
+  const rejected = run(
+    invalid,
+    createFreshRuntimeSnapshot(invalid, { seed: 77, globals: { flag: 1 } }),
+  );
   assert.equal(rejected.snapshot.status, "failed");
   assert.equal(rejected.snapshot.speakers.length, 0);
-  assert.equal(rejected.snapshot.frames[0]?.bindings.length, 0);
+  // Only the host value is bound; the failed declaration commits nothing.
+  assert.deepEqual(
+    rejected.snapshot.frames[0]?.bindings.map((binding) => binding.name),
+    ["flag"],
+  );
   assert.equal(rejected.snapshot.rng.state, 77);
 });
 
@@ -1329,8 +1341,9 @@ test("terminal say transitions reserve complete and future action events atomica
 });
 
 test("speaker assignment keeps defaultSaySkippable boolean", () => {
+  // `dynamic` hides the text from the compiler, which rejects a known non-boolean value itself (#552).
   const assignmentPlan = plan(
-    'speaker vera { defaultSaySkippable: true }\nvera.defaultSaySkippable = "no"\nexit',
+    'function dynamic(value) { return value }\nspeaker vera { defaultSaySkippable: true }\nvera.defaultSaySkippable = dynamic("no")\nexit',
   );
   const rejected = run(assignmentPlan, createFreshRuntimeSnapshot(assignmentPlan));
   assert.equal(rejected.snapshot.status, "failed");

@@ -35,6 +35,7 @@ import type { TypeCheckPlan } from "./plan/model.js";
 import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
 import {
   builtinCallProblems,
+  builtinShapeProblems,
   COLLECTION_METHODS,
   collectionMethodProblems,
   expressionLabel,
@@ -96,6 +97,7 @@ import {
   type ScalarValue,
   TypeJoin,
   members,
+  type PropertyTable,
   misfitProperty,
   nonNullType,
   NULL_TYPE,
@@ -542,8 +544,7 @@ class TypeChecker {
         scope.declare(statement.name.name, { kind: "speaker" });
         for (const property of statement.properties) {
           const type = yield* compileChild(this.#expressionTask(property.value, scope));
-          if (SPEAKER_TEXT_PROPERTIES.has(property.name.name))
-            this.#checkShownText(property.value, type, `the speaker's ${property.name.name}`);
+          this.#checkSpeakerProperty(property.name.name, property.value, type);
         }
         return true;
       case "speakerSetterStatement":
@@ -936,8 +937,8 @@ class TypeChecker {
     let handle = false;
     /** For an element, the type it may hold now, which can be wider than what may be stored. */
     let read: StaticType | undefined;
-    /** A speaker text property shows its value as text. */
-    let shownField: string | null = null;
+    /** The name of a speaker property the store may write, which the runtime checks. */
+    let speakerProperty: string | null = null;
     /** A property without a static type, such as one of an `object` or of a value of unknown type. */
     let untyped = false;
     if (target.kind === "identifier") {
@@ -1044,8 +1045,7 @@ class TypeChecker {
         const speakers = members(nonNullType(object)).map(
           (member) => resolved(member).kind === "speaker",
         );
-        if (SPEAKER_TEXT_PROPERTIES.has(name) && speakers.includes(true))
-          shownField = `the speaker's ${name}`;
+        if (speakers.includes(true)) speakerProperty = name;
         // A speaker shows its text property; any other receiver keeps the value as it is.
         untyped =
           place === undefined && this.diagnostics.length === before && speakers.includes(false);
@@ -1055,7 +1055,11 @@ class TypeChecker {
       }
     }
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
-    if (shownField !== null) this.#checkShownText(statement.value, value, shownField);
+    // A mixed `choose` that C2 rejects for the other receivers needs no second message here.
+    if (speakerProperty !== null && !(untyped && this.#mixedChoices.has(unwrap(statement.value)))) {
+      if (statement.operator === "=" || speakerProperty !== "defaultSaySkippable")
+        this.#checkSpeakerProperty(speakerProperty, statement.value, value);
+    }
     // A timer or media property write may run a block at once, such as an expiry at `remaining = 0 s`.
     if (handle) this.#suspend();
     if (place === undefined) {
@@ -2574,8 +2578,11 @@ class TypeChecker {
       const others = index === 0 ? rights : lefts;
       if (values.length === 1 && index === 1) continue;
       if (others.some((member) => member.kind !== "null" && isKnown(member))) continue;
+      // Null itself counts only when it is all the operand can be; a value that may be null needs a check instead.
+      const onlyNull = all.length === 1 && all[0]!.kind === "null";
       const impossible = all.find(
-        (member) => member.kind !== "null" && isKnown(member) && !possible(member, index),
+        (member) =>
+          (member.kind !== "null" || onlyNull) && isKnown(member) && !possible(member, index),
       );
       if (impossible === undefined) continue;
       // The members that work besides it are what a test keeps (ADR 0021 rule 3.5).
@@ -2762,7 +2769,13 @@ class TypeChecker {
           fallback,
         );
       }
-    }
+    } else if (
+      (method === "contains" || method === "remove") &&
+      expression.arguments.length === 1 &&
+      members(nonNullType(value)).some((member) => isDict(resolved(member)))
+    )
+      // On a union with a dict, the dict takes a text key as well (ADR 0021 rule 3.5).
+      this.#checkDictKey(values[0]!, expression.arguments[0]!.value);
     // Every member of a union must have the method (ADR 0021 rule 3.5).
     const all = members(value);
     const results = all.map((member) => memberMethodType(member, method));
@@ -2861,6 +2874,16 @@ class TypeChecker {
     const problems = collectionMethodProblems(method, value, property, expression, typeOf);
     this.#reportProblems(problems);
     if (method === "sort" || method === "shuffle") return NULL_TYPE;
+    // A set operation's argument that may be null needs a check first (owner decision on #504 Q1).
+    const operand = expression.arguments[0]?.value;
+    if (operand !== undefined && problems.length === 0) {
+      const all = members(typeOf(operand));
+      const passing = all.filter((member) => member.kind !== "null");
+      if (passing.length > 0 && passing.length < all.length) {
+        this.#reportMayBe(operand, NULL_TYPE, passing);
+        return { kind: value.kind, element: UNKNOWN_TYPE };
+      }
+    }
     return this.#setOperationType(method, value, expression, problems.length === 0);
   }
 
@@ -2920,6 +2943,10 @@ class TypeChecker {
   ): StaticType {
     const argument = expression.arguments[0];
     const value = values[0];
+    // A built-in that takes fixed positional arguments checks their values only when their number is right.
+    const shape = builtinShapeProblems(name, expression);
+    this.#reportProblems(shape);
+    if (shape.length > 0) return FIXED_RESULTS.get(name) ?? UNKNOWN_TYPE;
     switch (name) {
       case "random":
         return NUMBER_TYPE;
@@ -3336,6 +3363,12 @@ class TypeChecker {
                 option.expression.span,
               ),
           );
+        // For a computed choice object, only text's known type is checked here; property presence is checked at runtime.
+        for (const part of parts)
+          if (part.kind === "list" || part.kind === "set")
+            for (const element of members(part.element).map(resolved))
+              if (element.kind === "object" && element.properties !== null)
+                this.#checkChoiceText(option.expression, element.properties);
         const results = parts.map((part) => {
           const button =
             part.kind === "list" || part.kind === "set" ? resolved(part.element) : part;
@@ -3418,7 +3451,13 @@ class TypeChecker {
     );
     if (rejected) return UNKNOWN_TYPE;
     const literal = unwrap(entry);
-    if (literal.kind !== "objectLiteral") return value.kind === "object" ? UNKNOWN_TYPE : type;
+    if (literal.kind !== "objectLiteral") {
+      // For a computed choice object, only text's known type is checked here; property presence is checked at runtime.
+      for (const member of members(nonNullType(type)).map(resolved))
+        if (member.kind === "object" && member.properties !== null)
+          this.#checkChoiceText(entry, member.properties);
+      return value.kind === "object" ? UNKNOWN_TYPE : type;
+    }
     let returned: StaticType = UNKNOWN_TYPE;
     for (const property of literal.properties) {
       const propertyType = this.#typeOf(property.value);
@@ -3439,6 +3478,19 @@ class TypeChecker {
         this.#checkBackground(property.value, propertyType);
     }
     return returned;
+  }
+
+  /**
+   * A computed choice object's text that can never be shown fails whether it is there or missing, so its type alone
+   * decides. A text that may be null, unknown, or of a type that can be shown may still give a button.
+   */
+  #checkChoiceText(expression: Expression, table: PropertyTable): void {
+    const text = table.get("text");
+    if (text === undefined) return;
+    const shown = (member: StaticType): boolean =>
+      !isKnown(member) || resolved(member).kind === "null" || isShowable(member);
+    if (!members(text).some(shown))
+      this.#checkShownText(expression, text, "the text of a choice option");
   }
 
   /** `${...}` shows a value, or one element of a list; a known value it cannot show is an error. */
@@ -3584,6 +3636,22 @@ class TypeChecker {
       passing,
     );
     return true;
+  }
+
+  /**
+   * A speaker property that the runtime checks when it is set: `defaultSaySkippable` is true or false. A name part is
+   * shown as text; the runtime checks that it is text only when it prepares the speaker's messages.
+   */
+  #checkSpeakerProperty(name: string, expression: Expression, type: StaticType): void {
+    if (name === "defaultSaySkippable")
+      this.#reportUnless(
+        type,
+        (member) => isScalar(member, "boolean"),
+        expression,
+        "defaultSaySkippable is true or false (boolean)",
+      );
+    else if (SPEAKER_TEXT_PROPERTIES.has(name))
+      this.#checkShownText(expression, type, `the speaker's ${name}`);
   }
 
   /** Only `${...}` selects from a list; a list in a text field is an error, at runtime when it is not known here. */
@@ -5078,6 +5146,14 @@ function describeLiterals(values: readonly PossibleValue[]): string {
 function isShowable(member: StaticType): boolean {
   return !UNSHOWABLE_KINDS.has(resolved(member).kind);
 }
+
+/** The result types of the built-ins that take fixed positional arguments. */
+const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([
+  ["random", NUMBER_TYPE],
+  ["chance", BOOLEAN_TYPE],
+  ["randomInteger", INTEGER_TYPE],
+  ["escapeMarkup", STRING_TYPE],
+]);
 
 /** Speaker properties shown as text: the display name and the parts it is derived from. */
 const SPEAKER_TEXT_PROPERTIES: ReadonlySet<string> = new Set([

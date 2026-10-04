@@ -95,7 +95,7 @@ export function memberProblems(
   if (type.kind === "list" && name === "join") {
     if (call === null) return problem("join is a method; write .join() with parentheses.");
     const problems = argumentProblems(LIST_JOIN, call, typeOf, undefined);
-    const element = unshowableElement(receiver, typeOf);
+    const element = unshowableElement(receiver, type.element, typeOf);
     if (element !== undefined)
       problems.push({
         kind: "invalidOperand",
@@ -203,26 +203,72 @@ function argumentProblems(
   return problems;
 }
 
-/** The first element of a list literal whose known type `join` cannot show. */
+/**
+ * The first element of a list literal whose known type `join` cannot show, or for a computed list, its element type
+ * when no element of that type can be shown.
+ */
 function unshowableElement(
   receiver: Expression,
+  element: StaticType,
   typeOf: (expression: Expression) => StaticType,
 ): { readonly expression: Expression; readonly type: StaticType } | undefined {
-  while (receiver.kind === "parenthesizedExpression") receiver = receiver.expression;
-  if (receiver.kind !== "listLiteral") return undefined;
-  for (const expression of receiver.elements) {
-    // An element that may be text, a number, true or false, a duration, a date or time value, or null may be shown; `join` checks its value.
+  let node = receiver;
+  while (node.kind === "parenthesizedExpression") node = node.expression;
+  if (node.kind !== "listLiteral")
+    return joinShowable(element) ? undefined : { expression: receiver, type: element };
+  for (const expression of node.elements) {
     const type = typeOf(expression);
-    const showable = members(type).some(
-      (member) => !isKnown(member) || ["scalar", "null"].includes(resolved(member).kind),
-    );
-    if (!showable) return { expression, type };
+    if (!joinShowable(type)) return { expression, type };
   }
   return undefined;
 }
 
+/**
+ * Whether a value of this type may be shown by `join`: text, a number, true or false, a duration, a date or time value,
+ * or null; `join` checks the value.
+ */
+function joinShowable(type: StaticType): boolean {
+  return members(type).some(
+    (member) => !isKnown(member) || ["scalar", "null"].includes(resolved(member).kind),
+  );
+}
+
 function capitalized(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** The parameters of the built-ins that take a fixed number of positional arguments and no names (V30 §7, §8). */
+const FIXED_PARAMETERS: ReadonlyMap<string, readonly string[]> = new Map([
+  ["random", []],
+  ["chance", ["percent"]],
+  ["randomInteger", ["range"]],
+  ["escapeMarkup", ["text"]],
+]);
+
+/** Argument names and the number of arguments of a built-in that takes fixed positional arguments. */
+export function builtinShapeProblems(name: string, call: CallExpression): OperationProblem[] {
+  const parameters = FIXED_PARAMETERS.get(name);
+  if (parameters === undefined) return [];
+  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
+  if (named !== undefined)
+    return [
+      {
+        kind: "unknownNamedArgument",
+        message: `${name}(...) takes no named arguments; remove '${named.name.name}:'.`,
+        span: named.name.span,
+      },
+    ];
+  if (call.arguments.length === parameters.length) return [];
+  return [
+    {
+      kind: "argumentCount",
+      message:
+        parameters.length === 0
+          ? `${name}() takes no arguments, received ${call.arguments.length}.`
+          : `${name}(...) takes ${parameters.length} argument (${parameters.join(", ")}), received ${call.arguments.length}.`,
+      span: call.span,
+    },
+  ];
 }
 
 /**
