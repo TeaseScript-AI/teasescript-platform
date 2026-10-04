@@ -559,6 +559,13 @@ test("value cases keep the narrowing of the cases above, and a never-matching ca
     ["warning TSV046"],
   );
   assert.notEqual(ended.plan, null);
+  // A case value of the wrong type is only that error.
+  assert.deepEqual(
+    compileSource(
+      'function f(x: integer): integer {\n  switch x {\n    case is integer { return 1 }\n    case "a" { }\n  }\n}',
+    ).diagnostics.map((item) => item.code),
+    ["TSV049"],
+  );
 
   // Like `x is T`, a type case may continue on the next line.
   assert.deepEqual(

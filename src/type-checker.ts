@@ -587,9 +587,9 @@ class TypeChecker {
             for (const value of switchCase.values) {
               const valueType = yield* compileChild(this.#expressionTask(value, scope));
               const message = impossibleCaseMessage(statement.subject, subject, value, valueType);
+              // A value whose type can never match is an error, and it does not reach the block either.
               if (message !== undefined) {
                 this.#report(typeCode.impossibleCase, message, value.span);
-                matchable = true;
                 continue;
               }
               const never = this.#neverMatchingCaseValue(
