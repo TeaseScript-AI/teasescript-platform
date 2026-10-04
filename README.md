@@ -43,10 +43,11 @@ Binding to `0.0.0.0` exposes this development server to every network that can r
 
 The page offers fixed repository examples for core behavior, control flow, active-loop checkpoints, and functions. Saved checkpoints are namespaced by example and checkpoint format version.
 
-To try image tags (#572) with your own images, point the server at a folder; it is read again on each page load:
+To try image tags (#572) with your own images, point the server at a package folder; it is read again on each page
+load:
 
 ```shell
-PLAYGROUND_IMAGES=/path/to/images npm run playground
+PLAYGROUND_PACKAGE=/path/to/package npm run playground
 ```
 
 Each JPEG, PNG, WebP, GIF, TIFF, or SVG file below it becomes a package image, by its path relative to the folder,

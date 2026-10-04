@@ -72,7 +72,7 @@ const elements = {
 
 let sourceRevision = 0;
 let compiledRevision: number | null = null;
-/** The server's development image folder (#572), or `undefined` when it offers none. */
+/** The images of the server's development package folder (#572), or `undefined` when it offers none. */
 let images: readonly ProjectImageFile[] | undefined;
 let plan: InstructionPlan | null = null;
 let snapshot: RuntimeSnapshot | null = null;
@@ -143,23 +143,23 @@ new ResizeObserver(() => {
   updateChoicePresentation();
 }).observe(elements.sourcePanel);
 new ResizeObserver(updateChoicePresentation).observe(elements.playerPanel);
-void loadImageFolder().then(loadInitialSource);
+void loadPackageFolder().then(loadInitialSource);
 
-/** Offers the server's development image folder to tag queries and the Stage preview when it has one. */
-async function loadImageFolder(): Promise<void> {
+/** Offers the images of the server's development package folder to tag queries and the Stage preview. */
+async function loadPackageFolder(): Promise<void> {
   try {
-    const response = await fetch("/dev-images/catalog.json", { cache: "no-store" });
+    const response = await fetch("/dev-package/catalog.json", { cache: "no-store" });
     if (!response.ok) return;
-    const catalog = imageFolderCatalog(await response.json());
+    const catalog = packageFolderCatalog(await response.json());
     if (catalog === null) {
       elements.stagePanel.hidden = false;
-      elements.imageCatalogStatus.textContent = "The server's image folder catalog is malformed.";
+      elements.imageCatalogStatus.textContent = "The server's package catalog is malformed.";
       return;
     }
     images = catalog.images;
     elements.stagePanel.hidden = false;
     elements.imageCatalogStatus.textContent = [
-      `${catalog.images.length} images from the server's development folder.`,
+      `${catalog.images.length} images from the server's development package folder.`,
       ...catalog.problems.map((problem) => `${problem.path}: ${problem.message}`),
     ].join("\n");
   } catch {
@@ -168,7 +168,7 @@ async function loadImageFolder(): Promise<void> {
 }
 
 /** The catalog the server sent, or `null` when it does not have the expected shape. */
-function imageFolderCatalog(
+function packageFolderCatalog(
   value: unknown,
 ): {
   readonly images: readonly ProjectImageFile[];
@@ -831,7 +831,7 @@ function renderStageImage(path: string | null): void {
   const known = path !== null && images?.some((image) => image.path === path) === true;
   elements.stageImage.hidden = !known;
   if (known) {
-    const url = `/dev-images/files/${path.split("/").map(encodeURIComponent).join("/")}`;
+    const url = `/dev-package/files/${path.split("/").map(encodeURIComponent).join("/")}`;
     if (elements.stageImage.getAttribute("src") !== url) elements.stageImage.src = url;
   } else {
     elements.stageImage.removeAttribute("src");

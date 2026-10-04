@@ -26,7 +26,7 @@ import {
 const fixtures = fileURLToPath(new URL("../../tests/fixtures/xmp/", import.meta.url));
 const keywords = ["bedroom", "Tom & Jerry <3", "Café", "punishment: 4"];
 
-test("the development image folder offers its images with their XMP keywords, and only those files", async (context) => {
+test("the development package folder offers its images with their XMP keywords, and only those files", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "teasescript-images-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, "rooms"));
@@ -41,10 +41,10 @@ test("the development image folder offers its images with their XMP keywords, an
   await copyFile(join(fixtures, "keywords.jpg"), join(root, "star*.jpg"));
   await writeFile(join(root, "notes.txt"), "not an image");
 
-  const server = await listening(createPlaygroundServer({ imagesRoot: root }));
+  const server = await listening(createPlaygroundServer({ packageRoot: root }));
   context.after(() => new Promise((resolve) => server.close(resolve)));
 
-  const catalog = await get(server, "/dev-images/catalog.json");
+  const catalog = await get(server, "/dev-package/catalog.json");
   assert.equal(catalog.status, 200);
   const body = JSON.parse(catalog.body.toString("utf8"));
   assert.deepEqual(body.images, [
@@ -58,13 +58,13 @@ test("the development image folder offers its images with their XMP keywords, an
     ["packed.png", "star*.jpg"],
   );
 
-  const image = await get(server, "/dev-images/files/rooms/bedroom.jpg");
+  const image = await get(server, "/dev-package/files/rooms/bedroom.jpg");
   assert.equal(image.status, 200);
   assert.equal(image.contentType, "image/jpeg");
   assert.deepEqual(image.body, await readFile(join(fixtures, "keywords.jpg")));
-  assert.equal((await get(server, "/dev-images/files/rooms/bath.png.xmp")).status, 404);
-  assert.equal((await get(server, "/dev-images/files/notes.txt")).status, 404);
-  assert.equal((await get(server, "/dev-images/files/%2E%2E/escape.jpg")).status, 400);
+  assert.equal((await get(server, "/dev-package/files/rooms/bath.png.xmp")).status, 404);
+  assert.equal((await get(server, "/dev-package/files/notes.txt")).status, 404);
+  assert.equal((await get(server, "/dev-package/files/%2E%2E/escape.jpg")).status, 400);
 
   // The playground compiles with the catalog, so tag queries pick from these images.
   const compiled = compileWorkspaceSource('showImage tagged "bedroom", "punishment" >= 4\nexit', {
@@ -88,10 +88,10 @@ test("the catalog follows edits that keep a file's size and time, and skips what
   // A whole-second time, which the file system stores exactly, as an editor that preserves timestamps restores it.
   const time = 1_700_000_000;
   await utimes(sidecar, time, time);
-  const server = await listening(createPlaygroundServer({ imagesRoot: root }));
+  const server = await listening(createPlaygroundServer({ packageRoot: root }));
   context.after(() => new Promise((resolve) => server.close(resolve)));
   const catalog = async () =>
-    JSON.parse((await get(server, "/dev-images/catalog.json")).body.toString("utf8"));
+    JSON.parse((await get(server, "/dev-package/catalog.json")).body.toString("utf8"));
   assert.deepEqual((await catalog()).images, [{ path: "room.png", keywords }]);
 
   // The same length and modification time; only the change time and content differ.
@@ -118,9 +118,9 @@ test("the catalog follows edits that keep a file's size and time, and skips what
     ]);
   }
 
-  const missing = await listening(createPlaygroundServer({ imagesRoot: join(root, "absent") }));
+  const missing = await listening(createPlaygroundServer({ packageRoot: join(root, "absent") }));
   context.after(() => new Promise((resolve) => missing.close(resolve)));
-  const response = await get(missing, "/dev-images/catalog.json");
+  const response = await get(missing, "/dev-package/catalog.json");
   assert.equal(response.status, 200);
   assert.deepEqual(JSON.parse(response.body.toString("utf8")), {
     images: [],
@@ -128,25 +128,25 @@ test("the catalog follows edits that keep a file's size and time, and skips what
   });
 });
 
-test("the image folder serves only what its catalog lists: no hidden files or links", async (context) => {
+test("the package folder serves only what its catalog lists: no hidden files or links", async (context) => {
   const root = await mkdtemp(join(tmpdir(), "teasescript-images-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, ".private"));
   await copyFile(join(fixtures, "keywords.jpg"), join(root, "room.jpg"));
   await copyFile(join(fixtures, "keywords.jpg"), join(root, ".private/hidden.jpg"));
   await symlink(join(root, "room.jpg"), join(root, "inside-link.jpg"));
-  const server = await listening(createPlaygroundServer({ imagesRoot: root }));
+  const server = await listening(createPlaygroundServer({ packageRoot: root }));
   context.after(() => new Promise((resolve) => server.close(resolve)));
-  assert.equal((await get(server, "/dev-images/files/room.jpg")).status, 200);
-  assert.equal((await get(server, "/dev-images/files/.private/hidden.jpg")).status, 404);
-  assert.equal((await get(server, "/dev-images/files/inside-link.jpg")).status, 404);
+  assert.equal((await get(server, "/dev-package/files/room.jpg")).status, 200);
+  assert.equal((await get(server, "/dev-package/files/.private/hidden.jpg")).status, 404);
+  assert.equal((await get(server, "/dev-package/files/inside-link.jpg")).status, 404);
 });
 
-test("without a development image folder, the image routes are absent", async (context) => {
+test("without a development package folder, its routes are absent", async (context) => {
   const server = await listening(createPlaygroundServer());
   context.after(() => new Promise((resolve) => server.close(resolve)));
-  assert.equal((await get(server, "/dev-images/catalog.json")).status, 404);
-  assert.equal((await get(server, "/dev-images/files/room.jpg")).status, 404);
+  assert.equal((await get(server, "/dev-package/catalog.json")).status, 404);
+  assert.equal((await get(server, "/dev-package/files/room.jpg")).status, 404);
 });
 
 async function listening(server: Server): Promise<Server> {

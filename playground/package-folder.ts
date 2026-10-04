@@ -8,8 +8,8 @@ import {
   type XmpKeywordsResult,
 } from "../src/xmp-keywords.js";
 
-/** The file types the development image folder offers, by lowercase extension. */
-export const IMAGE_FOLDER_EXTENSIONS: ReadonlySet<string> = new Set([
+/** The image file types of the development package folder, by lowercase extension. */
+export const PACKAGE_IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
   ".jpg",
   ".jpeg",
   ".png",
@@ -23,18 +23,18 @@ export const IMAGE_FOLDER_EXTENSIONS: ReadonlySet<string> = new Set([
 /** An SVG image's tags come from its sidecar only. */
 const SIDECAR_ONLY: XmpKeywordsResult = { kind: "none" };
 
-export interface ImageFolderCatalog {
+export interface PackageFolderCatalog {
   readonly images: readonly ProjectImageFile[];
   /** Images whose tags could not be read, each listed without tags, or that were skipped, with the reason. */
   readonly problems: readonly { readonly path: string; readonly message: string }[];
 }
 
 /**
- * The temporary development image folder of #572: a folder on the server whose images a session may show and pick by
- * tag, until Laravel stores uploaded images and their tags. Each scan reads the folder again; the keywords of a file
+ * The temporary development package folder of #572: the package root on the server (ADR 0022), whose images a session
+ * may show and pick by tag, until Laravel stores uploaded packages, images, and their tags. Each scan reads the folder again; the keywords of a file
  * whose identity, size, and change time are unchanged are reused.
  */
-export class ImageFolder {
+export class PackageFolder {
   readonly #cache = new Map<
     string,
     { readonly version: string; readonly result: XmpKeywordsResult }
@@ -47,14 +47,14 @@ export class ImageFolder {
    * sidecar named after the whole file (`room.jpg.xmp`) when it has one, and otherwise of its embedded XMP. What
    * cannot be read is listed in `problems` instead.
    */
-  public async scan(): Promise<ImageFolderCatalog> {
+  public async scan(): Promise<PackageFolderCatalog> {
     const problems: { path: string; message: string }[] = [];
     const files = await listFiles(this.root, problems);
     const present = new Set(files);
     for (const path of this.#cache.keys()) if (!present.has(path)) this.#cache.delete(path);
     const images: ProjectImageFile[] = [];
     for (const path of files) {
-      if (!IMAGE_FOLDER_EXTENSIONS.has(extname(path).toLowerCase())) continue;
+      if (!PACKAGE_IMAGE_EXTENSIONS.has(extname(path).toLowerCase())) continue;
       const problem = packageAssetPathProblem(path);
       if (problem !== null) {
         problems.push({ path, message: `Skipped: ${problem}.` });

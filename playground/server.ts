@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { PLAYGROUND_EXAMPLES } from "./examples.js";
-import { IMAGE_FOLDER_EXTENSIONS, ImageFolder } from "./image-folder.js";
+import { PACKAGE_IMAGE_EXTENSIONS, PackageFolder } from "./package-folder.js";
 import {
   compileWorkspaceSource,
   executeWorkspaceSource,
@@ -14,10 +14,10 @@ import {
 export interface PlaygroundServerOptions {
   readonly projectRoot?: string;
   /**
-   * A development image folder (#572): its images and their XMP tags are offered at `/dev-images/catalog.json` and
-   * `/dev-images/files/<path>`. Without it, both routes are absent.
+   * A development package folder (#572): its images and their XMP tags are offered at `/dev-package/catalog.json` and
+   * `/dev-package/files/<path>`. Without it, both routes are absent.
    */
-  readonly imagesRoot?: string;
+  readonly packageRoot?: string;
 }
 
 export interface StartPlaygroundServerOptions extends PlaygroundServerOptions {
@@ -30,8 +30,8 @@ export function createPlaygroundServer(options: PlaygroundServerOptions = {}): S
   const playgroundRoot = resolve(projectRoot, "playground");
   const distRoot = resolve(projectRoot, "dist");
   const examplesRoot = resolve(projectRoot, "examples");
-  const imageFolder =
-    options.imagesRoot === undefined ? null : new ImageFolder(resolve(options.imagesRoot));
+  const packageFolder =
+    options.packageRoot === undefined ? null : new PackageFolder(resolve(options.packageRoot));
   const workspace: AutomationWorkspace = {
     source: "",
     sourceRevision: 0,
@@ -43,7 +43,7 @@ export function createPlaygroundServer(options: PlaygroundServerOptions = {}): S
   return createServer((request, response) => {
     void serveRequest(
       request,
-      { projectRoot, playgroundRoot, distRoot, examplesRoot, imageFolder },
+      { projectRoot, playgroundRoot, distRoot, examplesRoot, packageFolder },
       workspace,
       response,
     ).catch(() => {
@@ -63,10 +63,10 @@ export async function startPlaygroundServer(
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new RangeError("PORT must be an integer from 1 through 65535.");
   }
-  const imagesRoot = options.imagesRoot ?? process.env.PLAYGROUND_IMAGES;
+  const packageRoot = options.packageRoot ?? process.env.PLAYGROUND_PACKAGE;
   const server = createPlaygroundServer({
     ...options,
-    ...(imagesRoot === undefined || imagesRoot === "" ? {} : { imagesRoot }),
+    ...(packageRoot === undefined || packageRoot === "" ? {} : { packageRoot }),
   });
   await new Promise<void>((resolveListen, reject) => {
     server.once("error", reject);
@@ -77,8 +77,8 @@ export async function startPlaygroundServer(
   });
   const printableHost = host.includes(":") ? `[${host}]` : host;
   process.stdout.write(`TeaseScript playground: http://${printableHost}:${port}/\n`);
-  if (imagesRoot !== undefined && imagesRoot !== "") {
-    process.stdout.write(`Development images: ${resolve(imagesRoot)}\n`);
+  if (packageRoot !== undefined && packageRoot !== "") {
+    process.stdout.write(`Development package: ${resolve(packageRoot)}\n`);
   }
   return server;
 }
@@ -88,7 +88,7 @@ interface StaticRoots {
   readonly playgroundRoot: string;
   readonly distRoot: string;
   readonly examplesRoot: string;
-  readonly imageFolder: ImageFolder | null;
+  readonly packageFolder: PackageFolder | null;
 }
 
 interface AutomationWorkspace {
@@ -129,8 +129,8 @@ async function serveRequest(
     sendText(response, 400, "Rejected unsafe request path.\n", method === "HEAD");
     return;
   }
-  if (pathname === "/dev-images/catalog.json" && roots.imageFolder !== null) {
-    sendJson(response, 200, await roots.imageFolder.scan());
+  if (pathname === "/dev-package/catalog.json" && roots.packageFolder !== null) {
+    sendJson(response, 200, await roots.packageFolder.scan());
     return;
   }
 
@@ -365,14 +365,14 @@ function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | nul
   if (pathname.startsWith("/dist/")) {
     return resolveInside(roots.distRoot, pathname.slice("/dist/".length));
   }
-  if (pathname.startsWith("/dev-images/files/") && roots.imageFolder !== null) {
-    const relativePath = pathname.slice("/dev-images/files/".length);
+  if (pathname.startsWith("/dev-package/files/") && roots.packageFolder !== null) {
+    const relativePath = pathname.slice("/dev-package/files/".length);
     if (
-      !IMAGE_FOLDER_EXTENSIONS.has(extname(relativePath).toLowerCase()) ||
+      !PACKAGE_IMAGE_EXTENSIONS.has(extname(relativePath).toLowerCase()) ||
       relativePath.split("/").some((segment) => segment.startsWith("."))
     )
       return null;
-    const target = resolveInside(roots.imageFolder.root, relativePath);
+    const target = resolveInside(roots.packageFolder.root, relativePath);
     return target === null ? null : { ...target, linksAllowed: false };
   }
   if (pathname.startsWith("/examples/")) {
