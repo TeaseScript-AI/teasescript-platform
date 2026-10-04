@@ -94,7 +94,13 @@ import {
   excludeType,
   assignedType,
   widenedType,
+  widenPath,
+  numberPaths,
+  integerParts,
+  ownPartOrigins,
+  type Declaration,
   type Origin,
+  type PartOrigin,
   type StaticType,
 } from "./static-types.js";
 import { typePlan } from "./type-plans.js";
@@ -159,11 +165,35 @@ export function checkTypes(program: Program, options: TypeCheckOptions = {}): Ty
   }
 }
 
-/** The declaration of a variable without a type annotation: `let`, a parameter with a default, or a loop variable. */
-type Declaration = Origin;
+/**
+ * The variables, elements, and properties that one of their assignments gives a non-whole number, with the first such
+ * assignment: by the declaration of the variable that holds them, then by their path in it (see {@link PlacePath}).
+ */
+type Widened = Map<Declaration, Map<string, SourceSpan>>;
 
-/** The variables that one of their assignments gives a non-whole number, with the first such assignment. */
-type Widened = Map<Declaration, SourceSpan>;
+/**
+ * Where a place is inside a variable without a type annotation: the steps from the variable, each a property name or `[]`
+ * for the elements of a list or set. The variable itself has no steps.
+ */
+interface PlacePath {
+  readonly root: Declaration;
+  readonly path: readonly string[];
+}
+
+function extendPath(owner: PlacePath | undefined, step: string): PlacePath | undefined {
+  return owner === undefined ? undefined : { root: owner.root, path: [...owner.path, step] };
+}
+
+/** A place that stores a value of another place, so it widens with it (see `TypeChecker.#follow`). */
+interface Follower {
+  readonly place: PlacePath;
+  readonly at: SourceSpan;
+}
+
+/** The place an origin stands for: a variable, or an element or property inside one. */
+function originPlace(origin: Origin): PlacePath {
+  return "root" in origin ? origin : { root: origin, path: [] };
+}
 
 /** A variable and the type it keeps. Open slots and object property tables inside `type` record later decisions. */
 interface Variable {
@@ -264,7 +294,7 @@ interface FunctionContext {
 interface Place {
   readonly type: StaticType;
   /** For a variable without a type annotation, its declaration: a non-whole number widens it instead of failing. */
-  readonly declaration?: Declaration | undefined;
+  readonly widening?: PlacePath | undefined;
   /**
    * Whether no type is written for the place: a variable or parameter without an annotation, or a property or element
    * that one holds. Only a written union type keeps a `choose` of different value types (#511 C2).
@@ -342,27 +372,36 @@ class TypeChecker {
   /** Whether this check found a variable to widen that earlier checks did not. */
   widenedMore = false;
 
-  /** Widens every variable that follows a widened one (see {@link #followers}). */
+  /** Widens every place that follows a widened one (see {@link #followers}). */
   public widenFollowers(): void {
-    const pending = [...this.#widened.keys()];
-    while (pending.length > 0)
-      for (const { declaration, at } of this.#followers.get(pending.pop()!) ?? []) {
-        if (this.#widened.has(declaration)) continue;
-        this.#widened.set(declaration, at);
-        pending.push(declaration);
+    const pending: PlacePath[] = [];
+    for (const [root, paths] of this.#widened)
+      for (const path of paths.keys())
+        pending.push({ root, path: path === "" ? [] : path.split(".") });
+    while (pending.length > 0) {
+      const widened = pending.pop()!;
+      for (const { place, at } of this.#followers.get(widened.root)?.get(widened.path.join(".")) ??
+        []) {
+        if (this.#widenedAt(place.root, place.path)) continue;
+        this.#recordWidening(place, at);
+        pending.push(place);
       }
+    }
   }
 
   readonly #widened: Widened;
 
   /**
-   * For each integer variable, the integer variables that store its value, directly or through arithmetic, with where:
+   * For each integer place, by its variable and its path there, the integer places that store its value, with where:
    * when it widens, they widen too, without one more check per step of a chain.
    */
-  readonly #followers = new Map<
-    Declaration,
-    { readonly declaration: Declaration; readonly at: SourceSpan }[]
-  >();
+  readonly #followers = new Map<Declaration, Map<string, Follower[]>>();
+
+  /** The variable each declaration created most recently, whose type later widenings change. */
+  readonly #declared = new Map<Declaration, Variable>();
+
+  /** One origin for each element or property inside a variable, so equal parts are one origin. */
+  readonly #parts = new Map<Declaration, Map<string, PartOrigin>>();
 
   public constructor(options: TypeCheckOptions, widened: Widened) {
     this.#widened = widened;
@@ -686,16 +725,14 @@ class TypeChecker {
         );
         // The loop variable is a place: it keeps the plain element type.
         const loopType = element === undefined ? UNKNOWN_TYPE : copyType(plainType(element));
-        this.#followFirst(statement, loopType, statement.iterable.span);
+        this.#follow({ root: statement, path: [] }, loopType, statement.iterable.span);
         const variable: Variable = {
           name: statement.variable.name,
-          type: ownOrigins(
-            this.#widened.has(statement) ? widenedType(loopType) : loopType,
-            statement,
-          ),
+          type: this.#ownType(statement, loopType),
           shared: false,
           declaration: statement,
         };
+        this.#declared.set(statement, variable);
         const ends = yield* compileChild(this.#loopBodyTask(statement.body, scope, variable));
         return !isNonEmptyLiteral(statement.iterable) || ends;
       }
@@ -776,11 +813,10 @@ class TypeChecker {
     let type: StaticType;
     if (statement.typeAnnotation === null) {
       type = this.#newPlaceType(statement.initializer, value);
-      if (this.#widened.has(statement)) type = widenedType(type);
       // A number this variable holds derives from the variable itself, which follows what its first value derives
       // from (rule 1.2).
-      this.#followFirst(statement, value, statement.initializer.span);
-      type = ownOrigins(type, statement);
+      this.#follow({ root: statement, path: [] }, value, statement.initializer.span);
+      type = this.#ownType(statement, type);
       this.#reportMixedChoice(
         statement.initializer,
         (written) =>
@@ -812,6 +848,7 @@ class TypeChecker {
       declaration: statement.typeAnnotation === null ? statement : undefined,
       annotated: statement.typeAnnotation !== null,
     };
+    if (statement.typeAnnotation === null) this.#declared.set(statement, variable);
     scope.declare(name, { kind: "variable", variable });
     this.#assigned(variable, value);
   }
@@ -894,6 +931,7 @@ class TypeChecker {
             label,
             isNullable(object),
             this.#inferredCollection(target.object, scope),
+            lists.length === 1 ? this.#pathOf(target.object, scope) : undefined,
           );
           place =
             lists.length === 1
@@ -922,15 +960,21 @@ class TypeChecker {
           }
           const assigned = yield* compileChild(this.#expressionTask(statement.value, scope));
           this.#reportMixedChoice(statement.value, () => ONE_TYPE_FIX);
-          if (statement.operator === "=")
+          if (statement.operator === "=") {
             value.properties.set(
               name,
               decidedSlot(this.#newPlaceType(statement.value, assigned), statement.value.span),
             );
+            const owner = this.#pathOf(target.object, scope);
+            if (owner !== undefined) {
+              this.#follow(extendPath(owner, name), assigned, statement.value.span);
+              this.#rewiden(owner.root);
+            }
+          }
           return;
         }
         const before = this.diagnostics.length;
-        place = this.#propertyPlace(object, target.object, target.property);
+        place = this.#propertyPlace(object, target.object, target.property, scope);
         const speakers = members(nonNullType(object)).map(
           (member) => resolved(member).kind === "speaker",
         );
@@ -986,7 +1030,7 @@ class TypeChecker {
       return;
     }
     if (this.#widens(place, result, statement.value)) return;
-    this.#follow(place, result, statement.value);
+    this.#follow(place.widening, result, statement.value.span);
     if (!isAssignable(place.type, result))
       this.#report(
         typeCode.typeMismatch,
@@ -1042,6 +1086,7 @@ class TypeChecker {
         place.label,
         isNullable(place.type),
         place.inferred !== undefined,
+        place.widening,
       );
       for (const element of literal.elements)
         yield* compileChild(this.#storeTask(elements, element, this.#typeOf(element), decides));
@@ -1071,6 +1116,8 @@ class TypeChecker {
       }
       // New properties join the place only when the object fits it, so one mistake does not cause more.
       if (decides && fits) for (const [name, type] of added) properties.set(name, type);
+      if (decides && fits && added.length > 0 && place.widening !== undefined)
+        this.#rewiden(place.widening.root);
       return;
     }
     if (isAssignable(place.type, value)) {
@@ -1084,7 +1131,8 @@ class TypeChecker {
               : ONE_TYPE_FIX,
         );
       if (decides) settle(place.type, value, expression.span);
-      this.#follow(place, value, expression);
+      if (decides && place.widening !== undefined) this.#rewiden(place.widening.root);
+      this.#follow(place.widening, value, expression.span);
       return;
     }
     if (this.#widens(place, value, expression)) return;
@@ -1109,36 +1157,133 @@ class TypeChecker {
    * starts again with the variable declared as a number, so this check reports nothing about the store.
    */
   #widens(place: Place, value: StaticType, expression: Expression): boolean {
-    if (place.declaration === undefined) return false;
-    if (!isScalar(nonNullType(place.type), "integer") || !isScalar(nonNullType(value), "number"))
-      return false;
-    // A variable an earlier check widened is a number in this one; were it not, the store is reported, not hidden.
-    if (this.#widened.has(place.declaration)) return false;
-    this.#widened.set(place.declaration, expression.span);
+    const owner = place.widening;
+    if (owner === undefined) return false;
+    // The value fits once the parts where it holds a number instead of an integer widen, and only then.
+    const paths = numberPaths(place.type, value);
+    if (paths.length === 0) return false;
+    let widened = copyType(place.type);
+    for (const path of paths) widened = widenPath(widened, path);
+    if (!isAssignable(widened, value)) return false;
+    let found = false;
+    for (const path of paths) {
+      const part = { root: owner.root, path: [...owner.path, ...path] };
+      if (this.#widenedAt(part.root, part.path)) continue;
+      this.#recordWidening(part, expression.span);
+      found = true;
+    }
+    if (found) return true;
+    // An element or property added after its variable was created takes what earlier checks widened; a place that
+    // still does not fit is reported, not hidden.
+    this.#rewiden(owner.root);
+    const now = this.#typeAt(owner);
+    return now !== undefined && isAssignable(now, value);
+  }
+
+  #recordWidening(place: PlacePath, at: SourceSpan): void {
+    const paths = this.#widened.get(place.root) ?? new Map<string, SourceSpan>();
+    paths.set(place.path.join("."), at);
+    this.#widened.set(place.root, paths);
     this.widenedMore = true;
-    return true;
+  }
+
+  /** The assignment that widened a variable, element, or property, if an earlier check found one. */
+  #widenedAt(root: Declaration, path: readonly string[]): SourceSpan | undefined {
+    return this.#widened.get(root)?.get(path.join("."));
+  }
+
+  /** The origin that stands for an element or property inside a variable. */
+  #partOrigin(root: Declaration, path: readonly string[]): PartOrigin {
+    const key = path.join(".");
+    const parts = this.#parts.get(root) ?? new Map<string, PartOrigin>();
+    let part = parts.get(key);
+    if (part === undefined) {
+      part = { root, path: [...path] };
+      parts.set(key, part);
+      this.#parts.set(root, parts);
+    }
+    return part;
   }
 
   /**
-   * Records that an integer variable stores a value that derives from other variables (see the `origins` of a scalar
-   * type), so it widens together with them.
+   * A new variable's own type (rule 1.2): with what earlier checks widened in it, its own numbers deriving from the
+   * variable, and those in its elements and properties also from the part they are.
    */
-  #follow(place: Place, value: StaticType, expression: Expression): void {
-    if (place.declaration !== undefined)
-      this.#followFirst(place.declaration, value, expression.span);
+  #ownType(declaration: Declaration, type: StaticType): StaticType {
+    const paths = this.#widened.get(declaration);
+    let own = paths?.has("") === true ? widenedType(type) : type;
+    for (const path of paths?.keys() ?? []) if (path !== "") own = widenPath(own, path.split("."));
+    own = ownOrigins(own, declaration);
+    ownPartOrigins(own, (path) => this.#partOrigin(declaration, path));
+    return own;
   }
 
   /**
-   * Records that a variable without a type annotation takes an integer value that derives from other variables, as its
-   * first value or by a later store, so it widens together with them; its own type keeps only itself as its origin.
+   * Widens again what earlier checks widened inside a variable, and gives new parts their origins, for elements and
+   * properties that a store added after the variable was created.
    */
-  #followFirst(declaration: Declaration, value: StaticType, at: SourceSpan): void {
-    if (!isScalar(nonNullType(value), "integer")) return;
-    for (const origin of originsOf(value)) {
-      if (origin === declaration) continue;
-      const followers = this.#followers.get(origin) ?? [];
-      followers.push({ declaration, at });
-      this.#followers.set(origin, followers);
+  #rewiden(root: Declaration): void {
+    const variable = this.#declared.get(root);
+    if (variable === undefined) return;
+    for (const path of this.#widened.get(root)?.keys() ?? [])
+      if (path !== "") widenPath(variable.type, path.split("."));
+    ownPartOrigins(variable.type, (path) => this.#partOrigin(root, path));
+  }
+
+  /** The type a variable keeps at a path in it, or `undefined` when that part does not exist. */
+  #typeAt(place: PlacePath): StaticType | undefined {
+    let type: StaticType | undefined = this.#declared.get(place.root)?.type;
+    for (const step of place.path) {
+      if (type === undefined) return undefined;
+      const value = resolved(nonNullType(type));
+      if (step === "[]")
+        type = value.kind === "list" || value.kind === "set" ? value.element : undefined;
+      else type = value.kind === "object" ? (value.properties?.get(step) ?? undefined) : undefined;
+    }
+    return type;
+  }
+
+  /** Where the place an expression reads is inside a variable without a type annotation, if it is in one. */
+  #pathOf(expression: Expression, scope: Scope): PlacePath | undefined {
+    const steps: string[] = [];
+    let node = unwrap(expression);
+    for (;;) {
+      if (node.kind === "indexExpression") steps.push("[]");
+      else if (node.kind === "propertyAccessExpression") {
+        const owner = members(nonNullType(this.#typeOf(node.object))).map(resolved);
+        const element =
+          LIST_ELEMENT_READS.has(node.property.name) &&
+          owner.length === 1 &&
+          (owner[0]!.kind === "list" || owner[0]!.kind === "set");
+        steps.push(element ? "[]" : node.property.name);
+      } else break;
+      node = unwrap(node.object);
+    }
+    const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
+    const root = entry?.kind === "variable" ? entry.variable.declaration : undefined;
+    return root === undefined ? undefined : { root, path: steps.reverse() };
+  }
+
+  /**
+   * Records that an integer variable, element, or property takes a value whose integers derive from other places (see
+   * the `origins` of a scalar type), as its first value or by a later store, so it widens together with them. A
+   * structured value carries each of its integers to the matching part.
+   */
+  #follow(target: PlacePath | undefined, value: StaticType, at: SourceSpan): void {
+    if (target === undefined) return;
+    for (const part of integerParts(value)) {
+      const place: PlacePath = { root: target.root, path: [...target.path, ...part.path] };
+      const key = place.path.join(".");
+      for (const origin of part.origins) {
+        const source = originPlace(origin);
+        const sourceKey = source.path.join(".");
+        if (source.root === place.root && sourceKey === key) continue;
+        const paths = this.#followers.get(source.root) ?? new Map<string, Follower[]>();
+        const followers = paths.get(sourceKey) ?? [];
+        followers.push({ place, at });
+        paths.set(sourceKey, followers);
+        this.#followers.set(source.root, paths);
+      }
     }
   }
 
@@ -1146,7 +1291,8 @@ class TypeChecker {
   #widenedNote(expression: Expression | null): string {
     if (expression === null) return "";
     for (const origin of originsOf(this.#typeOf(expression))) {
-      const at = this.#widened.get(origin);
+      if ("root" in origin) continue;
+      const at = this.#widenedAt(origin, []);
       if (at !== undefined)
         return ` '${declarationName(origin)}' is a number because line ${at.start.line + 1} can store a non-whole number in it.`;
     }
@@ -1194,9 +1340,10 @@ class TypeChecker {
     const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
     const nullable = isNullable(entry?.kind === "variable" ? entry.variable.type : collection);
     const inferred = this.#inferredCollection(collectionExpression, scope);
+    const owner = collections.length === 1 ? this.#pathOf(collectionExpression, scope) : undefined;
     const places = collections.flatMap((member) =>
       member.kind === "list" || member.kind === "set"
-        ? [elementPlace(member, label, nullable, inferred)]
+        ? [elementPlace(member, label, nullable, inferred, owner)]
         : [],
     );
     if (places.length === 1 || places.length < collections.length) {
@@ -1312,6 +1459,7 @@ class TypeChecker {
     object: StaticType,
     objectExpression: Expression,
     property: Identifier,
+    scope: Scope,
   ): Place | undefined {
     const name = property.name;
     const label = `${expressionLabel(objectExpression) ?? "this object"}.${name}`;
@@ -1333,7 +1481,12 @@ class TypeChecker {
       if (target.type !== null)
         type = type === undefined ? target.type : narrowTo(type, target.type);
     }
-    return type === undefined ? undefined : propertyPlace(type, label, `'${label}'`);
+    if (type === undefined) return undefined;
+    const owner =
+      all.length === 1 && all[0]!.kind === "object"
+        ? this.#pathOf(objectExpression, scope)
+        : undefined;
+    return propertyPlace(type, label, `'${label}'`, extendPath(owner, name));
   }
 
   *#returnTask(
@@ -1461,8 +1614,10 @@ class TypeChecker {
       shared: false,
     }));
     fn.accepted = accepted;
-    for (const parameter of accepted)
+    for (const parameter of accepted) {
+      if (parameter.declaration !== undefined) this.#declared.set(parameter.declaration, parameter);
       scope.declare(parameter.name, { kind: "variable", variable: parameter });
+    }
     const context: FunctionContext = { fn, declared, returns: [], returnsNull: false };
     const outer = this.#function;
     const outerLoops = this.#loops.splice(0);
@@ -1544,9 +1699,8 @@ class TypeChecker {
         // Assignments in the body may widen an integer default, but calls never do (rule 1.5).
         if (parameter.typeAnnotation === null) {
           type = decidedType(placeType(value));
-          if (this.#widened.has(parameter)) type = widenedType(type);
-          this.#followFirst(parameter, value, parameter.defaultValue.span);
-          type = ownOrigins(type, parameter);
+          this.#follow({ root: parameter, path: [] }, value, parameter.defaultValue.span);
+          type = this.#ownType(parameter, type);
         } else {
           const declared = type;
           yield* compileChild(
@@ -1581,6 +1735,7 @@ class TypeChecker {
         declaration,
         annotated: parameter.typeAnnotation !== null,
       };
+      if (declaration !== undefined) this.#declared.set(declaration, variable);
       parameters.push(variable);
       scope.declare(name, { kind: "variable", variable });
     }
@@ -3839,7 +3994,8 @@ function variablePlace(variable: Variable): Place {
   const type = variable.type;
   return {
     type,
-    declaration: variable.declaration,
+    widening:
+      variable.declaration === undefined ? undefined : { root: variable.declaration, path: [] },
     inferred: variable.declaration === undefined ? undefined : "variable",
     label: name,
     subject: `'${name}' holds ${describeValue(type)}${decidedAt(type)}`,
@@ -3853,11 +4009,13 @@ function elementPlace(
   name: string | null,
   nullable: boolean,
   inferred = false,
+  owner?: PlacePath,
 ): Place {
   const subject = name === null ? `This ${collection.kind}` : `'${name}'`;
   const element = resolved(collection.element);
   return {
     type: collection.element,
+    widening: extendPath(owner, "[]"),
     inferred: inferred ? "part" : undefined,
     label: null,
     elementOf: name,
@@ -3872,18 +4030,25 @@ function elementPlace(
 
 /** The place of a property inside a stored object literal, named after the place that keeps the object. */
 function nestedPropertyPlace(type: StaticType, owner: Place, name: string): Place {
+  const widening = extendPath(owner.widening, name);
   if (owner.label !== null)
-    return propertyPlace(type, `${owner.label}.${name}`, `'${owner.label}.${name}'`);
+    return propertyPlace(type, `${owner.label}.${name}`, `'${owner.label}.${name}'`, widening);
   const subject =
     owner.elementOf === undefined || owner.elementOf === null
       ? `Property '${name}'`
       : `Property '${name}' of the elements of '${owner.elementOf}'`;
-  return propertyPlace(type, null, subject);
+  return propertyPlace(type, null, subject, widening);
 }
 
-function propertyPlace(type: StaticType, label: string | null, name: string): Place {
+function propertyPlace(
+  type: StaticType,
+  label: string | null,
+  name: string,
+  widening?: PlacePath,
+): Place {
   return {
     type,
+    widening,
     // No type can be written for a property.
     inferred: "part",
     label,

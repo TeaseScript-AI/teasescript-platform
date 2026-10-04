@@ -19,17 +19,18 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
 ### 1. Every value has one type, and the compiler keeps it
 
 1. A variable, list or set element, object property, function parameter, and function result each keep one type: the
-   declared one, or the type of the first value, which rule 2 widens from `integer` to `number` for a variable. Storing
-   a value of another type is a compile error that names both types and the fix.
+   declared one, or the type of the first value, which rule 2 widens from `integer` to `number` where no type is
+   declared. Storing a value of another type is a compile error that names both types and the fix.
 2. `let x = null` without a type takes the type `T?` of the first non-null value later assigned. A different non-null
    type later is an error that names both places. This is the ordinary rule applied to the first real value, not a
    general union inference. A variable without a type annotation (declared by `let`, as a parameter with a default, or
    as a loop variable) whose type is `integer` is likewise inferred from all its assignments: it is a `number` when any
    of them can store a non-whole number, also one checked after its uses. With `let speed = 1` and
-   `speed = speed * 1.5`, `speed` is a `number`; with `let count = 0` and `count += 1`, `count` stays an `integer`. A
-   declared `integer` stays strict, list or set elements and object properties keep their first value's type, and an
-   integer-only use of a widened variable, such as a list index, `removeAt`, or a repeat count, is a compile error that
-   names the assignment that widened it.
+   `speed = speed * 1.5`, `speed` is a `number`; with `let count = 0` and `count += 1`, `count` stays an `integer`. The
+   elements and properties inside such a variable widen by the same rule: with `let prices = [1, 2]` and
+   `prices.add(2.5)`, `prices` is a `number[]`, and `hero.score = 2.5` after `let hero = { score: 0 }` is valid. A
+   declared type stays strict, such as `integer`, `integer[]`, or `integer set`, and an integer-only use of a widened
+   value, such as a list index, `removeAt`, or a repeat count, is a compile error.
 3. An empty list or set takes its element type from the first element added or assigned. A list or set literal has one
    element type: integers and numbers together are numbers, and `null` elements make it optional. Elements of
    different types are an error that points to a declared union such as `(string | number)[]`.
@@ -62,9 +63,9 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
 1. `integer` to `number` is the only implicit type conversion.
 2. Literal spelling decides the numeric type: `2` is an `integer`; `2.0`, `.5`, and `1e3` are `number` values.
    Dividing numbers always gives a `number`; a duration divided by a number stays a duration (V30 §35). Storing a
-   `number` where an `integer` is required, such as a declared `integer`, an `integer[]` element, or an `integer`
-   property, is an error that suggests `floor(...)`, `round(...)`, `ceil(...)`, or a `number` declaration; nothing
-   truncates silently. A variable without a type annotation widens instead (rule 1.2).
+   `number` where an `integer` is required, such as a declared `integer` or an element of a declared `integer[]`, is an
+   error that suggests `floor(...)`, `round(...)`, `ceil(...)`, or a `number` declaration; nothing truncates silently. A
+   variable without a type annotation, and its elements and properties, widen instead (rule 1.2).
 3. A duration needs a unit. Bare numbers count as seconds only in commands that expect a time: `wait`, `timer`, the
    `showButton` timeout, and media positions.
 4. Text and numbers, numbers and booleans, and numbers and durations never convert into each other implicitly. Values

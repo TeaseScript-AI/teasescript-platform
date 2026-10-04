@@ -73,10 +73,22 @@ function scalar(name: ScalarTypeName): StaticType {
 }
 
 /**
- * The declaration of a variable without a type annotation, which a number may derive from (ADR 0021 rule 1.2): `let`, a
- * parameter with a default, or a loop variable.
+ * What a number may derive from (ADR 0021 rule 1.2): a variable without a type annotation, or an element or property
+ * inside one.
  */
-export type Origin = LetStatement | FunctionParameter | ForStatement;
+export type Origin = Declaration | PartOrigin;
+
+/** The declaration of a variable without a type annotation: `let`, a parameter with a default, or a loop variable. */
+export type Declaration = LetStatement | FunctionParameter | ForStatement;
+
+/**
+ * An element or property inside a variable without a type annotation, which a number may derive from: the variable and
+ * the steps to the part, each a property name or `[]` for the elements of a list or set.
+ */
+export interface PartOrigin {
+  readonly root: Declaration;
+  readonly path: readonly string[];
+}
 
 /**
  * What a number derives from: origins that merge without copying, so a long sum stays cheap, and that keep every
@@ -656,7 +668,11 @@ function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
     }
     case "union": {
       // A union whose members can no longer change needs no copy of its own.
-      if (settledForms.get(type) === type) return type;
+      if (
+        settledForms.get(type) === type &&
+        !type.members.some((member) => member.kind === "list" || member.kind === "set")
+      )
+        return type;
       const copied: StaticType[] = [];
       for (const member of type.members) copied.push(yield* compileChild(copyTask(member)));
       return { kind: "union", members: copied };
@@ -739,6 +755,157 @@ export function widenedType(type: StaticType): StaticType {
   if (value.kind === "open") value.widens = true;
   if (value.kind !== "union") return value;
   return union(value.members.map(widenedType));
+}
+
+/**
+ * Widens the integer type at `path` inside a place's own type (ADR 0021 rule 1.2), where each step is a property name or
+ * `[]` for the elements of a list or set. A decided slot on the way is changed in place; the returned type replaces
+ * `type` in its parent.
+ */
+export function widenPath(type: StaticType, path: readonly string[]): StaticType {
+  return runCompileTask(widenPathTask(type, path, 0));
+}
+
+function* widenPathTask(
+  type: StaticType,
+  path: readonly string[],
+  step: number,
+): CompileTask<StaticType> {
+  if (type.kind === "open") {
+    if (type.resolved === null) {
+      if (step === path.length) type.widens = true;
+    } else type.resolved = yield* compileChild(widenPathTask(type.resolved, path, step));
+    return type;
+  }
+  if (type.kind === "union") {
+    const widened: StaticType[] = [];
+    for (const member of type.members)
+      widened.push(yield* compileChild(widenPathTask(member, path, step)));
+    return union(widened);
+  }
+  if (step === path.length)
+    return isScalar(type, "integer")
+      ? withOrigins(NUMBER_TYPE, type.kind === "scalar" ? type.origins : undefined)
+      : type;
+  const name = path[step]!;
+  if (name === "[]" && (type.kind === "list" || type.kind === "set")) {
+    // EVIDENCE: invariant: a place's own collection type belongs to that place alone; values read from it are copied.
+    (type as { element: StaticType }).element = yield* compileChild(
+      widenPathTask(type.element, path, step + 1),
+    );
+  } else if (type.kind === "object" && type.properties !== null) {
+    const kept = type.properties.get(name);
+    if (kept !== undefined)
+      type.properties.set(name, yield* compileChild(widenPathTask(kept, path, step + 1)));
+  }
+  return type;
+}
+
+/**
+ * The paths in `target` where it keeps an integer and `source` holds a number, through elements and shared properties:
+ * the parts of a place that storing a value of `source` would widen (ADR 0021 rule 1.2).
+ */
+export function numberPaths(target: StaticType, source: StaticType): string[][] {
+  const paths: string[][] = [];
+  runCompileTask(numberPathsTask(target, source, [], paths));
+  return paths;
+}
+
+function* numberPathsTask(
+  targetType: StaticType,
+  sourceType: StaticType,
+  path: readonly string[],
+  paths: string[][],
+): CompileTask<void> {
+  const target = resolved(nonNullType(targetType));
+  const source = resolved(nonNullType(sourceType));
+  if (isScalar(target, "integer") && isScalar(source, "number")) {
+    paths.push([...path]);
+    return;
+  }
+  if ((target.kind === "list" || target.kind === "set") && source.kind === target.kind)
+    yield* compileChild(numberPathsTask(target.element, source.element, [...path, "[]"], paths));
+  if (target.kind === "object" && source.kind === "object") {
+    if (target.properties === null || source.properties === null) return;
+    for (const [name, value] of source.properties) {
+      const kept = target.properties.get(name);
+      if (kept !== undefined)
+        yield* compileChild(numberPathsTask(kept, value, [...path, name], paths));
+    }
+  }
+}
+
+/** The integers inside a value, through elements and properties, each with its path and what it derives from. */
+export function integerParts(
+  type: StaticType,
+): { readonly path: readonly string[]; readonly origins: Iterable<Origin> }[] {
+  const parts: { readonly path: readonly string[]; readonly origins: Iterable<Origin> }[] = [];
+  runCompileTask(integerPartsTask(type, [], parts));
+  return parts;
+}
+
+function* integerPartsTask(
+  typeToSearch: StaticType,
+  path: readonly string[],
+  parts: { readonly path: readonly string[]; readonly origins: Iterable<Origin> }[],
+): CompileTask<void> {
+  const type = resolved(nonNullType(typeToSearch));
+  if (isScalar(type, "integer")) {
+    const origins = scalarOrigins(type);
+    if (origins !== undefined) parts.push({ path, origins });
+    return;
+  }
+  if (type.kind === "list" || type.kind === "set")
+    yield* compileChild(integerPartsTask(type.element, [...path, "[]"], parts));
+  else if (type.kind === "object" && type.properties !== null)
+    for (const [name, value] of type.properties)
+      yield* compileChild(integerPartsTask(value, [...path, name], parts));
+}
+
+/**
+ * Gives every number inside a place's own type, in its elements and properties, the part it is as an origin as well,
+ * besides what it was built from, so a value read from that part derives from it (ADR 0021 rule 1.2). A slot that a
+ * later value decides takes the part too.
+ */
+export function ownPartOrigins(
+  type: StaticType,
+  origin: (path: readonly string[]) => Origin,
+  at: readonly string[] = [],
+): void {
+  runCompileTask(ownPartOriginsTask(type, origin, at));
+}
+
+function* ownPartOriginsTask(
+  type: StaticType,
+  origin: (path: readonly string[]) => Origin,
+  path: readonly string[],
+): CompileTask<StaticType> {
+  if (type.kind === "open") {
+    if (type.resolved === null) {
+      if (path.length > 0) type.origins = Origins.of(origin(path));
+    } else type.resolved = yield* compileChild(ownPartOriginsTask(type.resolved, origin, path));
+    return type;
+  }
+  if (type.kind === "union") {
+    const parts: StaticType[] = [];
+    for (const member of type.members)
+      parts.push(yield* compileChild(ownPartOriginsTask(member, origin, path)));
+    return parts.every((part, index) => part === type.members[index]) ? type : union(parts);
+  }
+  if (type.kind === "scalar")
+    return path.length === 0 ? type : withOrigins(type, Origins.of(origin(path)));
+  if (type.kind === "list" || type.kind === "set") {
+    // EVIDENCE: invariant: a place's own collection type belongs to that place alone; values read from it are copied.
+    (type as { element: StaticType }).element = yield* compileChild(
+      ownPartOriginsTask(type.element, origin, [...path, "[]"]),
+    );
+  } else if (type.kind === "object" && type.properties !== null)
+    for (const [name, value] of type.properties)
+      type.properties.set(
+        name,
+        yield* compileChild(ownPartOriginsTask(value, origin, [...path, name])),
+      );
+  return type;
 }
 
 /** The type with every undecided part unknown, for a place that no later value may decide, such as a parameter. */

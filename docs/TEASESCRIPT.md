@@ -249,7 +249,7 @@ values are checked when the operation runs.
 A separate type check (`src/type-checker.ts`) runs once names and structure are valid and enforces ADR 0021:
 variables, list and set elements, object properties, parameters, and function results keep one type, including types
 decided by a first non-null value, a first element, a parameter default, or a function's returns; an inferred `integer`
-variable is a `number` when one of its assignments can store a non-whole number; `integer` to `number` is the only
+variable, element, or property is a `number` when one of its assignments can store a non-whole number; `integer` to `number` is the only
 implicit conversion; operators, conditions, indexes, members, and command operands get values of types they
 support, and on a union every member must support them, with some known operands still rejected only at runtime until
 #552; union types, type names, and `is` type tests are available, and tests, `!= null`, and assignments narrow plain

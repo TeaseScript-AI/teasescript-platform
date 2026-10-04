@@ -165,7 +165,7 @@ test("an unannotated integer variable is a number when one of its assignments ca
     mismatches("let items = [10, 20]\nlet i = 0\nsay items[i + 1]\ni = 0.5")[0]?.[1],
     "A list index must be a whole number (integer), but this is a number. 'i' is a number because line 4 can store a non-whole number in it. Round it with floor(...), round(...), or ceil(...).",
   );
-  // Assignments in its body widen a parameter's default, but calls never do; properties and elements keep their type.
+  // Assignments in its body widen a parameter's default, but calls never do.
   assert.deepEqual(
     sayTexts(
       "function half(times = 1) {\n    times = times / 2\n    return times\n}\nsay half(3)\nsay half(2.5)",
@@ -175,7 +175,100 @@ test("an unannotated integer variable is a number when one of its assignments ca
   assert.deepEqual(codes("function f(times = 1) {\n    return times\n}\nlet r = f(2.5)"), [
     ["TSV041", "2.5"],
   ]);
-  assert.deepEqual(codes("let o = { n: 1 }\no.n = 1.5"), [["TSV041", "1.5"]]);
+});
+
+test("elements and properties of an unannotated variable widen to number like the variable", () => {
+  for (const [source, said] of [
+    ["let prices = [1, 2]\nprices.add(2.5)\nsay prices", "[1, 2, 2.5]"],
+    ["let marks = set[1]\nmarks.add(0.5)\nsay marks", "[1, 0.5]"],
+    ["let hero = { score: 0 }\nhero.score = 2.5\nsay hero", "{ score: 2.5 }"],
+    ["let hero = { score: 0 }\nhero.score += 0.5\nsay hero", "{ score: 0.5 }"],
+    ["let xs = []\nxs.add(1)\nxs[0] = 0.5\nsay xs", "[0.5]"],
+    ["let rows = [{ n: 1 }]\nrows.first.n = 1.5\nsay rows", "[{ n: 1.5 }]"],
+    ["let game = { scores: [1] }\ngame.scores.add(1.5)\nsay game", "{ scores: [1, 1.5] }"],
+    ["let p = {}\np.bonus = 1\np = { bonus: 1.5 }\nsay p", "{ bonus: 1.5 }"],
+    [
+      "function f(items = [1]) {\n    items.add(1.5)\n    return items\n}\nsay f([2.5])",
+      "[2.5, 1.5]",
+    ],
+  ] as const)
+    assert.deepEqual(sayTexts(source), [said], source);
+  // The widened type holds everywhere, so an integer-only use before the assignment is an error.
+  assert.deepEqual(
+    codes('let prices = [1, 2]\nlet items = ["a", "b"]\nsay items[prices[0]]\nprices.add(2.5)'),
+    [["TSV043", "prices[0]"]],
+  );
+  assert.deepEqual(
+    codes("let hero = { score: 0 }\nlet k: integer = hero.score\nhero.score = 2.5"),
+    [["TSV041", "hero.score"]],
+  );
+  // A value that is not a literal widens what it is stored in as well, and a chain of parts widens in one more check.
+  assert.deepEqual(sayTexts("let p = { n: 1 }\nlet q = { n: 1.5 }\np = q\nsay p.n"), ["1.5"]);
+  assert.deepEqual(sayTexts("let p = [1]\nlet q = [1.5]\np = q\nsay p"), ["[1.5]"]);
+  const parts = Array.from({ length: 1_000 }, (_, index) => `let v${index} = { n: 0 }`);
+  const links = Array.from({ length: 999 }, (_, index) => `v${index}.n = v${index + 1}.n + 1`);
+  assert.deepEqual(
+    codes(
+      `${parts.join("\n")}\n${links.reverse().join("\n")}\nv999.n = 0.5\nlet k: integer = v0.n`,
+    ),
+    [["TSV041", "v0.n"]],
+  );
+  // A chain of whole collections copied into each other widens in one more check.
+  const lists = Array.from({ length: 800 }, (_, index) => `let c${index} = [1]`);
+  const copies = Array.from({ length: 799 }, (_, index) => `c${index} = c${index + 1}`);
+  assert.deepEqual(
+    codes(`${lists.join("\n")}\n${copies.join("\n")}\nc799 = [1.5]\nlet k: integer[] = c0`),
+    [["TSV041", "c0"]],
+  );
+  // A part read under a test that keeps it whole does not widen what stores it.
+  assert.deepEqual(
+    codes(
+      "let p = [1]\nlet k = { n: 0 }\nif p is integer[] {\n    k.n = p.first\n}\nlet strict: integer = k.n\np.add(1.5)",
+    ),
+    [],
+  );
+  // Also where the elements may be null: a whole copy or one element stays whole, but a number test keeps it widening.
+  for (const [test, copy, check] of [
+    ["integer?[]", "q = p", "let k: integer?[] = q"],
+    ["integer?[]", "r.n = p.first", "let k: integer? = r.n"],
+    ["number?[]", "q = p", "let k: integer?[] = q"],
+  ] as const)
+    assert.deepEqual(
+      codes(
+        `let p = [null, 1]\nlet q = [null]\nlet r = { n: null }\nif p is ${test} {\n    ${copy}\n}\n${check}\np.add(1.5)`,
+      ),
+      test === "number?[]"
+        ? [
+            ["TSV046", "p is number?[]"],
+            ["TSV041", "q"],
+          ]
+        : [],
+      `${test} ${copy}`,
+    );
+  // A write that widens a narrowed list ends what the test knew about its elements.
+  assert.deepEqual(
+    codes(
+      'let names = ["a", "b"]\nlet p = [1]\nif p is integer[] {\n    p.add(1.5)\n    say names[p.last]\n}',
+    ),
+    [["TSV043", "p.last"]],
+  );
+  // A widened copy never changes the original, also through an optional type or a function result.
+  assert.deepEqual(
+    codes(
+      "function f(xs: integer[]? = [1]) {\n    let copied = xs\n    if copied != null {\n        copied.add(1.5)\n    }\n    return xs\n}\nlet r = f([2.5])",
+    ),
+    [["TSV041", "2.5"]],
+  );
+  assert.deepEqual(
+    codes(
+      "function f(flag: boolean) {\n    if flag {\n        return [1]\n    }\n}\nlet a = f(true)\nif a != null {\n    a.add(1.5)\n}\nlet b: integer[]? = f(true)",
+    ),
+    [],
+  );
+  // A declared integer collection stays strict, and a copy widens on its own.
+  assert.deepEqual(codes("let prices: integer[] = [1]\nprices.add(2.5)"), [["TSV041", "2.5"]]);
+  assert.deepEqual(codes("let ids: integer set = set[1]\nids.add(2.5)"), [["TSV041", "2.5"]]);
+  assert.deepEqual(codes("let a = [1]\nlet b = a\nb.add(1.5)\nlet k: integer[] = a"), []);
 });
 
 test("compound assignment keeps the variable's type", () => {
@@ -219,7 +312,7 @@ test("compound assignment keeps the variable's type", () => {
     [],
   );
   assert.deepEqual(
-    mismatches("let items = [1]\nitems[0] += 0.5")[0]?.[1],
+    mismatches("let items: integer[] = [1]\nitems[0] += 0.5")[0]?.[1],
     "'items' holds integer values (integer[]), so '+=' cannot make an element a number. To allow fractions, declare it as 'let items: number[] = ...'.",
   );
 });
@@ -556,8 +649,8 @@ test("an empty list or set takes its element type from the first element, and nu
   ]);
   assert.deepEqual(codes('let items = []\nitems = ["a"]\nitems[0] = 2'), [["TSV041", "2"]]);
   assert.deepEqual(codes('let tags = set[]\ntags.add("a")\ntags.add(true)'), [["TSV041", "true"]]);
-  assert.deepEqual(codes("let marks = [null, 1]\nmarks.add(null)\nmarks.add(2.5)"), [
-    ["TSV041", "2.5"],
+  assert.deepEqual(codes('let marks = [null, 1]\nmarks.add(null)\nmarks.add("x")'), [
+    ["TSV041", '"x"'],
   ]);
   assert.deepEqual(codes("let marks = [null]\nmarks.add(1)\nmarks.add(null)\nmarks.add(true)"), [
     ["TSV041", "true"],
