@@ -277,9 +277,8 @@ export function enforceVariableTypes(
           const needed =
             binding.optional ||
             binding.union !== undefined ||
-            (type !== undefined &&
-              nonNull(type).kind === "list" &&
-              elementType(type)?.kind === "union") ||
+            // A list literal that mixes types needs its union element type written (ADR 0021 rule 1.3).
+            (type !== undefined && hasUnion(type) && statement.value.kind === "list") ||
             binding.initial.kind === "optional" ||
             (binding.widened && type !== undefined && nonNull(type).kind === "list");
           if (needed && written !== null) {
@@ -941,10 +940,20 @@ function annotation(type: TeaseType): string | null {
     value.kind === "scalar" ||
     (value.kind === "list" && value.element.kind === "scalar") ||
     (value.kind === "union" && value.members.every(isWritableMember)) ||
-    (value.kind === "list" &&
-      value.element.kind === "union" &&
-      value.element.members.every(isWritableMember));
+    (value.kind === "list" && hasUnion(value) && writableElements(value.element));
   return writable ? typeName(type) : null;
+}
+
+/** Whether a list's elements, possibly lists themselves, end in scalars or unions an annotation can name. */
+function writableElements(type: TeaseType): boolean {
+  if (type.kind === "list") return writableElements(type.element);
+  return type.kind === "scalar" || (type.kind === "union" && type.members.every(isWritableMember));
+}
+
+/** Whether a type is or contains a union, as the element type of a list of lists may. */
+function hasUnion(type: TeaseType): boolean {
+  const value = nonNull(type);
+  return value.kind === "union" || (value.kind === "list" && hasUnion(value.element));
 }
 
 /** A type a union annotation can name: a scalar, a list of scalars, any list (`list`), or any object (`object`). */
@@ -1084,7 +1093,8 @@ function arithmeticType(
  */
 function elementsType(types: readonly TeaseType[]): TeaseType {
   const common = commonType(types);
-  if (common.kind !== "unknown" || types.length < 2) return common;
+  if (common.kind !== "unknown" || types.length === 0) return common;
+  // Lists of lists keep their elements' list type, such as `(string | integer)[]` for Groovy pairs.
   let merged: TeaseType | null = types[0]!;
   for (const type of types.slice(1)) {
     if (merged === null) return UNKNOWN;

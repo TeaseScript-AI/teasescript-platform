@@ -36,3 +36,7 @@ def names = ["first", "second"]
 def position = 0
 position = position + 0.5
 show(names[position])
+// Groovy pairs of a name and a level: a list of lists whose elements are text or whole numbers.
+def offenses = [["late", 2], ["rude", 4]]
+def single = [["missed", 1]]
+show("First: " + offenses[0][0] + ", then " + single[0][0])
