@@ -41,11 +41,12 @@ onMounted(async () => {
   if (container.value === null) return;
   models = project.map(({ path, text }) => ({
     path,
-    // Not Uri.file: on Windows it turns a `\` into a folder separator, so two package files could share a model.
+    // Distinct package paths need distinct model URIs. Uri.file turns a `\` into a folder separator on Windows, and
+    // Monaco lowercases a first folder that looks like a drive (`C:`), so the paths sit below a fixed first folder.
     model: monaco.editor.createModel(
       text,
       "teasescript",
-      monaco.Uri.from({ scheme: "file", path: `/${path}` }),
+      monaco.Uri.from({ scheme: "file", path: `/package/${path}` }),
     ),
   }));
   const first = models.find((file) => file.path === MAIN_FILE_PATH) ?? models[0];
