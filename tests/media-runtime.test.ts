@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import {
@@ -57,6 +58,30 @@ function mediaOf(snapshot: MutableSnapshot, mediaId: number): MutableMedia {
   return media;
 }
 
+/**
+ * Generous bound for a catch-up that finishes in well under a second. The horizons that use it hold so many silent
+ * passes that committing them one at a time would take days, so exceeding it means that regression rather than a slow
+ * machine; it is not a performance threshold.
+ */
+const BOUNDED_CATCH_UP_LIMIT_MS = 20_000;
+
+/** Restores a checkpoint, observes a time with progress reports, and runs the engine; prints the result as JSON. */
+const BOUNDED_CATCH_UP_SCRIPT = `
+  import { createCheckpoint, deserializeCheckpoint, observeTime, run, serializeCheckpoint }
+    from ${JSON.stringify(new URL("../src/index.js", import.meta.url).href)};
+  let input = "";
+  for await (const chunk of process.stdin) input += chunk;
+  const { checkpoint, nowMs, reports } = JSON.parse(input);
+  const { plan, snapshot } = deserializeCheckpoint(checkpoint);
+  const observed = observeTime(plan, snapshot, nowMs, reports);
+  const ran = run(plan, observed.snapshot);
+  process.stdout.write(JSON.stringify({
+    outcome: observed.outcome.kind,
+    events: [...observed.events, ...ran.events],
+    checkpoint: serializeCheckpoint(createCheckpoint(plan, ran.snapshot)),
+  }));
+`;
+
 /** A deterministic scripted Player: every operation validates the snapshot and continues execution. */
 class Session {
   readonly plan: InstructionPlan;
@@ -101,6 +126,41 @@ class Session {
         })),
       ),
     );
+    return this;
+  }
+
+  /** Like `at`, in a child process that must finish within `BOUNDED_CATCH_UP_LIMIT_MS`. */
+  atBounded(nowMs: number, ...reports: readonly (readonly [number, number])[]): this {
+    const child = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--eval", BOUNDED_CATCH_UP_SCRIPT],
+      {
+        input: JSON.stringify({
+          checkpoint: serializeCheckpoint(createCheckpoint(this.plan, this.snapshot)),
+          nowMs,
+          reports: reports.map(([mediaId, progressMs]) => ({
+            mediaId,
+            segment: this.media(mediaId)?.segment ?? 0,
+            progressMs,
+          })),
+        }),
+        encoding: "utf8",
+        timeout: BOUNDED_CATCH_UP_LIMIT_MS,
+      },
+    );
+    assert.equal(child.error, undefined, `catch-up to ${nowMs} ms must finish within the bound`);
+    assert.equal(child.status, 0, child.stderr);
+    // EVIDENCE: fixture: the child prints plain JSON data in this shape.
+    const result = JSON.parse(child.stdout) as {
+      outcome: string;
+      events: InterpreterEvent[];
+      checkpoint: string;
+    };
+    assert.equal(result.outcome, "observed");
+    this.#apply({
+      snapshot: deserializeCheckpoint(result.checkpoint).snapshot,
+      events: result.events,
+    });
     return this;
   }
 
@@ -1646,4 +1706,64 @@ test("a control at the end of a pass leaves pending start cues at the start unti
     if (control === "m.pause()") assert.equal(media.startCuesPending, true, control);
     assert.equal(validateRuntimeSnapshot(session.snapshot, session.plan).valid, true, control);
   }
+});
+
+test("a late observation across silent repeat passes equals observing every pass end on time", () => {
+  // Pass ends without in-range cues are skipped arithmetically during catch-up (docs/RUNTIME.md). The oracle observes
+  // in 5-millisecond steps, shorter than every pass here, so it commits each pass end separately.
+  const scenarios = [
+    'let m = playAudio(file: "a", async: true, endAt: 5.1 ms, repeat: true)\nwait 997 ms\nsay "${m.elapsed} ${m.position}"',
+    'let m = playAudio(file: "a", async: true, endAt: 6.3 ms, repeat: 150 times) {\n  finish { say "done" }\n}\nwait 1000 ms\nsay "${m.state} ${m.elapsed}"',
+    'let m = playAudio(file: "a", async: true, startAt: 0.05 ms, endAt: 6.3 ms, repeat: 777.7 ms) {\n  finish { say "done ${m.position}" }\n}\nwait 1000 ms',
+    'let m = playAudio(file: "a", async: true, startAt: 2 ms, endAt: 9.3 ms, repeat: true) {\n  at 1 ms { say "never" }\n}\nm.position = 2.4 ms\nwait 500 ms\nsay "${m.elapsed} ${m.position}"',
+    'let m = playAudio(file: "a", async: true, endAt: 7.5 ms, repeat: true)\nlet t = timer(duration: 97 ms, async: true, repeat: true) { say "${m.elapsed} ${m.position}" }\nwait 1000 ms',
+    'let m = playAudio(file: "a", async: true, endAt: 5.7 ms, repeat: true)\nlet n = playAudio(file: "b", async: true, endAt: 8.9 ms, repeat: 100 times)\nwait 1000 ms\nsay "${m.position} ${n.state} ${n.elapsed}"',
+  ];
+  for (const source of scenarios) {
+    const start = (): Session => {
+      const session = new Session(source).load(1, 10);
+      return session.media(2) === undefined ? session : session.load(2, 10);
+    };
+    const reports = (session: Session, nowMs: number): [number, number][] =>
+      [1, 2].flatMap((mediaId): [number, number][] =>
+        session.media(mediaId)?.state === "running" ? [[mediaId, nowMs]] : [],
+      );
+    const fine = start();
+    for (let nowMs = 5; nowMs <= 1_200; nowMs += 5) fine.at(nowMs, ...reports(fine, nowMs));
+    const late = start();
+    late.at(1_200, ...reports(late, 1_200));
+    assert.deepEqual(late.said(), fine.said(), source);
+    assert.ok(late.said().length > 0, source);
+    assert.deepEqual(late.media(1), fine.media(1), source);
+    assert.deepEqual(late.media(2), fine.media(2), source);
+    assert.equal(late.snapshot.status, fine.snapshot.status, source);
+  }
+});
+
+test("catch-up across 10^12 silent repeat passes finishes within the bound with on-time values", () => {
+  const forever = new Session(
+    'let m = playAudio(file: "a", async: true, endAt: 1 ms, repeat: true)\nwait 1000000000 s\nsay "${m.elapsed == 1000000000 s}"',
+  )
+    .load(1, 10)
+    .atBounded(1e12, [1, 1e12]);
+  assert.deepEqual(forever.said(), ["true"]);
+  assert.equal(forever.media(1)?.passesCompleted, 1e12);
+
+  const counted = new Session(
+    'let m = playAudio(file: "a", async: true, endAt: 1 ms, repeat: 1000000000000 times) {\n  finish { say "done ${m.elapsed == 1000000000 s}" }\n}\nwait 2000000000 s',
+  )
+    .load(1, 10)
+    .atBounded(2e12, [1, 2e12]);
+  assert.deepEqual(counted.said(), ["done true"]);
+  assert.equal(counted.media(1)?.state, "finished");
+  assert.equal(counted.media(1)?.passesCompleted, 1e12);
+
+  const budget = new Session(
+    'let m = playAudio(file: "a", async: true, endAt: 1.5 ms, repeat: 1000000000.25 s) {\n  finish { say "done ${m.position}" }\n}\nwait 2000000000 s',
+  )
+    .load(1, 10)
+    .atBounded(2e12, [1, 2e12]);
+  assert.equal(budget.media(1)?.state, "finished");
+  assert.equal(budget.media(1)?.elapsedMs, 1_000_000_000_250);
+  assert.equal(budget.said().length, 1);
 });

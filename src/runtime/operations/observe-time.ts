@@ -22,6 +22,8 @@ import {
   nextMediaEvent,
   pruneMediaPoints,
   recordMediaProgress,
+  repeatsSilently,
+  skipSilentPasses,
   type MediaTimelineEvent,
 } from "../media.js";
 import { applyMediaEvent, mediaSpan } from "./media-lifecycle.js";
@@ -132,8 +134,21 @@ export function processDueWork(
       );
     } else if (due.kind === "media") {
       // One timeline event per iteration, so a queued cue block holds catch-up like a timer expiry.
+      const media = due.action.media;
+      let event = due.event;
+      if (repeatsSilently(media)) {
+        // Silent pass ends may be skipped only up to the next other work, which could observe or change this media.
+        const boundary = nextOtherWork(current, due.actionId);
+        skipSilentPasses(
+          media,
+          boundary.deadlineMs,
+          boundary.phase > 0 || due.actionId < boundary.actionId,
+        );
+        event = nextMediaEvent(media)!;
+        current.currentSessionTimeMs = Math.max(current.currentSessionTimeMs, event.dueAtMs!);
+      }
       const span = mediaSpan(plan, due.action.owningInstruction);
-      applyMediaEvent(plan, current, due.action, due.event, events, span);
+      applyMediaEvent(plan, current, due.action, event, events, span);
     } else if (due.kind === "suspended") {
       settleSuspendedDelay(plan, current, due.frame, due.action, events);
     } else if (due.action.kind === "interaction") {
