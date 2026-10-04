@@ -66,7 +66,10 @@ goto script("rooms/${room}.tease", label: "start")
    other global functions and built-ins. Breaking either rule is a compile error whose fix is to make the name a global
    or pass it as a parameter. Interactions, `goto`, `call`, `end`, `exit`, and recursion work in it normally; a bare
    label means a label of the file where the function is written, like `goto "helpers.tease" start`. Such a goto
-   enters that file afresh, so for rule 4 none of its top-level `let`s has run there.
+   enters that file afresh, so for rule 4 none of its top-level `let`s has run there. For rule 4 it counts wherever the
+   function could be called, even when nothing calls it; this is conservative until it is computed which global
+   functions can be reached.
+
 6. Speakers are always global: `speaker vera { … }`, declared anywhere in any file, is known in every file and is set up
    at session start under the rules for globals (§6). There is no `global speaker`. `speaker vera`, which sets the
    default speaker, stays an ordinary statement.
@@ -141,6 +144,7 @@ global level = load "level", default: 1
    `global level = load "level", default: 1` gives the default to `load`. Without `default:`, an initializer that uses
    a local value is a compile error that names the global, explains that it needs a value from the start of the session,
    and shows both fixes: adding `, default: 0`, or writing `global attempts = 0` and later `attempts = localCount`.
+
 6. Types follow the `let` rules of ADR 0021, with one type environment for all files; ADR 0021 rule 6 gives the
    checking order across files.
 7. Values are checkpointed and live for the session. `save` and `load` give persistence beyond it.

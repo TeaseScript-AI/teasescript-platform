@@ -875,6 +875,7 @@ punish(3)
 - Interactions, timers, media, `goto`, `call`, `end`, `exit`, and recursion work in it as in any function. A bare label
   in it means a label of the file where it is written, like `goto "helpers.tease" start`: the goto enters that file
   afresh, so a variable of the file used after the label needs its `let` after the label too ([§26](#26-labels-and-goto)).
+  This holds even when nothing calls the function, until it is computed which global functions can be reached.
 - Its name is unique in the package, like that of a global ([§12](#global-variables)).
 
 ## 12. Variable declarations
