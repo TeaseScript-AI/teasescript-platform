@@ -106,31 +106,21 @@ test("a choice object that is not written in the option is checked by its known 
     'function pick(option = { value: 1 }) {\n    let answer = choose option\n}\npick({ text: "A", value: 1 })',
   ])
     assert.deepEqual(errors(source), [], source);
-  // A test that narrows a hidden exact value to another kind keeps its literals from reaching the choice.
-  const hidden = (value: string, test: string) =>
-    `let box: object = { part: ${value} }\nlet part = box.part\nif part is ${test} {\n    let answer = choose part\n}\nsay "done"`;
-  for (const [value, test] of [
-    ["{ value: 1 }", "integer"],
-    ["[{ value: 1 }]", "set"],
-    ["[{ value: 1 }]", "null"],
-    ["[{ value: 1 }]", "integer[]"],
-  ] as const)
-    assert.deepEqual(says(hidden(value, test)), ["done"], hidden(value, test));
-  // A copy taken where the test narrowed it does not bring the literals back behind a written type.
-  const copied =
-    'let box: object = { part: [{ value: 1 }] }\nlet part = box.part\nif part is integer[] {\n    let copy: list = part\n    let answer = choose copy\n}\nsay "done"';
-  assert.deepEqual(says(copied), ["done"]);
-  // Objects with different properties fit `object[]` but not `integer[]`, although their joined element type is unknown.
-  assert.deepEqual(
-    says(
-      'let part: object[] = [{ value: 1 }, { value: "x" }]\nif part is integer[] {\n    let answer = choose part\n}\nsay "done"',
-    ),
-    ["done"],
-  );
-  assert.deepEqual(
-    errors(hidden("{ value: 1 }", "object")).map(([code]) => code),
-    ["TSV029"],
-  );
+  // Code behind a test of a value, of a part of it, or of a copy may never get it, so its literals are not checked there.
+  const tested = (value: string, test: string, option = "part") =>
+    `let box: object = { part: ${value} }\nlet part = box.part\nif ${test} {\n    let answer = choose ${option}\n}\nsay "done"`;
+  for (const source of [
+    tested("{ value: 1 }", "part is integer"),
+    tested("[{ value: 1 }]", "part is set"),
+    tested("[{ value: 1 }]", "part is null"),
+    tested("[{ value: 1 }]", "part is integer[]"),
+    tested("[{ value: 1 }]", "part is not object[]"),
+    tested("[{ value: 1 }]", "box.part is integer[]", "box.part"),
+    'let part: object[] = [{ value: 1 }, { value: "x" }]\nif part is integer[] {\n    let answer = choose part\n}\nsay "done"',
+    'let part = [{ value: 1 }]\nlet copy = part\nif copy is integer[] {\n    let answer = choose part\n}\nsay "done"',
+    'let box: object = { part: [{ value: 1 }] }\nlet part = box.part\nif part is integer[] {\n    let copy: list = part\n    let answer = choose copy\n}\nsay "done"',
+  ])
+    assert.deepEqual(says(source), ["done"], source);
 });
 
 test("a property that an exact object never gets is an error where it is read", () => {

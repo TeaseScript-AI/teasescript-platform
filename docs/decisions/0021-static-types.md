@@ -58,9 +58,10 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
    only for exact objects, so reading a property it lacks, and a choice object's missing `text`, other property, or
    `value` or `background` that its button cannot use, are errors only for them, when every literal the object may be
    has the problem. An exact value is an object, list, or dict literal, a variable declared with an exact value whose
-   name nothing in the script assigns or changes, or a property, element, or dict value of an exact value that is
-   itself a literal; an element or dict value may be any of them. Any other object may lack a property it was built
-   with, or have others.
+   name nothing in the script assigns, changes, or tests with `is`, `==`, `!=`, or `switch` (also through a part of it
+   or a variable declared from it, since code behind a test may never get the value), or a property, element, or dict
+   value of an exact value that is itself a literal; an element or dict value may be any of them. Any other object may
+   lack a property it was built with, or have others.
 9. A possibly null value used where its non-null type is required, such as `n + 1` with `n: integer?`, is a compile
    error whose message names the check, `if n != null { ... }` (owner decision of 2026-10-04 on #504). The check
    narrows the value (rule 5.1). Places and operands that accept `null` themselves still take it.

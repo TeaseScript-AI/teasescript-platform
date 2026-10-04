@@ -347,8 +347,9 @@ class TypeChecker {
 
   readonly #functions: FunctionType[] = [];
   /**
-   * For each variable declared with an exact value whose name nothing in the script assigns or changes, the literals
-   * that value is one of: values are copied, so the variable always holds what they build (ADR 0021 rule 1.8).
+   * For each variable declared with an exact value whose name nothing in the script assigns, changes, or tests, the
+   * literals that value is one of: values are copied, so the variable always holds what they build, and no test keeps
+   * them from code that reads it (ADR 0021 rule 1.8).
    */
   readonly #exactLiterals = new WeakMap<Variable, readonly Expression[]>();
   /** For each identifier that reads such a variable, its literals. */
@@ -382,7 +383,12 @@ class TypeChecker {
   #flow = new Flow();
 
   /** What functions, blocks, and loops may change, collected before checking. */
-  #effects: ProgramEffects = { shared: new Set(), assigned: new Set(), loops: new Map() };
+  #effects: ProgramEffects = {
+    shared: new Set(),
+    assigned: new Set(),
+    tested: new Set(),
+    loops: new Map(),
+  };
 
   /** Whether the statement being checked can run; a `break` after a `return` does not end its loop. */
   #reachable = true;
@@ -907,7 +913,10 @@ class TypeChecker {
       annotated: statement.typeAnnotation !== null,
     };
     if (statement.typeAnnotation === null) this.#declared.set(statement, variable);
-    const exact = this.#effects.assigned.has(name) ? undefined : this.#exactValues(initializer);
+    const exact =
+      this.#effects.assigned.has(name) || this.#effects.tested.has(name)
+        ? undefined
+        : this.#exactValues(initializer);
     if (exact !== undefined) this.#exactLiterals.set(variable, exact);
     scope.declare(name, { kind: "variable", variable });
     this.#assigned(variable, value);
@@ -2014,18 +2023,9 @@ class TypeChecker {
         const entry = scope.resolve(expression.name);
         this.#exactReads.delete(expression);
         if (entry?.kind === "variable") {
-          const narrowed = this.#flow.get(entry.variable);
-          // The literals fit the variable's own type. Where a test narrowed it, they are its value here only if each surely
-          // fits the narrowed type, unlike a list of objects and `integer[]`; otherwise neither they nor a copy taken here
-          // count.
           const literals = this.#exactLiterals.get(entry.variable);
-          if (
-            literals !== undefined &&
-            (narrowed === undefined ||
-              literals.every((literal) => surelyFits(narrowed, this.#typeOf(literal))))
-          )
-            this.#exactReads.set(expression, literals);
-          return placeRead(narrowed ?? entry.variable.type);
+          if (literals !== undefined) this.#exactReads.set(expression, literals);
+          return placeRead(this.#currentType(entry.variable));
         }
         if (entry?.kind === "speaker" || (entry === undefined && expression.name === "speaker"))
           return { kind: "speaker" };
@@ -4401,6 +4401,11 @@ interface ProgramEffects {
   readonly shared: ReadonlySet<string>;
   /** Names that any assignment or list or set change in the program stores into. */
   readonly assigned: ReadonlySet<string>;
+  /**
+   * Names whose value, or a part of it, a type test, comparison, or `switch` examines, with the names of variables
+   * declared from them and those they are declared from: code behind such a test may never get their value.
+   */
+  readonly tested: ReadonlySet<string>;
   /** The effects of each loop, by its body; a `while` loop includes its condition. */
   readonly loops: ReadonlyMap<Block, LoopEffects>;
 }
@@ -4423,6 +4428,13 @@ type EffectWork =
 function programEffects(program: Program): ProgramEffects {
   const shared = new Set<string>();
   const assigned = new Set<string>();
+  const examined = new Set<string>();
+  /** For each variable declared from another name's value or a part of it, that name. */
+  const declaredFrom: [string, string][] = [];
+  const examine = (expression: Expression): void => {
+    const root = rootName(expression);
+    if (root !== null) examined.add(root);
+  };
   const nodes: LoopNode[] = [];
   const work: EffectWork[] = [];
   const enter = (
@@ -4447,6 +4459,14 @@ function programEffects(program: Program): ProgramEffects {
     const { loop, inside } = item;
     if ("expression" in item) {
       const expression = item.expression;
+      if (expression.kind === "typeTestExpression") examine(expression.value);
+      if (
+        expression.kind === "binaryExpression" &&
+        (expression.operator === "==" || expression.operator === "!=")
+      ) {
+        examine(expression.left);
+        examine(expression.right);
+      }
       if (
         loop !== null &&
         (expression.kind === "interactionExpression" ||
@@ -4474,6 +4494,11 @@ function programEffects(program: Program): ProgramEffects {
       continue;
     }
     const statement = item.statement;
+    if (statement.kind === "switchStatement") examine(statement.subject);
+    if (statement.kind === "letStatement") {
+      const root = rootName(statement.initializer);
+      if (root !== null) declaredFrom.push([statement.name.name, root]);
+    }
     if (loop !== null && SUSPENDING_STATEMENTS.has(statement.kind)) loop.suspends = true;
     if (statement.kind === "assignmentStatement") {
       // A store into an element or property changes the variable that holds it, too.
@@ -4517,10 +4542,32 @@ function programEffects(program: Program): ProgramEffects {
   return {
     shared,
     assigned,
+    tested: linkedNames(examined, declaredFrom),
     loops: new Map(
       nodes.map((node) => [node.body, { assigned: node.assigned, suspends: node.suspends }]),
     ),
   };
+}
+
+/** The names linked to any of `names` through pairs of names, in either direction. */
+function linkedNames(
+  names: ReadonlySet<string>,
+  pairs: readonly (readonly [string, string])[],
+): ReadonlySet<string> {
+  const neighbours = new Map<string, string[]>();
+  for (const [first, second] of pairs) {
+    neighbours.set(first, [...(neighbours.get(first) ?? []), second]);
+    neighbours.set(second, [...(neighbours.get(second) ?? []), first]);
+  }
+  const linked = new Set(names);
+  const pending = [...names];
+  while (pending.length > 0)
+    for (const next of neighbours.get(pending.pop()!) ?? [])
+      if (!linked.has(next)) {
+        linked.add(next);
+        pending.push(next);
+      }
+  return linked;
 }
 
 /** Methods that change the list or set they are called on. */
@@ -5360,17 +5407,6 @@ function exactParts(
 function fails(type: StaticType, accepts: (member: StaticType) => boolean): boolean {
   const known = members(type).filter(isKnown);
   return known.length > 0 && !known.some(accepts);
-}
-
-/**
- * Whether every value of `source` fits `target`: it is assignable, and no part of it is unknown or undecided, which
- * assignment accepts for the runtime to check, as a list of objects with different properties has unknown elements.
- */
-function surelyFits(target: StaticType, source: StaticType): boolean {
-  return (
-    isAssignable(target, source) &&
-    !containsType(source, (part) => part.kind === "unknown" || part.kind === "open")
-  );
 }
 
 /**
