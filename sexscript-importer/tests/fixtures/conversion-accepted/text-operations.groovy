@@ -19,3 +19,5 @@ show("Items: " + items + ", joined: " + items.join(", ") + " or " + items.join()
 def mixed = [1, 2.5, true]
 show("Mixed: ${mixed}")
 show(items)
+// Java counted an emoji as two characters.
+show("Smile count: " + "😀!".length())

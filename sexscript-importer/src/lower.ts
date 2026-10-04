@@ -5117,6 +5117,20 @@ function textOperation(
     const value = argument === undefined ? undefined : constantValue(argument);
     return typeof value === "string" ? value : null;
   };
+  // Java counted UTF-16 units where TeaseScript counts code points (#518); the counts differ only for characters
+  // outside the Basic Multilingual Plane, which a note marks where a literal shows one.
+  const noteCodePoints = (): void => {
+    if (!["size", "length", "substring", "indexOf", "lastIndexOf"].includes(name)) return;
+    const texts = [targetNode, ...argumentsNodes].map((argument) => literalText(argument) ?? "");
+    if (!texts.some((text) => /[\u{10000}-\u{10FFFF}]/u.test(text))) return;
+    addDiagnostic(
+      context,
+      "SX_TEXT_CODE_POINTS",
+      "warning",
+      `Java counted this text in UTF-16 units, so a character such as an emoji counted twice; TeaseScript ${name === "size" || name === "length" ? "length" : `${name}()`} counts code points, which changes the result here.`,
+      node.span,
+    );
+  };
   let operation: string;
   switch (name) {
     case "size":
@@ -5125,6 +5139,7 @@ function textOperation(
       if (mayBeMap && !context.proposals.has("dictionaries")) return undefined;
       const target = lowerExpression(targetNode, context);
       if (target === null) return null;
+      noteCodePoints();
       // A dictionary's length counts its keys; that stays with the dictionaries proposal (D1).
       return mayBeMap
         ? { kind: "property", target, name: "length", proposed: "dictionaries" }
@@ -5195,7 +5210,9 @@ function textOperation(
   const target = lowerExpression(targetNode, context);
   if (target === null) return null;
   const lowered = lowerArguments(argumentsNodes, context);
-  return lowered === null ? null : member(operation, lowered, target);
+  if (lowered === null) return null;
+  noteCodePoints();
+  return member(operation, lowered, target);
 }
 
 /** Groovy/Java string method names whose TeaseScript text operation has another name. */

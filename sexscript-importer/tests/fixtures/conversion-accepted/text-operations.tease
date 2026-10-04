@@ -24,3 +24,6 @@ say "Items: [${items.join(", ")}], joined: ${items.join(", ")} or ${items.join("
 let mixed = [1, 2.5, true]
 say "Mixed: [${mixed.join(", ")}]"
 say "[${items.join(", ")}]"
+// Java counted an emoji as two characters.
+// NOTE SX_TEXT_CODE_POINTS line 23: Java counted this text in UTF-16 units, so a character such as an emoji counted twice; TeaseScript length counts code points, which changes the result here.
+say "Smile count: ${"😀!".length}"
