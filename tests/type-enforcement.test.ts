@@ -751,6 +751,27 @@ test("arguments are checked as they were evaluated, against the parameters of th
     ),
     [["TSV041", "1"]],
   );
+  // A later part of a literal argument does not change an earlier part as it was evaluated.
+  assert.deepEqual(
+    sayTexts(
+      `${given}function f(obj = { nest: {}, tick: 0 }) {\n    obj.nest.flag = true\n    return obj.nest.flag\n}\nsay "\${f({ nest: given, tick: fill() })}"`,
+    ),
+    ["true"],
+  );
+  // A call reached while the function's defaults are checked waits for its parameters too, and a list it mixes is
+  // reported once, by the parameter that decides it.
+  assert.deepEqual(
+    codes(
+      'function f(n: integer = seed(false)): integer {\n    return n\n}\nfunction seed(recurse = false): integer {\n    if recurse {\n        return f("bad")\n    }\n    return 0\n}\nlet result = f()',
+    ),
+    [["TSV041", '"bad"']],
+  );
+  assert.deepEqual(
+    codes(
+      'function f(obj = {}, n = 0): boolean {\n    if n == 0 {\n        return f({ items: [1, "a"] }, 1)\n    }\n    obj.items = [1]\n    return true\n}\nf()',
+    ),
+    [["TSV041", '"a"']],
+  );
   // A declared element type decides a literal argument also when the call checks the body first.
   assert.deepEqual(codes('function f(values: integer[]) {\n    say "x"\n}\nf([1, "a"])'), [
     ["TSV041", '"a"'],

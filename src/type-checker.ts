@@ -126,11 +126,14 @@ interface FunctionType {
   accepted: readonly Variable[] | null;
   result: StaticType | null;
   checking: boolean;
-  /** Arguments of calls made while the body is checked, checked again against the parameters of the whole body. */
+  /**
+   * Calls reached while the function itself is checked, directly or through another function: their arguments, as
+   * evaluated, are checked once its parameters and body are complete, together with the list literals they mix.
+   */
   readonly pending: {
-    readonly place: Place;
-    readonly expression: Expression;
-    readonly value: StaticType;
+    readonly call: CallExpression;
+    readonly values: readonly StaticType[];
+    readonly literals: ReadonlyMap<Expression, readonly StaticType[]>;
   }[];
 }
 
@@ -687,9 +690,12 @@ class TypeChecker {
     this.#function = outer;
     this.#reachable = outerReachable;
     this.#loops.push(...outerLoops);
+    for (const { call, values, literals } of fn.pending.splice(0)) {
+      this.#mixedLiterals = new Map(literals);
+      yield* compileChild(this.#argumentsTask(fn, call, values));
+      this.#reportMixedLiterals();
+    }
     this.#mixedLiterals = outerLiterals;
-    for (const call of fn.pending.splice(0))
-      yield* compileChild(this.#storeTask(call.place, call.expression, call.value, false));
     if (continues) context.returnsNull = true;
     fn.result = declared ?? this.#inferredResult(context);
     if (
@@ -787,10 +793,21 @@ class TypeChecker {
       // An argument is the value as it was evaluated: a later argument or the body may still add a property to an
       // object it was read from.
       values.push(isBorrowed(argument.value) ? copyType(value) : value);
-      this.#captureLiteralParts(argument.value);
     }
     // The body is checked before the arguments, so they must fit the parameters as the body uses them.
     const result = copyType(yield* compileChild(this.#functionResultTask(fn)));
+    if (fn.checking)
+      fn.pending.push({ call: expression, values, literals: this.#takeMixedLiterals(expression) });
+    else yield* compileChild(this.#argumentsTask(fn, expression, values));
+    return result;
+  }
+
+  /** Checks the evaluated arguments of a call against the function's parameters, which they do not change. */
+  *#argumentsTask(
+    fn: FunctionType,
+    expression: CallExpression,
+    values: readonly StaticType[],
+  ): CompileTask<void> {
     const parameters = fn.accepted ?? (yield* compileChild(this.#parametersTask(fn)));
     const declarations = fn.declaration.parameters;
     let position = 0;
@@ -799,7 +816,6 @@ class TypeChecker {
         argument.kind === "positionalArgument"
           ? position++
           : declarations.findIndex((parameter) => parameter.name.name === argument.name.name);
-      const value = values[argumentIndex]!;
       const parameter = parameters[index];
       if (parameter === undefined) continue;
       const declaration = declarations[index]!;
@@ -820,34 +836,27 @@ class TypeChecker {
               )
             : parameterFix(parameter.name, parameter.type, rejected, value),
       };
-      const before = this.diagnostics.length;
-      yield* compileChild(this.#storeTask(place, argument.value, value, false));
-      // A call inside the function's own body sees the parameters only as the body used them so far.
-      if (fn.checking && this.diagnostics.length === before)
-        fn.pending.push({ place, expression: argument.value, value });
+      yield* compileChild(this.#storeTask(place, argument.value, values[argumentIndex]!, false));
     }
-    return result;
   }
 
-  /**
-   * Keeps the types of the variables and properties read inside a list, set, or object literal as they were when the
-   * literal was evaluated, for checks that run after other code may have added properties to them.
-   */
-  #captureLiteralParts(expression: Expression): void {
-    const pending = [expression];
+  /** Removes the mixed list literals inside a call's arguments from those its statement reports, and returns them. */
+  #takeMixedLiterals(expression: CallExpression): Map<Expression, readonly StaticType[]> {
+    const taken = new Map<Expression, readonly StaticType[]>();
+    const pending = expression.arguments.map((argument) => argument.value);
     while (pending.length > 0) {
       const node = unwrap(pending.pop()!);
-      const parts =
-        node.kind === "listLiteral" || node.kind === "setLiteral"
-          ? node.elements
-          : node.kind === "objectLiteral"
-            ? node.properties.map((property) => property.value)
-            : [];
-      for (const part of parts) {
-        if (isBorrowed(part)) this.#types.set(part, copyType(this.#typeOf(part)));
-        else pending.push(part);
+      const types = this.#mixedLiterals.get(node);
+      if (types !== undefined) {
+        taken.set(node, types);
+        this.#mixedLiterals.delete(node);
       }
+      if (node.kind === "listLiteral" || node.kind === "setLiteral")
+        for (const element of node.elements) pending.push(element);
+      else if (node.kind === "objectLiteral")
+        for (const property of node.properties) pending.push(property.value);
     }
+    return taken;
   }
 
   // Expressions ------------------------------------------------------------------------------------------------------
@@ -897,7 +906,10 @@ class TypeChecker {
         const types: StaticType[] = [];
         for (const item of expression.elements) {
           const type = yield* compileChild(this.#expressionTask(item, scope));
-          types.push(isBorrowed(item) ? copyType(type) : type);
+          // The copy is the element as it was evaluated, also for a later check of this literal's parts.
+          const owned = isBorrowed(item) ? copyType(type) : type;
+          if (owned !== type) this.#types.set(item, owned);
+          types.push(owned);
         }
         // Elements of known types must share one type; an element of unknown type leaves the element type unknown.
         const known = types.filter((type) => resolved(type).kind !== "unknown");
@@ -910,7 +922,10 @@ class TypeChecker {
         const properties = new Map<string, StaticType>();
         for (const property of expression.properties) {
           const type = yield* compileChild(this.#expressionTask(property.value, scope));
-          properties.set(property.name.name, ownType(property.value, type));
+          // The copy is the value as it was evaluated, also for a later check of this literal's parts.
+          const owned = isBorrowed(property.value) ? copyType(type) : type;
+          if (owned !== type) this.#types.set(property.value, owned);
+          properties.set(property.name.name, freshPlaceType(owned));
         }
         return { kind: "object", properties };
       }
