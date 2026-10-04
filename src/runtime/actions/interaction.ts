@@ -1,5 +1,9 @@
 import { cloneInteractionChoiceValue } from "../../choice-values.js";
-import { isBlankTextAnswer, isNumberAnswerText } from "../../interaction-answers.js";
+import {
+  isBlankTextAnswer,
+  isIntegerAnswerText,
+  isNumberAnswerText,
+} from "../../interaction-answers.js";
 import { interactionStringFits } from "../../interaction-limits.js";
 import type { InteractionChoiceOption, InteractionChoiceValue } from "../../plan/model.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
@@ -65,6 +69,13 @@ export function resolveInteractionCompletion(
       };
     }
     const submitted = payload.submittedText.trim();
+    // `askInteger` accepts only whole-number notation within the safe integer range.
+    if (action.ui.kind === "number" && action.ui.integer === true) {
+      const parsed = Number(submitted);
+      return isIntegerAnswerText(submitted) && Number.isSafeInteger(parsed)
+        ? { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted }
+        : { ok: false, message: "That is wrong. I asked for a whole number." };
+    }
     if (!isNumberAnswerText(submitted)) {
       return {
         ok: false,

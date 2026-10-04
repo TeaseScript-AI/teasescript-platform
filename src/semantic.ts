@@ -174,7 +174,7 @@ class SemanticValidator {
   public constructor(options: SemanticValidationOptions) {
     this.#invalidConfiguredNames = Object.freeze(
       [...(options.globals ?? []), ...(options.builtins ?? [])].filter((name) =>
-        ["showButton", "askText", "askNumber", "choose"].includes(name),
+        ["showButton", "askText", "askNumber", "askInteger", "choose"].includes(name),
       ),
     );
     this.#builtins = new Set([
@@ -1685,7 +1685,8 @@ function unwrapParentheses(expression: Expression): Expression {
 function isDefinitelyNonNumeric(expression: Expression): boolean {
   expression = unwrapParentheses(expression);
   if (expression.kind === "interactionExpression") {
-    if (expression.interactionKind === "number") return false;
+    if (expression.interactionKind === "number" || expression.interactionKind === "integer")
+      return false;
     if (expression.interactionKind !== "choice") return true;
     // A choice returns the type its values share, which the type checker knows.
     return false;

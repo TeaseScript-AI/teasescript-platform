@@ -95,6 +95,7 @@ let name = askText "Your name?", default: "Ada"
 let amount = askNumber
 let amount = askNumber as mistress "Enter a number"
 let minutes = askNumber default: 10
+let count = askInteger "How many?", default: 3
 ```
 
 For `askText` and `askNumber`, the optional string is Standard UI field text or a hint. It is not automatically spoken
@@ -103,7 +104,7 @@ player still submits it, and a cleared field does not fall back to it. See
 [default answers](specifications/accepted-syntaxes-v30.md#default-answers).
 
 All four basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
-`askNumber` returns `number`. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
+`askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers. `showButton` used as a value returns the elapsed waiting time as a `duration`, and an
 optional `timeout:` ends the wait without a chat message; see
 [blocking button](specifications/accepted-syntaxes-v30.md#21-blocking-button).
 Timer interrupts may suspend an interaction; handler `exit` discards its instruction without producing a result

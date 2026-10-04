@@ -12,7 +12,7 @@ const props = withDefaults(
     submitting?: boolean;
     placeholder?: string;
     accessibleName?: string;
-    inputMode?: "text" | "decimal";
+    inputMode?: "text" | "decimal" | "numeric";
     feedback?: string;
     /** A skippable pacing gate is waiting; Space in the empty input settles it. */
     pacing?: boolean;

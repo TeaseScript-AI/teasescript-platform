@@ -1591,7 +1591,11 @@ class TypeChecker {
         const type = yield* compileChild(this.#expressionTask(expression.defaultValue, scope));
         this.#checkInteractionDefault(expression.interactionKind, expression.defaultValue, type);
       }
-      return expression.interactionKind === "number" ? NUMBER_TYPE : STRING_TYPE;
+      return expression.interactionKind === "number"
+        ? NUMBER_TYPE
+        : expression.interactionKind === "integer"
+          ? INTEGER_TYPE
+          : STRING_TYPE;
     }
     // `choose` returns a button's value: one written before `:`, or else what gives the button, with its type.
     const values: StaticType[] = [];
@@ -1773,11 +1777,11 @@ class TypeChecker {
   }
 
   /**
-   * A default answer must be an answer the field accepts: text for askText, a number for askNumber. The compiler rejects
-   * a default it knows is wrong; the runtime checks the others when the field opens.
+   * A default answer must be an answer the field accepts: text for askText, a number for askNumber, and a whole number
+   * for askInteger. The compiler rejects a default it knows is wrong; the runtime checks the others when the field opens.
    */
   #checkInteractionDefault(
-    kind: "text" | "number",
+    kind: "text" | "number" | "integer",
     expression: Expression,
     type: StaticType,
   ): void {
@@ -1793,6 +1797,22 @@ class TypeChecker {
         : kind === "number"
           ? numberDefaultFix(expression)
           : textDefaultFix(expression, name);
+    if (kind === "integer") {
+      // A non-whole default is never rounded; a number variable may be one that widened (rule 1.2).
+      if (isScalar(nonNullTypeForUse(type), "number"))
+        this.#report(
+          typeCode.invalidInteractionDefault,
+          `The default answer of askInteger must be a whole number (integer)${holds}.${this.#widenedNote(expression)}${ROUND_FIX}.`,
+          expression.span,
+        );
+      else if (!isAssignable(INTEGER_TYPE, type))
+        this.#report(
+          typeCode.invalidInteractionDefault,
+          `The default answer of askInteger must be a whole number (integer)${holds}.${resolved(type).kind === "null" ? EMPTY_FIELD_FIX : " Use a whole number, such as 'default: 10'."}`,
+          expression.span,
+        );
+      return;
+    }
     if (kind === "number") {
       if (!isAssignable(NUMBER_TYPE, type))
         this.#report(

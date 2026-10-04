@@ -1310,7 +1310,7 @@ export class InstructionCompiler {
     const expectedResult =
       expression.interactionKind === "choice"
         ? ("choice" as const)
-        : expression.interactionKind === "number"
+        : expression.interactionKind === "number" || expression.interactionKind === "integer"
           ? ("number" as const)
           : ("string" as const);
 
@@ -1318,7 +1318,7 @@ export class InstructionCompiler {
     if (ui !== undefined) {
       return this.#emitResultInteraction(
         {
-          interactionKind: expression.interactionKind,
+          interactionKind: planInteractionKind(expression),
           target: "standardChat",
           speaker: expression.speaker?.name ?? null,
           expectedResult,
@@ -1336,7 +1336,7 @@ export class InstructionCompiler {
     let preparedUi: PreparedInteractionUiPayload;
     const preparedTemporaryIds: number[] = [speakerTemporary];
 
-    if (expression.interactionKind === "text" || expression.interactionKind === "number") {
+    if (expression.interactionKind !== "choice") {
       const hint =
         expression.hint === null
           ? null
@@ -1357,15 +1357,21 @@ export class InstructionCompiler {
               expression.defaultValue.span,
             );
       if (prefill !== null) preparedTemporaryIds.push(prefill.temporaryId);
-      preparedUi = {
-        kind: expression.interactionKind,
-        hintTemporary: hint?.temporaryId ?? null,
-        ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
-        accessibleName: {
-          kind: "localizedDefault",
-          key: expression.interactionKind === "text" ? "answer" : "number",
-        },
-      };
+      preparedUi =
+        expression.interactionKind === "text"
+          ? {
+              kind: "text",
+              hintTemporary: hint?.temporaryId ?? null,
+              ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
+              accessibleName: { kind: "localizedDefault", key: "answer" },
+            }
+          : {
+              kind: "number",
+              hintTemporary: hint?.temporaryId ?? null,
+              ...(prefill === null ? {} : { prefillTemporary: prefill.temporaryId }),
+              ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
+              accessibleName: { kind: "localizedDefault", key: "number" },
+            };
     } else {
       const loweredValues = yield* compileChild(
         this.#lowerInteractionPayloadsTask(values, speakerTemporary),
@@ -1398,7 +1404,7 @@ export class InstructionCompiler {
     }
 
     const lowered = this.#emitPreparedResultInteraction(
-      expression.interactionKind,
+      planInteractionKind(expression),
       expectedResult,
       speakerTemporary,
       preparedUi,
@@ -2023,7 +2029,7 @@ function staticInteractionPrefill(expression: InteractionExpression): string | u
   let negative = false;
   while (
     literal.kind === "parenthesizedExpression" ||
-    (expression.interactionKind === "number" &&
+    (expression.interactionKind !== "text" &&
       literal.kind === "unaryExpression" &&
       (literal.operator === "-" || literal.operator === "+"))
   ) {
@@ -2032,7 +2038,7 @@ function staticInteractionPrefill(expression: InteractionExpression): string | u
       literal = literal.operand;
     } else literal = literal.expression;
   }
-  if (expression.interactionKind === "number")
+  if (expression.interactionKind !== "text")
     return literal.kind === "numberLiteral"
       ? numberAnswerText(negative ? -literal.value : literal.value)
       : undefined;
@@ -2042,21 +2048,31 @@ function staticInteractionPrefill(expression: InteractionExpression): string | u
     : undefined;
 }
 
+/** `askInteger` runs as a `number` interaction whose UI only accepts whole numbers. */
+function planInteractionKind(expression: InteractionExpression): InteractionKind {
+  return expression.interactionKind === "integer" ? "number" : expression.interactionKind;
+}
+
 /** The UI of an interaction whose text, values, and default answer are all known at compile time. */
 function staticInteractionUi(expression: InteractionExpression): InteractionUiPayload | undefined {
-  if (expression.interactionKind === "text" || expression.interactionKind === "number") {
+  if (expression.interactionKind !== "choice") {
     const hint = expression.hint === null ? null : staticVisibleText(expression.hint);
     const prefill = expression.defaultValue === null ? null : staticInteractionPrefill(expression);
     if (hint === undefined || prefill === undefined) return undefined;
-    return {
-      kind: expression.interactionKind,
-      hint,
-      ...(prefill === null ? {} : { prefill }),
-      accessibleName: {
-        kind: "localizedDefault",
-        key: expression.interactionKind === "text" ? "answer" : "number",
-      },
-    };
+    return expression.interactionKind === "text"
+      ? {
+          kind: "text",
+          hint,
+          ...(prefill === null ? {} : { prefill }),
+          accessibleName: { kind: "localizedDefault", key: "answer" },
+        }
+      : {
+          kind: "number",
+          hint,
+          ...(prefill === null ? {} : { prefill }),
+          ...(expression.interactionKind === "integer" ? { integer: true as const } : {}),
+          accessibleName: { kind: "localizedDefault", key: "number" },
+        };
   }
   const options: InteractionChoiceOption[] = [];
   for (const option of expression.options) {

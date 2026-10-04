@@ -1,5 +1,5 @@
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 31;
+export const INSTRUCTION_PLAN_VERSION = 32;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -446,6 +446,8 @@ export type InteractionUiPayload =
       readonly hint: string | null;
       /** Answer text that prefills the field; submitting it unchanged answers with the default. */
       readonly prefill?: string;
+      /** `askInteger`: only a whole number is an answer. */
+      readonly integer?: true;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
@@ -477,6 +479,8 @@ export type PreparedInteractionUiPayload =
       readonly hintTemporary: number | null;
       /** Holds the evaluated default answer until the field opens, then its prefill text. */
       readonly prefillTemporary?: number;
+      /** `askInteger`: only a whole number is an answer. */
+      readonly integer?: true;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {

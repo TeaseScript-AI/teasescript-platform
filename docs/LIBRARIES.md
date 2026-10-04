@@ -184,6 +184,7 @@ over-limit data without truncation or partial state mutation.
 `askText` normalizes line endings to `LF`, otherwise preserves submitted text exactly, rejects whitespace-only input, returns `string`, and uses that same normalized text in the player transcript.
 
 `askNumber` trims surrounding whitespace, parses the accepted TeaseScript decimal/scientific forms on one line, returns a finite `number`, canonicalizes negative zero to `0`, and preserves the trimmed submitted number text in the transcript. It adds no first-POC range parameters.
+`askInteger` is its whole-number counterpart ([ADR 0018](decisions/0018-first-standard-library-poc-contract.md#askinteger)).
 
 `choose` returns the value of the selected button; an option without a value written before its `:` returns itself, with its own type. List options, choice objects, and repeated values follow [V30 §19](specifications/accepted-syntaxes-v30.md#19-choices). Identifier values return `string`; numeric values return their `integer` or `number`; until union types (#504), one choice may not mix those value kinds.
 

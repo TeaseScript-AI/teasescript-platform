@@ -877,15 +877,17 @@ function materializeInteractionUi(
   } else if (prepared.kind === "text" || prepared.kind === "number") {
     const hint = prepared.hintTemporary === null ? null : readText(prepared.hintTemporary);
     let prefill: string | undefined;
+    const integer = prepared.kind === "number" && prepared.integer === true;
     if (prepared.prefillTemporary !== undefined) {
       const temporary = read(prepared.prefillTemporary);
-      prefill = interactionPrefill(prepared.kind, temporary.value, span);
+      prefill = interactionPrefill(integer ? "integer" : prepared.kind, temporary.value, span);
       stagedWrites.push({ temporaryId: temporary.id, value: prefill });
     }
     ui = {
       kind: prepared.kind,
       hint,
       ...(prefill === undefined ? {} : { prefill }),
+      ...(integer ? { integer: true as const } : {}),
       accessibleName: prepared.accessibleName,
     };
   } else {
@@ -920,10 +922,20 @@ function materializeInteractionUi(
 
 /** The prefill text of a default answer, which must be an answer the field accepts. */
 function interactionPrefill(
-  kind: "text" | "number",
+  kind: "text" | "number" | "integer",
   value: SerializableRuntimeValue,
   span: SourceSpan,
 ): string {
+  if (kind === "integer") {
+    // A non-whole default is an error, never rounded.
+    if (typeof value !== "number" || !Number.isSafeInteger(value))
+      throw fault(
+        "TSR052",
+        "The default answer of askInteger must be a whole number. Round it with floor(...), round(...), or ceil(...), or ask without 'default:'.",
+        span,
+      );
+    return numberAnswerText(value);
+  }
   if (kind === "number") {
     if (typeof value !== "number" || !Number.isFinite(value))
       throw fault(
@@ -1456,6 +1468,7 @@ function cloneInteractionUi(
     kind: ui.kind,
     hint: ui.hint,
     ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
+    ...(ui.kind === "number" && ui.integer === true ? { integer: true as const } : {}),
     accessibleName,
   };
 }

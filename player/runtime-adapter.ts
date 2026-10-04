@@ -143,6 +143,7 @@ export function playerRuntimeForeground(
         accessibleName,
         hint: action.ui.hint ?? "Type your response…",
         ...(action.ui.prefill === undefined ? {} : { prefill: action.ui.prefill }),
+        ...(action.ui.integer === true ? { integer: true as const } : {}),
       });
     case "choice":
       return Object.freeze({
