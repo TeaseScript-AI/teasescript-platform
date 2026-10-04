@@ -1178,7 +1178,12 @@ class TypeChecker {
       if ("problem" in target) {
         const passing = all.filter((_, other) => !("problem" in targets[other]!));
         if (passing.length > 0) this.#reportMayBe(objectExpression, all[index]!, passing);
-        else this.#report(typeCode.invalidOperand, target.problem, property.span);
+        else
+          this.#report(
+            typeCode.invalidOperand,
+            target.problem,
+            target.receiver === true ? objectExpression.span : property.span,
+          );
         return undefined;
       }
       if (target.type !== null)
@@ -2013,6 +2018,8 @@ class TypeChecker {
       const argument = expression.arguments[0];
       if (argument !== undefined && expression.arguments.length === 1) {
         const type = yield* compileChild(this.#expressionTask(argument.value, scope));
+        if (isSetReceiver(receiver) && !this.#checkSetElement(argument.value, type))
+          return NULL_TYPE;
         const collection = this.#elementReceiver(callee.object, scope, receiver, type);
         yield* compileChild(
           this.#storeElementTask(collection, callee.object, argument.value, type, scope),
@@ -2034,6 +2041,13 @@ class TypeChecker {
     if (!isKnown(value)) return UNKNOWN_TYPE;
     if (method === "removeAt" && values.length === 1 && members(value).every(isList))
       this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value);
+    // A set compares only values it can hold, and a list becomes a set only of such values.
+    if ((method === "contains" || method === "remove") && isSetReceiver(value))
+      for (const [index, argument] of expression.arguments.entries())
+        this.#checkSetElement(argument.value, values[index]!);
+    if (method === "toSet")
+      for (const member of members(nonNullType(value)).map(resolved))
+        if (member.kind === "list" && !this.#checkSetElement(expression, member.element)) break;
     // Every member of a union must have the method (ADR 0021 rule 3.5).
     const all = members(value);
     const results = all.map((member) => memberMethodType(member, method));
@@ -3555,7 +3569,8 @@ function mayBe(type: StaticType, ...kinds: ("timer" | "media")[]): boolean {
 function assignableProperty(
   member: StaticType,
   name: string,
-): { readonly type: StaticType | null } | { readonly problem: string } {
+):
+  { readonly type: StaticType | null } | { readonly problem: string; readonly receiver?: boolean } {
   if (member.kind === "timer" || member.kind === "media") {
     const type = handlePropertyType(member.kind, name, "assign");
     return type === undefined
@@ -3565,6 +3580,12 @@ function assignableProperty(
   if (member.kind === "speaker" || member.kind === "unknown" || member.kind === "open")
     return { type: null };
   if (member.kind === "object" && member.properties === null) return { type: null };
+  // A problem with the receiver itself points at the receiver.
+  if (["scalar", "list", "set", "range", "null"].includes(member.kind))
+    return {
+      problem: `Only objects, speakers, and timer and media handles have properties to assign, but this is ${describeValue(member)}.`,
+      receiver: true,
+    };
   const type = member.kind === "object" ? member.properties?.get(name) : undefined;
   return type === undefined
     ? { problem: `${capitalize(describeValue(member))} has no property '${name}'.` }
@@ -3573,6 +3594,11 @@ function assignableProperty(
 
 function isList(type: StaticType): boolean {
   return resolved(type).kind === "list";
+}
+
+/** Whether a receiver may be a set. */
+function isSetReceiver(type: StaticType): boolean {
+  return members(nonNullType(type)).some((member) => resolved(member).kind === "set");
 }
 
 function isSetElement(type: StaticType): boolean {
