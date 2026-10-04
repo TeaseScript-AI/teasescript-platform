@@ -23,6 +23,18 @@ import {
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
+import {
+  arithmeticType,
+  describeValue,
+  elementType,
+  expressionType,
+  isAnnotatable,
+  isAssignable,
+  nonNullType,
+  typeFromAnnotation,
+  typeName,
+  type StaticType,
+} from "./static-types.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 import { expressionChildren, mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
 import { durationLiteralMilliseconds } from "./duration.js";
@@ -42,6 +54,8 @@ interface Binding {
   readonly kind: BindingKind;
   /** Set while a variable statically holds an async timer or media handle. */
   handle?: "timer" | "media" | null;
+  /** A variable's declared or inferred type, which it keeps (V30 §12); absent when unknown. */
+  type?: StaticType | undefined;
 }
 
 const TIMER_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
@@ -106,6 +120,7 @@ const semanticCode = {
   invalidMedia: "TSV036",
   invalidMediaHandleMember: "TSV037",
   invalidStorageKey: "TSV038",
+  typeMismatch: "TSV041",
 } as const;
 
 export function validateSemantics(
@@ -236,7 +251,11 @@ class SemanticValidator {
     try {
       const scope = new SemanticScope(this.#root);
       if (handler.selfHandle !== null) {
-        scope.bindings.set(handler.selfHandle, { kind: "variable", handle: "media" });
+        scope.bindings.set(handler.selfHandle, {
+          kind: "variable",
+          handle: "media",
+          type: { kind: "mediaHandle" },
+        });
       }
       runCompileTask(this.#validateStatements(handler.block.statements, scope, 0));
     } finally {
@@ -623,8 +642,11 @@ class SemanticValidator {
         } else {
           this.#validateExpression(statement.initializer, scope, null);
         }
+        const type = this.#declarationType(statement, scope);
         if (this.#declare(statement.name.name, "variable", statement.name.span, scope)) {
-          scope.bindings.get(statement.name.name)!.handle = handleKind(statement.initializer);
+          const binding = scope.bindings.get(statement.name.name)!;
+          binding.handle = handleKind(statement.initializer);
+          binding.type = type;
         }
         return;
       }
@@ -740,6 +762,7 @@ class SemanticValidator {
       case "assignmentStatement":
         this.#validateAssignmentTarget(statement.target, scope);
         this.#validateExpression(statement.value, scope, null);
+        this.#validateAssignmentType(statement, scope);
         if (statement.target.kind === "identifier") {
           const binding = scope.resolve(statement.target.name);
           // Reassignment may happen on any path, so the variable is no longer known to hold a handle.
@@ -808,7 +831,10 @@ class SemanticValidator {
           );
         }
         const loopScope = new SemanticScope(scope);
-        this.#declare(statement.variable.name, "variable", statement.variable.span, loopScope);
+        if (this.#declare(statement.variable.name, "variable", statement.variable.span, loopScope))
+          loopScope.bindings.get(statement.variable.name)!.type = elementType(
+            nonNullType(this.#expressionType(statement.iterable, scope)),
+          );
         yield* compileChild(
           this.#validateStatements(statement.body.statements, loopScope, loopDepth + 1),
         );
@@ -1137,6 +1163,7 @@ class SemanticValidator {
             this.#validateExpressionTask(argument.value, scope, contextualSpeaker),
           );
         }
+        this.#validateAddedElementType(expression, scope);
         if (
           expression.callee.kind === "identifier" &&
           expression.callee.name === "randomInteger" &&
@@ -1203,6 +1230,211 @@ class SemanticValidator {
         return;
     }
     expression satisfies never;
+  }
+
+  #expressionType(expression: Expression, scope: SemanticScope): StaticType {
+    return expressionType(expression, {
+      identifier: (name) => {
+        const binding = scope.resolve(name);
+        if (binding === undefined || binding.kind === "function") return undefined;
+        return binding.kind === "speaker" ? { kind: "speaker" } : binding.type;
+      },
+      isBuiltin: (name) => this.#builtins.has(name),
+    });
+  }
+
+  /**
+   * The type a new variable keeps: its annotation, else its initializer's type. `null` and unknown initializers give no
+   * inferred type, so the compiler never invents an optional or union type.
+   */
+  #declarationType(
+    statement: Extract<Statement, { kind: "letStatement" }>,
+    scope: SemanticScope,
+  ): StaticType | undefined {
+    const name = statement.name.name;
+    const initializer = this.#expressionType(statement.initializer, scope);
+    if (statement.typeAnnotation === null)
+      return initializer.kind === "unknown" || initializer.kind === "null"
+        ? undefined
+        : initializer;
+    const declared = typeFromAnnotation(statement.typeAnnotation);
+    const load = unwrapParentheses(statement.initializer);
+    const checked =
+      load.kind === "loadExpression" && load.defaultValue !== null
+        ? { expression: load.defaultValue, type: this.#expressionType(load.defaultValue, scope) }
+        : { expression: statement.initializer, type: initializer };
+    if (
+      !this.#validateLiteralElements(declared, checked.expression, scope, name) &&
+      !isAssignable(declared, checked.type)
+    )
+      this.#report(
+        semanticCode.typeMismatch,
+        `'${name}' is declared as ${typeName(declared)}, so it cannot start as ${describeValue(checked.type)}.${typeFix(name, declared, checked.type)}`,
+        checked.expression.span,
+      );
+    return declared;
+  }
+
+  /**
+   * Checks each element of a list or set literal against a known element type, so a mixed literal cannot slip into a
+   * typed collection. Returns whether the literal was checked element by element.
+   */
+  #validateLiteralElements(
+    target: StaticType,
+    expression: Expression,
+    scope: SemanticScope,
+    variable: string,
+  ): boolean {
+    const collection = nonNullType(target);
+    const literal = unwrapParentheses(expression);
+    if (
+      !(collection.kind === "list" && literal.kind === "listLiteral") &&
+      !(collection.kind === "set" && literal.kind === "setLiteral")
+    )
+      return false;
+    if (collection.element.kind === "unknown") return true;
+    for (const element of literal.elements) {
+      const type = this.#expressionType(element, scope);
+      if (!isAssignable(collection.element, type))
+        this.#report(
+          semanticCode.typeMismatch,
+          `'${variable}' holds ${typeName(collection.element)} values (${typeName(collection)}), so it cannot contain ${describeValue(type)}.${elementFix(variable, collection, type, target.kind === "optional")}`,
+          element.span,
+        );
+    }
+    return true;
+  }
+
+  #validateAssignmentType(
+    statement: Extract<Statement, { kind: "assignmentStatement" }>,
+    scope: SemanticScope,
+  ): void {
+    const target = statement.target;
+    const value = this.#expressionType(statement.value, scope);
+    if (target.kind === "indexExpression") {
+      const declared = this.#expressionType(target.object, scope);
+      const list = nonNullType(declared);
+      if (list.kind !== "list" || list.element.kind === "unknown") return;
+      const optional = declared.kind === "optional";
+      if (statement.operator === "=") {
+        if (!isAssignable(list.element, value))
+          this.#reportElementMismatch(target.object, list, optional, value, statement.value.span);
+        return;
+      }
+      const subject = `${subjectName(target.object, "This list")} holds ${typeName(list.element)} values (${typeName(list)})`;
+      this.#validateStoredType(
+        statement,
+        scope,
+        list.element,
+        value,
+        subject,
+        "an element",
+        (result) => elementFix(variableName(target.object), list, result, optional),
+      );
+      return;
+    }
+    if (target.kind !== "identifier") return;
+    const binding = scope.resolve(target.name);
+    const type = binding?.kind === "variable" ? binding.type : undefined;
+    if (type === undefined || value.kind === "unknown") return;
+    this.#validateStoredType(
+      statement,
+      scope,
+      type,
+      value,
+      `'${target.name}' holds ${describeValue(type)}`,
+      "it",
+      (result) => typeFix(target.name, type, result),
+      target.name,
+    );
+  }
+
+  /** Checks `=`, `+=`, or `-=` of `value` into a place of `type`; `subject` and `place` phrase the message. */
+  #validateStoredType(
+    statement: Extract<Statement, { kind: "assignmentStatement" }>,
+    scope: SemanticScope,
+    type: StaticType,
+    value: StaticType,
+    subject: string,
+    place: string,
+    fix: (result: StaticType) => string,
+    variable?: string,
+  ): void {
+    if (statement.operator === "=") {
+      if (
+        variable !== undefined &&
+        this.#validateLiteralElements(type, statement.value, scope, variable)
+      )
+        return;
+      if (!isAssignable(type, value))
+        this.#report(
+          semanticCode.typeMismatch,
+          `${subject}, so ${place === "it" ? "it" : place} cannot be set to ${describeValue(value)}.${fix(value)}`,
+          statement.value.span,
+        );
+      return;
+    }
+    const result = arithmeticType(statement.operator === "+=" ? "+" : "-", type, value);
+    if (result === undefined) {
+      const operand = nonNullType(type);
+      // Only `integer`, `number`, and `duration` combinations support `+=`/`-=`; a known value of any other kind fails.
+      if (operand.kind !== "unknown" && nonNullType(value).kind !== "unknown")
+        this.#report(
+          semanticCode.typeMismatch,
+          `${subject}, so ${describeValue(value)} cannot be ${statement.operator === "+=" ? "added to" : "subtracted from"} ${place}.${operandFix(operand)}`,
+          statement.value.span,
+        );
+      return;
+    }
+    if (!isAssignable(type, result))
+      this.#report(
+        semanticCode.typeMismatch,
+        `${subject}, so '${statement.operator}' cannot make ${place} ${describeValue(result)}.${fix(result)}`,
+        statement.value.span,
+      );
+  }
+
+  /** `list.add(value)` and `set.add(value)` keep the collection's element type. */
+  #validateAddedElementType(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+    scope: SemanticScope,
+  ): void {
+    const callee = unwrapParentheses(expression.callee);
+    if (
+      callee.kind !== "propertyAccessExpression" ||
+      callee.property.name !== "add" ||
+      expression.arguments.length !== 1 ||
+      expression.arguments[0]!.kind !== "positionalArgument"
+    )
+      return;
+    const declared = this.#expressionType(callee.object, scope);
+    const collection = nonNullType(declared);
+    if (collection.kind !== "list" && collection.kind !== "set") return;
+    const argument = expression.arguments[0]!.value;
+    const value = this.#expressionType(argument, scope);
+    if (!isAssignable(collection.element, value))
+      this.#reportElementMismatch(
+        callee.object,
+        collection,
+        declared.kind === "optional",
+        value,
+        argument.span,
+      );
+  }
+
+  #reportElementMismatch(
+    collectionExpression: Expression,
+    collection: StaticType & { readonly kind: "list" | "set" },
+    optional: boolean,
+    value: StaticType,
+    span: SourceSpan,
+  ): void {
+    const subject = subjectName(collectionExpression, `This ${collection.kind}`);
+    this.#report(
+      semanticCode.typeMismatch,
+      `${subject} holds ${typeName(collection.element)} values (${typeName(collection)}), so it cannot contain ${describeValue(value)}.${elementFix(variableName(collectionExpression), collection, value, optional)}`,
+      span,
+    );
   }
 
   #validateStorageKey(key: Expression, scope: SemanticScope, message: string): void {
@@ -1488,7 +1720,6 @@ function literalKind(expression: Expression): Expression["kind"] {
   return current.kind;
 }
 
-/** The handle kind statically held by a variable initialized from `expression`. */
 /** "2 arguments (a, b)" or "1 to 3 arguments (a, b, c)", naming the parameters so the author sees what is expected. */
 function argumentRange(required: number, parameterNames: readonly string[]): string {
   const total = parameterNames.length;
@@ -1499,6 +1730,59 @@ function argumentRange(required: number, parameterNames: readonly string[]): str
   return total === 0 ? "no arguments" : `${count} (${parameterNames.join(", ")})`;
 }
 
+/** How to make an operand fit `+=`/`-=` on a variable of `operand` type. */
+function operandFix(operand: StaticType): string {
+  if (operand.kind !== "scalar") return "";
+  if (operand.name === "integer" || operand.name === "number") return " Use a number instead.";
+  if (operand.name === "duration") return " Use a duration such as '2 s' instead.";
+  return "";
+}
+
+/** How to make a value fit a list or set: allow fractions, or keep other values in a separate collection. */
+function elementFix(
+  variable: string | null,
+  collection: StaticType & { readonly kind: "list" | "set" },
+  value: StaticType,
+  optional: boolean,
+): string {
+  const element = collection.element;
+  if (
+    variable !== null &&
+    element.kind === "scalar" &&
+    element.name === "integer" &&
+    value.kind === "scalar" &&
+    value.name === "number"
+  )
+    return ` To allow fractions, declare it as 'let ${variable}: ${collection.kind === "list" ? "number[]" : "number set"}${optional ? "?" : ""} = ...'.`;
+  return ` Use a separate ${collection.kind} for values of another type.`;
+}
+
+function variableName(expression: Expression): string | null {
+  return expression.kind === "identifier" ? expression.name : null;
+}
+
+function subjectName(expression: Expression, fallback: string): string {
+  return expression.kind === "identifier" ? `'${expression.name}'` : fallback;
+}
+
+/** A short suggestion for the most common mismatches: null, and fractions in a whole-number variable. */
+function typeFix(name: string, target: StaticType, value: StaticType): string {
+  if (value.kind === "null" && target.kind !== "optional")
+    return isAnnotatable(target)
+      ? ` To allow null, declare it as 'let ${name}: ${typeName(target)}? = ...'.`
+      : " Use a separate variable for null.";
+  const nonNull = nonNullType(target);
+  if (
+    nonNull.kind === "scalar" &&
+    nonNull.name === "integer" &&
+    value.kind === "scalar" &&
+    value.name === "number"
+  )
+    return ` To allow fractions, declare it as 'let ${name}: number${target.kind === "optional" ? "?" : ""} = ...'.`;
+  return " Use a separate variable for a value of another type.";
+}
+
+/** The handle kind statically held by a variable initialized from `expression`. */
 function handleKind(expression: Expression): "timer" | "media" | null {
   expression = unwrapParentheses(expression);
   if (expression.kind === "timerExpression" && expression.async) return "timer";
