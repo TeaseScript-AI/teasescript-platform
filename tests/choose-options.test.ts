@@ -593,8 +593,16 @@ test("a choice that returns text and numbers needs a place declared with a union
     `function probe(p) {\n    p[0] = choose "new", 2\n}`,
     `function probe(p) {\n    p.answer = choose "new", 2\n}`,
     `${values}let box: object = { values: values }\nbox.values.add(choose "new", 2)`,
+    'function probe(p: speaker | object) {\n    p.firstName = choose "new", 2\n}',
   ])
     assert.deepEqual(spans(source), [["TSV044", 'choose "new", 2']], source);
+  // A speaker shows its text property as text.
+  assert.deepEqual(
+    spans(
+      'function probe(p: speaker | object) {\n    if p is speaker {\n        p.firstName = choose "new", 2\n    }\n}',
+    ),
+    [],
+  );
   assert.deepEqual(
     spans(
       `function probe(p: (string | integer)[]) {\n    p.add(choose "new", 2)\n}\n${values}probe(values)`,

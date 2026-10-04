@@ -863,9 +863,14 @@ class TypeChecker {
         }
         const before = this.diagnostics.length;
         place = this.#propertyPlace(object, target.object, target.property);
-        const speaker = members(object).some((member) => resolved(member).kind === "speaker");
-        if (SPEAKER_TEXT_PROPERTIES.has(name) && speaker) shownField = `the speaker's ${name}`;
-        untyped = place === undefined && this.diagnostics.length === before && !speaker;
+        const speakers = members(nonNullType(object)).map(
+          (member) => resolved(member).kind === "speaker",
+        );
+        if (SPEAKER_TEXT_PROPERTIES.has(name) && speakers.includes(true))
+          shownField = `the speaker's ${name}`;
+        // A speaker shows its text property; any other receiver keeps the value as it is.
+        untyped =
+          place === undefined && this.diagnostics.length === before && speakers.includes(false);
         handle = mayBe(object, "timer", "media");
         // A media position, remaining time, or volume write first waits for the previous message's pacing.
         if (MEDIA_PACED_PROPERTIES.has(name) && mayBe(object, "media")) this.#suspend();
