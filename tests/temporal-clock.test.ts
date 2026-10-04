@@ -75,7 +75,7 @@ function observe(current: Session, atMs: number): Session {
   return runSession(current);
 }
 
-/** Records a Continue without running, as the Player does before its scene clock resumes. */
+/** Records a Continue capture without running; the Player runs the session right after it. */
 function continueAt(
   current: Session,
   wallClockMs: number,
