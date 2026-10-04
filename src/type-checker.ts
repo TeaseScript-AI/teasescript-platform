@@ -570,9 +570,10 @@ class TypeChecker {
             this.#declareFunction(statement, file, this.#project),
           );
     this.#effects = { shared: new Set(), loops };
+    // Start values run one after another with nothing between them, so what one stores is known to the next.
+    this.#flow = new Flow();
     for (const { file, declaration } of sessionDeclarations(programs)) {
       this.#enterFile(file);
-      this.#flow = new Flow();
       runCompileTask(this.#startValueTask(declaration));
       this.#reportMixedLiterals();
     }
