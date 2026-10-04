@@ -809,6 +809,17 @@ class TypeChecker {
         const name = target.property.name;
         // A new property takes its type from its first value, by the same rule as `let` (rule 1.4).
         if (value.kind === "object" && value.properties !== null && !value.properties.has(name)) {
+          // A receiver that may be null needs a check first, also for a new property (owner decision on #504 Q1).
+          const receivers = members(object);
+          if (receivers.some((member) => member.kind === "null")) {
+            this.#reportMayBe(
+              target.object,
+              NULL_TYPE,
+              receivers.filter((member) => member.kind !== "null"),
+            );
+            yield* compileChild(this.#expressionTask(statement.value, scope));
+            return;
+          }
           const assigned = yield* compileChild(this.#expressionTask(statement.value, scope));
           if (statement.operator === "=")
             value.properties.set(
@@ -1859,14 +1870,43 @@ class TypeChecker {
     expressions: readonly Expression[],
     result: (...values: StaticType[]) => StaticType | undefined,
   ): { readonly type: StaticType } | { readonly failed: readonly StaticType[] } {
-    // An operand that may be null needs a check first (owner decision on #504 Q1), so null is one of its members.
-    if (operands.some((operand) => !isKnown(nonNullTypeForUse(operand))))
-      return { type: UNKNOWN_TYPE };
     const values = operands.map((operand) => resolved(operand));
     const lefts = members(values[0]!);
     const rights = values.length > 1 ? members(values[1]!) : [];
     const apply = (left: StaticType, right: StaticType | undefined): StaticType | undefined =>
       right === undefined ? result(left) : result(left, right);
+    // An operand that may be null needs a check first (owner decision on #504 Q1), whatever the other operand is.
+    const named = new Set<string>();
+    for (const [index, all] of [lefts, rights].entries()) {
+      const others = (index === 0 ? rights : lefts).map((member) =>
+        isKnown(member) ? member : UNKNOWN_TYPE,
+      );
+      const takesNull = (others.length > 0 ? others : [undefined]).some(
+        (other) =>
+          (index === 0 ? apply(NULL_TYPE, other) : apply(other ?? NULL_TYPE, NULL_TYPE)) !==
+          undefined,
+      );
+      const passing = all.filter((member) => member.kind !== "null");
+      if (!all.some((member) => member.kind === "null") || passing.length === 0 || takesNull)
+        continue;
+      // Only when null is the one problem: every other member works with the other operand, as far as it is known.
+      const otherValues = others.filter((other) => other.kind !== "null" && isKnown(other));
+      const works =
+        (others.length > 0 && otherValues.length === 0) ||
+        passing.every((member) =>
+          (otherValues.length > 0 ? otherValues : [undefined]).every(
+            (other) =>
+              (index === 0 ? apply(member, other) : apply(other ?? member, member)) !== undefined,
+          ),
+        );
+      if (!works) continue;
+      const label = expressionLabel(expressions[index]!) ?? `operand ${index}`;
+      if (!named.has(label)) this.#reportMayBe(expressions[index]!, NULL_TYPE, passing);
+      named.add(label);
+    }
+    if (named.size > 0) return { type: UNKNOWN_TYPE };
+    if (operands.some((operand) => !isKnown(nonNullTypeForUse(operand))))
+      return { type: UNKNOWN_TYPE };
     const results: StaticType[] = [];
     let failed: readonly StaticType[] | undefined;
     for (const left of lefts) {
@@ -2203,7 +2243,20 @@ class TypeChecker {
         // Each member gives buttons: a collection its elements, a value itself. The elements of a computed collection
         // are not visible here: a choice object among them may return its value or its text, so only scalar
         // elements give a known result type.
-        const accepted = this.#choiceEntry(option.expression, type, false) !== UNKNOWN_TYPE;
+        // Every element of a computed list or set gives one button, so each must be a value or a choice object.
+        const accepted =
+          this.#choiceEntry(option.expression, type, false) !== UNKNOWN_TYPE &&
+          !this.#checkElements(
+            option.expression,
+            type,
+            (element) => isShowable(element) || resolved(element).kind === "object",
+            () =>
+              this.#report(
+                typeCode.invalidInteractionChoice,
+                "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
+                option.expression.span,
+              ),
+          );
         const results = parts.map((part) => {
           const button =
             part.kind === "list" || part.kind === "set" ? resolved(part.element) : part;
@@ -2283,8 +2336,8 @@ class TypeChecker {
     const type = yield* compileChild(this.#expressionTask(expression, scope));
     const value = unwrap(expression);
     if (value.kind !== "listLiteral") {
-      // `${...}` selects one element of a list, so a list is shown too.
-      this.#checkMembers(
+      // `${...}` selects one element of a list, so a list is shown too, and its elements must be shown.
+      const reported = this.#checkMembers(
         expression,
         type,
         (member) => isShowable(member) || resolved(member).kind === "list",
@@ -2295,6 +2348,14 @@ class TypeChecker {
             expression.span,
           ),
       );
+      if (!reported)
+        this.#checkElements(expression, type, isShowable, () =>
+          this.#report(
+            typeCode.unshowableValue,
+            "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
+            expression.span,
+          ),
+        );
       return;
     }
     if (value.elements.length === 0)
@@ -2359,6 +2420,30 @@ class TypeChecker {
     const known = members(nonNullType(type)).filter(isKnown);
     if (known.length === 0 || known.some(accepts)) return false;
     reject(resolved(known[0]!));
+    return true;
+  }
+
+  /**
+   * Checks the known elements of the lists and sets a value of `type` may be, which are shown or give buttons one at a
+   * time: reports that the author must test which collection it is when only some are accepted, else rejects them when
+   * none are. Returns whether it reported.
+   */
+  #checkElements(
+    expression: Expression,
+    type: StaticType,
+    accepts: (element: StaticType) => boolean,
+    reject: () => void,
+  ): boolean {
+    const passing: StaticType[] = [];
+    const failing: StaticType[] = [];
+    for (const member of members(nonNullType(type)).map(resolved)) {
+      if (member.kind !== "list" && member.kind !== "set") continue;
+      for (const element of members(member.element).filter(isKnown))
+        (accepts(element) ? passing : failing).push({ kind: member.kind, element });
+    }
+    if (failing.length === 0) return false;
+    if (passing.length === 0) reject();
+    else this.#reportMayBe(expression, failing[0]!, passing);
     return true;
   }
 
@@ -2481,14 +2566,23 @@ class TypeChecker {
     return type;
   }
 
-  #reportTime(expression: Expression, type: StaticType, unit: boolean): void {
-    if (unit) this.#reportUnless(type, isNumeric, expression, "A time before a unit is a number");
+  #reportTime(expression: Expression, type: StaticType, unit: boolean, range = false): void {
+    const isRange = (member: StaticType): boolean => range && resolved(member).kind === "range";
+    if (unit)
+      this.#reportUnless(
+        type,
+        (member) => isNumeric(member) || isRange(member),
+        expression,
+        "A time before a unit is a number",
+      );
     else
       this.#reportUnless(
         type,
-        (member) => isNumeric(member) || isScalar(member, "duration"),
+        (member) => isNumeric(member) || isScalar(member, "duration") || isRange(member),
         expression,
-        "A time is a duration such as '30 s', or a number of seconds",
+        range
+          ? "A timer duration is a duration such as '30 s', a number of seconds, or a range of whole seconds"
+          : "A time is a duration such as '30 s', or a number of seconds",
       );
   }
 
@@ -2504,8 +2598,7 @@ class TypeChecker {
       );
     // A timer also accepts a range of whole seconds, written directly or held in a variable.
     const duration = yield* compileChild(this.#expressionTask(timer.duration, scope));
-    if (resolved(nonNullType(duration)).kind !== "range")
-      this.#reportTime(timer.duration, duration, timer.unit !== null);
+    this.#reportTime(timer.duration, duration, timer.unit !== null, true);
     if (timer.label !== null)
       this.#checkShownText(
         timer.label,
@@ -2982,6 +3075,18 @@ function programEffects(program: Program): ProgramEffects {
           (expression.kind === "callExpression" && !isPureBuiltinCall(expression)))
       )
         loop.suspends = true;
+      // A method that changes a list or set changes the variable that holds it.
+      if (
+        expression.kind === "callExpression" &&
+        expression.callee.kind === "propertyAccessExpression" &&
+        COLLECTION_CHANGES.has(expression.callee.property.name)
+      ) {
+        const root = rootName(expression.callee.object);
+        if (root !== null) {
+          if (inside) shared.add(root);
+          loop?.assigned.add(root);
+        }
+      }
       handlers(expression);
       for (const part of expressionParts(expression)) work.push({ expression: part, loop, inside });
       continue;
@@ -2989,13 +3094,14 @@ function programEffects(program: Program): ProgramEffects {
     const statement = item.statement;
     if (loop !== null && SUSPENDING_STATEMENTS.has(statement.kind)) loop.suspends = true;
     if (statement.kind === "assignmentStatement") {
-      if (statement.target.kind === "identifier") {
-        if (inside) shared.add(statement.target.name);
-        loop?.assigned.add(statement.target.name);
-      } else if (loop !== null) {
-        // A timer or media property write may run a block at once.
-        loop.suspends = true;
+      // A store into an element or property changes the variable that holds it, too.
+      const root = rootName(statement.target);
+      if (root !== null) {
+        if (inside) shared.add(root);
+        loop?.assigned.add(root);
       }
+      // A timer or media property write may run a block at once.
+      if (statement.target.kind !== "identifier" && loop !== null) loop.suspends = true;
     }
     handlers(statement);
     switch (statement.kind) {
@@ -3031,6 +3137,24 @@ function programEffects(program: Program): ProgramEffects {
       nodes.map((node) => [node.body, { assigned: node.assigned, suspends: node.suspends }]),
     ),
   };
+}
+
+/** Methods that change the list or set they are called on. */
+const COLLECTION_CHANGES: ReadonlySet<string> = new Set([
+  "add",
+  "remove",
+  "clear",
+  "removeAt",
+  "removeFirst",
+  "removeLast",
+]);
+
+/** The variable a place belongs to, such as `xs` for `xs[0].name`, or `null` for a place no variable holds. */
+function rootName(expression: Expression): string | null {
+  let node = unwrap(expression);
+  while (node.kind === "propertyAccessExpression" || node.kind === "indexExpression")
+    node = unwrap(node.object);
+  return node.kind === "identifier" ? node.name : null;
 }
 
 /** The statements of the blocks that run as part of a statement: branches and loop bodies, not handler blocks. */

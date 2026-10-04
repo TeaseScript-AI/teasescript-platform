@@ -334,19 +334,20 @@ test("optional types keep their non-null type in operations, elements, and loops
     ["TSV043", "'v' may be null. Check it first: if v != null { ... }", "v"],
   ]);
   assert.deepEqual(codes('let t: string? = "a"\nlet r = round(t)'), [["TSV043", "t"]]);
-  // So may an optional time, timer length, media position, or range bound.
+  // Also beside an operand of unknown type, as a timer range, or as the receiver of a new property.
   for (const source of [
-    "let n: number? = 1\nwait n",
-    "let n: integer? = 1\nwait n ms",
-    "let n: duration? = 1 s\ntimer n",
-    'let n: duration? = 1 s\nplayAudio(file: "a.mp3", startAt: n)',
-  ]) {
-    const result = runValidSource(source);
-    assert.equal(result.snapshot.failure, null, source);
-    assert.equal(result.snapshot.status, "waiting", source);
-  }
-  assert.deepEqual(sayTexts("let n: integer? = 1\nlet r = n..3\nsay r"), ["1..3"]);
-  assert.deepEqual(codes('let n: string? = "a"\nwait n'), [["TSV043", "n"]]);
+    "function f(n: integer?, other) {\n    return n + other\n}",
+    "function f(n: integer?) {\n    return n + n\n}",
+    "function f(n: range?) {\n    timer async n\n}",
+  ])
+    assert.deepEqual(
+      mismatches(source).map(([code, message]) => [code, message]),
+      [["TSV043", "'n' may be null. Check it first: if n != null { ... }"]],
+      source,
+    );
+  assert.deepEqual(codes("let box = null\nbox = {}\nfunction f {\n    box.extra = 1\n}"), [
+    ["TSV043", "box"],
+  ]);
 });
 
 test("number times duration is a duration, and a media cue's own handle keeps its type", () => {

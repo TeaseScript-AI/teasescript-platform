@@ -188,6 +188,20 @@ test("only plain variables narrow, and a call, wait, or shared assignment cancel
     errors(`${union}if v is integer {\n    say "x"\n}\nfunction f {\n    let i: integer = v\n}`),
     [["TSV041", "v"]],
   );
+  // Changing an element through a call or in an earlier iteration changes the collection, so its element type is
+  // checked again at runtime; a test in each iteration keeps it known.
+  const list = "let xs: list = [1]\n";
+  for (const body of [
+    'function change {\n    xs[0] = "x"\n}\nif xs is integer[] {\n    change()\n    let n: integer = xs[0]\n}',
+    'if xs is integer[] {\n    repeat 2 {\n        let n: integer = xs[0]\n        xs[0] = "x"\n    }\n}',
+  ])
+    assert.equal(runValidSource(`${list}${body}`).snapshot.failure?.code, "TSR058", body);
+  assert.equal(
+    runValidSource(
+      `${list}repeat 2 {\n    if xs is integer[] {\n        let n: integer = xs[0]\n    }\n    xs[0] = "x"\n}`,
+    ).snapshot.failure,
+    null,
+  );
 });
 
 test("media pacing and loading, and handle writes, cancel narrowing where a handler may run", () => {
@@ -234,6 +248,13 @@ test("tests on undecided places and on collections keep every value that may pas
     ),
     ["true"],
   );
+  // A test is not a first value: an empty list or set still takes its element type from the first one stored.
+  for (const source of [
+    'let xs = []\nif xs is string[] {\n    say "empty"\n}\nxs.add(1)',
+    "let xs = []\nif xs is string[] {\n    xs.add(1)\n}",
+    "let xs = set[]\nif xs is string set {\n    xs.add(1)\n}",
+  ])
+    assert.deepEqual(errors(source), [], source);
 });
 
 test("a write that may break a narrowed collection, and an impossible test outcome, are followed exactly", () => {

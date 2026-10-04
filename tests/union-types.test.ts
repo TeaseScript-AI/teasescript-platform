@@ -193,6 +193,15 @@ test("display, choice, and speaker text checks look at every member of a union",
   );
   // A list of any values does not admit a mixed literal; its elements need a declared union.
   assert.deepEqual(codes('let values: list = [1, "x"]'), [["TSV044", '[1, "x"]']]);
+  // The elements of a computed list are shown, or give buttons, one at a time.
+  for (const source of [
+    'function f(xs: (string | object)[]) {\n    say "${xs}"\n}',
+    "function f(xs: string[] | timer[]) {\n    let answer = choose xs\n}",
+  ])
+    assert.deepEqual(codes(source), [["TSV043", "xs"]], source);
+  assert.deepEqual(codes("function f(xs: timer[]) {\n    let answer = choose xs\n}"), [
+    ["TSV029", "xs"],
+  ]);
 });
 
 test("mixed list literals need a declared union, and every other mix points to it", () => {
