@@ -147,7 +147,8 @@ test("calendar units are never misread; doubled units and overflow are rejected 
 test("a unit only binds to a number on the same line", () => {
   const plan = compileValidPlan("let s = 1\nlet a = 2\ns = a");
   assert.equal(validateInstructionPlan(plan).valid, true);
-  assert.deepEqual(sayTexts('let min = 3\nsay "${min} ${2 min}"'), ["3 2 min"]);
+  // `min` is a protected built-in (V30 §13), so the unit name used as a variable is `ms`.
+  assert.deepEqual(sayTexts('let ms = 3\nsay "${ms} ${2 ms}"'), ["3 2 ms"]);
 });
 
 test("wait accepts duration values and keeps its trailing unit form", () => {

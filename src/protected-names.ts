@@ -55,6 +55,8 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "round",
   "floor",
   "ceil",
+  "min",
+  "max",
   "toString",
   "toNumber",
   "toInteger",
@@ -119,6 +121,8 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "round",
   "floor",
   "ceil",
+  "min",
+  "max",
 ] as const);
 
 /** Temporary direct-call bridge for implemented Platform Standard Library helpers. */

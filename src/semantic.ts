@@ -1548,7 +1548,7 @@ class SemanticValidator {
     if (this.#protectedNames.has(name)) {
       this.#report(
         semanticCode.duplicateDeclaration,
-        `Declaration '${name}' conflicts with a protected TeaseScript name.`,
+        `Declaration '${name}' conflicts with a protected TeaseScript name. Choose another name, such as '${name}Value'.`,
         span,
       );
       return false;

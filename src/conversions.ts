@@ -43,6 +43,9 @@ export function isConversionResult(result: ConversionResult, value: unknown): bo
 
 export const ROUNDING_BUILTINS: ReadonlySet<string> = new Set(["round", "floor", "ceil"]);
 
+/** `min` and `max` of two or more numbers or durations (V30 §13). */
+export const MIN_MAX_BUILTINS: ReadonlySet<string> = new Set(["min", "max"]);
+
 /**
  * The number written in `text`: the decimal or scientific form `askNumber` accepts, with surrounding whitespace
  * ignored, or `undefined` when the text is not such a finite number.

@@ -5,6 +5,7 @@ import {
   describeConversionResult,
   isConversionName,
   numberFromText,
+  MIN_MAX_BUILTINS,
   ROUNDING_BUILTINS,
   type ConversionResult,
 } from "./conversions.js";
@@ -12,6 +13,7 @@ import type { SourceSpan } from "./source.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
   describeValue,
+  DURATION_TYPE,
   INTEGER_TYPE,
   isAssignable,
   isKnown,
@@ -226,6 +228,7 @@ export function builtinCallProblems(
   call: CallExpression,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
+  if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
   const result = isConversionName(name) ? CONVERSION_RESULTS.get(name)! : undefined;
   if (result === undefined && !ROUNDING_BUILTINS.has(name)) return [];
   const problems: OperationProblem[] = [];
@@ -270,6 +273,54 @@ export function builtinCallProblems(
       });
   }
   return problems;
+}
+
+/**
+ * Problems with `min` or `max`: two or more positional arguments that are all numbers or all durations. A possibly null
+ * argument is checked by its other members (V30 §34); its value is checked at runtime.
+ */
+function minMaxProblems(
+  name: string,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  const named = call.arguments.find((argument) => argument.kind === "namedArgument");
+  if (named !== undefined)
+    return [
+      {
+        kind: "unknownNamedArgument",
+        message: `${name}(...) takes no named arguments; remove '${named.name.name}:'.`,
+        span: named.name.span,
+      },
+    ];
+  if (call.arguments.length < 2)
+    return [
+      {
+        kind: "argumentCount",
+        message: `${name}(...) takes 2 or more arguments, received ${call.arguments.length}.`,
+        span: call.span,
+      },
+    ];
+  let family: "numbers" | "durations" | undefined;
+  for (const argument of call.arguments) {
+    const type = typeOf(argument.value);
+    if (!isKnown(forUse(type))) continue;
+    const kind = isAssignable(NUMBER_TYPE, type)
+      ? "numbers"
+      : isAssignable(DURATION_TYPE, type)
+        ? "durations"
+        : undefined;
+    const message =
+      kind === undefined
+        ? `${name}(...) needs numbers or durations, not ${describeValue(forUse(type))}.`
+        : family !== undefined && kind !== family
+          ? `${name}(...) needs all numbers or all durations, but this is ${kind === "numbers" ? "a number" : "a duration"} and an earlier one is ${family === "numbers" ? "a number" : "a duration"}.`
+          : undefined;
+    if (message !== undefined)
+      return [{ kind: "invalidOperand", message, span: argument.value.span }];
+    family = kind;
+  }
+  return [];
 }
 
 /**

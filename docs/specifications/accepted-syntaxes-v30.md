@@ -1049,6 +1049,17 @@ floor(-2.5)  // -3
 ceil(-2.5)   // -2
 ```
 
+`min(...)` and `max(...)` return the smallest or largest of two or more values, which are all numbers or all
+durations. The result is an `integer` when every argument is an `integer`, a `number` otherwise, and a `duration` for
+durations. Mixing numbers and durations, other values, `null`, and named arguments are compile errors when the types
+show them, and runtime errors otherwise:
+
+```text
+let minutes = min(20, 5 + punishments)
+let pause = max(1 minute, remaining)
+let boundedLevel = max(1, min(level, 10))
+```
+
 ## 14. Scope
 **Status:** Accepted
 
@@ -3801,6 +3812,8 @@ chance
 round
 floor
 ceil
+min
+max
 toString
 toNumber
 toInteger
