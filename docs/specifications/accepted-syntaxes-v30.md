@@ -873,7 +873,8 @@ punish(3)
   file, and may call only other global functions and built-ins. Using a name of its file is a compile error whose fix is
   to make that name a global, or to pass it as a parameter.
 - Interactions, timers, media, `goto`, `call`, `end`, `exit`, and recursion work in it as in any function. A bare label
-  in it means a label of the file where it is written.
+  in it means a label of the file where it is written, like `goto "helpers.tease" start`: the goto enters that file
+  afresh, so a variable of the file used after the label needs its `let` after the label too ([§26](#26-labels-and-goto)).
 - Its name is unique in the package, like that of a global ([§12](#global-variables)).
 
 ## 12. Variable declarations

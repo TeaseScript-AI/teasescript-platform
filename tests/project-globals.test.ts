@@ -196,7 +196,6 @@ test("a start value uses only literals, earlier globals, operators, and load", (
     ]),
   );
   assert.equal(unknown.snapshot.failure?.code, "TSR067");
-
   // Earlier globals, operators, and load with its default are fine.
   const plan = compiledPlan([
     {
@@ -506,6 +505,48 @@ test("speakers are global: declared anywhere in any file and known in every file
       ["main.tease", "TSV001", 1],
       ["other.tease", "TSV001", 1],
     ],
+  );
+});
+
+test("the label check follows where a global's assignment runs, and a global function's goto enters afresh", () => {
+  // A `global ... default:` assigns only when its declaration runs, so an unreachable one adds no way to a label and
+  // reads nothing.
+  const said1 = (source: string) =>
+    said(runToEnd(compiledPlan([{ path: "main.tease", source }])).events);
+  assert.deepEqual(
+    said1(
+      "if false { global ignored = skip(), default: null }\nlet x = 1\nlabel later\nsay x\nexit\nfunction skip { goto later }",
+    ),
+    ["1"],
+  );
+  assert.deepEqual(
+    said1(
+      "goto later\nlet x = 1\nlabel later\nif false { global ignored = x, default: 0 }\nsay ignored\nexit",
+    ),
+    ["0"],
+  );
+  for (const source of [
+    "if true { global ignored = skip(), default: null }\nlet x = 1\nlabel later\nsay x\nexit\nfunction skip { goto later }",
+    "goto later\nlet x = 1\nlabel later\nif true { global ignored = x, default: 0 }\nsay ignored\nexit",
+  ])
+    assert.deepEqual(diagnostics([{ path: "main.tease", source }]), [["main.tease", "TSV054", 4]]);
+
+  // A global function may run from any file, and its bare label means that label of its own file, entered afresh, so
+  // nothing of the file has run there: here main.tease calls lib.tease, which calls back into main.tease's goto.
+  assert.deepEqual(
+    diagnostics([
+      {
+        path: "main.tease",
+        source:
+          "indirect()\nlet x = 1\nlabel later\nsay x\nexit\nglobal function skip { goto later }",
+      },
+      { path: "lib.tease", source: "global function indirect { skip() }" },
+    ]),
+    [["main.tease", "TSV054", 4]],
+  );
+  assert.deepEqual(
+    said1("label later\nlet x = 1\nsay x\nexit\nglobal function skip { goto later }"),
+    ["1"],
   );
 });
 

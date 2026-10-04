@@ -65,7 +65,8 @@ goto script("rooms/${room}.tease", label: "start")
    It may use only globals, its parameters, and its own locals, not its file's top-level `let`s, and may call only
    other global functions and built-ins. Breaking either rule is a compile error whose fix is to make the name a global
    or pass it as a parameter. Interactions, `goto`, `call`, `end`, `exit`, and recursion work in it normally; a bare
-   label means a label of the file where the function is written.
+   label means a label of the file where the function is written, like `goto "helpers.tease" start`. Such a goto
+   enters that file afresh, so for rule 4 none of its top-level `let`s has run there.
 6. Speakers are always global: `speaker vera { … }`, declared anywhere in any file, is known in every file and is set up
    at session start under the rules for globals (§6). There is no `global speaker`. `speaker vera`, which sets the
    default speaker, stays an ordinary statement.

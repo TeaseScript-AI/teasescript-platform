@@ -405,6 +405,11 @@ class SemanticValidator {
     readonly label: string;
     readonly context: FlowContext;
     readonly statement: Statement;
+    /**
+     * A goto in a global function or its blocks, which may run from any file: its bare label means that label of this
+     * file as a transfer to the file, which enters the file afresh, with none of its top-level `let`s run (ADR 0022 §3).
+     */
+    readonly fresh: boolean;
   }[] = [];
 
   readonly #calls: {
@@ -1001,8 +1006,9 @@ class SemanticValidator {
       case "globalStatement":
         if (this.#protectedNames.has(statement.name.name))
           this.#declare(statement.name.name, "variable", statement.name.span, scope);
+        // The assignment runs exactly when the declaration does, so what it uses keeps the declaration as its statement.
         if (statement.assignment !== null)
-          yield* compileChild(this.#validateStatement(statement.assignment, scope, loopDepth));
+          yield* compileChild(this.#validateStatementKind(statement.assignment, scope, loopDepth));
         this.#validateStartValue(statement.initial, scope, statement, null);
         return;
       case "speakerSetterStatement":
@@ -1243,6 +1249,7 @@ class SemanticValidator {
           label: statement.label.name,
           context: this.#context,
           statement: this.#statement!,
+          fresh: this.#globalFunction !== null,
         });
         if (!this.#labels.has(statement.label.name)) {
           this.#report(
@@ -2082,7 +2089,8 @@ class SemanticValidator {
         const statement = statements[index]!;
         if (followGotos && statement.kind === "labelStatement") {
           for (const goto of gotos) {
-            if (goto.label === statement.name.name) known = meet(known, atContext(goto.context));
+            if (goto.label === statement.name.name)
+              known = meet(known, goto.fresh ? new Set() : atContext(goto.context));
           }
         }
         if (!sameKnown(before[index]!, known)) {
