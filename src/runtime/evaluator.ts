@@ -2,6 +2,7 @@ import { temporalCaptureAt } from "./temporal-captures.js";
 import {
   combinedDateAndTime,
   hasTemporalMethod,
+  exactDurationMilliseconds,
   TEMPORAL_GETTERS,
   temporalBinary,
   temporalConverted,
@@ -44,7 +45,20 @@ import {
   setOperationItems,
   sortOrder,
 } from "./collection-operations.js";
-import { formatDuration } from "../duration.js";
+import {
+  addDurationParts,
+  compareDurationParts,
+  divideDurationParts,
+  durationFamily,
+  durationParts,
+  durationRatio,
+  formatDuration,
+  isExactDuration,
+  negateDurationParts,
+  scaleDurationParts,
+  storedDuration,
+  type DurationParts,
+} from "../duration.js";
 import {
   callStringMethod,
   checkTextArguments,
@@ -227,7 +241,7 @@ export class Evaluator {
       case "literal":
         return expression.value;
       case "duration":
-        return { kind: "duration", milliseconds: expression.milliseconds };
+        return storedDuration(durationParts(expression));
       case "identifier": {
         if (expression.name === "speaker" && this.snapshot.contextualSpeaker !== null) {
           const speaker = this.speakerById(this.snapshot.contextualSpeaker, expression.span);
@@ -584,13 +598,10 @@ export class Evaluator {
               throw fault("TSR026", "Expected a boolean value.", expression.operand.span);
             value = !result.value;
           } else if (isDuration(result.value)) {
-            value = {
-              kind: "duration",
-              milliseconds:
-                expression.operator === "+"
-                  ? result.value.milliseconds
-                  : 0 - result.value.milliseconds,
-            };
+            const parts = durationParts(result.value);
+            value = storedDuration(
+              expression.operator === "+" ? parts : negateDurationParts(parts),
+            );
           } else {
             const number = this.#number(result.value, expression.operand.span);
             value = this.#finite(expression.operator === "+" ? number : -number, expression.span);
@@ -1179,43 +1190,79 @@ export class Evaluator {
     }
   }
 
-  /** V30 §35 exact-duration arithmetic and comparison; mixing with plain numbers is explicit only. */
+  /**
+   * V30 §35 duration arithmetic and comparison; mixing with plain numbers is explicit only. Exact durations keep their
+   * elapsed arithmetic; calendar parts stay whole, and durations compare and divide only within one family.
+   */
   #durationBinary(
     expression: BinaryExpressionPlan,
     left: SerializableRuntimeValue,
     right: SerializableRuntimeValue,
   ): SerializableRuntimeValue {
-    const duration = (milliseconds: number): SerializableRuntimeDuration => ({
-      kind: "duration",
-      milliseconds: this.#finite(milliseconds, expression.span),
-    });
+    const span = expression.span;
+    const operator = expression.operator;
+    const result = (parts: DurationParts | string): SerializableRuntimeDuration => {
+      if (typeof parts === "string")
+        throw fault("TSR009", `Operator '${operator}': ${parts}.`, span);
+      // Calendar parts must stay whole numbers that a value can store, like the milliseconds' finite range.
+      if (!Number.isSafeInteger(parts.months) || !Number.isSafeInteger(parts.days))
+        throw fault(
+          "TSR036",
+          `Operator '${operator}': the result has too many calendar days or months to represent.`,
+          span,
+        );
+      return storedDuration({ ...parts, milliseconds: this.#finite(parts.milliseconds, span) });
+    };
     if (isDuration(left) && isDuration(right)) {
-      switch (expression.operator) {
+      const [a, b] = [durationParts(left), durationParts(right)];
+      const exact = isExactDuration(a) && isExactDuration(b);
+      switch (operator) {
         case "+":
-          return duration(left.milliseconds + right.milliseconds);
+          return result(addDurationParts(a, b));
         case "-":
-          return duration(left.milliseconds - right.milliseconds);
-        case "/":
-          return this.#finite(left.milliseconds / right.milliseconds, expression.span);
+          return result(addDurationParts(a, b, -1));
+        case "/": {
+          if (exact) return this.#finite(a.milliseconds / b.milliseconds, span);
+          const ratio = durationRatio(a, b);
+          if (typeof ratio === "string")
+            throw fault(
+              "TSR009",
+              `${formatDuration(a)} cannot be divided by ${formatDuration(b)}: ${ratio}.`,
+              span,
+            );
+          return this.#finite(ratio, span);
+        }
         case "<":
-          return left.milliseconds < right.milliseconds;
         case "<=":
-          return left.milliseconds <= right.milliseconds;
         case ">":
-          return left.milliseconds > right.milliseconds;
-        case ">=":
-          return left.milliseconds >= right.milliseconds;
+        case ">=": {
+          const order = compareDurationParts(a, b);
+          if (typeof order === "string")
+            throw fault(
+              "TSR009",
+              `${formatDuration(a)} and ${formatDuration(b)} cannot be compared: ${order}.`,
+              span,
+            );
+          if (operator === "<") return order < 0;
+          if (operator === "<=") return order <= 0;
+          if (operator === ">") return order > 0;
+          return order >= 0;
+        }
       }
     } else if (isDuration(left) && typeof right === "number") {
-      if (expression.operator === "*") return duration(left.milliseconds * right);
-      if (expression.operator === "/") return duration(left.milliseconds / right);
-    } else if (typeof left === "number" && isDuration(right) && expression.operator === "*") {
-      return duration(left * right.milliseconds);
+      const parts = durationParts(left);
+      if (operator === "*") return result(scaleDurationParts(parts, right));
+      if (operator === "/")
+        return isExactDuration(parts)
+          ? result({ ...parts, milliseconds: parts.milliseconds / right })
+          : result(divideDurationParts(parts, right));
+    } else if (typeof left === "number" && isDuration(right) && operator === "*") {
+      return result(scaleDurationParts(durationParts(right), left));
     }
     throw fault(
       "TSR009",
-      `Operator '${expression.operator}' is not supported for these duration operands; add durations to durations and multiply or divide durations by numbers.`,
-      expression.span,
+      `Operator '${operator}' is not supported for these duration operands; add durations to durations and multiply or divide durations by numbers.`,
+      span,
     );
   }
 
@@ -1619,6 +1666,7 @@ export class Evaluator {
       if (!isDuration(value)) {
         throw fault("TSR050", `Timer ${name} must be assigned a duration such as 10 s.`, span);
       }
+      exactDurationMilliseconds(value, `Timer ${name}`, span);
       if (name === "remaining") {
         if (timer.state === "running" || timer.state === "paused") {
           assertRepresentableRound(now, Math.max(0, value.milliseconds), span);
@@ -1716,6 +1764,7 @@ export class Evaluator {
     if (!isDuration(value) || !Number.isFinite(value.milliseconds)) {
       throw fault("TSR050", `Media ${name} must be assigned a duration such as 10 s.`, span);
     }
+    exactDurationMilliseconds(value, `Media ${name}`, span);
     const action = activeMediaAction(this.snapshot, handle.mediaId);
     // Playback already reached by now is committed before the seek starts a new segment.
     if (action !== undefined) drainMediaEvents(null, this.snapshot, action, this.events, span);
@@ -1938,16 +1987,32 @@ export class Evaluator {
       );
     }
     // A loop, not a spread into Math.min/Math.max, so a call with very many arguments cannot overflow the native stack.
-    const value = (item: SerializableRuntimeValue): number =>
-      typeof item === "number" ? item : isDuration(item) ? item.milliseconds : Number.NaN;
-    let best = value(positional[0]!);
-    for (const item of positional) {
-      const candidate = value(item);
-      if (name === "min" ? candidate < best : candidate > best) best = candidate;
+    if (numbers) {
+      const values = positional.filter((item): item is number => typeof item === "number");
+      let best = values[0]!;
+      for (const candidate of values)
+        if (name === "min" ? candidate < best : candidate > best) best = candidate;
+      return withoutNegativeZero(best);
     }
-    return numbers
-      ? withoutNegativeZero(best)
-      : { kind: "duration", milliseconds: withoutNegativeZero(best) };
+    // Durations order only within one family (V30 §35), also those that do not win; zero belongs to every family. The
+    // result keeps its own parts.
+    const durations = positional.filter(isDuration);
+    const families = new Set(durations.map((item) => durationFamily(durationParts(item))));
+    families.delete("zero");
+    if (families.size > 1 || families.has("mixed"))
+      throw fault(
+        "TSR059",
+        `${name}(...) compares durations of one kind only: exact time, days and weeks, or months and years.`,
+        span,
+      );
+    let best = durations[0]!;
+    for (const candidate of durations) {
+      const order = compareDurationParts(durationParts(candidate), durationParts(best));
+      if (typeof order === "string")
+        throw fault("TSR059", `${name}(...) cannot compare these durations: ${order}.`, span);
+      if (name === "min" ? order < 0 : order > 0) best = candidate;
+    }
+    return cloneSerializableValue(best);
   }
 
   #roundingBuiltin(
@@ -2076,6 +2141,19 @@ export class Evaluator {
       if (property === undefined)
         throw fault("TSR017", `Media handles have no property '${name}'.`, span);
       return property;
+    }
+    if (isDuration(value)) {
+      const parts = durationParts(value);
+      const family = durationFamily(parts);
+      if (name === "days" && (family === "days" || family === "zero")) return parts.days;
+      if (name === "months" && (family === "months" || family === "zero")) return parts.months;
+      throw fault(
+        "TSR017",
+        name === "days" || name === "months"
+          ? `Only a duration of whole ${name === "days" ? "days or weeks" : "months or years"} has .${name}, but this is ${formatDuration(parts)}.`
+          : `Durations have no property '${name}'.`,
+        span,
+      );
     }
     if (isTemporal(value)) {
       const property = temporalProperty(value, name);

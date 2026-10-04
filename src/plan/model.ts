@@ -1,7 +1,8 @@
+import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 38;
+export const INSTRUCTION_PLAN_VERSION = 39;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -426,7 +427,7 @@ export type InteractionChoiceValue =
   | number
   | boolean
   | null
-  | { readonly kind: "duration"; readonly milliseconds: number }
+  | StoredDuration
   | ({ readonly kind: "date" } & DateFields)
   | ({ readonly kind: "time" } & TimeFields)
   | ({ readonly kind: "datetime" } & DateTimeFields)
@@ -569,10 +570,15 @@ export interface LiteralExpressionPlan extends ExpressionPlanBase {
   readonly value: string | number | boolean | null;
 }
 
-/** An exact elapsed-duration literal, already converted to milliseconds. */
+/**
+ * A duration literal, already normalized: exact milliseconds, and whole calendar `months` and `days`, present only when
+ * they are not zero.
+ */
 export interface DurationExpressionPlan extends ExpressionPlanBase {
   readonly kind: "duration";
   readonly milliseconds: number;
+  readonly months?: number;
+  readonly days?: number;
 }
 
 export interface IdentifierExpressionPlan extends ExpressionPlanBase {

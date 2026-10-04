@@ -42,7 +42,7 @@ import type {
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
-import { durationLiteralMilliseconds } from "../../duration.js";
+import { durationLiteralParts, storedDuration } from "../../duration.js";
 import type { RuntimeCheckSite } from "../../type-checker.js";
 import { typeFromAnnotation } from "../../static-types.js";
 import { typePlan } from "../../type-plans.js";
@@ -2152,12 +2152,12 @@ function assembleExpression(
     case "nullLiteral":
     case "numberLiteral":
       return { kind: "literal", value: expression.value, span: copySpan(expression.span) };
-    case "durationLiteral":
-      return {
-        kind: "duration",
-        milliseconds: durationLiteralMilliseconds(expression),
-        span: copySpan(expression.span),
-      };
+    case "durationLiteral": {
+      const parts = durationLiteralParts(expression);
+      // The type checker rejects a calendar amount that is not whole before lowering.
+      if (typeof parts === "string") throw new Error(`Invalid duration literal: ${parts}.`);
+      return { ...storedDuration(parts), span: copySpan(expression.span) };
+    }
     case "stringLiteral":
       return expression.parts.some((part) => part.kind === "stringInterpolation")
         ? {

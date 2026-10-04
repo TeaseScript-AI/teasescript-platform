@@ -93,6 +93,29 @@ export function weekdayName(date: DateFields): string {
   return WEEKDAY_NAMES[isoWeekdayNumber(date) - 1]!;
 }
 
+/**
+ * A date moved by whole months and then whole days (V30 §35): a day the target month lacks becomes its last day, so
+ * January 31 plus one month is February 28 or 29. `undefined` outside the years 0000 to 9999.
+ */
+export function addCalendarParts(
+  date: DateFields,
+  months: number,
+  days: number,
+): DateFields | undefined {
+  const monthIndex = date.year * 12 + (date.month - 1) + months;
+  const year = Math.floor(monthIndex / 12);
+  const month = monthIndex - year * 12 + 1;
+  if (year < MIN_YEAR || year > MAX_YEAR) return undefined;
+  const clamped = { year, month, day: Math.min(date.day, daysInMonth(year, month)) };
+  const moved = dateFromEpochDays(daysFromEpoch(clamped) + days);
+  return moved.year < MIN_YEAR || moved.year > MAX_YEAR ? undefined : moved;
+}
+
+/** The whole calendar days from `right` to `left`. */
+export function daysBetween(left: DateFields, right: DateFields): number {
+  return daysFromEpoch(left) - daysFromEpoch(right);
+}
+
 export function compareDates(left: DateFields, right: DateFields): number {
   return Math.sign(daysFromEpoch(left) - daysFromEpoch(right));
 }

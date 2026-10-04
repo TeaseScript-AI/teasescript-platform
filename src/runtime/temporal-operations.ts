@@ -1,9 +1,19 @@
+import {
+  durationParts,
+  formatDuration,
+  isExactDuration,
+  negateDurationParts,
+  storedDuration,
+  type DurationParts,
+} from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import {
+  addCalendarParts,
   compareDates,
   compareDateTimes,
   compareTimes,
+  daysBetween,
   formatIsoDate,
   formatIsoDateTime,
   formatIsoTime,
@@ -51,6 +61,25 @@ type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 /** Failed temporal conversion or arithmetic: invalid text, a result outside the years 0000–9999 or the zone rules. */
 const TEMPORAL_FAILURE = "TSR063";
+
+/**
+ * The milliseconds of a duration that a timer, `wait`, timeout, or media position measures as elapsed time. A calendar
+ * day or month has no fixed length, so such a duration is a runtime error.
+ */
+export function exactDurationMilliseconds(
+  value: SerializableRuntimeDuration,
+  subject: string,
+  span: SourceSpan,
+): number {
+  const parts = durationParts(value);
+  if (!isExactDuration(parts))
+    throw fault(
+      "TSR065",
+      `${subject} needs an exact duration such as 24 h, but ${formatDuration(parts)} has calendar days or months, which have no fixed length.`,
+      span,
+    );
+  return parts.milliseconds;
+}
 
 export const TEMPORAL_GETTERS: ReadonlySet<string> = new Set([
   "getDate",
@@ -282,9 +311,13 @@ export function temporalBinary(
     return order >= 0;
   }
   if (operator === "+" || operator === "-") {
-    // A duration is added to or subtracted from the moment written first, as in `started + 1 h`.
-    if (isDuration(right) && (isTimestamp(left) || isDateTime(left)))
-      return shifted(left, operator === "-" ? -right.milliseconds : right.milliseconds);
+    // A duration is added to or subtracted from the value written first, as in `started + 1 h`.
+    if (isDuration(right) && (isDate(left) || isTimestamp(left) || isDateTime(left))) {
+      const parts = durationParts(right);
+      return moved(left, operator === "-" ? negateDurationParts(parts) : parts);
+    }
+    if (operator === "-" && isDate(left) && isDate(right))
+      return storedDuration({ months: 0, days: daysBetween(left, right), milliseconds: 0 });
     if (operator === "-" && isTimestamp(left) && isTimestamp(right))
       return elapsed(left.epochMilliseconds, right.epochMilliseconds);
     if (operator === "-" && isDateTime(left) && isDateTime(right))
@@ -292,20 +325,44 @@ export function temporalBinary(
   }
   throw fault(
     "TSR009",
-    `'${operator}' does not apply to ${describeValue(left)} and ${describeValue(right)}. A timestamp or datetime adds or subtracts a duration, and two timestamps or two datetimes subtract to a duration.`,
+    `'${operator}' does not apply to ${describeValue(left)} and ${describeValue(right)}. A date, datetime, or timestamp adds or subtracts a duration, and two of one kind subtract to a duration.`,
     span,
   );
 
-  function shifted(
-    moment: SerializableRuntimeTimestamp | SerializableRuntimeDateTime,
-    milliseconds: number,
-  ): SerializableRuntimeTimestamp | SerializableRuntimeDateTime {
-    const start =
-      moment.kind === "timestamp" ? moment.epochMilliseconds : zoned(context, moment, span);
-    const end = timestamp(start + roundToMillisecond(milliseconds), span);
-    return moment.kind === "timestamp"
-      ? end
-      : { kind: "datetime", ...local(context, end.epochMilliseconds, span) };
+  /**
+   * A date, datetime, or timestamp moved by a duration's months, then days, then exact time (V30 §35). Calendar parts
+   * keep the local clock time; exact time is elapsed, through the player's zone for a datetime.
+   */
+  function moved(
+    value: SerializableRuntimeDate | SerializableRuntimeDateTime | SerializableRuntimeTimestamp,
+    parts: DurationParts,
+  ): SerializableRuntimeDate | SerializableRuntimeDateTime | SerializableRuntimeTimestamp {
+    if (value.kind === "timestamp") {
+      if (!isExactDuration(parts))
+        throw fault(
+          "TSR009",
+          `A timestamp moves only by exact time such as 24 h, not by ${formatDuration(parts)}: the length of a day or month depends on the zone. Convert it with toDateTime() first.`,
+          span,
+        );
+      return timestamp(value.epochMilliseconds + roundToMillisecond(parts.milliseconds), span);
+    }
+    if (value.kind === "date" && parts.milliseconds !== 0)
+      throw fault(
+        "TSR009",
+        `A date moves only by days, weeks, months, or years, not by ${formatDuration(parts)}. Use a datetime for clock time.`,
+        span,
+      );
+    const date = addCalendarParts(value, parts.months, parts.days);
+    if (date === undefined)
+      throw fault(TEMPORAL_FAILURE, "The result lies outside the years 0000 to 9999.", span);
+    if (value.kind === "date") return { kind: "date", ...date };
+    const calendarMoved: SerializableRuntimeDateTime = { ...value, ...date };
+    if (parts.milliseconds === 0) return calendarMoved;
+    const end = timestamp(
+      zoned(context, calendarMoved, span) + roundToMillisecond(parts.milliseconds),
+      span,
+    );
+    return { kind: "datetime", ...local(context, end.epochMilliseconds, span) };
   }
 }
 

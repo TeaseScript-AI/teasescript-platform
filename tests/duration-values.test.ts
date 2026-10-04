@@ -11,7 +11,6 @@ import {
 import { run } from "../src/runtime/engine.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { validateSerializableValue } from "../src/runtime/serializable-values.js";
-import type { SourceSpan } from "../src/source.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
@@ -98,50 +97,29 @@ test("mixing plain numbers with durations fails instead of guessing a unit", () 
   ]);
 });
 
-test("calendar units are never misread; doubled units and overflow are rejected at compile time", () => {
-  // Calendar durations (V30 section 35) are accepted direction without an implementation yet. A calendar unit may be
-  // rejected with a compile or runtime error located in the duration, but a started wait must have the calendar
-  // meaning, never for example `wait 3` seconds or `1 min`. A calendar day spans 23 to 25 elapsed hours, a week 7 days
-  // and a month 28 to 31 days. Interpolated durations use the same expression parser as these `let` initializers.
-  const days = (fewest: number, most: number) => (deadlineMs: number) =>
-    deadlineMs >= fewest * 23 * 3_600_000 && deadlineMs <= most * 25 * 3_600_000;
-  const cases: ReadonlyArray<
-    readonly [source: string, duration: string, accepted: (deadlineMs: number) => boolean]
-  > = [
-    ["wait 3 days", "3 days", days(3, 3)],
-    ["let n = 3\nwait n days", "n days", days(3, 3)],
-    ["let a = 2 weeks\nwait a", "2 weeks", days(14, 14)],
-    ["let a = 1 mo\nwait a", "1 mo", days(28, 31)],
-  ];
-  for (const [source, duration, accepted] of cases) {
+test("wait never measures a calendar duration; doubled units and overflow are rejected at compile time", () => {
+  // A calendar day or month has no fixed number of hours (V30 section 35): a calendar duration that the compiler can see
+  // is a compile error located in it, and one it cannot see fails when the wait starts.
+  for (const [source, duration] of [
+    ["wait 3 days", "3 days"],
+    ["let n = 3\nwait n days", "days"],
+    ["wait 2 weeks", "2 weeks"],
+    ["wait 1 h + 1 mo", "1 h + 1 mo"],
+  ] as const) {
     const start = source.indexOf(duration);
-    const inDuration = (span: SourceSpan): boolean =>
-      span.start.offset >= start && span.end.offset <= start + duration.length;
-    const message = `${JSON.stringify(source)}: an error must be located in ${JSON.stringify(duration)}`;
     const compiled = compileSource(source);
-    if (compiled.plan === null) {
-      assert.ok(
-        compiled.diagnostics.some(({ severity, span }) => severity === "error" && inDuration(span)),
-        message,
-      );
-      continue;
-    }
-    const { snapshot, events } = run(
-      compiled.plan,
-      createImmediatePacingRuntimeSnapshot(compiled.plan),
-    );
-    const failure = events.at(-1);
-    if (failure?.kind === "runtimeFailure") {
-      assert.ok(inDuration(failure.span), message);
-      continue;
-    }
-    const action = snapshot.foregroundAction;
-    assert.ok(action?.kind === "delay", `${JSON.stringify(source)} must wait`);
+    assert.equal(compiled.plan, null, source);
     assert.ok(
-      accepted(action.deadlineMs),
-      `${JSON.stringify(source)} must not mean ${action.deadlineMs} ms`,
+      compiled.diagnostics.some(
+        ({ severity, span }) =>
+          severity === "error" &&
+          span.start.offset >= start &&
+          span.end.offset <= start + duration.length,
+      ),
+      `${JSON.stringify(source)}: an error must be located in ${JSON.stringify(duration)}`,
     );
   }
+  assert.equal(runtimeFailure(`${DYNAMIC}let a = dynamic(1 mo)\nwait a`), "TSR065");
   assert.deepEqual(diagnostics("wait 10 s ms"), ["TSV033"]);
   assert.deepEqual(diagnostics("let a = 1e306 h"), ["TSC001"]);
 });

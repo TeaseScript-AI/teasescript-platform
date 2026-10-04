@@ -1,3 +1,4 @@
+import { isStoredDurationRecord } from "../duration.js";
 import { isNormalizedOpaqueColor } from "../color.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
@@ -1421,11 +1422,7 @@ function validateExpressionNode(
       }
       return;
     case "duration":
-      if (
-        !hasExactKeys(value, ["kind", "milliseconds", "span"]) ||
-        typeof value.milliseconds !== "number" ||
-        !Number.isFinite(value.milliseconds)
-      ) {
+      if (!isStoredDurationRecord(value, ["span"])) {
         errors.push(planError("TSC002", "Duration literal plan is invalid.", path));
       }
       return;

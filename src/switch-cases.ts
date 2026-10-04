@@ -1,5 +1,10 @@
 import type { Expression, SwitchStatement } from "./ast.js";
-import { durationLiteralMilliseconds } from "./duration.js";
+import {
+  durationLiteralParts,
+  durationParts,
+  negateDurationParts,
+  storedDuration,
+} from "./duration.js";
 import type { SourceSpan } from "./source.js";
 import {
   describeValue,
@@ -153,11 +158,16 @@ function literalValue(
 ): Omit<Extract<CaseValue, { kind: "literal" }>, "kind" | "span"> | undefined {
   const { negative, operand } = signed(expression);
   if (operand.kind === "durationLiteral") {
-    const milliseconds = (negative ? -1 : 1) * durationLiteralMilliseconds(operand);
+    const text = `${negative ? "-" : ""}${operand.amount.raw} ${operand.unit}`;
+    const literal = durationLiteralParts(operand);
+    // A calendar amount that is not whole is reported where the literal is typed.
+    if (typeof literal === "string") return { key: `duration:${text}`, number: undefined, text };
+    // `==` compares durations by their parts, so `1 d` and `24 h` are different cases.
+    const parts = durationParts(storedDuration(negative ? negateDurationParts(literal) : literal));
     return {
-      key: `duration:${milliseconds === 0 ? 0 : milliseconds}`,
+      key: `duration:${parts.months}:${parts.days}:${parts.milliseconds}`,
       number: undefined,
-      text: `${negative ? "-" : ""}${operand.amount.raw} ${operand.unit}`,
+      text,
     };
   }
   const number = numberLiteral(expression);

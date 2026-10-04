@@ -41,8 +41,26 @@ import {
   type OperationProblem,
 } from "./operation-checks.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
-import { formatDuration } from "./duration.js";
-import { staticChoiceValue, staticNumber, staticVisibleText } from "./static-evaluation.js";
+import {
+  compareDurationParts,
+  divideDurationParts,
+  durationFamily,
+  durationLiteralParts,
+  durationParts,
+  durationRatio,
+  formatDuration,
+  isExactDuration,
+  scaleDurationParts,
+  type DurationParts,
+} from "./duration.js";
+import {
+  knownOperands,
+  knownStep,
+  staticChoiceValue,
+  staticNumber,
+  staticVisibleText,
+  type StaticScalar,
+} from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 import { impossibleCaseMessage } from "./switch-cases.js";
 import type { SourceSpan } from "./source.js";
@@ -340,6 +358,9 @@ class TypeChecker {
   #function: FunctionContext | null = null;
 
   readonly #types = new Map<Expression, StaticType>();
+
+  /** Numbers and durations known at compile time, folded once per expression (see `#known`). */
+  readonly #knownValues = new Map<Expression, StaticScalar | undefined>();
 
   /** The checked expressions whose kept type is still the type of the place they read. */
   readonly #placeReads = new Set<Expression>();
@@ -910,6 +931,14 @@ class TypeChecker {
       )
         this.#relaxNarrowedRoot(target.object, scope);
       const object = yield* compileChild(this.#expressionTask(target.object, scope));
+      if (
+        target.kind === "propertyAccessExpression" &&
+        ["remaining", "repeatDuration", "position"].includes(target.property.name) &&
+        members(nonNullType(object)).some((member) =>
+          ["timer", "media"].includes(resolved(member).kind),
+        )
+      )
+        this.#reportCalendarTime(statement.value, `'${target.property.name}'`);
       if (target.kind === "indexExpression") {
         const index = yield* compileChild(this.#expressionTask(target.index, scope));
         this.#checkIndex(object, target.object, index, target.index);
@@ -1906,8 +1935,16 @@ class TypeChecker {
         return NULL_TYPE;
       case "numberLiteral":
         return expression.numericType === "integer" ? INTEGER_TYPE : NUMBER_TYPE;
-      case "durationLiteral":
+      case "durationLiteral": {
+        const parts = durationLiteralParts(expression);
+        if (typeof parts === "string")
+          this.#report(
+            typeCode.invalidOperand,
+            `${parts}; a calendar duration counts whole days or months. Write the exact time instead, as in '36 h'.`,
+            expression.span,
+          );
         return DURATION_TYPE;
+      }
       case "stringLiteral":
         for (const part of expression.parts)
           if (part.kind === "stringInterpolation")
@@ -2309,6 +2346,7 @@ class TypeChecker {
       return yield* compileChild(this.#valueOfConditionTask(expression, scope));
     const left = yield* compileChild(this.#expressionTask(expression.left, scope));
     const right = yield* compileChild(this.#expressionTask(expression.right, scope));
+    this.#checkKnownDurations(expression, left, right);
     switch (expression.operator) {
       case "==":
       case "!=":
@@ -2333,6 +2371,92 @@ class TypeChecker {
           arithmeticType(expression.operator, a, b),
         );
     }
+  }
+
+  /**
+   * Reports duration arithmetic that is known to fail (V30 §35): comparing or dividing durations of different
+   * families, moving a timestamp by calendar parts or a date by exact time, and calendar parts that would not stay whole.
+   * Only the operands a check needs are folded, through `#known`, so any shape of chain stays linear.
+   */
+  #checkKnownDurations(
+    expression: Extract<Expression, { kind: "binaryExpression" }>,
+    left: StaticType,
+    right: StaticType,
+  ): void {
+    const leftDuration = isScalar(left, "duration");
+    const rightDuration = isScalar(right, "duration");
+    if (!leftDuration && !rightDuration) return;
+    const operator = expression.operator;
+    const duration = (operand: Expression): DurationParts | undefined => {
+      const value = this.#known(operand);
+      return value !== null && typeof value === "object" ? durationParts(value) : undefined;
+    };
+    const number = (operand: Expression): number | undefined => {
+      const value = this.#known(operand);
+      return typeof value === "number" ? value : undefined;
+    };
+    let problem: string | number | DurationParts | undefined;
+    if (operator === "+" || operator === "-") {
+      // Only a timestamp or a date moved by a known duration has something to check.
+      const moved = isScalar(left, "timestamp")
+        ? "timestamp"
+        : isScalar(left, "date")
+          ? "date"
+          : undefined;
+      const b = moved !== undefined && rightDuration ? duration(expression.right) : undefined;
+      if (b !== undefined && moved === "timestamp" && !isExactDuration(b))
+        problem = `a timestamp moves only by exact time such as 24 h, not by ${formatDuration(b)}; convert it with toDateTime() first`;
+      else if (b !== undefined && moved === "date" && b.milliseconds !== 0)
+        problem = `a date moves only by days, weeks, months, or years, not by ${formatDuration(b)}`;
+    } else if (leftDuration && rightDuration) {
+      const a = duration(expression.left);
+      const b = a === undefined ? undefined : duration(expression.right);
+      if (a !== undefined && b !== undefined)
+        problem =
+          operator === "/"
+            ? durationRatio(a, b)
+            : ["<", "<=", ">", ">="].includes(operator)
+              ? compareDurationParts(a, b)
+              : undefined;
+    } else if (operator === "*" || operator === "/") {
+      // A duration times or divided by a number, or a number times a duration: calendar parts must stay whole.
+      const [parts, factor] = leftDuration
+        ? [duration(expression.left), number(expression.right)]
+        : operator === "*"
+          ? [duration(expression.right), number(expression.left)]
+          : [undefined, undefined];
+      if (parts !== undefined && factor !== undefined)
+        problem =
+          operator === "*" ? scaleDurationParts(parts, factor) : divideDurationParts(parts, factor);
+    }
+    if (typeof problem === "string")
+      this.#report(typeCode.invalidOperand, `'${operator}': ${problem}.`, expression.span);
+  }
+
+  /**
+   * The number or duration `expression` is known to have at compile time, folded once per expression from its operands'
+   * known values. Iterative, so a long chain of steps does not deepen the native stack.
+   */
+  #known(expression: Expression): StaticScalar | undefined {
+    const pending: Expression[] = [expression];
+    while (pending.length > 0) {
+      const current = pending.at(-1)!;
+      if (this.#knownValues.has(current)) {
+        pending.pop();
+        continue;
+      }
+      const missing = knownOperands(current).filter((operand) => !this.#knownValues.has(operand));
+      if (missing.length > 0) {
+        pending.push(...missing);
+        continue;
+      }
+      this.#knownValues.set(
+        current,
+        knownStep(current, (operand) => this.#knownValues.get(operand)),
+      );
+      pending.pop();
+    }
+    return this.#knownValues.get(expression);
   }
 
   /**
@@ -2801,6 +2925,22 @@ class TypeChecker {
           families[0]?.find((one) => one !== undefined);
         const spans = new Set(several.map((item) => item.value.span.start.offset));
         this.#reportProblems(problems.filter((problem) => !spans.has(problem.span.start.offset)));
+        // Known durations must share one family, also those that would not win (V30 §35).
+        const knownFamilies = new Set(
+          expression.arguments.map((item) => {
+            const value = this.#known(item.value);
+            return value !== null && typeof value === "object"
+              ? durationFamily(durationParts(value))
+              : "zero";
+          }),
+        );
+        knownFamilies.delete("zero");
+        if (knownFamilies.size > 1 || knownFamilies.has("mixed"))
+          this.#report(
+            typeCode.invalidOperand,
+            `${name}(...) compares durations of one kind only: exact time, days and weeks, or months and years.`,
+            expression.span,
+          );
         for (const item of several)
           this.#reportUnless(
             this.#typeOf(item.value),
@@ -2865,6 +3005,20 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "propertyAccessExpression" }>,
   ): StaticType | PlaceRead {
     const name = expression.property.name;
+    // A known duration of another family has no such count (V30 §35).
+    if ((name === "days" || name === "months") && isScalar(object, "duration")) {
+      const value = this.#known(expression.object);
+      if (value !== null && typeof value === "object") {
+        const parts = durationParts(value);
+        const family = durationFamily(parts);
+        if (family !== "zero" && family !== name)
+          this.#report(
+            typeCode.invalidOperand,
+            `Only a duration of whole ${name === "days" ? "days or weeks" : "months or years"} has .${name}, but this is ${formatDuration(parts)}.`,
+            expression.property.span,
+          );
+      }
+    }
     const all = members(object);
     const types = all.map((member) => memberPropertyType(member, name));
     const passing = all.filter((_, index) => types[index] !== undefined);
@@ -3278,13 +3432,15 @@ class TypeChecker {
     for (const option of showButtonOptions(parts)) {
       const type = yield* compileChild(this.#expressionTask(option.value, scope));
       if (option.name === "background") this.#checkBackground(option.value, type);
-      else
+      else {
+        this.#reportCalendarTime(option.value, "A showButton timeout");
         this.#reportUnless(
           type,
           (member) => isNumeric(member) || isScalar(member, "duration"),
           option.value,
           "A showButton timeout is a duration such as '30 s', or a number of seconds",
         );
+      }
     }
   }
 
@@ -3465,6 +3621,7 @@ class TypeChecker {
   }
 
   #reportTime(expression: Expression, type: StaticType, unit: boolean, range = false): void {
+    if (!unit) this.#reportCalendarTime(expression, "A time");
     const isRange = (member: StaticType): boolean => range && resolved(member).kind === "range";
     if (unit)
       this.#reportUnless(
@@ -3481,6 +3638,19 @@ class TypeChecker {
         range
           ? "A timer duration is a duration such as '30 s', a number of seconds, or a range of whole seconds"
           : "A time is a duration such as '30 s', or a number of seconds",
+      );
+  }
+
+  /** Reports a duration known to have calendar days or months where elapsed time is measured (V30 §35). */
+  #reportCalendarTime(expression: Expression, subject: string): void {
+    const known = staticChoiceValue(expression)?.value;
+    if (known === null || typeof known !== "object") return;
+    const parts = durationParts(known);
+    if (!isExactDuration(parts))
+      this.#report(
+        typeCode.invalidOperand,
+        `${subject} needs an exact duration such as 24 h, but ${formatDuration(parts)} has calendar days or months, which have no fixed length.`,
+        expression.span,
       );
   }
 
@@ -3527,7 +3697,7 @@ class TypeChecker {
             "A repeat count is a whole number (integer)",
           ),
         );
-      else if (media.repeat?.kind === "value" && operand === media.repeat.value)
+      else if (media.repeat?.kind === "value" && operand === media.repeat.value) {
         yield* compileChild(
           this.#requireTask(
             operand,
@@ -3536,7 +3706,8 @@ class TypeChecker {
             "Repeat is true, false, or a duration",
           ),
         );
-      else yield* compileChild(this.#timeTask(operand, false, scope));
+        this.#reportCalendarTime(operand, "A repeat budget");
+      } else yield* compileChild(this.#timeTask(operand, false, scope));
     }
     for (const block of mediaHandlerBlocks(media))
       this.#handlers.push({ block, selfHandle: media.async ? selfHandle : null });
@@ -4404,6 +4575,9 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
       return handlePropertyType(value.kind, name, "read");
     case "scalar":
       if (isScalar(value, "string")) return name === "length" ? INTEGER_TYPE : undefined;
+      // A duration of whole days or months tells how many (V30 §35).
+      if (value.name === "duration")
+        return name === "days" || name === "months" ? INTEGER_TYPE : undefined;
       return temporalFieldType(value.name, name);
     case "range":
     case "null":
@@ -4757,8 +4931,10 @@ function buttonLiteral(entry: Expression): ScalarValue | null | undefined {
 /** The text, number, true, false, or null that an expression certainly is, or `undefined`. */
 function literalValue(expression: Expression): ScalarValue | null | undefined {
   const known = staticChoiceValue(expression)?.value;
-  // A duration is compared by its length, so it stands for its milliseconds in a duration type.
-  return known !== null && typeof known === "object" ? known.milliseconds : known;
+  // An exact duration is compared by its length, so it stands for its milliseconds in a duration type. A calendar
+  // duration has no fixed length and is not tracked.
+  if (known === null || typeof known !== "object") return known;
+  return isExactDuration(durationParts(known)) ? known.milliseconds : undefined;
 }
 
 /** The value a compared expression certainly is, such as `"Open"` or `1 s`, or `undefined`. */
@@ -4766,6 +4942,8 @@ function comparedLiteral(expression: Expression): readonly PossibleValue[] | und
   const known = staticChoiceValue(expression);
   if (known === undefined) return undefined;
   const value = known.value;
+  if (value !== null && typeof value === "object" && !isExactDuration(durationParts(value)))
+    return undefined;
   return [
     value !== null && typeof value === "object"
       ? { value: value.milliseconds, duration: true }

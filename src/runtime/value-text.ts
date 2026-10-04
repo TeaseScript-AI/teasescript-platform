@@ -1,4 +1,4 @@
-import { formatDuration } from "../duration.js";
+import { durationParts, formatDuration } from "../duration.js";
 import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import {
@@ -90,7 +90,7 @@ function plainScalarText(value: SerializableRuntimeValue, span: SourceSpan): str
   if (isFiniteNumber(value)) return String(Object.is(value, -0) ? 0 : value);
   if (typeof value === "boolean") return value ? "true" : "false";
   if (value === null) return "null";
-  if (isDuration(value)) return formatDuration(value.milliseconds);
+  if (isDuration(value)) return formatDuration(durationParts(value));
   throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
 }
 

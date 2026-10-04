@@ -70,7 +70,7 @@ import type {
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
-import { elapsedDurationUnit, isCalendarDurationUnit } from "./duration.js";
+import { calendarDurationUnit, elapsedDurationUnit } from "./duration.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 import { TokenKind, type Token } from "./token.js";
 
@@ -775,7 +775,14 @@ class Parser {
     let unit: DurationUnit | null;
     // In `timer 5..10 s` the unit belongs to the whole range, not only to its end bound.
     if (duration.kind === "rangeExpression" && duration.end.kind === "durationLiteral") {
-      unit = duration.end.unit;
+      const rangeUnit = duration.end.unit;
+      unit = elapsedDurationUnit(rangeUnit) ?? null;
+      if (unit === null)
+        this.#reportSpan(
+          parserDiagnosticCode.unsupportedDurationUnit,
+          "A timer needs an exact unit: 'ms', 's', 'min', or 'h'. A calendar day is not a fixed number of hours.",
+          duration.end.unitSpan,
+        );
       end = duration.end.span;
       duration = Object.freeze({
         ...duration,
@@ -1378,11 +1385,14 @@ class Parser {
     const token = this.#advance();
     const unit = elapsedDurationUnit(token.lexeme);
     if (unit !== undefined) return unit;
+    const calendar = calendarDurationUnit(token.lexeme) !== undefined;
     this.#reportToken(
-      isCalendarDurationUnit(token.lexeme)
+      calendar
         ? parserDiagnosticCode.unsupportedDurationUnit
         : parserDiagnosticCode.expectedStatementEnd,
-      `Expected ${command} unit 'ms', 's', 'min', or 'h' (or their long forms).`,
+      calendar
+        ? `A ${command} needs an exact unit: 'ms', 's', 'min', or 'h'. A calendar day is not a fixed number of hours.`
+        : `Expected ${command} unit 'ms', 's', 'min', or 'h' (or their long forms).`,
       token,
     );
     return null;
@@ -2513,18 +2523,8 @@ class Parser {
   #parseDurationUnit(amount: NumberLiteral): Expression {
     if (!this.#check(TokenKind.Identifier)) return amount;
     const token = this.#peek();
-    const unit = elapsedDurationUnit(token.lexeme);
-    if (unit === undefined) {
-      if (isCalendarDurationUnit(token.lexeme)) {
-        this.#advance();
-        this.#reportToken(
-          parserDiagnosticCode.unsupportedDurationUnit,
-          `Calendar duration unit '${token.lexeme}' is not implemented yet; use ms, s, min, or h.`,
-          token,
-        );
-      }
-      return amount;
-    }
+    const unit = elapsedDurationUnit(token.lexeme) ?? calendarDurationUnit(token.lexeme);
+    if (unit === undefined) return amount;
     this.#advance();
     return Object.freeze({
       kind: "durationLiteral",

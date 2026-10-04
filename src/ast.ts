@@ -492,11 +492,14 @@ export interface NumberLiteral {
 
 export type DurationUnit = "ms" | "s" | "min" | "h";
 
+/** Calendar units: days, weeks, months, and years (V30 §35). They only appear in duration literals. */
+export type CalendarDurationUnit = "d" | "w" | "mo" | "y";
+
 /** A V30 exact elapsed-duration literal such as `30 s` or `2 minutes`. */
 export interface DurationLiteral {
   readonly kind: "durationLiteral";
   readonly amount: NumberLiteral;
-  readonly unit: DurationUnit;
+  readonly unit: DurationUnit | CalendarDurationUnit;
   readonly unitSpan: SourceSpan;
   readonly span: SourceSpan;
 }
