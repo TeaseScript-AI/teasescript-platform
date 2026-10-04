@@ -401,7 +401,11 @@ Converting the corpus's script chains to ADR 0022 surfaced:
   variable of a global's name must become an assignment to it. A global's initializer may not call a function (ADR 0022
   §6.4), so a value a script computes at its start becomes a global with an empty start value and an assignment in each
   script. A file that only declares global functions and globals still needs an `exit` at its end under §4 as written,
-  although nothing transfers to it; `helpers.tease` has one, which is an open question for #570. 13 otherwise
+  although nothing transfers to it; `helpers.tease` has one, which is an open question for #570. The warning for
+  impossible null tests also reaches the importer's null test of an input question right after the question was set
+  to text, which main's narrowing proves non-null; the importer leaves that test out too (59 of 64 such sites in
+  DisciplineClinic's `Punish`, which does not reach the type pass yet; the other 5 follow the assignment in an outer
+  block). 13 otherwise
   compiler-clean scripts use `helpers.tease`, all of them also blocked by file transfers, and DisciplineClinic's `Exit`
   no longer compiles as generated because it calls the shared helpers.
 - **Localized variants are chosen by language.** The legacy player looked for `name_<language>_<country>` and
@@ -414,6 +418,12 @@ Converting the corpus's script chains to ADR 0022 surfaced:
   `Domme3/training`). The legacy player ended the chain quietly when it found no file; a path cannot leave the package
   (ADR 0022 §1), so these become `exit` with a note.
 - **Explicit endings** need an `exit` at the end of every converted script, since the legacy chain ended there.
+- **Project compilation (#573) does not change the gate yet.** `compileProject` checks the package's files together
+  but compiles each file on its own and builds the one plan only when every file compiles; transfers, globals, and
+  global functions come in parts 3 to 5. The gate therefore keeps compiling each file, with stand-ins for transfers and
+  a copy of the globals it reaches, and the smoke runner keeps following transfers between per-file plans, which also
+  lets the runnable scripts of a package with unconverted files run. Moving to `compileProject` pays off once the
+  runtime follows `goto` inside one plan (part 5).
 
 ## Legacy baggage
 
