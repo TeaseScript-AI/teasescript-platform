@@ -25,8 +25,9 @@ Importer progress is measured at package level rather than by requiring every ge
 3. **Dependency-closed** — every generated function call resolves to generated package code or a known accepted
    TeaseScript/Standard-Library capability. This includes transitive helper dependencies.
 4. **Compiler-clean** — the generated script passes the real compiler. The report also compiles a copy in which
-   accepted-but-unimplemented TeaseScript (`run`/`end`, `switch`, ...) is replaced by placeholder host calls;
-   a file that is clean only in that copy is blocked by TeaseScript implementation work, not by importer output.
+   accepted-but-unimplemented TeaseScript (`run`/`end`, `showPopup`, ...) is replaced by placeholder host calls that
+   keep the accepted result types; a file that is clean only in that copy is blocked by TeaseScript implementation
+   work, not by importer output.
 5. **Runnable/verified** — relevant execution paths have actually run without unresolved runtime behavior. The
    report's smoke run (`report --run`) executes one deterministic path per package entry in the real runtime,
    following script transfers with shared storage, and runs scripts no entry reached in isolation. It catches runtime
@@ -40,7 +41,8 @@ fields are not duplicated automatically because fields may carry shared state; t
 ## Existing TeaseScript is sufficient
 
 These corpus patterns looked like gaps but are importer work; the generated form is ordinary TeaseScript, or accepted
-TeaseScript that the compiler gate replaces with stand-ins until it is implemented:
+TeaseScript that the compiler gate replaces with stand-ins until `main` implements it (see Accepted but not
+implemented):
 
 | Legacy pattern | TeaseScript form |
 | --- | --- |
@@ -59,20 +61,23 @@ TeaseScript that the compiler gate replaces with stand-ins until it is implement
 | `getSelectedValue(text, [...])` | `say text` plus `choose 0: ..., 1: ...` (numeric values return the index) |
 | `getSelectedValue(text, ["Back"] + list)` | `say text` plus `choose 0: "Back", sexscriptLegacyMenuOptions(list, 1)`, whose `{ value, text }` choice objects return the index (PR #515) |
 | `getBoolean(text, yes, no)` | `say text` plus `(choose yes: ..., no: ...) == "yes"` |
-| `getString` / `getFloat` / `getInteger` with a default | `say text` plus `askText default: value` / `askNumber default: value`; `askInteger(text, default: value)` |
+| `getString` / `getFloat` / `getInteger` with a default | `say text` plus `askText default: value` / `askNumber default: value` / `askInteger default: value` (#548) |
 | `Calendar.getInstance().get(Calendar.HOUR_OF_DAY)` and other fields | `getDateTime().hour`, with month and weekday-number conversions |
 | `getTime()` (Unix seconds) | `getTimestamp().toSeconds()`, a fixed moment (#532) |
 | `Calendar.getInstance().get(Calendar.DAY_OF_YEAR)` | `(getDate() - toDate("${getDate().year}-01-01")).days + 1` (#532) |
 | `new Date().format("yyyy-MM-dd")`, `new Date().format("HH:mm")` | `getDate().toISO()`; `getTime().formatTime()`, with a note (#532) |
 | `list + other`, `list << x`, `list.push(x)`, `list += other` | a generated concatenation helper and `add()` |
 | a map used as a lookup table: `[(KEY): v]`, `map[key]`, `containsKey`, `keySet`, `values`, `size`, `put`, `remove`, `clear`, `each { k, v -> }` | a `dict` (#536): `dict{ [KEY]: v }`, `map[key]`, `contains`, `keys`, `values`, `length`, `map[key] = v`, a guarded `remove`, `clear`, `for k in map` |
-| a map with fixed names that gains fields later, and its `clear()` | an object literal that declares every used field (null when added later); `clear()` reassigns it with null fields |
+| a map with fixed names that gains fields later, and its `clear()` | an object literal that declares every used field (null when added later); `clear()` reassigns it with null fields, so a map that `clear()` empties starts every field as null and sets its values right after, since a property keeps the type of its first value (ADR 0021 rule 1.4) |
 | `list.remove(index)`, `list.remove(value)` | `list.removeAt(index)`, also as a value; `list.remove(value)` with structural equality (#517) |
-| Groovy string methods (`size()`, `trim()`, `toUpperCase()`, `replace()`, `split()`, ...) | text operations (`text.length`, `trim()`, `uppercase()`, ...; PR #518) |
-| `list.join(separator)`, `"${list}"` | `list.join(separator)`; `"[${list.join(", ")}]"` (PR #518) |
+| Groovy string methods (`size()`, `trim()`, `toUpperCase()`, `replace()`, `split()`, ...) | text operations (`text.length`, `trim()`, `uppercase()`, ...; #518) |
+| `list.join(separator)`, `"${list}"` | `list.join(separator)`; `"[${list.join(", ")}]"` (#518) |
 | `def x` / `int x` without initializer | `let x: string? = null` (or `string[]?`, ...), and `0` or `false` for primitives |
-| `def x = 0` that later holds a fraction | `let x = 0`, which widens to `number` by itself (#504 option B; the compiler gate writes `: number` until #526 lands) |
+| `def x = 0` that later holds a fraction | `let x = 0`, which widens to `number` by itself (#504 option B, #526) |
 | `def x = "a"` that is later set to `null`; `def x = null` | `let x: string? = "a"`; `let x = null`, which keeps the type of its first value (#504 decision 1a) |
+| a variable that receives a function result that may be absent, or a storage read that the script then tests for null; `def b = a` where `a` may be null | `let x: integer? = 7`, since a possibly null value fits only an optional place (ADR 0021 rule 1.9); `let b: string? = a`, since the compiler narrows `a` at the declaration. Other storage reads are checked at runtime when stored |
+| `text += value` | `text = "${text}${value}"` |
+| a list literal mixing types, such as Groovy pairs `[["late", 2], ["rude", 4]]` | `let pairs: (string \| integer)[][] = [["late", 2], ["rude", 4]]` (ADR 0021 rule 1.3), with a note when later elements add a type |
 | `int x = 7 / 2`, `int x = f()`, and later values stored in `x` | `let x = toInteger(7 / 2)`, `let x = toInteger(f())` (Groovy stores 3); `int x = loadInteger(k)` becomes `let x: integer = load k`, and another storage read `toInteger(load k)` |
 | `new Boolean[n]`, `x in list`, boolean `&`/`|` | a generated list helper, `list.contains(x)`, `and`/`or` with a side-effect-free right side |
 | `System.exit(0)` | `exit` (the Player stays open) |
@@ -90,7 +95,7 @@ TeaseScript that the compiler gate replaces with stand-ins until it is implement
 | `getSelectedValue(q, opts.collect { it.lbl })` inside a larger expression | the menu into `selected` before the statement |
 | `x.isEmpty()`, `x.size()`, `n.times { }` on a value of unknown type | `x.length == 0`, `x.length` (text, lists, and dicts), with a note where the value may be an object, whose length fails (`SX_LENGTH_RECEIVER`, 20 sites); the loop (Groovy has `times()` only on numbers) |
 | `list = list.sort()` | `list.sort()` |
-| A script variable that holds values of several types where every write and read is straight-line code of the block that declares it, which no function writes (`x = "a"; say x; x = 1; ...`) | one variable per type (`x`, `xNumber`); otherwise a type change (`SX_TYPE_CHANGE`) |
+| A script variable that holds values of several types where every write and read is straight-line code of the block that declares it, which no function writes (`x = "a"; say x; x = 1; ...`) | one variable per type (`x`, `xNumber`); otherwise a declared union (`let dialog: string \| list = ""`, `SX_UNION_TYPE` note, #530), and a type change (`SX_TYPE_CHANGE`) only for types a union annotation does not name, such as a range |
 | `while (playBackgroundSound(s) \|\| true)` | `while true` with the call as its first statement |
 | `sleep(ms)`, `waitWithGauge(s)` | `wait ... ms`, `timer ...` |
 
@@ -113,7 +118,7 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   notation (PR #515). A list of text, numbers, and booleans becomes `"[${list.join(", ")}]"`; other lists are reported
   (`SX_COLLECTION_TEXT`). Groovy printed a whole `double` as `2.0`, where `${...}` shows `2`. Groovy `join()` had no
   separator, so it becomes `join("")`, as TeaseScript's default separator is `", "`.
-- Text operations follow Unicode code points and full case mapping (PR #518): lengths and positions count code points
+- Text operations follow Unicode code points and full case mapping (#518): lengths and positions count code points
   where Java counted UTF-16 units, `trim()` also removes non-breaking spaces, and `uppercaseFirst()` turns a leading
   `ß` into `SS`. A literal with a character outside the Basic Multilingual Plane, such as an emoji, gets a `NOTE` on a
   length, `substring`, `indexOf`, or `lastIndexOf` (`SX_TEXT_CODE_POINTS`); text known only at runtime does not. Java
@@ -213,47 +218,80 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   `&&`/`||`/`?:` and nothing with side effects is evaluated earlier in the statement; otherwise the statement is
   reported (`SX_CONDITIONAL_POSITION`, `SX_PROMPT_POSITION`).
 
-## Type enforcement findings (#519)
+## Type enforcement findings (#519, #526, #530)
 
 `main` rejects a value of another type than a variable's declared or inferred one (`TSV041`), and only `integer`
-widens to `number`. The importer follows the compiler's static types over the generated program, under the accepted
-rules: the result types of PR #518, and the #504 decisions that a variable starting as `null` keeps the type
-of its first value (1a) and that an unannotated integer widens to `number` by itself (option B, built in #526). Where
-`main` needs another annotation, only the compiler gate writes it. Measured on the four corpus packages:
+widens to `number`. Since `337388d2` it checks types in a separate pass (#526, ADR 0021), checks values the compiler
+cannot know at runtime (#520), and accepts unions, `is`, and narrowing (#530). The importer follows these rules over the
+generated program: a variable that starts as `null` keeps the type of its first value (#504 decision 1a), and an
+unannotated integer widens to `number` by itself (option B). Measured on the four corpus packages:
 
-- **Variables that change type: 8, all in DisciplineClinic.** Five start as an empty-text placeholder and later hold a
-  list or yes/no answers (`def lineArray = ""`, then `lineArray = ["I need discipline, ...", ...]`, also `mantraArray`,
-  `lessonArray`, `adviceArray`, and `answer`); they now start with the later type's empty value, with a note
-  (`SX_PLACEHOLDER_TYPE`). Three reuse a variable across functions: `response` (two scripts) for text, then booleans or
-  menu positions, and `dialog` for the menu text and then the option list (`dialog = ["Back"] + mistressArray`).
-  Functions write them, so splitting them by type would need flow analysis across calls; without union types they are
-  reported at the declaration (`SX_TYPE_CHANGE`), and the menus over `dialog` and over OffenseSelect's `answer` stay
-  unconverted (`SX_DYNAMIC_CHOICE_OPTIONS`). The other three packages reuse variables only with compatible types.
-- **Integer/number friction, resolved by #504 option B:** 18 declarations (Domme3 3, DisciplineClinic 9, Toy 6) start
-  with a whole number and later hold a fraction (`def spankTempo = 1`, later `spankTempo = 0.75`). Under #519 alone
-  each needed `: number`, which takes a whole-program view of every later assignment. The output now writes none;
-  until #526 lands, the compiler gate writes `: number` on 30 declarations (counted as the pending capability "number
-  annotations"). The 14 that only received a numeric `choose` result need none since `main` types it as an integer
-  (#515).
-- **Optional types:** one variable starts with text and is later set to null (`let block: string? = "begin"`).
-  Variables that start as `null` are no longer annotated from Groovy's number evidence, which cannot tell an integer
-  from a fraction; they keep the type of their first value.
+- **The type pass reaches only scripts that pass name and structure checks.** Toy, DisciplineClinic's `Punish` and
+  `OffenseSelect`, and Domme3's `exercise` and `status` stop at unknown names first (variables whose declaration stays
+  unconverted, assignments to undeclared names, which Groovy turned into script properties), and Domme3's `settings`
+  at a `break` outside a loop, so their type errors stay hidden behind those.
+- **Variables that change type: 8 in DisciplineClinic, 1 in Toy.** Five start as an empty-text placeholder and later
+  hold a list or yes/no answers (`def lineArray = ""`); they start with the later type's empty value, with a note
+  (`SX_PLACEHOLDER_TYPE`). The other four now get a declared union with a note that names the test a use of one type
+  needs (`SX_UNION_TYPE`); see the union findings below.
+- **Integer/number friction, resolved by #504 option B:** 18 declarations start with a whole number and later hold a
+  fraction (`def spankTempo = 1`, later `spankTempo = 0.75`); `main` widens them by itself, so the output writes no
+  `: number`.
+- **Optional types:** a variable that is later set to null gets `T?` (`let block: string? = "begin"`). Two more cases
+  surfaced with #526: `let newBlock = block` with `block: string?` takes `block`'s type narrowed at that point, so it
+  gets `string?` written (Domme3 `sleep`); and a variable that receives a storage read and is then tested for null
+  (`w = loadInteger(k)`, then `if (w == null) ...`) gets `integer?`, since `main` checks the stored null at runtime
+  otherwise. A storage read the script does not test for null stays unannotated: the runtime check is what Groovy's
+  guards (`if (loadInteger(k) != null) p = loadInteger(k)`) rely on.
 - **Groovy integer declarations coerce:** an `int` stores whole numbers, so every value not known to be an integer
   truncates with `toInteger`, 55 sites (25 of them `showButton` seconds stored in Domme3's `int t`). The 53 `int`
-  declarations initialized with `loadInteger()` become `let x: integer = load k`, which checks the stored value; the
-  4 initialized with another read truncate (`toInteger(load k)`), as Groovy did with a stored fraction. Groovy stored a
-  one-character text in an `int` as its character code (`"3"` became 51) and failed for longer text, so a value
-  proven to be text is reported and a truncated value that may be text gets a note (`SX_INTEGER_FROM_TEXT`; 0 corpus
-  sites).
-- **Index rule:** a variable that may hold a fraction cannot index a list (#504 option B); such an index truncates
-  with `toInteger`, as Groovy's `getAt(Number)` did. No corpus site remains once null-started variables are inferred.
-- **Importer defects the checks exposed:** 13 Toy `lines += [...]` appends were emitted as numeric `+=` because the
-  per-file Groovy type inference could not prove the list; the type pass now appends with the concatenation helper,
-  and reports an append whose value may be a list or one element (`SX_LIST_CONCATENATION`). A text key on a receiver
-  of unknown type was emitted as list indexing, which `main` now rejects; it is reported as map access.
-- **Coming with #526:** an unannotated parameter takes its default's type, so a legacy default such as `amount = 1`
-  that callers pass fractions would need `amount: number = 1`; 101 generated functions have defaults, and `main` does
-  not compile typed function signatures yet.
+  declarations initialized with `loadInteger()` become `let x: integer = load k`, which `main` now checks when the
+  value is stored (#520); in isolated smoke runs with empty storage four Domme3 scripts fail there (`TSR058`), where
+  Groovy's `int` rejected null too. Groovy stored a one-character text in an `int` as its character code (`"3"` became
+  51), so a value proven to be text is reported and a truncated value that may be text gets a note
+  (`SX_INTEGER_FROM_TEXT`; 0 corpus sites).
+- **Text `+=`:** Groovy appended to text with `+=`; `main` rejects `+=` on text at compile time (TeaseScript `+` is
+  numeric), so `text += value` on a variable that holds text becomes `text = "${text}${value}"` (Domme3's
+  `showDynamically`, which also iterates over the characters of a text, which TeaseScript `for` rejects at runtime).
+- **Index rule:** a variable that may hold a fraction cannot index a list (#504 option B); such an index truncates with
+  `toInteger`, as Groovy's `getAt(Number)` did. No corpus site remains.
+- **Mixed list literals:** a list of mixed types needs a declared union element type (ADR 0021 rule 1.3).
+  DisciplineClinic's offense tables are Groovy pairs (`[["offenseDrivingAccident", 4], ...]`, 6 tables with 61 pairs
+  in `OffenseSelect`) and now declare `(string | integer)[][]`.
+- **Objects that `clear()` empties:** an object property keeps the type of its first value (rule 1.4), so the field
+  values of such a map are set after a declaration with null fields (0 corpus sites with values; Toy's
+  `sessionParams` already starts empty).
+- **Parameters with defaults (#526):** an unannotated parameter takes its default's type; no script that reaches the
+  type pass passes a value of another type to one of the 101 generated functions with defaults.
+
+### Union types on real code (#530)
+
+The variables that held values of several types are declared with unions, and the compiler then shows how many uses
+need a type test. Uses in `say`, `${...}`, `save`, `==`, `choose` option lists right after a list assignment, and
+assignments need none, and an assignment narrows the variable until the next call that may change it.
+
+| Variable | Declaration | References | Uses that need a test |
+| --- | --- | ---: | --- |
+| DisciplineClinic `dialog` (main script) | `let dialog: string \| list = ""` | 217 (93 assignments) | 0 |
+| DisciplineClinic `response` (`OffenseSelect`) | `let response: boolean \| integer = false` | 22 | 0 |
+| DisciplineClinic `response` (`Punish`) | `let response: boolean \| integer = false` | 31 | 1: `if response { ... }` after an `if` that assigns a yes/no answer in one branch only; Groovy tested truth, the branch-merged type is still `boolean \| integer` |
+| Toy `txt` (`tease`) | `let txt: (string \| string[])[] = ["Rub", "Caress"]` | 4 in its function | not measurable: Toy stops at unknown names before the type pass; the uses pass `txt` to a function |
+
+The counts for `Punish` and `OffenseSelect` come from copies in which their unrelated unknown names are removed, so the
+type pass runs. Unions fit this corpus well: the friction is one test in about 270 references, and it sits on a
+condition the importer already marks (`SX_CONDITION_TYPE`). The one menu over `dialog` stays unconverted for another
+reason: the importer proves a menu's option list at conversion time from Groovy types, which cannot see that `dialog`
+holds a list at that point (`SX_DYNAMIC_CHOICE_OPTIONS`); `main` would accept `choose` over it there.
+
+The larger friction is narrowing of variables that start as null. Such a variable is optional, and the narrowing an
+assignment gives does not survive a loop start whose body changes the variable or, for a top-level variable that a
+function assigns, a call, `wait`, interaction, or `say` (V30 "Type tests and narrowing"). Legacy code assigns lists in a
+function and reads them after a helper call (`dialogArray = [...]`, `dIdx = getRandom(dialogArray.size())`,
+`show(dialogArray[dIdx])`), so each read needs a null test: 38 sites (the lists `dialogArray` 15 and `offenseArray`
+18, and three number variables 5), which blocks `WaitRoom` and would block `Punish` and
+`OffenseSelect` once their other causes are fixed. None of these scripts tests the lists for null, so starting them
+with an empty list instead of null would remove 33 of the sites; it would change only reads before the first
+assignment, where Groovy failed with a null pointer. That is an importer choice left for the owner.
 
 ## Dict findings (#536)
 
@@ -304,7 +342,7 @@ Concrete points the migration surfaced in TeaseScript itself:
 
 - **Storage** matches the owner decision on `main` (#484): `load` never writes, and `save null` removes the key.
 - **Prefill if available.** 27 of the corpus's 62 input defaults come from settings loaded from storage, which may be
-  null (`askInteger(dialog, default: playerLevel)`). TeaseScript rejects a null default when the input opens, so a
+  null (`askInteger default: playerLevel`). TeaseScript rejects a null default when the input opens, so a
   faithful conversion would need an `if` around two inputs; the output keeps one input with a note. A form that
   prefills only when the value is present would fit these settings dialogs.
 - **Two kinds of time (#532).** Local `date`, `time`, and `datetime` values have no zone and follow the player; a
@@ -321,6 +359,17 @@ Concrete points the migration surfaced in TeaseScript itself:
   becomes `(getDate() - toDate("${getDate().year}-01-01")).days + 1`, which lowers `sleep`.
 - **Compact interactions as values.** A used `showButton` result needs parentheses and a duration division,
   `(showButton "Done", timeout: 30) / 1 s`, 49 corpus sites; most compare the seconds with a number.
+- **Possible defects in `main` at `337388d2`,** found by stress-testing the merged PRs with corpus code; none of them
+  causes a corpus compile error or smoke-run failure. A `switch` case `case null, 0` does not remove null from the
+  later cases and `default`, while separate `case null` and `case 0` do (#557). `==` and `!=` with a value the other
+  side can never hold warn only for literal-valued types such as `choose` results, not for `text != null` with
+  `text: string` or `n == null` with `n: integer` (ADR 0021 rule 4.5; #535); Domme3's `chores` has such tests. A range
+  case that a `choose` result never matches, and `case 5` after `case is integer` on a value that is not typed
+  `integer`, get no warning (V30 §32; #557). A `load` default of the wrong type is a compile error only in an
+  annotated `let`, not in an assignment, a return, or an argument (V30 §25; #526). `askInteger` accepts an answer with
+  line breaks that `askNumber` rejects (ADR 0018; #548). The `union()` error for mixed element types names separate
+  lists instead of the union form (#546, #530), `toString()` of a nested list suggests `join()`, which fails for it too
+  (#518), and V30 §18 still shows the removed form `load "level" default 1`.
 
 ## Legacy baggage
 
@@ -344,21 +393,21 @@ Emily persona; the code's default owner `ancilla` is not included.
 
 ## Accepted but not implemented
 
-The importer emits these accepted forms although the current compiler rejects them, or its runtime does not implement
-them; the compiler gate counts them separately: `run`/`end`, `switch` (#528, PR #529), `showPopup`, the `showButton`
-timeout and elapsed result (#531), `askInteger`, `askBooleans`, date and time (`getDateTime()`, `getDate()`,
-`getTime()`, `getTimestamp()`, `toSeconds()`, `toISO()`, `formatTime()`, `toDate()`, `.days`; #532), `openUrl`,
-`round`/`floor`/`ceil` and the conversions (#518), text operations and `join` (#518), list `sort()` (V30 §16),
-`takePhoto()` (camera, #475), integer widening (#504 option B, #526), for which the gate writes `: number`, `dict` with
-`get(key, default:)` (#536), and `load "key", default:` (#541), which the gate writes in the form `main` still
-implements. `run`/`end` dominates: it blocks 23 otherwise compiler-clean corpus scripts.
+The importer emits these accepted forms although `main` does not implement them yet; the compiler gate replaces them
+with stand-ins that keep their accepted result types and counts them separately: `run`/`end`, `showPopup`,
+`askBooleans`, date and time (`getDateTime()`, `getDate()`, `getTime()`, `getTimestamp()`, `toSeconds()`, `toISO()`,
+`formatTime()`, `toDate()`, `.days`; #532), `openUrl`, `takePhoto()` (camera, #475), and `dict` with
+`get(key, default:)` (#536). `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger`
+(#548), rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526),
+and `load "key", default:` (#545) are compiled and run as `main` implements them since its merge at `337388d2`.
+`run`/`end` dominates: it blocks 22 otherwise compiler-clean corpus scripts.
 
 ## Remaining gaps by workaround class
 
-What still blocks conversion once the open tracker work lands (#504 types, #508 text operations, #528 switch, #531
-`showButton` timeout, #532 date and time, #536 `dict`, #541 `load` default, camera #475), ranked by whether current
-TeaseScript can express it. Counts are root errors or blocked scripts in default mode after the third round; the
-column "Before" gives the count at the `dict` round.
+What still blocks conversion once the open tracker work lands (#532 date and time, #536 `dict`, camera #475, and the
+other accepted forms above), ranked by whether current TeaseScript can express it. Counts are root errors or blocked
+scripts in default mode after the merge of `main` at `337388d2`; the column "Before" gives the count at the `dict`
+round.
 
 **Expressible in current TeaseScript (importer work).** The language already has a clean form.
 
@@ -369,7 +418,7 @@ column "Before" gives the count at the `dict` round.
 | Collection methods with closures inside larger expressions; `times`, `isEmpty`, `sort` | Toy 36 of 59 dynamic calls | Toy 27 of 53, all on receivers the importer cannot prove to be lists | loops (done where the receiver is a list or range) |
 | Collection methods on unproven receivers: closure parameters (`texts.collect`), persona data (`DOMME.sessions.forEach`), map entries (`toys.any { s, t -> }`), plus `each`, `sum`, list appends | (in the row above) | Toy 27 dynamic calls, 7 `each`, 4 `sum`, 3 appends, 2 other | a loop once inference proves the list, or a key loop with a lookup for a dict |
 | Menus built inside larger expressions | Toy 6 | Toy 2 (option lists not proven) | the menu into a temporary first (done) |
-| Variables that hold values of two types (valid dynamic Groovy) | DisciplineClinic 8 | DisciplineClinic 3 (written by functions), Toy 1 | an empty-text placeholder starts with the later type's empty value (done, 5); one variable per type in straight-line code (done, none in the corpus); across functions, flow analysis or union types (#530) |
+| Variables that hold values of two types (valid dynamic Groovy) | DisciplineClinic 8 | 0 | an empty-text placeholder starts with the later type's empty value (done, 5); one variable per type in straight-line code (done, none in the corpus); otherwise a declared union (done, DisciplineClinic 3, Toy 1; #530) |
 | Closures that capture local state | Toy 10 | Toy 10 | explicit state parameters: feasible for 2 local helpers that call sibling local closures (`suck`, `suckBeat`); the other 8 are stored in registries, returned, or evaluate persona expressions |
 | Method pointers; calls of closures kept in data (`it.cond()`, `e.event.func(...)`) | Toy 3 and 4 | Toy 3 and 5 | action IDs with a dispatcher |
 | Persona data files with Groovy expression strings | Toy | Toy | data converted at import time |
@@ -383,7 +432,6 @@ accepted implementation is still wanted. Each workaround the importer emits carr
 | --- | --- | --- | --- |
 | `askBooleans` | blocks 8 scripts | not emitted (accepted, waiting for its implementation): one yes/no `choose` per item, then a confirmation | one form with every option; changing an earlier answer |
 | `showPopup` | blocks 4 scripts | not emitted (accepted): `say` plus `showButton "OK"` | the popup presentation |
-| `askInteger` | blocks 1 script | not emitted (accepted, #539): `askNumber` in a loop until `round(n) == n` | validation while typing |
 | Media selected by tags (M1), including Toy's imagery folders with tag files | Domme3 3, Toy imagery | not emitted: a per-pack table of image counts fixed at conversion time | packs added after conversion |
 | Regular expressions | Toy 2 converted, `tokenize` and Java patterns left | emitted: a loop over the parts between spaces for `split(/\s+/)`, and one removing each `<...>` for `replaceAll(/<[^>]*>/, "")` | readability, and exactness for other whitespace and a leading space |
 | The player's language (`Locale.getDefault().getLanguage()`) | distribution 2 converted | emitted: English, `"en"` | the font configuration offer for other languages |
@@ -392,7 +440,7 @@ accepted implementation is still wanted. Each workaround the importer emits carr
 
 | Gap | Corpus | Why |
 | --- | --- | --- |
-| Script transfers `run`/`call`/`goto`/`end` (syntax under re-evaluation in the tracker) | blocks 23 scripts (distribution 9, Domme3 12, DisciplineClinic 2) | A package is several scripts that transfer to each other. Imitating that means merging every script into one file with a dispatcher loop, with every function passing a pending transfer up to it: a rewrite of the whole package. Only `call` alone maps to a function call within one file. |
+| Script transfers `run`/`call`/`goto`/`end` (syntax under re-evaluation in the tracker) | blocks 22 scripts (distribution 9, Domme3 12, DisciplineClinic 1) | A package is several scripts that transfer to each other. Imitating that means merging every script into one file with a dispatcher loop, with every function passing a pending transfer up to it: a rewrite of the whole package. Only `call` alone maps to a function call within one file. |
 | Desktop and Java APIs: `java.time` formatting and zones (5), files (4), `java.util.Random` (4), JSON and Base64 (2), `Eval.me`, `java.util.function.Function`, `System.getProperty`, OS processes (1 each), Java objects, the Cornertime exchange | Toy 19 of its 53 dynamic calls and 8 constructors, distribution | Outside the product boundary by design (see Legacy baggage). `Random.nextInt(n)` alone could become `randomInteger()`, without the seed. |
 | Legacy bugs (variables nothing assigns, helpers without the script host) | Domme3 3 and 7, DisciplineClinic 1 | Need an author's repair; reporting them is correct. Six more sit in functions nothing calls and are notes now. |
 
@@ -404,26 +452,30 @@ Smoke runs that go further surface problems the static gates do not:
   (`assignmentArrayList[i] = [...]`), which Groovy grows, padding with null; a TeaseScript position must exist
   (`TSR025`). The importer appends at the end with a note (`SX_LIST_GROWTH`, 2 sites); a position beyond the end
   stays different.
-- **Accepted list `sort()` is missing on `main`.** V30 §16 lists `items.sort()`; `main` compiles it but its runtime
-  rejects the method (`TSR016`), so the gate stands in for it (`list sort()`, 1 Toy site).
-- **`main` compiles method calls its runtime does not implement.** Text operations such as `trim()` pass the compiler
-  and fail only at runtime (`TSR016`) until PR #518 lands, so the compiler gate alone would not catch them; the smoke
-  runs do.
+- **Accepted list `sort()` was missing on `main`.** V30 §16 lists `items.sort()`; `main` compiled it but its runtime
+  rejected the method (`TSR016`) until #546, so the gate stood in for it (1 Toy site).
+- **`main` compiled method calls its runtime did not implement.** Text operations such as `trim()` passed the compiler
+  and failed only at runtime (`TSR016`) until #518 merged, so only the smoke runs caught them.
 - **Unreachable legacy code blocked whole scripts.** Test functions nothing references held class loading and reads of
   never-assigned variables (DisciplineClinic's `testAllImages` and `test`); they are notes now. Which functions are
   unreferenced has to come from the generated program together with the legacy code: module loads and setups run
   module code that no legacy name refers to, and an unconverted caller still calls.
 - **Variables reused for several types cross function boundaries.** DisciplineClinic's `dialog` and `response` are
   written by many functions, each assigning before it reads, so a split by type would need flow analysis across calls,
-  `break`, and loops; they stay type changes, and `dialog` keeps the main script, and with it the entry flow, blocked.
-  Five empty-text placeholders later hold lists or yes/no answers and convert with a note.
-- **Isolated runs still fail on settings the introductions save** (Domme3 6 scripts, DisciplineClinic `WaitRoom`):
-  Groovy compared a missing setting as null, which TeaseScript comparisons reject.
+  `break`, and loops; with #530 they get declared unions (see the union findings above). Five empty-text placeholders
+  later hold lists or yes/no answers and convert with a note.
+- **Isolated runs still fail on settings the introductions save** (Domme3 7 scripts): Groovy compared a missing setting
+  as null, which TeaseScript comparisons reject, and `main` now also rejects a missing setting stored in a Groovy `int`
+  when it is read.
 
 ## Open importer work
 
 Found while evaluating the proposals, besides the importer work listed above; none needs a language decision:
 
+- **Menus over a union variable:** the option list of a menu is proven from Groovy types at conversion time, which
+  cannot see that `dialog` holds a list right after `dialog = ["Back"] + mistressArray`; `main` would narrow it there.
+- **Concatenation that starts with possibly null text:** `dialog + count + ...` with `dialog: string?` keeps a numeric
+  `+` for its first pair, which the type pass rejects (1 `Punish` site).
 - **Groovy type inference is per file and flow-insensitive:** a name used in two functions shares one type set, which
   hides lists (the Toy appends above) and makes `size()` on values of unknown type look like possible maps. The
   never-assigned-variable check is name-based in the same way. Local closure results now have types, also across the

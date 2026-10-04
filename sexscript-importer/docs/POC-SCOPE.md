@@ -55,8 +55,7 @@ replaced by placeholder host calls (`src/pending.ts`), so implementation gaps an
 Owner decision (2026-10-02):
 
 - `load "key"` returns `null` when the key is missing;
-- `load "key", default: value` returns the supplied value when the key is missing (written `load "key" default value`
-  until #541);
+- `load "key", default: value` returns the supplied value when the key is missing (#541, implemented in #545);
 - neither form writes storage;
 - only `save` writes storage.
 

@@ -28,21 +28,20 @@ with the direction TeaseScript already took, and common practice in other langua
 | C2 | Options with and without a written value may be mixed; without one, the button text is the value | Accepted (#511); merged as #515 |
 | C3 | Values from a list: choice objects `{ value?, text, background? }` | Accepted (#511); merged as #515 |
 | C4 | Effective values are unique | Withdrawn: buttons may repeat a value |
-| C5 | Warning when a choice result is compared with a value no option has | Taken up by the owner with #504 |
-| T1 | Type enforcement, union types, type tests, narrowing | #504: enforcement merged (#519); rules, runtime checks, and unions in draft PRs #526, #520, #530 |
+| C5 | Warning when a choice result is compared with a value no option has | Merged as part of #504 (#535) |
+| T1 | Type enforcement, union types, type tests, narrowing | #504: merged (#519 enforcement, #526 type rules, #520 runtime checks, #530 unions, `is`, and narrowing) |
 | D1 | Dictionaries: lookup by runtime key (`toys[name]`) | Owner-decided as a separate `dict` type (#536) |
 | M1 | Media selected by tags (include/exclude tags, count matches) | Evaluated (counting); later |
 
-The importer emits L1 and C1–C3 in its default output as merged in #515, which the compiler gate and smoke runs check
-with the real implementation, and the text operations, `join`, and conversions of #508 following the head of PR #518
-(`15ee912c`). Until that PR merges, the report's compiler gate and smoke runs replace them with stand-ins, counted as
-the pending capability `text operations`. It also emits the `dict` type of #536 for D1, counted as `dict (#536)` in the
-compiler gate. Only M1 remains a proposal (`--proposed`).
+The importer emits L1 and C1–C3 in its default output as merged in #515, and the text operations, `join`, and
+conversions of #508 as merged in #518; the compiler gate and smoke runs check both with `main`'s implementation. It
+also emits the `dict` type of #536 for D1, counted as `dict (#536)` in the compiler gate until it is implemented, and
+declares unions (#530) for variables that Groovy gave several types. Only M1 remains a proposal (`--proposed`).
 
 ## Corpus evaluation
 
-Measured on 2026-10-04 at importer commit `a9ce333b` with `node src/cli.ts report --run [--proposed=<id>] <package
-scripts>`, after merging `main` at `b459787c` (#515). The importer emits a working syntax of its own choosing for the
+Measured on 2026-10-04 at importer commit `8c8245bc` with `node src/cli.ts report --run [--proposed=<id>] <package
+scripts>`, after merging `main` at `337388d2`. The importer emits a working syntax of its own choosing for the
 remaining proposal; the report compiles and smoke-runs it through stand-ins in current TeaseScript, so "converted"
 means converted, compiled, and run, not just emitted. Each cell: root errors / lowered scripts / compiler-clean except
 pending / scripts reached by smoke runs.
@@ -52,15 +51,18 @@ pending / scripts reached by smoke runs.
 | default before (`6e0d4d03`) | 15 / 10 / 10 / 10 | 35 / 13 / 10 / 10 | 17 / 3 / 3 / 3 | 267 / 0 / 0 / 0 |
 | default before `dict` (`b4d4362b`) | 13 / 10 / 10 / 10 | 31 / 15 / 12 / 12 | 22 / 3 / 3 / 3 | 254 / 0 / 0 / 0 |
 | default after `dict` (`b4f097a9`) | 13 / 10 / 10 / 10 | 24 / 15 / 12 / 12 | 22 / 3 / 3 / 3 | 183 / 0 / 0 / 0 |
-| default now | 8 / 12 / 12 / 12 | 24 / 15 / 12 / 12 | 8 / 3 / 3 / 3 | 108 / 0 / 0 / 0 |
+| default before `main` at `337388d2` (`61ee928e`) | 8 / 12 / 12 / 12 | 24 / 15 / 12 / 12 | 8 / 3 / 3 / 3 | 108 / 0 / 0 / 0 |
+| default now | 8 / 12 / 12 / 12 | 24 / 15 / 12 / 12 | 5 / 3 / 2 / 2 | 107 / 0 / 0 / 0 |
 | media-tags (M1) | unchanged | 21 / 17 / 14 / 14 | unchanged | unchanged |
 
 The third round converts conditional expressions, inputs, collection loops, and menus inside larger expressions
 through temporaries, starts empty-text placeholders with their later type's empty value, notes what functions nothing
 references cannot convert, and adds marked workarounds for two regular expressions and the system language (see the
 workaround classes in [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md)). The distribution's English and German
-introductions now run to their end; DisciplineClinic's main script stays blocked by `dialog`, which its functions use
-for text and for a menu's options.
+introductions now run to their end. The merge of `main` at `337388d2` replaces most stand-ins with real
+implementations and adds the type pass and unions: DisciplineClinic's `dialog` and `response` and a Toy list become
+unions (3 and 1 fewer root errors), and DisciplineClinic's `WaitRoom` loses its compiler-clean state to narrowing of a
+variable that starts as null (see [`CORPUS-INVENTORY.md`](CORPUS-INVENTORY.md)).
 
 The default now includes what the earlier measurement (2026-10-03, importer `d713b469`) counted as the proposals
 choose-lists, string-operations, and input-defaults, everything `main` merged since (#513, #514, #517, #519, #523,
@@ -278,16 +280,16 @@ the owner takes it up there.
 
 ## T1. Types: enforcement, union types, type tests, narrowing
 
-Tracked in issue #504. `main` enforces that a variable keeps its declared or inferred type (#519): an `integer` may be
-stored where a `number` is expected, and every other mismatch is compile error `TSV041`. The type rules (ADR 0021,
-draft PR #526), runtime checks for values the compiler cannot know (draft PR #520), and union types with type tests and
-narrowing (draft PR #530) are not merged; the importer emits no union types. It follows two owner decisions that
-#526 builds: a variable that starts as `null` keeps the type of its first value (1a), and an unannotated variable that
-starts as a whole number widens to `number` when it later receives a fraction (option B). Option B resolved the
-importer's largest friction: 18 legacy variables, plus 14 that receive a numeric `choose`, needed `: number` under
-#519 alone.
+Tracked in issue #504 and merged: `main` enforces that a variable keeps its declared or inferred type (#519), checks
+types in a separate pass (ADR 0021, #526), checks values the compiler cannot know at runtime (#520), and has union types
+with type tests and narrowing (#530, #535). The importer follows the owner decisions that a variable that starts as
+`null` keeps the type of its first value (1a) and that an unannotated variable that starts as a whole number widens to
+`number` when it later receives a fraction (option B), which resolved its largest friction (18 legacy variables, plus 14
+that receive a numeric `choose`). It declares a union where Groovy gave a variable values of several types: on the
+corpus, 4 variables with about 270 references need one type test between them, while variables that start as null
+need 38 null tests because calls cancel their narrowing (see [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md)).
 
-**Type-test form (#504 question 4): `value is number`,** as recommended here and implemented in draft PR #530 (`is` and
+**Type-test form (#504 question 4): `value is number`,** as recommended here and merged in #530 (`is` and
 `is not`).
 
 ```tease
@@ -317,11 +319,10 @@ Owner decisions that do not depend on the importer test go straight to `main` th
 #513); removing objects and positions from lists, with structural `==` on lists, sets, and objects (#509, as #517); a
 prefilled `default:` for single-field inputs (#510, as #514); positional arguments followed by named ones (#522, as
 #524); the runtime fix for a `choose` reached again with other option texts (#521, as #523); and L1 with C1–C3 (#511, as
-#515). Open: built-in text operations (#508, PR #518), switch with several values per case (#528, PR #529), the compact
-`showButton "Done", timeout: 30` form (#531), and date, time, and datetime values (#532). The importer follows all of
-them in its default output. `save null` already removes the key on `main` (#484), and `load "key", default: value`
-(#541) replaces `load "key" default value`: the importer emits the new form for typed read-then-default code, and the
-compiler gate writes the old form until #541 lands. Text utilities beyond #508, such as regular expressions, are future
+#515); built-in text operations (#508, as #518); switch with several values per case and type cases (#528, as #529 and
+#557); the compact `showButton "Done", timeout: 30` form (#531, as #534); `askInteger` (#539, as #548); and
+`load "key", default: value` (#541, as #545). Open: date, time, and datetime values (#532). The importer follows all of
+them in its default output. `save null` already removes the key on `main` (#484). Text utilities beyond #508, such as regular expressions, are future
 work as a `.ts` system library, and localized script variants too; one language is enough for now.
 
 ## Later
@@ -332,12 +333,9 @@ work as a `.ts` system library, and localized script variants too; one language 
 
 ## Next steps
 
-- **Union types (#504).** Five of DisciplineClinic's 8 variables that changed type now start with their later type's
-  empty value; the other three (`dialog`, `response` in two scripts) are written by many functions. When draft PR #530
-  lands, the importer should decide per variable between a union and separate variables, also for the menus over
-  `dialog` and OffenseSelect's `answer`.
-- **Re-measure the corpus** as PRs #518 and #529 and the #531, #532, #536, and #541 implementations merge (their
-  stand-ins then go away), and when #526 or #520 change accepted type behavior. #526 types a function parameter from its
-  default value, which a typed parameter would have to widen (101 generated functions have defaults), while `main` does
-  not compile typed function signatures yet.
+- **Lists that start as null (importer choice for the owner).** Starting DisciplineClinic's null-started lists that
+  functions assign (`dialogArray`, `offenseArray`) with an empty list instead would remove 33 of the 38 null tests that
+  narrowing needs; only reads before the first assignment, where Groovy failed with a null pointer, would differ.
+- **Re-measure the corpus** as the #532, #536, and script-transfer implementations merge (their stand-ins then go
+  away).
 - **M1** stays for later, after tagged media exists.

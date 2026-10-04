@@ -85,7 +85,7 @@ node --test tests/*.test.ts
 
 `tests/fixtures/conversion/` pairs real Groovy inputs with the expected `.tease` output; that output must compile with
 the TeaseScript compiler. `tests/fixtures/conversion-accepted/` holds output that uses accepted but not yet implemented
-TeaseScript, including owner-decided syntax whose implementation is still open (such as `choose` list options and text
-operations); it must compile once those capabilities are replaced by placeholder calls. Both groups must also run to the
+TeaseScript, including owner-decided syntax whose implementation is still open (such as script transfers, date and
+time, and `dict`); it must compile once those capabilities are replaced by placeholder calls. Both groups must also run to the
 end in the runtime smoke run. These tests skip with a stated reason when Java/Groovy or the repository build is
 unavailable.
