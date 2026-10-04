@@ -26,17 +26,21 @@ test("timestamp is a type name for annotations and type tests, and a protected n
         '    if value is timestamp { return "moment" }',
         '    return "local"',
         "}",
+        "exit",
       ].join("\n"),
     ),
     [],
   );
-  assert.deepEqual(diagnostics('function f(at: timestamp) {\n    at = "2026-10-04T12:30:00Z"\n}'), [
+  assert.deepEqual(
+    diagnostics('function f(at: timestamp) {\n    at = "2026-10-04T12:30:00Z"\n}\nexit'),
     [
-      "TSV041",
-      "'at' holds a timestamp, so it cannot be set to text (string). Convert the text with toTimestamp(...).",
-      '"2026-10-04T12:30:00Z"',
+      [
+        "TSV041",
+        "'at' holds a timestamp, so it cannot be set to text (string). Convert the text with toTimestamp(...).",
+        '"2026-10-04T12:30:00Z"',
+      ],
     ],
-  ]);
+  );
   assert.deepEqual(codes("let timestamp = 1"), [["TSV001", "timestamp"]]);
 });
 
@@ -55,6 +59,7 @@ test("conversions read ISO text and convert between temporal kinds", () => {
         "function read(text: string): date {",
         "    return toDate(text)",
         "}",
+        "exit",
       ].join("\n"),
     ),
     [],
@@ -86,7 +91,7 @@ test("constant text that is not a valid value is a compile error, also with a de
   ] as const;
   for (const [call, message] of cases) {
     const text = /"[^"]*"/u.exec(call)![0];
-    assert.deepEqual(diagnostics(`let value = ${call}`), [["TSV043", message, text]], call);
+    assert.deepEqual(diagnostics(`let value = ${call}\nexit`), [["TSV043", message, text]], call);
   }
 });
 
@@ -101,6 +106,7 @@ test("conversions report wrong arguments, argument counts, and named arguments",
         '    let d = toDateTime("2026-10-04", toTime("18:00"))',
         '    let e = toDate("2026-10-04", default: "2026-10-04")',
         "}",
+        "exit",
       ].join("\n"),
     ),
     [
@@ -133,6 +139,7 @@ test("conversions report wrong arguments, argument counts, and named arguments",
         "let a = toDate()",
         'let b = toDateTime(toDate("2026-10-04"), toTime("18:00"), toTime("19:00"))',
         'let c = toDate("2026-10-04", fallback: 1)',
+        "exit",
       ].join("\n"),
     ).map(([code, message]) => [code, message]),
     [
@@ -141,7 +148,7 @@ test("conversions report wrong arguments, argument counts, and named arguments",
       ["TSV022", "toDate(...) has no parameter 'fallback'; its only named argument is default:."],
     ],
   );
-  assert.deepEqual(diagnostics('let day: date = "2026-10-04"'), [
+  assert.deepEqual(diagnostics('let day: date = "2026-10-04"\nexit'), [
     [
       "TSV041",
       "'day' is declared as date, so it cannot start as text (string). Convert the text with toDate(...).",
@@ -164,6 +171,7 @@ test("date and time values have read-only fields and methods by kind", () => {
         "    let local: datetime = started.toDateTime()",
         "    let unix: integer = started.toSeconds() + started.toMilliseconds()",
         "}",
+        "exit",
       ].join("\n"),
     ),
     [],
@@ -179,6 +187,7 @@ test("date and time values have read-only fields and methods by kind", () => {
         '    let e = day.formatDate("dd-MM")',
         "    day.year = 2027",
         "}",
+        "exit",
       ].join("\n"),
     ),
     [
@@ -213,6 +222,7 @@ test("a comparison of weekday fields with values they never have gives a warning
         '    if day.weekday == "saturday" { say "never" }',
         '    if day.weekdayNumber != 0 { say "always" }',
         "}",
+        "exit",
       ].join("\n"),
     ),
     [
@@ -244,6 +254,7 @@ test("date and time values order within one kind, and timestamps and dates and t
         "    let moving = started",
         "    moving += 5 min",
         "}",
+        "exit",
       ].join("\n"),
     ),
     // A date is never equal to a date and time, so comparing them is only the always-false warning (ADR 0021 rule 4.5).
@@ -265,6 +276,7 @@ test("ordering and arithmetic across kinds or on other values name the kinds and
         "    let g = 1 h + started",
         "    let h = dinner + 5",
         "}",
+        "exit",
       ].join("\n"),
     ),
     [
@@ -322,6 +334,7 @@ test("date and time values show as text, give buttons, and are set elements", ()
         "    let spans: duration set = set[1 h, 2 h]",
         "    let mixed: (time | timestamp) set = set[]",
         "}",
+        "exit",
       ].join("\n"),
     ),
     [],

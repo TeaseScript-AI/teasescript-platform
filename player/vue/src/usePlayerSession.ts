@@ -1,6 +1,17 @@
 import { computed, ref, shallowRef, watch } from "vue";
 import { tryOnScopeDispose, useIntervalFn } from "@vueuse/core";
-import { MediaDevice, MediaLoadQueue } from "../../media-device.js";
+import { createBrowserCaptureHost, browserMediaUrls } from "../../browser-capture.js";
+import { CaptureDevice } from "../../capture-device.js";
+import {
+  CapturedMediaStore,
+  isCapturedMediaReference,
+  type CapturedMediaRepository,
+} from "../../captured-media.js";
+import {
+  browserCapturedMediaLocks,
+  capturedMediaStorage,
+} from "../../captured-media-persistence.js";
+import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../media-device.js";
 import {
   completePlayerRuntimeStorageWrite,
   continuePlayerRuntimeSession,
@@ -12,8 +23,13 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
 import type { ScriptStorageProvider } from "../../script-storage.js";
+import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../../session-camera.js";
 import type { RuntimeScriptStorageEntrySnapshot, TemporalContext } from "../../../src/index.js";
+import { silence } from "./generatedAudio";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
+
+const PRIMED_AUDIO_ELEMENTS = 2;
+const SILENCE = silence(50);
 
 // Media progress is sampled this often while media loads or plays; cues fire at this resolution.
 const MEDIA_SAMPLE_MS = 100;
@@ -31,6 +47,16 @@ export interface PlayerSessionOptions {
    */
   scriptStorage?: ScriptStorageProvider;
   /**
+   * Trusted session capabilities. This is a temporary host bridge until package capability metadata exists; it is
+   * neither author syntax nor a manifest format.
+   */
+  capabilities?: { readonly camera?: boolean };
+  /**
+   * Durable storage for captured photos that a saved value references, in the script storage's scope. Without a
+   * repository, captures stay session media, and a persistent save that references one fails.
+   */
+  capturedMedia?: { readonly repository: CapturedMediaRepository | null };
+  /**
    * The player's time zone and date and time presentation as they are now: the account settings, else the browser's,
    * which is the default. Start and Continue resolve it again, so a changed setting applies from that point on.
    */
@@ -46,7 +72,45 @@ type Activation = {
 // Player state; this host records which session is shown, when presentation must reset, maps
 // browser time onto the session's scene time, and plays the session's media on browser elements.
 export function usePlayerSession(options: PlayerSessionOptions = {}) {
-  const resolveAsset = options.resolveAsset ?? (() => null);
+  const resolvePackageAsset = options.resolveAsset ?? (() => null);
+  const diagnostics = shallowRef<readonly PlayerDiagnostic[]>([]);
+  const reportDiagnostic = (diagnostic: PlayerDiagnostic) => {
+    console.warn(`[player] ${diagnostic.code}: ${diagnostic.message}`);
+    diagnostics.value = [...diagnostics.value, diagnostic];
+  };
+  // Bumped when a stored photo finished loading, so presentation resolves its reference again.
+  const mediaRevision = ref(0);
+  const capturedMedia = new CapturedMediaStore(
+    options.capturedMedia?.repository ?? null,
+    browserMediaUrls,
+    options.scriptStorage?.scope ?? "player",
+    () => mediaRevision.value++,
+  );
+  // A Player that can capture or read stored photos saves a value only after storing the photos it references, and
+  // only while it holds the scope's live lock, so no other Player reclaims media it might still use. Without either,
+  // no captured photo can exist here, and storage is used directly.
+  const capturedMediaPersistence =
+    options.scriptStorage &&
+    (options.capabilities?.camera === true || options.capturedMedia?.repository)
+      ? capturedMediaStorage(options.scriptStorage, capturedMedia, browserCapturedMediaLocks())
+      : undefined;
+  const scriptStorage = capturedMediaPersistence ?? options.scriptStorage;
+  const camera: SessionCamera<MediaStreamTrack> = new SessionCamera(
+    new CaptureDevice(
+      createBrowserCaptureHost((kind, state) => {
+        if (kind === "camera" && state.status === "ended") camera.revoked();
+      }),
+      capturedMedia,
+    ),
+    reportDiagnostic,
+  );
+  /** Captured media resolves only through the trusted store, never as a package asset. */
+  const resolveAsset = (path: string): string | null => {
+    if (!isCapturedMediaReference(path)) return resolvePackageAsset(path);
+    void mediaRevision.value;
+    const resolved = capturedMedia.resolve(path);
+    return resolved.state === "ready" ? resolved.url : null;
+  };
   const resolveTemporalContext = options.temporalContext ?? (() => playerTemporalContext());
   const session = shallowRef<PlayerRuntimeSession | null>(null);
   // A new session remounts the transcript and resets interaction-local state.
@@ -54,7 +118,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const interactionReset = ref(0);
   const activation = shallowRef<Activation | null>(null);
   const audioBlocked = ref(false);
-  const scriptStorage = options.scriptStorage;
 
   const pendingLoadCount = ref(0);
   const loads = new MediaLoadQueue(
@@ -68,8 +131,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       return "delivered";
     },
   );
+  // Audio elements reused across media. Browsers such as Safari allow playback per element only from a user
+  // activation; an element that played during the activating click keeps that permission when its source changes.
+  const audioElements: MediaDeviceElement[] = [];
   const device = new MediaDevice({
-    createElement: () => new Audio(),
+    createElement: () => audioElements.pop() ?? new Audio(),
+    releaseElement: (element) => audioElements.push(element),
     resolveSource: resolveAsset,
     reportLoad: (mediaId, report) => {
       loads.add(mediaId, report);
@@ -97,9 +164,56 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     (active) => (active ? sampling.resume() : sampling.pause()),
     { immediate: true },
   );
+  const captures = new CaptureService(() => camera.answer(), {
+    session: () => session.value,
+    generation: () => generation.value,
+    observe: () => clock.observe(),
+    publish: (next) => (session.value = next),
+    capturedMedia,
+    diagnostic: reportDiagnostic,
+    later: (task) => setTimeout(task, 0),
+  });
+  const serviceCapture = () => captures.request();
+  watch(session, () => void serviceCapture());
+  // A session that ended releases its camera.
+  watch(
+    () => session.value?.snapshot.status,
+    (status) => {
+      if (status === "halted" || status === "failed") camera.release();
+    },
+  );
+
+  /**
+   * Plays silence on spare audio elements within the activating click, so script audio may still play when the
+   * session starts later, for example after a camera permission prompt. Two cover the common overlap of a
+   * background loop and a cue; more elements fall back to the refused-playback retry.
+   */
+  function primeAudio() {
+    while (audioElements.length < PRIMED_AUDIO_ELEMENTS) audioElements.push(new Audio());
+    for (const element of audioElements) {
+      element.src = SILENCE;
+      void element.play().catch(() => {});
+    }
+  }
+
+  let activationToken = 0;
+  let disposed = false;
   tryOnScopeDispose(() => {
+    disposed = true;
+    activationToken++;
     loads.clear();
     device.reset();
+    for (const element of audioElements.splice(0)) {
+      element.pause();
+      element.removeAttribute("src");
+      element.load();
+    }
+    captures.stop();
+    camera.release();
+    // Issued saves still finish and store their photos before the live lock and the session media are released.
+    void (capturedMediaPersistence?.close() ?? Promise.resolve()).finally(() =>
+      capturedMedia.close(),
+    );
   });
 
   // The stored values that seed the next session, or `null` when storage is session-local: no provider, or one that
@@ -127,8 +241,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // previous value when it failed (warning TSW014). Every published session is observed, whichever operation made it.
   // Keyed by session generation too: a newer session reuses action IDs.
   const writesInFlight = new Set<string>();
-  let disposed = false;
-  tryOnScopeDispose(() => (disposed = true));
   watch(
     session,
     (current) => {
@@ -162,11 +274,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // A running or resumable session keeps its own view of the stored values, so clearing waits until it ends; while a
   // clear runs, no second clear and no Start can begin, so a new session never starts from the values being removed.
   const clearing = ref(false);
+  // A Start or Continue waiting for the camera already owns its view of the stored values, although its session is not
+  // published yet; a restored one may still write them.
+  const openingCamera = ref(false);
   const canClearScriptStorage = computed(
     () =>
       scriptStorage !== undefined &&
       storedEntries.value !== null &&
       !clearing.value &&
+      !openingCamera.value &&
       activation.value?.kind !== "continue" &&
       (session.value === null ||
         session.value.snapshot.status === "halted" ||
@@ -207,6 +323,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * on page load and the click is the user activation later audible playback relies on.
    */
   function prepare(create: () => PlayerRuntimeSession) {
+    activationToken++;
+    openingCamera.value = false;
+    // A new session needs its own camera; a superseded acquisition never stays open.
+    camera.release();
     activation.value = { kind: "start", begin: create };
   }
   /**
@@ -222,16 +342,48 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * Continue records the wall clock and the player's zone and presentation as they are now.
    */
   function prepareRestore(restored: PlayerRuntimeSession) {
+    activationToken++;
+    openingCamera.value = false;
+    camera.release();
     activation.value = {
       kind: "continue",
       begin: () => continuePlayerRuntimeSession(restored, temporalCapture()).session,
     };
   }
-  /** Runs the prepared Start or Continue; call it from the activating click. */
-  function activate() {
+  /**
+   * Runs the prepared Start or Continue; call it from the activating click. With the camera capability it first opens
+   * the session camera, so any browser permission request happens here, before ordinary script execution. A camera
+   * failure never prevents the session from starting.
+   */
+  async function activate() {
     const pending = activation.value;
     if (!pending || clearing.value) return;
     activation.value = null;
+    const token = ++activationToken;
+    if (options.capabilities?.camera !== true) {
+      // Without the capability nothing waits: `takePhoto()` is unconfigured (settled before `open` returns), and the
+      // session starts within the activating click.
+      void camera.open(false);
+      captures.reset();
+      start(pending.begin());
+      return;
+    }
+    // Retire the previous session first: its elements return to the pool before priming, so the new session never
+    // receives an element the browser still blocks, and it cannot project media while the camera opens.
+    session.value = null;
+    device.reset();
+    primeAudio();
+    openingCamera.value = true;
+    let opened: boolean;
+    try {
+      opened = await camera.open(true);
+    } finally {
+      // A superseding prepare already reset it for its own activation.
+      if (token === activationToken) openingCamera.value = false;
+    }
+    // Replaced, re-prepared, or unmounted while the browser answered: an obsolete session never starts.
+    if (!opened || disposed || token !== activationToken) return;
+    captures.reset();
     start(pending.begin());
   }
 
@@ -251,6 +403,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     loadScriptStorage,
     scriptStorageOptions,
     resolveAsset,
+    /** Bounded developer diagnostics, for example an unavailable session camera. */
+    diagnostics: computed(() => diagnostics.value),
     /** Presented runtime timers; hidden timers have no entry. */
     timers: clock.timers,
     /** Observes elapsed time and media progress, runs the session, and returns the published session. */

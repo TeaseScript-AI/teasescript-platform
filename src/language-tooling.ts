@@ -1,3 +1,4 @@
+import { sessionDeclarations } from "./project-globals.js";
 import type {
   Expression,
   InteractionExpression,
@@ -9,7 +10,12 @@ import type {
   TimerParts,
 } from "./ast.js";
 import { compileProject, compileSource } from "./compiler.js";
-import { mediaHandlerBlocks, mediaOperands, showButtonOptions } from "./expression-children.js";
+import {
+  mediaHandlerBlocks,
+  mediaOperands,
+  showButtonOptions,
+  tagQueryOperands,
+} from "./expression-children.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
 import { compareProjectPaths } from "./project-paths.js";
@@ -211,6 +217,14 @@ export function languageCompletions(
     items.push(command("askTime", "Compact time input expression"));
     items.push(command("askDateTime", "Compact date and time input expression"));
     items.push(command("choose", "Compact choice expression"));
+    items.push(
+      Object.freeze({
+        label: "takePhoto",
+        kind: "command",
+        detail: "Capture a photo from the session camera; null when no camera is available",
+        insertText: "takePhoto()",
+      }),
+    );
   }
 
   const compact = compactCommandContext(lineTokens);
@@ -451,10 +465,12 @@ const protectedNames: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES)
 
 /** Declared speaker names; a protected name such as `set` is an invalid declaration, not a suggestion. */
 function declaredSpeakers(source: string): readonly string[] {
-  const speakers = compileSource(source).program.statements.flatMap((statement) =>
-    statement.kind === "speakerDeclaration" && !protectedNames.has(statement.name.name)
-      ? [statement.name.name]
-      : [],
+  // A speaker belongs to the whole script wherever it is declared.
+  const speakers = sessionDeclarations([compileSource(source).program]).flatMap(
+    ({ declaration }) =>
+      declaration.kind === "speakerDeclaration" && !protectedNames.has(declaration.name.name)
+        ? [declaration.name.name]
+        : [],
   );
   return Object.freeze([...new Set(speakers)]);
 }
@@ -704,6 +720,11 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "letStatement":
       children.push({ kind: "expression", node: statement.initializer });
       return;
+    case "globalStatement":
+      if (statement.assignment !== null)
+        children.push({ kind: "expression", node: statement.assignment.value });
+      children.push({ kind: "expression", node: statement.initial });
+      return;
     case "assignmentStatement":
       children.push({ kind: "expression", node: statement.target });
       children.push({ kind: "expression", node: statement.value });
@@ -775,10 +796,18 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "deleteStatement":
       children.push({ kind: "expression", node: statement.key });
       return;
+    case "gotoStatement":
+    case "callFileStatement":
+    case "fallbackStatement":
+      if (statement.target?.kind === "scriptTarget")
+        children.push({ kind: "expression", node: statement.target.expression });
+      return;
     case "hideImageStatement":
     case "speakerSetterStatement":
     case "waitStatement":
     case "exitStatement":
+    case "endStatement":
+    case "labelStatement":
     case "breakStatement":
     case "continueStatement":
       return;
@@ -881,6 +910,10 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       children.push({ kind: "expression", node: expression.key });
       if (expression.defaultValue !== null)
         children.push({ kind: "expression", node: expression.defaultValue });
+      return;
+    case "tagQueryExpression":
+      for (const operand of tagQueryOperands(expression))
+        children.push({ kind: "expression", node: operand });
       return;
     case "identifier":
     case "booleanLiteral":

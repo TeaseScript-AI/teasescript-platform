@@ -51,7 +51,9 @@ test("askDate, askTime, and askDateTime return the ISO answer as a value", () =>
       iso: "2026-03-29T02:30",
     },
   ] as const) {
-    const session = start(`let value = ${command} "When?"\nsay value, instant\nsay value.toISO()`);
+    const session = start(
+      `let value = ${command} "When?"\nsay value, instant\nsay value.toISO()\nexit`,
+    );
     assert.deepEqual(playerRuntimeForeground(session), {
       kind,
       accessibleName: "Answer",
@@ -85,7 +87,7 @@ test("a date or time field asks again for anything but strict ISO text", () => {
       texts: ["", "2026-10-04", "2026-10-04 18:00", "2026-10-04T18:00Z", "2026-10-04T18:00+02:00"],
     },
   ]) {
-    const session = start(`let value = ${command} "When?"`);
+    const session = start(`let value = ${command} "When?"\nexit`);
     for (const text of texts) {
       const rejected = answer(session, text);
       assert.equal(rejected.outcome.kind, "invalidPayload", `${command} ${JSON.stringify(text)}`);
@@ -105,7 +107,7 @@ test("a default answer prefills the field as ISO text and submitting it returns 
       prefill: "2026-10-04T18:00:15.250",
     },
   ]) {
-    const session = start(`${source}\nsay value.toISO()`);
+    const session = start(`${source}\nsay value.toISO()\nexit`);
     const foreground = playerRuntimeForeground(session);
     assert.equal(foreground !== null && "prefill" in foreground && foreground.prefill, prefill);
     // Clearing the field never falls back to the default.
@@ -114,7 +116,9 @@ test("a default answer prefills the field as ISO text and submitting it returns 
     assert.equal(foreground !== null && "isoText" in foreground, false, source);
   }
   // A native date control has no year 0000, so the Player shows such a default as ISO text it can edit and submit.
-  const yearZero = start('let value = askDate default: toDate("0000-01-01")\nsay value.toISO()');
+  const yearZero = start(
+    'let value = askDate default: toDate("0000-01-01")\nsay value.toISO()\nexit',
+  );
   assert.deepEqual(playerRuntimeForeground(yearZero), {
     kind: "ask-date",
     accessibleName: "Answer",
@@ -128,20 +132,20 @@ test("a default answer prefills the field as ISO text and submitting it returns 
 test("a default of another kind fails at compile time or before the field opens", () => {
   for (const { source, fix } of [
     {
-      source: 'let value = askDate default: "2026-10-04"',
+      source: 'let value = askDate default: "2026-10-04"\nexit',
       fix: "Convert the text with toDate(...)",
     },
-    { source: 'let value = askTime default: toDate("2026-10-04")', fix: "must be a time" },
-    { source: "let value = askDateTime default: 5", fix: "must be a date and time" },
+    { source: 'let value = askTime default: toDate("2026-10-04")\nexit', fix: "must be a time" },
+    { source: "let value = askDateTime default: 5\nexit", fix: "must be a date and time" },
   ]) {
     const diagnostics = compileSource(source).diagnostics;
     assert.equal(diagnostics[0]?.code, "TSV039", source);
     assert.ok(diagnostics[0]?.message.includes(fix), diagnostics[0]?.message);
   }
-  assert.ok(compileSource("let value: date = askTime").diagnostics.length > 0);
+  assert.ok(compileSource("let value: date = askTime\nexit").diagnostics.length > 0);
 
   const plan = compileValidPlan(
-    'function same(text) {\n    return text\n}\nlet value = askDate default: same("2026-10-04")',
+    'function same(text) {\n    return text\n}\nlet value = askDate default: same("2026-10-04")\nexit',
   );
   const result = run(plan, createFreshRuntimeSnapshot(plan, { temporalContext: AMSTERDAM }));
   assert.equal(result.snapshot.status, "failed");
@@ -152,7 +156,7 @@ test("a default of another kind fails at compile time or before the field opens"
 
 test("a checkpoint while the field is open restores the control and its default", () => {
   const session = start(
-    'let day = toDate("2026-10-04")\nlet value = askDate "Which day?", default: day',
+    'let day = toDate("2026-10-04")\nlet value = askDate "Which day?", default: day\nexit',
   );
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   assert.equal(validateRuntimeSnapshot(restored.snapshot, restored.plan).valid, true);
@@ -172,7 +176,7 @@ function rejects(plan: InstructionPlan, snapshot: unknown): boolean {
 }
 
 test("plan and snapshot validation keep the date and time rules", () => {
-  const session = start('let value = askTime default: toTime("14:30")');
+  const session = start('let value = askTime default: toTime("14:30")\nexit');
   const { plan, snapshot } = session;
   const action = snapshot.foregroundAction;
   assert.ok(action?.kind === "interaction" && action.ui.kind === "temporal");

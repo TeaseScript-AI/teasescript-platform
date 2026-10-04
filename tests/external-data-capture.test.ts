@@ -24,6 +24,7 @@ import { captureExternalData } from "../src/external-data-capture.js";
 import { SerializableValueError } from "../src/runtime/serializable-values.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { functionFrames } from "./helpers/runtime-equivalence.js";
 
 const FAILING_BEFORE_DEPTH = 20_000;
 
@@ -215,10 +216,10 @@ test("plan validation accepts deep and broad plan data without a generic depth o
 
 test("repeated stepping and checkpoint entries reuse the validated immutable plan", () => {
   const statementCount = 64;
-  const source = Array.from(
-    { length: statementCount },
-    (_, index) => `say "Line ${index}", instant`,
-  ).join("\n");
+  const source = [
+    ...Array.from({ length: statementCount }, (_, index) => `say "Line ${index}", instant`),
+    "exit",
+  ].join("\n");
   const plan = compiledPlan(source);
   const uninterrupted = run(plan, createFreshRuntimeSnapshot(plan));
   // validateInstructionPlan always captures its input, so this measures one whole-plan capture.
@@ -326,7 +327,10 @@ test("checkpoint entries return deeply frozen plans detached from the caller", (
 
 test("ordinary source compiles beyond the removed generic capture threshold", () => {
   const count = 5_000;
-  const source = Array.from({ length: count }, (_, index) => `say "Line ${index}"`).join("\n");
+  const source = [
+    ...Array.from({ length: count }, (_, index) => `say "Line ${index}"`),
+    "exit",
+  ].join("\n");
   const compiled = compileSource(source);
 
   assert.deepEqual(compiled.diagnostics, []);
@@ -337,7 +341,7 @@ test("ordinary source compiles beyond the removed generic capture threshold", ()
 test("snapshot validation accepts a deeply nested supplied call argument", () => {
   const plan = compiledPlan("function echo(value) { return value }\necho(1)\nexit");
   const snapshot = activeCallSnapshot(plan);
-  const argument = snapshot.callFrames[0]!.arguments[0];
+  const argument = functionFrames(snapshot)[0]!.arguments[0];
   assert.ok(argument?.supplied);
   // EVIDENCE: the supplied call argument is intentionally replaced with a valid deeply nested runtime value.
   (argument as { value: SerializableRuntimeValue }).value = deepList(5_000);

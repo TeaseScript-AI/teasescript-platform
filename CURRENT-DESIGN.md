@@ -31,8 +31,9 @@ only selected validated typed plain data.
 
 Package code may use HTML, CSS, canvas, DOM APIs, and optional Shadow DOM only inside that player boundary. It cannot
 access the parent DOM, account cookies, forum state, or internal site data and has no unrestricted external network
-access. Published media uses platform-managed storage/CDN. Future third-party services and device capabilities
-require platform-managed typed integrations rather than direct package access.
+access. Published media uses platform-managed storage/CDN. Future third-party services and device acquisition
+require platform-managed integrations rather than direct package access; the Player brokers camera and microphone
+streams that capability-authorized package code may then use locally (ADR 0017).
 
 Laravel remains authoritative for authentication, authorization, persistence, publishing, moderation, and public API
 validation. The player/controller may render Standard UI, invoke browser capabilities, transport checkpoints, and

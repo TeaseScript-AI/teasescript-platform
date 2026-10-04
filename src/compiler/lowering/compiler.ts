@@ -4,18 +4,25 @@ import type {
   TimerParts,
   MediaParts,
   FunctionDeclaration,
+  GlobalStatement,
   ListLiteral,
   ObjectLiteral,
   SetLiteral,
   Statement,
   InteractionExpression,
   ShowButtonParts,
+  SpeakerDeclaration,
   SwitchCase,
   SwitchStatement,
+  TagQueryExpression,
   TypeTestExpression,
+  FileTarget,
+  LabelTarget,
+  TransferTarget,
 } from "../../ast.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { InstructionCompilationError } from "../errors.js";
+import { MAIN_FILE_PATH } from "../../project-paths.js";
 import type {
   AssignmentTargetPlan,
   CompiledFunctionDefinition,
@@ -38,8 +45,11 @@ import type {
   InteractionUiPayload,
   PreparedInteractionUiPayload,
   PlanSourceLocation,
+  PlanLabel,
+  TagQueryExpressionPlan,
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
+import { isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralParts, storedDuration } from "../../duration.js";
@@ -51,12 +61,42 @@ import {
   expressionChildren as instructionEmissionChildren,
   mediaOperands,
   showButtonOptions,
+  tagQueryOperands,
 } from "../../expression-children.js";
+
+/** A transfer or fallback at `instruction` whose destination is a file, from its entry or at a label. */
+export interface PendingDestination {
+  readonly instruction: number;
+  /** The file, or for a glob the files to pick from. */
+  readonly paths: readonly string[];
+  readonly label: string | null;
+  readonly pick: boolean;
+}
 
 /** Plan-wide numbering shared by the compilers of a project's files: loop and temporary IDs are unique in a plan. */
 export interface LoweringCounters {
   nextLoopId: number;
   nextTemporaryId: number;
+}
+
+/** What the compilers of a project's files share about its global functions. */
+export interface ProjectFunctions {
+  /** The global functions of every file, by name. */
+  readonly global: ReadonlyMap<string, FunctionDeclaration>;
+  /**
+   * The calls of a global function of another file, by instruction index. Its ID is known only once every file before
+   * it is lowered, so the call gets it then.
+   */
+  readonly foreignCalls: { readonly instruction: number; readonly name: string }[];
+}
+
+/** A timer expiry block or media cue block, compiled after the file's functions. */
+interface RegisteredHandler {
+  readonly block: Block;
+  readonly owner: "timer" | "media";
+  readonly selfHandle: string | null;
+  /** Whether it is in a global function, directly or through other blocks. */
+  readonly global: boolean;
 }
 
 export class InstructionCompiler {
@@ -66,14 +106,71 @@ export class InstructionCompiler {
     readonly breaks: number[];
   }> = [];
 
+  /** The functions this file may call: its own, with their IDs, and the global functions of other files. */
   readonly #functionByName: ReadonlyMap<
     string,
-    { readonly id: number; readonly declaration: FunctionDeclaration }
+    { readonly id: number | null; readonly declaration: FunctionDeclaration }
   >;
+
+  /** Whether the code being compiled is in a global function or one of its timer and media blocks. */
+  #global = false;
 
   readonly #instructionEmissionByExpression = new WeakMap<Expression, boolean>();
 
   #contextualSpeakerTemporary: number | null = null;
+
+  /** The labels of the file's root region, in source order. */
+  public readonly labels: PlanLabel[] = [];
+
+  /** Gotos whose target is set by {@link resolveGotos} once every label of the file has its instruction. */
+  readonly #gotos: { readonly instruction: number; readonly label: string }[] = [];
+
+  /** Transfers and fallbacks naming a file or a label, resolved once every file of the project is compiled. */
+  readonly #destinations: PendingDestination[] = [];
+
+  /** The pending file destinations of this file's transfers and fallbacks. */
+  public get destinations(): readonly PendingDestination[] {
+    return this.#destinations;
+  }
+
+  #destinationOf(
+    target: LabelTarget | FileTarget,
+  ): Pick<PendingDestination, "paths" | "label" | "pick"> {
+    if (target.kind === "labelTarget") {
+      return { paths: [this.path], label: target.label.name, pick: false };
+    }
+    const picks = this.picks.get(target);
+    return {
+      paths: picks ?? [target.path],
+      label: target.label?.name ?? null,
+      pick: picks !== undefined,
+    };
+  }
+
+  #emitTransfer(mode: "goto" | "call", target: TransferTarget, span: SourceSpan): void {
+    if (target.kind === "scriptTarget") {
+      const lowered = this.#lowerExpression(target.expression);
+      this.instructions.push({
+        kind: "transfer",
+        mode,
+        destination: { value: lowered.plan },
+        span: copySpan(span),
+      });
+      // A call returns here with the temporaries of its target; a goto leaves them behind.
+      if (mode === "call") this.#emitTemporaryCleanup(lowered.temporaryIds, span);
+      return;
+    }
+    this.#destinations.push({
+      instruction: this.instructions.length,
+      ...this.#destinationOf(target),
+    });
+    this.instructions.push({
+      kind: "transfer",
+      mode,
+      destination: { file: -1, target: -1 },
+      span: copySpan(span),
+    });
+  }
 
   /** Functions of earlier files come first, so this file's IDs continue after theirs. */
   readonly #functionIdBase: number;
@@ -88,19 +185,76 @@ export class InstructionCompiler {
     public readonly instructions: Instruction[] = [],
     public readonly functions: CompiledFunctionDefinition[] = [],
     private readonly counters: LoweringCounters = { nextLoopId: 1, nextTemporaryId: 1 },
+    private readonly project: ProjectFunctions = { global: new Map(), foreignCalls: [] },
+    /** The file's path, which a label alone in a `call` or `fallback` names. */
+    private readonly path: string = MAIN_FILE_PATH,
+    /** The files each glob target may pick, from semantic validation. */
+    private readonly picks: ReadonlyMap<FileTarget, readonly string[]> = new Map(),
   ) {
     this.#functionIdBase = functions.length;
-    this.#functionByName = new Map(
-      declarations.map((declaration, index) => [
-        declaration.name.name,
-        { id: this.#functionIdBase + index + 1, declaration },
-      ]),
+    const functionByName = new Map<
+      string,
+      { readonly id: number | null; readonly declaration: FunctionDeclaration }
+    >([...project.global].map(([name, declaration]) => [name, { id: null, declaration }]));
+    declarations.forEach((declaration, index) =>
+      functionByName.set(declaration.name.name, {
+        id: this.#functionIdBase + index + 1,
+        declaration,
+      }),
     );
+    this.#functionByName = functionByName;
+  }
+
+  /** The ID of one of this file's functions. */
+  public functionId(declaration: FunctionDeclaration): number {
+    return this.#functionIdBase + this.declarations.indexOf(declaration) + 1;
+  }
+
+  /**
+   * Compiles the start value of a global or a speaker declared in file `file`, which a session sets up before its
+   * story runs (ADR 0022 §6). It uses no calls or interactions, so it is one instruction.
+   */
+  public compileStartValue(declaration: GlobalStatement | SpeakerDeclaration, file: number): void {
+    if (declaration.kind === "globalStatement") {
+      this.instructions.push({
+        kind: "declareGlobal",
+        name: declaration.name.name,
+        value: compileExpression(declaration.initial, this.typeChecks),
+        ...withTypeCheck(this.typeChecks.get(declaration)),
+        file,
+        span: copySpan(declaration.span),
+      });
+      return;
+    }
+    this.instructions.push({
+      kind: "declareSpeaker",
+      name: declaration.name.name,
+      properties: declaration.properties.map((property) => ({
+        name: property.name.name,
+        value: compileExpression(property.value, this.typeChecks),
+        span: copySpan(property.span),
+      })),
+      file,
+      span: copySpan(declaration.span),
+    });
+  }
+
+  public resolveGotos(): void {
+    for (const { instruction, label } of this.#gotos) {
+      const target = this.labels.find((candidate) => candidate.name === label);
+      const goto = this.instructions[instruction];
+      if (target === undefined || goto?.kind !== "goto") {
+        throw new TypeError("Semantically invalid goto reached compilation.");
+      }
+      this.instructions[instruction] = { ...goto, target: target.instruction };
+    }
   }
 
   public compileFunctions(): void {
     for (const declaration of this.declarations) {
+      this.#global = declaration.global;
       this.#compileFunction(declaration);
+      this.#global = false;
     }
     // Handlers found while compiling a handler are appended and compiled in ID order.
     for (let index = 0; index < this.#handlers.length; index += 1) {
@@ -112,11 +266,7 @@ export class InstructionCompiler {
   }
 
   /** Timer expiry blocks and media cue blocks, compiled after the user functions in registration order. */
-  readonly #handlers: {
-    readonly block: Block;
-    readonly owner: "timer" | "media";
-    readonly selfHandle: string | null;
-  }[] = [];
+  readonly #handlers: RegisteredHandler[] = [];
 
   /** A statement-level media control call whose receiver waits at a pacing barrier once it is evaluated. */
   #barrierCall: Expression | null = null;
@@ -135,36 +285,12 @@ export class InstructionCompiler {
   *#compileStatement(statement: Statement): CompileTask<void> {
     switch (statement.kind) {
       case "speakerDeclaration":
-        if (statement.properties.some((property) => this.#containsUserCall(property.value))) {
-          this.instructions.push({
-            kind: "declareSpeaker",
-            name: statement.name.name,
-            properties: [],
-            span: copySpan(statement.span),
-          });
-          for (const property of statement.properties) {
-            const lowered = this.#lowerExpression(property.value);
-            this.instructions.push({
-              kind: "setDeclaredSpeakerProperty",
-              speaker: statement.name.name,
-              name: property.name.name,
-              value: lowered.plan,
-              span: copySpan(property.span),
-            });
-            this.#emitTemporaryCleanup(lowered.temporaryIds, property.span);
-          }
-          return;
-        }
-        this.instructions.push({
-          kind: "declareSpeaker",
-          name: statement.name.name,
-          properties: statement.properties.map((property) => ({
-            name: property.name.name,
-            value: compileExpression(property.value, this.typeChecks),
-            span: copySpan(property.span),
-          })),
-          span: copySpan(statement.span),
-        });
+        // A speaker is set up before the story runs, by the start of main.tease.
+        return;
+      case "globalStatement":
+        // A global gets its start value before the story runs; with `default:`, the declaration assigns here.
+        if (statement.assignment !== null)
+          yield* compileChild(this.#compileStatement(statement.assignment));
         return;
       case "speakerSetterStatement":
         this.instructions.push({
@@ -362,6 +488,57 @@ export class InstructionCompiler {
       }
       case "exitStatement":
         this.instructions.push({ kind: "exit", span: copySpan(statement.span) });
+        return;
+      case "endStatement":
+        this.instructions.push({ kind: "end", span: copySpan(statement.span) });
+        return;
+      case "labelStatement":
+        this.labels.push({ name: statement.name.name, instruction: this.instructions.length });
+        return;
+      case "gotoStatement":
+        // In a global function or its blocks, a label alone names that label of the function's file, entered
+        // afresh like `goto "file.tease" label` (ADR 0022 §3.5).
+        if (statement.target.kind === "labelTarget" && !this.#global) {
+          this.#gotos.push({
+            instruction: this.instructions.length,
+            label: statement.target.label.name,
+          });
+          this.instructions.push({ kind: "goto", target: -1, span: copySpan(statement.span) });
+          return;
+        }
+        this.#emitTransfer("goto", statement.target, statement.span);
+        return;
+      case "callFileStatement":
+        this.#emitTransfer("call", statement.target, statement.span);
+        return;
+      case "fallbackStatement":
+        if (statement.target === null) {
+          this.instructions.push({
+            kind: "setFallback",
+            destination: null,
+            span: copySpan(statement.span),
+          });
+          return;
+        }
+        if (statement.target.kind === "scriptTarget") {
+          const lowered = this.#lowerExpression(statement.target.expression);
+          this.instructions.push({
+            kind: "setFallback",
+            destination: { value: lowered.plan },
+            span: copySpan(statement.span),
+          });
+          this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
+          return;
+        }
+        this.#destinations.push({
+          instruction: this.instructions.length,
+          ...this.#destinationOf(statement.target),
+        });
+        this.instructions.push({
+          kind: "setFallback",
+          destination: { file: -1, target: -1 },
+          span: copySpan(statement.span),
+        });
         return;
       case "letStatement": {
         const initializer = unwrapParentheses(statement.initializer);
@@ -876,18 +1053,12 @@ export class InstructionCompiler {
   /** Reserves the next function ID; the region is compiled after all user functions. */
   #registerHandler(block: Block, owner: "timer" | "media", selfHandle: string | null): number {
     const id = this.#functionIdBase + this.declarations.length + this.#handlers.length + 1;
-    this.#handlers.push({ block, owner, selfHandle });
+    this.#handlers.push({ block, owner, selfHandle, global: this.#global });
     return id;
   }
 
-  #compileHandler(
-    registered: {
-      readonly block: Block;
-      readonly owner: "timer" | "media";
-      readonly selfHandle: string | null;
-    },
-    id: number,
-  ): void {
+  #compileHandler(registered: RegisteredHandler, id: number): void {
+    this.#global = registered.global;
     const handler = registered.block;
     const entryInstruction = this.instructions.length;
     this.instructions.push({
@@ -904,9 +1075,11 @@ export class InstructionCompiler {
     this.compileStatements(handler.statements);
     const implicitReturnInstruction = this.instructions.length;
     this.instructions.push({ kind: "returnVoid", span: copySpan(handler.span) });
+    this.#global = false;
     this.functions.push({
       id,
       handler: registered.owner,
+      global: registered.global,
       selfHandle: registered.selfHandle,
       name: registered.owner === "timer" ? "timer expiry" : "media cue",
       declarationSpan: copySpan(handler.span),
@@ -920,10 +1093,11 @@ export class InstructionCompiler {
   }
 
   #compileFunction(declaration: FunctionDeclaration): void {
-    const registered = this.#functionByName.get(declaration.name.name);
-    if (registered === undefined) {
+    const own = this.#functionByName.get(declaration.name.name);
+    if (own?.id === null || own?.declaration !== declaration) {
       throw new TypeError("Semantically invalid function reached compilation.");
     }
+    const registered = { id: own.id, declaration };
     const entryInstruction = this.instructions.length;
     declaration.parameters.forEach((parameter, parameterIndex) => {
       this.instructions.push({
@@ -975,6 +1149,7 @@ export class InstructionCompiler {
     this.functions.push({
       id: registered.id,
       handler: null,
+      global: declaration.global,
       selfHandle: null,
       name: declaration.name.name,
       declarationSpan: copySpan(declaration.span),
@@ -1023,6 +1198,16 @@ export class InstructionCompiler {
       if (lowered === null) throw new TypeError("Blocking media reached value lowering.");
       return lowered;
     }
+    if (isTakePhotoCall(expression)) {
+      const transientTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "capture",
+        capture: "photo",
+        destinationTemporary: transientTemporary,
+        span: copySpan(expression.span),
+      });
+      return this.#consumeInteractionResult(transientTemporary, expression.span);
+    }
     if (
       expression.kind === "callExpression" &&
       expression.callee.kind === "identifier" &&
@@ -1032,6 +1217,19 @@ export class InstructionCompiler {
     }
     if (expression.kind === "loadExpression") {
       return yield* compileChild(this.#lowerLoadTask(expression));
+    }
+    if (expression.kind === "tagQueryExpression") {
+      // A bound or tag list that calls a function runs as instructions; the earlier operands wait in temporaries.
+      const operands = yield* compileChild(
+        this.#lowerOrderedExpressionsTask(tagQueryOperands(expression)),
+      );
+      return {
+        plan: tagQueryPlan(
+          expression,
+          operands.map((operand) => operand.plan),
+        ),
+        temporaryIds: operands.flatMap((operand) => operand.temporaryIds),
+      };
     }
     if (
       expression.kind === "binaryExpression" &&
@@ -1763,9 +1961,10 @@ export class InstructionCompiler {
     });
     const destinationTemporary = this.#allocateTemporary();
     const callIndex = this.instructions.length;
+    if (registered.id === null) this.project.foreignCalls.push({ instruction: callIndex, name });
     this.instructions.push({
       kind: "callFunction",
-      functionId: registered.id,
+      functionId: registered.id ?? 0,
       arguments: planned,
       destinationTemporary,
       returnInstruction: callIndex + 1,
@@ -1964,9 +2163,10 @@ export class InstructionCompiler {
         continue;
       }
       if (
-        current.expression.kind === "callExpression" &&
-        current.expression.callee.kind === "identifier" &&
-        this.#functionByName.has(current.expression.callee.name)
+        isTakePhotoCall(current.expression) ||
+        (current.expression.kind === "callExpression" &&
+          current.expression.callee.kind === "identifier" &&
+          this.#functionByName.has(current.expression.callee.name))
       ) {
         this.#instructionEmissionByExpression.set(current.expression, true);
         continue;
@@ -2271,6 +2471,8 @@ function assembleExpression(
         span: copySpan(expression.span),
       };
     case "callExpression":
+      if (isTakePhotoCall(expression))
+        throw new TypeError("takePhoto() reached pure expression assembly.");
       return {
         kind: "call",
         callee: child(expression.callee),
@@ -2323,6 +2525,8 @@ function assembleExpression(
         default: expression.defaultValue === null ? null : child(expression.defaultValue),
         span: copySpan(expression.span),
       };
+    case "tagQueryExpression":
+      return tagQueryPlan(expression, tagQueryOperands(expression).map(child));
     case "interactionExpression":
     case "showButtonExpression":
     case "timerExpression":
@@ -2333,6 +2537,28 @@ function assembleExpression(
     case "typeTestExpression":
       return typeTestPlan(expression, child(expression.value));
   }
+}
+
+function tagQueryPlan(
+  expression: TagQueryExpression,
+  operands: readonly ExpressionPlan[],
+): TagQueryExpressionPlan {
+  return {
+    kind: "tagQuery",
+    catalog: expression.catalog,
+    select: expression.select,
+    operands: [...operands],
+    steps: expression.steps.map((step) =>
+      step.kind === "tag"
+        ? { kind: "tag", name: step.name }
+        : step.kind === "tagCompare"
+          ? { kind: "tagCompare", name: step.name, operator: step.operator }
+          : step.kind === "tagList"
+            ? { kind: "tagList", option: step.option }
+            : { kind: step.kind },
+    ),
+    span: copySpan(expression.span),
+  };
 }
 
 /** A type test; a type the runtime cannot narrow down, which no written type is, makes the test constant. */

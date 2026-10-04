@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  compileProject,
   compileSource,
   createCheckpoint,
   deserializeCheckpoint,
@@ -14,6 +15,10 @@ import {
   validateInstructionPlan,
   type InstructionPlan,
   type InterpreterEvent,
+  type ProjectImageFile,
+  type ProjectSourceFile,
+  type RuntimeCallFrameSnapshot,
+  type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
@@ -31,6 +36,12 @@ export interface RuntimeResumeEquivalenceOptions {
    * normal speed, reporting progress on each time observation.
    */
   readonly mediaDurationMs?: number;
+  /** The package images that tag queries search. */
+  readonly images?: readonly ProjectImageFile[];
+  /** The host's stored values when the session starts, such as values an earlier session saved. */
+  readonly scriptStorage?: readonly RuntimeScriptStorageEntrySnapshot[];
+  /** How the session ends: `halted` by default, or `failed` for a scenario that ends with a runtime error. */
+  readonly ending?: "halted" | "failed";
 }
 
 /** Spacing of the simulated Player's media progress observations. */
@@ -42,18 +53,25 @@ export interface RuntimeResumeEquivalenceResult {
   readonly finalSnapshot: RuntimeSnapshot;
 }
 
+/** `source` is one source, the `main.tease` of a single-file project, or the files of a project. */
 export function assertRuntimeResumeEquivalent(
-  source: string,
+  source: string | readonly ProjectSourceFile[],
   options: RuntimeResumeEquivalenceOptions = {},
 ): RuntimeResumeEquivalenceResult {
-  const scenario = options.scenarioName ?? describeScenario(source);
+  const scenario =
+    options.scenarioName ??
+    describeScenario(typeof source === "string" ? source : (source[0]?.source ?? ""));
   const instructionGuard = options.instructionGuard ?? DEFAULT_INSTRUCTION_GUARD;
   assert.ok(
     Number.isInteger(instructionGuard) && instructionGuard > 0,
     `${scenario}: instructionGuard must be a positive integer`,
   );
 
-  const compiled = compileSource(source);
+  const compileOptions = { images: options.images ?? [] };
+  const compiled =
+    typeof source === "string"
+      ? compileSource(source, compileOptions)
+      : compileProject(source, compileOptions);
   assert.deepEqual(
     compiled.diagnostics,
     [],
@@ -70,7 +88,11 @@ export function assertRuntimeResumeEquivalent(
   );
 
   const seed = options.seed ?? DEFAULT_EQUIVALENCE_SEED;
-  const initial = createImmediatePacingRuntimeSnapshot(plan, { seed });
+  const fresh = {
+    seed,
+    ...(options.scriptStorage === undefined ? {} : { scriptStorage: options.scriptStorage }),
+  };
+  const initial = createImmediatePacingRuntimeSnapshot(plan, fresh);
   const initialSnapshotValidation = validateRuntimeSnapshot(initial, plan);
   assert.equal(
     initialSnapshotValidation.valid,
@@ -86,15 +108,16 @@ export function assertRuntimeResumeEquivalent(
     scenario,
     mediaDurationMs,
   );
+  const ending = options.ending ?? "halted";
   assert.equal(
     uninterrupted.snapshot.status,
-    "halted",
-    `${scenario}: uninterrupted execution must halt within ${instructionGuard} instructions`,
+    ending,
+    `${scenario}: uninterrupted execution must end ${ending} within ${instructionGuard} instructions`,
   );
   assertMonotonicEventSequences(uninterrupted.events, `${scenario}: uninterrupted execution`);
 
   // The stepping pass starts from its own fresh snapshot, so a baseline that mutated its input cannot hide boundaries.
-  const steppingInitial = createImmediatePacingRuntimeSnapshot(plan, { seed });
+  const steppingInitial = createImmediatePacingRuntimeSnapshot(plan, fresh);
   assert.deepEqual(
     initial,
     steppingInitial,
@@ -168,8 +191,8 @@ export function assertRuntimeResumeEquivalent(
     );
     assert.equal(
       resumed.snapshot.status,
-      "halted",
-      `${context}: resumed execution must halt within ${instructionGuard} instructions`,
+      ending,
+      `${context}: resumed execution must end ${ending} within ${instructionGuard} instructions`,
     );
 
     const combinedEvents = [...accumulatedEvents, ...resumed.events];
@@ -264,7 +287,7 @@ function observeDueDelay(
   for (const action of [
     snapshot.foregroundAction,
     ...snapshot.backgroundActions,
-    ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
+    ...functionFrames(snapshot).map((frame) => frame.timerInterruption?.suspendedAction ?? null),
   ]) {
     if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
       deadlines.push(action.deadlineMs);
@@ -322,4 +345,13 @@ function describeScenario(source: string): string {
 
 function formatValidationErrors(errors: readonly unknown[]): string {
   return errors.length === 0 ? "none" : JSON.stringify(errors);
+}
+
+/** The function and block frames of the call stack, without file calls. */
+export function functionFrames(
+  snapshot: Pick<RuntimeSnapshot, "callFrames">,
+): RuntimeCallFrameSnapshot[] {
+  return snapshot.callFrames.filter(
+    (frame): frame is RuntimeCallFrameSnapshot => frame.kind === "function",
+  );
 }

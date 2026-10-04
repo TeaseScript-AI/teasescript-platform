@@ -24,13 +24,13 @@ import {
 import { MAX_INTERACTION_STRING_UTF8_BYTES } from "../src/interaction-limits.js";
 
 test("workspace helper exposes production say pacing and returns JSON-safe data", () => {
-  const compiled = compileWorkspaceSource('say "Hello"');
+  const compiled = compileWorkspaceSource('say "Hello"\nexit');
   assert.ok(compiled.plan);
-  const result = executeWorkspaceSource('say "Hello"');
+  const result = executeWorkspaceSource('say "Hello"\nexit');
   assert.equal(result.status, "halted");
   assert.deepEqual(
     result.events.map((event) => event.kind),
-    ["say", "actionRequested", "complete"],
+    ["say", "actionRequested", "exit"],
   );
   const [say, requested] = result.events;
   assert.equal(say?.kind === "say" ? say.text : null, "Hello");
@@ -64,7 +64,7 @@ test("workspace helper reports parser and semantic diagnostics", () => {
 });
 
 test("workspace helper stops blocking waits in waiting with action events", () => {
-  const result = executeWorkspaceSource("wait 1");
+  const result = executeWorkspaceSource("wait 1\nexit");
   assert.equal(result.status, "waiting");
   assert.deepEqual(
     result.events.map((event) => event.kind),
@@ -73,7 +73,7 @@ test("workspace helper stops blocking waits in waiting with action events", () =
 });
 
 test("validated workspace execution does not mutate the caller snapshot", () => {
-  const compiled = compileWorkspaceSource('say "Hello"');
+  const compiled = compileWorkspaceSource('say "Hello"\nexit');
   assert.ok(compiled.plan);
   assert.ok(compiled.snapshot);
   const before = JSON.stringify(compiled.snapshot);
@@ -84,7 +84,7 @@ test("validated workspace execution does not mutate the caller snapshot", () => 
 });
 
 test("workspace helper accepts source beyond the former local byte limit", () => {
-  const source = `${"// padding\n".repeat(10_000)}say "large source"`;
+  const source = `${"// padding\n".repeat(10_000)}say "large source"\nexit`;
 
   const result = compileWorkspaceSource(source);
 
@@ -93,9 +93,10 @@ test("workspace helper accepts source beyond the former local byte limit", () =>
 });
 
 test("workspace helper is deterministic and returns runtime instruction-budget failures", () => {
-  const source = "say random(1, 10)";
+  const source = "say random(1, 10)\nexit";
   assert.deepEqual(executeWorkspaceSource(source), executeWorkspaceSource(source));
-  const result = executeWorkspaceSource("while true {} ");
+  // The exit is never taken; a script needs a reachable one.
+  const result = executeWorkspaceSource("let stop = false\nwhile true {\n  if stop { exit }\n}");
   assert.equal(result.status, "failed");
   assert.ok(
     result.events.some((event) => event.kind === "runtimeFailure" && event.code === "TSR037"),
@@ -109,7 +110,7 @@ test("workspace import decoding accepts large UTF-8 source and rejects malformed
 });
 
 test("workspace player controls delegate interaction families and preserve presentation", () => {
-  const text = compileWorkspaceSource('let answer = askText "Answer"\nsay answer, instant');
+  const text = compileWorkspaceSource('let answer = askText "Answer"\nsay answer, instant\nexit');
   assert.ok(text.plan && text.snapshot);
   const waiting = executeValidatedWorkspaceSnapshot(text.plan, text.snapshot, "run");
   assert.ok(waiting.snapshot);
@@ -135,7 +136,7 @@ test("workspace player controls delegate interaction families and preserve prese
   assert.equal(JSON.stringify(waitingSnapshot), before);
   assert.deepEqual(resumedSayTexts(text.plan, completed.snapshot), ["hello"]);
 
-  const button = compileWorkspaceSource('showButton "Continue"');
+  const button = compileWorkspaceSource('showButton "Continue"\nexit');
   assert.ok(button.plan && button.snapshot);
   const buttonWaiting = executeValidatedWorkspaceSnapshot(button.plan, button.snapshot, "run");
   assert.ok(buttonWaiting.snapshot);
@@ -147,7 +148,7 @@ test("workspace player controls delegate interaction families and preserve prese
   assert.equal(buttonDone.outcome.kind, "completed");
 
   const choice = compileWorkspaceSource(
-    'let answer = choose first: "First", second: "Second"\nsay answer, instant',
+    'let answer = choose first: "First", second: "Second"\nsay answer, instant\nexit',
   );
   assert.ok(choice.plan && choice.snapshot);
   const choiceWaiting = executeValidatedWorkspaceSnapshot(choice.plan, choice.snapshot, "run");
@@ -168,7 +169,7 @@ test("workspace player controls delegate interaction families and preserve prese
 
 test("a control rendered for an earlier interaction cannot answer a later one", () => {
   const workspace = compileWorkspaceSource(
-    'let a = choose oldA: "Old A", oldB: "Old B"\nlet b = choose newA: "New A", newB: "New B"\nshowButton "Go"\nshowButton "Again"',
+    'let a = choose oldA: "Old A", oldB: "Old B"\nlet b = choose newA: "New A", newB: "New B"\nshowButton "Go"\nshowButton "Again"\nexit',
   );
   assert.ok(workspace.plan && workspace.snapshot);
   const plan = workspace.plan;
@@ -196,7 +197,8 @@ test("a control rendered for an earlier interaction cannot answer a later one", 
 });
 
 test("workspace pacing and checkpoint controls are explicit and restore without time mutation", () => {
-  const compiled = compileWorkspaceSource('say "paced"');
+  // The long wait keeps the session running while the message's pacing gate is in the background.
+  const compiled = compileWorkspaceSource('say "paced"\nwait 2000\nexit');
   assert.ok(compiled.plan && compiled.snapshot);
   const running = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
   assert.ok(running.snapshot);
@@ -225,7 +227,7 @@ test("workspace pacing and checkpoint controls are explicit and restore without 
 });
 
 test("workspace control rejection clones unchanged state", () => {
-  const compiled = compileWorkspaceSource('say "done"');
+  const compiled = compileWorkspaceSource('say "done"\nexit');
   assert.ok(compiled.plan && compiled.snapshot);
   const before = JSON.stringify(compiled.snapshot);
   const rejected = submitWorkspaceComposer(compiled.plan, compiled.snapshot, "ignored");
@@ -236,7 +238,9 @@ test("workspace control rejection clones unchanged state", () => {
 });
 
 test("workspace controls preserve number input and authored choice order", () => {
-  const number = compileWorkspaceSource('let amount = askNumber "Amount"\nsay amount, instant');
+  const number = compileWorkspaceSource(
+    'let amount = askNumber "Amount"\nsay amount, instant\nexit',
+  );
   assert.ok(number.plan && number.snapshot);
   const waiting = executeValidatedWorkspaceSnapshot(number.plan, number.snapshot, "run");
   assert.ok(waiting.snapshot);
@@ -249,7 +253,7 @@ test("workspace controls preserve number input and authored choice order", () =>
   assert.deepEqual(resumedSayTexts(number.plan, completed.snapshot), ["12.5"]);
 
   const choice = compileWorkspaceSource(
-    'let selected = choose "Alpha", "Beta"\nsay selected, instant',
+    'let selected = choose "Alpha", "Beta"\nsay selected, instant\nexit',
   );
   assert.ok(choice.plan && choice.snapshot);
   const choiceWaiting = executeValidatedWorkspaceSnapshot(choice.plan, choice.snapshot, "run");
@@ -280,7 +284,7 @@ test("workspace composer answers date and time asks with ISO text", () => {
     ["askDateTime", "2026-10-04T18:00"],
   ] as const) {
     const compiled = compileWorkspaceSource(
-      `let value = ${command} "When?"\nsay value.toISO(), instant`,
+      `let value = ${command} "When?"\nsay value.toISO(), instant\nexit`,
     );
     assert.ok(compiled.plan && compiled.snapshot);
     const waiting = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
@@ -292,7 +296,9 @@ test("workspace composer answers date and time asks with ISO text", () => {
 });
 
 test("composer text for a choice remains engine-owned and rejects ambiguous visible text", () => {
-  const compiled = compileWorkspaceSource('let selected = choose first: "Same", second: "Same"');
+  const compiled = compileWorkspaceSource(
+    'let selected = choose first: "Same", second: "Same"\nexit',
+  );
   assert.ok(compiled.plan && compiled.snapshot);
   const waiting = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
   assert.ok(waiting.snapshot);
@@ -308,7 +314,8 @@ test("composer text for a choice remains engine-owned and rejects ambiguous visi
 });
 
 test("workspace controls preserve engine pacing and completion rejection outcomes", () => {
-  const unskippable = compileWorkspaceSource('say unskippable "paced"');
+  // Each long wait keeps the session running while the message's pacing gate is in the background.
+  const unskippable = compileWorkspaceSource('say unskippable "paced"\nwait 2000\nexit');
   assert.ok(unskippable.plan && unskippable.snapshot);
   const waiting = executeValidatedWorkspaceSnapshot(unskippable.plan, unskippable.snapshot, "run");
   assert.ok(waiting.snapshot);
@@ -318,7 +325,7 @@ test("workspace controls preserve engine pacing and completion rejection outcome
   assert.deepEqual(rejectedSkip.events, []);
   assert.equal(JSON.stringify(rejectedSkip.snapshot), before);
 
-  const skippable = compileWorkspaceSource('say "paced"');
+  const skippable = compileWorkspaceSource('say "paced"\nwait 2000\nexit');
   assert.ok(skippable.plan && skippable.snapshot);
   const running = executeValidatedWorkspaceSnapshot(skippable.plan, skippable.snapshot, "run");
   assert.ok(running.snapshot);
@@ -328,7 +335,7 @@ test("workspace controls preserve engine pacing and completion rejection outcome
   assert.deepEqual(duplicate.events, []);
   assert.deepEqual(duplicate.snapshot, completed.snapshot);
 
-  const text = compileWorkspaceSource("let answer = askText");
+  const text = compileWorkspaceSource("let answer = askText\nexit");
   assert.ok(text.plan && text.snapshot);
   const textWaiting = executeValidatedWorkspaceSnapshot(text.plan, text.snapshot, "run");
   assert.ok(textWaiting.snapshot);
@@ -364,3 +371,22 @@ function resumedSayTexts(plan: InstructionPlan, snapshot: RuntimeSnapshot): stri
     event.kind === "say" ? [event.text] : [],
   );
 }
+
+test("the workspace has no camera, so continuing past takePhoto() yields null with a warning", () => {
+  const compiled = compileWorkspaceSource(
+    "let photo = takePhoto()\nlet missing = photo == null\nexit",
+  );
+  assert.ok(compiled.plan && compiled.snapshot);
+  const waiting = executeValidatedWorkspaceSnapshot(compiled.plan, compiled.snapshot, "run");
+  assert.equal(waiting.status, "waiting");
+  assert.equal(waiting.snapshot?.foregroundAction?.kind, "capture");
+  const continued = executeValidatedWorkspaceSnapshot(compiled.plan, waiting.snapshot!, "run");
+  assert.equal(continued.status, "halted");
+  assert.ok(
+    continued.events.some((event) => event.kind === "developerWarning" && event.code === "TSW015"),
+  );
+  const missing = continued.snapshot?.frames[0]?.bindings.find(
+    (binding) => binding.name === "missing",
+  );
+  assert.equal(missing?.value, true);
+});

@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 43;
+export const INSTRUCTION_PLAN_VERSION = 50;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -25,6 +25,8 @@ export interface InstructionPlan {
   readonly version: typeof INSTRUCTION_PLAN_VERSION;
   /** `main.tease` first, then the other files in path order; their blocks follow each other in the same order. */
   readonly files: readonly PlanFile[];
+  /** The package images that tag queries search, by path (ADR 0023). */
+  readonly images: readonly PlanImage[];
   readonly temporaryCount: number;
   readonly functions: readonly CompiledFunctionDefinition[];
   readonly instructions: readonly Instruction[];
@@ -39,9 +41,34 @@ export interface PlanFile {
   readonly path: string;
   readonly sourceSpan: PlanSourceLocation;
   readonly startInstruction: number;
-  /** End of the root region; the file's functions and handlers follow up to {@link endInstruction}. */
+  /** Where a `goto` or `call` that names the file without a label starts it. */
+  readonly entryInstruction: number;
+  /**
+   * End of the root region, whose last instruction is the `end` that the compiler adds after the file's statements;
+   * the file's functions and handlers follow up to {@link endInstruction}.
+   */
   readonly rootEndInstruction: number;
   readonly endInstruction: number;
+  /** The labels of the file's outer scope, in source order, each at the root instruction where it stands. */
+  readonly labels: readonly PlanLabel[];
+}
+
+export interface PlanLabel {
+  readonly name: string;
+  readonly instruction: number;
+}
+
+/** A package image and its tags, generated from the image's XMP keywords. */
+export interface PlanImage {
+  /** Path relative to the package root, with `/` between folders. */
+  readonly path: string;
+  /** Each tag name once, in name order. */
+  readonly tags: readonly PlanTag[];
+}
+
+export interface PlanTag {
+  readonly name: string;
+  readonly value: number | null;
 }
 
 export interface CompiledFunctionParameter {
@@ -59,6 +86,11 @@ export interface CompiledFunctionDefinition {
    * `callFunction`. `null` for a user function.
    */
   readonly handler: "timer" | "media" | null;
+  /**
+   * A `global function`, which every file may call, or a block inside one. It sees the project's globals but not its
+   * file's top-level variables (ADR 0022 §3).
+   */
+  readonly global: boolean;
   /** For a media block of `let NAME = play... async`, the local name bound to its own handle on entry. */
   readonly selfHandle: string | null;
   readonly name: string;
@@ -72,8 +104,8 @@ export interface CompiledFunctionDefinition {
 }
 
 export type Instruction =
+  | DeclareGlobalInstruction
   | DeclareSpeakerInstruction
-  | SetDeclaredSpeakerPropertyInstruction
   | SetDefaultSpeakerInstruction
   | EnterScopeInstruction
   | LeaveScopeInstruction
@@ -110,23 +142,35 @@ export type Instruction =
   | StorageWriteInstruction
   | PlayMediaInstruction
   | InteractionInstruction
+  | CaptureInstruction
+  | GotoInstruction
+  | TransferInstruction
+  | SetFallbackInstruction
+  | EndInstruction
   | ExitInstruction;
 
 interface InstructionBase {
   readonly span: PlanSourceLocation;
 }
 
+/**
+ * Sets up a global with its start value before the story runs (ADR 0022 §6). The start values of all files lead the
+ * root region of `main.tease`; `file` is the index of the file whose source the locations refer to.
+ */
+export interface DeclareGlobalInstruction extends InstructionBase {
+  readonly kind: "declareGlobal";
+  readonly name: string;
+  readonly value: ExpressionPlan;
+  readonly typeCheck?: TypeCheckPlan;
+  readonly file: number;
+}
+
+/** Sets up a speaker before the story runs, like {@link DeclareGlobalInstruction}. */
 export interface DeclareSpeakerInstruction extends InstructionBase {
   readonly kind: "declareSpeaker";
   readonly name: string;
   readonly properties: readonly PlannedProperty[];
-}
-
-export interface SetDeclaredSpeakerPropertyInstruction extends InstructionBase {
-  readonly kind: "setDeclaredSpeakerProperty";
-  readonly speaker: string;
-  readonly name: string;
-  readonly value: ExpressionPlan;
+  readonly file: number;
 }
 
 export interface SetDefaultSpeakerInstruction extends InstructionBase {
@@ -563,8 +607,72 @@ export interface PreparedInteractionInstruction extends InstructionBase {
 
 export type InteractionInstruction = StaticInteractionInstruction | PreparedInteractionInstruction;
 
+/**
+ * `takePhoto()`: waits until the Player answers with a still from the session camera or reports it unavailable. The
+ * result is the captured image reference, or `null`; it is always handed off through `destinationTemporary`.
+ */
+export interface CaptureInstruction extends InstructionBase {
+  readonly kind: "capture";
+  readonly capture: "photo";
+  readonly destinationTemporary: number;
+}
+
 export interface ExitInstruction extends InstructionBase {
   readonly kind: "exit";
+}
+
+/**
+ * `goto label`: leaves the current function, handler, loop, and block, abandons an interrupted action, and continues at
+ * `target`, a label of the same file's root region.
+ */
+export interface GotoInstruction extends InstructionBase {
+  readonly kind: "goto";
+  readonly target: number;
+}
+
+/** A file and where it starts: its entry or one of its labels. */
+export interface PlanDestination {
+  readonly file: number;
+  readonly target: number;
+}
+
+/** A glob target: each time it runs, one draw from the session random generator picks one of `pick`. */
+export interface PlanPick {
+  readonly pick: readonly PlanDestination[];
+}
+
+export type PlanTransferDestination = PlanDestination | PlanPick;
+
+/**
+ * A computed target, such as `goto (next)`: each time it runs, `value` evaluates to a script reference, which names the
+ * destination by path and label.
+ */
+export interface PlanComputedDestination {
+  readonly value: ExpressionPlan;
+}
+
+/**
+ * `goto` or `call` naming a file, or `call label`: enters `destination` with fresh top-level variables. A `goto`
+ * leaves the current file like a `goto label`; a `call` continues after it once that file reaches `end`.
+ */
+export interface TransferInstruction extends InstructionBase {
+  readonly kind: "transfer";
+  readonly mode: "goto" | "call";
+  readonly destination: PlanTransferDestination | PlanComputedDestination;
+}
+
+/**
+ * `fallback target` sets where an `end` without a caller continues; `fallback none` clears it with `null`. A computed
+ * target is resolved when the statement runs, so the fallback it sets is a file and its entry or label.
+ */
+export interface SetFallbackInstruction extends InstructionBase {
+  readonly kind: "setFallback";
+  readonly destination: PlanTransferDestination | PlanComputedDestination | null;
+}
+
+/** `end`, and the end the compiler adds after the last statement of a file's root region. */
+export interface EndInstruction extends InstructionBase {
+  readonly kind: "end";
 }
 
 export interface PlannedProperty {
@@ -595,6 +703,7 @@ export type ExpressionPlan =
   | TemporaryExpressionPlan
   | PreparedReferenceExpressionPlan
   | StorageLoadExpressionPlan
+  | TagQueryExpressionPlan
   | TypeTestExpressionPlan;
 
 interface ExpressionPlanBase {
@@ -635,6 +744,30 @@ export interface StorageLoadExpressionPlan extends ExpressionPlanBase {
 }
 
 /**
+ * `showImage tagged …` (one random match) or `findImages(…)` (every match, in catalog order) over the plan's images.
+ * The operands are evaluated once, in order, before any image is matched; each `tagCompare` and `tagList` step reads
+ * the next one. A random pick draws once from the session random generator.
+ */
+export interface TagQueryExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "tagQuery";
+  readonly catalog: "images";
+  readonly select: "random" | "list";
+  readonly operands: readonly ExpressionPlan[];
+  /** The query in postfix order; without steps every image matches. */
+  readonly steps: readonly TagQueryStepPlan[];
+}
+
+export type TagQueryStepPlan =
+  | { readonly kind: "tag"; readonly name: string }
+  | {
+      readonly kind: "tagCompare";
+      readonly name: string;
+      readonly operator: "==" | "!=" | "<" | "<=" | ">" | ">=";
+    }
+  | { readonly kind: "tagList"; readonly option: "all" | "none" | "any" }
+  | { readonly kind: "and" | "or" | "not" };
+
+/**
  * A check that a value the compiler cannot know fits the type of the place that receives it (ADR 0021 rule 1.7). It
  * runs after the value is evaluated and before it is stored, and fails with `TSR058`.
  */
@@ -669,7 +802,8 @@ export type TypePlanName =
   | "range"
   | "speaker"
   | "timer"
-  | "media";
+  | "media"
+  | "script";
 
 export interface TypePropertyPlan {
   readonly name: string;
@@ -789,12 +923,38 @@ export interface RangeExpressionPlan extends ExpressionPlanBase {
   readonly inclusive: boolean;
 }
 
-/** End of the root region of `main.tease`, where a session that reaches it without `exit` completes. */
-export function mainRootEnd(plan: InstructionPlan): number {
-  return plan.files[0]!.rootEndInstruction;
+/** The span of `main.tease`: the location of a plan-level fact that belongs to no single instruction. */
+export function mainSourceSpan(plan: Pick<InstructionPlan, "files">): PlanSourceLocation {
+  return plan.files[0]!.sourceSpan;
 }
 
-/** The span of `main.tease`: the location of a plan-level fact that belongs to no single instruction. */
-export function mainSourceSpan(plan: InstructionPlan): PlanSourceLocation {
-  return plan.files[0]!.sourceSpan;
+/** The globals and speakers that the start of `main.tease` sets up, in order (ADR 0022 §6). */
+export function startupDeclarations(plan: {
+  readonly instructions: readonly (Instruction | undefined)[];
+}): readonly (DeclareGlobalInstruction | DeclareSpeakerInstruction)[] {
+  const declarations: (DeclareGlobalInstruction | DeclareSpeakerInstruction)[] = [];
+  for (const instruction of plan.instructions) {
+    if (instruction?.kind !== "declareGlobal" && instruction?.kind !== "declareSpeaker") break;
+    declarations.push(instruction);
+  }
+  return declarations;
+}
+
+/**
+ * The project file whose source the location of an instruction is in: the file whose block holds it, or for a start
+ * value the file it comes from.
+ */
+export function instructionSourcePath(
+  plan: Pick<InstructionPlan, "files"> & {
+    readonly instructions: readonly (Instruction | undefined)[];
+  },
+  index: number,
+): string {
+  const instruction = plan.instructions[index];
+  if (instruction?.kind === "declareGlobal" || instruction?.kind === "declareSpeaker")
+    return plan.files[instruction.file]!.path;
+  return (
+    plan.files.find((file) => index >= file.startInstruction && index < file.endInstruction) ??
+    plan.files[0]!
+  ).path;
 }

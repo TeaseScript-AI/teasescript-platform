@@ -40,7 +40,7 @@ The Standard Library owns reusable author-facing composition when that behavior 
 
 Package libraries may import the public, capability-safe Standard Library surface. They should build on shared behavior rather than directly recreating every feature from low-level primitives. Package-library-to-package-library dependencies remain a separate open decision.
 
-Ordinary TypeScript execution may remain synchronous, but it may not suspend invisibly across a pending-action or checkpoint boundary. Resumable library behavior must be lowered into an explicit serializable plan or represented by an engine-managed serializable continuation.
+Ordinary TypeScript execution may remain synchronous, but it may not suspend invisibly as resume state across a pending-action or checkpoint boundary; Player-local awaits inside the sandbox are not resume state. Resumable library behavior must be lowered into an explicit serializable plan or represented by an engine-managed serializable continuation.
 
 A plan/checkpoint must either contain the lowered library behavior or bind to an exact compatible Standard Library identity/version. Restore against an implicit latest implementation is not permitted.
 

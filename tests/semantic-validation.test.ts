@@ -76,7 +76,10 @@ test("keeps parser and semantic diagnostics distinct", () => {
 });
 
 test("accepts explicitly declared injected built-ins and globals", () => {
-  const result = compileSource("capture(player)", { builtins: ["capture"], globals: ["player"] });
+  const result = compileSource("capture(player)\nexit", {
+    builtins: ["capture"],
+    globals: ["player"],
+  });
 
   assert.deepEqual(result.diagnostics, []);
   assert.notEqual(result.plan, null);
@@ -155,6 +158,7 @@ test("preserves direct builtin calls in every supported nested context", () => {
       "}",
       "let result = sample()",
       "values.remove(1)",
+      "exit",
     ].join("\n"),
     { builtins: ["customBuiltin"] },
   );

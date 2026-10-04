@@ -28,7 +28,7 @@ ADR 0015 remains authoritative for explicit JSON-safe execution state. ADR 0016 
 6. Do not allow libraries to add or mutate TeaseScript grammar. New command, block, or other special syntax remains an explicit language/compiler decision.
 7. Permit official TeaseScript syntax to lower to a public Standard Library export, a core primitive, or a fixed composition of both. The source form does not determine which internal layer owns the implementation.
 8. Keep stable identity, validation, scheduling, checkpoint, restore, event sequencing, and typed host boundaries in the engine even when a Standard Library wrapper provides the public API.
-9. Require library behavior crossing a pending-action or checkpoint boundary to be lowered into explicit serializable engine instructions or represented by an engine-managed serializable continuation. Ordinary TypeScript calls may not remain invisibly suspended.
+9. Require library behavior crossing a pending-action or checkpoint boundary to be lowered into explicit serializable engine instructions or represented by an engine-managed serializable continuation. Ordinary TypeScript calls may not remain invisibly suspended as resume state.
 10. Separate public Standard Library exports from privileged platform adapters. Public imports must not transitively expose internal host capabilities.
 11. Require deterministic Standard Library identity/version binding whenever behavior is not fully lowered into the instruction plan. Restore may not silently use an implicit latest implementation.
 12. Preserve currently implemented behavior until the required library-linkage and metadata pipeline exists. This documentation decision does not move or delete current `say` code.
@@ -71,7 +71,7 @@ This includes:
 - foreground and background pending-action identity and lifecycle;
 - deterministic session-time observation and timed-action settlement;
 - opaque engine-managed handles and reference validation;
-- typed, validated, JSON-safe data crossing runtime, player, host, checkpoint, and package boundaries, with
+- typed, validated, JSON-safe data crossing runtime, player, host, checkpoint, and package-to-runtime boundaries, with
   resource/security bounds only at separately justified concrete boundaries;
 - stable output provenance such as output target identity and speaker identity where required;
 - engine-managed serializable continuations for resumable library workflows;
@@ -158,9 +158,9 @@ The Standard Library is trusted platform code, but it remains subject to the pla
 
 ## Resumability boundary
 
-Ordinary TypeScript library code may run synchronously between engine instruction boundaries. It may calculate values, validate arguments, and call synchronous capabilities.
+Ordinary TypeScript library code may run synchronously between engine instruction boundaries. It may calculate values, validate arguments, and call synchronous capabilities. Inside the Player sandbox, package code may also await ephemeral local work, such as a camera frame, as Player-local execution detail. Such promises and capture or recording handles are not restored after a reload; a reconstructible TeaseScript pending interaction may be rebuilt from canonical state instead.
 
-A library workflow that waits for time, input, media, a background handler, or another pending result must not retain an ordinary TypeScript stack, promise, callback, closure, or generator as canonical resume state. It must either:
+When TeaseScript execution waits for a library workflow, for example for time, input, media, a background handler, or another pending result, the workflow must not retain an ordinary TypeScript stack, promise, callback, closure, or generator as canonical resume state. It must either:
 
 - be lowered into explicit versioned serializable engine instructions; or
 - use an explicit versioned engine-managed serializable continuation.
@@ -171,7 +171,7 @@ The exact lowering and linkage mechanism remains deferred, but this invariant do
 
 Package libraries may import only the public, capability-safe Standard Library surface.
 
-Privileged platform adapters may exist internally for player integration or capability brokering, but they are separate modules and are not transitively exported. Calling a public helper must not grant access to internal host capabilities, the parent DOM, account cookies, raw browser objects, or unrestricted networking.
+Privileged platform adapters may exist internally for player integration or capability brokering, but they are separate modules and are not transitively exported. Calling a public helper must not grant access to privileged adapters, internal host capabilities, the parent DOM, account cookies, or unrestricted networking. Inside the Player sandbox, capability-authorized package code may receive and use ephemeral live browser and media objects and APIs through an accepted capability surface, for arbitrary local image, video, and audio processing, including pixel- and sample-level work, recording, and custom UI. That surface may expose raw objects such as streams, tracks, media elements, canvases, image bitmaps, workers, and audio contexts where deliberately supported, or equivalent capability objects. Such objects never enter canonical runtime, checkpoint, or persisted state and never cross the parent/Player boundary as raw objects. Pixel, image, and sample buffers derived from them also stay inside the Player sandbox unless a later explicit validated boundary admits them. Device access remains governed by the browser's permission and the Player-brokered capability. Player cleanup is guaranteed for the browser resources the Player owns; when a surface exposes raw clonable resources, complete revocation of package-created derivatives such as cloned tracks relies on the applicable sandbox teardown or lifecycle contract.
 
 ## Deterministic version binding
 
@@ -202,7 +202,7 @@ Package libraries may not:
 - bypass core pending-action, time, checkpoint, validation, or security rules;
 - access the parent DOM, main-site cookies, unrestricted external networking, or undocumented host capabilities;
 - place callbacks, DOM nodes, promises, browser handles, streams, or mutable class instances into canonical runtime state;
-- suspend an ordinary TypeScript call across a pending-action or checkpoint boundary.
+- rely on a suspended ordinary TypeScript call as resume state across a pending-action or checkpoint boundary.
 
 ## Syntax, functions, and editor tooling
 

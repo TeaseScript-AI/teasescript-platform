@@ -101,8 +101,7 @@ different cleanup, and an independent control-flow entry into the handoff are in
 because each would let a validated plan reach a state that snapshot validation rejects. The current validator enforces
 this through a fixed local shape rather than whole-plan result-liveness analysis; its conservative analysis of which
 expression positions count as reading the destination, and its exclusion of branches, loop edges, user-function calls,
-and control-flow targets onto the cleanup, are provisional POC policy, not language semantics. A result-free button may
-be the terminal root instruction and uses the existing canonical settled root-end transition.
+and control-flow targets onto the cleanup, are provisional POC policy, not language semantics.
 
 Completion semantics are:
 
@@ -390,6 +389,13 @@ The implementation includes:
 - instruction and event-boundary stepping with instruction budgets;
 - explicit loop frames for ranges and loops;
 - explicit function definitions, parameter prologues, calls, serializable call frames, returns, and recursion;
+- labels, `goto`, `call`, `end`, and `fallback` within and across files, under [Files and
+  activations](#files-and-activations): a `goto` leaves every function, block, loop, and interrupt frame of its
+  activation, abandons an interrupted action, and continues at a label or a file's entry; a top-level `let` that runs
+  again sets its existing variable. Plan validation accepts a label only where the code that follows needs no open
+  block, active loop, or temporary from before it;
+- explicit endings: the compiler closes each file's root region with an `end`, so a session halts only through `exit`;
+  `end` without a calling file or a fallback fails with `TSR066`;
 - checkpoint restore inside loops, calls, defaults, and across RNG/event boundaries;
 - source-order-preserving temporaries and checkpoint-safe prepared references;
 - full suspended-caller live-temporary validation;
@@ -495,7 +501,7 @@ A blocking instruction evaluates its arguments, stores a complete JSON-safe acti
 the next runtime entry. Timer lifecycle transitions and suspended-delay settlements emit completion events without
 replacing `lastSettlement`; see [Timers and scene time](#timers-and-scene-time).
 
-`wait 0` is deliberately immediate: its duration expression is still evaluated, but it allocates no action ID, creates no pending action or settlement, and emits neither action event. The next source instruction runs normally; if it was the terminal root instruction, ordinary natural completion emits one `complete` event. In contrast, a positive terminal root wait settles with `actionCompleted`; the following runtime entry consumes the canonical settled root-end transition and emits the sequenced `complete` event. Re-entering an already halted snapshot emits no further completion event.
+`wait 0` is deliberately immediate: its duration expression is still evaluated, but it allocates no action ID, creates no pending action or settlement, and emits neither action event. The next source instruction runs normally. A positive wait settles with `actionCompleted`, and the following runtime entry continues at the next instruction. Re-entering an already halted snapshot emits no further event.
 
 A duplicate delivery matching `lastSettlement` returns the same immutable canonical recorded settlement without another
 write, event, RNG advance, handler, or continuation. `lastSettlement` is bounded replay/idempotency data only: it does
@@ -533,6 +539,45 @@ pending work.
 
 Blocking `wait` and `timer`, foreground interactions, pacing gates, and asynchronous timers share ADR 0016 action,
 identity, observation, event, and checkpoint infrastructure. Their timer-specific composition is defined below.
+
+## Files and activations
+
+ADR 0022 and V30 §29 define transfers between files. Each entry into a file is an activation with its own top-level
+variables in a root scope; the root names its file (`file`) and where the activation started (`entry`: the file's entry
+or one of its labels, which a `goto` to a label keeps), and every other scope has `file: null` and `entry: null`. The
+base activation's root is `frames[0]`.
+
+- `call` pushes a file call frame (`kind: "file"`) onto the one ordered call stack, with the caller's temporaries, its
+  scope and loop depths, and the position after the `call`; the called activation's root is the scope at its
+  `scopeBaseDepth`. `end` ends the innermost activation, also from one of its functions or blocks, and returns there.
+  Without a file call, `end` continues at the snapshot's `fallback` (a file and its entry or label, or `null`) as a
+  fresh activation, or fails with `TSR066`.
+- A `goto` naming a file, `call` of a label, and the fallback replace or add an activation with a fresh root; a `goto`
+  to a label keeps the activation it runs in. A glob destination (`{ pick: [...] }`) draws one of its files from the
+  session random generator each time it runs, a glob fallback each time it is used. A goto leaves the functions, blocks, loops, and temporaries above its
+  activation's root; when that activation is lower on the stack, the file calls above it go too.
+- A computed destination (`{ value }`) evaluates to a script reference (`{ kind: "script", path, label }`, `label`
+  `null` for the file's top) each time it runs, and is resolved by path and label against the plan's files. A value
+  that is not a reference fails with `TSR058`; a missing file or label, or a `goto` or fallback to a file whose root
+  region holds nothing after its entry but its closing `end`, fails with `TSR069`. A computed `fallback` stores the resolved file and target.
+- Reading or assigning a top-level variable of the file whose `let` has not run in the activation fails with `TSR070`,
+  which names the label at the root's `entry` unless the activation started at the file's entry.
+- A function frame (`kind: "function"`) records `rootScopeId`, the root of the activation it runs for: its caller's,
+  or for an expiry, cue, or finish block the one that started the timer or media. Timers record that root as
+  `rootScopeId`, media with blocks as `handlerRootScopeId`, and queued blocks as `rootScopeId`. A root that leaves the
+  stack stays in `retainedScopes` while such a block can still run, and is dropped at the next transfer after that; a
+  `goto` from such a block brings its activation back in place of the innermost one.
+- A transfer that leaves an activation removes its non-persistent timers, as [Timers and scene
+  time](#timers-and-scene-time) describes; `exit` also clears activations, retained roots, and the fallback.
+
+Restore validation checks that roots stand exactly at the bottom and above each file call, that a file's entry is the
+start of its root region, that each file call returns after a `call`, that each loop belongs to the call context that
+runs it (so a recursive call runs its own instance of a loop) and is active exactly where that context stands in its
+body, that each function frame, and each timer, media, and queued block with a block to run, names an
+existing activation root of that function's or block's file, that every position lies in the region of the code
+running there, that each root's `entry` is its file's entry or one of its labels, and that the fallback is the
+destination of one of the plan's `fallback` statements or, when the plan has a computed `fallback`, a label of a file
+or the entry of a file that runs something. Script references elsewhere in the state are checked for their shape only.
 
 ## Timers and scene time
 
@@ -606,8 +651,12 @@ returns after the deadline, the restored button times out at once, at the curren
 result. A normal return restores the interrupted action with its original identity;
 returning to an interaction first consumes a pacing gate created by the block. `stop()` on an active timer cancels its
 unstarted queued blocks; on a finished or stopped timer it is a silent no-op. `exit` inside a block halts the session
-and discards the interrupted action. `exit` and script end stop every timer and drop queued blocks. A failed session
-clears its foreground action.
+and discards the interrupted action. A `goto` inside a block, or in a function it calls, also discards the interrupted
+action, without a settlement, and continues at its label. `exit` stops every timer and drops queued blocks. A timer
+records the root of the activation that started it (`rootScopeId`); a transfer that leaves an activation (a `goto` from
+it, its `end`, or a block's `goto` that abandons it) stops that activation's non-persistent timers, with a `stopped`
+settlement each, and drops their queued blocks. A `call` stops nothing; persistent timers and their queued blocks
+stay. A failed session clears its foreground action.
 
 Restore validation requires every issued timer ID to have exactly one active or settled record, handles to refer
 to issued IDs, queued blocks to belong to their timer, at most one interrupt frame, and suspended actions to be
@@ -692,8 +741,8 @@ lifecycle, cue, and handle behavior is defined in specification §22.
 optionally with a self-handle name bound on entry to the media's handle. Their invocations share the timer expiry
 queue and interrupt machinery above; interrupt frames record `mediaId` instead of `timerId`.
 
-**Cleanup and restore.** `exit` and script end stop all media without events and drop queued blocks; the Stage image
-stays. Checkpoints carry the complete media state, including unprocessed samples, and restore does not advance or
+**Cleanup and restore.** `exit` stops all media without events and drops queued blocks; the Stage image stays. A `goto`
+leaves media and their queued cue blocks running. Checkpoints carry the complete media state, including unprocessed samples, and restore does not advance or
 rewrite it. Restore validation requires issued media IDs to have exactly one active or settled record, handles to refer
 to issued IDs, queued and running cue blocks to belong to their media's own blocks, at most one active video,
 waits to refer to their active media, each media's total playback to agree with its segment anchor, whose first
@@ -729,12 +778,15 @@ file; other paths are `TSC009` diagnostics. For each file, the compiler:
 
 1. parses source text into a `Program`;
 2. runs AST-level validation for parsed non-finite numeric literals;
-3. runs semantic validation when parsing and finite-literal checking produced no errors;
+3. runs semantic validation when parsing and finite-literal checking produced no errors, with the globals, global
+   functions, and speakers of every parsed file;
 4. includes the core runtime built-ins plus configured global and builtin names in validation;
-5. lowers the program only when no error diagnostics remain in any file;
-6. completely validates and deeply freezes an instruction plan before returning it.
+5. checks types once no file has an error, for all files together;
+6. lowers the program only when no error diagnostics remain in any file;
+7. completely validates and deeply freezes an instruction plan before returning it.
 
-Each file has its own top-level names and functions. The plan holds all files: `main.tease` first, then the others by
+Each file has its own top-level names and functions; globals, global functions, and speakers belong to the whole
+project (see [Globals, global functions, and speakers](#globals-global-functions-and-speakers)). The plan holds all files: `main.tease` first, then the others by
 path, each a block of its root region followed by its functions and handlers, and a session starts at the top of
 `main.tease`. The result separates parser and semantic diagnostics per file, gives every project diagnostic the path of
 its file, and returns `plan: null` when compilation fails. Runtime entry
@@ -883,6 +935,73 @@ due time before catch-up continues. A pending write survives checkpoint and rest
 Restoring an older checkpoint carries its older storage view. A later read-modify-write can overwrite newer durable
 data; reconciliation belongs to #469 and is not implemented here.
 
+## Camera capture
+
+`takePhoto()` implements specification
+[§33](specifications/accepted-syntaxes-v30.md#33-browser-api-file-folder-camera-and-url-references). It is a reserved
+call, not a builtin: hosts cannot inject or override it, it takes no arguments (`TSV020`), it is not a value (`TSV028`),
+and it cannot run in a parameter default (`TSV032`). It lowers to a `capture` instruction whose result is handed off
+through a temporary like an interaction result; plan validation rejects an unlowered `takePhoto` call.
+
+Executing it creates a foreground `capture` action and waits. The host answers through `completeAction`:
+
+```text
+{ actionId, actionKind: "capture", payload: { kind: "captured", media: { kind: "image", reference } } }
+{ actionId, actionKind: "capture", payload: { kind: "unavailable", reason } }
+```
+
+`reason` is `unconfigured`, `denied`, `notFound`, `busy`, `unsupported`, `revoked`, or `failed`. A captured reference is
+accepted only when the trusted host's `ActionCompletionOptions.capturedMedia.holds(reference, "image")` vouches for it,
+so a well-formed string from anywhere else never becomes a captured photo; the engine does not inspect the reference's
+private spelling. An unavailable camera yields `null` and one `TSW015` developer warning, and the script continues.
+A settled capture is retained as `lastSettlement`, so a repeated completion replays as `alreadySettled`. Captures are
+not interrupted: a due timer expiry block runs once the capture settles. They emit no transcript.
+
+The Player opens the session camera after Start when the trusted host grants the camera capability, answers each capture
+once from that open stream, and delivers the answer until the runtime settles it. Captured photos are session media; a
+save stores the photos its value references durably before the value is persisted
+(`player/captured-media-persistence.ts`); when that fails, the host acknowledges the `storageWrite` as `failed`, so the
+previous value is kept as for any failed persistent write. Media no saved value references is reclaimed
+opportunistically when a Player opens while no Player of the same scope is live in any tab (Web Locks) and the saved
+values can be read completely; without Web Locks it is not reclaimed, and while a Player lives nothing is deleted. The
+technical playground has no camera and answers a pending capture as `unconfigured` when execution continues.
+
+## Globals, global functions, and speakers
+
+The compiler implements globals, global functions, and always-global speakers under ADR 0022 §3 and §6 and
+specification [§11](specifications/accepted-syntaxes-v30.md#global-functions) and
+[§12](specifications/accepted-syntaxes-v30.md#global-variables). Their names are checked across all files, and the
+types of all files share one environment in the checking order of ADR 0021 rule 6.
+
+The start values of all globals and speakers form a startup prefix at the beginning of the root region of `main.tease`:
+one `declareGlobal` (with an optional runtime `typeCheck`) or `declareSpeaker` instruction each, in session-start order,
+each with the index of the `file` whose source its locations refer to. The declarations themselves emit nothing, except
+a `global` with `default:`, which assigns its value where it stands. Plan validation accepts these instructions only as
+that prefix, each name once, with start values of the accepted kinds (no calls other than `script(...)`, no temporaries,
+and no globals set up later), and no label, `goto`, jump, or call return leads back into it. Function definitions record whether they are `global`, which a timer or media block is
+exactly when the code that registers it is. An instruction may call a function of another file only when it is global,
+and a global function or block calls only global functions.
+
+`RuntimeSnapshot.globals` holds the session's globals as `{ name, value }` bindings: first the host's
+`FreshRuntimeOptions.globals` in their order, with the existing capture, value-copy, and runtime-identity rules, then
+the script's globals and speakers as the startup prefix sets them up; a speaker's global holds its speaker reference.
+Fresh-session creation rejects a host global with the name of a script global or speaker. A name is looked up in the
+scopes of the running function or root, then, unless the running function or block is global, in the root of the
+activation it runs for, and then among the globals. Start values are evaluated without random selection: a list of
+unknown type reaching `.random` or `${...}` there fails with `TSR067`. A bare-label `goto` in a global function or its
+blocks is a transfer to that label of the function's file, which it enters afresh. A file's entry, also `main.tease`'s,
+follows the startup prefix, so no transfer runs the start values again.
+
+Snapshot validation requires exactly the host globals followed by the script globals and speakers before the next
+instruction while the prefix runs, and all of them after it, with no scope binding of a global's name and a speaker
+registry of exactly the set-up speakers. While the prefix runs, a snapshot holds nothing else: no call, loop,
+temporary, action, timer, media, queued block, settlement, prepared output, top-level variable, default speaker, or
+Stage image, and none of their identities allocated; after it, no saved instruction position lies inside it. Restore
+never runs a start value again. A snapshot may refer to the
+instructions, functions, and blocks of `main.tease` and to global functions of any file with their blocks; any other
+file's code is malformed until `goto` and `call` can enter it. A runtime failure, in the snapshot's `failure` and the
+`runtimeFailure` event, carries the `path` of the file whose source its span is in.
+
 ## Visible text boundary
 
 Ordinary scalar visible-text conversion accepts strings, finite numbers, booleans, `null`, durations, and date and time
@@ -946,7 +1065,7 @@ under [Format evolution](#format-evolution).
 
 Serializable-set validation and rebuilding use linear native membership tracking while retaining the insertion-ordered `items` array as the canonical serialized representation. Scalar equality and duplicate handling are unchanged.
 
-A halted snapshot is accepted only at the root completion boundary, including an empty root, or immediately after an `exit` instruction. Halted snapshots must also retain no active call frames, loop frames, temporaries, nested scopes, contextual speaker, or failure state. These checks establish that the serialized state is a possible current runtime state; they do not authenticate its execution history.
+A session halts only through `exit`: a halted snapshot is accepted only immediately after an `exit` instruction. Halted snapshots must also retain no active call frames, loop frames, temporaries, nested scopes, contextual speaker, or failure state. These checks establish that the serialized state is a possible current runtime state; they do not authenticate its execution history.
 
 Persisted runtime counters, identities, instruction positions, collection-iteration positions, depths, temporary IDs, warning-deduplication IDs, speaker references, and source-span positions must be JavaScript safe integers in their existing non-negative or positive ranges. Ordinary finite script numbers retain their existing semantics. The allocator counters `nextEventSequence`, `nextScopeId`, `nextSpeakerId`, and `nextCallFrameId` may hold `Number.MAX_SAFE_INTEGER` as stored state, but an operation that would increment such a value is rejected with `RuntimeDataError` `TSR101` before an event sequence or runtime identity is reused.
 
@@ -981,9 +1100,9 @@ The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `
 
 | Format | Current revision | Reason for current revision |
 | --- | ---: | --- |
-| Instruction plan | 43 | Projects (#570): a plan lists its `files`, each with a path, source span, and a block of a root region followed by its functions and handlers; this table replaces the plan-level `sourceSpan` and `rootEndInstruction`, and an instruction may only refer to functions of its own file. Revision 42: Any set member (owner decision on #568): a set literal, set `add`, and `toSet` take any value a list takes, so a plan that failed with `TSR032` now runs. Revision 41: Durations as set members (owner-accepted 2026-10-04): static set and choice values may hold durations. Revision 40: Date and time input: an interaction may be `temporal`, with UI, static or prepared, that carries `temporalKind` (`date`, `time`, or `datetime`) and an optional ISO `prefill`, and the `temporal` result domain. Revision 39: Calendar durations: a duration literal plan may carry whole `months` and `days`, present only when they are not zero. Revision 38: Dicts: a `dict` expression carries ordered entries, each a key and a value expression, a type may be `dict` with a value type, and a dict `get` call may check its `default:`. Revision 37: Date and time values: static choice values may be dates, times, datetimes, and timestamps, and types include `timestamp`. Revision 36: Type tests: a `typeTest` expression (`value is T` or `value is not T`) carries a recursive type and is evaluated with the matcher of the runtime type checks. A type may be `never`, which no value fits, so a list of it holds only the empty list. Revision 35: the `min` and `max` built-ins. Revision 34: the list methods `sort` and `shuffle`, and `intersection`, `union`, and `difference` on lists and sets. Revision 33: text operations (`length` and text methods), list `join`, and the conversion and rounding built-ins. Revision 32: `askInteger`: number interaction UI, static or prepared, may carry `integer: true`. Revision 31: the binary operator `in`, a number-in-range test that `switch` range cases compile to. Revision 30: runtime type checks: `declareBinding`, `assign`, `bindDefaultParameter`, and `returnValue` instructions, function-call arguments, and list or set `add` calls may carry a `typeCheck` with a recursive type and the receiving place, checked for values the compiler cannot know; `storageLoad` no longer carries its own expected type. Revision 29: `showButton` timeout and elapsed time: a button used as a value has the `duration` result domain and a destination, and a prepared button may carry a `timeoutTemporary`. Revision 28: list text and choices: `say` shows any value, with lists, sets, and objects in literal notation, only `${...}` interpolation selects a list element, and text fields reject lists; a prepared `choose` keeps its evaluated options and the value written before each `:` (or `null`), static choice UI carries typed values, and choice results use the `choice` domain. Revision 27: structural `==` for objects, lists, sets, and ranges (previously `TSR029`); the list method `removeAt`; `removeAt`, `removeFirst`, and `removeLast` return the removed element, and `removeFirst`/`removeLast` on an empty list fail (previously no-ops). Revision 26: text and number interaction UI may carry a `prefill` default answer, or its `prefillTemporary` when computed. Revision 25: script storage: `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and `storageWrite` instructions (`save`; `delete` when the value is `null`). Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
-| Runtime snapshot | 38 | Any set member (owner decision on #568): a set may hold any value a list may hold, unique by structural `==`; a prepared reference no longer steps into a set by position, because a set member is read as a copy. Revision 37: Durations as set members (owner-accepted 2026-10-04): a set may hold durations, keyed by their months, days, and milliseconds. Revision 36: Temporal interaction UI, active or recorded in a settlement, carries `temporalKind` and an optional ISO prefill; a temporal settlement result is a date, time, or datetime of that kind. Revision 35: Calendar durations: a duration value may carry whole `months` and `days`, present only when they are not zero. Revision 34: Date and time captures: `temporalContext` became `temporalCaptures`, each with a boundary scene time, an event sequence, an optional wall clock, and a context, recorded at start and by `recordContinueCapture`. Revision 33: Dicts: a runtime value may be a `dict` of ordered `{ key, value }` entries with unique text keys, and a prepared reference path may step through a dict `key`. Revision 32: Date and time values: runtime values, set members, and choice values may be dates, times, datetimes, and timestamps; the session records its captured `temporalContext`. Revision 31: Number interaction UI, active or recorded in a settlement, may carry `integer: true`, which requires a whole-number answer and prefill. Revision 30: interaction actions record `createdAtMs` and a button's `timeoutMs`; an interaction settlement may be `timedOut`, without transcript sequence or text, and a button result is a non-negative elapsed duration. Revision 29: choice actions and settlements carry each button's typed value, a choice result may be any choice value including `null` or a duration, and a choice control completes by button position. Revision 28: text and number interaction UI, active or recorded in a settlement, may carry a validated `prefill`. Revision 27: an interaction settlement records the `ui` the player answered, and validates against it instead of the prepared temporaries, which a later run of the same instruction may fill anew. Revision 26: the validated, key-sorted `scriptStorage` session view, `scriptStoragePersistent`, and foreground `storageWrite` actions and settlements. Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
-| Checkpoint | 54 | Updated the self-contained bundle for the project plan contract. Revision 53: the any-set-member plan and snapshot contracts. Revision 52: the duration set-member plan and snapshot contracts. Revision 51: the date and time input plan and snapshot contracts. Revision 50: the calendar duration plan and snapshot contracts. Revision 49: the date and time capture snapshot contract. Revision 48: the dict plan and snapshot contracts. Revision 47: the date and time plan and snapshot contracts. Revision 46: the type-test plan contract. Revision 45: the `min` and `max` plan contract. Revision 44: the list-sort and set-operation plan contract. Revision 43: the text-operation and built-in plan contract. Revision 42: the `askInteger` plan and snapshot contracts. Revision 41: the `in` plan operator. Revision 40: the runtime-type-check plan contract. Revision 39: the `showButton` timeout plan and snapshot contracts. Revision 38: the list-text and choice plan and snapshot contracts. Revision 37: the structural-equality and list-removal plan contract. Revision 36: interaction prefills. Revision 35: the recorded interaction settlement UI. Revision 34: the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
+| Instruction plan | 50 | Script references (#570): a transfer or fallback destination may be computed, `{ value }`, whose expression evaluates to a script reference; the `script` built-in, and the `script` type for type checks and tests. Revision 49: Globs (#570): a transfer or fallback destination may be `{ pick }`, the files a glob picks from. Revision 48: File transfers (#570): a `transfer` instruction goes to or calls a file's entry or label, or calls a label of its own file; `setFallback` sets or clears the fallback; each file lists its `entryInstruction`. Revision 47: Camera capture: the `capture` instruction for `takePhoto()`, and rejection of an unlowered `takePhoto` call. Revision 46: Globals (#570): `declareGlobal` instructions and `declareSpeaker` instructions, both with the `file` of their source, form a startup prefix at the start of `main.tease`, and `setDeclaredSpeakerProperty` is removed; function definitions record `global`, and an instruction may call a global function of another file. Revision 45: Tags (#572): a plan has an `images` catalog of package image paths in path order, each with its tags in name order (a canonical name and a finite number or `null`), and a `tagQuery` expression (`showImage tagged`, `findImages`) of postfix steps over operands that are evaluated once, in order, before any image is matched. Revision 44: Labels and endings (#570): each file lists its `labels`, and its root region closes with an `end` instruction; `goto` (to a label of its file) and `end` instructions; a root jump stays inside its region. Revision 43: Projects (#570): a plan lists its `files`, each with a path, source span, and a block of a root region followed by its functions and handlers; this table replaces the plan-level `sourceSpan` and `rootEndInstruction`, and an instruction may only refer to functions of its own file. Revision 42: Any set member (owner decision on #568): a set literal, set `add`, and `toSet` take any value a list takes, so a plan that failed with `TSR032` now runs. Revision 41: Durations as set members (owner-accepted 2026-10-04): static set and choice values may hold durations. Revision 40: Date and time input: an interaction may be `temporal`, with UI, static or prepared, that carries `temporalKind` (`date`, `time`, or `datetime`) and an optional ISO `prefill`, and the `temporal` result domain. Revision 39: Calendar durations: a duration literal plan may carry whole `months` and `days`, present only when they are not zero. Revision 38: Dicts: a `dict` expression carries ordered entries, each a key and a value expression, a type may be `dict` with a value type, and a dict `get` call may check its `default:`. Revision 37: Date and time values: static choice values may be dates, times, datetimes, and timestamps, and types include `timestamp`. Revision 36: Type tests: a `typeTest` expression (`value is T` or `value is not T`) carries a recursive type and is evaluated with the matcher of the runtime type checks. A type may be `never`, which no value fits, so a list of it holds only the empty list. Revision 35: the `min` and `max` built-ins. Revision 34: the list methods `sort` and `shuffle`, and `intersection`, `union`, and `difference` on lists and sets. Revision 33: text operations (`length` and text methods), list `join`, and the conversion and rounding built-ins. Revision 32: `askInteger`: number interaction UI, static or prepared, may carry `integer: true`. Revision 31: the binary operator `in`, a number-in-range test that `switch` range cases compile to. Revision 30: runtime type checks: `declareBinding`, `assign`, `bindDefaultParameter`, and `returnValue` instructions, function-call arguments, and list or set `add` calls may carry a `typeCheck` with a recursive type and the receiving place, checked for values the compiler cannot know; `storageLoad` no longer carries its own expected type. Revision 29: `showButton` timeout and elapsed time: a button used as a value has the `duration` result domain and a destination, and a prepared button may carry a `timeoutTemporary`. Revision 28: list text and choices: `say` shows any value, with lists, sets, and objects in literal notation, only `${...}` interpolation selects a list element, and text fields reject lists; a prepared `choose` keeps its evaluated options and the value written before each `:` (or `null`), static choice UI carries typed values, and choice results use the `choice` domain. Revision 27: structural `==` for objects, lists, sets, and ranges (previously `TSR029`); the list method `removeAt`; `removeAt`, `removeFirst`, and `removeLast` return the removed element, and `removeFirst`/`removeLast` on an empty list fail (previously no-ops). Revision 26: text and number interaction UI may carry a `prefill` default answer, or its `prefillTemporary` when computed. Revision 25: script storage: `storageLoad` expressions with lazy defaults and direct typed-initializer checks, and `storageWrite` instructions (`save`; `delete` when the value is `null`). Revision 24: message preparation accepts authored position and alignment only for prose. Media instructions `pacingBarrier`, `showImage`, and `playMedia`; handler regions carry `handler` (`timer` or `media`) and `selfHandle`. Revision 21 added the timer instructions. |
+| Runtime snapshot | 44 | Script references (#570): a runtime value may be a script reference, `{ kind: "script", path, label }`, and every scope records `entry`, where a root's activation started. Revision 43: Globs (#570): the fallback may be a glob destination. Revision 42: File activations (#570): a scope names the file of an activation root; call frames are `function` or `file` frames; function frames, timers and media with blocks, and queued blocks name their activation root; `retainedScopes` and `fallback` are new. Revision 41: Foreground `capture` actions and their replayable settlements, and capture results in the canonical result handoff, which records its `actionKind`. Revision 40: Globals (#570): a `globals` list holds the host's globals, then the script's globals and speakers, which no longer live in the root scope; a prepared reference may have a global as its root; a failure carries the `path` of its source; global functions of every file and their blocks may run. Revision 39: Endings (#570): `terminalContinuationHandoff` is gone, a halted snapshot stands after an `exit`, and a position names an instruction of the plan. Revision 38: Any set member (owner decision on #568): a set may hold any value a list may hold, unique by structural `==`; a prepared reference no longer steps into a set by position, because a set member is read as a copy. Revision 37: Durations as set members (owner-accepted 2026-10-04): a set may hold durations, keyed by their months, days, and milliseconds. Revision 36: Temporal interaction UI, active or recorded in a settlement, carries `temporalKind` and an optional ISO prefill; a temporal settlement result is a date, time, or datetime of that kind. Revision 35: Calendar durations: a duration value may carry whole `months` and `days`, present only when they are not zero. Revision 34: Date and time captures: `temporalContext` became `temporalCaptures`, each with a boundary scene time, an event sequence, an optional wall clock, and a context, recorded at start and by `recordContinueCapture`. Revision 33: Dicts: a runtime value may be a `dict` of ordered `{ key, value }` entries with unique text keys, and a prepared reference path may step through a dict `key`. Revision 32: Date and time values: runtime values, set members, and choice values may be dates, times, datetimes, and timestamps; the session records its captured `temporalContext`. Revision 31: Number interaction UI, active or recorded in a settlement, may carry `integer: true`, which requires a whole-number answer and prefill. Revision 30: interaction actions record `createdAtMs` and a button's `timeoutMs`; an interaction settlement may be `timedOut`, without transcript sequence or text, and a button result is a non-negative elapsed duration. Revision 29: choice actions and settlements carry each button's typed value, a choice result may be any choice value including `null` or a duration, and a choice control completes by button position. Revision 28: text and number interaction UI, active or recorded in a settlement, may carry a validated `prefill`. Revision 27: an interaction settlement records the `ui` the player answered, and validates against it instead of the prepared temporaries, which a later run of the same instruction may fill anew. Revision 26: the validated, key-sorted `scriptStorage` session view, `scriptStoragePersistent`, and foreground `storageWrite` actions and settlements. Revision 25: captured bubble presentations require null position and alignment; placement is Player-owned. Media state: `stageImage`, background `media` actions, `settledMedia`, `nextMediaId`, foreground `mediaPlayback` waits and settlements, media cue invocations and interrupt frames, barrier-promoted pacing gates, and media handles. Revision 22 added timer state. |
+| Checkpoint | 61 | Updated the self-contained bundle for the script-reference plan and snapshot contracts. Revision 60: the glob plan and snapshot contracts. Revision 59: the file transfer plan and activation snapshot contracts. Revision 58: updated the self-contained bundle for the capture plan and snapshot contracts. Revision 57: the globals plan and snapshot contracts. Revision 56: the image catalog and tag query plan contract. Revision 55: updated the self-contained bundle for the label and ending plan and snapshot contracts. Revision 54: the project plan contract. Revision 53: the any-set-member plan and snapshot contracts. Revision 52: the duration set-member plan and snapshot contracts. Revision 51: the date and time input plan and snapshot contracts. Revision 50: the calendar duration plan and snapshot contracts. Revision 49: the date and time capture snapshot contract. Revision 48: the dict plan and snapshot contracts. Revision 47: the date and time plan and snapshot contracts. Revision 46: the type-test plan contract. Revision 45: the `min` and `max` plan contract. Revision 44: the list-sort and set-operation plan contract. Revision 43: the text-operation and built-in plan contract. Revision 42: the `askInteger` plan and snapshot contracts. Revision 41: the `in` plan operator. Revision 40: the runtime-type-check plan contract. Revision 39: the `showButton` timeout plan and snapshot contracts. Revision 38: the list-text and choice plan and snapshot contracts. Revision 37: the structural-equality and list-removal plan contract. Revision 36: interaction prefills. Revision 35: the recorded interaction settlement UI. Revision 34: the script-storage plan and snapshot contracts. Revision 33: prose-only authored placement, bubble presentation validation, and the media plan and snapshot contracts. |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -1022,7 +1141,8 @@ The exported TypeScript source frontend, source compiler, low-level runtime, sna
 - stable package/plan identity and migration policy;
 - Standard Library imports, generated declarations/editor metadata transport, versioning, and capability access;
 - iframe host commands and response correlation;
-- camera stream ownership and persistent media collections, their cleanup, persistence, and recovery;
+- captured-media recovery after reload or restore and persistent media collections, their cleanup and persistence
+  (camera and microphone ownership is in [`SECURITY.md`](SECURITY.md));
 - time-integrity diagnostics and future server-authoritative scheduling;
 - server checkpoint persistence and conflict resolution;
 - performance profiling and safe optimization of snapshot cloning/liveness metadata.

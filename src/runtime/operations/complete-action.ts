@@ -1,4 +1,5 @@
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
+import { interruptFrame } from "../activations.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import {
   currentTemporalContext,
@@ -7,6 +8,7 @@ import {
 } from "../state.js";
 import type {
   RuntimeActionSettlementSnapshot,
+  RuntimeCaptureActionSnapshot,
   RuntimeChatPacingGateActionSnapshot,
   RuntimeInteractionActionSettlementSnapshot,
   RuntimeInteractionActionSnapshot,
@@ -19,11 +21,15 @@ import type {
   PlayerTranscriptEvent,
 } from "../events.js";
 import { writeScriptStorage } from "../script-storage.js";
+import {
+  captureUnavailableMessage,
+  resolveCaptureCompletion,
+  type CapturedMediaAdmission,
+} from "../actions/capture.js";
 import { resolveInteractionCompletion } from "../actions/interaction.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import { settleBackgroundPacingGate } from "./pacing-gate.js";
-import { terminalContinuationHandoffFor } from "./terminal-continuation.js";
 import {
   assertEventSequenceCapacity,
   captureExecutableData,
@@ -36,10 +42,16 @@ import {
   takeSequence,
 } from "./support.js";
 
+export interface ActionCompletionOptions {
+  /** Required to accept a captured photo; without it only an unavailable camera completes a capture. */
+  readonly capturedMedia?: CapturedMediaAdmission;
+}
+
 export function completeAction(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   request: unknown,
+  options: ActionCompletionOptions = {},
 ): PendingActionOperationResult<ActionCompletionOutcome> {
   const captured = captureExecutableData(plan, snapshot);
   const current = captured.snapshot;
@@ -63,11 +75,7 @@ export function completeAction(
       ? current.foregroundAction
       : (current.backgroundActions.find((action) => action.actionId === actionId) ?? null);
   if (active === null) {
-    if (
-      current.callFrames.some(
-        (frame) => frame.timerInterruption?.suspendedAction?.actionId === actionId,
-      )
-    ) {
+    if (interruptFrame(current)?.timerInterruption?.suspendedAction?.actionId === actionId) {
       // An interrupted action is inert while a timer expiry block runs; it is not settled.
       return pendingResult(current, [], { kind: "suspendedAction" as const, actionId });
     }
@@ -125,6 +133,9 @@ export function completeAction(
   }
   if (active.kind === "interaction") {
     return completeInteraction(captured.plan, current, active, value);
+  }
+  if (active.kind === "capture") {
+    return completeCapture(captured.plan, current, active, value, options.capturedMedia);
   }
   return completePacingGate(captured.plan, current, active, value);
 }
@@ -187,8 +198,13 @@ function completePacingGate(
 
 function validRequestedActionKind(
   value: unknown,
-): value is "interaction" | "chatPacingGate" | "storageWrite" {
-  return value === "interaction" || value === "chatPacingGate" || value === "storageWrite";
+): value is "interaction" | "chatPacingGate" | "storageWrite" | "capture" {
+  return (
+    value === "interaction" ||
+    value === "chatPacingGate" ||
+    value === "storageWrite" ||
+    value === "capture"
+  );
 }
 
 /**
@@ -246,7 +262,6 @@ function completeStorageWrite(
   });
   current.foregroundAction = null;
   current.lastSettlement = settlement;
-  current.terminalContinuationHandoff = terminalContinuationHandoffFor(plan, action);
   current.status = "running";
   current.nextInstruction = action.continuationInstruction;
   events.push(
@@ -255,6 +270,78 @@ function completeStorageWrite(
       sequence: settlement.completionEventSequence,
       settlement,
       span,
+    } satisfies ActionCompletedEvent),
+  );
+  return pendingResult(current, events, { kind: "completed", settlement });
+}
+
+/** Settles a capture: the admitted reference or `null`, with a developer warning when the camera was unavailable. */
+function completeCapture(
+  plan: InstructionPlan,
+  current: RuntimeSnapshot,
+  action: RuntimeCaptureActionSnapshot,
+  request: Record<string, unknown>,
+  admission: CapturedMediaAdmission | undefined,
+): PendingActionOperationResult<ActionCompletionOutcome> {
+  const resolved = resolveCaptureCompletion(request.payload, admission);
+  if (!resolved.ok) {
+    return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
+  }
+  assertEventSequenceCapacity(current, resolved.unavailableReason === null ? 1 : 2);
+  setTemporary(current.temporaries, action.destinationTemporary, resolved.result);
+  const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
+  const events: InterpreterEvent[] = [];
+  let warningSequence: number | null = null;
+  if (resolved.unavailableReason !== null) {
+    warningSequence = takeSequence(current, 2);
+    events.push(
+      Object.freeze({
+        kind: "developerWarning",
+        sequence: warningSequence,
+        severity: "warning",
+        code: "TSW015",
+        message: captureUnavailableMessage(resolved.unavailableReason),
+        span: copySpan(span),
+      } satisfies DeveloperWarningEvent),
+    );
+  }
+  const completionSequence = takeSequence(current, 2);
+  const settlement: RuntimeActionSettlementSnapshot = Object.freeze({
+    actionId: action.actionId,
+    actionKind: "capture",
+    capture: action.capture,
+    settlementKind: "completed",
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    ownerCallFrameId: action.ownerCallFrameId,
+    destinationTemporary: action.destinationTemporary,
+    requestEventSequence: action.requestEventSequence,
+    warningEventSequence: warningSequence,
+    completionEventSequence: completionSequence,
+    completedAtMs: current.currentSessionTimeMs,
+    result: resolved.result,
+    unavailableReason: resolved.unavailableReason,
+  });
+  current.foregroundAction = null;
+  current.lastSettlement = settlement;
+  // Like an interaction result, the canonical result is kept until its first consume.
+  current.interactionResultHandoff = Object.freeze({
+    actionKind: "capture",
+    actionId: action.actionId,
+    owningInstruction: action.owningInstruction,
+    continuationInstruction: action.continuationInstruction,
+    ownerCallFrameId: action.ownerCallFrameId,
+    destinationTemporary: action.destinationTemporary,
+    result: resolved.result,
+  });
+  current.status = "running";
+  current.nextInstruction = action.continuationInstruction;
+  events.push(
+    Object.freeze({
+      kind: "actionCompleted",
+      sequence: completionSequence,
+      settlement,
+      span: copySpan(span),
     } satisfies ActionCompletedEvent),
   );
   return pendingResult(current, events, { kind: "completed", settlement });
@@ -305,7 +392,7 @@ function completeInteraction(
           ),
         })
       : resolved.result;
-  const settlement = commitInteractionSettlement(plan, current, action, {
+  const settlement = commitInteractionSettlement(current, action, {
     settlementKind: "completed",
     transcriptEventSequence: transcriptSequence,
     completionEventSequence: completionSequence,
@@ -344,7 +431,7 @@ export function timeOutButton(
 ): void {
   if (action.timeoutMs === null) throw new Error("Only a button with a timeout can time out.");
   const completionSequence = takeSequence(current, 2);
-  const settlement = commitInteractionSettlement(plan, current, action, {
+  const settlement = commitInteractionSettlement(current, action, {
     settlementKind: "timedOut",
     transcriptEventSequence: null,
     completionEventSequence: completionSequence,
@@ -369,7 +456,6 @@ export function timeOutButton(
  * retains the settlement for replay, and makes the continuation eligible for a later runtime entry.
  */
 function commitInteractionSettlement(
-  plan: InstructionPlan,
   current: RuntimeSnapshot,
   action: RuntimeInteractionActionSnapshot,
   outcome: Pick<
@@ -405,6 +491,7 @@ function commitInteractionSettlement(
     action.destinationTemporary === null
       ? null
       : Object.freeze({
+          actionKind: "interaction",
           actionId: action.actionId,
           owningInstruction: action.owningInstruction,
           continuationInstruction: action.continuationInstruction,
@@ -415,7 +502,6 @@ function commitInteractionSettlement(
   current.foregroundAction = null;
   current.lastSettlement = settlement;
   current.interactionResultHandoff = handoff;
-  current.terminalContinuationHandoff = terminalContinuationHandoffFor(plan, action);
   current.status = "running";
   current.nextInstruction = action.continuationInstruction;
   return settlement;

@@ -49,6 +49,7 @@ test("parses and executes prototype-sensitive declarations and properties", () =
     "let result = hasOwnProperty(3)",
     "let record = { __proto__: result }",
     "say record.__proto__",
+    "exit",
   ].join("\n");
   const parsed = parse(source);
   const compiled = compileSource(source);
@@ -64,6 +65,7 @@ test("parses and executes prototype-sensitive declarations and properties", () =
       "letStatement",
       "letStatement",
       "sayStatement",
+      "exitStatement",
     ],
   );
   const execution = run(compiled.plan!, createFreshRuntimeSnapshot(compiled.plan!));
@@ -74,7 +76,7 @@ test("parses and executes prototype-sensitive declarations and properties", () =
 });
 
 test("accepts prototype-sensitive configured globals and builtins", () => {
-  const source = 'say "${constructor}:${valueOf()}"';
+  const source = 'say "${constructor}:${valueOf()}"\nexit';
   const compiled = compileSource(source, { globals: ["constructor"], builtins: ["valueOf"] });
   const valueOf: RuntimeBuiltinFunction = () => "builtin";
   assert.deepEqual(compiled.diagnostics, []);
@@ -91,7 +93,7 @@ test("accepts prototype-sensitive configured globals and builtins", () => {
 });
 
 test("accepts direct prototype-sensitive configured global and builtin paths", () => {
-  const globalSource = "say constructor";
+  const globalSource = "say constructor\nexit";
   const globalCompilation = compileSource(globalSource, { globals: ["constructor"] });
   assert.deepEqual(globalCompilation.diagnostics, []);
   assert.notEqual(globalCompilation.plan, null);
@@ -106,7 +108,7 @@ test("accepts direct prototype-sensitive configured global and builtin paths", (
     ["global value"],
   );
 
-  const builtinSource = "say valueOf()";
+  const builtinSource = "say valueOf()\nexit";
   const builtinCompilation = compileSource(builtinSource, { builtins: ["valueOf"] });
   const valueOf: RuntimeBuiltinFunction = () => "builtin value";
   assert.deepEqual(builtinCompilation.diagnostics, []);

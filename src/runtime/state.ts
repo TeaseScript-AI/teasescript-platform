@@ -22,16 +22,19 @@ import type {
   RuntimePreparedSayOutputSnapshot,
 } from "./actions/model.js";
 import {
-  type ExpressionPlan,
+  type CompiledFunctionDefinition,
   type Instruction,
   type InstructionPlan,
   type InteractionChoiceValue,
   type InteractionUiPayload,
-  mainRootEnd,
+  startupDeclarations,
+  type PlanTransferDestination,
 } from "../plan/model.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { cloneMessageMarkup } from "../message-markup.js";
 import { captureOrReuseInstructionPlan } from "../plan/capture.js";
+import { GLOBAL_SCOPE_ID } from "./prepared-references.js";
+import { packagePathProblem } from "../project-paths.js";
 import { captureExternalData, type ExternalDataFailureKind } from "../external-data-capture.js";
 import { createSourceSpan, type SourceSpan } from "../source.js";
 import {
@@ -43,7 +46,6 @@ import {
   validTopLevelPreparedSayOutputRelationship,
   validateInteractionResultHandoffState,
   validatePendingActionState,
-  validateTerminalContinuationHandoffState,
 } from "./action-validation.js";
 import {
   createXorShift32State,
@@ -61,6 +63,15 @@ import {
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
+import {
+  contextHoldsInstruction,
+  rootFitsFunction,
+  runsNothing,
+  serializedContext,
+  serializedRootFiles,
+  serializedScopes,
+  serializedTopContext,
+} from "./activation-validation.js";
 import { validateTimerState } from "./timer-validation.js";
 import { validateMediaState } from "./media-validation.js";
 import {
@@ -73,7 +84,10 @@ import {
   type RuntimeMediaCueInvocationSnapshot,
   type RuntimeMediaSnapshot,
 } from "./media.js";
-import { expressionPlanChildren } from "../plan/expression-children.js";
+import {
+  instructionKilledTemporaries,
+  requiredInstructionTemporaries,
+} from "../plan/temporary-uses.js";
 import {
   cloneScriptStorage,
   sortScriptStorage,
@@ -82,7 +96,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 38;
+export const RUNTIME_SNAPSHOT_VERSION = 44;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -96,6 +110,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "version",
   "nextInstruction",
   "frames",
+  "globals",
   "speakers",
   "defaultSpeaker",
   "contextualSpeaker",
@@ -104,6 +119,8 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "loopFrames",
   "temporaries",
   "callFrames",
+  "retainedScopes",
+  "fallback",
   "nextEventSequence",
   "nextScopeId",
   "nextSpeakerId",
@@ -117,7 +134,6 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextActionId",
   "lastSettlement",
   "interactionResultHandoff",
-  "terminalContinuationHandoff",
   "preparedSayOutput",
   "settledTimers",
   "nextTimerId",
@@ -141,6 +157,16 @@ export interface RuntimeBindingSnapshot {
 
 export interface RuntimeScopeFrameSnapshot {
   readonly id: number;
+  /**
+   * The file of an activation's root scope, which holds the top-level variables of one entry into the file; `null`
+   * for a block or function scope.
+   */
+  readonly file: number | null;
+  /**
+   * Where the activation of a root started: its file's entry or one of its labels, which a `goto` to a label of the
+   * file keeps; `null` for a block or function scope.
+   */
+  readonly entry: number | null;
   readonly bindings: RuntimeBindingSnapshot[];
 }
 
@@ -153,6 +179,8 @@ export interface RuntimeSpeakerSnapshot {
 export interface RuntimeFailureSnapshot {
   readonly code: string;
   readonly message: string;
+  /** The project file whose source {@link span} is in. */
+  readonly path: string;
   readonly span: SourceSpan;
 }
 
@@ -223,7 +251,10 @@ export type RuntimeInterruptibleActionSnapshot =
   | RuntimeMediaPlaybackActionSnapshot;
 
 export interface RuntimeCallFrameSnapshot {
+  readonly kind: "function";
   readonly id: number;
+  /** The activation root whose top-level names the function or block sees. */
+  readonly rootScopeId: number;
   readonly functionId: number;
   readonly functionName: string;
   /** A user call site, or the timer statement for an expiry block. */
@@ -240,25 +271,33 @@ export interface RuntimeCallFrameSnapshot {
   parameterState: RuntimeParameterStateSnapshot;
 }
 
+/**
+ * A `call` of a file: the called file runs in its own activation, whose root is `frames[scopeBaseDepth]`, and its
+ * `end` continues at `returnInstruction` with the caller's temporaries.
+ */
+export interface RuntimeFileCallFrameSnapshot {
+  readonly kind: "file";
+  readonly id: number;
+  readonly callSiteSpan: SourceSpan;
+  readonly returnInstruction: number;
+  readonly callerTemporaries: RuntimeTemporarySnapshot[];
+  readonly scopeBaseDepth: number;
+  readonly loopBaseDepth: number;
+}
+
+/** Function and file calls in the order they happened. */
+export type RuntimeFrameSnapshot = RuntimeCallFrameSnapshot | RuntimeFileCallFrameSnapshot;
+
 export interface RuntimeInteractionResultHandoffSnapshot {
+  /** Which foreground action produced the result: an interaction or a capture. */
+  readonly actionKind: "interaction" | "capture";
   readonly actionId: number;
   readonly owningInstruction: number;
   readonly continuationInstruction: number;
   readonly ownerCallFrameId: number | null;
   readonly destinationTemporary: number;
+  /** A capture's result is its captured-media reference, or `null` when its camera was unavailable. */
   readonly result: InteractionChoiceValue;
-}
-
-/**
- * Single-use authority for a settled terminal foreground action. Unlike
- * `lastSettlement`, this remains meaningful when later background work
- * settles before the next normal runtime entry completes the root.
- */
-export interface RuntimeTerminalContinuationHandoffSnapshot {
-  readonly actionId: number;
-  readonly actionKind: "delay" | "interaction" | "mediaPlayback" | "storageWrite";
-  readonly owningInstruction: number;
-  readonly continuationInstruction: number;
 }
 
 export interface ChatPacingSettings {
@@ -272,6 +311,11 @@ export interface RuntimeSnapshot {
   readonly version: typeof RUNTIME_SNAPSHOT_VERSION;
   nextInstruction: number;
   readonly frames: RuntimeScopeFrameSnapshot[];
+  /**
+   * The session's globals, which every file sees (ADR 0022 §6): those the host gives, then the globals and speakers of
+   * the script as the start of `main.tease` sets them up.
+   */
+  readonly globals: RuntimeBindingSnapshot[];
   readonly speakers: RuntimeSpeakerSnapshot[];
   defaultSpeaker: number | null;
   contextualSpeaker: number | null;
@@ -279,7 +323,11 @@ export interface RuntimeSnapshot {
   readonly warnedSpeakerIds: number[];
   readonly loopFrames: RuntimeLoopFrameSnapshot[];
   readonly temporaries: RuntimeTemporarySnapshot[];
-  readonly callFrames: RuntimeCallFrameSnapshot[];
+  readonly callFrames: RuntimeFrameSnapshot[];
+  /** Roots of activations that were left but whose timer or media blocks can still run. */
+  readonly retainedScopes: RuntimeScopeFrameSnapshot[];
+  /** Where an `end` without a calling file continues, set by `fallback`. */
+  fallback: PlanTransferDestination | null;
   nextEventSequence: number;
   nextScopeId: number;
   nextSpeakerId: number;
@@ -302,7 +350,6 @@ export interface RuntimeSnapshot {
   nextActionId: number;
   lastSettlement: RuntimeActionSettlementSnapshot | null;
   interactionResultHandoff: RuntimeInteractionResultHandoffSnapshot | null;
-  terminalContinuationHandoff: RuntimeTerminalContinuationHandoffSnapshot | null;
   preparedSayOutput: RuntimePreparedSayOutputSnapshot | null;
   /** Finished or stopped timers, retained so their handles stay readable. Active timers are background actions. */
   readonly settledTimers: RuntimeTimerSnapshot[];
@@ -392,7 +439,8 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
   if (!isPlainRecord(globals)) {
     throw new TypeError("Fresh runtime globals must be an object.");
   }
-  const bindings: RuntimeBindingSnapshot[] = [];
+  const hostGlobals: RuntimeBindingSnapshot[] = [];
+  const scriptGlobals = new Set(startupDeclarations(plan).map((declaration) => declaration.name));
   const maxCallDepthValue = capturedOptions.maxCallDepth;
   const initialSessionTimeMs = capturedOptions.initialSessionTimeMs ?? 0;
   const chatPacingSettings = captureChatPacingSettings(capturedOptions);
@@ -438,6 +486,8 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
   }
   for (const [name, value] of Object.entries(globals)) {
     if (name.length === 0) throw new TypeError("Global binding names must not be empty.");
+    if (scriptGlobals.has(name))
+      throw new TypeError(`globals.${name} has the name of a global or speaker of the script.`);
     const failure = validateCapturedSerializableValue(value, `globals.${name}`);
     if (failure !== null) throw new TypeError(failure);
     // EVIDENCE: validation: validateCapturedSerializableValue accepted this captured global value above.
@@ -447,13 +497,16 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
         `globals.${name} contains a timer handle, media handle, or speaker reference, which only the runtime creates.`,
       );
     }
-    bindings.push({ name, value: valid });
+    hostGlobals.push({ name, value: valid });
   }
   return {
     format: RUNTIME_SNAPSHOT_FORMAT,
     version: RUNTIME_SNAPSHOT_VERSION,
     nextInstruction: 0,
-    frames: [{ id: 0, bindings }],
+    frames: [{ id: 0, file: 0, entry: plan.files[0]!.entryInstruction, bindings: [] }],
+    globals: hostGlobals,
+    retainedScopes: [],
+    fallback: null,
     speakers: [],
     defaultSpeaker: null,
     contextualSpeaker: null,
@@ -488,7 +541,6 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     nextActionId: 1,
     lastSettlement: null,
     interactionResultHandoff: null,
-    terminalContinuationHandoff: null,
     preparedSayOutput: null,
     settledTimers: [],
     nextTimerId: 1,
@@ -500,7 +552,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     settledMedia: [],
     nextMediaId: 1,
     maxCallDepth,
-    status: mainRootEnd(plan) === 0 ? "halted" : "ready",
+    status: "ready",
     failure: null,
   };
 }
@@ -521,13 +573,10 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     format: RUNTIME_SNAPSHOT_FORMAT,
     version: RUNTIME_SNAPSHOT_VERSION,
     nextInstruction: snapshot.nextInstruction,
-    frames: snapshot.frames.map((frame) => ({
-      id: frame.id,
-      bindings: frame.bindings.map((binding) => ({
-        name: binding.name,
-        value: cloneCapturedSerializableValue(binding.value),
-      })),
-    })),
+    frames: snapshot.frames.map(cloneScopeFrame),
+    globals: snapshot.globals.map(cloneBinding),
+    retainedScopes: snapshot.retainedScopes.map(cloneScopeFrame),
+    fallback: snapshot.fallback === null ? null : cloneTransferDestination(snapshot.fallback),
     speakers: snapshot.speakers.map((speaker) => ({
       id: speaker.id,
       identifier: speaker.identifier,
@@ -552,29 +601,19 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       };
     }),
     temporaries: snapshot.temporaries.map(cloneTemporary),
-    callFrames: snapshot.callFrames.map((frame) => ({
-      id: frame.id,
-      functionId: frame.functionId,
-      functionName: frame.functionName,
-      callSiteSpan: copySpan(frame.callSiteSpan),
-      returnInstruction: frame.returnInstruction,
-      destinationTemporary: frame.destinationTemporary,
-      timerInterruption:
-        frame.timerInterruption === null ? null : cloneInterruption(frame.timerInterruption),
-      callerTemporaries: frame.callerTemporaries.map(cloneTemporary),
-      scopeBaseDepth: frame.scopeBaseDepth,
-      loopBaseDepth: frame.loopBaseDepth,
-      arguments: frame.arguments.map((argument) =>
-        argument.supplied
-          ? {
-              parameterName: argument.parameterName,
-              supplied: true,
-              value: cloneCapturedSerializableValue(argument.value),
-            }
-          : { parameterName: argument.parameterName, supplied: false },
-      ),
-      parameterState: { ...frame.parameterState },
-    })),
+    callFrames: snapshot.callFrames.map((frame) =>
+      frame.kind === "file"
+        ? {
+            kind: "file",
+            id: frame.id,
+            callSiteSpan: copySpan(frame.callSiteSpan),
+            returnInstruction: frame.returnInstruction,
+            callerTemporaries: frame.callerTemporaries.map(cloneTemporary),
+            scopeBaseDepth: frame.scopeBaseDepth,
+            loopBaseDepth: frame.loopBaseDepth,
+          }
+        : cloneFunctionFrame(frame),
+    ),
     nextEventSequence: snapshot.nextEventSequence,
     nextScopeId: snapshot.nextScopeId,
     nextSpeakerId: snapshot.nextSpeakerId,
@@ -593,10 +632,6 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       snapshot.interactionResultHandoff === null
         ? null
         : cloneInteractionResultHandoff(snapshot.interactionResultHandoff),
-    terminalContinuationHandoff:
-      snapshot.terminalContinuationHandoff === null
-        ? null
-        : cloneTerminalContinuationHandoff(snapshot.terminalContinuationHandoff),
     preparedSayOutput:
       snapshot.preparedSayOutput === null
         ? null
@@ -617,8 +652,58 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
         : {
             code: snapshot.failure.code,
             message: snapshot.failure.message,
+            path: snapshot.failure.path,
             span: copySpan(snapshot.failure.span),
           },
+  };
+}
+
+function cloneBinding(binding: RuntimeBindingSnapshot): RuntimeBindingSnapshot {
+  return { name: binding.name, value: cloneCapturedSerializableValue(binding.value) };
+}
+
+export function cloneTransferDestination(
+  destination: PlanTransferDestination,
+): PlanTransferDestination {
+  return "pick" in destination
+    ? { pick: destination.pick.map((option) => ({ file: option.file, target: option.target })) }
+    : { file: destination.file, target: destination.target };
+}
+
+function cloneScopeFrame(frame: RuntimeScopeFrameSnapshot): RuntimeScopeFrameSnapshot {
+  return {
+    id: frame.id,
+    file: frame.file,
+    entry: frame.entry,
+    bindings: frame.bindings.map(cloneBinding),
+  };
+}
+
+function cloneFunctionFrame(frame: RuntimeCallFrameSnapshot): RuntimeCallFrameSnapshot {
+  return {
+    kind: "function",
+    id: frame.id,
+    rootScopeId: frame.rootScopeId,
+    functionId: frame.functionId,
+    functionName: frame.functionName,
+    callSiteSpan: copySpan(frame.callSiteSpan),
+    returnInstruction: frame.returnInstruction,
+    destinationTemporary: frame.destinationTemporary,
+    timerInterruption:
+      frame.timerInterruption === null ? null : cloneInterruption(frame.timerInterruption),
+    callerTemporaries: frame.callerTemporaries.map(cloneTemporary),
+    scopeBaseDepth: frame.scopeBaseDepth,
+    loopBaseDepth: frame.loopBaseDepth,
+    arguments: frame.arguments.map((argument) =>
+      argument.supplied
+        ? {
+            parameterName: argument.parameterName,
+            supplied: true,
+            value: cloneCapturedSerializableValue(argument.value),
+          }
+        : { parameterName: argument.parameterName, supplied: false },
+    ),
+    parameterState: { ...frame.parameterState },
   };
 }
 
@@ -638,23 +723,13 @@ function cloneInteractionResultHandoff(
   handoff: RuntimeInteractionResultHandoffSnapshot,
 ): RuntimeInteractionResultHandoffSnapshot {
   return {
+    actionKind: handoff.actionKind,
     actionId: handoff.actionId,
     owningInstruction: handoff.owningInstruction,
     continuationInstruction: handoff.continuationInstruction,
     ownerCallFrameId: handoff.ownerCallFrameId,
     destinationTemporary: handoff.destinationTemporary,
     result: cloneInteractionChoiceValue(handoff.result),
-  };
-}
-
-function cloneTerminalContinuationHandoff(
-  handoff: RuntimeTerminalContinuationHandoffSnapshot,
-): RuntimeTerminalContinuationHandoffSnapshot {
-  return {
-    actionId: handoff.actionId,
-    actionKind: handoff.actionKind,
-    owningInstruction: handoff.owningInstruction,
-    continuationInstruction: handoff.continuationInstruction,
   };
 }
 
@@ -681,7 +756,7 @@ function cloneForegroundAction<T extends RuntimeForegroundActionSnapshot>(action
 function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendingActionSnapshot {
   if (action.kind === "timer") return { ...action, timer: cloneTimer(action.timer) };
   if (action.kind === "media") return { ...action, media: cloneMedia(action.media) };
-  if (action.kind === "mediaPlayback") return { ...action };
+  if (action.kind === "mediaPlayback" || action.kind === "capture") return { ...action };
   if (action.kind === "storageWrite")
     return { ...action, value: cloneCapturedSerializableValue(action.value) };
   if (action.kind === "delay")
@@ -793,7 +868,8 @@ function cloneSettlement(
   if (
     settlement.actionKind === "chatPacingGate" ||
     settlement.actionKind === "mediaPlayback" ||
-    settlement.actionKind === "storageWrite"
+    settlement.actionKind === "storageWrite" ||
+    settlement.actionKind === "capture"
   )
     return { ...settlement };
   return {
@@ -903,27 +979,10 @@ export function classifyCapturedRuntimeSnapshot(
   return validateCapturedRuntimeSnapshotDetails(value, plan);
 }
 
-/**
- * The part of a plan that a session can run: `main.tease`, its functions, and its handlers. Until `goto` and `call`
- * reach other files, a snapshot that refers to another file's instructions or functions is malformed, so every check
- * of a snapshot sees only this part. It is built per validation, like the other analyses of external plan data.
- */
-function runnablePlan(plan: InstructionPlan): InstructionPlan {
-  if (plan.files.length === 1) return plan;
-  const end = plan.files[0]!.endInstruction;
-  return {
-    ...plan,
-    files: [plan.files[0]!],
-    instructions: plan.instructions.slice(0, end),
-    functions: plan.functions.filter((definition) => definition.endInstruction <= end),
-  };
-}
-
 function validateCapturedRuntimeSnapshotDetails(
   value: unknown,
-  fullPlan?: InstructionPlan,
+  plan?: InstructionPlan,
 ): ClassifiedSnapshotValidationResult {
-  const plan = fullPlan === undefined ? undefined : runnablePlan(fullPlan);
   const errors: string[] = [];
   if (!isPlainRecord(value)) {
     return Object.freeze({
@@ -958,21 +1017,26 @@ function validateCapturedRuntimeSnapshotDetails(
   if (temporalProblem !== null)
     errors.push(`Runtime temporalCaptures is malformed: ${temporalProblem}`);
   const analysis = plan === undefined ? undefined : createSnapshotValidationAnalysis(plan);
-  const instructionLimit = plan?.instructions.length;
+  // Every region ends in a transfer, so a position is always an instruction of the runnable plan.
   if (
     !nonNegativeSafeInteger(value.nextInstruction) ||
-    (instructionLimit !== undefined && value.nextInstruction > instructionLimit)
+    (plan !== undefined && plan.instructions[value.nextInstruction] === undefined)
   ) {
     errors.push("Runtime nextInstruction is outside the plan.");
   }
-  validateFrames(value.frames, errors);
+  validateScopes(value.frames, value.retainedScopes, plan, errors);
+  validateRootPlacement(value.frames, value.callFrames, errors);
+  validateFallback(value.fallback, plan, errors);
   const speakerIds = validateSpeakers(value.speakers, errors);
+  validateGlobals(value, plan, errors);
+  validateStartupPhase(value, plan, errors);
+  const scopes = referenceScopes(value);
   const preparedReferenceTemporaryIds = collectPreparedReferenceTemporaryIds(plan);
   const preparedSayTemporaryOwnership = collectPreparedSayTemporaryOwnership(plan);
   validateTemporaries(value.temporaries, plan, "Runtime temporaries", errors);
   validatePreparedReferenceTemporaries(
     value.temporaries,
-    value.frames,
+    scopes,
     value.speakers,
     preparedReferenceTemporaryIds,
     "Runtime temporaries",
@@ -1000,7 +1064,7 @@ function validateCapturedRuntimeSnapshotDetails(
     errors,
   );
   const handleIds = validateSpeakerReferences(
-    value.frames,
+    scopes,
     value.speakers,
     value.loopFrames,
     value.temporaries,
@@ -1044,12 +1108,12 @@ function validateCapturedRuntimeSnapshotDetails(
     value.callFrames,
     callFrameIds,
     plan,
-    analysis,
+    value,
     errors,
   );
   validateCurrentTemporaryRequirements(
     value.temporaries,
-    value.loopFrames,
+    activeLoopIdOf(value.loopFrames, callContextOwner(value.callFrames, Infinity)),
     value.nextInstruction,
     value.status,
     plan,
@@ -1058,12 +1122,10 @@ function validateCapturedRuntimeSnapshotDetails(
   if (!nonNegativeSafeInteger(value.nextEventSequence) || value.nextEventSequence < 1) {
     errors.push("Runtime nextEventSequence must be a positive safe integer.");
   }
-  const frameIds = Array.isArray(value.frames)
-    ? value.frames
-        .filter(isPlainRecord)
-        .map((frame) => frame.id)
-        .filter(nonNegativeSafeInteger)
-    : [];
+  const frameIds = serializedScopes(value)
+    .filter(isPlainRecord)
+    .map((frame) => frame.id)
+    .filter(nonNegativeSafeInteger);
   if (
     !nonNegativeSafeInteger(value.nextScopeId) ||
     value.nextScopeId < 1 ||
@@ -1101,7 +1163,7 @@ function validateCapturedRuntimeSnapshotDetails(
   ) {
     errors.push("Runtime maxCallDepth is outside the supported range.");
   }
-  validatePendingActionState(value, plan, analysis, errors);
+  validatePendingActionState(value, plan, errors);
   validateTimerState(value, plan, handleIds.timer, errors);
   validateMediaState(value, plan, handleIds.media, errors);
   if (value.stageImage !== null && typeof value.stageImage !== "string") {
@@ -1116,14 +1178,12 @@ function validateCapturedRuntimeSnapshotDetails(
   if (typeof value.scriptStoragePersistent !== "boolean") {
     errors.push("Runtime scriptStoragePersistent must be a boolean.");
   }
-  validateInteractionResultHandoffState(value, plan, analysis, errors);
-  validateTerminalContinuationHandoffState(value, plan, errors);
+  validateInteractionResultHandoffState(value, plan, errors);
   if (!isOneOf(value.status, ["ready", "running", "waiting", "halted", "failed"])) {
     errors.push("Runtime status is invalid.");
   }
-  validateFailure(value.failure, value.status, errors);
+  validateFailure(value.failure, value.status, plan, errors);
   validateStatusConsistency(value, plan, errors);
-  validateRootEndTransition(value, plan, errors);
   const validation = Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
   return Object.freeze({ validation, failureKind: validation.valid ? null : failureKind });
 }
@@ -1135,7 +1195,7 @@ function validateLoopFrames(
   callFrames: unknown,
   callFrameIds: ReadonlySet<number>,
   plan: InstructionPlan | undefined,
-  analysis: SnapshotValidationAnalysis | undefined,
+  snapshotValue: Record<string, unknown>,
   errors: string[],
 ): void {
   if (!Array.isArray(value)) {
@@ -1143,39 +1203,7 @@ function validateLoopFrames(
     return;
   }
   const frameCount = Array.isArray(frames) ? frames.length : 0;
-  const loopIds = new Set<number>();
   let previousDepth = 0;
-  const plannedLoops = new Map<
-    number,
-    {
-      kind: "repeat" | "for" | "while";
-      variable?: string;
-      start: number;
-      continueStart: number;
-      target: number;
-      functionId: number | null;
-    }
-  >();
-  const callFramesById = new Map<number, Record<string, unknown>>();
-  if (Array.isArray(callFrames)) {
-    for (const frame of callFrames) {
-      if (isPlainRecord(frame) && nonNegativeSafeInteger(frame.id)) {
-        callFramesById.set(frame.id, frame);
-      }
-    }
-  }
-  plan?.instructions.forEach((instruction, index) => {
-    if (instruction.kind === "loopStart") {
-      plannedLoops.set(instruction.loopId, {
-        kind: instruction.loopKind,
-        ...(instruction.loopKind === "for" ? { variable: instruction.variable } : {}),
-        start: index,
-        continueStart: instruction.continueTarget,
-        target: instruction.target,
-        functionId: analysis?.functionIdsByInstruction[index] ?? null,
-      });
-    }
-  });
   for (const frame of value) {
     if (
       !isPlainRecord(frame) ||
@@ -1194,37 +1222,10 @@ function validateLoopFrames(
     ) {
       errors.push("Runtime loop frame has an unknown call-frame owner.");
     }
-    if (loopIds.has(frame.loopId)) errors.push("Runtime loop IDs must be unique.");
-    loopIds.add(frame.loopId);
     if (frame.scopeDepth < previousDepth) {
       errors.push("Runtime loop frame scope depths are out of order.");
     }
     previousDepth = frame.scopeDepth;
-    const planned = plannedLoops.get(frame.loopId);
-    const owner = nonNegativeSafeInteger(frame.callFrameId)
-      ? callFramesById.get(frame.callFrameId)
-      : undefined;
-    const currentOwner =
-      Array.isArray(callFrames) && callFrames.length > 0
-        ? isPlainRecord(callFrames.at(-1))
-          ? callFrames.at(-1)!.id
-          : undefined
-        : null;
-    if (
-      plan !== undefined &&
-      (planned === undefined ||
-        planned.kind !== frame.kind ||
-        (planned.kind === "for" && planned.variable !== frame.variable) ||
-        (planned.functionId === null
-          ? frame.callFrameId !== null
-          : !isPlainRecord(owner) || owner.functionId !== planned.functionId) ||
-        (frame.callFrameId === currentOwner &&
-          (!nonNegativeSafeInteger(nextInstruction) ||
-            nextInstruction < planned.continueStart ||
-            nextInstruction >= planned.target)))
-    ) {
-      errors.push("Runtime loop frame does not match the instruction plan.");
-    }
     if (frame.kind === "repeat") {
       if (!nonNegativeSafeInteger(frame.remaining)) {
         errors.push("Runtime repeat-loop state is malformed.");
@@ -1246,6 +1247,131 @@ function validateLoopFrames(
       }
     } else {
       errors.push("Runtime loop kind is unsupported.");
+    }
+  }
+  if (Array.isArray(callFrames)) {
+    validateLoopContexts(value, frames, nextInstruction, callFrames, plan, snapshotValue, errors);
+  }
+}
+
+/**
+ * Each context owns the loops between its call frame's loop base and the next call frame's, and runs them in its own
+ * scopes. At the position where a context stands (the next instruction, or the call or interrupted position it resumes
+ * from), exactly the loops whose body holds that position are active, in nesting order; a loop whose header holds it
+ * may be active. Loops are identified per context, so a recursive call runs its own instance of the same loop.
+ */
+function validateLoopContexts(
+  loops: readonly unknown[],
+  frames: unknown,
+  nextInstruction: unknown,
+  callFrames: readonly unknown[],
+  plan: InstructionPlan | undefined,
+  snapshotValue: Record<string, unknown>,
+  errors: string[],
+): void {
+  const frameList = Array.isArray(frames) ? frames : [];
+  const plannedLoops = new Map<
+    number,
+    {
+      readonly kind: "repeat" | "for" | "while";
+      readonly variable?: string;
+      readonly start: number;
+      readonly continueStart: number;
+      readonly target: number;
+    }
+  >();
+  plan?.instructions.forEach((instruction, index) => {
+    if (instruction.kind === "loopStart") {
+      plannedLoops.set(instruction.loopId, {
+        kind: instruction.loopKind,
+        ...(instruction.loopKind === "for" ? { variable: instruction.variable } : {}),
+        start: index,
+        continueStart: instruction.continueTarget,
+        target: instruction.target,
+      });
+    }
+  });
+  const depth = (frame: unknown, key: "loopBaseDepth" | "scopeBaseDepth", fallback: number) =>
+    isPlainRecord(frame) && nonNegativeSafeInteger(frame[key]) ? frame[key] : fallback;
+  // The call frames' own checks report impossible bases; only real, ordered partitions are walked.
+  let previousBase = 0;
+  for (const frame of callFrames) {
+    const base = depth(frame, "loopBaseDepth", -1);
+    if (base < previousBase || base > loops.length) return;
+    previousBase = base;
+  }
+  for (let level = 0; level <= callFrames.length; level += 1) {
+    const below = level === 0 ? undefined : callFrames[level - 1];
+    const above = callFrames[level];
+    const owner = level === 0 ? null : isPlainRecord(below) ? below.id : undefined;
+    const loopStart = depth(below, "loopBaseDepth", 0);
+    const loopEnd = level === callFrames.length ? loops.length : depth(above, "loopBaseDepth", 0);
+    const scopeStart = depth(below, "scopeBaseDepth", 0);
+    const scopeEnd =
+      level === callFrames.length ? frameList.length : depth(above, "scopeBaseDepth", 0);
+    // A call stands at its call instruction; an interrupted context resumes where it was interrupted. After `exit`
+    // the position follows the exit wherever it stood, with no loops left.
+    const position =
+      level === callFrames.length
+        ? snapshotValue.status === "halted"
+          ? undefined
+          : nextInstruction
+        : isPlainRecord(above) && nonNegativeSafeInteger(above.returnInstruction)
+          ? isPlainRecord(above.timerInterruption)
+            ? above.returnInstruction
+            : above.returnInstruction - 1
+          : undefined;
+    const context = serializedContext(snapshotValue, level);
+    const active = new Set<number>();
+    let previousStart = -1;
+    for (let index = loopStart; index < loopEnd; index += 1) {
+      const frame = loops[index];
+      if (!isPlainRecord(frame) || !nonNegativeSafeInteger(frame.loopId)) continue;
+      const planned = plannedLoops.get(frame.loopId);
+      const scopeDepth = nonNegativeSafeInteger(frame.scopeDepth) ? frame.scopeDepth : -1;
+      const inBody =
+        planned !== undefined &&
+        nonNegativeSafeInteger(position) &&
+        position > planned.start &&
+        position < planned.target;
+      if (
+        frame.callFrameId !== owner ||
+        active.has(frame.loopId) ||
+        scopeDepth <= scopeStart ||
+        (inBody ? scopeDepth >= scopeEnd : scopeDepth !== scopeEnd) ||
+        (scopeDepth < frameList.length &&
+          (!isPlainRecord(frameList[scopeDepth]) || frameList[scopeDepth].file !== null))
+      ) {
+        errors.push("Runtime loop frame does not belong to its call context.");
+      }
+      active.add(frame.loopId);
+      if (plan === undefined) continue;
+      if (
+        planned === undefined ||
+        planned.kind !== frame.kind ||
+        (planned.kind === "for" && planned.variable !== frame.variable) ||
+        context === undefined ||
+        !contextHoldsInstruction(plan, context, planned.start) ||
+        planned.start <= previousStart ||
+        !nonNegativeSafeInteger(position) ||
+        position < planned.continueStart ||
+        position >= planned.target
+      ) {
+        errors.push("Runtime loop frame does not match the instruction plan.");
+      }
+      previousStart = planned?.start ?? previousStart;
+    }
+    if (plan === undefined || context === undefined || !nonNegativeSafeInteger(position)) continue;
+    for (const [loopId, planned] of plannedLoops) {
+      if (
+        position > planned.start &&
+        position < planned.target &&
+        !active.has(loopId) &&
+        contextHoldsInstruction(plan, context, planned.start)
+      ) {
+        errors.push("Runtime state is missing a loop that its position runs in.");
+        break;
+      }
     }
   }
 }
@@ -1342,7 +1468,7 @@ function collectPreparedReferenceTemporaryIds(
     plan.instructions
       .filter(
         (instruction): instruction is Extract<Instruction, { kind: "prepareReference" }> =>
-          instruction.kind === "prepareReference",
+          instruction?.kind === "prepareReference",
       )
       .map((instruction) => instruction.destinationTemporary),
   );
@@ -1370,6 +1496,7 @@ function collectPreparedSayTemporaryOwnership(
   const nullableSaySpeakerSources = new Set<number>();
   if (plan !== undefined) {
     for (const instruction of plan.instructions) {
+      if (instruction === undefined) continue;
       if (instruction.kind === "prepareSaySpeaker") {
         outputSpeakerIds.add(instruction.destinationTemporary);
         if (instruction.speaker === null)
@@ -1560,8 +1687,12 @@ function validatePreparedReferenceDescriptor(
   if (marker !== "preparedReference") {
     return "the descriptor marker is invalid.";
   }
-  if (rootFrameId !== null && !nonNegativeSafeInteger(rootFrameId)) {
-    return "the root frame ID must be a non-negative integer or null.";
+  if (
+    rootFrameId !== null &&
+    rootFrameId !== GLOBAL_SCOPE_ID &&
+    !nonNegativeSafeInteger(rootFrameId)
+  ) {
+    return "the root frame ID must be a non-negative integer, the globals' scope ID, or null.";
   }
   if (rootName !== null && (typeof rootName !== "string" || rootName.length === 0)) {
     return "the root name must be a non-empty string or null.";
@@ -1807,6 +1938,7 @@ function validateCallFrames(
   }
   const frameCount = Array.isArray(frames) ? frames.length : 0;
   const loopCount = Array.isArray(loopFrames) ? loopFrames.length : 0;
+  const roots = serializedRootFiles(snapshotValue);
   let previousId = 0;
   let previousScopeBase = 0;
   let previousLoopBase = 0;
@@ -1822,11 +1954,30 @@ function validateCallFrames(
       previousId = frame.id;
       ids.add(frame.id);
     }
-    const definition = nonNegativeSafeInteger(frame.functionId)
-      ? analysis?.functionsById.get(frame.functionId)
-      : undefined;
-    const interruption = frame.timerInterruption;
+    if (frame.kind !== "function" && frame.kind !== "file") {
+      errors.push("Runtime call frame is malformed.");
+      return;
+    }
+    // A file call has no function: it continues after its `call` when the called file ends.
+    const isFunction = frame.kind === "function";
+    if (!isFunction) validateFileCallFrame(frame, frames, plan, errors);
+    const definition =
+      isFunction && nonNegativeSafeInteger(frame.functionId)
+        ? analysis?.functionsById.get(frame.functionId)
+        : undefined;
+    const interruption = isFunction ? frame.timerInterruption : null;
+    // A function sees the top-level names of the activation it was called in; a block, those of its creator's.
     if (
+      isFunction &&
+      (!rootFitsFunction(plan, roots, frame.rootScopeId, frame.functionId) ||
+        (!isPlainRecord(interruption) &&
+          frame.rootScopeId !== serializedContext(snapshotValue, frameIndex)?.rootId))
+    ) {
+      errors.push("Runtime call frame refers to an impossible activation.");
+    }
+    if (!isFunction) {
+      // Validated above.
+    } else if (
       !Object.hasOwn(frame, "timerInterruption") ||
       (interruption !== null && !isPlainRecord(interruption)) ||
       (definition !== undefined && (definition.handler !== null) !== (interruption !== null))
@@ -1845,19 +1996,19 @@ function validateCallFrames(
         loopFrames,
         snapshotValue,
         plan,
-        analysis,
         errors,
       );
     }
-    let callInstruction: InstructionPlan["instructions"][number] | undefined;
+    let callInstruction: Instruction | undefined;
     if (
-      !nonNegativeSafeInteger(frame.functionId) ||
-      frame.functionId < 1 ||
-      (plan !== undefined && definition === undefined) ||
-      typeof frame.functionName !== "string" ||
-      frame.functionName.length === 0 ||
-      (definition !== undefined && frame.functionName !== definition.name) ||
-      !validSpan(frame.callSiteSpan)
+      isFunction &&
+      (!nonNegativeSafeInteger(frame.functionId) ||
+        frame.functionId < 1 ||
+        (plan !== undefined && definition === undefined) ||
+        typeof frame.functionName !== "string" ||
+        frame.functionName.length === 0 ||
+        (definition !== undefined && frame.functionName !== definition.name) ||
+        !validSpan(frame.callSiteSpan))
     ) {
       errors.push("Runtime call frame refers to a malformed or unknown function.");
     }
@@ -1869,6 +2020,12 @@ function validateCallFrames(
       (plan !== undefined && frame.returnInstruction > plan.instructions.length)
     ) {
       errors.push("Runtime call frame has an invalid return instruction.");
+    } else if (plan !== undefined && !isFunction) {
+      // The called activation may have gone to another file since, so its root need not be the call's file.
+      const call = plan.instructions[frame.returnInstruction - 1];
+      if (call?.kind !== "transfer" || call.mode !== "call") {
+        errors.push("Runtime call frame return target does not match its call instruction.");
+      }
     } else if (plan !== undefined) {
       const call = plan.instructions[frame.returnInstruction - 1];
       if (
@@ -1882,7 +2039,9 @@ function validateCallFrames(
         callInstruction = call;
       }
     }
-    if (
+    if (!isFunction) {
+      // A file call has no result.
+    } else if (
       isPlainRecord(interruption)
         ? frame.destinationTemporary !== null
         : !nonNegativeSafeInteger(frame.destinationTemporary) ||
@@ -1894,7 +2053,7 @@ function validateCallFrames(
     validateTemporaries(frame.callerTemporaries, plan, "Runtime caller temporaries", errors);
     validatePreparedReferenceTemporaries(
       frame.callerTemporaries,
-      frames,
+      referenceScopes(snapshotValue),
       speakers,
       preparedReferenceTemporaryIds,
       "Runtime caller temporaries",
@@ -1931,24 +2090,31 @@ function validateCallFrames(
       errors.push("Runtime call frame has an impossible loop base.");
     }
     if (nonNegativeSafeInteger(frame.loopBaseDepth)) previousLoopBase = frame.loopBaseDepth;
-    validateCallArguments(frame.arguments, definition, errors);
-    validateCallArgumentSupply(frame.arguments, callInstruction, errors);
-    validateParameterState(frame.parameterState, definition, errors);
-    validateParameterBindings(frame, frames, definition, analysis, errors);
+    if (isFunction) {
+      validateCallArguments(frame.arguments, definition, errors);
+      validateCallArgumentSupply(frame.arguments, callInstruction, errors);
+      validateParameterState(frame.parameterState, definition, errors);
+      validateParameterBindings(frame, frames, definition, analysis, errors);
+    }
 
     if (
       plan !== undefined &&
       nonNegativeSafeInteger(frame.returnInstruction) &&
-      (nonNegativeSafeInteger(frame.destinationTemporary) || isPlainRecord(interruption)) &&
+      (!isFunction ||
+        nonNegativeSafeInteger(frame.destinationTemporary) ||
+        isPlainRecord(interruption)) &&
       Array.isArray(frame.callerTemporaries)
     ) {
       validateSuspendedContinuationTemporaries(
         frame.callerTemporaries,
         nonNegativeSafeInteger(frame.destinationTemporary) ? frame.destinationTemporary : null,
         frame.returnInstruction,
-        Array.isArray(loopFrames) && nonNegativeSafeInteger(frame.loopBaseDepth)
-          ? loopFrames.slice(0, frame.loopBaseDepth)
-          : [],
+        activeLoopIdOf(
+          Array.isArray(loopFrames) && nonNegativeSafeInteger(frame.loopBaseDepth)
+            ? loopFrames.slice(0, frame.loopBaseDepth)
+            : [],
+          callContextOwner(value, frameIndex),
+        ),
         analysis!,
         errors,
       );
@@ -1959,18 +2125,10 @@ function validateCallFrames(
       nonNegativeSafeInteger(frame.returnInstruction) &&
       !isPlainRecord(interruption)
     ) {
-      const callIndex = frame.returnInstruction - 1;
-      const caller = frameIndex === 0 ? undefined : value[frameIndex - 1];
-      const callerDefinition =
-        isPlainRecord(caller) && nonNegativeSafeInteger(caller.functionId)
-          ? analysis?.functionsById.get(caller.functionId)
-          : undefined;
+      const caller = serializedContext(snapshotValue, frameIndex);
       if (
-        (frameIndex === 0 && callIndex >= mainRootEnd(plan)) ||
-        (frameIndex > 0 &&
-          (callerDefinition === undefined ||
-            callIndex < callerDefinition.entryInstruction ||
-            callIndex >= callerDefinition.endInstruction))
+        caller === undefined ||
+        !contextHoldsInstruction(plan, caller, frame.returnInstruction - 1)
       ) {
         errors.push("Runtime call frame return instruction is outside its caller.");
       }
@@ -2034,6 +2192,38 @@ function validateCallFrames(
   return ids;
 }
 
+const FILE_CALL_FRAME_KEYS = [
+  "kind",
+  "id",
+  "callSiteSpan",
+  "returnInstruction",
+  "callerTemporaries",
+  "scopeBaseDepth",
+  "loopBaseDepth",
+] as const;
+
+/** A file call's own fields; its return and caller state are validated with every call frame. */
+function validateFileCallFrame(
+  frame: Record<string, unknown>,
+  frames: unknown,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  const root =
+    Array.isArray(frames) && nonNegativeSafeInteger(frame.scopeBaseDepth)
+      ? frames[frame.scopeBaseDepth]
+      : undefined;
+  if (
+    !hasExactKeys(frame, FILE_CALL_FRAME_KEYS) ||
+    !validSpan(frame.callSiteSpan) ||
+    !isPlainRecord(root) ||
+    !nonNegativeSafeInteger(root.file) ||
+    (plan !== undefined && root.file >= plan.files.length)
+  ) {
+    errors.push("Runtime file call frame is malformed.");
+  }
+}
+
 /**
  * An expiry-block frame records the interrupted position and, while it is still pending, the interrupted foreground
  * delay or interaction. That action is validated against the interrupted context: the caller's scopes, loops, call
@@ -2048,7 +2238,6 @@ function validateTimerHandlerFrame(
   loopFrames: unknown,
   snapshotValue: Record<string, unknown>,
   plan: InstructionPlan | undefined,
-  analysis: SnapshotValidationAnalysis | undefined,
   errors: string[],
 ): void {
   const now = snapshotValue.currentSessionTimeMs;
@@ -2066,19 +2255,10 @@ function validateTimerHandlerFrame(
     return;
   }
   const resume = frame.returnInstruction;
-  const caller = frameIndex === 0 ? undefined : callFrames[frameIndex - 1];
-  const callerDefinition =
-    isPlainRecord(caller) && nonNegativeSafeInteger(caller.functionId)
-      ? analysis?.functionsById.get(caller.functionId)
-      : undefined;
+  const caller = serializedContext(snapshotValue, frameIndex);
   if (
     !nonNegativeSafeInteger(resume) ||
-    (plan !== undefined &&
-      (frameIndex === 0
-        ? resume > mainRootEnd(plan)
-        : callerDefinition === undefined ||
-          resume < callerDefinition.entryInstruction ||
-          resume >= callerDefinition.endInstruction))
+    (plan !== undefined && (caller === undefined || !contextHoldsInstruction(plan, caller, resume)))
   ) {
     errors.push("Runtime timer expiry block interrupted outside its caller.");
     return;
@@ -2089,7 +2269,7 @@ function validateTimerHandlerFrame(
   const interruptedLoops = Array.isArray(loopFrames) ? loopFrames.slice(0, loopBase) : [];
   validateCurrentTemporaryRequirements(
     frame.callerTemporaries,
-    interruptedLoops,
+    activeLoopIdOf(interruptedLoops, callContextOwner(callFrames, frameIndex)),
     resume,
     "running",
     plan,
@@ -2158,7 +2338,7 @@ function validateSelfHandleBinding(
 
 function validateCallArgumentSupply(
   argumentsValue: unknown,
-  callInstruction: InstructionPlan["instructions"][number] | undefined,
+  callInstruction: Instruction | undefined,
   errors: string[],
 ): void {
   if (!Array.isArray(argumentsValue) || callInstruction?.kind !== "callFunction") {
@@ -2195,7 +2375,7 @@ function createTemporaryMap(
 function validateParameterBindings(
   frame: Record<string, unknown>,
   frames: unknown,
-  definition: InstructionPlan["functions"][number] | undefined,
+  definition: CompiledFunctionDefinition | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
   errors: string[],
 ): void {
@@ -2243,7 +2423,7 @@ function validateParameterBindings(
 
 function validateCallArguments(
   value: unknown,
-  definition: InstructionPlan["functions"][number] | undefined,
+  definition: CompiledFunctionDefinition | undefined,
   errors: string[],
 ): void {
   if (!Array.isArray(value)) {
@@ -2280,7 +2460,7 @@ function validateCallArguments(
 
 function validateParameterState(
   value: unknown,
-  definition: InstructionPlan["functions"][number] | undefined,
+  definition: CompiledFunctionDefinition | undefined,
   errors: string[],
 ): void {
   if (
@@ -2298,7 +2478,7 @@ function validateParameterState(
 
 function validateExactParameterPosition(
   value: unknown,
-  definition: InstructionPlan["functions"][number],
+  definition: CompiledFunctionDefinition,
   instructionPosition: number,
   analysis: SnapshotValidationAnalysis,
   errors: string[],
@@ -2315,7 +2495,7 @@ function validateExactParameterPosition(
 }
 
 function expectedParameterProgress(
-  definition: InstructionPlan["functions"][number],
+  definition: CompiledFunctionDefinition,
   instructionPosition: number,
   analysis: SnapshotValidationAnalysis,
 ): RuntimeParameterStateSnapshot | null {
@@ -2362,7 +2542,7 @@ function expectedParameterProgress(
 
 interface SnapshotValidationAnalysis {
   readonly plan: InstructionPlan;
-  readonly functionsById: ReadonlyMap<number, InstructionPlan["functions"][number]>;
+  readonly functionsById: ReadonlyMap<number, CompiledFunctionDefinition>;
   readonly regionEnds: readonly number[];
   readonly functionIdsByInstruction: readonly (number | null)[];
   readonly continuationLiveness: Map<string, readonly ReadonlySet<number>[]>;
@@ -2372,9 +2552,13 @@ interface SnapshotValidationAnalysis {
 
 function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
   const functionsById = new Map<number, InstructionPlan["functions"][number]>();
-  const regionEnds = new Array<number>(plan.instructions.length).fill(mainRootEnd(plan));
+  const regionEnds = new Array<number>(plan.instructions.length).fill(plan.instructions.length);
+  for (const file of plan.files) {
+    regionEnds.fill(file.rootEndInstruction, file.startInstruction, file.rootEndInstruction);
+  }
   const functionIdsByInstruction = new Array<number | null>(plan.instructions.length).fill(null);
   for (const definition of plan.functions) {
+    if (definition === undefined) continue;
     functionsById.set(definition.id, definition);
     for (let index = definition.entryInstruction; index < definition.endInstruction; index += 1) {
       regionEnds[index] = definition.endInstruction;
@@ -2390,7 +2574,7 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
   }
   // A media block's self-handle is bound on entry, like a parameter.
   const parameterNames = new Map(
-    plan.functions.map((definition) => [
+    [...functionsById.values()].map((definition) => [
       definition.id,
       new Set([
         ...definition.parameters.map((parameter) => parameter.name),
@@ -2413,13 +2597,13 @@ function validateSuspendedContinuationTemporaries(
   callerTemporaries: unknown[],
   destinationTemporary: number | null,
   returnInstruction: number,
-  callerLoopFrames: unknown,
+  activeLoopId: number | null,
   analysis: SnapshotValidationAnalysis,
   errors: string[],
 ): void {
   const present = new Set(createTemporaryMap(callerTemporaries).keys());
   if (destinationTemporary !== null) present.add(destinationTemporary);
-  const required = requiredContinuationTemporaries(analysis, returnInstruction, callerLoopFrames);
+  const required = requiredContinuationTemporaries(analysis, returnInstruction, activeLoopId);
   if ([...required].some((temporaryId) => !present.has(temporaryId))) {
     errors.push("Runtime caller temporaries cannot resume the suspended continuation.");
   }
@@ -2428,16 +2612,12 @@ function validateSuspendedContinuationTemporaries(
 function requiredContinuationTemporaries(
   analysis: SnapshotValidationAnalysis,
   startInstruction: number,
-  loopFrames: unknown,
+  activeLoopId: number | null,
 ): ReadonlySet<number> {
-  const activeLoop = Array.isArray(loopFrames) ? loopFrames.at(-1) : undefined;
-  const loopSignature =
-    isPlainRecord(activeLoop) && nonNegativeSafeInteger(activeLoop.loopId)
-      ? `loop:${activeLoop.loopId}`
-      : "none";
+  const loopSignature = activeLoopId === null ? "none" : `loop:${activeLoopId}`;
   let liveIn = analysis.continuationLiveness.get(loopSignature);
   if (liveIn === undefined) {
-    liveIn = computeContinuationLiveness(analysis, loopFrames);
+    liveIn = computeContinuationLiveness(analysis, activeLoopId);
     analysis.continuationLiveness.set(loopSignature, liveIn);
   }
   return liveIn[startInstruction] ?? new Set<number>();
@@ -2445,7 +2625,7 @@ function requiredContinuationTemporaries(
 
 function computeContinuationLiveness(
   analysis: SnapshotValidationAnalysis,
-  loopFrames: unknown,
+  activeLoopId: number | null,
 ): readonly ReadonlySet<number>[] {
   const plan = analysis.plan;
   const count = plan.instructions.length;
@@ -2454,7 +2634,9 @@ function computeContinuationLiveness(
   while (changed) {
     changed = false;
     for (let index = count - 1; index >= 0; index -= 1) {
-      const instruction = plan.instructions[index]!;
+      const instruction = plan.instructions[index];
+      // An instruction outside the runnable plan has nothing live.
+      if (instruction === undefined) continue;
       const liveOut = new Set<number>();
       for (const successor of instructionSuccessors(analysis, index)) {
         for (const temporaryId of liveIn[successor] ?? []) {
@@ -2464,7 +2646,7 @@ function computeContinuationLiveness(
       for (const temporaryId of instructionKilledTemporaries(instruction)) {
         liveOut.delete(temporaryId);
       }
-      for (const temporaryId of requiredInstructionTemporaries(instruction, loopFrames)) {
+      for (const temporaryId of requiredInstructionTemporaries(instruction, activeLoopId)) {
         liveOut.add(temporaryId);
       }
       if (!sameNumberSet(liveIn[index]!, liveOut)) {
@@ -2498,40 +2680,17 @@ function instructionSuccessors(
     case "returnValue":
     case "returnVoid":
     case "exit":
+    // A goto or end leaves this path with no temporaries, so nothing it holds stays live.
+    case "goto":
+    case "end":
       return [];
+    // A file call returns after it with the caller's temporaries; a file goto leaves like a goto.
+    case "transfer":
+      return instruction.mode === "call" && next !== null ? [next] : [];
     case "callFunction":
       return instruction.returnInstruction < regionEnd ? [instruction.returnInstruction] : [];
     default:
       return next === null ? [] : [next];
-  }
-}
-
-function instructionKilledTemporaries(instruction: Instruction): ReadonlySet<number> {
-  switch (instruction.kind) {
-    case "storeTemporary":
-      return new Set([instruction.temporaryId]);
-    case "prepareSayText":
-    case "prepareSaySpeaker":
-    case "prepareSayContextualSpeaker":
-      return new Set([instruction.destinationTemporary]);
-    case "prepareInteractionSpeaker":
-      return new Set([instruction.destinationTemporary]);
-    case "prepareReference":
-      return new Set([instruction.destinationTemporary]);
-    case "clearTemporary":
-      return new Set([instruction.temporaryId]);
-    case "clearTemporaries":
-      return new Set(instruction.temporaryIds);
-    case "callFunction":
-      return new Set([instruction.destinationTemporary]);
-    case "interaction":
-    case "startTimer":
-    case "playMedia":
-      return instruction.destinationTemporary === null
-        ? new Set<number>()
-        : new Set([instruction.destinationTemporary]);
-    default:
-      return new Set<number>();
   }
 }
 
@@ -2548,6 +2707,7 @@ function validateStatusConsistency(
   const loops = Array.isArray(value.loopFrames) ? value.loopFrames.length : 0;
   const temporaries = Array.isArray(value.temporaries) ? value.temporaries.length : 0;
   const scopes = Array.isArray(value.frames) ? value.frames.length : 0;
+  const retained = Array.isArray(value.retainedScopes) ? value.retainedScopes.length : 0;
   if (value.contextualSpeaker !== null) {
     errors.push("Runtime contextual speaker must be cleared between instructions.");
   }
@@ -2562,6 +2722,7 @@ function validateStatusConsistency(
         "chatPacingGate",
         "mediaPlayback",
         "storageWrite",
+        "capture",
       ]);
     if (!hasAllowedActionKind) {
       errors.push("Waiting runtime state requires one foreground action.");
@@ -2578,6 +2739,19 @@ function validateStatusConsistency(
   if (!validTopLevelPreparedSayOutputRelationship(value, plan)) {
     errors.push("Runtime prepared say output has impossible pacing-settlement provenance.");
   }
+  // Code runs in a context of the top of the call stack: a function's position is validated with its frame, a root
+  // region's here. After exit, the position follows the exit wherever it stood.
+  const context = serializedTopContext(value);
+  if (
+    plan !== undefined &&
+    value.status !== "halted" &&
+    context !== undefined &&
+    context.functionId === null &&
+    (!nonNegativeSafeInteger(value.nextInstruction) ||
+      !contextHoldsInstruction(plan, context, value.nextInstruction))
+  ) {
+    errors.push("Root execution position is outside the root instruction range.");
+  }
   if (value.status === "ready") {
     if (
       value.nextInstruction !== 0 ||
@@ -2585,6 +2759,11 @@ function validateStatusConsistency(
       loops !== 0 ||
       temporaries !== 0 ||
       scopes !== 1 ||
+      (Array.isArray(value.frames) &&
+        isPlainRecord(value.frames[0]) &&
+        value.frames[0].file !== 0) ||
+      retained !== 0 ||
+      value.fallback !== null ||
       value.failure !== null
     ) {
       errors.push("Ready runtime state contains execution progress.");
@@ -2597,7 +2776,15 @@ function validateStatusConsistency(
       errors.push("Ready runtime state must not contain pacing execution state.");
     }
   } else if (value.status === "halted") {
-    if (calls !== 0 || loops !== 0 || temporaries !== 0 || scopes !== 1 || value.failure !== null) {
+    if (
+      calls !== 0 ||
+      loops !== 0 ||
+      temporaries !== 0 ||
+      scopes !== 1 ||
+      retained !== 0 ||
+      value.fallback !== null ||
+      value.failure !== null
+    ) {
       errors.push("Halted runtime state retains active execution state.");
     }
     if (plan !== undefined && !isLegalHaltPosition(value.nextInstruction, plan)) {
@@ -2614,57 +2801,6 @@ function validateStatusConsistency(
     }
   } else if (value.status === "running") {
     if (value.failure !== null) errors.push("Running runtime state contains failure information.");
-    if (
-      plan !== undefined &&
-      calls === 0 &&
-      (!nonNegativeSafeInteger(value.nextInstruction) || value.nextInstruction > mainRootEnd(plan))
-    ) {
-      errors.push("Root execution position is outside the root instruction range.");
-    }
-  }
-}
-
-/**
- * A terminal delay or result-free button may settle at the root-end
- * coordinate while awaiting its ordinary completion entry. The separate
- * handoff remains authoritative even when a background pacing settlement
- * replaces bounded replay data before that entry occurs.
- */
-function validateRootEndTransition(
-  value: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
-  errors: string[],
-): void {
-  if (
-    plan === undefined ||
-    value.status !== "running" ||
-    value.nextInstruction !== mainRootEnd(plan) ||
-    !Array.isArray(value.callFrames) ||
-    value.callFrames.length !== 0
-  )
-    return;
-
-  const common =
-    Array.isArray(value.frames) &&
-    value.frames.length === 1 &&
-    isPlainRecord(value.frames[0]) &&
-    value.frames[0].id === 0 &&
-    Array.isArray(value.callFrames) &&
-    value.callFrames.length === 0 &&
-    Array.isArray(value.loopFrames) &&
-    value.loopFrames.length === 0 &&
-    Array.isArray(value.temporaries) &&
-    value.temporaries.length === 0 &&
-    value.foregroundAction === null &&
-    value.failure === null &&
-    value.contextualSpeaker === null;
-  // Queued expiry blocks run before the script ends, so a block may return to the root end without a handoff.
-  const awaitsQueuedBlock =
-    Array.isArray(value.pendingTimerHandlers) && value.pendingTimerHandlers.length > 0;
-  if (!common || (value.terminalContinuationHandoff === null && !awaitsQueuedBlock)) {
-    errors.push(
-      "Running root-end state is not a canonical settled terminal foreground transition.",
-    );
   }
 }
 
@@ -2733,13 +2869,12 @@ function positiveSafeInteger(value: unknown): value is number {
 
 function isLegalHaltPosition(nextInstruction: unknown, plan: InstructionPlan): boolean {
   if (!nonNegativeSafeInteger(nextInstruction)) return false;
-  if (nextInstruction === mainRootEnd(plan)) return true;
   return nextInstruction > 0 && plan.instructions[nextInstruction - 1]?.kind === "exit";
 }
 
 function validateCurrentTemporaryRequirements(
   temporaries: unknown,
-  loopFrames: unknown,
+  activeLoopId: number | null,
   nextInstruction: unknown,
   status: unknown,
   plan: InstructionPlan | undefined,
@@ -2755,7 +2890,7 @@ function validateCurrentTemporaryRequirements(
   }
   const instruction = plan.instructions[nextInstruction];
   if (instruction === undefined) return;
-  const required = requiredInstructionTemporaries(instruction, loopFrames);
+  const required = requiredInstructionTemporaries(instruction, activeLoopId);
   const present = new Set(
     temporaries
       .filter(isPlainRecord)
@@ -2775,160 +2910,207 @@ function validateCurrentTemporaryRequirements(
   if (instruction.kind === "callFunction" && present.has(instruction.destinationTemporary)) {
     errors.push("Runtime function result destination is already occupied.");
   }
+  if (instruction.kind === "capture" && present.has(instruction.destinationTemporary)) {
+    errors.push("Runtime capture result destination is already occupied.");
+  }
 }
 
-function requiredInstructionTemporaries(
-  instruction: Instruction,
-  loopFrames: unknown,
-): ReadonlySet<number> {
-  const output = new Set<number>();
-  const collect = (expression: ExpressionPlan): void => {
-    collectExpressionTemporaries(expression, output);
-  };
-  switch (instruction.kind) {
-    case "declareSpeaker":
-      instruction.properties.forEach((property) => collect(property.value));
-      break;
-    case "setDeclaredSpeakerProperty":
-    case "declareBinding":
-      collect(instruction.value);
-      break;
-    case "prepareReference":
-      collect(instruction.expression);
-      break;
-    case "validateAssignmentTarget":
-      collect(instruction.target);
-      break;
-    case "assign":
-      collect(instruction.value);
-      collect(instruction.target);
-      break;
-    case "validateCallReceiver":
-      collect(instruction.receiver);
-      break;
-    case "evaluate":
-      collect(instruction.expression);
-      break;
-    case "jumpIfFalse":
-      collect(instruction.condition);
-      break;
-    case "loopStart": {
-      const active = Array.isArray(loopFrames) ? loopFrames.at(-1) : undefined;
-      if (
-        instruction.loopKind === "while" ||
-        !isPlainRecord(active) ||
-        active.loopId !== instruction.loopId
-      ) {
-        collect(instruction.expression);
-      }
-      break;
+/**
+ * The scopes a prepared reference may have as its root: the scope frames and retained roots, then the session's globals under
+ * {@link GLOBAL_SCOPE_ID}.
+ */
+// oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: boundary: the scope frames remain unvalidated until the reference checks read them.
+function referenceScopes(snapshot: Record<string, unknown>): unknown {
+  return Array.isArray(snapshot.frames)
+    ? [
+        ...serializedScopes(snapshot),
+        { id: GLOBAL_SCOPE_ID, bindings: Array.isArray(snapshot.globals) ? snapshot.globals : [] },
+      ]
+    : snapshot.frames;
+}
+
+/**
+ * The session's globals: the host's, then those that the start of `main.tease` set up so far, in its order (ADR 0022
+ * §6). While it runs, exactly the globals and speakers before the next instruction are set up; after it, all of them. A
+ * speaker's global refers to the speaker of its name, and the speaker registry holds exactly these speakers. No scope
+ * binding has the name of a global.
+ */
+function validateGlobals(
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  const globals = snapshot.globals;
+  if (!Array.isArray(globals)) {
+    errors.push("Runtime globals must be an array.");
+    return;
+  }
+  const names: string[] = [];
+  const values: unknown[] = [];
+  const globalNames = new Set<string>();
+  for (const binding of globals) {
+    if (!isPlainRecord(binding) || typeof binding.name !== "string" || binding.name.length === 0) {
+      errors.push("Runtime global is malformed.");
+      return;
     }
-    case "storeTemporary":
-    case "bindDefaultParameter":
-    case "prepareSayText":
-    case "returnValue":
-      collect(instruction.value);
-      break;
-    case "prepareSayContextualSpeaker":
-      output.add(instruction.speakerTemporary);
-      break;
-    case "callFunction":
-      instruction.arguments.forEach((argument) =>
-        collectExpressionTemporaries(argument.value, output),
+    if (globalNames.has(binding.name)) errors.push("Runtime globals contain a duplicate name.");
+    globalNames.add(binding.name);
+    names.push(binding.name);
+    values.push(binding.value);
+    const failure = validateCapturedSerializableValue(binding.value);
+    if (failure !== null) errors.push(failure);
+  }
+  // No scope binds a global's name, also not a root retained for a block.
+  if (
+    serializedScopes(snapshot).some(
+      (frame) =>
+        isPlainRecord(frame) &&
+        Array.isArray(frame.bindings) &&
+        frame.bindings.some(
+          (binding) =>
+            isPlainRecord(binding) &&
+            typeof binding.name === "string" &&
+            globalNames.has(binding.name),
+        ),
+    )
+  )
+    errors.push("Runtime scope binding has the name of a global.");
+  if (plan === undefined) return;
+  const declarations = startupDeclarations(plan);
+  const setUp =
+    nonNegativeSafeInteger(snapshot.nextInstruction) &&
+    snapshot.nextInstruction < declarations.length
+      ? snapshot.nextInstruction
+      : declarations.length;
+  const host = globals.length - setUp;
+  const scriptNames = new Set(declarations.map((declaration) => declaration.name));
+  const speakers = Array.isArray(snapshot.speakers) ? snapshot.speakers : [];
+  let speakerIndex = 0;
+  const matches = (declaration: (typeof declarations)[number], index: number): boolean => {
+    if (names[host + index] !== declaration.name) return false;
+    if (declaration.kind !== "declareSpeaker") return true;
+    const speaker = speakers[speakerIndex];
+    speakerIndex += 1;
+    const value = values[host + index];
+    return (
+      isPlainRecord(speaker) &&
+      speaker.identifier === declaration.name &&
+      isPlainRecord(value) &&
+      value.kind === "speakerReference" &&
+      value.speakerId === speaker.id &&
+      value.identifier === declaration.name
+    );
+  };
+  if (
+    host < 0 ||
+    names.slice(0, host).some((name) => scriptNames.has(name)) ||
+    !declarations.slice(0, setUp).every(matches) ||
+    speakers.length !== speakerIndex
+  )
+    errors.push("Runtime globals do not match those the plan sets up before the next instruction.");
+}
+
+/** The parts of a snapshot that hold work or saved instruction positions, in fields named `...Instruction`. */
+const POSITION_HOLDERS = [
+  "callFrames",
+  "foregroundAction",
+  "backgroundActions",
+  "lastSettlement",
+  "interactionResultHandoff",
+  "preparedSayOutput",
+  "settledTimers",
+  "settledMedia",
+  "pendingTimerHandlers",
+] as const;
+
+/**
+ * The start of `main.tease` sets up the globals and speakers once, before anything else runs (ADR 0022 §6). While the
+ * next instruction is in it, a session holds nothing but the globals and speakers set up so far: no call, loop,
+ * temporary, action, timer, media, queued block, settlement, prepared output, top-level variable, default speaker, or
+ * Stage image, and no identity of those was ever allocated. Afterwards no saved position leads back into it.
+ */
+function validateStartupPhase(
+  snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  if (plan === undefined) return;
+  const prefixEnd = startupDeclarations(plan).length;
+  if (prefixEnd === 0) return;
+  if (nonNegativeSafeInteger(snapshot.nextInstruction) && snapshot.nextInstruction < prefixEnd) {
+    const empty = (value: unknown): boolean =>
+      value === null || (Array.isArray(value) && value.length === 0);
+    const frames = snapshot.frames;
+    if (
+      !isOneOf(snapshot.status, ["ready", "running", "failed"]) ||
+      !POSITION_HOLDERS.every((field) => empty(snapshot[field])) ||
+      !empty(snapshot.loopFrames) ||
+      !empty(snapshot.temporaries) ||
+      !Array.isArray(frames) ||
+      frames.length !== 1 ||
+      !isPlainRecord(frames[0]) ||
+      !empty(frames[0].bindings) ||
+      snapshot.defaultSpeaker !== null ||
+      snapshot.stageImage !== null ||
+      [
+        snapshot.nextScopeId,
+        snapshot.nextCallFrameId,
+        snapshot.nextActionId,
+        snapshot.nextTimerId,
+        snapshot.nextMediaId,
+      ].some((counter) => counter !== 1)
+    )
+      errors.push(
+        "Runtime state within the startup holds more than the globals and speakers set up.",
       );
-      break;
-    case "setDefaultSpeaker":
-    case "prepareInteractionSpeaker":
-    case "enterScope":
-    case "leaveScope":
-    case "jump":
-    case "loopControl":
-    case "clearTemporary":
-    case "clearTemporaries":
-    case "bindSuppliedParameter":
-    case "beginFunctionDefaults":
-    case "prepareParameterDefault":
-    case "enterFunctionBody":
-    case "returnVoid":
-    case "exit":
-      break;
-    case "say":
-      if (typeof instruction.textTemporary === "number") output.add(instruction.textTemporary);
-      else collect(instruction.value);
-      if (typeof instruction.speakerTemporary === "number")
-        output.add(instruction.speakerTemporary);
-      if (typeof instruction.pacing === "object") collect(instruction.pacing);
-      break;
-    case "wait":
-      collect(instruction.duration);
-      if (typeof instruction.display === "object") collect(instruction.display);
-      if (instruction.label !== null) collect(instruction.label);
-      break;
-    case "startTimer":
-      collect(instruction.duration);
-      if (typeof instruction.display === "object") collect(instruction.display);
-      if (instruction.label !== null) collect(instruction.label);
-      break;
-    case "pacingBarrier":
-      if (instruction.receiver !== null) collect(instruction.receiver);
-      break;
-    case "showImage":
-      if (instruction.image !== null) collect(instruction.image);
-      break;
-    case "storageWrite":
-      if (instruction.value !== null) collect(instruction.value);
-      collect(instruction.key);
-      break;
-    case "playMedia":
-      collect(instruction.file);
-      if (instruction.repeat.kind === "value") collect(instruction.repeat.value);
-      if (instruction.repeat.kind === "times") collect(instruction.repeat.count);
-      for (const operand of [instruction.startAt, instruction.endAt, instruction.volume]) {
-        if (operand !== null) collect(operand);
-      }
-      for (const cue of instruction.cues) collect(cue.offset);
-      break;
-    case "interaction":
-      if ("preparedUi" in instruction) {
-        output.add(instruction.speakerTemporary);
-        if (instruction.preparedUi.kind === "button") {
-          output.add(instruction.preparedUi.buttonLabelTemporary);
-          if (instruction.preparedUi.backgroundTemporary !== undefined)
-            output.add(instruction.preparedUi.backgroundTemporary);
-        } else if (instruction.preparedUi.kind !== "choice") {
-          if (instruction.preparedUi.hintTemporary !== null)
-            output.add(instruction.preparedUi.hintTemporary);
-          if (instruction.preparedUi.prefillTemporary !== undefined)
-            output.add(instruction.preparedUi.prefillTemporary);
-        } else output.add(instruction.preparedUi.optionsTemporary);
-      }
-      break;
+    return;
   }
-  return output;
-}
-
-function collectExpressionTemporaries(expression: ExpressionPlan, output: Set<number>): void {
-  const pending = [expression];
-  while (pending.length) {
-    const current = pending.pop()!;
-    if (current.kind === "temporary" || current.kind === "preparedReference")
-      output.add(current.temporaryId);
-    const children = expressionPlanChildren(current);
-    for (let i = children.length - 1; i >= 0; i--) pending.push(children[i]!);
+  const work: unknown[] = POSITION_HOLDERS.map((field) => snapshot[field]);
+  while (work.length > 0) {
+    const node = work.pop();
+    if (Array.isArray(node)) {
+      for (const item of node) work.push(item);
+      continue;
+    }
+    if (!isPlainRecord(node)) continue;
+    for (const [key, nested] of Object.entries(node)) {
+      if (key.endsWith("Instruction") && typeof nested === "number" && nested < prefixEnd) {
+        errors.push("Runtime state saves a position within the startup, which runs only once.");
+        return;
+      }
+      work.push(nested);
+    }
   }
 }
 
-function validateFrames(value: unknown, errors: string[]): void {
-  if (!Array.isArray(value) || value.length === 0) {
+/** Scope frames on the stack, then the roots retained for blocks of activations the session has left. */
+function validateScopes(
+  frames: unknown,
+  retainedScopes: unknown,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  if (!Array.isArray(frames) || frames.length === 0) {
     errors.push("Runtime frames must be a non-empty array.");
     return;
   }
+  if (!isCanonicalJsonArray(retainedScopes)) {
+    errors.push("Runtime retainedScopes must be an array.");
+    return;
+  }
   const frameIds = new Set<number>();
-  for (const frame of value) {
+  for (const [index, frame] of [...frames, ...retainedScopes].entries()) {
     if (
       !isPlainRecord(frame) ||
+      !hasExactKeys(frame, ["id", "file", "entry", "bindings"]) ||
       !nonNegativeSafeInteger(frame.id) ||
-      !Array.isArray(frame.bindings)
+      !Array.isArray(frame.bindings) ||
+      (frame.file === null
+        ? frame.entry !== null
+        : !nonNegativeSafeInteger(frame.file) ||
+          !nonNegativeSafeInteger(frame.entry) ||
+          (plan !== undefined && !isFileEntry(plan, frame.file, frame.entry))) ||
+      (index >= frames.length && frame.file === null)
     ) {
       errors.push("Runtime scope frame is malformed.");
       continue;
@@ -2951,9 +3133,106 @@ function validateFrames(value: unknown, errors: string[]): void {
       if (failure !== null) errors.push(failure);
     }
   }
-  if (isPlainRecord(value[0]) && value[0].id !== 0) {
-    errors.push("Runtime root scope frame must have ID 0.");
+}
+
+/** Whether an activation of a file may start at an instruction: the file's entry or one of its labels. */
+function isFileEntry(plan: InstructionPlan, file: number, entry: number): boolean {
+  const planFile = plan.files[file];
+  return (
+    planFile !== undefined &&
+    (entry === planFile.entryInstruction ||
+      planFile.labels.some((label) => label.instruction === entry))
+  );
+}
+
+/** An activation's root stands at the bottom of the stack and above each file call; no other scope is a root. */
+function validateRootPlacement(frames: unknown, callFrames: unknown, errors: string[]): void {
+  if (!Array.isArray(frames) || !Array.isArray(callFrames)) return;
+  const rootDepths = new Set([0]);
+  for (const frame of callFrames) {
+    if (
+      isPlainRecord(frame) &&
+      frame.kind === "file" &&
+      nonNegativeSafeInteger(frame.scopeBaseDepth)
+    )
+      rootDepths.add(frame.scopeBaseDepth);
   }
+  if (
+    frames.some(
+      (frame, depth) => isPlainRecord(frame) && (frame.file !== null) !== rootDepths.has(depth),
+    )
+  ) {
+    errors.push("Runtime activation roots are out of place.");
+  }
+}
+
+/** Destinations are equal by their files and targets; a glob's files in the same order, which its draws index. */
+function sameTransferDestination(planned: PlanTransferDestination, stored: unknown): boolean {
+  const samePlain = (left: { file: number; target: number }, right: unknown): boolean =>
+    isPlainRecord(right) && right.file === left.file && right.target === left.target;
+  if (!("pick" in planned)) return samePlain(planned, stored);
+  const options: unknown = isPlainRecord(stored) ? stored.pick : undefined;
+  return (
+    Array.isArray(options) &&
+    options.length === planned.pick.length &&
+    planned.pick.every((option, index) => samePlain(option, options[index]))
+  );
+}
+
+/**
+ * `fallback` holds the destination of a `fallback` statement: a file's entry or label, or a glob's files. A computed
+ * `fallback` resolves when it runs, so with one in the plan it may also be any label, or the entry of a file that runs
+ * something.
+ */
+function validateFallback(
+  value: unknown,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
+  if (value === null) return;
+  const destination = (candidate: unknown): boolean =>
+    isPlainRecord(candidate) &&
+    hasExactKeys(candidate, ["file", "target"]) &&
+    nonNegativeSafeInteger(candidate.file) &&
+    nonNegativeSafeInteger(candidate.target);
+  const shaped =
+    destination(value) ||
+    (isPlainRecord(value) &&
+      hasExactKeys(value, ["pick"]) &&
+      isCanonicalJsonArray(value.pick) &&
+      value.pick.length > 0 &&
+      value.pick.every(destination));
+  if (
+    !shaped ||
+    (plan !== undefined &&
+      !plan.instructions.some(
+        (instruction) =>
+          instruction.kind === "setFallback" &&
+          instruction.destination !== null &&
+          // A computed destination holds an expression, never a stored fallback.
+          !("value" in instruction.destination) &&
+          sameTransferDestination(instruction.destination, value),
+      ) &&
+      !(isPlainRecord(value) && resolvedFallbackFits(value, plan)))
+  ) {
+    errors.push("Runtime fallback is malformed.");
+  }
+}
+
+/** Whether a fallback is one that a computed `fallback` of the plan may have resolved to. */
+function resolvedFallbackFits(value: Record<string, unknown>, plan: InstructionPlan): boolean {
+  return (
+    plan.instructions.some(
+      (instruction) =>
+        instruction.kind === "setFallback" &&
+        instruction.destination !== null &&
+        "value" in instruction.destination,
+    ) &&
+    nonNegativeSafeInteger(value.file) &&
+    nonNegativeSafeInteger(value.target) &&
+    isFileEntry(plan, value.file, value.target) &&
+    !runsNothing(plan, value.file)
+  );
 }
 
 function validateSpeakers(value: unknown, errors: string[]): Set<number> {
@@ -2997,7 +3276,12 @@ function validateSpeakers(value: unknown, errors: string[]): Set<number> {
   return ids;
 }
 
-function validateFailure(value: unknown, status: unknown, errors: string[]): void {
+function validateFailure(
+  value: unknown,
+  status: unknown,
+  plan: InstructionPlan | undefined,
+  errors: string[],
+): void {
   if (value === null) {
     if (status === "failed") errors.push("Failed runtime status requires failure information.");
     return;
@@ -3006,6 +3290,10 @@ function validateFailure(value: unknown, status: unknown, errors: string[]): voi
     !isPlainRecord(value) ||
     typeof value.code !== "string" ||
     typeof value.message !== "string" ||
+    typeof value.path !== "string" ||
+    (plan === undefined
+      ? packagePathProblem(value.path) !== null
+      : !plan.files.some((file) => file.path === value.path)) ||
     !validSpan(value.span)
   ) {
     errors.push("Runtime failure information is malformed.");
@@ -3213,4 +3501,22 @@ function snapshotExternalDataFailureMessage(kind: ExternalDataFailureKind): stri
     case "nonPlainObject":
       return "Runtime snapshot contains a non-plain object.";
   }
+}
+
+/** The innermost loop of a context: the last loop frame, when the context owns it. */
+function activeLoopIdOf(loopFrames: unknown, owner: number | null | undefined): number | null {
+  const active = Array.isArray(loopFrames) ? loopFrames.at(-1) : undefined;
+  return isPlainRecord(active) &&
+    nonNegativeSafeInteger(active.loopId) &&
+    active.callFrameId === owner
+    ? active.loopId
+    : null;
+}
+
+/** The owner of the context above `level` call frames (all of them for the top): `null` for the base activation. */
+function callContextOwner(callFrames: unknown, level: number): number | null | undefined {
+  if (!Array.isArray(callFrames)) return null;
+  const below: unknown = callFrames[Math.min(level, callFrames.length) - 1];
+  if (below === undefined) return null;
+  return isPlainRecord(below) && nonNegativeSafeInteger(below.id) ? below.id : undefined;
 }

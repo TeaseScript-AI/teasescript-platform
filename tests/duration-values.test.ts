@@ -41,6 +41,7 @@ test("duration literals accept short and long elapsed units and convert exactly"
         'say "${500 ms} ${1 millisecond} ${30 s} ${1 second} ${2 seconds}"',
         'say "${10 min} ${1 minute} ${3 minutes} ${2 h} ${1 hour} ${4 hours}"',
         'say "${90 s} ${1.5 s} ${3725.25 s} ${0 ms} ${-(90 s)}"',
+        "exit",
       ].join("\n"),
     ),
     [
@@ -60,6 +61,7 @@ test("duration arithmetic and cross-unit comparisons follow V30 section 35", () 
           'say "${90 seconds > 1 minute} ${90 s == 1.5 min} ${60 min == 1 h} ${59 s >= 1 min}"',
           'say "${1 min + 30 s} ${1 min - 90 s} ${2 * 30 s} ${30 s * 3} ${1 h / 4}"',
           'say "${1 h / 30 min} ${[5 s].random} ${10 s != dynamic(10)} ${10 s == dynamic(10000)}"',
+          "exit",
         ].join("\n"),
     ),
     ["true true true false", "1 min 30 s -30 s 1 min 1 min 30 s 15 min", "2 5 s true false"],
@@ -74,16 +76,20 @@ test("mixing plain numbers with durations fails instead of guessing a unit", () 
     ["let n = 2", "1 s < n"],
     ["let d = 1 s", "d * d"],
   ] as const) {
-    const source = `${declaration}\nsay "\${${expression}}"`;
+    const source = `${declaration}\nsay "\${${expression}}"\nexit`;
     assert.deepEqual(diagnostics(source), ["TSV043"], source);
-    const dynamic = `${DYNAMIC}${declaration.replace(/= (.*)$/, "= dynamic($1)")}\nsay "\${${expression}}"`;
+    const dynamic = `${DYNAMIC}${declaration.replace(/= (.*)$/, "= dynamic($1)")}\nsay "\${${expression}}"\nexit`;
     assert.equal(runtimeFailure(dynamic), "TSR009", dynamic);
   }
   // `%` takes no duration whatever the other operand is, so the compiler rejects it also beside an unknown value.
   for (const declaration of ["let n = 2", `${DYNAMIC}let n = dynamic(2)`])
-    assert.deepEqual(diagnostics(`${declaration}\nsay "\${1 s % n}"`), ["TSV043"], declaration);
-  assert.equal(runtimeFailure('let n = 0\nsay "${1 s / n}"'), "TSR036");
-  assert.equal(runtimeFailure('let d = 0 s\nsay "${d / d}"'), "TSR036");
+    assert.deepEqual(
+      diagnostics(`${declaration}\nsay "\${1 s % n}"\nexit`),
+      ["TSV043"],
+      declaration,
+    );
+  assert.equal(runtimeFailure('let n = 0\nsay "${1 s / n}"\nexit'), "TSR036");
+  assert.equal(runtimeFailure('let d = 0 s\nsay "${d / d}"\nexit'), "TSR036");
   for (const source of [
     'say "${1 s + 1}"',
     "wait 1 + 2 ms",
@@ -93,8 +99,8 @@ test("mixing plain numbers with durations fails instead of guessing a unit", () 
   ]) {
     assert.deepEqual(diagnostics(source), ["TSV035"], source);
   }
-  assert.equal(runValidSource("wait (1 + 2) ms").snapshot.foregroundAction?.kind, "delay");
-  assert.deepEqual(sayTexts('say "${2 * 1 s} ${1 s * 2} ${1 s / 2} ${-(1 s) * 2}"'), [
+  assert.equal(runValidSource("wait (1 + 2) ms\nexit").snapshot.foregroundAction?.kind, "delay");
+  assert.deepEqual(sayTexts('say "${2 * 1 s} ${1 s * 2} ${1 s / 2} ${-(1 s) * 2}"\nexit'), [
     "2 s 2 s 500 ms -2 s",
   ]);
 });
@@ -103,10 +109,10 @@ test("wait never measures a calendar duration; doubled units and overflow are re
   // A calendar day or month has no fixed number of hours (V30 section 35): a calendar duration that the compiler can see
   // is a compile error located in it, and one it cannot see fails when the wait starts.
   for (const [source, duration] of [
-    ["wait 3 days", "3 days"],
+    ["wait 3 days\nexit", "3 days"],
     ["let n = 3\nwait n days", "days"],
-    ["wait 2 weeks", "2 weeks"],
-    ["wait 1 h + 1 mo", "1 h + 1 mo"],
+    ["wait 2 weeks\nexit", "2 weeks"],
+    ["wait 1 h + 1 mo\nexit", "1 h + 1 mo"],
   ] as const) {
     const start = source.indexOf(duration);
     const compiled = compileSource(source);
@@ -121,16 +127,16 @@ test("wait never measures a calendar duration; doubled units and overflow are re
       `${JSON.stringify(source)}: an error must be located in ${JSON.stringify(duration)}`,
     );
   }
-  assert.equal(runtimeFailure(`${DYNAMIC}let a = dynamic(1 mo)\nwait a`), "TSR065");
+  assert.equal(runtimeFailure(`${DYNAMIC}let a = dynamic(1 mo)\nwait a\nexit`), "TSR065");
   assert.deepEqual(diagnostics("wait 10 s ms"), ["TSV033"]);
   assert.deepEqual(diagnostics("let a = 1e306 h"), ["TSC001"]);
 });
 
 test("a unit only binds to a number on the same line", () => {
-  const plan = compileValidPlan("let s = 1\nlet a = 2\ns = a");
+  const plan = compileValidPlan("let s = 1\nlet a = 2\ns = a\nexit");
   assert.equal(validateInstructionPlan(plan).valid, true);
   // `min` is a protected built-in (V30 §13), so the unit name used as a variable is `ms`.
-  assert.deepEqual(sayTexts('let ms = 3\nsay "${ms} ${2 ms}"'), ["3 2 ms"]);
+  assert.deepEqual(sayTexts('let ms = 3\nsay "${ms} ${2 ms}"\nexit'), ["3 2 ms"]);
 });
 
 test("wait accepts duration values and keeps its trailing unit form", () => {
@@ -151,9 +157,9 @@ test("wait accepts duration values and keeps its trailing unit form", () => {
       source,
     );
   }
-  assert.equal(runtimeFailure("wait -(1 s)"), "TSR050");
-  assert.deepEqual(diagnostics("let d = 1 s\nwait d ms"), ["TSV043"]);
-  assert.equal(runtimeFailure(`${DYNAMIC}let d = dynamic(1 s)\nwait d ms`), "TSR050");
+  assert.equal(runtimeFailure("wait -(1 s)\nexit"), "TSR050");
+  assert.deepEqual(diagnostics("let d = 1 s\nwait d ms\nexit"), ["TSV043"]);
+  assert.equal(runtimeFailure(`${DYNAMIC}let d = dynamic(1 s)\nwait d ms\nexit`), "TSR050");
 });
 
 test("duration values persist through checkpoint JSON and reject malformed data", () => {
@@ -199,6 +205,7 @@ test("+= and -= apply to variables, properties, and indexes with one target eval
         "let d = 1 min",
         "d -= 15 s",
         'say "${x} ${o.a} ${l[1]} ${i} ${d}"',
+        "exit",
       ].join("\n"),
     ),
     ["2.5 11 7 1 45 s"],
@@ -216,13 +223,14 @@ test("compound assignment reads the target before an instruction-emitting operan
         "}",
         "x += bump()",
         'say "${x}"',
+        "exit",
       ].join("\n"),
     ),
     ["2"],
   );
-  assert.deepEqual(diagnostics("let x = 1\nx += true"), ["TSV041"]);
+  assert.deepEqual(diagnostics("let x = 1\nx += true\nexit"), ["TSV041"]);
   assert.equal(
-    runtimeFailure('let flag = load "flag", default: true\nlet x = 1\nx += flag'),
+    runtimeFailure('let flag = load "flag", default: true\nlet x = 1\nx += flag\nexit'),
     "TSR027",
   );
   assert.deepEqual(diagnostics("y += 1"), ["TSV003"]);

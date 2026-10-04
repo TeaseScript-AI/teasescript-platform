@@ -13,9 +13,15 @@ import type {
   ExpressionStatement,
   ForStatement,
   FunctionDeclaration,
+  GlobalStatement,
   FunctionParameter,
+  CallFileStatement,
+  FallbackStatement,
+  GotoStatement,
+  TransferTarget,
   Identifier,
   IfStatement,
+  LabelStatement,
   LetStatement,
   NamedArgument,
   ObjectLiteral,
@@ -63,6 +69,8 @@ import type {
   SwitchCase,
   SwitchStatement,
   SwitchTypeTest,
+  TagQueryExpression,
+  TagQueryStep,
   TypeAnnotation,
   TypeName,
   UnaryExpression,
@@ -71,6 +79,7 @@ import type {
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
 import { readMisplacedHeader, readScriptHeader, type ScriptHeader } from "./script-header.js";
+import { isTagListOption, tagPredicateSteps } from "./tag-query.js";
 import { calendarDurationUnit, elapsedDurationUnit } from "./duration.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 import { TokenKind, type Token } from "./token.js";
@@ -91,6 +100,11 @@ const statementOnlyCommands: ReadonlySet<string> = new Set([
   "save",
   "delete",
   "switch",
+  "label",
+  "goto",
+  "call",
+  "fallback",
+  "end",
 ]);
 
 const parserDiagnosticCode = {
@@ -131,6 +145,8 @@ const parserDiagnosticCode = {
   expectedStorageKey: "TSP036",
   symbolicOperator: "TSP037",
   invalidSwitchForm: "TSP038",
+  expectedLabelName: "TSP039",
+  invalidTagQuery: "TST001",
 } as const;
 
 const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
@@ -253,6 +269,22 @@ class Parser {
     if (this.#checkIdentifier("switch")) {
       return yield* parseChild(this.#parseSwitchStatement());
     }
+    if (this.#checkIdentifier("label")) {
+      return this.#parseLabelStatement();
+    }
+    if (
+      this.#checkIdentifier("goto") ||
+      this.#checkIdentifier("call") ||
+      this.#checkIdentifier("fallback")
+    ) {
+      return yield* parseChild(this.#parseTransferStatement());
+    }
+    if (this.#checkIdentifier("end")) {
+      return Object.freeze({ kind: "endStatement", span: copySpan(this.#advance().span) });
+    }
+    if (this.#checkIdentifier("global")) {
+      return yield* parseChild(this.#parseGlobalStatement());
+    }
     if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
       const parts = yield* parseChild(this.#parseMediaParts());
       return parts === null
@@ -290,7 +322,7 @@ class Parser {
       case TokenKind.KeywordContinue:
         return this.#parseLoopControl("continueStatement");
       case TokenKind.KeywordFunction:
-        return yield* parseChild(this.#parseFunctionDeclaration());
+        return yield* parseChild(this.#parseFunctionDeclaration(null));
       case TokenKind.KeywordReturn:
         return this.#parseReturnStatement();
       default:
@@ -717,6 +749,94 @@ class Parser {
     return speculative.#isSayStatementBoundary();
   }
 
+  #parseLabelStatement(): LabelStatement | null {
+    const keyword = this.#advance();
+    if (!this.#check(TokenKind.Identifier)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedLabelName,
+        "Expected a label name after 'label'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const name = this.#identifier(this.#advance());
+    return Object.freeze({ kind: "labelStatement", name, span: spanFrom(keyword.span, name.span) });
+  }
+
+  /** `goto`, `call`, or `fallback`, followed by a label, or by a quoted file path and an optional label. */
+  *#parseTransferStatement(): ParseTask<
+    GotoStatement | CallFileStatement | FallbackStatement | null
+  > {
+    const keyword = this.#advance();
+    if (keyword.lexeme === "fallback" && this.#checkIdentifier("none")) {
+      const none = this.#advance();
+      return Object.freeze({
+        kind: "fallbackStatement",
+        target: null,
+        span: spanFrom(keyword.span, none.span),
+      });
+    }
+    const target = yield* parseChild(this.#parseTransferTarget(keyword));
+    if (target === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    const span = spanFrom(keyword.span, target.span);
+    switch (keyword.lexeme) {
+      case "goto":
+        return Object.freeze({ kind: "gotoStatement", target, span });
+      case "call":
+        return Object.freeze({ kind: "callFileStatement", target, span });
+      default:
+        return Object.freeze({ kind: "fallbackStatement", target, span });
+    }
+  }
+
+  *#parseTransferTarget(keyword: Token): ParseTask<TransferTarget | null> {
+    // A computed target is a `script(...)` call or a grouped expression, as in `goto (next)`.
+    if (
+      this.#check(TokenKind.LeftParenthesis) ||
+      (this.#checkIdentifier("script") && this.#peek(1).kind === TokenKind.LeftParenthesis)
+    ) {
+      const expression = this.#parseExpression();
+      if (expression === null) return null;
+      return Object.freeze({ kind: "scriptTarget", expression, span: copySpan(expression.span) });
+    }
+    if (this.#check(TokenKind.Identifier)) {
+      const label = this.#identifier(this.#advance());
+      return Object.freeze({ kind: "labelTarget", label, span: copySpan(label.span) });
+    }
+    const start = this.#peek();
+    if (!this.#match(TokenKind.StringStart)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedLabelName,
+        `Expected a label name or a quoted file path after '${keyword.lexeme}'.`,
+      );
+      return null;
+    }
+    const literal = yield* parseChild(this.#parseStringLiteral(start));
+    if (literal === null) return null;
+    if (literal.form !== "singleLine" || literal.parts.some((part) => part.kind !== "stringText")) {
+      this.#reportSpan(
+        parserDiagnosticCode.expectedLabelName,
+        "A file path is plain text in quotes. To build a path from values, use script(...).",
+        literal.span,
+      );
+      return null;
+    }
+    const path = literal.parts
+      .map((part) => (part.kind === "stringText" ? part.value : ""))
+      .join("");
+    const label = this.#check(TokenKind.Identifier) ? this.#identifier(this.#advance()) : null;
+    return Object.freeze({
+      kind: "fileTarget",
+      path,
+      pathSpan: copySpan(literal.span),
+      label,
+      span: spanFrom(literal.span, (label ?? literal).span),
+    });
+  }
+
   #parseExitStatement(): Statement {
     const keyword = this.#advance();
     return Object.freeze({ kind: "exitStatement", span: copySpan(keyword.span) });
@@ -938,19 +1058,161 @@ class Parser {
       )
     )
       return null;
-    const image = this.#parseExpression();
+    const tagged = this.#checkIdentifier("tagged");
+    const image = tagged ? this.#parseTaggedImage() : this.#parseExpression();
     if (image === null) {
-      this.#reportInsertion(
-        parserDiagnosticCode.expectedExpression,
-        "Expected an image file or null after 'showImage'.",
-      );
-      this.#synchronizeStatement(true);
+      if (!tagged) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected an image file or null after 'showImage'.",
+        );
+      }
+      // A statement at the start of a continued line, after a trailing comma or option name, is kept.
+      if (tagged && this.#previous().kind === TokenKind.Newline && this.#atStatementStart()) {
+        this.#recoveredAtStatementBoundary = true;
+      } else {
+        this.#synchronizeStatement(true);
+      }
       return null;
     }
     return Object.freeze({
       kind: "showImageStatement",
       image,
       span: spanFrom(command.span, image.span),
+    });
+  }
+
+  /**
+   * `showImage tagged "bedroom", "punishment" > 3, none: ["outdoor"]`: comma-separated tag predicates, then `all:`,
+   * `none:`, or `any:` options. A matching image needs all of them (ADR 0023).
+   */
+  #parseTaggedImage(): TagQueryExpression | null {
+    const tagged = this.#advance();
+    if (this.#check(TokenKind.Newline) || this.#check(TokenKind.EndOfFile)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.invalidTagQuery,
+        "Expected a tag after 'tagged', such as showImage tagged \"bedroom\".",
+      );
+      return null;
+    }
+    const filters: TagQueryStep[][] = [];
+    const options = new Set<string>();
+    let end = tagged.span;
+    do {
+      this.#skipNewlines();
+      // A statement on the line after a trailing comma is not a tag; the caller keeps it.
+      if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart()) {
+        this.#reportInsertion(parserDiagnosticCode.invalidTagQuery, "Expected a tag after ','.");
+        return null;
+      }
+      if (isPropertyName(this.#peek()) && this.#peek(1).kind === TokenKind.Colon) {
+        const name = this.#advance();
+        this.#advance();
+        const value = runParse(this.#parseColonValueTask(true));
+        if (value === null) return null;
+        const filter = this.#tagListFilter(name.lexeme, name.span, value, options, false);
+        if (filter === null) return null;
+        filters.push([filter]);
+        end = value.span;
+        continue;
+      }
+      if (options.size > 0) {
+        this.#reportToken(
+          parserDiagnosticCode.invalidTagQuery,
+          "Write the tags before all:, none:, or any:.",
+          this.#peek(),
+        );
+        return null;
+      }
+      const predicate = runParse(this.#parseRequiredExpressionTask());
+      if (predicate === null) return null;
+      const steps = this.#tagPredicate(predicate);
+      if (steps === null) return null;
+      filters.push(steps);
+      end = predicate.span;
+    } while (this.#match(TokenKind.Comma));
+    return tagQuery("random", filters, spanFrom(tagged.span, end));
+  }
+
+  /**
+   * `findImages(where: …, all: …, none: …, any: …)` after its `(`: the list of matching images (ADR 0023). After a
+   * reported error it is the plain call, so the surrounding expression still parses.
+   */
+  *#finishFindImages(
+    callee: Expression,
+    left: Token,
+  ): ParseTask<TagQueryExpression | CallExpression> {
+    const call = yield* parseChild(this.#finishCall(callee, left));
+    const filters: TagQueryStep[][] = [];
+    const options = new Set<string>();
+    for (const argument of call.arguments) {
+      if (argument.kind === "positionalArgument") {
+        this.#reportSpan(
+          parserDiagnosticCode.invalidTagQuery,
+          "findImages takes named arguments: where:, all:, none:, and any:.",
+          argument.span,
+        );
+        return call;
+      }
+      const name = argument.name.name;
+      if (name === "where") {
+        if (options.has(name)) {
+          this.#reportSpan(
+            parserDiagnosticCode.invalidTagQuery,
+            "The option 'where' appears more than once; combine the tags with and.",
+            argument.name.span,
+          );
+          return call;
+        }
+        options.add(name);
+        const steps = this.#tagPredicate(argument.value);
+        if (steps === null) return call;
+        filters.push(steps);
+        continue;
+      }
+      const filter = this.#tagListFilter(name, argument.name.span, argument.value, options, true);
+      if (filter === null) return call;
+      filters.push([filter]);
+    }
+    return tagQuery("list", filters, call.span);
+  }
+
+  #tagPredicate(predicate: Expression): TagQueryStep[] | null {
+    return tagPredicateSteps(predicate, (message, span) =>
+      this.#reportSpan(parserDiagnosticCode.invalidTagQuery, message, span),
+    );
+  }
+
+  /** An `all:`, `none:`, or `any:` option; each may appear once. */
+  #tagListFilter(
+    name: string,
+    nameSpan: SourceSpan,
+    value: Expression,
+    options: Set<string>,
+    takesWhere: boolean,
+  ): TagQueryStep | null {
+    if (!isTagListOption(name)) {
+      this.#reportSpan(
+        parserDiagnosticCode.invalidTagQuery,
+        `Unknown option '${name}'. ${takesWhere ? "findImages takes where:, " : "tagged takes "}all:, none:, and any:.`,
+        nameSpan,
+      );
+      return null;
+    }
+    if (options.has(name)) {
+      this.#reportSpan(
+        parserDiagnosticCode.invalidTagQuery,
+        `The option '${name}' appears more than once.`,
+        nameSpan,
+      );
+      return null;
+    }
+    options.add(name);
+    return Object.freeze({
+      kind: "tagList",
+      option: name,
+      value,
+      span: spanFrom(nameSpan, value.span),
     });
   }
 
@@ -1459,6 +1721,79 @@ class Parser {
     });
   }
 
+  /**
+   * `global function ...`, or `global name[: Type] = value[, default: start]`. Like the default answer of an ask, a
+   * `, default:` belongs to the nearest construct before it that takes one, so `global level = load "level", default: 1`
+   * gives the fallback to `load`.
+   */
+  *#parseGlobalStatement(): ParseTask<GlobalStatement | FunctionDeclaration | null> {
+    const keyword = this.#advance();
+    if (this.#check(TokenKind.KeywordFunction))
+      return yield* parseChild(this.#parseFunctionDeclaration(keyword));
+    if (!this.#checkDeclarationName()) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedIdentifier,
+        "Expected a variable identifier or 'function' after 'global'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const name = this.#identifier(this.#advance());
+    let typeAnnotation: TypeAnnotation | null = null;
+    if (this.#match(TokenKind.Colon)) {
+      typeAnnotation = this.#parseTypeAnnotation();
+      if (typeAnnotation === null) {
+        this.#synchronizeStatement();
+        return null;
+      }
+    }
+    if (!this.#match(TokenKind.Equal)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedEqual,
+        "Expected '=' in the global declaration.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    this.#skipContinuationNewlines();
+    const value = this.#parseRequiredExpression();
+    if (value === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    const defaultOffset = this.#offsetAfterComma();
+    if (defaultOffset === null || !this.#atInteractionDefault(defaultOffset))
+      return Object.freeze({
+        kind: "globalStatement",
+        name,
+        typeAnnotation,
+        initial: value,
+        assignment: null,
+        span: spanFrom(keyword.span, value.span),
+      });
+    for (let skipped = 0; skipped < defaultOffset + 2; skipped += 1) this.#advance();
+    const start = yield* parseChild(this.#parseColonValueTask(true));
+    if (start === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    const span = spanFrom(keyword.span, start.span);
+    return Object.freeze({
+      kind: "globalStatement",
+      name,
+      typeAnnotation,
+      initial: start,
+      assignment: Object.freeze({
+        kind: "assignmentStatement",
+        operator: "=",
+        target: name,
+        value,
+        span: copySpan(span),
+      }),
+      span,
+    });
+  }
+
   #parseTypeAnnotation(context: TypeContext = "statement"): TypeAnnotation | null {
     return runParse(this.#parseTypeTask(context));
   }
@@ -1877,7 +2212,8 @@ class Parser {
     return Object.freeze({ kind, span: copySpan(keyword.span) });
   }
 
-  *#parseFunctionDeclaration(): ParseTask<FunctionDeclaration | null> {
+  /** A function declaration; `globalKeyword` is the `global` before a global function. */
+  *#parseFunctionDeclaration(globalKeyword: Token | null): ParseTask<FunctionDeclaration | null> {
     const keyword = this.#advance();
     if (!this.#checkDeclarationName() && !this.#check(TokenKind.KeywordWait)) {
       this.#reportInsertion(
@@ -1935,11 +2271,12 @@ class Parser {
     if (body === null) return null;
     return Object.freeze({
       kind: "functionDeclaration",
+      global: globalKeyword !== null,
       name,
       parameters: Object.freeze(parameters),
       returnTypeAnnotation,
       body,
-      span: spanFrom(keyword.span, body.span),
+      span: spanFrom((globalKeyword ?? keyword).span, body.span),
     });
   }
 
@@ -2083,7 +2420,10 @@ class Parser {
         span: spanFrom(expression.span, value.span),
       });
     }
-    if (expression.kind !== "callExpression") {
+    if (
+      expression.kind !== "callExpression" &&
+      !(expression.kind === "tagQueryExpression" && expression.select === "list")
+    ) {
       if (expression.kind === "identifier") {
         this.#reportSpan(
           parserDiagnosticCode.expectedStatement,
@@ -2116,8 +2456,10 @@ class Parser {
   }
 
   *#parseRequiredExpressionTask(): ParseTask<Expression | null> {
+    const diagnosticCount = this.#diagnostics.length;
     const expression = yield* parseChild(this.#parseOr());
-    if (expression === null) {
+    // A failed expression that already reported its own error needs no generic one after it.
+    if (expression === null && this.#diagnostics.length === diagnosticCount) {
       this.#reportInsertion(parserDiagnosticCode.expectedExpression, "Expected an expression.");
     }
     return expression;
@@ -2459,6 +2801,12 @@ class Parser {
         continue;
       }
       if (this.#match(TokenKind.LeftParenthesis)) {
+        if (expression.kind === "identifier" && expression.name === "findImages") {
+          expression = yield* parseChild(
+            this.#withinDelimiters(this.#finishFindImages(expression, this.#previous())),
+          );
+          continue;
+        }
         expression = yield* parseChild(
           this.#withinDelimiters(this.#finishCall(expression, this.#previous())),
         );
@@ -3185,17 +3533,15 @@ class Parser {
     }
     const diagnosticCount = this.#diagnostics.length;
     const expression = yield* parseChild(this.#parseOr());
-    if (expression === null) {
-      this.#reportToken(
-        parserDiagnosticCode.unsupportedStringExpression,
-        "Expected a supported expression inside the string interpolation.",
-        this.#peek(),
-      );
-      this.#synchronizeInterpolation();
-      this.#match(TokenKind.InterpolationEnd);
-      return null;
-    }
-    if (this.#diagnostics.length !== diagnosticCount) {
+    if (expression === null || this.#diagnostics.length !== diagnosticCount) {
+      // Only a failure that reported nothing itself gets this generic error.
+      if (this.#diagnostics.length === diagnosticCount) {
+        this.#reportToken(
+          parserDiagnosticCode.unsupportedStringExpression,
+          "Expected a supported expression inside the string interpolation.",
+          this.#peek(),
+        );
+      }
       this.#synchronizeInterpolation();
       this.#match(TokenKind.InterpolationEnd);
       return null;
@@ -3483,6 +3829,7 @@ const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
       "range",
       "timer",
       "media",
+      "script",
     ] as const
   ).map((name) => [name, name]),
 );
@@ -3533,6 +3880,26 @@ const propertyNameKinds: ReadonlySet<TokenKind> = new Set([
 
 function mediaHandlersSpan(handlers: MediaHandlers): SourceSpan {
   return handlers.kind === "compact" ? handlers.body.span : handlers.span;
+}
+
+/** A query whose candidates must pass every filter, each a complete postfix predicate. */
+function tagQuery(
+  select: TagQueryExpression["select"],
+  filters: readonly (readonly TagQueryStep[])[],
+  span: SourceSpan,
+): TagQueryExpression {
+  const steps: TagQueryStep[] = [];
+  filters.forEach((filter, index) => {
+    for (const step of filter) steps.push(step);
+    if (index > 0) steps.push({ kind: "and" });
+  });
+  return Object.freeze({
+    kind: "tagQueryExpression",
+    catalog: "images",
+    select,
+    steps: Object.freeze(steps),
+    span: copySpan(span),
+  });
 }
 
 function isPropertyName(token: Token): boolean {

@@ -19,6 +19,8 @@ import { utc } from "./helpers/temporal-fixtures.js";
 
 import {
   activatePlayerRuntimeButton,
+  activePlayerRuntimeCapture,
+  answerPlayerRuntimeCapture,
   completePlayerRuntimeStorageWrite,
   pendingPlayerRuntimeStorageWrite,
   continuePlayerRuntimeSession,
@@ -47,6 +49,7 @@ speaker guide {
 }
 say as guide prose(position: "right", background: "ivory") "A letter", instant
 showButton "Continue"
+exit
 `);
   const entry = session.transcriptEntries[0];
   if (entry?.kind !== "message") throw new Error("Expected a runtime message.");
@@ -89,6 +92,7 @@ say "Default bubble", instant
 say prose "Default prose", instant
 say prose(position: "center", align: "center") "Explicit center", instant
 showButton "Continue"
+exit
 `);
   const positions = session.transcriptEntries.map((entry) => {
     if (entry.kind !== "message") throw new Error("Expected a runtime message.");
@@ -234,7 +238,7 @@ exit
 
 test("runtime adapter preserves choice order and rendered-selection semantics", () => {
   let session = createPlayerRuntimeSession(
-    'let choice = choose "First", "Second"\nsay choice, instant',
+    'let choice = choose "First", "Second"\nsay choice, instant\nexit',
   );
   const foreground = playerRuntimeForeground(session);
   assert.equal(foreground?.kind, "choose");
@@ -254,7 +258,7 @@ test("runtime adapter preserves choice order and rendered-selection semantics", 
 
 test("runtime adapter selects the rendered button even when two buttons return the same value", () => {
   const session = createPlayerRuntimeSession(
-    'let options = [{ text: "A", value: 1 }, { text: "B", value: 1 }]\nlet choice = choose options\nsay [choice], instant',
+    'let options = [{ text: "A", value: 1 }, { text: "B", value: 1 }]\nlet choice = choose options\nsay [choice], instant\nexit',
   );
   const foreground = playerRuntimeForeground(session);
   if (foreground?.kind !== "choose") throw new Error("Expected choice presentation.");
@@ -272,7 +276,7 @@ test("runtime adapter selects the rendered button even when two buttons return t
 
 test("runtime adapter routes pacing skip and explicit time through canonical operations", () => {
   let session = createPlayerRuntimeSession(
-    'say unskippable "First", 10\nsay skippable "Second", 10\nwait 20 s',
+    'say unskippable "First", 10\nsay skippable "Second", 10\nwait 20 s\nexit',
   );
   const firstGate = playerRuntimePacingGate(session);
   assert.equal(firstGate?.skippable, false);
@@ -301,7 +305,7 @@ test("runtime adapter routes pacing skip and explicit time through canonical ope
 
 test("runtime checkpoint restore reconstructs presentation without replay or completion", () => {
   let session = createPlayerRuntimeSession(
-    'say "Question", instant\nlet answer = choose one: "One", two: "Two"\nsay answer, instant',
+    'say "Question", instant\nlet answer = choose one: "One", two: "Two"\nsay answer, instant\nexit',
   );
   const before = playerRuntimeForeground(session);
   const restorePoint = createPlayerRuntimeRestorePoint(session);
@@ -323,7 +327,7 @@ test("runtime checkpoint restore reconstructs presentation without replay or com
 });
 
 test("runtime checkpoint restore preserves a paced history and its continuation", () => {
-  let session = createPlayerRuntimeSession('repeat 4 { say "x" }');
+  let session = createPlayerRuntimeSession('repeat 4 { say "x" }\nexit');
   for (let index = 0; index < 2; index++) session = skipPlayerRuntimePacing(session)!.session;
   const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
   assert.deepEqual(restored.events, session.events);
@@ -336,7 +340,7 @@ test("runtime checkpoint restore preserves a paced history and its continuation"
 
 test("Continue runs a restored ready session at once, after recording its capture", () => {
   const { plan } = compileSource(
-    'say "Resumed at ${getTimestamp().toISO()}", instant\nwait 1 s\nsay "Later", instant',
+    'say "Resumed at ${getTimestamp().toISO()}", instant\nwait 1 s\nsay "Later", instant\nexit',
   );
   assert.ok(plan);
   const checkpointJson = serializeCheckpoint(
@@ -394,7 +398,7 @@ test("Continue runs a restored ready session at once, after recording its captur
 test("runtime checkpoint restore handles retained event histories above the native spread limit", () => {
   // Size is the regression input: spreading this many arguments exceeded the supported Node stack.
   const count = 150_000;
-  const { plan } = compileSource(`repeat ${count} { say "x", instant }`);
+  const { plan } = compileSource(`repeat ${count} { say "x", instant }\nexit`);
   assert.ok(plan);
   const result = run(plan, createFreshRuntimeSnapshot(plan), {}, { instructionBudget: count * 20 });
   assert.equal(result.snapshot.status, "halted");
@@ -414,6 +418,7 @@ test("invalid dynamic markup colours preserve enclosing colours in delivered pie
   const session = createPlayerRuntimeSession(`
 let bad = "invalid"
 say "[color=red][bg=ivory]outer [color=\${bad}][bg=\${bad}]inner **bold**[/bg][/color] outer[/bg][/color] [color=\${bad}][bg=\${bad}]plain[/bg][/color]", instant
+exit
 `);
   const entry = session.transcriptEntries[0];
   if (entry?.kind !== "message" || entry.content === undefined) throw new Error("Expected markup.");
@@ -606,6 +611,7 @@ test("runtime adapter forwards media reports, projects a live seek, and restores
       "}",
       "wait 10",
       'say "done ${music.position} ${music.elapsed}", instant',
+      "exit",
     ].join("\n"),
   );
   assert.deepEqual(playerRuntimeMedia(session.snapshot).stage, {
@@ -640,6 +646,42 @@ test("runtime adapter forwards media reports, projects a live seek, and restores
   assert.equal(finished.snapshot.status, "halted");
   const last = finished.transcriptEntries.at(-1);
   assert.equal(last?.kind === "message" ? last.text : undefined, "done 10 s 8 s");
+});
+
+test("the Player answers takePhoto() with a vouched reference or an unavailable camera", () => {
+  const session = createPlayerRuntimeSession(
+    "let photo = takePhoto()\nshowImage photo\nlet second = takePhoto()\nexit",
+  );
+  const pending = activePlayerRuntimeCapture(session.snapshot);
+  assert.ok(pending !== null);
+  const reference = "captured-media:session:1";
+  const unvouched = answerPlayerRuntimeCapture(session, pending.actionId, {
+    kind: "captured",
+    reference,
+  });
+  assert.equal(unvouched.outcome.kind, "invalidPayload");
+  const answered = answerPlayerRuntimeCapture(
+    session,
+    pending.actionId,
+    { kind: "captured", reference },
+    { holds: (candidate, kind) => candidate === reference && kind === "image" },
+  );
+  assert.equal(answered.outcome.kind, "completed");
+  // The session continued to the next capture and shows the photo.
+  assert.equal(playerRuntimeMedia(answered.session.snapshot).stage.image, reference);
+  const next = activePlayerRuntimeCapture(answered.session.snapshot);
+  assert.ok(next !== null && next.actionId !== pending.actionId);
+  const unavailable = answerPlayerRuntimeCapture(answered.session, next.actionId, {
+    kind: "unavailable",
+    reason: "denied",
+  });
+  assert.equal(unavailable.outcome.kind, "completed");
+  assert.equal(unavailable.session.snapshot.status, "halted");
+  assert.ok(
+    unavailable.session.events.some(
+      (event) => event.kind === "developerWarning" && event.code === "TSW015",
+    ),
+  );
 });
 
 test("runtime adapter leaves evaluated persistent writes pending until acknowledgement", () => {
@@ -800,7 +842,7 @@ test("a session records the account's zone and presentation, falling back to the
   // A zone this browser does not know falls back to the browser's own zone and language.
   assert.equal(playerTemporalContext({ timeZone: "Mars/Olympus_Mons" }).zone.name, browserZone);
 
-  const session = createPlayerRuntimeSession('say toDateTime("2026-10-04T18:30")', {
+  const session = createPlayerRuntimeSession('say toDateTime("2026-10-04T18:30")\nexit', {
     temporalContext: account,
   });
   assert.deepEqual(session.snapshot.temporalCaptures[0]?.context, account);

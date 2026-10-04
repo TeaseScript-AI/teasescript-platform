@@ -22,14 +22,19 @@ function diagnostics(source: string): [string, string, string][] {
 test("positional arguments followed by named arguments fill an author function's parameters", () => {
   const result = runValidSource(
     SHOW +
-      ['say show(1, c: "3")', 'say show(1, "2", c: "3")', 'say show(1, c: "3", b: "2")'].join("\n"),
+      [
+        'say show(1, c: "3")',
+        'say show(1, "2", c: "3")',
+        'say show(1, c: "3", b: "2")',
+        "exit",
+      ].join("\n"),
   );
   assert.equal(result.snapshot.failure, null);
   assert.deepEqual(sayTexts(result), ["1b3", "123", "123"]);
 });
 
 test("a built-in receives positional and named arguments from one call", () => {
-  const plan = compileValidPlan('say pack(1, mode: "x")', { builtins: ["pack"] });
+  const plan = compileValidPlan('say pack(1, mode: "x")\nexit', { builtins: ["pack"] });
   const result = run(plan, createImmediatePacingRuntimeSnapshot(plan), {
     builtins: {
       pack: (call) => JSON.stringify({ positional: call.positional, named: call.named }),
@@ -40,7 +45,7 @@ test("a built-in receives positional and named arguments from one call", () => {
 });
 
 test("the specification's conversion example parses as one positional and one named argument", () => {
-  const result = compileSource('let text = "5"\nlet amount = toNumber(text, default: 0)');
+  const result = compileSource('let text = "5"\nlet amount = toNumber(text, default: 0)\nexit');
   assert.deepEqual(result.parserDiagnostics, []);
 });
 
@@ -92,7 +97,7 @@ test("a name given twice to a built-in or method is rejected at compile time", (
     ["TSV023", "Argument 'x' is given twice. Remove one of them.", "x"],
   ]);
   assert.deepEqual(
-    compileSource('say pack(1, mode: "x", size: 2)', { builtins: ["pack"] }).diagnostics,
+    compileSource('say pack(1, mode: "x", size: 2)\nexit', { builtins: ["pack"] }).diagnostics,
     [],
   );
   for (const callee of ["(items.remove)", "[items.remove][0]", "pick().remove"])
@@ -117,7 +122,7 @@ test("argument count errors name the parameters and the fix", () => {
 });
 
 test("plan validation rejects a function call that gives one parameter two arguments", () => {
-  const plan = structuredClone(compileValidPlan(SHOW + 'let shown = show(1, c: "3")'));
+  const plan = structuredClone(compileValidPlan(SHOW + 'let shown = show(1, c: "3")\nexit'));
   const call = plan.instructions.find((instruction) => instruction.kind === "callFunction");
   assert.ok(call?.kind === "callFunction" && call.arguments.length === 2);
   // EVIDENCE: fixture renames only the named argument's parameter to the one the positional argument fills.

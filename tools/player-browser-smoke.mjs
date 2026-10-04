@@ -1,8 +1,18 @@
-import { rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
+import { join } from "node:path";
 import { createPlaygroundServer } from "../dist/playground/server.js";
 import { findChromium } from "./find-chromium.mjs";
+
+// The fake camera's frame: a distinct color per quadrant (top left, top right, bottom left, bottom right), so a
+// photo that is blank, mirrored, flipped, or not the camera's frame fails the check.
+const TEST_CARD = [
+  [220, 40, 40],
+  [40, 180, 60],
+  [40, 70, 220],
+  [235, 235, 235],
+];
 
 await main();
 
@@ -23,11 +33,18 @@ async function main() {
   const origin = `http://127.0.0.1:${address.port}`;
   const debugPort = await reservePort();
   const profile = `/tmp/teasescript-player-chromium-${process.pid}`;
+  const cameraFeed = join(profile, "camera-test-card.y4m");
+  await mkdir(profile, { recursive: true });
+  await writeFile(cameraFeed, testCardY4m());
   const browser = spawn(chromium, [
     "--headless=new",
     "--no-sandbox",
     "--disable-gpu",
     "--disable-dev-shm-usage",
+    // A synthetic camera that shows the test card for the camera scenario; permissions are granted or denied per
+    // scenario through CDP.
+    "--use-fake-device-for-media-stream",
+    `--use-file-for-fake-video-capture=${cameraFeed}`,
     `--remote-debugging-port=${debugPort}`,
     "--remote-allow-origins=*",
     `--user-data-dir=${profile}`,
@@ -57,8 +74,9 @@ async function main() {
       await narrowScenario(cdp);
       await scriptStorageScenario(cdp, origin);
       await demoScenario(cdp, origin);
+      await cameraScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground and the repository demo on /player/",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, and the camera scenario",
       );
     } finally {
       cdp.close();
@@ -300,7 +318,7 @@ async function constrainedChoicesScenario(cdp) {
     (_, index) =>
       `c${index}: "Option ${index + 1}: select this alternative for the next part of the story"`,
   ).join(", ");
-  await replaceSourceAndRun(cdp, `let answer = choose ${options}`);
+  await replaceSourceAndRun(cdp, `let answer = choose ${options}\nexit`);
   await waitFor(cdp, `document.querySelector('.choice-select option:nth-child(13)') !== null`);
   assertEqual(
     await value(cdp, visible(".choice-buttons")),
@@ -325,7 +343,7 @@ async function constrainedChoicesScenario(cdp) {
 async function replacedCheckpointScenario(cdp) {
   await replaceSourceAndRun(
     cdp,
-    'say "First", instant\nshowButton "A"\nsay "Second", instant\nshowButton "B"',
+    'say "First", instant\nshowButton "A"\nsay "Second", instant\nshowButton "B"\nexit',
   );
   await waitFor(cdp, `document.querySelector('#interaction-controls button')?.textContent === 'A'`);
   await click(cdp, "#save-checkpoint");
@@ -1002,6 +1020,167 @@ async function transcriptTexts(cdp) {
     cdp,
     `[...document.querySelectorAll('#transcript li')].map((item) => [...item.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join('').trim())`,
   );
+}
+
+/**
+ * The session camera opens at Start and `takePhoto()` puts its photo on the Stage; without camera permission the
+ * script continues without a photo.
+ */
+async function cameraScenario(cdp, origin) {
+  const url = `${origin}/player/?dev&scenario=camera`;
+  const start = async () => {
+    await navigate(cdp, url);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await physicalClick(cdp, "[data-session-activation] button");
+  };
+  const takeNewPhoto = () =>
+    evaluate(
+      cdp,
+      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Take another, Mistress').click()`,
+    );
+  // A decoded photo, not merely an image element with a captured URL.
+  const capturedImages = `[...document.querySelectorAll('img')].filter((image) => image.src.startsWith('blob:') && image.complete && image.naturalWidth > 0).length`;
+  // The color at the center of each quadrant of the shown photo, in the test card's order.
+  const photoColors = `(() => {
+    const image = [...document.querySelectorAll('img')].find((image) => image.src.startsWith('blob:') && image.complete && image.naturalWidth > 0);
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    const drawing = canvas.getContext('2d');
+    drawing.drawImage(image, 0, 0);
+    return [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]].map(([x, y]) =>
+      [...drawing.getImageData(Math.floor(x * canvas.width), Math.floor(y * canvas.height), 1, 1).data.slice(0, 3)]);
+  })()`;
+  const savedItem = JSON.stringify('player-storage:["development-camera","camera.photo"]');
+  const savedPhoto = `JSON.parse(localStorage.getItem(${savedItem}) ?? 'null')?.value ?? null`;
+  const storedPhotos = () =>
+    evaluate(
+      cdp,
+      `return new Promise((resolve, reject) => {
+        const request = indexedDB.open('teasescript-captured-media');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const store = database.objectStoreNames[0];
+          const keys = database.transaction(store).objectStore(store).getAllKeys();
+          keys.onsuccess = () => { database.close(); resolve(keys.result.map(([, reference]) => reference)); };
+        };
+      })`,
+    );
+
+  await cdp.call("Browser.setPermission", {
+    origin,
+    permission: { name: "camera" },
+    setting: "granted",
+  });
+  await start();
+  await waitFor(cdp, `document.body.innerText.includes('Got you. That one is mine now.')`);
+  await waitFor(cdp, `${capturedImages} === 1`);
+  assertTestCard(
+    await value(cdp, photoColors),
+    "The captured photo does not show the camera's frame",
+  );
+  const first = await value(cdp, savedPhoto);
+  assertEqual(String(first).startsWith("captured-media:"), true, "The photo reference was saved");
+  assertEqual((await storedPhotos()).includes(first), true, "The saved photo was stored durably");
+
+  // A new run loads the saved reference and shows the same stored photo.
+  await start();
+  await waitFor(cdp, `document.body.innerText.includes('Look what I kept from last time.')`);
+  await waitFor(
+    cdp,
+    `${capturedImages} === 1`,
+    8_000,
+    "The saved photo did not resolve in a new run",
+  );
+  assertTestCard(await value(cdp, photoColors), "The saved photo does not show the captured frame");
+  await takeNewPhoto();
+  await waitFor(cdp, `document.body.innerText.includes('Got you. That one is mine now.')`);
+  const second = await value(cdp, savedPhoto);
+  assertEqual(
+    second !== first && String(second).startsWith("captured-media:"),
+    true,
+    "The new photo was saved",
+  );
+
+  // The next mount reclaims the replaced photo, which no saved value references.
+  await navigate(cdp, url);
+  const deadline = Date.now() + 8_000;
+  while (JSON.stringify(await storedPhotos()) !== JSON.stringify([second])) {
+    if (Date.now() > deadline) throw new Error("The replaced photo was not reclaimed");
+    await delay(50);
+  }
+
+  await cdp.call("Browser.setPermission", {
+    origin,
+    permission: { name: "camera" },
+    setting: "denied",
+  });
+  await start();
+  await waitFor(cdp, `document.body.innerText.includes('Look what I kept from last time.')`);
+  await takeNewPhoto();
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('No camera? Then you stay unseen, for now. We go on without a photo.')`,
+  );
+  assertEqual(await value(cdp, savedPhoto), second, "A denied camera replaced the saved photo");
+
+  // A forged reference in saved data is ordinary text: it resolves to no photo, and the script continues.
+  await evaluate(
+    cdp,
+    `localStorage.setItem(${savedItem}, JSON.stringify({ v: 1, value: 'captured-media:00000000-0000-4000-8000-000000000000:1' }))`,
+  );
+  await start();
+  await waitFor(cdp, `document.body.innerText.includes('Look what I kept from last time.')`);
+  await delay(500);
+  assertEqual(await value(cdp, capturedImages), 0, "A forged reference resolved to a photo");
+  await takeNewPhoto();
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('No camera? Then you stay unseen, for now. We go on without a photo.')`,
+  );
+  await cdp.call("Browser.resetPermissions");
+}
+
+/** One 320×240 frame of the test card as a Y4M video, which Chromium's fake camera repeats. */
+function testCardY4m() {
+  const width = 320;
+  const height = 240;
+  // BT.601 limited-range YUV, the conversion Chromium applies to the file's frames.
+  const yuv = ([red, green, blue]) => [
+    Math.round(16 + (65.738 * red + 129.057 * green + 25.064 * blue) / 256),
+    Math.round(128 + (-37.945 * red - 74.494 * green + 112.439 * blue) / 256),
+    Math.round(128 + (112.439 * red - 94.154 * green - 18.285 * blue) / 256),
+  ];
+  const plane = (planeWidth, planeHeight, channel) => {
+    const bytes = Buffer.alloc(planeWidth * planeHeight);
+    for (let y = 0; y < planeHeight; y += 1) {
+      for (let x = 0; x < planeWidth; x += 1) {
+        const quadrant = (y < planeHeight / 2 ? 0 : 2) + (x < planeWidth / 2 ? 0 : 1);
+        bytes[y * planeWidth + x] = yuv(TEST_CARD[quadrant])[channel];
+      }
+    }
+    return bytes;
+  };
+  return Buffer.concat([
+    Buffer.from(`YUV4MPEG2 W${width} H${height} F30:1 Ip A1:1 C420jpeg\nFRAME\n`),
+    plane(width, height, 0),
+    plane(width / 2, height / 2, 1),
+    plane(width / 2, height / 2, 2),
+  ]);
+}
+
+function assertTestCard(colors, message) {
+  // Video and image encoding shift colors slightly; a different image is far outside this.
+  const matches =
+    colors?.length === TEST_CARD.length &&
+    colors.every((color, quadrant) =>
+      color.every((channel, index) => Math.abs(channel - TEST_CARD[quadrant][index]) <= 40),
+    );
+  if (!matches)
+    throw new Error(
+      `${message}: expected ${JSON.stringify(TEST_CARD)}, received ${JSON.stringify(colors)}`,
+    );
 }
 
 function documentTextIncludes(values, text) {

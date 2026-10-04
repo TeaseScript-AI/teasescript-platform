@@ -84,6 +84,7 @@ export function registerTeaseScriptLanguage(): void {
         "instant",
         "speaker",
         "let",
+        "global",
         "if",
         "else",
         "switch",
@@ -96,6 +97,11 @@ export function registerTeaseScriptLanguage(): void {
         "function",
         "return",
         "is",
+        "label",
+        "goto",
+        "tagged",
+        "call",
+        "fallback",
       ],
       types: [
         "string",
@@ -113,6 +119,7 @@ export function registerTeaseScriptLanguage(): void {
         "object",
         "range",
         "media",
+        "script",
       ],
       commands: [
         "showButton",
@@ -124,12 +131,15 @@ export function registerTeaseScriptLanguage(): void {
         "timer",
         "showImage",
         "hideImage",
+        "findImages",
         "playAudio",
         "playVideo",
+        "takePhoto",
         "save",
         "load",
         "delete",
         "exit",
+        "end",
       ],
     });
     monaco.languages.setLanguageConfiguration(TEASE_LANGUAGE_ID, {

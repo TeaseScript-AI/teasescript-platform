@@ -50,6 +50,7 @@ test("a set of lists, objects, dicts, or sets keeps the first of members equal b
         "let numbers = set[[1], [1.0], [-0], [0]]",
         "say numbers",
         "say groups.length",
+        "exit",
       ].join("\n"),
     ),
     [
@@ -87,6 +88,7 @@ test("add, contains, remove, and the set operations compare composite members wi
         "say a.toList()",
         "say a == set[[3], [1], [2]]",
         "say a == set[[1], [2]]",
+        "exit",
       ].join("\n"),
     ),
     [
@@ -128,6 +130,7 @@ test("a member is copied on insert, and first, last, random, and iteration give 
         "let doors = set[{ open: false }]",
         "doors.first.open = true",
         "say doors",
+        "exit",
       ].join("\n"),
     ),
     ["[[1], [2]]", "[[1], [2]]", "true", "[{ open: false }]"],
@@ -137,23 +140,23 @@ test("a member is copied on insert, and first, last, random, and iteration give 
 test("what changes a read set member decides and widens nothing in the set, unlike a list element", () => {
   for (const selector of ["first", "last", "random"])
     assert.deepEqual(
-      says(`${DYNAMIC}let s = set[[]]\ns.${selector}.add("x")\ns.add(dynamic([1]))\nsay s`),
+      says(`${DYNAMIC}let s = set[[]]\ns.${selector}.add("x")\ns.add(dynamic([1]))\nsay s\nexit`),
       ["[[], [1]]"],
       selector,
     );
   assert.deepEqual(
     says(
-      `${DYNAMIC}let s = set[{ items: [] }]\ns.first.items.add("x")\ns.add(dynamic({ items: [1] }))\nsay s`,
+      `${DYNAMIC}let s = set[{ items: [] }]\ns.first.items.add("x")\ns.add(dynamic({ items: [1] }))\nsay s\nexit`,
     ),
     ["[{ items: [] }, { items: [1] }]"],
   );
   // A read member is a computed value like a literal, so a number does not widen the set's integer lists.
-  assert.deepEqual(codes("let s = set[[1]]\ns.first.add(2.5)\nlet xs: integer[] = s.first"), [
+  assert.deepEqual(codes("let s = set[[1]]\ns.first.add(2.5)\nlet xs: integer[] = s.first\nexit"), [
     ["TSV041", "2.5"],
   ]);
   // A list element is a place: what changes it also changes the list and its element type.
-  assert.deepEqual(says('let l = [[]]\nl.first.add("x")\nsay l'), ['[["x"]]']);
-  assert.deepEqual(codes("let l = [[1]]\nl.first.add(2.5)\nlet xs: integer[] = l.first"), [
+  assert.deepEqual(says('let l = [[]]\nl.first.add("x")\nsay l\nexit'), ['[["x"]]']);
+  assert.deepEqual(codes("let l = [[1]]\nl.first.add(2.5)\nlet xs: integer[] = l.first\nexit"), [
     ["TSV041", "l.first"],
   ]);
 });
@@ -184,6 +187,7 @@ test("collections nest in every direction", () => {
         "say setsInObjects",
         'setsInDicts["second"].add([2])',
         'say setsInDicts["second"]',
+        "exit",
       ].join("\n"),
     ),
     [
@@ -201,12 +205,13 @@ test("collections nest in every direction", () => {
     ],
   );
   // Element types of sets follow the list rules.
-  assert.deepEqual(codes("let groups: integer[] set = set[[1], [2]]\ngroups.add([3])"), []);
-  assert.deepEqual(codes('let groups = set[[1]]\ngroups.add(["x"])'), [["TSV041", '"x"']]);
-  assert.deepEqual(codes("let groups = set[[1], [2.5]]\nlet first: integer[] = groups.first"), [
-    ["TSV041", "groups.first"],
-  ]);
-  assert.deepEqual(failure(`${DYNAMIC}let groups: integer[] set = dynamic(set[["x"]])`), [
+  assert.deepEqual(codes("let groups: integer[] set = set[[1], [2]]\ngroups.add([3])\nexit"), []);
+  assert.deepEqual(codes('let groups = set[[1]]\ngroups.add(["x"])\nexit'), [["TSV041", '"x"']]);
+  assert.deepEqual(
+    codes("let groups = set[[1], [2.5]]\nlet first: integer[] = groups.first\nexit"),
+    [["TSV041", "groups.first"]],
+  );
+  assert.deepEqual(failure(`${DYNAMIC}let groups: integer[] set = dynamic(set[["x"]])\nexit`), [
     "TSR058",
     "'groups' holds a set (integer[] set), so it cannot take a set with text (string) at [0][0].",
   ]);
@@ -223,12 +228,13 @@ test("speakers and handles are set members by identity, like list elements, and 
         "let beat = timer async 10 s",
         "let clocks = set[beat, beat]",
         "say clocks.length",
+        "exit",
       ].join("\n"),
     ),
     ["[<speaker vera>, <speaker mira>]", "1"],
   );
   assert.deepEqual(
-    failure(`${DYNAMIC}speaker vera {}\nsave dynamic(set[vera]) as "voices"`)?.[0],
+    failure(`${DYNAMIC}speaker vera {}\nsave dynamic(set[vera]) as "voices"\nexit`)?.[0],
     "TSR055",
   );
 });
@@ -238,6 +244,7 @@ test("choose gives one button per member of a set of choice objects, like a list
     'let options = set[{ value: 1, text: "Kneel" }, { value: 1, text: "Kneel" }, { value: 2, text: "Beg" }]',
     "let answer = choose options",
     "say [answer]",
+    "exit",
   ].join("\n");
   const plan = compileValidPlan(source);
   const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
@@ -271,6 +278,7 @@ test("storage keeps sets of composite members, and a checkpoint restores them or
         'let doors: set = load "doors"',
         "say doors",
         'say doors.contains({ tags: set[], name: "back" })',
+        "exit",
       ].join("\n"),
     ),
     ['[{ name: "front", tags: [[1]] }, { name: "back", tags: [] }]', "true"],
@@ -287,10 +295,13 @@ test("storage keeps sets of composite members, and a checkpoint restores them or
       "    say group",
       "}",
       'say doors.union(set[{ name: "side" }])',
+      "exit",
     ].join("\n"),
   );
 
-  const plan = compileValidPlan("let doors = set[{ a: 1, b: 2 }, { a: 3 }]\nwait 1 s\nsay doors");
+  const plan = compileValidPlan(
+    "let doors = set[{ a: 1, b: 2 }, { a: 3 }]\nwait 1 s\nsay doors\nexit",
+  );
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan));
   assert.equal(waiting.snapshot.status, "waiting");
   const serialized = serializeCheckpoint(createCheckpoint(plan, waiting.snapshot));

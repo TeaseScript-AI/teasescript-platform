@@ -11,7 +11,14 @@ import type { TemporalContext } from "../temporal.js";
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import { getSerializableProperty, type SerializableRuntimeValue } from "./serializable-values.js";
-import { isDuration, isList, isObject, isSet, isTemporal } from "./value-predicates.js";
+import {
+  isDuration,
+  isList,
+  isObject,
+  isScriptReference,
+  isSet,
+  isTemporal,
+} from "./value-predicates.js";
 import { fieldText, isVisibleScalar, visibleText } from "./value-text.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
@@ -76,7 +83,7 @@ function choiceButton(
         "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
         span,
       );
-    return { text: visibleText(option, span, context), value: value ?? choiceValue(option) };
+    return { text: visibleText(option, span, context), value: value ?? choiceValue(option, span) };
   }
   if (
     option.properties.some(
@@ -104,17 +111,23 @@ function choiceButton(
   const background = getSerializableProperty(option, "background");
   return {
     text,
-    value: value ?? choiceValue(ownValue === undefined ? textValue : ownValue),
+    value: value ?? choiceValue(ownValue === undefined ? textValue : ownValue, span),
     ...(background === undefined ? {} : { background: backgroundColor(background, span) }),
   };
 }
 
-/** A scalar that `isVisibleScalar` accepted, as a choice value. */
-function choiceValue(value: SerializableRuntimeValue): InteractionChoiceValue {
+/** A scalar that `isVisibleScalar` accepted, as a choice value; a script reference is shown but not returned. */
+function choiceValue(value: SerializableRuntimeValue, span: SourceSpan): InteractionChoiceValue {
   if (isDuration(value)) return { ...value };
   if (isTemporal(value)) return { ...value };
   if (typeof value === "number") return Object.is(value, -0) ? 0 : value;
   if (typeof value === "string" || typeof value === "boolean" || value === null) return value;
+  if (isScriptReference(value))
+    throw fault(
+      "TSR052",
+      "A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer.",
+      span,
+    );
   throw new Error("A choice value must be a visible scalar.");
 }
 

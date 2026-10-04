@@ -38,6 +38,7 @@ test("conversions turn text into numbers and true or false, and scalars into tex
         'say "${toBoolean("true")} ${toBoolean(" false ")} ${toBoolean(false)}"',
         'say "[${toString("text")}] [${toString(2.5)}] [${toString(-0)}] [${toString(true)}] [${toString(null)}] [${toString(90 seconds)}]"',
         'say toString(3).padStart(3, "0")',
+        "exit",
       ].join("\n"),
     ),
     [
@@ -56,6 +57,7 @@ test("round ties away from zero, floor rounds down, and ceil rounds up", () => {
       [
         'say "${round(2.4)} ${round(2.5)} ${round(-2.5)} ${round(0.5)} ${round(-0.5)} ${round(-0.4)} ${round(7)}"',
         'say "${floor(2.7)} ${floor(-2.5)} ${ceil(2.1)} ${ceil(-2.5)} ${floor(10 / 4)}"',
+        "exit",
       ].join("\n"),
     ),
     ["2 3 -3 1 -1 0 7", "2 -3 3 -2 2"],
@@ -67,6 +69,7 @@ test("default: is the result only when a value the compiler cannot know does not
     [
       'say "${toNumber(word, default: 0)} ${toNumber(digits, default: 0)} ${toInteger(word, default: -1)}"',
       'say "${toBoolean(word, default: false)} ${toBoolean(flag, default: false)} ${toNumber(missing, default: 1.5)}"',
+      "exit",
     ].join("\n"),
     { word: "many", digits: "42", flag: "true", missing: null },
   );
@@ -84,11 +87,12 @@ test("conversions and rounding have static result types", () => {
         'let ready: boolean = toBoolean("true")',
         'let text = "4"',
         "let widened: number = toNumber(text, default: 0)",
+        "exit",
       ].join("\n"),
     ),
     [],
   );
-  assert.deepEqual(diagnostics('let count: integer = toNumber("2")'), [
+  assert.deepEqual(diagnostics('let count: integer = toNumber("2")\nexit'), [
     [
       "TSV041",
       "'count' is declared as integer, so it cannot start as a number. Round it with floor(...), round(...), or ceil(...), or declare it as 'let count: number = ...'.",
@@ -100,115 +104,125 @@ test("conversions and rounding have static result types", () => {
 test("conversions the compiler can prove invalid and misused arguments are compile errors", () => {
   const cases: [string, string, string, string][] = [
     [
-      'say toNumber("hello")',
+      'say toNumber("hello")\nexit',
       "TSV043",
       'toNumber(...) cannot convert "hello"; the text must be a number such as 2.5 or -3.',
       '"hello"',
     ],
     [
-      'say toInteger("${2} apples", default: 0)',
+      'say toInteger("${2} apples", default: 0)\nexit',
       "TSV043",
       'toInteger(...) cannot convert "2 apples"; the text must be a number such as 2.5 or -3.',
       '"${2} apples"',
     ],
     [
-      'say toBoolean("yes")',
+      'say toBoolean("yes")\nexit',
       "TSV043",
       'toBoolean(...) cannot convert "yes"; the text must be "true" or "false".',
       '"yes"',
     ],
-    ["say toNumber(null)", "TSV043", "toNumber(...) converts text and numbers, not null.", "null"],
     [
-      "say toNumber(true)",
+      "say toNumber(null)\nexit",
+      "TSV043",
+      "toNumber(...) converts text and numbers, not null.",
+      "null",
+    ],
+    [
+      "say toNumber(true)\nexit",
       "TSV043",
       "toNumber(...) converts text and numbers, not true or false (boolean).",
       "true",
     ],
     [
-      "let pause = 5 s\nsay toInteger(pause)",
+      "let pause = 5 s\nsay toInteger(pause)\nexit",
       "TSV043",
       "toInteger(...) converts text and numbers, not a duration. Divide a duration by a unit instead, such as value / 1 s.",
       "pause",
     ],
     [
-      "let count = 1\nsay toBoolean(count)",
+      "let count = 1\nsay toBoolean(count)\nexit",
       "TSV043",
       "toBoolean(...) converts text and true or false (boolean), not a whole number (integer). Compare the number instead, such as value != 0.",
       "count",
     ],
     [
-      "say toString([1, 2])",
+      "say toString([1, 2])\nexit",
       "TSV043",
       "toString(...) cannot convert a list (integer[]); use .join() to combine its elements as text.",
       "[1, 2]",
     ],
     [
-      "let rounds = [[1, 2], [3]]\nsay toString(rounds)",
+      "let rounds = [[1, 2], [3]]\nsay toString(rounds)\nexit",
       "TSV043",
       "toString(...) cannot convert a list (integer[][]), and .join() cannot combine its elements, which hold a list (integer[]). Show the whole list with say, or select a value inside it that toString(...) converts.",
       "rounds",
     ],
     [
-      "say toString(dict{ a: { n: 1 } })",
+      "say toString(dict{ a: { n: 1 } })\nexit",
       "TSV043",
       "toString(...) cannot convert a dict (object dict), and .values.join() cannot combine its values, which hold an object. Show the whole dict with say, or select a value inside it that toString(...) converts.",
       "dict{ a: { n: 1 } }",
     ],
     [
-      "say toString(set[1, 2])",
+      "say toString(set[1, 2])\nexit",
       "TSV043",
       "toString(...) cannot convert a set (integer set); use .toList().join() to combine its elements as text.",
       "set[1, 2]",
     ],
     [
-      "say toString(1..3)",
+      "say toString(1..3)\nexit",
       "TSV043",
-      "toString(...) converts text, numbers, true or false, null, durations, and date and time values, not a range.",
+      "toString(...) converts text, numbers, true or false, null, durations, date and time values, and script references, not a range.",
       "1..3",
     ],
     [
-      'say toNumber("5", default: "0")',
+      'say toNumber("5", default: "0")\nexit',
       "TSV043",
       "toNumber(...) needs a number as its default:, not text (string).",
       '"0"',
     ],
     [
-      'say toInteger("5", default: 0.5)',
+      'say toInteger("5", default: 0.5)\nexit',
       "TSV043",
       "toInteger(...) needs a whole number (integer) as its default:, not a number.",
       "0.5",
     ],
     [
-      "say toString(5, default: null)",
+      "say toString(5, default: null)\nexit",
       "TSV043",
       "toString(...) needs text (string) as its default:, not null.",
       "null",
     ],
     [
-      'say toNumber("5", fallback: 0)',
+      'say toNumber("5", fallback: 0)\nexit',
       "TSV022",
       "toNumber(...) has no parameter 'fallback'; its only named argument is default:.",
       "fallback",
     ],
     [
-      "say toNumber()",
+      "say toNumber()\nexit",
       "TSV020",
       "toNumber(...) takes 1 argument (value), received 0.",
       "toNumber()",
     ],
     [
-      'say round("2.5")',
+      'say round("2.5")\nexit',
       "TSV043",
       "round(...) needs a number, not text (string). Convert text with toNumber(...) first.",
       '"2.5"',
     ],
     [
-      "say floor(2, 3)",
+      "say floor(2, 3)\nexit",
       "TSV020",
       "floor(...) takes 1 argument (value), received 2.",
       "floor(2, 3)",
     ],
-    ["say ceil(2, to: 1)", "TSV022", "ceil(...) takes no named arguments; remove 'to:'.", "to"],
+    [
+      "say ceil(2, to: 1)\nexit",
+      "TSV022",
+      "ceil(...) takes no named arguments; remove 'to:'.",
+      "to",
+    ],
   ];
   for (const [source, code, message, text] of cases)
     assert.deepEqual(diagnostics(source), [[code, message, text]], source);
@@ -217,37 +231,37 @@ test("conversions the compiler can prove invalid and misused arguments are compi
 test("values that do not convert at runtime raise errors that name the fix", () => {
   const cases: [string, Record<string, string | number | boolean | null>, string, string][] = [
     [
-      "say toNumber(value)",
+      "say toNumber(value)\nexit",
       { value: "many" },
       "TSR058",
       'toNumber(...) cannot convert text (string) "many" to a number. Give a fallback with default: if the value may not convert.',
     ],
     [
-      "say toInteger(value)",
+      "say toInteger(value)\nexit",
       { value: true },
       "TSR058",
       "toInteger(...) cannot convert true or false (boolean) to a whole number (integer). Give a fallback with default: if the value may not convert.",
     ],
     [
-      "say toBoolean(value)",
+      "say toBoolean(value)\nexit",
       { value: "yes" },
       "TSR058",
       'toBoolean(...) cannot convert text (string) "yes" to true or false (boolean). Give a fallback with default: if the value may not convert.',
     ],
     [
-      "say toNumber(value)",
+      "say toNumber(value)\nexit",
       { value: "1e400" },
       "TSR058",
       'toNumber(...) cannot convert text (string) "1e400" to a number. Give a fallback with default: if the value may not convert.',
     ],
     [
-      "say toNumber(value, default: backup)",
+      "say toNumber(value, default: backup)\nexit",
       { value: "1", backup: "0" },
       "TSR058",
       "toNumber(...) needs a number as its default:, not text (string).",
     ],
     [
-      "say round(value)",
+      "say round(value)\nexit",
       { value: "2.5" },
       "TSR059",
       "round(...) needs a number, not text (string). Convert text with toNumber(...) first.",
@@ -260,7 +274,7 @@ test("values that do not convert at runtime raise errors that name the fix", () 
       [code, message],
       `${source} ${JSON.stringify(globals)}`,
     );
-    const call = source.replace(/^say /u, "");
+    const call = source.split("\n")[0]!.replace(/^say /u, "");
     assert.deepEqual(
       [result.snapshot.failure?.span.start.offset, result.snapshot.failure?.span.end.offset],
       [4, 4 + call.length],
@@ -268,7 +282,7 @@ test("values that do not convert at runtime raise errors that name the fix", () 
     );
   }
   const list = runValidSource(
-    "function dynamic(value) { return value }\nsay toString(dynamic([1]))",
+    "function dynamic(value) { return value }\nsay toString(dynamic([1]))\nexit",
   );
   assert.deepEqual(
     [list.snapshot.failure?.code, list.snapshot.failure?.message],
@@ -293,6 +307,7 @@ test("a conversion checks its value as it was evaluated, before later arguments 
           '    return "fallback"',
           "}",
           `say toString(${read}, default: backup())`,
+          "exit",
         ].join("\n"),
       ),
       ["null"],
@@ -308,6 +323,7 @@ test("conversions are checkpoint and resume equivalent", () => {
       "    total += toNumber(entry, default: 0)",
       "}",
       'say "${round(total)} ${floor(total)} ${toInteger(total)} ${toString(total).length}"',
+      "exit",
     ].join("\n"),
   );
 });

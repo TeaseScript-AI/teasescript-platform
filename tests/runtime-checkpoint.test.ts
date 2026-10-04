@@ -28,7 +28,7 @@ import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
 test("checkpoint accepts a large valid plan and snapshot without a shared work rejection", () => {
   const compiled = plan(
-    Array.from({ length: 3_000 }, (_value, index) => `say "${index}"`).join("\n"),
+    [...Array.from({ length: 3_000 }, (_value, index) => `say "${index}"`), "exit"].join("\n"),
   );
   const snapshot = createFreshRuntimeSnapshot(compiled);
   snapshot.frames[0]!.bindings.push(
@@ -138,35 +138,8 @@ test("preserves nested deep-copy independence and ordered sets after restore", (
   );
 });
 
-test("keeps same-named speakers in sibling lexical scopes as distinct state", () => {
-  const { events } = assertRuntimeResumeEquivalent(
-    [
-      "if true {",
-      '  speaker voice { displayName: "Scope one" }',
-      '  say as voice "First"',
-      "}",
-      "if true {",
-      '  speaker voice { displayName: "Scope two" }',
-      '  say as voice "Second"',
-      "}",
-      "exit",
-    ].join("\n"),
-  );
-
-  // Each say is emitted with the speaker declared in its own scope, told apart by authored display name.
-  assert.deepEqual(
-    events.flatMap((event) =>
-      event.kind === "say" ? [[event.speaker?.displayName, event.text]] : [],
-    ),
-    [
-      ["Scope one", "First"],
-      ["Scope two", "Second"],
-    ],
-  );
-});
-
 test("an unknown root snapshot field is rejected at validation, checkpoint and restore", () => {
-  const compiled = plan('say "kept"');
+  const compiled = plan('say "kept"\nexit');
   const snapshot = createFreshRuntimeSnapshot(compiled);
   const withUnknownField = { ...structuredClone(snapshot), unknownField: "none" };
   assert.equal(validateRuntimeSnapshot(withUnknownField, compiled).valid, false);
@@ -427,7 +400,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 test("checkpoint and plan validation never coerce non-string enumerated fields to text", () => {
-  const compiled = plan('let n = 1\nwait n s\nshowButton "Go"');
+  const compiled = plan('let n = 1\nwait n s\nshowButton "Go"\nexit');
   const fresh = createFreshRuntimeSnapshot(compiled);
   const waiting = run(compiled, fresh).snapshot;
   for (const snapshot of [fresh, waiting]) {

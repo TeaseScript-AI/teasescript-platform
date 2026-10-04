@@ -93,6 +93,17 @@ export interface SerializableMediaHandle {
   readonly mediaId: number;
 }
 
+/**
+ * A reference to a file of the project, at its top or at a label, as `script(path, label:)` makes it. It names the file by
+ * path, so it keeps its meaning across sessions and plans; whether that file and label exist is checked where a transfer
+ * uses it.
+ */
+export interface SerializableScriptReference {
+  readonly kind: "script";
+  readonly path: string;
+  readonly label: string | null;
+}
+
 export interface SerializableRuntimeProperty {
   readonly name: string;
   value: SerializableRuntimeValue;
@@ -109,7 +120,8 @@ export type SerializableRuntimeValue =
   | SerializableRuntimeTemporal
   | SerializableTimerHandle
   | SerializableMediaHandle
-  | SerializableSpeakerReference;
+  | SerializableSpeakerReference
+  | SerializableScriptReference;
 
 export class SerializableValueError extends Error {
   public constructor(
@@ -316,6 +328,7 @@ function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRun
     case "timestamp":
     case "timerHandle":
     case "mediaHandle":
+    case "script":
       return { ...value };
     case "set":
       return { kind: "set", items: new Array(value.items.length) };
@@ -573,6 +586,8 @@ function leafKey(value: SerializableRuntimeValue): string | undefined {
       return `h${value.timerId};`;
     case "mediaHandle":
       return `m${value.mediaId};`;
+    case "script":
+      return `x${textKey(value.path)}${value.label === null ? "z" : textKey(value.label)}`;
     default:
       return undefined;
   }
@@ -706,6 +721,8 @@ function equalsOrDefer(
       return right.kind === "mediaHandle" && right.mediaId === left.mediaId;
     case "speakerReference":
       return right.kind === "speakerReference" && right.speakerId === left.speakerId;
+    case "script":
+      return right.kind === "script" && right.path === left.path && right.label === left.label;
   }
 }
 
@@ -896,6 +913,15 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         (current.mediaId as number) < 1
       )
         return `${path()} contains a malformed media handle.`;
+      continue;
+    }
+    if (current.kind === "script") {
+      if (
+        !hasOnlyKeys(current, ["kind", "path", "label"]) ||
+        typeof current.path !== "string" ||
+        (current.label !== null && typeof current.label !== "string")
+      )
+        return `${path()} contains a malformed script reference.`;
       continue;
     }
     if (current.kind === "range") {

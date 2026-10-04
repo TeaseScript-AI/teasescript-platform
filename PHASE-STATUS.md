@@ -19,8 +19,10 @@ accept syntax, architecture, or implementation details.
   variables, assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated
   single-line and block strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion,
   control flow, deterministic random, rounding, and `min`/`max` built-ins, text operations and list `join`, the
-  `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `sort`/`shuffle` and set operations, and top-level
-  user-defined functions.
+  `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `sort`/`shuffle` and set operations, top-level
+  user-defined functions, labels and `goto`, and explicit endings with a required `exit` (ADR 0022). Projects of several
+  `.tease` files compile into one plan, with globals, global functions, and speakers shared by all files, `goto`,
+  `call`, and `end` between files with a `fallback`, glob targets, and computed targets from `script(...)` references.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
 - **Script storage:** `save`/`load`/`delete`, optional lazy defaults, a validated checkpointed session view, and
@@ -30,10 +32,15 @@ accept syntax, architecture, or implementation details.
   labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;
   protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, prepared
   output, typed skip settlement, and interaction/timer composition.
-- **Stage image and media:** `showImage`/`hideImage` Stage state and blocking or asynchronous `playAudio`/`playVideo`
+- **Stage image and media:** `showImage`/`hideImage` Stage state, tag queries over the compiled package image catalog
+  (`showImage tagged`, `findImages`), and blocking or asynchronous `playAudio`/`playVideo`
   with playback ranges, repetition, volume, handles, seeks, timeline cues, Player load/progress observations, and
   checkpoint restore at the language, compiler, and runtime level. The Player shows the Stage image and plays
   audio after explicit Start; browser video playback remains deferred.
+- **Camera capture:** `takePhoto()` as a typed capture action with trusted reference admission and non-fatal
+  unavailability under [Runtime](docs/RUNTIME.md#camera-capture). With a trusted host capability the Player opens the
+  session camera after Start and captures silently; a photo saved through script storage is stored in the browser and
+  shown again in a later run. `askImage`, recording APIs, and the advanced package media API remain deferred.
 - **Player:** the POC Player is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. It uses
   Vue/Vite, Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the transcript
   owner. A framework-independent adapter connects it to the implemented transcript, foreground-interaction, pacing,
@@ -57,7 +64,7 @@ contracts and boundaries.
   duration presentation;
 - production cross-origin Player/host integration, richer editor support, and final browser acceptance coverage;
 - pending-action capabilities beyond the implemented timer, interaction, pacing, and media families; browser video
-  playback, the layered scene, camera lifecycle, and custom views;
+  playback, the layered scene, camera capture beyond `takePhoto()`, and custom views;
 - the cross-origin player-host protocol and production browser security integration;
 - TypeScript library linkage, final Standard Library/package identity and compatibility, richer module selection, and
   community dependency resolution;

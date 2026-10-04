@@ -70,7 +70,13 @@ test("parses multiline defaults, named calls, and exact declaration spans", () =
   const call = result.program.statements[1];
   assert.equal(declaration?.kind, "functionDeclaration");
   assert.equal(call?.kind, "expressionStatement");
-  if (declaration?.kind !== "functionDeclaration" || call?.kind !== "expressionStatement") return;
+  assert.equal(call.kind === "expressionStatement" && call.expression.kind, "callExpression");
+  if (
+    declaration?.kind !== "functionDeclaration" ||
+    call?.kind !== "expressionStatement" ||
+    call.expression.kind !== "callExpression"
+  )
+    return;
   assert.equal(declaration.span.start.offset, 0);
   assert.equal(declaration.span.end.offset, source.indexOf("\ngreet("));
   assert.equal(declaration.parameters[1]?.defaultValue?.kind, "stringLiteral");
@@ -146,7 +152,7 @@ test("preserves typed signatures and never silently ignores declared types", () 
     [...source.matchAll(/number/gu)].map((match) => ["number", match.index]),
   );
 
-  const violating = "function echo(value: string): string { return value }\nsay echo(5)";
+  const violating = "function echo(value: string): string { return value }\nsay echo(5)\nexit";
   const compiled = compileSource(violating);
   assert.equal(compiled.plan, null);
   assert.deepEqual(

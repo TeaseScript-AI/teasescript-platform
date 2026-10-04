@@ -16,6 +16,7 @@ test("interpolation selects one list element at every evaluation", () => {
       'let values = [dynamic("left"), 2]',
       'say "Value: ${values}"',
       'say "${values} and ${values}"',
+      "exit",
     ].join("\n")}`,
     [0, 0.75, 0],
   );
@@ -25,7 +26,7 @@ test("interpolation selects one list element at every evaluation", () => {
 
   // Any element that `${...}` shows on its own may be selected.
   const scalars = runSource(
-    `${dynamic}let values = [dynamic(true), null, 90 seconds]\nsay "\${values}, \${values}, \${values}"`,
+    `${dynamic}let values = [dynamic(true), null, 90 seconds]\nsay "\${values}, \${values}, \${values}"\nexit`,
     [0, 0.5, 0.9],
   );
   assert.equal(scalars.result.snapshot.failure, null);
@@ -34,20 +35,23 @@ test("interpolation selects one list element at every evaluation", () => {
 
 test("say shows lists, sets, and objects in code-like notation without message markup", () => {
   const cases = [
-    ['say ["pet", "puppy"]', '["pet", "puppy"]'],
-    ["say [2.5, 3, null]", "[2.5, 3, null]"],
-    ['say [["a"], ["b"]]', '[["a"], ["b"]]'],
-    ['say [{ name: "Bo", age: 3 }]', '[{ name: "Bo", age: 3 }]'],
-    ['say { name: "Bo" }', '{ name: "Bo" }'],
-    ['say ["He said \\"hi\\""]', '["He said \\"hi\\""]'],
-    ["say []", "[]"],
-    ["say {}", "{}"],
-    ["say [90 seconds]", "[1 min 30 s]"],
-    ["say set[2, 1, 2]", "[2, 1]"],
-    ["say [2.50, -0, 1e21]", "[2.5, 0, 1e+21]"],
-    ['say ["a\\\\b", "x\\ny\\tz\\r", "\\${name}"]', '["a\\\\b", "x\\ny\\tz\\r", "\\${name}"]'],
+    ['say ["pet", "puppy"]\nexit', '["pet", "puppy"]'],
+    ["say [2.5, 3, null]\nexit", "[2.5, 3, null]"],
+    ['say [["a"], ["b"]]\nexit', '[["a"], ["b"]]'],
+    ['say [{ name: "Bo", age: 3 }]\nexit', '[{ name: "Bo", age: 3 }]'],
+    ['say { name: "Bo" }\nexit', '{ name: "Bo" }'],
+    ['say ["He said \\"hi\\""]\nexit', '["He said \\"hi\\""]'],
+    ["say []\nexit", "[]"],
+    ["say {}\nexit", "{}"],
+    ["say [90 seconds]\nexit", "[1 min 30 s]"],
+    ["say set[2, 1, 2]\nexit", "[2, 1]"],
+    ["say [2.50, -0, 1e21]\nexit", "[2.5, 0, 1e+21]"],
     [
-      'say ["**bold**", "https://example.com", "# heading", "[link](https://example.com)"]',
+      'say ["a\\\\b", "x\\ny\\tz\\r", "\\${name}"]\nexit',
+      '["a\\\\b", "x\\ny\\tz\\r", "\\${name}"]',
+    ],
+    [
+      'say ["**bold**", "https://example.com", "# heading", "[link](https://example.com)"]\nexit',
       '["**bold**", "https://example.com", "# heading", "[link](https://example.com)"]',
     ],
   ] as const;
@@ -64,7 +68,7 @@ test("say shows lists, sets, and objects in code-like notation without message m
   }
 
   // A scalar is shown as before, and its text is still message markup.
-  const scalar = runSource('say "**bold**"', []);
+  const scalar = runSource('say "**bold**"\nexit', []);
   assert.deepEqual(sayTexts(scalar.result), ["bold"]);
 });
 
@@ -74,6 +78,7 @@ test("say notation survives prepared pacing and checkpoint resume", () => {
     "    return 0",
     "}",
     'say [{ a: "**a**", b: [1] }], pause()',
+    "exit",
   ].join("\n");
   const equivalent = assertRuntimeResumeEquivalent(source);
   assert.deepEqual(
@@ -84,13 +89,13 @@ test("say notation survives prepared pacing and checkpoint resume", () => {
 
 test("say shows ranges and speakers as code-like notation", () => {
   const cases = [
-    ["say 1..5", "1..5"],
-    ["say 1..=5", "1..=5"],
-    ["say [-2..3, 0..=1]", "[-2..3, 0..=1]"],
-    ["say { r: 0..=1 }", "{ r: 0..=1 }"],
-    ["speaker mistress {}\nsay mistress", "<speaker mistress>"],
+    ["say 1..5\nexit", "1..5"],
+    ["say 1..=5\nexit", "1..=5"],
+    ["say [-2..3, 0..=1]\nexit", "[-2..3, 0..=1]"],
+    ["say { r: 0..=1 }\nexit", "{ r: 0..=1 }"],
+    ["speaker mistress {}\nsay mistress\nexit", "<speaker mistress>"],
     [
-      "speaker vera {}\nspeaker mistress {}\nsay [vera, mistress]",
+      "speaker vera {}\nspeaker mistress {}\nsay [vera, mistress]\nexit",
       "[<speaker vera>, <speaker mistress>]",
     ],
   ] as const;
@@ -114,6 +119,7 @@ test("say shows a timer handle with its current state, also after checkpoint res
     "beat.resume()",
     "wait 8 s",
     "say beat, 0",
+    "exit",
   ].join("\n");
   const equivalent = assertRuntimeResumeEquivalent(source);
   assert.deepEqual(
@@ -139,6 +145,7 @@ test("say shows a media handle with its current state, also after checkpoint res
     'let beep = playAudio(file: "beep.mp3", async: true)',
     "wait 61 s",
     "say beep, 0",
+    "exit",
   ].join("\n");
   const equivalent = assertRuntimeResumeEquivalent(source, { mediaDurationMs: 60_000 });
   assert.deepEqual(
@@ -156,11 +163,11 @@ test("interpolation checks the whole list before selecting, so the outcome does 
   // `dynamic` hides the text's type, so one list may hold text and another value.
   const dynamic = "function dynamic(value) {\n  return value\n}\n";
   const cases = [
-    [`${dynamic}let values = [dynamic("ok"), { value: 1 }]\nsay "\${values}"`, "TSR021"],
-    [`${dynamic}let values = [dynamic("ok"), ["nested"]]\nsay "\${values}"`, "TSR021"],
-    [`${dynamic}let values = [dynamic("ok"), set[1]]\nsay "\${values}"`, "TSR021"],
-    [`${dynamic}let values = [dynamic("ok"), 1..2]\nsay "\${values}"`, "TSR021"],
-    ['let values = []\nsay "${values}"', "TSR019"],
+    [`${dynamic}let values = [dynamic("ok"), { value: 1 }]\nsay "\${values}"\nexit`, "TSR021"],
+    [`${dynamic}let values = [dynamic("ok"), ["nested"]]\nsay "\${values}"\nexit`, "TSR021"],
+    [`${dynamic}let values = [dynamic("ok"), set[1]]\nsay "\${values}"\nexit`, "TSR021"],
+    [`${dynamic}let values = [dynamic("ok"), 1..2]\nsay "\${values}"\nexit`, "TSR021"],
+    ['let values = []\nsay "${values}"\nexit', "TSR019"],
   ] as const;
   for (const [source, code] of cases) {
     for (const randomValue of [0, 0.75]) {
@@ -170,7 +177,7 @@ test("interpolation checks the whole list before selecting, so the outcome does 
       assert.deepEqual(sayTexts(execution.result), [], source);
     }
   }
-  const empty = runSource('let values = []\nsay "${values}"', []);
+  const empty = runSource('let values = []\nsay "${values}"\nexit', []);
   assert.equal(
     empty.result.snapshot.failure?.message,
     "An interpolated list must contain at least one element to select from.",
@@ -180,24 +187,24 @@ test("interpolation checks the whole list before selecting, so the outcome does 
 test("interpolated values the compiler can see are checked when compiling", () => {
   const cases = [
     [
-      'say "${[{}]}"',
+      'say "${[{}]}"\nexit',
       "{}",
-      "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
+      "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, and script references, because one element is shown as text.",
     ],
     [
-      'let answer = askText "${[]}"',
+      'let answer = askText "${[]}"\nexit',
       "[]",
       "An interpolated list must contain at least one element to select from.",
     ],
     [
-      'speaker vera {}\nsay "${[vera]}"',
+      'speaker vera {}\nsay "${[vera]}"\nexit',
       "vera",
-      "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
+      "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, and script references, because one element is shown as text.",
     ],
     [
-      'say "${{ name: "Bo" }}"',
+      'say "${{ name: "Bo" }}"\nexit',
       '{ name: "Bo" }',
-      '"${...}" cannot show an object. It shows text, numbers, true, false, null, durations, and date and time values, and selects one element of a list.',
+      '"${...}" cannot show an object. It shows text, numbers, true, false, null, durations, date and time values, and script references, and selects one element of a list.',
     ],
   ] as const;
   for (const [source, at, message] of cases) {
@@ -218,7 +225,7 @@ test("interpolated values the compiler can see are checked when compiling", () =
 });
 
 test("preserves direct scalar visible-text conversion", () => {
-  const execution = runSource(["say true", "say null", "say 3.5"].join("\n"), []);
+  const execution = runSource(["say true", "say null", "say 3.5", "exit"].join("\n"), []);
 
   assert.equal(execution.result.snapshot.failure, null);
   assert.equal(execution.randomCalls, 0);

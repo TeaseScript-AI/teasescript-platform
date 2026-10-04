@@ -1,6 +1,7 @@
 import type {
   ForStatement,
   FunctionParameter,
+  GlobalStatement,
   LetStatement,
   ScalarTypeName,
   TypeAnnotation,
@@ -86,8 +87,11 @@ function scalar(name: ScalarTypeName): StaticType {
  */
 export type Origin = Declaration | PartOrigin;
 
-/** The declaration of a variable without a type annotation: `let`, a parameter with a default, or a loop variable. */
-export type Declaration = LetStatement | FunctionParameter | ForStatement;
+/**
+ * The declaration of a variable without a type annotation: `let`, `global`, a parameter with a default, or a loop
+ * variable.
+ */
+export type Declaration = LetStatement | GlobalStatement | FunctionParameter | ForStatement;
 
 /**
  * An element or property inside a variable without a type annotation, which a number may derive from: the variable and
@@ -283,6 +287,7 @@ export const DATE_TYPE = scalar("date");
 export const TIME_TYPE = scalar("time");
 export const DATETIME_TYPE = scalar("datetime");
 export const TIMESTAMP_TYPE = scalar("timestamp");
+export const SCRIPT_TYPE = scalar("script");
 
 export function openType(): OpenType {
   return { kind: "open", resolved: null, resolvedAt: null, sawNull: false };
@@ -1369,6 +1374,7 @@ const SCALAR_DESCRIPTIONS: Readonly<Record<ScalarTypeName, string>> = {
   time: "a time",
   datetime: "a date and time",
   timestamp: "a timestamp",
+  script: "a script reference",
 };
 
 /** A plain-language description of a value of `type` for diagnostics. */

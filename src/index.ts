@@ -29,6 +29,11 @@ export { parse, type ParseResult } from "./parser.js";
 export type { ScriptHeader } from "./script-header.js";
 export { normalizeTagName, type Tag } from "./tags.js";
 export {
+  readImageXmpKeywords,
+  readXmpPacketKeywords,
+  type XmpKeywordsResult,
+} from "./xmp-keywords.js";
+export {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   compileProject,
@@ -40,6 +45,7 @@ export {
   type ProjectFileCompilation,
   type ProjectSourceFile,
 } from "./compiler.js";
+export type { ProjectImageFile } from "./image-catalog.js";
 export { MAIN_FILE_PATH } from "./project-paths.js";
 export {
   INSTRUCTION_PLAN_FORMAT,
@@ -121,7 +127,6 @@ export type {
   ActionRequestedEvent,
   PlayerTranscriptEvent,
   ExitEvent,
-  CompleteEvent,
   DeveloperWarningEvent,
   InterpreterEvent,
   OutputSpeaker,
@@ -143,7 +148,11 @@ export {
   type RuntimeOperationResult,
   type RuntimeRunOptions,
 } from "./runtime/engine.js";
-export { completeAction } from "./runtime/operations/complete-action.js";
+export {
+  completeAction,
+  type ActionCompletionOptions,
+} from "./runtime/operations/complete-action.js";
+export type { CapturedMediaAdmission } from "./runtime/actions/capture.js";
 export { observeTime, type MediaProgressReport } from "./runtime/operations/observe-time.js";
 export {
   recordContinueCapture,
@@ -192,6 +201,8 @@ export {
   type RuntimeLoopFrameSnapshot,
   type RuntimeCallArgumentSnapshot,
   type RuntimeCallFrameSnapshot,
+  type RuntimeFileCallFrameSnapshot,
+  type RuntimeFrameSnapshot,
   type RuntimeParameterStateSnapshot,
   type RuntimeTemporarySnapshot,
   type RuntimeRepeatLoopFrameSnapshot,
@@ -203,7 +214,10 @@ export {
   type SnapshotValidationResult,
 } from "./runtime/state.js";
 export type {
+  CaptureUnavailableReason,
   RuntimeActionSettlementSnapshot,
+  RuntimeCaptureActionSettlementSnapshot,
+  RuntimeCaptureActionSnapshot,
   RuntimeDelayActionSnapshot,
   RuntimeInteractionActionSnapshot,
   RuntimeMediaActionSnapshot,
@@ -241,6 +255,7 @@ export {
   type SerializableRuntimeValue,
   type SerializableSpeakerReference,
   type SerializableMediaHandle,
+  type SerializableScriptReference,
   type SerializableRuntimeDate,
   type SerializableRuntimeDateTime,
   type SerializableRuntimeTime,

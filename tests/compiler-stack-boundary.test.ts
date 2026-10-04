@@ -7,7 +7,8 @@ import { runValidSource } from "./helpers/run-valid-source.js";
 
 test("large flat chains complete full compilation with source provenance", () => {
   for (const termCount of [200, 1_600, 6_400, 12_800]) {
-    const source = flatChain(termCount);
+    const statement = flatChain(termCount);
+    const source = `${statement}\nexit`;
     const result = compileSource(source);
     assert.deepEqual(result.diagnostics, []);
     assert.notEqual(result.plan, null);
@@ -15,7 +16,7 @@ test("large flat chains complete full compilation with source provenance", () =>
     assert.equal(declaration?.kind, "declareBinding");
     assert.deepEqual(
       declaration === undefined ? null : [declaration.span.so, declaration.span.eo],
-      [0, source.length],
+      [0, statement.length],
     );
     // Terms cycle through 0..9: each full cycle adds 45, the partial one 0 + ... + (r - 1).
     const remainder = termCount % 10;
@@ -30,8 +31,8 @@ test("large flat chains complete full compilation with source provenance", () =>
 });
 
 test("flat, parenthesis, collection, object, and block compilation remain iterative with a constrained host stack", () => {
-  const source = flatChain(1_024);
-  const nestedSource = `let value = ${"(".repeat(1_024)}1${")".repeat(1_024)}`;
+  const source = `${flatChain(1_024)}\nexit`;
+  const nestedSource = `let value = ${"(".repeat(1_024)}1${")".repeat(1_024)}\nexit`;
   const collectionSource = `let value = ${"[".repeat(1_024)}1${"]".repeat(1_024)}\nexit`;
   const setSource = `let value = ${"set[".repeat(1_024)}1${"]".repeat(1_024)}\nexit`;
   const objectSource = `let value = ${"{ value: ".repeat(1_024)}1${" }".repeat(1_024)}\nexit`;
@@ -70,10 +71,10 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     const compiledObject = compileSource(process.env.TEASESCRIPT_OBJECT_SOURCE);
     const deepObject = "{ x: ".repeat(1024) + "1" + " }".repeat(1024);
     const innerObjectCodes = ["{a:1, b:{q:1}}", "{a:{q:1}, b:2}", "{a:{q:1}.q}", "{a:{q:1}.q + 2}"].map((leaf) =>
-      compileSource("let value = " + "{x:".repeat(1024) + leaf + "}".repeat(1024)).diagnostics.map((diagnostic) => diagnostic.code),
+      compileSource("let value = " + "{x:".repeat(1024) + leaf + "}".repeat(1024) + "\\nexit").diagnostics.map((diagnostic) => diagnostic.code),
     );
     const siblingObjects = ["{ before: 2, child: " + deepObject + " }", "{ child: " + deepObject + ", after: 2 }"].map((expression) => {
-      const compiled = compileSource("let value = " + expression);
+      const compiled = compileSource("let value = " + expression + "\\nexit");
       return {codes: compiled.diagnostics.map((diagnostic) => diagnostic.code), status: compiled.plan ? run(compiled.plan, createFreshRuntimeSnapshot(compiled.plan)).snapshot.status : null};
     });
     const compiledBlock = compileSource(process.env.TEASESCRIPT_BLOCK_SOURCE);
@@ -95,7 +96,7 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     }
     const {createCheckpoint, restoreCheckpoint} = await import(${JSON.stringify(checkpointUrl)});
     const downstreamObjects = [
-      "let value = " + deepObject + " == null",
+      "let value = " + deepObject + " == null\\nexit",
       "function take(value = " + deepObject + ") { return value }\\nlet got = take()\\nexit",
     ].map((source) => {
       const compiled = compileSource(source);
@@ -180,7 +181,7 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     compiledFlatCodes: [],
     compiledFlatValue: 4_596,
     compiledNestedCodes: [],
-    compiledNestedProgramStatements: 1,
+    compiledNestedProgramStatements: 2,
     compiledNestedValue: 1,
     innerObjectCodes: [[], [], [], []],
     downstreamObjects: [
@@ -216,11 +217,11 @@ test("type checking follows long function, default, and property chains, wide li
     const { compileSource } = await import(${JSON.stringify(compilerUrl)});
     const chain = (link) => Array.from({ length: 512 }, (_, index) => link(index, index === 511 ? "1" : "f" + (index + 1) + "()"));
     const sources = [
-      chain((index, next) => "function f" + index + " { return " + next + " }").join("\\n") + "\\nlet result = f0()",
-      chain((index, next) => "function f" + index + "(x = " + next + ") { return x }").join("\\n") + "\\nlet result = f0()",
+      chain((index, next) => "function f" + index + " { return " + next + " }").join("\\n") + "\\nlet result = f0()\\nexit",
+      chain((index, next) => "function f" + index + "(x = " + next + ") { return x }").join("\\n") + "\\nlet result = f0()\\nexit",
       "function f(obj) { obj" + ".x".repeat(4096) + ".p = 1 }\\nexit",
       "let wide = [" + "1, ".repeat(32767) + "1]\\nexit",
-      'let passed = (load "v") is ' + Array.from({ length: 65536 }, (_, index) => (index % 2 === 0 ? "integer" : "string")).join(" | "),
+      'let passed = (load "v") is ' + Array.from({ length: 65536 }, (_, index) => (index % 2 === 0 ? "integer" : "string")).join(" | ") + "\\nexit",
     ];
     process.stdout.write(JSON.stringify(sources.map((source) => {
       const compiled = compileSource(source);
