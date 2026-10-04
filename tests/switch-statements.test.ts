@@ -594,3 +594,26 @@ test("a case that lists null with other values takes null away from the cases af
 
   assert.deepEqual(says(source), ["6 strokes."]);
 });
+
+test("a range case that no choice value falls in is a never-matching warning", () => {
+  const result = compileSource(
+    [
+      'let pick = choose 0: "Toilet", 1: "Sleep", 2: "Break"',
+      "switch pick {",
+      '  case 0 { say "a" }',
+      '  case 1..=2 { say "b" }',
+      '  case 3..=5 { say "never" }',
+      "}",
+    ].join("\n"),
+  );
+  assert.notEqual(result.plan, null);
+  assert.deepEqual(
+    result.diagnostics.map((item) => [
+      item.severity,
+      item.code,
+      item.span.start.line + 1,
+      item.message,
+    ]),
+    [["warning", "TSV046", 5, "'pick' is always 0, 1 or 2 here, so this case never matches."]],
+  );
+});

@@ -201,6 +201,19 @@ function literalValue(
   }
 }
 
+/** The bounds of a range case with a number literal on each side, such as `1..=5`, or `undefined` for another value. */
+export function literalRange(
+  expression: Expression,
+): { readonly start: number; readonly end: number; readonly inclusive: boolean } | undefined {
+  const range = unwrapParentheses(expression);
+  if (range.kind !== "rangeExpression") return undefined;
+  const start = numberLiteral(range.start);
+  const end = numberLiteral(range.end);
+  return start === undefined || end === undefined
+    ? undefined
+    : { start: start.value, end: end.value, inclusive: range.inclusive };
+}
+
 /** A number literal with an optional sign, such as `3`, `-2.5`, or `+1`. */
 function numberLiteral(expression: Expression): { value: number; text: string } | undefined {
   const { negative, operand } = signed(expression);

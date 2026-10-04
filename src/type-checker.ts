@@ -62,7 +62,7 @@ import {
   type StaticScalar,
 } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
-import { impossibleCaseMessage } from "./switch-cases.js";
+import { impossibleCaseMessage, literalRange } from "./switch-cases.js";
 import type { SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
 import {
@@ -2292,9 +2292,21 @@ class TypeChecker {
     )
       return `${holder} holds ${describeValue(subject)} here, after the cases above, so this case never matches.`;
     const possible = possibleValues(subject);
+    if (possible === undefined) return undefined;
+    // A range matches a number within its bounds, so no button value may fall in it.
+    const range = literalRange(value);
+    if (range !== undefined) {
+      const within = ({ value, duration }: PossibleValue) =>
+        typeof value === "number" &&
+        !duration &&
+        value >= range.start &&
+        (range.inclusive ? value <= range.end : value < range.end);
+      return possible.some(within)
+        ? undefined
+        : `${holder} is always ${describeLiterals(possible)} here, so this case never matches.`;
+    }
     const literal = comparedLiteral(value);
-    if (possible === undefined || literal === undefined || mayEqualAny(subject, literal))
-      return undefined;
+    if (literal === undefined || mayEqualAny(subject, literal)) return undefined;
     return `${holder} is always ${describeLiterals(possible)} here, so this case never matches.`;
   }
 
