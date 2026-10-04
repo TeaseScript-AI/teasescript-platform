@@ -880,14 +880,14 @@ class TypeChecker {
         verb: "start as",
         fix: (rejected, expression) => typeFix(name, type, rejected, expression),
       };
-      // A typed load's default must fit the variable as well; the loaded value itself is checked at runtime.
-      if (initializer.kind === "loadExpression" && initializer.defaultValue !== null) {
-        yield* compileChild(
-          this.#storeTask(place, initializer.defaultValue, this.#typeOf(initializer.defaultValue)),
-        );
-      } else {
-        yield* compileChild(this.#storeTask(place, statement.initializer, value));
-      }
+      const checked = checkedValue(statement.initializer);
+      yield* compileChild(
+        this.#storeTask(
+          place,
+          checked,
+          checked === statement.initializer ? value : this.#typeOf(checked),
+        ),
+      );
       this.#recordRuntimeCheck(statement, type, `'${name}'`, value);
     }
     const variable: Variable = {
@@ -967,8 +967,15 @@ class TypeChecker {
         if (statement.operator === "=") {
           const value = yield* compileChild(this.#expressionTask(statement.value, scope));
           const receiver = this.#elementReceiver(target.object, scope, object, value);
+          const checked = checkedValue(statement.value);
           yield* compileChild(
-            this.#storeElementTask(receiver, target.object, statement.value, value, scope),
+            this.#storeElementTask(
+              receiver,
+              target.object,
+              checked,
+              checked === statement.value ? value : this.#typeOf(checked),
+              scope,
+            ),
           );
           this.#recordRuntimeCheck(
             statement,
@@ -1060,7 +1067,14 @@ class TypeChecker {
     // For `+=` and `-=`, the runtime checks the computed result, which is unknown when the operand is.
     this.#recordRuntimeCheck(statement, place.type, runtimePlace(target), value);
     if (statement.operator === "=") {
-      yield* compileChild(this.#storeTask(place, statement.value, value));
+      const checked = checkedValue(statement.value);
+      yield* compileChild(
+        this.#storeTask(
+          place,
+          checked,
+          checked === statement.value ? value : this.#typeOf(checked),
+        ),
+      );
       // A variable of unknown type may take the value's own type, so it gets a copy of a place it was read from.
       if (variable !== undefined) this.#assigned(variable, this.#capture(statement.value));
       return;
@@ -4461,6 +4475,14 @@ function isPureBuiltinCall(expression: CallExpression): boolean {
 }
 
 // Places -------------------------------------------------------------------------------------------------------------
+
+/** What a store checks at compile time: for a load, its default; the loaded value itself is checked at runtime. */
+function checkedValue(expression: Expression): Expression {
+  const value = unwrap(expression);
+  return value.kind === "loadExpression" && value.defaultValue !== null
+    ? value.defaultValue
+    : expression;
+}
 
 function variablePlace(variable: Variable): Place {
   const name = variable.name;
