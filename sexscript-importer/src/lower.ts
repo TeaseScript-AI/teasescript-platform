@@ -3889,6 +3889,20 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
         context.actions.add(name);
         return { kind: "literal", value: name, action: true };
       }
+      if (
+        !context.types.variables.has(name) &&
+        !context.packageFunctions.has(name) &&
+        !isLegacyGetterProperty(name)
+      ) {
+        // No declaration, assignment, parameter, or package global defines it, and no SexScript getter: Groovy
+        // looked it up as a property of the script and failed (MissingPropertyException).
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_UNDEFINED_VARIABLE",
+          `${name} is never assigned in this script or its package; SexScript failed with a missing property whenever this ran.`,
+        );
+      }
       return { kind: "variable", name };
     }
     case "list": {
@@ -5436,6 +5450,12 @@ function dateTimeField(
         `java.util.Calendar field ${field} has no direct TeaseScript datetime property.`,
       );
   }
+}
+
+/** A name Groovy read through a SexScript getter of the script object, such as `dataFolder` for getDataFolder(). */
+function isLegacyGetterProperty(name: string): boolean {
+  const property = capitalized(name);
+  return SEXSCRIPT_API_METHODS.has(`get${property}`) || SEXSCRIPT_API_METHODS.has(`is${property}`);
 }
 
 /** A reference to a closure function without calling it (and not to a same-named local variable). */
