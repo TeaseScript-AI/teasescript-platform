@@ -9,7 +9,7 @@ import type {
   SetLiteral,
   Statement,
   InteractionExpression,
-  ShowButtonStatement,
+  ShowButtonParts,
 } from "../../ast.js";
 import type { SourceSpan } from "../../source.js";
 import { InstructionCompilationError } from "../errors.js";
@@ -30,6 +30,8 @@ import type {
   StorageTypePlan,
   TemporaryExpressionPlan,
   InteractionChoiceOption,
+  InteractionKind,
+  InteractionResultDomain,
   InteractionUiPayload,
   PreparedInteractionUiPayload,
   PlanSourceLocation,
@@ -42,6 +44,7 @@ import { runCompileTask, compileChild, type CompileTask } from "../continuation.
 import {
   expressionChildren as instructionEmissionChildren,
   mediaOperands,
+  showButtonOptions,
 } from "../../expression-children.js";
 
 export class InstructionCompiler {
@@ -279,7 +282,7 @@ export class InstructionCompiler {
         return;
       }
       case "showButtonStatement":
-        this.#compileShowButton(statement);
+        yield* compileChild(this.#lowerShowButtonTask(statement, false));
         return;
       case "waitStatement": {
         const lowered = this.#lowerExpression(statement.duration);
@@ -895,6 +898,11 @@ export class InstructionCompiler {
     if (expression.kind === "interactionExpression") {
       return yield* compileChild(this.#lowerInteractionTask(expression));
     }
+    if (expression.kind === "showButtonExpression") {
+      const lowered = yield* compileChild(this.#lowerShowButtonTask(expression, true));
+      if (lowered === null) throw new TypeError("A showButton value lowered without a result.");
+      return lowered;
+    }
     if (expression.kind === "timerExpression") {
       const lowered = yield* compileChild(this.#lowerTimerTask(expression, true));
       if (lowered === null) throw new TypeError("A blocking timer reached value lowering.");
@@ -1120,64 +1128,82 @@ export class InstructionCompiler {
     }
   }
 
-  #compileShowButton(statement: ShowButtonStatement): void {
-    const staticLabel = staticVisibleText(statement.label);
-    if (staticLabel !== undefined && statement.background === null) {
+  /**
+   * Lowers a `showButton`. A static label without options embeds its UI; otherwise the requesting speaker, the label,
+   * and the options are prepared in source order. As a value, the button yields its elapsed waiting time.
+   */
+  *#lowerShowButtonTask(
+    parts: ShowButtonParts,
+    valueWanted: boolean,
+  ): CompileTask<LoweredExpression | null> {
+    const expectedResult = valueWanted ? "duration" : "none";
+    const accessibleName = { kind: "localizedDefault", key: "continue" } as const;
+    const staticLabel = staticVisibleText(parts.label);
+    if (staticLabel !== undefined && parts.background === null && parts.timeout === null) {
+      const instruction = {
+        interactionKind: "button",
+        target: "standardChat",
+        speaker: parts.speaker?.name ?? null,
+        expectedResult,
+        ui: { kind: "button", buttonLabel: staticLabel, accessibleName },
+        span: copySpan(parts.span),
+      } as const;
+      if (valueWanted) return this.#emitResultInteraction(instruction, parts.span);
+      this.instructions.push({ kind: "interaction", ...instruction, destinationTemporary: null });
+      return null;
+    }
+
+    const speakerTemporary = this.#prepareInteractionSpeaker(
+      parts.speaker?.name ?? null,
+      parts.asSpan ?? parts.commandSpan,
+    );
+    const label = this.#materializeDedicatedInteractionValue(
+      yield* compileChild(this.#lowerInteractionPayloadTask(parts.label, speakerTemporary)),
+      parts.label.span,
+    );
+    const optionTemporaries: { background?: number; timeout?: number } = {};
+    for (const option of showButtonOptions(parts)) {
+      optionTemporaries[option.name] = this.#materializeDedicatedInteractionValue(
+        yield* compileChild(this.#lowerInteractionPayloadTask(option.value, speakerTemporary)),
+        option.value.span,
+      ).temporaryId;
+    }
+    const { background, timeout } = optionTemporaries;
+    const preparedUi: PreparedInteractionUiPayload = {
+      kind: "button",
+      buttonLabelTemporary: label.temporaryId,
+      ...(background === undefined ? {} : { backgroundTemporary: background }),
+      ...(timeout === undefined ? {} : { timeoutTemporary: timeout }),
+      accessibleName,
+    };
+    const preparedTemporaryIds = [
+      speakerTemporary,
+      label.temporaryId,
+      ...Object.values(optionTemporaries),
+    ];
+    let lowered: LoweredExpression | null = null;
+    if (valueWanted) {
+      lowered = this.#emitPreparedResultInteraction(
+        "button",
+        "duration",
+        speakerTemporary,
+        preparedUi,
+        parts.span,
+      );
+    } else {
       this.instructions.push({
         kind: "interaction",
         interactionKind: "button",
         target: "standardChat",
-        speaker: statement.speaker?.name ?? null,
+        speakerTemporary,
         destinationTemporary: null,
         expectedResult: "none",
-        ui: {
-          kind: "button",
-          buttonLabel: staticLabel,
-          accessibleName: { kind: "localizedDefault", key: "continue" },
-        },
-        span: copySpan(statement.span),
+        preparedUi,
+        span: copySpan(parts.span),
       });
-      return;
     }
-
-    const speakerTemporary = this.#prepareInteractionSpeaker(
-      statement.speaker?.name ?? null,
-      statement.asSpan ?? statement.commandSpan,
-    );
-    const label = this.#materializeDedicatedInteractionValue(
-      this.#lowerInteractionPayload(statement.label, speakerTemporary),
-      statement.label.span,
-    );
-    const background =
-      statement.background === null
-        ? null
-        : this.#materializeDedicatedInteractionValue(
-            this.#lowerInteractionPayload(statement.background, speakerTemporary),
-            statement.background.span,
-          );
-    this.instructions.push({
-      kind: "interaction",
-      interactionKind: "button",
-      target: "standardChat",
-      speakerTemporary,
-      destinationTemporary: null,
-      expectedResult: "none",
-      preparedUi: {
-        kind: "button",
-        buttonLabelTemporary: label.temporaryId,
-        ...(background === null ? {} : { backgroundTemporary: background.temporaryId }),
-        accessibleName: { kind: "localizedDefault", key: "continue" },
-      },
-      span: copySpan(statement.span),
-    });
-    this.#emitTemporaryCleanup(
-      [
-        speakerTemporary,
-        label.temporaryId,
-        ...(background === null ? [] : [background.temporaryId]),
-      ],
-      statement.span,
-    );
+    this.#emitTemporaryCleanup(preparedTemporaryIds, parts.span);
+    return lowered;
   }
 
   *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
@@ -1308,8 +1334,8 @@ export class InstructionCompiler {
   }
 
   #emitPreparedResultInteraction(
-    interactionKind: InteractionExpression["interactionKind"],
-    expectedResult: "string" | "number" | "choice",
+    interactionKind: InteractionKind,
+    expectedResult: Exclude<InteractionResultDomain, "none">,
     speakerTemporary: number,
     preparedUi: PreparedInteractionUiPayload,
     span: SourceSpan,
@@ -1780,6 +1806,7 @@ export class InstructionCompiler {
 
       if (
         current.expression.kind === "interactionExpression" ||
+        current.expression.kind === "showButtonExpression" ||
         current.expression.kind === "timerExpression" ||
         current.expression.kind === "playMediaExpression"
       ) {
@@ -2095,6 +2122,7 @@ function assembleExpression(
         span: copySpan(expression.span),
       };
     case "interactionExpression":
+    case "showButtonExpression":
     case "timerExpression":
     case "playMediaExpression":
       throw new TypeError(

@@ -8,12 +8,13 @@ import type {
   LetStatement,
   MediaParts,
   Program,
+  ShowButtonParts,
   Statement,
   TimerParts,
 } from "./ast.js";
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
-import { mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
+import { mediaHandlerBlocks, mediaOperands, showButtonOptions } from "./expression-children.js";
 import {
   isBlankTextAnswer,
   isValidInteractionPrefill,
@@ -374,16 +375,7 @@ class TypeChecker {
           );
         return true;
       case "showButtonStatement":
-        this.#checkShownText(
-          statement.label,
-          yield* compileChild(this.#expressionTask(statement.label, scope)),
-          "a button label",
-        );
-        if (statement.background !== null)
-          this.#checkBackground(
-            statement.background,
-            yield* compileChild(this.#expressionTask(statement.background, scope)),
-          );
+        yield* compileChild(this.#showButtonTask(statement, scope));
         return true;
       case "waitStatement":
         yield* compileChild(this.#timeTask(statement.duration, statement.unit !== null, scope));
@@ -1175,6 +1167,9 @@ class TypeChecker {
       }
       case "interactionExpression":
         return yield* compileChild(this.#interactionTask(expression, scope));
+      case "showButtonExpression":
+        yield* compileChild(this.#showButtonTask(expression, scope));
+        return DURATION_TYPE;
       case "timerExpression":
         yield* compileChild(this.#timerTask(expression, scope));
         return expression.async ? { kind: "timer" } : UNKNOWN_TYPE;
@@ -1646,6 +1641,26 @@ class TypeChecker {
   }
 
   /** A button background is a colour in text; `null` is no colour either, so an optional type is checked by its value. */
+  /** A button's label is shown text, and its options are checked in source order. As a value it is a duration. */
+  *#showButtonTask(parts: ShowButtonParts, scope: Scope): CompileTask<void> {
+    this.#checkShownText(
+      parts.label,
+      yield* compileChild(this.#expressionTask(parts.label, scope)),
+      "a button label",
+    );
+    for (const option of showButtonOptions(parts)) {
+      const type = yield* compileChild(this.#expressionTask(option.value, scope));
+      if (option.name === "background") this.#checkBackground(option.value, type);
+      else
+        this.#reportUnless(
+          type,
+          isNumeric(type) || isScalar(type, "duration"),
+          option.value,
+          "A showButton timeout is a duration such as '30 s', or a number of seconds",
+        );
+    }
+  }
+
   #checkBackground(expression: Expression, type: StaticType): void {
     if (isKnown(nonNullType(type)) && !isScalar(nonNullType(type), "string"))
       this.#report(

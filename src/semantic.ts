@@ -9,6 +9,7 @@ import type {
   CallArgument,
   Identifier,
   InteractionChoiceOption,
+  ShowButtonParts,
   TimerParts,
   Expression,
   MediaParts,
@@ -23,9 +24,14 @@ import {
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
-import { staticNumber, staticVisibleText } from "./static-evaluation.js";
+import { staticNumber, staticQuantity, staticVisibleText } from "./static-evaluation.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
-import { expressionChildren, mediaHandlerBlocks, mediaOperands } from "./expression-children.js";
+import {
+  expressionChildren,
+  mediaHandlerBlocks,
+  mediaOperands,
+  showButtonOptions,
+} from "./expression-children.js";
 import { durationLiteralMilliseconds } from "./duration.js";
 
 export interface SemanticValidationOptions {
@@ -680,15 +686,9 @@ class SemanticValidator {
         }
         return;
       }
-      case "showButtonStatement": {
-        const contextualSpeaker = this.#interactionSpeaker(statement.speaker, scope);
-        this.#validateExpression(statement.label, scope, contextualSpeaker);
-        if (statement.background !== null) {
-          this.#validateExpression(statement.background, scope, contextualSpeaker);
-          this.#validateButtonBackground(statement.background);
-        }
+      case "showButtonStatement":
+        yield* compileChild(this.#validateShowButtonTask(statement, scope));
         return;
-      }
       case "waitStatement": {
         this.#validateExpression(statement.duration, scope, null);
         if (
@@ -1067,6 +1067,9 @@ class SemanticValidator {
         );
         this.#validateTimerHandleMember(expression.object, expression.property, scope, "read");
         return;
+      case "showButtonExpression":
+        yield* compileChild(this.#validateShowButtonTask(expression, scope));
+        return;
       case "timerExpression":
         this.#validateTimer(expression, scope, true);
         return;
@@ -1233,6 +1236,41 @@ class SemanticValidator {
       : this.#validateSpeakerReference(speaker.name, speaker.span, scope)
         ? speaker.name
         : null;
+  }
+
+  /** Validates the operands of a statement or expression `showButton` in source order. */
+  *#validateShowButtonTask(parts: ShowButtonParts, scope: SemanticScope): CompileTask<void> {
+    const contextualSpeaker = this.#interactionSpeaker(parts.speaker, scope);
+    yield* compileChild(this.#validateExpressionTask(parts.label, scope, contextualSpeaker));
+    for (const option of showButtonOptions(parts)) {
+      yield* compileChild(this.#validateExpressionTask(option.value, scope, contextualSpeaker));
+      if (option.name === "background") this.#validateButtonBackground(option.value);
+      else this.#validateButtonTimeout(option.value);
+    }
+  }
+
+  /**
+   * When the compiler can fully evaluate a timeout, it reports every failure the runtime would hit: a value of zero or
+   * less, an overflowing step, or one scene time cannot reach. The type checker requires a number or a duration, and
+   * the runtime checks the values the compiler cannot know.
+   */
+  #validateButtonTimeout(expression: Expression): void {
+    const known = staticQuantity(expression);
+    const milliseconds =
+      known === undefined ? undefined : typeof known === "number" ? known * 1_000 : known.milliseconds;
+    if (milliseconds !== undefined && milliseconds <= 0)
+      this.#report(
+        semanticCode.invalidRepeatCount,
+        "The showButton timeout must be greater than zero. Remove 'timeout:' to wait for the click without a time limit.",
+        expression.span,
+      );
+    // Scene time is at most `Number.MAX_SAFE_INTEGER` milliseconds, so a longer timeout can never be reached.
+    else if (milliseconds !== undefined && !(milliseconds <= Number.MAX_SAFE_INTEGER))
+      this.#report(
+        semanticCode.invalidRepeatCount,
+        "The showButton timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
+        expression.span,
+      );
   }
 
   #validateButtonBackground(expression: Expression): void {
@@ -1572,6 +1610,7 @@ function isDefinitelyNonFileReference(expression: Expression): boolean {
     kind === "setLiteral" ||
     kind === "objectLiteral" ||
     kind === "rangeExpression" ||
+    kind === "showButtonExpression" ||
     kind === "timerExpression" ||
     kind === "playMediaExpression" ||
     kind === "unaryExpression"
@@ -1600,11 +1639,18 @@ function isKnownInteger(expression: Expression): boolean {
 /** The first interaction or media playback in a parameter default, which cannot pause a default's evaluation. */
 function findFirstInteraction(
   expression: Expression,
-): Extract<Expression, { kind: "interactionExpression" | "playMediaExpression" }> | null {
+): Extract<
+  Expression,
+  { kind: "interactionExpression" | "showButtonExpression" | "playMediaExpression" }
+> | null {
   const work = [expression];
   while (work.length) {
     const current = work.pop()!;
-    if (current.kind === "interactionExpression" || current.kind === "playMediaExpression")
+    if (
+      current.kind === "interactionExpression" ||
+      current.kind === "showButtonExpression" ||
+      current.kind === "playMediaExpression"
+    )
       return current;
     const children = expressionChildren(current);
     for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
@@ -1634,6 +1680,7 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "objectLiteral" ||
     expression.kind === "rangeExpression" ||
     expression.kind === "durationLiteral" ||
+    expression.kind === "showButtonExpression" ||
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression"
   );
@@ -1667,6 +1714,7 @@ function isDefinitelyNonString(expression: Expression): boolean {
     expression.kind === "objectLiteral" ||
     expression.kind === "rangeExpression" ||
     expression.kind === "unaryExpression" ||
+    expression.kind === "showButtonExpression" ||
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression"
   );
@@ -1680,7 +1728,8 @@ function isDefinitelyNonIterable(expression: Expression): boolean {
     expression.kind === "nullLiteral" ||
     expression.kind === "numberLiteral" ||
     expression.kind === "objectLiteral" ||
-    expression.kind === "interactionExpression"
+    expression.kind === "interactionExpression" ||
+    expression.kind === "showButtonExpression"
   );
 }
 
@@ -1717,7 +1766,13 @@ function visitExpression(
             ...(current.defaultValue === null ? [] : [current.defaultValue]),
             ...current.options.map((option) => option.expression),
           ]
-        : expressionChildren(current);
+        : current.kind === "showButtonExpression"
+          ? [
+              ...(current.speaker === null ? [] : [current.speaker]),
+              current.label,
+              ...showButtonOptions(current).map((option) => option.value),
+            ]
+          : expressionChildren(current);
     for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
   }
 }

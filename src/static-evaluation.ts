@@ -69,7 +69,18 @@ export type StaticScalar =
  * operands, with the runtime's operations. Anything else is `undefined`.
  */
 function staticScalar(expression: Expression): { readonly value: StaticScalar } | undefined {
-  return runCompileTask(staticScalarTask(expression));
+  return runCompileTask(staticScalarTask(expression, false));
+}
+
+/**
+ * A known number or duration as the runtime would compute it. A step that overflows makes the whole value that
+ * non-finite result, which the runtime would reject, so a caller can report it. Anything else is `undefined`.
+ */
+export function staticQuantity(
+  expression: Expression,
+): number | { readonly kind: "duration"; readonly milliseconds: number } | undefined {
+  const known = runCompileTask(staticScalarTask(expression, true))?.value;
+  return typeof known === "number" || isStaticDuration(known) ? known : undefined;
 }
 
 /** Scalar visible text, as the runtime converts the value. */
@@ -83,7 +94,10 @@ function scalarText(value: StaticScalar): string {
 
 function* staticScalarTask(
   expression: Expression,
+  keepNonFinite: boolean,
 ): CompileTask<{ readonly value: StaticScalar } | undefined> {
+  const finite = (value: StaticScalar | undefined) =>
+    keepNonFinite && value !== undefined ? { value } : finiteScalar(value);
   expression = unwrapParentheses(expression);
   switch (expression.kind) {
     case "stringLiteral": {
@@ -93,14 +107,14 @@ function* staticScalarTask(
           parts.push(part.value);
           continue;
         }
-        const known = yield* compileChild(staticScalarTask(part.expression));
+        const known = yield* compileChild(staticScalarTask(part.expression, keepNonFinite));
         if (known === undefined) return undefined;
         parts.push(scalarText(known.value));
       }
       return { value: parts.join("") };
     }
     case "numberLiteral":
-      return Number.isFinite(expression.value) ? { value: expression.value } : undefined;
+      return finite(expression.value);
     case "booleanLiteral":
       return { value: expression.value };
     case "nullLiteral":
@@ -109,7 +123,7 @@ function* staticScalarTask(
       return finite({ kind: "duration", milliseconds: durationLiteralMilliseconds(expression) });
     case "unaryExpression": {
       if (expression.operator !== "+" && expression.operator !== "-") return undefined;
-      const known = yield* compileChild(staticScalarTask(expression.operand));
+      const known = yield* compileChild(staticScalarTask(expression.operand, keepNonFinite));
       const value = known?.value;
       if (typeof value === "number") return { value: expression.operator === "+" ? value : -value };
       if (!isStaticDuration(value)) return undefined;
@@ -118,10 +132,13 @@ function* staticScalarTask(
         : { value: { kind: "duration", milliseconds: 0 - value.milliseconds } };
     }
     case "binaryExpression": {
-      const left = yield* compileChild(staticScalarTask(expression.left));
+      const left = yield* compileChild(staticScalarTask(expression.left, keepNonFinite));
       if (left === undefined) return undefined;
-      const right = yield* compileChild(staticScalarTask(expression.right));
+      const right = yield* compileChild(staticScalarTask(expression.right, keepNonFinite));
       if (right === undefined) return undefined;
+      // The runtime rejects a non-finite step, so later arithmetic cannot make the result valid again.
+      if (keepNonFinite && finiteScalar(left.value) === undefined) return left;
+      if (keepNonFinite && finiteScalar(right.value) === undefined) return right;
       return finite(arithmetic(expression.operator, left.value, right.value));
     }
     default:
@@ -174,7 +191,9 @@ function isStaticDuration(
   return typeof value === "object" && value !== null;
 }
 
-function finite(value: StaticScalar | undefined): { readonly value: StaticScalar } | undefined {
+function finiteScalar(
+  value: StaticScalar | undefined,
+): { readonly value: StaticScalar } | undefined {
   if (value === undefined) return undefined;
   if (typeof value === "number") return Number.isFinite(value) ? { value } : undefined;
   if (isStaticDuration(value)) return Number.isFinite(value.milliseconds) ? { value } : undefined;

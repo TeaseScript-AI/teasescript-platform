@@ -1,5 +1,5 @@
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 28;
+export const INSTRUCTION_PLAN_VERSION = 29;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -403,8 +403,8 @@ export interface PlayMediaInstruction extends InstructionBase {
 }
 
 export type InteractionKind = "button" | "text" | "number" | "choice";
-/** `choice` is the value of the selected choice option. */
-export type InteractionResultDomain = "none" | "string" | "number" | "choice";
+/** `choice` is the value of the selected choice option; a button used as a value yields a `duration`. */
+export type InteractionResultDomain = "none" | "string" | "number" | "choice" | "duration";
 export type InteractionAccessibleName =
   | { readonly kind: "text"; readonly text: string }
   | {
@@ -454,6 +454,8 @@ export type PreparedInteractionUiPayload =
       readonly kind: "button";
       readonly buttonLabelTemporary: number;
       readonly backgroundTemporary?: number;
+      /** Holds the evaluated timeout until the button appears; the action keeps it as `timeoutMs`. */
+      readonly timeoutTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {

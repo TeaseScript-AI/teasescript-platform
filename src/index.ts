@@ -200,6 +200,7 @@ export type {
   RuntimeStorageWriteActionSnapshot,
   RuntimeStorageWriteSettlementSnapshot,
 } from "./runtime/actions/model.js";
+export { interactionDeadlineMs } from "./runtime/actions/model.js";
 export {
   DEFAULT_PLAYGROUND_SEED,
   createXorShift32State,

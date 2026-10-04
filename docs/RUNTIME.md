@@ -66,6 +66,7 @@ One discriminated pending-action family must carry JSON-safe data equivalent to:
 kind: button | text | number | choice
 action identity
 owning and continuation instruction positions
+scene time when it appeared, and a button's timeout when set
 result destination when applicable
 expected result type
 validated Standard UI payload
@@ -85,8 +86,8 @@ continuation.
 
 The compact compiler fully lowers these forms into the versioned plan. Static control text is embedded directly in the interaction instruction. Dynamic control text first captures the requesting speaker, evaluates payload expressions in source order, and stores one prepared UI value; dynamic `choose` batches all option values into one prepared list, next to the value written before each option's `:` (or `null`) in the plan, rather than emitting one interaction-preparation instruction per option. The runtime materializes and validates that prepared UI atomically before publishing the pending action: it expands each list or set option into one button per element, in order, gives every button its value (the written value, a choice object's `value`, or else the option itself), and rejects a choice without buttons or with more buttons than the option-count limit. Buttons may share a value. No Standard Library lookup or suspended JavaScript/TypeScript call survives the compile boundary.
 
-Result-bearing text, number, and choice instructions require the destination temporary to be absent when the interaction
-is requested. Successful completion atomically writes the typed result into that prepared ordinary runtime temporary,
+Result-bearing text, number, choice, and valued button instructions require the destination temporary to be absent
+when the interaction is requested. Successful completion atomically writes the typed result into that prepared ordinary runtime temporary,
 records one nullable single-use `interactionResultHandoff` authority, and advances to the next instruction without
 executing it. The handoff contains only the completed action identity, owning and continuation positions, owner call
 frame, destination temporary, and canonical result. Snapshot validation checks it independently of the bounded
@@ -110,7 +111,12 @@ Completion semantics are:
 - `choose` returns the value of the selected button: a value written before `:` (an identifier is a `string`, a
   numeric literal a number), a choice object's `value` (or its `text` when it has none), or otherwise the option
   itself with its own type, which may be text, a number, a boolean, `null`, or a duration;
-- `showButton` has no useful first-slice return value or timeout.
+- `showButton` used as a value returns the scene time since the button appeared as a `duration`; used as a statement
+  it has no result. Its optional timeout, converted to milliseconds when the button appears, must be finite and
+  positive with a representable deadline at `appeared + timeout`; otherwise the instruction fails with `TSR050` before
+  the button appears. Reaching the deadline is a time settlement, below: the settlement kind is `timedOut`, it
+  publishes `actionCompleted` without a `playerTranscript` event, and its result is exactly the timeout. A click that
+  arrives later returns `alreadySettled` with that settlement.
 
 A rendered choice control supplies the position of its button (`{ kind: "selectedOption", optionIndex }`), because several buttons may return the same value. The engine derives the returned value and the canonical transcript text from the active action. A rendered control never supplies a replacement canonical transcript string.
 
@@ -551,7 +557,7 @@ accumulated elapsed time. A finished or stopped record moves to `settledTimers` 
 (`{ kind: "timerHandle", timerId }`) stays readable; `nextTimerId` allocates handle IDs.
 
 `observeTime` processes due work globally by `(scene time, phase, action ID)`: foreground and suspended delays, pacing
-gates, timer rounds, and media timeline events (see [Stage image and media playback](#stage-image-and-media-playback)).
+gates, the timeout of the presented button, timer rounds, and media timeline events (see [Stage image and media playback](#stage-image-and-media-playback)).
 A round that expires naturally ends at its deadline and a repeating timer starts its next round there, drawing a
 repeating range from the session RNG; `remaining` reaching zero ends the round at the current scene time, as does
 pausing a round that is already due while its expiry waits behind a running block. An expired round with an expiry block
@@ -569,8 +575,9 @@ An observation records `observedSessionTimeMs`; `currentSessionTimeMs` is the sc
 Due work settles one deadline at a time, advancing scene time to each. Whenever the script or an expiry block can
 execute, catch-up pauses with scene time at the moment that work became due: the script continues after a `wait` or
 pacing gate at its deadline, a block starts at its expiry's deadline, and catch-up continues toward the observed time
-once execution waits or ends. Every settlement records the scene time at which it happened: a time-driven settlement
-records its deadline, and a pacing gate that is skipped, consumed, or superseded records the current scene time. A
+once execution waits or ends. Every delay, pacing-gate, timer, and media settlement records the scene time at which it
+happened: a time-driven settlement records its deadline, and a pacing gate that is skipped, consumed, or superseded
+records the current scene time. A
 late observation therefore gives the same output, events, and snapshot as observing every deadline on time: a block
 can `stop()` a later timer before it expires, and a timer it starts orders by its own deadline.
 
@@ -592,7 +599,9 @@ instruction budget, so extreme catch-up of handler-bearing rounds can exhaust it
 
 The suspended foreground action is inert: a completion for it returns `suspendedAction` without mutation. A suspended
 delay settles in due-work order and publishes `actionCompleted`, without replacing `lastSettlement`; its continuation
-runs once when the block returns. A normal return restores the interrupted action with its original identity;
+runs once when the block returns. A suspended button's timeout does not settle while the block runs; when the block
+returns after the deadline, the restored button times out at once, at the current scene time, with the timeout as its
+result. A normal return restores the interrupted action with its original identity;
 returning to an interaction first consumes a pacing gate created by the block. `stop()` on an active timer cancels its
 unstarted queued blocks; on a finished or stopped timer it is a silent no-op. `exit` inside a block halts the session
 and discards the interrupted action. `exit` and script end stop every timer and drop queued blocks. A failed session

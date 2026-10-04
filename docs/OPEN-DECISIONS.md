@@ -62,8 +62,6 @@ Current constraints: [`TEASESCRIPT.md`](TEASESCRIPT.md), [`LIBRARIES.md`](LIBRAR
 - Static treatment of contextual `speaker` access when control-flow analysis proves no explicit or default speaker is
   available.
 
-- Compatibility mapping and compact author syntax for invoking the accepted V30 `showButton` timeout and
-  elapsed-time behavior.
 - Detailed interaction result objects, including the author-facing option that selects them.
 - Compatibility mapping, names, and option shapes that expose the accepted V30 parenthesized input/choice options
   and custom compact `choose` field hints without changing their accepted behavior.

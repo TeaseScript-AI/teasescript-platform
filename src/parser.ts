@@ -26,6 +26,7 @@ import type {
   PropertyAccessExpression,
   ScalarTypeName,
   SayStatement,
+  ShowButtonParts,
   ShowButtonStatement,
   InteractionExpression,
   InteractionChoiceOption,
@@ -73,7 +74,8 @@ export interface ParseResult {
   readonly diagnostics: readonly Diagnostic[];
 }
 
-// Commands that #parseStatement dispatches by name and that have no expression form.
+// Commands that #parseStatement dispatches by name. A line that starts with one starts a statement; only `showButton`
+// also has an expression form, used after `=`, an operator, or an opening delimiter.
 const statementOnlyCommands: ReadonlySet<string> = new Set([
   "showButton",
   "showImage",
@@ -141,6 +143,7 @@ export function parse(source: string): ParseResult {
 class Parser {
   readonly #diagnostics: Diagnostic[] = [];
   #current = 0;
+  #commaLookahead: { readonly at: number; readonly offset: number | null } | null = null;
   #recoveredAtStatementBoundary = false;
   /** Inside a media cue position, whose block `{` ends a compact choice. */
   #inCuePosition = false;
@@ -182,7 +185,7 @@ class Parser {
 
   *#parseStatement(): ParseTask<Statement | null> {
     if (this.#checkIdentifier("showButton")) {
-      return this.#parseShowButtonStatement();
+      return yield* parseChild(this.#parseShowButtonStatement());
     }
     if (this.#checkIdentifier("timer")) {
       return yield* parseChild(this.#parseTimerStatement());
@@ -253,7 +256,25 @@ class Parser {
     }
   }
 
-  #parseShowButtonStatement(): ShowButtonStatement | null {
+  *#parseShowButtonStatement(): ParseTask<ShowButtonStatement | null> {
+    const parts = yield* parseChild(this.#parseShowButtonParts());
+    if (parts === null) return null;
+    if (this.#check(TokenKind.Comma)) {
+      this.#reportSpan(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        "showButton accepts only background: and timeout: after the button text.",
+        this.#peek().span,
+      );
+      this.#synchronizeStatement();
+    }
+    return Object.freeze({ kind: "showButtonStatement", ...parts });
+  }
+
+  /**
+   * `showButton [as speaker] label [, background: colour] [, timeout: duration]`. A comma that is not followed by one
+   * of the two options is left to the enclosing statement, list, call, or object.
+   */
+  *#parseShowButtonParts(): ParseTask<ShowButtonParts | null> {
     const command = this.#advance();
     if (this.#check(TokenKind.LeftParenthesis)) {
       this.#reportSpan(
@@ -266,7 +287,7 @@ class Parser {
     }
     let asSpan: SourceSpan | null = null;
     let speaker: Identifier | null = null;
-    if (this.#match(TokenKind.KeywordAs)) {
+    if (!this.#atStorageDelimiter() && this.#match(TokenKind.KeywordAs)) {
       asSpan = copySpan(this.#previous().span);
       if (!this.#check(TokenKind.Identifier)) {
         this.#reportInsertion(
@@ -287,7 +308,7 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const label = this.#parseExpression();
+    const label = yield* parseChild(this.#parseOr());
     if (label === null) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedInteractionText,
@@ -297,56 +318,66 @@ class Parser {
       return null;
     }
     let background: Expression | null = null;
-    if (this.#match(TokenKind.Comma)) {
-      const separatorSpan = this.#previous().span;
-      this.#skipContinuationNewlines();
-      if (!this.#checkIdentifier("background") || this.#peek(1).kind !== TokenKind.Colon) {
-        this.#reportSpan(
-          parserDiagnosticCode.unsupportedInteractionForm,
-          "Expected background: colour after the button text.",
-          separatorSpan,
-        );
-        this.#synchronizeStatement();
-        return null;
-      }
-      this.#advance();
-      this.#advance();
-      background = runParse(this.#parseColonValueTask(false));
-      if (background === null) {
+    let timeout: Expression | null = null;
+    for (
+      let offset = this.#interactionDefaultAfterComma();
+      offset !== null;
+      offset = this.#interactionDefaultAfterComma()
+    ) {
+      const name = this.#peek(offset);
+      const option =
+        name.kind === TokenKind.Identifier &&
+        (name.lexeme === "background" || name.lexeme === "timeout") &&
+        this.#peek(offset + 1).kind === TokenKind.Colon
+          ? name.lexeme
+          : null;
+      if (option === null) break;
+      for (let skipped = 0; skipped < offset + 2; skipped += 1) this.#advance();
+      const value = yield* parseChild(this.#parseColonValueTask(false));
+      if (value === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedInteractionText,
-          "Expected a button background colour.",
+          option === "background"
+            ? "Expected a button background colour."
+            : "Expected a button timeout, such as timeout: 5 or timeout: 500 ms.",
         );
         // A statement at the start of a continued line is kept, as for choice values.
         if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
           this.#recoveredAtStatementBoundary = true;
         return null;
       }
+      if ((option === "background" ? background : timeout) !== null) {
+        this.#reportSpan(
+          parserDiagnosticCode.unsupportedInteractionForm,
+          `showButton accepts one ${option}: option.`,
+          name.span,
+        );
+      }
+      if (option === "background") background = value;
+      else timeout = value;
     }
-    if (this.#check(TokenKind.KeywordAs)) {
+    if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
         "The 'as speaker' clause must appear immediately after 'showButton'.",
         this.#peek().span,
       );
       this.#synchronizeStatement();
-    } else if (this.#check(TokenKind.Comma)) {
-      this.#reportSpan(
-        parserDiagnosticCode.unsupportedInteractionForm,
-        "Additional showButton arguments are not supported in the compact interaction syntax.",
-        this.#peek().span,
-      );
-      this.#synchronizeStatement();
     }
-    return Object.freeze({
-      kind: "showButtonStatement",
+    const last = [background, timeout].reduce<Expression>(
+      (latest, option) =>
+        option !== null && option.span.end.offset > latest.span.end.offset ? option : latest,
+      label,
+    );
+    return {
       commandSpan: copySpan(command.span),
       asSpan,
       speaker,
       label,
       background,
-      span: spanFrom(command.span, background?.span ?? label.span),
-    });
+      timeout,
+      span: spanFrom(command.span, last.span),
+    };
   }
 
   #parseSpeakerStatement(): SpeakerDeclaration | SpeakerSetterStatement | null {
@@ -2144,6 +2175,10 @@ class Parser {
     ) {
       return yield* parseChild(this.#parseInteractionExpression());
     }
+    if (this.#checkIdentifier("showButton")) {
+      const parts = yield* parseChild(this.#parseShowButtonParts());
+      return parts === null ? null : Object.freeze({ kind: "showButtonExpression", ...parts });
+    }
     if (this.#checkIdentifier("timer")) {
       const parts = yield* parseChild(this.#parseTimerParts());
       return parts === null ? null : Object.freeze({ kind: "timerExpression", ...parts });
@@ -2411,11 +2446,18 @@ class Parser {
     );
   }
 
-  /** The offset of the token after a `,` and any continuation newlines, or `null` without a comma. */
+  /**
+   * The offset of the token after a `,` and any continuation newlines, or `null` without a comma. Nested interactions
+   * that end at the same token reuse one scan of the newlines.
+   */
   #interactionDefaultAfterComma(): number | null {
-    if (!this.#check(TokenKind.Comma)) return null;
-    let offset = 1;
-    while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
+    if (this.#commaLookahead?.at === this.#current) return this.#commaLookahead.offset;
+    let offset: number | null = null;
+    if (this.#check(TokenKind.Comma)) {
+      offset = 1;
+      while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
+    }
+    this.#commaLookahead = { at: this.#current, offset };
     return offset;
   }
 

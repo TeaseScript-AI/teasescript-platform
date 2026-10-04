@@ -1791,40 +1791,16 @@ The developer instruction controls tone and wording. It does not need to repeat 
 - `askAudio(...)` defaults to `allowMicrophone: true` and `allowFile: true`.
 
 ## 21. Blocking button
-**Status:** Accepted
+**Status:** Accepted (compact form: Owner decision on #531, 2026-10-04)
 
-`showButton` displays a button and blocks normal script execution until the user clicks it or an optional timeout is reached.
-
-The return value may be ignored:
-
-```text
-showButton("Continue")
-```
-
-The elapsed waiting time may also be stored:
+`showButton` displays a button and blocks normal script execution until the user clicks it or an optional timeout is
+reached. It uses the compact form of [ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#showbutton),
+including `as speaker` and `background:`:
 
 ```text
-let elapsed = showButton("Continue")
-```
-
-With an optional timeout, positional or named syntax may be used:
-
-```text
-showButton("Continue", 5)
-```
-
-```text
-let elapsed = showButton(
-    text: "Continue",
-    timeout: 5
-)
-```
-
-The elapsed time is a `duration` ([§35](#35-date-time-durations-and-unix-time)), so it is compared with duration
-values:
-
-```text
-let elapsed = showButton("Continue", 5)
+showButton "Continue"
+showButton "Continue", timeout: 5
+let elapsed = showButton "Continue", timeout: 30 s
 if elapsed < 2 s {
     say "That was quick."
 }
@@ -1835,10 +1811,16 @@ Rules:
 - `timeout` is optional. A bare number counts seconds, as for `wait` and `timer` ([§27](#27-timers)); an elapsed
   duration such as `500 ms` or `2 min` may also be used. `5` and `5 s` are the same timeout.
 - Without a timeout, the command waits until the user clicks.
-- With a timeout, execution continues after the click or when the timeout is reached.
-- The function returns the actual elapsed waiting time as a `duration`.
+- With a timeout, execution continues after the click or when the timeout is reached. A reached timeout removes the
+  button without a chat message.
+- The command returns the elapsed waiting time as a `duration` ([§35](#35-date-time-durations-and-unix-time)),
+  measured in scene time like timers ([§27](#time)). When the timeout is reached, the returned duration equals the
+  timeout; a timeout of `5` returns `5 s`.
 - If the caller does not need the elapsed time, the return value may be ignored.
-- When the timeout is reached, the returned duration equals the timeout; a timeout of `5` returns `5 s`.
+- A zero, negative, or non-numeric timeout, or one with a calendar unit, is an error. The compiler rejects a timeout
+  it can see is invalid; any other is checked when the button would appear, and an invalid one is a runtime error.
+- The parenthesized forms `showButton("Continue", 5)` and `showButton(text: "Continue", timeout: 5)` are deferred
+  until parenthesized interaction calls are needed.
 - `showButton` belongs to the core language/runtime API, not specifically to the browser-picker API.
 
 ## 22. Stage image, audio, and video

@@ -68,7 +68,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 29;
+export const RUNTIME_SNAPSHOT_VERSION = 30;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -678,6 +678,8 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
     target: action.target,
     speakerId: action.speakerId,
     ui: cloneInteractionUi(action.ui),
+    createdAtMs: action.createdAtMs,
+    timeoutMs: action.timeoutMs,
     requestEventSequence: action.requestEventSequence,
   };
 }
@@ -737,7 +739,7 @@ function cloneSettlement(
     actionId: settlement.actionId,
     actionKind: "interaction",
     interactionKind: settlement.interactionKind,
-    settlementKind: "completed",
+    settlementKind: settlement.settlementKind,
     owningInstruction: settlement.owningInstruction,
     continuationInstruction: settlement.continuationInstruction,
     ownerCallFrameId: settlement.ownerCallFrameId,

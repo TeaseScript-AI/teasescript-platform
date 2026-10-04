@@ -89,6 +89,7 @@ import type {
   RuntimeStorageWriteActionSnapshot,
 } from "./actions/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
+import { buttonTimeoutMilliseconds } from "./actions/interaction.js";
 import {
   calculatePacingDeadlineMs,
   calculateSmartPacingDurationMs,
@@ -693,6 +694,20 @@ function executePlannedInstruction(
       const materialized = prepared
         ? materializeInteractionUi(instruction.preparedUi, snapshot.temporaries, instruction.span)
         : { ui: instruction.ui, stagedWrites: [] as const };
+      const timeoutMs =
+        prepared &&
+        instruction.preparedUi.kind === "button" &&
+        instruction.preparedUi.timeoutTemporary !== undefined
+          ? buttonTimeoutMs(
+              readTemporary(
+                snapshot.temporaries,
+                instruction.preparedUi.timeoutTemporary,
+                instruction.span,
+              ),
+              snapshot,
+              instruction.span,
+            )
+          : null;
       const backgroundGate = snapshot.backgroundActions.find(
         (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
       );
@@ -720,6 +735,8 @@ function executePlannedInstruction(
         target: instruction.target,
         speakerId: speaker?.id ?? null,
         ui: cloneInteractionUi(materialized.ui),
+        createdAtMs: snapshot.currentSessionTimeMs,
+        timeoutMs,
         requestEventSequence: sequence,
       });
       commitInteractionMaterialization(snapshot, materialized.stagedWrites);
@@ -1448,8 +1465,38 @@ function cloneInteractionAction(
     target: action.target,
     speakerId: action.speakerId,
     ui: cloneInteractionUi(action.ui),
+    createdAtMs: action.createdAtMs,
+    timeoutMs: action.timeoutMs,
     requestEventSequence: action.requestEventSequence,
   };
+}
+
+/**
+ * A `showButton` timeout in milliseconds: a number of seconds or an elapsed duration greater than zero whose deadline
+ * is a representable later scene time.
+ */
+function buttonTimeoutMs(
+  value: SerializableRuntimeValue,
+  snapshot: RuntimeSnapshot,
+  span: SourceSpan,
+): number {
+  const timeoutMs = buttonTimeoutMilliseconds(value);
+  if (timeoutMs === null) {
+    throw fault(
+      "TSR050",
+      "The showButton timeout must be a number of seconds or a duration greater than zero, such as 'timeout: 5' or 'timeout: 500 ms'.",
+      span,
+    );
+  }
+  const deadlineMs = snapshot.currentSessionTimeMs + timeoutMs;
+  if (!isValidSessionTime(deadlineMs) || deadlineMs <= snapshot.currentSessionTimeMs) {
+    throw fault(
+      "TSR050",
+      "The showButton timeout is outside the supported session-time range.",
+      span,
+    );
+  }
+  return timeoutMs;
 }
 
 function currentCallFrameId(snapshot: RuntimeSnapshot): number | null {
