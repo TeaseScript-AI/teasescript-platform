@@ -906,3 +906,30 @@ test("a glob that may pick main.tease enters it again after its start values", (
   );
   assert.notDeepEqual(result.diagnostics, []);
 });
+
+test("a computed target that may name main.tease enters it again after its start values", () => {
+  const main = [
+    "global value: integer | string = 1",
+    "global first = true",
+    "let count: integer = value",
+    "say count",
+    "if first {",
+    "    first = false",
+    '    goto "b.tease"',
+    "}",
+    "exit",
+  ].join("\n");
+  const codes = (b: string): string[] =>
+    compileProject(
+      project(main, { "b.tease": `value = "bad"\n${b}`, "c.tease": "exit" }),
+    ).diagnostics.map((diagnostic) => diagnostic.code);
+  // A grouped reference, a computed path, and a literal path to main.tease may start main again.
+  for (const transfer of [
+    'let next = script("main.tease")\ngoto (next)',
+    'let path = "main.tease"\ngoto script(path)',
+    'goto script("main.tease")',
+  ])
+    assert.notDeepEqual(codes(transfer), [], transfer);
+  // A literal path to another file does not.
+  assert.deepEqual(codes('goto script("c.tease")'), []);
+});

@@ -4779,10 +4779,8 @@ function programEffects(program: Program): ProgramEffects {
       (statement.kind === "gotoStatement" ||
         statement.kind === "callFileStatement" ||
         statement.kind === "fallbackStatement") &&
-      statement.target?.kind === "fileTarget" &&
-      statement.target.label === null &&
-      // A glob may pick main.tease too.
-      globMatches(statement.target.path, [MAIN_FILE_PATH]).length > 0
+      statement.target !== null &&
+      entersMainAtTop(statement.target)
     )
       entersMain = true;
     // The `default:` form of a global assigns it where the declaration runs.
@@ -5012,6 +5010,30 @@ function timerOperands(timer: TimerParts): readonly Expression[] {
     timer.duration,
     ...(timer.label === null ? [] : [timer.label]),
   ];
+}
+
+/**
+ * Whether a target may enter main.tease at its top: a file target naming it or a glob that may pick it, and any computed
+ * target but a `script(...)` whose literal path names another file.
+ */
+function entersMainAtTop(target: TransferTarget): boolean {
+  if (target.kind === "labelTarget") return false;
+  if (target.kind === "fileTarget")
+    return target.label === null && globMatches(target.path, [MAIN_FILE_PATH]).length > 0;
+  const reference = unwrap(target.expression);
+  const path =
+    reference.kind === "callExpression" &&
+    reference.callee.kind === "identifier" &&
+    reference.callee.name === "script"
+      ? reference.arguments.find((argument) => argument.kind === "positionalArgument")?.value
+      : undefined;
+  const literal = path === undefined ? null : unwrap(path);
+  const text =
+    literal?.kind === "stringLiteral" && literal.parts.every((part) => part.kind === "stringText")
+      ? literal.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("")
+      : null;
+  // Only a literal path is known, and only one to another file stays out of main.tease.
+  return text === null || text === MAIN_FILE_PATH;
 }
 
 const PURE_BUILTINS: ReadonlySet<string> = new Set([
