@@ -202,7 +202,7 @@ test("sort, min, and max order date and time values of one kind", () => {
         'say days.join(", ")',
         'let first: time = min(toTime("14:30"), toTime("09:15:30"), toTime("23:00"))',
         "say first.toISO()",
-        'say max(toTimestamp("2026-10-04T12:00:00Z"), toTimestamp("2026-10-04T14:00:00+02:00")).toISO()',
+        'say max(toTimestamp("2026-10-04T12:00:00Z"), toTimestamp("2026-10-04T13:00:00+02:00")).toISO()',
         'say max(toDateTime("2026-10-04T18:00"), toDateTime("2026-10-04T18:00:00.001")).toISO()',
       ].join("\n"),
     ),
