@@ -8,6 +8,9 @@ The Monaco browser editor POC is a separate editor-owned Vue/Vite surface under 
 editor-neutral tooling through thin Monaco providers and registers `.tease` presentation without becoming a second
 correctness grammar. It follows the [language design intent](TEASESCRIPT.md#language-design-intent) for the
 [creator audience](PRODUCT.md), keeping the beginner-facing surface focused instead of exposing every Monaco feature.
+It opens a small sample project and compiles all files as one project after every edit. A file overview lists each
+file with the title, author, description, and tags of its header ([V30 §41](specifications/accepted-syntaxes-v30.md#41-headers-and-tags))
+and its diagnostic count; selecting a file opens it.
 The standalone playground is a local technical workspace, not the production editor. It uses an accessible native
 textarea for ordinary `.tease` source, diagnostics, instruction-plan/runtime/event inspection, stepping, reset, and
 validated checkpoint save/restore. Its Player panel provides the first Standard interaction and chat-pacing control POC
