@@ -358,7 +358,7 @@ test("nested timers created by an expiry block leave the terminal wait valid", (
     [timers[1]!.actionId, "finished", 2_000],
     [delay.actionId, "completed", 3_000],
   ]);
-  assert.equal(session.events.filter((event) => event.kind === "complete").length, 1);
+  assert.equal(session.events.filter((event) => event.kind === "exit").length, 1);
 });
 
 test("an async timer returns a typed handle whose reads follow scene time", () => {

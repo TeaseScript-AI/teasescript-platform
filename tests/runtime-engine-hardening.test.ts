@@ -133,6 +133,7 @@ test("keeps public single-instruction event results isolated", () => {
   );
   const first = executeInstruction(compiled, createFreshRuntimeSnapshot(compiled));
   const second = executeInstruction(compiled, first.snapshot);
+  const third = executeInstruction(compiled, second.snapshot);
 
   assert.deepEqual(
     first.events.map((event) => event.kind),
@@ -140,7 +141,11 @@ test("keeps public single-instruction event results isolated", () => {
   );
   assert.deepEqual(
     second.events.map((event) => event.kind),
-    ["say", "complete"],
+    ["say"],
+  );
+  assert.deepEqual(
+    third.events.map((event) => event.kind),
+    ["exit"],
   );
   assert.deepEqual(
     first.events.map((event) => event.sequence),
@@ -148,7 +153,11 @@ test("keeps public single-instruction event results isolated", () => {
   );
   assert.deepEqual(
     second.events.map((event) => event.sequence),
-    [2, 3],
+    [2],
+  );
+  assert.deepEqual(
+    third.events.map((event) => event.sequence),
+    [3],
   );
 });
 
@@ -182,8 +191,8 @@ test("keeps re-entrant runtime operation contexts isolated", () => {
   assert.equal(result.snapshot.status, "halted");
   assert.equal(result.snapshot.rng.state, initialRngState);
   assert.deepEqual(innerEvents, [
-    ["say", "complete"],
-    ["say", "complete"],
+    ["say", "exit"],
+    ["say", "exit"],
   ]);
   assert.deepEqual(
     result.events.map((event) =>
@@ -193,7 +202,7 @@ test("keeps re-entrant runtime operation contexts isolated", () => {
     ),
     [
       ["say", 1, "2"],
-      ["complete", 2],
+      ["exit", 2],
     ],
   );
 });

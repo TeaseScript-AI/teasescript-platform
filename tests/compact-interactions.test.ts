@@ -1455,23 +1455,23 @@ test("a retained dynamic settlement validates against the UI it recorded, before
 
 test("oversized static compact interactions return no plan and a diagnostic at the interaction span", () => {
   // The button label is the only authored definition string, so it alone exceeds the aggregate.
-  const oversizedButton = `showButton "${"x".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES + 1)}"\nexit`;
+  const oversizedButton = `showButton "${"x".repeat(MAX_INTERACTION_AGGREGATE_UTF8_BYTES + 1)}"`;
   const options = Array.from(
     { length: MAX_INTERACTION_OPTION_ENTRIES + 1 },
     (_, index) => `"option-${index}"`,
   ).join(", ");
-  const oversizedChoice = `let result = choose ${options}\nexit`;
+  const oversizedChoice = `let result = choose ${options}`;
   // The compiler sees that the choice has too many buttons before plan validation would.
-  for (const [source, start, code] of [
+  for (const [statement, start, code] of [
     [oversizedButton, 0, "TSC006"],
     [oversizedChoice, oversizedChoice.indexOf("choose"), "TSV029"],
   ] as const) {
-    const result = compileSource(source);
+    const result = compileSource(`${statement}\nexit`);
     assert.equal(result.plan, null);
     const diagnostic = result.diagnostics.find((candidate) => candidate.code === code);
     assert.deepEqual(diagnostic?.span, {
       start: { offset: start, line: 0, column: start },
-      end: { offset: source.length, line: 0, column: source.length },
+      end: { offset: statement.length, line: 0, column: statement.length },
     });
   }
 });

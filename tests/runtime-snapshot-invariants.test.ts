@@ -44,11 +44,11 @@ test("rejects a fresh non-empty snapshot changed only to halted", () => {
 test("accepts and round-trips every runtime-produced halted shape", () => {
   const scenarios = [
     {
-      name: "normal root completion",
+      name: "exit as the last statement",
       source: 'say "done"\nexit',
-      expectedKinds: ["say", "complete"],
+      expectedKinds: ["say", "exit"],
     },
-    { name: "empty root", source: "", expectedKinds: [] },
+    { name: "only exit", source: "exit", expectedKinds: ["exit"] },
     {
       name: "root exit",
       source: 'say "before"\nexit\nsay "after"',
@@ -56,7 +56,10 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
     },
     {
       name: "function exit",
-      source: ["function stop { exit }", 'say "before"', "stop()", 'say "after"'].join("\n"),
+      // A call counts as returning, so the root still needs its own exit.
+      source: ["function stop { exit }", 'say "before"', "stop()", 'say "after"', "exit"].join(
+        "\n",
+      ),
       expectedKinds: ["say", "exit"],
     },
     {
@@ -69,6 +72,7 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
         "}",
         "outer()",
         'say "unreachable root code"',
+        "exit",
       ].join("\n"),
       expectedKinds: ["exit"],
     },

@@ -1064,18 +1064,13 @@ test("a foreground action keeps identities distinct from the retained settlement
   }
 });
 
-test("terminal button completion remains inspectable and continuation runs only on later entry", () => {
-  const withExit = interactionPlan("button", {
+test("a completed button before exit remains inspectable and exit runs only on a later entry", () => {
+  const plan = interactionPlan("button", {
     kind: "button",
     buttonLabel: "Done",
     accessibleName: defaults.button,
   });
-  const plan = {
-    ...withExit,
-    files: [{ ...withExit.files[0]!, rootEndInstruction: 1, endInstruction: 1 }],
-    instructions: withExit.instructions.slice(0, 1),
-  };
-  assert.equal(validateInstructionPlan(plan).valid, true);
+  assert.equal(plan.instructions[1]?.kind, "exit");
   const pending = waiting(plan);
   const completionRequest = {
     actionId: pending.snapshot.foregroundAction!.actionId,
@@ -1098,7 +1093,7 @@ test("terminal button completion remains inspectable and continuation runs only 
   assert.equal(validateRuntimeSnapshot(resumed.snapshot, plan).valid, true);
   assert.deepEqual(
     resumed.events.map((event) => event.kind),
-    ["complete"],
+    ["exit"],
   );
 });
 
@@ -1115,7 +1110,14 @@ test("result-bearing interactions require an in-region continuation", () => {
       files: [{ ...root.files[0]!, rootEndInstruction: 1, endInstruction: 1 }],
       instructions: root.instructions.slice(0, 1),
     };
-    assert.equal(validateInstructionPlan(terminalRoot).valid, false, kind);
+    // The cut also leaves the root region without its closing end, which is a separate error.
+    assert.deepEqual(
+      validateInstructionPlan(terminalRoot)
+        .errors.filter((error) => error.path === "$.instructions[0]")
+        .map((error) => error.message),
+      ["Result-bearing interaction requires a local in-region result handoff."],
+      kind,
+    );
     assert.throws(() => run(terminalRoot, createFreshRuntimeSnapshot(terminalRoot)), kind);
   }
 });

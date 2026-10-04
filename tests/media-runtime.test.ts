@@ -635,17 +635,18 @@ test("dynamic media options are validated when supplied, including null and inde
   const indefinite =
     'playAudio(file: "a", async: true, repeat: loop) {\n  finish {\n    say "x"\n  }\n}';
   const hidden = "function dynamic(value) {\n    return value\n}\n";
-  for (const [source, offending] of [
-    [`let loop = true\n${indefinite}\nexit`, indefinite],
+  for (const [script, offending] of [
+    [`let loop = true\n${indefinite}`, indefinite],
     // A variable just set to null is known to be null, so the function hides it until the media starts.
-    [`${hidden}let v = dynamic(null)\nplayAudio(file: "a", volume: v)\nexit`, "v"],
-    [`${hidden}let s = dynamic(null)\nplayAudio(file: "a", startAt: s)\nexit`, "s"],
-    [`${hidden}let e = dynamic(null)\nplayAudio(file: "a", endAt: e)\nexit`, "e"],
+    [`${hidden}let v = dynamic(null)\nplayAudio(file: "a", volume: v)`, "v"],
+    [`${hidden}let s = dynamic(null)\nplayAudio(file: "a", startAt: s)`, "s"],
+    [`${hidden}let e = dynamic(null)\nplayAudio(file: "a", endAt: e)`, "e"],
   ] as const) {
+    const source = `${script}\nexit`;
     const compiled = plan(source);
     const { snapshot } = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
     assert.equal(snapshot.status, "failed", source);
-    const start = source.lastIndexOf(offending);
+    const start = script.lastIndexOf(offending);
     assert.deepEqual(
       [
         snapshot.failure?.code,
@@ -934,23 +935,23 @@ test("restore validation rejects a queued cue owned by another media", () => {
   assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false);
 });
 
-test("root completion keeps the terminal instruction's span however late the media is observed", () => {
+test("the session end keeps the exit statement's span however late the media is observed", () => {
   const source =
     'let m = playAudio async "m.mp3" {\n  at 100 ms {\n    say "cue"\n  }\n}\nwait 1 s\nexit';
-  const completion = (session: Session) => {
-    const event = session.events.find((candidate) => candidate.kind === "complete");
+  const ending = (session: Session) => {
+    const event = session.events.find((candidate) => candidate.kind === "exit");
     assert.ok(event !== undefined);
     return event.span;
   };
   const fine = new Session(source).load(1, 1_000).at(100, [1, 100]).at(1_000, [1, 1_000]);
   const late = new Session(source).load(1, 1_000).at(1_000, [1, 1_000]);
-  // Completion is attributed to the authored terminal statement.
-  const terminal = source.lastIndexOf("wait 1 s");
+  // The end is attributed to the authored exit statement.
+  const exit = source.lastIndexOf("exit");
   assert.deepEqual(
-    [completion(fine).start.offset, completion(fine).end.offset],
-    [terminal, terminal + "wait 1 s".length],
+    [ending(fine).start.offset, ending(fine).end.offset],
+    [exit, exit + "exit".length],
   );
-  assert.deepEqual(completion(late), completion(fine));
+  assert.deepEqual(ending(late), ending(fine));
 });
 
 test("stop() cancels a cue block that is queued and not yet started", () => {

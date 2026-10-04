@@ -366,8 +366,8 @@ test("a due timer block waits for the write and reads the acknowledged value at 
   assert.equal(caughtUp.snapshot.observedSessionTimeMs, 6_000);
 });
 
-test("a terminal save completes the root after acknowledgement even with background chat pacing", () => {
-  for (const source of ['save 2 as "k"\nexit', 'say "Before"\nsave 2 as "k"']) {
+test("a final save runs on into exit after acknowledgement even with background chat pacing", () => {
+  for (const source of ['save 2 as "k"\nexit', 'say "Before"\nsave 2 as "k"\nexit']) {
     const compiled = plan(source);
     const pending = run(
       compiled,
@@ -389,9 +389,9 @@ test("a terminal save completes the root after acknowledgement even with backgro
     assert.deepEqual(finished.snapshot.scriptStorage, [{ key: "k", value: 2 }]);
     assert.deepEqual(
       [...completed.events, ...finished.events]
-        .filter((event) => event.kind === "complete")
+        .filter((event) => event.kind === "exit")
         .map(({ kind }) => kind),
-      ["complete"],
+      ["exit"],
     );
   }
 });

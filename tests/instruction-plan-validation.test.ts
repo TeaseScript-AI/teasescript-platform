@@ -203,13 +203,20 @@ test("validates break targets after multi-temporary condition cleanup", () => {
   );
 });
 
-test("preserves a compiler-generated root-end target", () => {
+test("preserves a compiler-generated target at the root's closing end", () => {
   const compiled = plan(
-    ['function hidden { say "hidden" }', 'if false { say "never" }', "exit"].join("\n"),
+    [
+      'function hidden { say "hidden" }',
+      "let leave = true",
+      "if leave { exit } else { exit }",
+    ].join("\n"),
   );
-  const jumpIndex = rootInstructionIndex(compiled, "jumpIfFalse");
+  // The jump over the else block lands on the end that closes the root region.
+  const jumpIndex = rootInstructionIndex(compiled, "jump");
+  const closingEnd = compiled.files[0]!.rootEndInstruction - 1;
 
-  assert.equal(targetOf(compiled, jumpIndex, "target"), compiled.files[0]!.rootEndInstruction);
+  assert.equal(compiled.instructions[closingEnd]?.kind, "end");
+  assert.equal(targetOf(compiled, jumpIndex, "target"), closingEnd);
   assert.equal(validateInstructionPlan(compiled).valid, true);
 });
 
@@ -284,9 +291,13 @@ test("keeps snapshots valid after accepted root control flow reaches its boundar
   const initial = createFreshRuntimeSnapshot(compiled);
   const first = executeInstruction(compiled, initial);
 
-  assert.equal(first.snapshot.status, "halted");
-  assert.equal(first.snapshot.nextInstruction, compiled.files[0]!.rootEndInstruction);
+  assert.equal(first.snapshot.status, "running");
+  assert.equal(first.snapshot.nextInstruction, rootInstructionIndex(compiled, "exit"));
   assert.equal(validateRuntimeSnapshot(first.snapshot, compiled).valid, true);
+  const exited = executeInstruction(compiled, first.snapshot);
+  assert.equal(exited.snapshot.status, "halted");
+  assert.equal(exited.snapshot.nextInstruction, compiled.files[0]!.rootEndInstruction - 1);
+  assert.equal(validateRuntimeSnapshot(exited.snapshot, compiled).valid, true);
 });
 
 test("rejects forged prepared say fields and lifetimes before any script event executes", () => {

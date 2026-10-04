@@ -175,7 +175,7 @@ test("a pending timer checkpoint restores without a redraw or duplicate request"
   }
 });
 
-test("timer resume equivalence holds at every boundary in loops, calls, and at root end", () => {
+test("timer resume equivalence holds at every boundary in loops, calls, and before exit", () => {
   const result = assertRuntimeResumeEquivalent(
     [
       "function countdown(seconds) {",
@@ -200,7 +200,7 @@ test("timer resume equivalence holds at every boundary in loops, calls, and at r
     requested.every((event) => event.action.kind === "delay" && event.action.display === "visible"),
   );
   assert.equal(result.events.filter((event) => event.kind === "actionCompleted").length, 5);
-  assert.equal(result.events.at(-1)?.kind, "complete");
+  assert.equal(result.events.at(-1)?.kind, "exit");
 });
 
 test("a timer coexists with an older background pacing gate and settles in deadline order", () => {
