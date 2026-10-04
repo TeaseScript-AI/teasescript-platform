@@ -1,7 +1,7 @@
 function sexscriptLegacyConcat(lists) {
   let combined = []
-  for list in lists {
-    for item in list {
+  for part in lists {
+    for item in part {
       combined.add(item)
     }
   }

@@ -399,6 +399,7 @@ function interactionAnswer(action: RuntimeData, visit: number) {
     case "text":
       return { kind: "submittedText", submittedText: TEXT_ANSWERS[visit % TEXT_ANSWERS.length] };
     case "number":
+    case "integer":
       return {
         kind: "submittedText",
         submittedText: String(NUMBER_ANSWERS[visit % NUMBER_ANSWERS.length]),

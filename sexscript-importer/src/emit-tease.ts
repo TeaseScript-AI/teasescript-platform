@@ -390,12 +390,9 @@ function emitValue(expression: IrExpression): string {
     : emitExpression(expression);
 }
 
-/** `load key, default: value` (#541), or the form main still implements, `load key default value`. */
+/** `load key, default: value` (#541). */
 function emitLoadDefault(expression: Extract<IrExpression, { kind: "load" }>): string {
-  const key = operand(expression.key, POSTFIX);
-  return expression.mainDefault === true
-    ? `load ${key} default ${operand(expression.defaultValue!, POSTFIX)}`
-    : `load ${key}, default: ${emitExpression(expression.defaultValue!)}`;
+  return `load ${operand(expression.key, POSTFIX)}, default: ${emitExpression(expression.defaultValue!)}`;
 }
 
 function operand(expression: IrExpression, minimum: number): string {

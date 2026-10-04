@@ -1,13 +1,13 @@
 function sexscriptLegacyConcat(lists) {
   let combined = []
-  for list in lists {
-    for item in list {
+  for part in lists {
+    for item in part {
       combined.add(item)
     }
   }
   return combined
 }
-function randomIntegerValue(range) {
+function randomIntegerValue(rangeValue) {
   return 99
 }
 say "Roll: ${randomInteger(0..3)}, ${randomIntegerValue(1)}"

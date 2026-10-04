@@ -121,9 +121,9 @@ function registerFixtures(
 
 // The smoke-run stand-ins behave like the accepted capabilities they replace, so a run does not pass where the real
 // implementation would fail: a dict never equals an object and takes only text keys, the empty text included (#536),
-// a button timeout must be positive (#531), and toDate() takes the date of a datetime (#532).
+// and toDate() takes the date of a datetime (#532).
 test(
-  "pending stand-ins keep the accepted dict, button timeout, and toDate behavior",
+  "pending stand-ins keep the accepted dict and toDate behavior",
   { skip: "reason" in runnerResult ? runnerResult.reason : false },
   () => {
     if (!("runner" in runnerResult)) return;
@@ -131,7 +131,6 @@ test(
       ["sxLiteral", "dict.literal"],
       ["sxGet", "dict.get"],
       ["sxDefault", "dict.get(default:)"],
-      ["sxButton", "showButton"],
       ["sxToDate", "toDate"],
       ["sxNow", "getDateTime"],
     ]);
@@ -147,14 +146,14 @@ test(
     assert.equal(
       run(
         [
-          'let entries = sxLiteral([["a", 1], ["b", 2]])',
+          'let entries = sxLiteral(["a", "b"], [1, 2])',
           "if entries == { a: 1, b: 2 } {",
           "  let unreachable = [1][5]",
           "}",
-          'if entries != sxLiteral([["b", 2], ["a", 1]]) {',
+          'if entries != sxLiteral(["b", "a"], [2, 1]) {',
           "  let unreachable = [1][5]",
           "}",
-          'if sxGet(sxLiteral([["", 3]]), "") != 3 {',
+          'if sxGet(sxLiteral([""], [3]), "") != 3 {',
           "  let unreachable = [1][5]",
           "}",
           "if sxToDate(sxNow()).day != sxNow().day {",
@@ -165,12 +164,10 @@ test(
       ),
       "halted",
     );
-    assert.equal(run('let value = sxGet(sxLiteral([["1", 3]]), 1)\n'), "failed");
-    assert.equal(run('let elapsed = sxButton("Go", 0)\n'), "failed");
-    // A default has the dict's value type (#536), and a timeout is seconds or a duration (#531).
-    assert.equal(run('let value = sxDefault(sxLiteral([["a", "x"]]), "b", 3)\n'), "failed");
-    assert.equal(run('let value = sxDefault(sxLiteral([["a", "x"]]), "b", "y")\n'), "halted");
-    assert.equal(run('let elapsed = sxButton("Go", "soon")\n'), "failed");
+    assert.equal(run('let value = sxGet(sxLiteral(["1"], [3]), 1)\n'), "failed");
+    // A default has the dict's value type (#536).
+    assert.equal(run('let value = sxDefault(sxLiteral(["a"], ["x"]), "b", 3)\n'), "failed");
+    assert.equal(run('let value = sxDefault(sxLiteral(["a"], ["x"]), "b", "y")\n'), "halted");
   },
 );
 
@@ -562,10 +559,7 @@ test(
       halted,
     );
     // A runtime failure caused by the last allowed step is still reported.
-    assert.deepEqual(run('wait 1\nlet total = 1 + "bad"\n', 1), {
-      status: "failed",
-      code: "TSR027",
-    });
+    assert.deepEqual(run("wait 1\nlet item = [1][5]\n", 1), { status: "failed", code: "TSR025" });
     // Numbered inputs rotate, so a loop waiting for a larger answer ends.
     assert.deepEqual(run("let n: number = 0\nwhile n < 3 {\n  n = askNumber\n}\n"), halted);
   },

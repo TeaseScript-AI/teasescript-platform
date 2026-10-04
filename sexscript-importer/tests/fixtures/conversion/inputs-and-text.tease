@@ -18,12 +18,12 @@ if name != "" {
   say "Good, ${name}"
 }
 // The question of an endless loop's condition is asked again in every round.
-let round = 0
+let roundValue = 0
 while true {
-  say "Round ${round}"
+  say "Round ${roundValue}"
   let ignoredAnswer1 = askText
-  round += 1
-  if round == 2 {
+  roundValue += 1
+  if roundValue == 2 {
     break
   }
 }

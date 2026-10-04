@@ -8,3 +8,8 @@ while (waitedTime < 5) {
 	waitedTime = getTime() - startTime
 }
 show("Time is up")
+// A variable that starts as null takes the clock's seconds, so the time between two readings is a number.
+def before = null
+before = getTime()
+def after = getTime()
+if (after - before >= 0) show("Measured")

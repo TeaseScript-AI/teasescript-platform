@@ -98,11 +98,6 @@ export type IrStatement =
       integer?: true;
       /** The Groovy value may be text, which an integer variable stored as a character code. */
       maybeText?: true;
-      /**
-       * The annotation the current compiler needs where the accepted rules need none: an integer that later holds
-       * fractions widens by itself (#504 option B, #526). Only the compiler gate writes it.
-       */
-      compilerType?: string;
     })
   | (IrBase & {
       kind: "assign";
@@ -174,32 +169,21 @@ export type IrExpression =
     }
   /** `dict` marks a dict lookup, whose missing key is an error (#536). */
   | { kind: "index"; target: IrExpression; index: IrExpression; dict?: true }
-  /**
-   * `pending` marks an accepted text operation or list `join` that main does not implement yet (V30 §8 and §16 as
-   * accepted in PR #518); `dict` marks a member of a dict (#536).
-   */
-  | { kind: "property"; target: IrExpression; name: string; pending?: true; dict?: true }
+  /** `dict` marks a member of a dict (#536). */
+  | { kind: "property"; target: IrExpression; name: string; dict?: true }
   /** A dict `get` has the key and the default as its arguments: `dict.get(key, default: value)` (#536). */
   | {
       kind: "methodCall";
       target: IrExpression;
       name: string;
       arguments: IrExpression[];
-      pending?: true;
       dict?: true;
     }
   /**
    * `load key` returns null for a missing key; `defaultValue` replaces that null without writing storage, written
-   * `load key, default: value` (#541), or with `mainDefault` in the form main implements until #541 lands. `integer`
-   * marks a legacy `loadInteger()`, which read a whole number.
+   * `load key, default: value` (#541). `integer` marks a legacy `loadInteger()`, which read a whole number.
    */
-  | {
-      kind: "load";
-      key: IrExpression;
-      defaultValue?: IrExpression;
-      integer?: true;
-      mainDefault?: true;
-    }
+  | { kind: "load"; key: IrExpression; defaultValue?: IrExpression; integer?: true }
   /**
    * Compact `choose`. Without `labels`, numeric labels return the zero-based option index; with `labels`, each
    * option gets the identifier label that `choose` returns.
@@ -214,7 +198,7 @@ export type IrExpression =
    * Compact single-field input whose prompt, if any, was emitted as a preceding `say`. `defaultValue` prefills the
    * field, written `askText default: value` (V30 §20).
    */
-  | { kind: "input"; input: "askText" | "askNumber"; defaultValue?: IrExpression }
+  | { kind: "input"; input: "askText" | "askNumber" | "askInteger"; defaultValue?: IrExpression }
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
   /** An elapsed duration literal such as `1 s`. */
   | { kind: "duration"; value: number; unit: "s" | "ms" }

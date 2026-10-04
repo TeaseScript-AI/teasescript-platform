@@ -5,7 +5,7 @@ import {
   type RuntimeValue,
 } from "./runtime-check.ts";
 import { emitTease } from "./emit-tease.ts";
-import type { IrExpression, IrStatement, IrSwitchCase, MigrationProgram } from "./ir.ts";
+import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 import { proposalCapability, type ProposalId } from "./proposals.ts";
 import { isRecord } from "./ast.ts";
 
@@ -18,20 +18,11 @@ import { isRecord } from "./ast.ts";
 const PENDING_CALLS = new Map<string, string>([
   ["askBoolean", "askBoolean()"],
   ["askBooleans", "askBooleans()"],
-  ["askInteger", "askInteger()"],
-  ["ceil", "ceil()"],
-  ["floor", "floor()"],
   ["getDate", "getDate()"],
   ["getDateTime", "getDateTime()"],
   ["openUrl", "openUrl()"],
-  ["round", "round()"],
-  ["showButton", "showButton timeout"],
   ["takePhoto", "takePhoto()"],
-  ["toBoolean", "toBoolean()"],
   ["toDate", "toDate()"],
-  ["toInteger", "toInteger()"],
-  ["toNumber", "toNumber()"],
-  ["toString", "toString()"],
 ]);
 
 /** Current-time getters whose conversion and format methods (#532) the shim replaces together with the getter. */
@@ -47,6 +38,24 @@ const DICT_KEY_PREFIX = "key ";
 const PROPOSED_CALLS = new Map<string, ProposalId>([["countImages", "media-tags"]]);
 
 const SHIM_PREFIX = "sxPending";
+
+/**
+ * Stand-ins whose accepted result is never null, by the conversion that gives the placeholder's untyped result that
+ * type, so that the compiler checks and narrows its uses as it will the accepted operation's.
+ */
+const TYPED_RESULTS = new Map<string, "toInteger" | "toString" | "toBoolean">([
+  ["askBoolean", "toBoolean"],
+  ["dict.contains()", "toBoolean"],
+  ["dict.length", "toInteger"],
+  ["(date - date).days", "toInteger"],
+  ["getTimestamp().toSeconds()", "toInteger"],
+  ["getTimestamp().toMilliseconds()", "toInteger"],
+  ["getDate().toISO()", "toString"],
+  ["getDate().formatDate()", "toString"],
+  ["getTime().formatTime()", "toString"],
+  ["getDateTime().formatDateTime()", "toString"],
+  ["media-tags.countImages", "toInteger"],
+]);
 
 export interface PendingShim {
   program: MigrationProgram;
@@ -77,7 +86,6 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
     shimNames.set(base, candidate);
     return candidate;
   };
-  let switchCount = 0;
   const call = (
     capability: string,
     name: string,
@@ -92,21 +100,19 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
     );
     operations.set(shim, name);
     builtins.add(shim);
-    return { kind: "call", name: shim, positional, named };
+    const placeholder: IrExpression = { kind: "call", name: shim, positional, named };
+    const conversion = TYPED_RESULTS.get(name);
+    return conversion === undefined
+      ? placeholder
+      : { kind: "call", name: conversion, positional: [placeholder], named: {} };
   };
 
   const expression = (value: IrExpression): IrExpression => {
     switch (value.kind) {
       case "load":
-        if (value.defaultValue === undefined) return { ...value, key: expression(value.key) };
-        // `load key, default: value` (#541); main implements `load key default value`.
-        capabilities.add("load default: (#541)");
-        return {
-          ...value,
-          key: expression(value.key),
-          defaultValue: expression(value.defaultValue),
-          mainDefault: true,
-        };
+        return value.defaultValue === undefined
+          ? { ...value, key: expression(value.key) }
+          : { ...value, key: expression(value.key), defaultValue: expression(value.defaultValue) };
       case "call": {
         const proposal = PROPOSED_CALLS.get(value.name);
         if (proposal !== undefined && value.local !== true) {
@@ -124,16 +130,6 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         const named = Object.fromEntries(
           Object.entries(value.named).map(([name, child]) => [name, expression(child)]),
         );
-        if (value.name === "askInteger" && capability !== undefined) {
-          // A real number input keeps the interaction boundary of each answer in the copy: the placeholder
-          // evaluates the prompt and returns 0, and the input supplies the number.
-          return {
-            kind: "binary",
-            operator: "+",
-            left: call(capability, "askIntegerPrompt", positional, named),
-            right: { kind: "input", input: "askNumber" },
-          };
-        }
         return capability === undefined
           ? { ...value, positional, named }
           : call(capability, value.name, positional, named);
@@ -142,20 +138,18 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         return { ...value, items: value.items.map(expression) };
       case "object":
         if (value.dict === true) {
-          // A dict literal (#536) becomes a stand-in built from key-value pairs.
+          // A dict literal (#536) becomes a stand-in built from a list of keys and a list of their values, so each
+          // list holds one type.
           return call(DICT, "dict.literal", [
             {
               kind: "list",
-              items: value.properties.map((property) => ({
-                kind: "list",
-                items: [
-                  property.key === undefined
-                    ? { kind: "literal", value: property.name }
-                    : expression(property.key),
-                  expression(property.value),
-                ],
-              })),
+              items: value.properties.map((property) =>
+                property.key === undefined
+                  ? { kind: "literal", value: property.name }
+                  : expression(property.key),
+              ),
             },
+            { kind: "list", items: value.properties.map((property) => expression(property.value)) },
           ]);
         }
         return {
@@ -173,9 +167,6 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
       case "property":
         if (value.dict === true)
           return call(DICT, `dict.${value.name}`, [expression(value.target)]);
-        if (value.pending === true) {
-          return call("text operations", `text.${value.name}`, [expression(value.target)]);
-        }
         if (
           value.name === "days" &&
           value.target.kind === "binary" &&
@@ -206,12 +197,6 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
               ? "dict.get(default:)"
               : `dict.${value.name}()`;
           return call(DICT, operation, [
-            expression(value.target),
-            ...value.arguments.map(expression),
-          ]);
-        }
-        if (value.pending === true) {
-          return call("text operations", `text.${value.name}()`, [
             expression(value.target),
             ...value.arguments.map(expression),
           ]);
@@ -250,14 +235,11 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
           ? value
           : { ...value, defaultValue: expression(value.defaultValue) };
       case "button":
-        // The elapsed result of a button with or without a timeout (#531).
-        return call(
-          "showButton timeout",
-          "showButton",
-          value.timeout === null
-            ? [expression(value.label)]
-            : [expression(value.label), expression(value.timeout)],
-        );
+        return {
+          ...value,
+          label: expression(value.label),
+          timeout: value.timeout === null ? null : expression(value.timeout),
+        };
       case "literal":
       case "duration":
       case "variable":
@@ -294,35 +276,30 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
           callStatement(call("showPopup", "showPopup", [expression(item.message)]), item.span),
         ];
       case "showButton":
-        if (item.timeout === null) return [{ ...item, label: expression(item.label) }];
         return [
-          callStatement(
-            call("showButton timeout", "showButton", [
-              expression(item.label),
-              expression(item.timeout),
-            ]),
-            item.span,
-          ),
+          {
+            ...item,
+            label: expression(item.label),
+            timeout: item.timeout === null ? null : expression(item.timeout),
+          },
         ];
-      case "switch": {
-        capabilities.add("switch");
-        switchCount += 1;
-        return switchAsIfChain(
-          item,
-          shimName(`${SHIM_PREFIX}SwitchValue${switchCount}`),
-          expression,
-          statements,
-        );
-      }
+      case "switch":
+        return [
+          {
+            ...item,
+            value: expression(item.value),
+            cases: item.cases.map((switchCase) => ({
+              ...switchCase,
+              matches: switchCase.matches.map(expression),
+              body: statements(switchCase.body),
+            })),
+            default: statements(item.default),
+          },
+        ];
       case "function":
         return [{ ...item, body: statements(item.body) }];
-      case "let": {
-        if (item.compilerType === undefined) return [{ ...item, value: expression(item.value) }];
-        // The current compiler needs `: number` where an integer widens by itself (#504 option B, #526).
-        capabilities.add("number annotations (#526)");
-        const { compilerType, ...declaration } = item;
-        return [{ ...declaration, type: compilerType, value: expression(item.value) }];
-      }
+      case "let":
+        return [{ ...item, value: expression(item.value) }];
       case "assign": {
         const target = item.target;
         if (target.kind === "index" && target.dict === true) {
@@ -367,23 +344,6 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
                 dictionary,
                 ...value.arguments.map(expression),
               ]),
-              span: item.span,
-            },
-          ];
-        }
-        if (
-          value.kind === "methodCall" &&
-          value.name === "sort" &&
-          value.arguments.length === 0 &&
-          value.target.kind === "variable"
-        ) {
-          // List sort() (V30 §16), which main does not implement yet, sorts the list in place.
-          return [
-            {
-              kind: "assign",
-              operator: "=",
-              target: value.target,
-              value: call("list sort()", "list.sort()", [value.target]),
               span: item.span,
             },
           ];
@@ -451,51 +411,6 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
   };
 }
 
-/** Accepted switch semantics (literal or range cases, no fallthrough) expressed as an equivalent if chain. */
-function switchAsIfChain(
-  item: Extract<IrStatement, { kind: "switch" }>,
-  valueName: string,
-  expression: (value: IrExpression) => IrExpression,
-  statements: (items: IrStatement[]) => IrStatement[],
-): IrStatement[] {
-  const value: IrExpression = { kind: "variable", name: valueName };
-  const matches = (switchCase: IrSwitchCase): IrExpression =>
-    switchCase.matches
-      .map(matchesOne)
-      .reduce((left, right) => ({ kind: "binary", operator: "or", left, right }));
-  const matchesOne = (match: IrExpression): IrExpression => {
-    if (match.kind !== "range")
-      return { kind: "binary", operator: "==", left: value, right: expression(match) };
-    return {
-      kind: "binary",
-      operator: "and",
-      left: { kind: "binary", operator: ">=", left: value, right: expression(match.from) },
-      right: {
-        kind: "binary",
-        operator: match.inclusive ? "<=" : "<",
-        left: value,
-        right: expression(match.to),
-      },
-    };
-  };
-  let chain: IrStatement[] = statements(item.default);
-  for (const switchCase of [...item.cases].reverse()) {
-    chain = [
-      {
-        kind: "if",
-        condition: matches(switchCase),
-        then: statements(switchCase.body),
-        else: chain,
-        span: switchCase.span,
-      },
-    ];
-  }
-  return [
-    { kind: "let", name: valueName, value: expression(item.value), span: item.span },
-    ...chain,
-  ];
-}
-
 function collectNames(value: unknown, names: Set<string>): void {
   if (Array.isArray(value)) {
     for (const item of value) collectNames(item, names);
@@ -516,9 +431,7 @@ export interface MediaFile {
 
 /**
  * Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only: `run` records its target in
- * the flow state, time and dates follow the simulated clock from 2026-10-02 12:00 UTC, conversions fail without a
- * `default` like the accepted functions, and a timed button answers quickly, then at its timeout, without advancing
- * the clock. Integer input is a real number input in the shimmed program.
+ * the flow state, and time and dates follow the simulated clock from 2026-10-02 12:00 UTC.
  */
 export function pendingHostFunctions(
   shim: PendingShim,
@@ -556,40 +469,6 @@ export function pendingHostFunctions(
     };
     return value;
   };
-  const convert =
-    (
-      name: string,
-      parse: (value: RuntimeValue | undefined) => RuntimeValue | undefined,
-    ): HostFunction =>
-    ([positionalValue], named) => {
-      const value = positionalValue ?? named.value;
-      const converted = parse(value);
-      if (converted !== undefined) return converted;
-      if (named.default !== undefined) return named.default;
-      throw new Error(`${name}() cannot convert ${JSON.stringify(value)}.`);
-    };
-  const toNumber = (value: RuntimeValue | undefined): number | undefined => {
-    const parsed =
-      typeof value === "number"
-        ? value
-        : typeof value === "string" && value.trim() !== ""
-          ? Number(value)
-          : NaN;
-    return Number.isFinite(parsed) ? parsed : undefined;
-  };
-  const rounded =
-    (name: string, round: (value: number) => number): HostFunction =>
-    ([value]) => {
-      if (typeof value !== "number") throw new Error(`${name}() needs a number.`);
-      return round(value);
-    };
-  const text = (operation: string, value: RuntimeValue | undefined): string => {
-    if (typeof value !== "string") throw new Error(`${operation} needs text.`);
-    return value;
-  };
-  // Text positions count code points, as V30 §8 defines.
-  const codePointIndex = (value: RuntimeValue | undefined, unitIndex: number): number =>
-    unitIndex < 0 ? -1 : [...String(value).slice(0, unitIndex)].length;
   const items = (value: RuntimeValue[]): RuntimeValue => {
     const list = { kind: "list", items: value };
     return list;
@@ -737,151 +616,23 @@ export function pendingHostFunctions(
     ["dict.clear()", ([target]) => (dictEntries("clear()", target), dictionary([]))],
     [
       "dict.literal",
-      ([pairs]) => {
+      ([keys, values]) => {
         const properties: Array<{ name: string; value: RuntimeValue }> = [];
-        for (const pair of listItems(pairs) ?? []) {
-          const [key, value] = listItems(runtimeValue(pair)) ?? [];
+        const entryValues = listItems(values) ?? [];
+        for (const [position, key] of (listItems(keys) ?? []).entries()) {
+          const value = runtimeValue(entryValues[position]);
           const name = keyText(runtimeValue(key));
           // A repeated key keeps its first position and takes the later value, as in a Groovy map.
           const index = properties.findIndex((property) => property.name === name);
-          if (index >= 0) properties[index] = { name, value: runtimeValue(value) };
-          else properties.push({ name, value: runtimeValue(value) });
+          if (index >= 0) properties[index] = { name, value };
+          else properties.push({ name, value });
         }
         return dictionary(properties);
-      },
-    ],
-    // Accepted text operations and list join (PR #518): the length also counts list elements.
-    [
-      "text.length",
-      ([value]) => {
-        if (typeof value === "string") return [...value].length;
-        const elements = listItems(value);
-        // A value of unknown type may also be a dict, which counts its entries.
-        if (elements === null) return dictEntries("length", value).length;
-        return elements.length;
-      },
-    ],
-    ["text.uppercase()", ([value]) => text("uppercase()", value).toUpperCase()],
-    ["text.lowercase()", ([value]) => text("lowercase()", value).toLowerCase()],
-    [
-      "text.uppercaseFirst()",
-      ([value]) => {
-        const [first = "", ...rest] = [...text("uppercaseFirst()", value)];
-        return first.toUpperCase() + rest.join("");
-      },
-    ],
-    ["text.trim()", ([value]) => text("trim()", value).trim()],
-    [
-      "text.contains()",
-      ([value, part]) => text("contains()", value).includes(text("contains()", part)),
-    ],
-    [
-      "text.indexOf()",
-      ([value, part]) =>
-        codePointIndex(value, text("indexOf()", value).indexOf(text("indexOf()", part))),
-    ],
-    [
-      "text.lastIndexOf()",
-      ([value, part]) =>
-        codePointIndex(
-          value,
-          text("lastIndexOf()", value).lastIndexOf(text("lastIndexOf()", part)),
-        ),
-    ],
-    [
-      "text.startsWith()",
-      ([value, prefix]) => text("startsWith()", value).startsWith(text("startsWith()", prefix)),
-    ],
-    [
-      "text.endsWith()",
-      ([value, suffix]) => text("endsWith()", value).endsWith(text("endsWith()", suffix)),
-    ],
-    [
-      "text.replace()",
-      ([value, search, replacement]) => {
-        const literal = text("replace()", replacement);
-        // A callback keeps `$&` and similar patterns literal.
-        return text("replace()", value).replaceAll(text("replace()", search), () => literal);
-      },
-    ],
-    [
-      "text.split()",
-      ([value, separator]) => items(text("split()", value).split(text("split()", separator))),
-    ],
-    [
-      "text.substring()",
-      ([value, start, end]) => {
-        const source = [...text("substring()", value)];
-        if (typeof start !== "number" || (end !== undefined && typeof end !== "number")) {
-          throw new Error("substring() needs numeric positions.");
-        }
-        const stop = end ?? source.length;
-        if (start < 0 || stop > source.length || start > stop) {
-          throw new Error("substring() positions are out of range.");
-        }
-        return source.slice(start, stop).join("");
-      },
-    ],
-    [
-      "text.join()",
-      ([value, separator]) => {
-        const elements = listItems(value);
-        if (elements === null) throw new Error("join() needs a list.");
-        return elements
-          .map((element) => {
-            const item = runtimeValue(element);
-            if (item === null || typeof item !== "object") return String(item);
-            throw new Error("join() shows text, numbers, true, false, and null.");
-          })
-          .join(separator === undefined ? ", " : text("join()", separator));
-      },
-    ],
-    // Numbers in ascending order, and text in the order of its characters.
-    [
-      "list.sort()",
-      ([value]) => {
-        const elements = (listItems(value) ?? []).map(runtimeValue);
-        if (elements.every((element) => typeof element === "number"))
-          return items([...elements].sort((left, right) => Number(left) - Number(right)));
-        if (elements.every((element) => typeof element === "string"))
-          return items(
-            [...elements].sort((left, right) =>
-              String(left) < String(right) ? -1 : String(left) > String(right) ? 1 : 0,
-            ),
-          );
-        throw new Error("sort() needs a list of numbers or a list of text.");
       },
     ],
     ["run", ([script]) => ((state.transfer = String(script)), null)],
     ["end", () => null],
     ["showPopup", () => null],
-    // The elapsed duration until the click: quick, then the whole timeout. The simulated clock does not advance.
-    [
-      "showButton",
-      ([, positionalTimeout], named) => {
-        const given = positionalTimeout ?? named.timeout;
-        const timeout = composite(given);
-        // A timeout is a number of seconds or a duration (#531); without one, the stand-in waits 30 s.
-        if (
-          given !== undefined &&
-          typeof given !== "number" &&
-          (timeout?.kind !== "duration" || typeof timeout.milliseconds !== "number")
-        )
-          throw new Error("showButton needs a number of seconds or a duration as its timeout.");
-        const limit =
-          typeof given === "number"
-            ? given * 1000
-            : typeof timeout?.milliseconds === "number"
-              ? timeout.milliseconds
-              : 30_000;
-        // A timeout must be positive (#531).
-        if (limit <= 0) throw new Error("showButton needs a positive timeout.");
-        const milliseconds = next("showButton", [Math.min(1000, limit), limit]);
-        const elapsed = { kind: "duration", milliseconds };
-        return elapsed;
-      },
-    ],
-    ["askIntegerPrompt", () => 0],
     ["askBoolean", () => next("askBoolean", [true, false])],
     ["askBooleans", (_, named) => named.defaults ?? emptyList],
     ["getTimestamp().toSeconds()", () => Math.floor((epochMs + state.clock.nowMs) / 1000)],
@@ -951,36 +702,6 @@ export function pendingHostFunctions(
     ["openUrl", () => null],
     // A photo reference, then null as when the camera is unavailable or the player cancels.
     ["takePhoto", () => next("takePhoto", ["camera/photo.jpg", null])],
-    // V30 §13: ties round away from zero.
-    ["round", rounded("round", (value) => Math.sign(value) * Math.round(Math.abs(value)))],
-    ["floor", rounded("floor", Math.floor)],
-    ["ceil", rounded("ceil", Math.ceil)],
-    [
-      "toInteger",
-      convert("toInteger", (value) => {
-        const parsed = toNumber(value);
-        return parsed === undefined ? undefined : Math.trunc(parsed);
-      }),
-    ],
-    ["toNumber", convert("toNumber", toNumber)],
-    [
-      "toString",
-      convert("toString", (value) =>
-        typeof value === "object" && value !== null ? undefined : String(value),
-      ),
-    ],
-    [
-      "toBoolean",
-      convert("toBoolean", (value) =>
-        typeof value === "boolean"
-          ? value
-          : value === "true"
-            ? true
-            : value === "false"
-              ? false
-              : undefined,
-      ),
-    ],
   ]);
   const result: Record<string, HostFunction> = {};
   for (const [shimName, operation] of shim.operations) {

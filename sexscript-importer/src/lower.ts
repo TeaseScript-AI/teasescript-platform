@@ -6953,7 +6953,7 @@ function joinableElements(listNode: AstNode, node: AstNode, context: LowerContex
 
 /** Accepted list `join` (PR #518), which shows each element as `${...}` does. */
 function listJoin(list: IrExpression, separator: IrExpression): IrExpression {
-  return { kind: "methodCall", target: list, name: "join", arguments: [separator], pending: true };
+  return { kind: "methodCall", target: list, name: "join", arguments: [separator] };
 }
 
 /**
@@ -6975,7 +6975,6 @@ function textOperation(
     target,
     name: operation,
     arguments: args,
-    pending: true,
   });
   const literalText = (argument: AstNode | undefined): string | null => {
     const value = argument === undefined ? undefined : constantValue(argument);
@@ -7018,7 +7017,7 @@ function textOperation(
           node.span,
         );
       }
-      const length: IrExpression = { kind: "property", target, name: "length", pending: true };
+      const length: IrExpression = { kind: "property", target, name: "length" };
       return name === "isEmpty"
         ? { kind: "binary", operator: "==", left: length, right: { kind: "literal", value: 0 } }
         : length;
@@ -7623,7 +7622,6 @@ function lowerRegexWorkaround(
     target: value,
     name: operation,
     arguments: args,
-    pending: true,
   });
   const literal = (value: string | number): IrExpression => ({ kind: "literal", value });
   const variable = (name: string): IrExpression => ({ kind: "variable", name });
@@ -8836,8 +8834,8 @@ function buttonTimeout(
 
 /**
  * Legacy single-field input shows `message` in its dialog and pre-fills `defaultValue`. TeaseScript shows the
- * question with `say` and then asks with a compact input whose `default:` prefills the field (V30 §20); integer
- * input keeps the message as its hint, followed by the named default (#524).
+ * question with `say` and then asks with a compact input whose `default:` prefills the field (V30 §20), also for
+ * integer input (`askInteger`, #548).
  */
 function lowerSingleInput(
   node: AstNode,
@@ -8856,7 +8854,7 @@ function lowerSingleInput(
   }
   const defaultNode = argumentNodes[1];
   const prefill = defaultNode === undefined || isEmptyDefault(defaultNode) ? null : args[1]!;
-  if (name !== "getInteger" && prefill !== null && !isPure(defaultNode!, context)) {
+  if (prefill !== null && !isPure(defaultNode!, context)) {
     return unsupportedExpression(
       context,
       node,
@@ -8895,21 +8893,9 @@ function lowerSingleInput(
           : templateOrLiteral([{ value: prefill }]);
     }
   }
-  if (name === "getInteger") {
-    // Accepted V30 integer input; compact syntax exists only for text and number input. A null legacy
-    // message kept the current text, so the field gets no message of its own.
-    const message = isNullConstant(argumentNodes[0])
-      ? { kind: "literal" as const, value: "" }
-      : args[0]!;
-    return {
-      kind: "call",
-      name: "askInteger",
-      positional: [message],
-      named: prefill === null ? {} : { default: prefill },
-    };
-  }
   if (!pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
-  const input = name === "getString" ? "askText" : "askNumber";
+  const input =
+    name === "getString" ? "askText" : name === "getInteger" ? "askInteger" : "askNumber";
   return textPrefill === null
     ? { kind: "input", input }
     : { kind: "input", input, defaultValue: textPrefill };
@@ -8942,7 +8928,7 @@ function notePrefill(
     "warning",
     name === "getString"
       ? `${name}() pre-filled its field with this value even when it was blank; a TeaseScript default must be non-blank text, or the input fails when it opens.`
-      : `${name}() pre-filled its field with this value even when it was null; a TeaseScript default must be a number, or the input fails when it opens.`,
+      : `${name}() pre-filled its field with this value even when it was null; a TeaseScript default must be ${name === "getInteger" ? "a whole number" : "a number"}, or the input fails when it opens.`,
     node.span,
   );
 }

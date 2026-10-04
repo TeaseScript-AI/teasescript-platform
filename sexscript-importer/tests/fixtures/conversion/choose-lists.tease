@@ -37,7 +37,7 @@ while again == 0 {
 
 // The same menu reached again with other option texts.
 let options = ["Low", "High"]
-for round in 1..=2 {
+for roundValue in 1..=2 {
   say "Pick one"
   let picked = choose sexscriptLegacyMenuOptions(options, 0)
   say "Picked ${options[picked]}"

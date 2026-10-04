@@ -9,9 +9,7 @@ import type { IrExpression, IrFunctionParameter, IrStatement } from "./ir.ts";
  * as an integer type (`int m = 7 / 2` stores 3) with `toInteger`. A variable that holds values of two different
  * types, such as text and a list, cannot be expressed without union types; those are returned as conflicts.
  *
- * Types follow the compiler (`src/static-types.ts` in the repository root) plus the accepted result types it does not
- * implement yet: text operations, `join`, conversions, and rounding (#518), and the `showButton` elapsed duration
- * (#513).
+ * Types follow the compiler (`src/static-types.ts` in the repository root).
  * Values it cannot know, such as storage and function results, are not checked.
  */
 export type TeaseType =
@@ -54,8 +52,6 @@ export interface VariableTypeResult {
   annotated: number;
   /** Values truncated with `toInteger` because Groovy declared the variable with an integer type. */
   truncated: number;
-  /** Declarations whose type only the current compiler needs (`compilerType`), for the compiler gate. */
-  compilerAnnotated: number;
   /**
    * `list += value` statements, emitted as numeric `+=` because the list was not proven while lowering, that now
    * append with the concatenation helper.
@@ -209,7 +205,6 @@ export function enforceVariableTypes(
     placeholders: [],
     annotated: 0,
     truncated: 0,
-    compilerAnnotated: 0,
     appended: [],
   };
   for (const [declaration, items] of declarationConflicts) {
@@ -262,12 +257,6 @@ export function enforceVariableTypes(
           if (needed && written !== null) {
             result.annotated += 1;
             next = { ...next, type: written };
-          }
-          // An unannotated variable widens by itself (#504 option B), but the current compiler needs `: number`.
-          const compilerWritten = binding.widened || binding.optional ? written : null;
-          if (compilerWritten !== null && compilerWritten !== (next.type ?? null)) {
-            result.compilerAnnotated += 1;
-            next = { ...next, compilerType: compilerWritten };
           }
           // An empty list needs its element type written.
           if (placeholder?.kind === "list" && written !== null && next.type === undefined)
@@ -1084,7 +1073,9 @@ export function expressionType(
       return sharedValueType(values);
     }
     case "input":
-      return scalar(value.input === "askText" ? "string" : "number");
+      return scalar(
+        value.input === "askText" ? "string" : value.input === "askInteger" ? "integer" : "number",
+      );
     case "range":
       return { kind: "range" };
     case "unary": {

@@ -1,8 +1,8 @@
-function sexscriptLegacyRandom(max) {
-  if max == null {
+function sexscriptLegacyRandom(limit) {
+  if limit == null {
     return randomInteger(0..100)
   }
-  let bound = max - max % 1
+  let bound = limit - limit % 1
   if bound > 0 {
     return randomInteger(0..bound)
   }

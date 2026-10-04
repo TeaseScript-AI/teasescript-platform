@@ -18,8 +18,8 @@ function yesText {
 }
 // TODO SX_PROMPT_POSITION line 5: This input's question cannot be shown at the right moment: the input is guarded by && / || / ?:, follows side effects in the same statement, or has arguments with side effects. Split the statement so the input comes first.
 // | def result = getBoolean("Question", yesText(), "No")
-function getRandom(max) {
-  return max - 1
+function getRandom(maxValue) {
+  return maxValue - 1
 }
 let xs = [1, 2, 3]
 say "Pick ${xs[getRandom(xs.length)]}"

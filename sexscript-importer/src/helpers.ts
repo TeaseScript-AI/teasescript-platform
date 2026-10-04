@@ -278,11 +278,11 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
     build: () =>
       fn(
         "sexscriptLegacyRandom",
-        ["max"],
+        ["limit"],
         [
-          ifS(bin("==", v("max"), lit(null)), [ret(randomBelow(lit(100)))]),
+          ifS(bin("==", v("limit"), lit(null)), [ret(randomBelow(lit(100)))]),
           // A fractional bound was truncated toward zero, like (int) max.
-          letS("bound", bin("-", v("max"), bin("%", v("max"), lit(1)))),
+          letS("bound", bin("-", v("limit"), bin("%", v("limit"), lit(1)))),
           ifS(bin(">", v("bound"), lit(0)), [ret(randomBelow(v("bound")))]),
           ifS(bin("<", v("bound"), lit(0)), [
             ret({
@@ -334,7 +334,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ["lists"],
         [
           letS("combined", { kind: "list", items: [] }),
-          forS("list", v("lists"), [forS("item", v("list"), [add("combined", v("item"))])]),
+          forS("part", v("lists"), [forS("item", v("part"), [add("combined", v("item"))])]),
           ret(v("combined")),
         ],
       ),
