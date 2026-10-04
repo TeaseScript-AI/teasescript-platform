@@ -813,7 +813,10 @@ class TypeChecker {
           return;
         }
         place = this.#propertyPlace(object, target.object, target.property);
-        if (value.kind === "speaker" && SPEAKER_TEXT_PROPERTIES.has(name))
+        if (
+          SPEAKER_TEXT_PROPERTIES.has(name) &&
+          members(object).some((member) => resolved(member).kind === "speaker")
+        )
           shownField = `the speaker's ${name}`;
         handle = mayBe(object, "timer", "media");
         // A media position, remaining time, or volume write first waits for the previous message's pacing.
@@ -904,8 +907,9 @@ class TypeChecker {
       (kept.kind === "list" && literal.kind === "listLiteral") ||
       (kept.kind === "set" && literal.kind === "setLiteral")
     ) {
-      // A declared element type, even `list` or `set` of any values, decides what the literal may mix.
-      if (resolved(kept.element).kind !== "open") this.#mixedLiterals.delete(literal);
+      // A declared element type decides what the literal may mix; `list` or `set` of any values does not, so a mixed
+      // literal still needs a declared union.
+      if (isKnown(kept.element)) this.#mixedLiterals.delete(literal);
       const elements = elementPlace(kept, place.label, isNullable(place.type));
       for (const element of literal.elements)
         yield* compileChild(this.#storeTask(elements, element, this.#typeOf(element), decides));
@@ -2171,15 +2175,21 @@ class TypeChecker {
       }
       const type = yield* compileChild(this.#expressionTask(option.expression, scope));
       const value = resolved(nonNullType(type));
-      if (value.kind === "list" || value.kind === "set") {
-        // The elements of a computed collection are not visible here: a choice object among them may return its
-        // value or its text, so only scalar elements give a known result type.
-        const element = resolved(value.element);
+      const parts = members(nonNullType(type)).map(resolved);
+      if (parts.some((part) => part.kind === "list" || part.kind === "set")) {
+        // Each member gives buttons: a collection its elements, a value itself. The elements of a computed collection
+        // are not visible here: a choice object among them may return its value or its text, so only scalar
+        // elements give a known result type.
+        const accepted = this.#choiceEntry(option.expression, type, false) !== UNKNOWN_TYPE;
+        const results = parts.map((part) => {
+          const button =
+            part.kind === "list" || part.kind === "set" ? resolved(part.element) : part;
+          // A computed collection's element type is copied, so the result stays apart from the collection.
+          return button.kind === "object" ? UNKNOWN_TYPE : copyType(button);
+        });
         values.push(
           written ??
-            (isNullable(type) || element.kind === "object"
-              ? UNKNOWN_TYPE
-              : copyType(value.element)),
+            (accepted && !isNullable(type) ? (joinTypes(results) ?? UNKNOWN_TYPE) : UNKNOWN_TYPE),
         );
         continue;
       }
@@ -2204,22 +2214,23 @@ class TypeChecker {
    */
   #choiceEntry(entry: Expression, type: StaticType, inList: boolean): StaticType {
     const value = resolved(nonNullType(type));
-    if (inList && (value.kind === "list" || value.kind === "set")) {
+    // A button comes from a value or a choice object; a list or set gives buttons only as a whole option.
+    const accepted = (member: StaticType): boolean => {
+      const kind = resolved(member).kind;
+      return (
+        isShowable(member) || kind === "object" || (!inList && (kind === "list" || kind === "set"))
+      );
+    };
+    const rejected = this.#checkMembers(entry, type, accepted, (member) =>
       this.#report(
         typeCode.invalidInteractionChoice,
-        "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
+        inList && (member.kind === "list" || member.kind === "set")
+          ? "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set."
+          : "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
         entry.span,
-      );
-      return UNKNOWN_TYPE;
-    }
-    if (UNSHOWABLE_KINDS.has(value.kind) && value.kind !== "object") {
-      this.#report(
-        typeCode.invalidInteractionChoice,
-        "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
-        entry.span,
-      );
-      return UNKNOWN_TYPE;
-    }
+      ),
+    );
+    if (rejected) return UNKNOWN_TYPE;
     const literal = unwrap(entry);
     if (literal.kind !== "objectLiteral") return value.kind === "object" ? UNKNOWN_TYPE : type;
     let returned: StaticType = UNKNOWN_TYPE;
@@ -2230,12 +2241,13 @@ class TypeChecker {
         if (!literal.properties.some((other) => other.name.name === "value"))
           returned = propertyType;
       } else if (property.name.name === "value") {
-        if (UNSHOWABLE_KINDS.has(resolved(nonNullType(propertyType)).kind))
+        this.#checkMembers(property.value, propertyType, isShowable, () =>
           this.#report(
             typeCode.invalidInteractionChoice,
             "A choice value must be text, a number, true, false, null, or a duration.",
             property.value.span,
-          );
+          ),
+        );
         returned = propertyType;
       } else if (property.name.name === "background")
         this.#checkBackground(property.value, propertyType);
@@ -2249,16 +2261,17 @@ class TypeChecker {
     const value = unwrap(expression);
     if (value.kind !== "listLiteral") {
       // `${...}` selects one element of a list, so a list is shown too.
-      const interpolated = (member: StaticType): boolean =>
-        isShowable(member) || resolved(member).kind === "list";
-      if (this.#reportedMayBe(expression, type, interpolated)) return;
-      const shown = resolved(nonNullType(type));
-      if (UNSHOWABLE_KINDS.has(shown.kind) && shown.kind !== "list")
-        this.#report(
-          typeCode.unshowableValue,
-          `"\${...}" cannot show ${describeValue(shown)}. It shows text, numbers, true, false, null, and durations, and selects one element of a list.`,
-          expression.span,
-        );
+      this.#checkMembers(
+        expression,
+        type,
+        (member) => isShowable(member) || resolved(member).kind === "list",
+        (member) =>
+          this.#report(
+            typeCode.unshowableValue,
+            `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, and durations, and selects one element of a list.`,
+            expression.span,
+          ),
+      );
       return;
     }
     if (value.elements.length === 0)
@@ -2268,12 +2281,13 @@ class TypeChecker {
         value.span,
       );
     for (const element of value.elements)
-      if (UNSHOWABLE_KINDS.has(resolved(nonNullType(this.#typeOf(element))).kind))
+      this.#checkMembers(element, this.#typeOf(element), isShowable, () =>
         this.#report(
           typeCode.unshowableValue,
           "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
           element.span,
-        );
+        ),
+      );
   }
 
   /** A button background is a colour in text; `null` is no colour either, so an optional type is checked by its value. */
@@ -2308,6 +2322,24 @@ class TypeChecker {
   }
 
   /**
+   * Checks every known member of a value's type except `null` (ADR 0021 rule 3.5): when only some are accepted, the
+   * author must test which one it holds first; when none is, `reject` reports the first. Returns whether anything was
+   * reported.
+   */
+  #checkMembers(
+    expression: Expression,
+    type: StaticType,
+    accepts: (member: StaticType) => boolean,
+    reject: (member: StaticType) => void,
+  ): boolean {
+    if (this.#reportedMayBe(expression, type, accepts)) return true;
+    const known = members(nonNullType(type)).filter(isKnown);
+    if (known.length === 0 || known.some(accepts)) return false;
+    reject(resolved(known[0]!));
+    return true;
+  }
+
+  /**
    * For a value of a union type of which only some members are accepted, reports that the author must test which
    * member it holds first (ADR 0021 rule 3.5), and returns whether it did.
    */
@@ -2329,20 +2361,19 @@ class TypeChecker {
 
   /** Only `${...}` selects from a list; a list in a text field is an error, at runtime when it is not known here. */
   #checkShownText(expression: Expression, type: StaticType, field: string): void {
-    if (this.#reportedMayBe(expression, type, isShowable)) return;
-    const value = resolved(nonNullType(type));
-    if (value.kind === "list")
-      this.#report(
-        typeCode.listInText,
-        `A list cannot be ${field}. Select one element with "\${list}" or list.random.`,
-        expression.span,
-      );
-    else if (UNSHOWABLE_KINDS.has(value.kind))
-      this.#report(
-        typeCode.unshowableValue,
-        `${capitalize(field)} cannot be ${describeValue(value)}.`,
-        expression.span,
-      );
+    this.#checkMembers(expression, type, isShowable, (member) =>
+      member.kind === "list"
+        ? this.#report(
+            typeCode.listInText,
+            `A list cannot be ${field}. Select one element with "\${list}" or list.random.`,
+            expression.span,
+          )
+        : this.#report(
+            typeCode.unshowableValue,
+            `${capitalize(field)} cannot be ${describeValue(member)}.`,
+            expression.span,
+          ),
+    );
   }
 
   /**

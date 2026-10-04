@@ -981,8 +981,9 @@ let values: (string | number)[] = ["Level", 2]  // valid
 let mixed = ["Level", 2]                       // compile error: declare (string | number)[]
 ```
 
-An operation on a union is allowed when every member supports it with a compatible result. `==`, `!=`, `${...}`, and
-storing into an equal or wider union always work. Otherwise the error names the test the author needs:
+An operation on a union is allowed when every member supports it with a compatible result. `==`, `!=`, and storing into
+an equal or wider union always work; `${...}` and text fields need every member to be a value they can show
+([§16](#16-lists)). Otherwise the error names the test the author needs:
 
 ```text
 let points = reward + 1

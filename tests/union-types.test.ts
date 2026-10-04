@@ -51,7 +51,7 @@ test("type names cover null, any list, set, or object, and program-control value
   assert.deepEqual(
     codes(
       [
-        'let anything: list = [1, "a"]',
+        "let anything: list = [1]",
         "let tags: set = set[1]",
         "let record: object = { a: 1 }",
         "let span: range = 1..3",
@@ -157,6 +157,42 @@ test("a union receiver checks element stores, property writes, compound assignme
   assert.deepEqual(codes('let xs: (integer | string)[] | boolean = [1, "x"]'), []);
   assert.deepEqual(codes('let xs: integer[][] | (string | boolean)[][] = [["x", true]]'), []);
   assert.deepEqual(codes('let xs: integer[] | string[] = [1, "x"]'), [["TSV044", '[1, "x"]']]);
+});
+
+test("display, choice, and speaker text checks look at every member of a union", () => {
+  // A union whose known members cannot be shown at all is an error, as is a mix that needs a test first.
+  for (const [source, code] of [
+    ["function f(x: integer[] | object) {\n    showButton x\n}", "TSV040"],
+    ['function f(x: object | integer set) {\n    say "${x}"\n}', "TSV042"],
+    ['function f(x: string | object) {\n    say "${[x]}"\n}', "TSV043"],
+    [
+      'function f(x: string | integer[]) {\n    let answer = choose { text: "go", value: x }\n}',
+      "TSV043",
+    ],
+    ["function f(x: string | timer) {\n    let answer = choose x\n}", "TSV043"],
+    [
+      "speaker vera {}\nfunction f(voice: speaker | object) {\n    voice.firstName = [1]\n}",
+      "TSV040",
+    ],
+  ] as const)
+    assert.deepEqual(
+      compileSource(source).diagnostics.map((diagnostic) => diagnostic.code),
+      [code],
+      source,
+    );
+  // A union of collections gives buttons from either one, so the result has their element type.
+  assert.deepEqual(
+    codes("function f(x: integer[] | integer set) {\n    let n: integer = choose x\n}"),
+    [],
+  );
+  assert.deepEqual(
+    codes(
+      'function f(x: integer[] | integer set) {\n    let selected = choose x\n    say "${selected.length}"\n}',
+    ),
+    [["TSV043", "length"]],
+  );
+  // A list of any values does not admit a mixed literal; its elements need a declared union.
+  assert.deepEqual(codes('let values: list = [1, "x"]'), [["TSV044", '[1, "x"]']]);
 });
 
 test("mixed list literals need a declared union, and every other mix points to it", () => {
