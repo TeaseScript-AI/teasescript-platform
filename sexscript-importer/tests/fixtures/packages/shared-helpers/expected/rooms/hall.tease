@@ -4,7 +4,12 @@ function enter {
   image()
   say "Come in."
 }
+let level = 1
+function report {
+  say "Level ${level}"
+}
 enter()
+report()
 greet()
 taunt()
 goto "rooms/garden.tease"

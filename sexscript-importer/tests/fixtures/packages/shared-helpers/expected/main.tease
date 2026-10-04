@@ -5,8 +5,13 @@ function enter {
   image()
   say "Come in."
 }
+let level = 1
+function report {
+  say "Level ${level}"
+}
 save "Vera" as "mistress"
 enter()
+report()
 taunt()
 greet()
 goto "rooms/hall.tease"

@@ -107,6 +107,17 @@ export function promoteGlobalFunctions(
     candidates.set(name, { statement, scripts: users, copies: list.length });
   }
 
+  // The type of a file-level value, from literals and the results of the scripts' functions.
+  let results: ReadonlyMap<string, TeaseType> | undefined;
+  const valueType = (value: IrExpression): TeaseType => {
+    results ??= functionResultTypes(scripts.flatMap((program) => program.statements));
+    return expressionType(
+      value,
+      () => ({ kind: "unknown" }),
+      (name) => results?.get(name),
+    );
+  };
+
   // A candidate stays file-local when it calls a file-local function or reads a file-level value that cannot become a
   // global; dropping one can drop the candidates that call it, so the check repeats until nothing changes.
   const reads = new Map(
@@ -159,6 +170,20 @@ export function promoteGlobalFunctions(
       });
       if (everywhere.some((declaration) => (declaration.type ?? "") !== [...types][0]))
         return `reads ${variable}, which another script declares with another type`;
+      // Without annotations, the start values decide the type; a null start takes the type of a later value.
+      const started = new Set(
+        everywhere
+          .filter((declaration) => !isNullLiteral(declaration.value))
+          .map((declaration) => valueType(declaration.value))
+          .map((type) => (type.kind === "optional" ? type.value : type))
+          .filter((type) => type.kind !== "unknown" && type.kind !== "null")
+          // An empty list takes its element type from the first one assigned, so lists compare as lists.
+          .map((type) =>
+            type.kind === "scalar" || type.kind === "temporal" ? type.name : type.kind,
+          ),
+      );
+      if (started.size > 1)
+        return `reads ${variable}, which the scripts start with values of different types`;
       const first = declarations[0]!;
       if (
         constantValue(first.value) &&
@@ -171,16 +196,6 @@ export function promoteGlobalFunctions(
     return null;
   }
 
-  // The type of a file-level value, from literals and the results of the scripts' functions.
-  let results: ReadonlyMap<string, TeaseType> | undefined;
-  const valueType = (value: IrExpression): TeaseType => {
-    results ??= functionResultTypes(scripts.flatMap((program) => program.statements));
-    return expressionType(
-      value,
-      () => ({ kind: "unknown" }),
-      (name) => results?.get(name),
-    );
-  };
   if (candidates.size === 0)
     return { programs: [...scripts], helpers: null, promoted: [], globals: [], kept };
   const promotedNames = new Set(candidates.keys());
@@ -317,6 +332,10 @@ function startValue(type: string | undefined, inferred: TeaseType): IrExpression
   if (type === "string") return { kind: "literal", value: "" };
   if (type === "boolean") return { kind: "literal", value: false };
   return { kind: "literal", value: 0 };
+}
+
+function isNullLiteral(value: IrExpression): boolean {
+  return value.kind === "literal" && value.value === null;
 }
 
 /** Whether a value is made of literals only, so it can initialize a global (ADR 0022 §6.4). */
