@@ -152,9 +152,9 @@ global level = load "level", default: 1
 
 6. Types follow the `let` rules of ADR 0021, with one type environment for all files; ADR 0021 rule 6 gives the
    checking order across files. When the project holds a file `call`, what is known about a global that some file's
-   top level assigns does not outlast a file or function call; when some file holds a `goto` or `call` that may enter
-   `main.tease` at its top (a glob that may pick it or a computed target counts), `main.tease` starts without what its
-   start values stored. Both rules look at the source as written, including code that cannot run.
+   top level assigns does not outlast a file or function call; when some file holds a `goto`, `call`, or `fallback`
+   that may enter `main.tease` at its top (a glob that may pick it or a computed target counts), `main.tease` starts
+   without what its start values stored. Both rules look at the source as written, including code that cannot run.
 7. Values are checkpointed and live for the session. `save` and `load` give persistence beyond it.
 
 ## Consequences
