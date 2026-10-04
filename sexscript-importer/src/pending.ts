@@ -23,7 +23,6 @@ const PENDING_CALLS = new Map<string, string>([
   ["floor", "floor()"],
   ["getDate", "getDate()"],
   ["getDateTime", "getDateTime()"],
-  ["getSeconds", "getSeconds()"],
   ["openUrl", "openUrl()"],
   ["round", "round()"],
   ["showButton", "showButton timeout"],
@@ -33,6 +32,9 @@ const PENDING_CALLS = new Map<string, string>([
   ["toNumber", "toNumber()"],
   ["toString", "toString()"],
 ]);
+
+/** Current-time getters whose conversion and format methods (#532) the shim replaces together with the getter. */
+const TEMPORAL_GETTERS = new Set(["getDate", "getTime", "getDateTime"]);
 
 /** Calls that only a proposed language change defines, by the proposal (see proposals.ts). */
 const PROPOSED_CALLS = new Map<string, ProposalId>([["countImages", "media-tags"]]);
@@ -190,6 +192,16 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         }
         return { ...value, target: expression(value.target) };
       case "methodCall":
+        if (
+          value.target.kind === "call" &&
+          value.target.local !== true &&
+          TEMPORAL_GETTERS.has(value.target.name) &&
+          value.target.positional.length === 0
+        ) {
+          // A conversion or format method of the current date or time (#532), as one placeholder.
+          const operation = `${value.target.name}().${value.name}()`;
+          return call(operation, operation, value.arguments.map(expression));
+        }
         if (value.proposed !== undefined) {
           return call(proposalCapability(value.proposed), `${value.proposed}.${value.name}()`, [
             expression(value.target),
@@ -928,7 +940,22 @@ export function pendingHostFunctions(
     ["chooseValue", () => 0],
     ["askBoolean", () => next("askBoolean", [true, false])],
     ["askBooleans", (_, named) => named.defaults ?? emptyList],
-    ["getSeconds", () => Math.floor((epochMs + state.clock.nowMs) / 1000)],
+    ["getDateTime().toSeconds()", () => Math.floor((epochMs + state.clock.nowMs) / 1000)],
+    ["getDateTime().toMilliseconds()", () => epochMs + state.clock.nowMs],
+    ["getDate().toISO()", () => new Date(epochMs + state.clock.nowMs).toISOString().slice(0, 10)],
+    // The player's local presentation; the stand-in uses the ISO form.
+    [
+      "getDate().formatDate()",
+      () => new Date(epochMs + state.clock.nowMs).toISOString().slice(0, 10),
+    ],
+    [
+      "getTime().formatTime()",
+      () => new Date(epochMs + state.clock.nowMs).toISOString().slice(11, 16),
+    ],
+    [
+      "getDateTime().formatDateTime()",
+      () => new Date(epochMs + state.clock.nowMs).toISOString().slice(0, 16).replace("T", " "),
+    ],
     ["getDateTime", () => date(true)],
     ["getDate", () => date(false)],
     ["openUrl", () => null],

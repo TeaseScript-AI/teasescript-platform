@@ -648,7 +648,8 @@ function lowerStatementList(
 }
 
 /**
- * A loop that only redraws a countdown until `waited = getSeconds() - start` reaches a limit kept the legacy player
+ * A loop that only redraws a countdown until `waited = getDateTime().toSeconds() - start` reaches a limit kept the
+ * legacy player
  * busy for that time; TeaseScript runs it out of its instruction budget. Right after `waited` is computed, with a
  * body that only shows text and sets its own locals before recomputing `waited`, it becomes a visible timer over the
  * limit (`timer`, as for waitWithGauge), whose display replaces the redrawn text.
@@ -695,7 +696,7 @@ function withVisibleCountdowns(statements: IrStatement[], context: LowerContext)
   });
 }
 
-/** The start variable of `waited = getSeconds() - start` (declaration or assignment), or null. */
+/** The start variable of `waited = getDateTime().toSeconds() - start` (declaration or assignment), or null. */
 function elapsedStart(statement: IrStatement, waited: string): string | null {
   const value =
     statement.kind === "let" && statement.name === waited
@@ -709,14 +710,33 @@ function elapsedStart(statement: IrStatement, waited: string): string | null {
   if (
     value?.kind !== "binary" ||
     value.operator !== "-" ||
-    value.left.kind !== "call" ||
-    value.left.name !== "getSeconds" ||
-    value.left.positional.length !== 0 ||
+    !isCurrentSeconds(value.left) ||
     value.right.kind !== "variable"
   ) {
     return null;
   }
   return value.right.name;
+}
+
+/** The current Unix time in seconds; #532 removed getSeconds() in favour of the datetime conversion. */
+function currentSeconds(): IrExpression {
+  return {
+    kind: "methodCall",
+    target: { kind: "call", name: "getDateTime", positional: [], named: {} },
+    name: "toSeconds",
+    arguments: [],
+  };
+}
+
+function isCurrentSeconds(value: IrExpression): boolean {
+  return (
+    value.kind === "methodCall" &&
+    value.name === "toSeconds" &&
+    value.arguments.length === 0 &&
+    value.target.kind === "call" &&
+    value.target.name === "getDateTime" &&
+    value.target.positional.length === 0
+  );
 }
 
 /** Whether a loop statement only shows text and computes locals it declares itself. */
@@ -4850,12 +4870,7 @@ function lowerObjectMethodCallExpression(
     targetNode !== null &&
     (targetNode.kind === "constructorCall" || isCurrentDateConstructor(targetNode))
   ) {
-    return unsupportedExpression(
-      context,
-      node,
-      "SX_DATE_FORMAT",
-      "Java date pattern formatting has no TeaseScript equivalent; keep typed date/datetime values (compare them or store them directly) or display them with formatDate()/formatTime().",
-    );
+    return dateFormat(node, targetNode, argumentsNodes, context);
   }
   if (targetNode?.kind === "constructorCall") {
     return unsupportedExpression(
@@ -5258,6 +5273,73 @@ function isCurrentDateConstructor(node: AstNode): boolean {
     (node.type === "java.util.Date" || node.type === "Date") &&
     (args === null || nodeArray(args.items).length === 0)
   );
+}
+
+/**
+ * Java date pattern formatting of the current moment (#532): the fixed machine format `yyyy-MM-dd` is a date's
+ * `toISO()`; a display pattern of a whole date, time, or both becomes `formatDate()`, `formatTime()`, or
+ * `formatDateTime()`, which show the player's local form instead of the legacy pattern, with a note. Other patterns
+ * (weekday names, partial fields, time zones) and dates built from Unix time are reported.
+ */
+function dateFormat(
+  node: AstNode,
+  targetNode: AstNode,
+  argumentsNodes: AstNode[],
+  context: LowerContext,
+): IrExpression | null {
+  const pattern = argumentsNodes.length === 1 ? constantString(argumentsNodes[0]) : null;
+  if (!isCurrentDateConstructor(targetNode)) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_DATE_FORMAT",
+      "This Java date is built from its arguments, such as a Unix time in milliseconds; TeaseScript has no conversion from Unix time to a date or datetime (#532). Store and load the datetime itself, then format it with formatDate() or toISO().",
+    );
+  }
+  const kind = pattern === null ? null : datePatternKind(pattern);
+  if (kind === null) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_DATE_FORMAT",
+      "This Java date pattern is neither the ISO date yyyy-MM-dd (toISO()) nor a whole date or time that formatDate(), formatTime(), or formatDateTime() can show (#532); build the text from the date fields.",
+    );
+  }
+  const getter =
+    kind === "isoDate" || kind === "date" ? "getDate" : kind === "time" ? "getTime" : "getDateTime";
+  const method =
+    kind === "isoDate"
+      ? "toISO"
+      : `format${kind === "date" ? "Date" : kind === "time" ? "Time" : "DateTime"}`;
+  if (kind !== "isoDate") {
+    addDiagnostic(
+      context,
+      "SX_DATE_FORMAT",
+      "warning",
+      `Java formatted the current ${kind === "dateTime" ? "date and time" : kind} with the pattern ${JSON.stringify(pattern)}; ${method}() shows the player's local form instead (#532).`,
+      node.span,
+    );
+  }
+  return {
+    kind: "methodCall",
+    target: { kind: "call", name: getter, positional: [], named: {} },
+    name: method,
+    arguments: [],
+  };
+}
+
+/** What a Java SimpleDateFormat pattern shows: the ISO date, a whole date, a time, both, or null for anything else. */
+function datePatternKind(pattern: string): "isoDate" | "date" | "time" | "dateTime" | null {
+  if (pattern === "yyyy-MM-dd") return "isoDate";
+  // Quoted text is literal; every other letter is a pattern field.
+  const fields = pattern.replace(/'[^']*'/gu, "").replace(/[^A-Za-z]/gu, "");
+  if (/[^yMdHhkKmsSa]/u.test(fields)) return null;
+  const date = /y/u.test(fields) && /M/u.test(fields) && /d/u.test(fields);
+  const time = /[HhkK]/u.test(fields) && /m/u.test(fields);
+  if (date && time) return "dateTime";
+  if (date && !/[HhkKmsSa]/u.test(fields)) return "date";
+  if (time && !/[yMd]/u.test(fields)) return "time";
+  return null;
 }
 
 /** `Calendar.getInstance().get(Calendar.FIELD)` reads one field of the current local date and time. */
@@ -5785,12 +5867,12 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       }
       context.popupTimers += 1;
       const start = context.popupTimers === 1 ? "popupStart" : `popupStart${context.popupTimers}`;
-      const seconds: IrExpression = { kind: "call", name: "getSeconds", positional: [], named: {} };
+      const seconds = currentSeconds();
       addDiagnostic(
         context,
         "SX_POPUP_ELAPSED",
         "warning",
-        "showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getSeconds(), in whole seconds.",
+        "showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getDateTime().toSeconds(), in whole seconds.",
         node.span,
       );
       // Legacy timing started once the message was computed.
@@ -5812,8 +5894,9 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       };
     }
     case "getTime":
+      // Legacy getTime() returned Unix seconds; TeaseScript getTime() is the time of day (#532).
       return args.length === 0
-        ? { kind: "call", name: "getSeconds", positional: [], named: {} }
+        ? currentSeconds()
         : unsupportedExpression(
             context,
             node,

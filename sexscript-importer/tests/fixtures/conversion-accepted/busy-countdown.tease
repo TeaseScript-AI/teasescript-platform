@@ -1,6 +1,6 @@
 // A countdown redrawn in a busy loop becomes a visible timer.
-let startTime = getSeconds()
-let waitedTime = getSeconds() - startTime
+let startTime = getDateTime().toSeconds()
+let waitedTime = getDateTime().toSeconds() - startTime
 // NOTE SX_BUSY_COUNTDOWN line 4: The legacy loop redrew a countdown as fast as it could until the time was up; it became a visible timer over the same time, whose display replaces the redrawn text.
 timer 5
 say "Time is up"
