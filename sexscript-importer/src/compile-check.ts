@@ -44,6 +44,53 @@ export async function loadRepositoryCompiler(): Promise<TeaseCompiler> {
   };
 }
 
+/** One file of a project (ADR 0022): its package path, `main.tease` for the entry, and its source. */
+export interface TeaseProjectFile {
+  path: string;
+  source: string;
+}
+
+export interface TeaseProjectDiagnostic extends TeaseCompileDiagnostic {
+  /** The project file the diagnostic belongs to. */
+  path: string;
+}
+
+export interface TeaseProjectCompileResult {
+  /** Whether the project compiled into one plan, which needs every file free of errors. */
+  compiled: boolean;
+  diagnostics: TeaseProjectDiagnostic[];
+}
+
+export type TeaseProjectCompiler = (
+  files: readonly TeaseProjectFile[],
+  builtins?: readonly string[],
+) => TeaseProjectCompileResult;
+
+/** Loads the real compiler's project compilation (`compileProject`) from the repository build. */
+export async function loadRepositoryProjectCompiler(): Promise<TeaseProjectCompiler> {
+  const module: unknown = await import(repositoryCompilerUrl.href);
+  if (!isRecord(module) || typeof module.compileProject !== "function") {
+    throw new Error("Repository build does not export compileProject().");
+  }
+  const compileProject = module.compileProject;
+  return (files, builtins = []) => {
+    const result: unknown = compileProject(
+      files.map(({ path, source }) => ({ path, source })),
+      { builtins: [...builtins] },
+    );
+    if (!isRecord(result) || !Array.isArray(result.diagnostics)) {
+      throw new Error("compileProject() returned an unexpected result shape.");
+    }
+    return {
+      compiled: result.plan !== null && result.plan !== undefined,
+      diagnostics: result.diagnostics.map((value: unknown) => ({
+        ...readDiagnostic(value),
+        path: isRecord(value) && typeof value.path === "string" ? value.path : "",
+      })),
+    };
+  };
+}
+
 function readCompilationResult(value: unknown): TeaseCompileResult {
   if (!isRecord(value) || !Array.isArray(value.diagnostics)) {
     throw new Error("compileSource() returned an unexpected result shape.");

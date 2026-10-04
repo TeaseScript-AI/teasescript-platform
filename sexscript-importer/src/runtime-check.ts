@@ -53,106 +53,25 @@ export type TeaseRunner = (
   options?: SmokeRunOptions,
 ) => SmokeRunResult;
 
-/**
- * State shared by the scripts of one package flow: storage, the file a `goto` transfers to, simulated time, and
- * answer rotation of host stand-ins for pending inputs.
- */
-export interface FlowState {
-  storage: Map<string, RuntimeValue>;
-  transfer: string | null;
-  clock: SmokeClock;
-  answers: Map<string, number>;
-}
-
-export function newFlowState(): FlowState {
-  return { storage: new Map(), transfer: null, clock: { nowMs: 0 }, answers: new Map() };
-}
-
-export interface FlowScript {
+/** One file of a TeaseScript project (ADR 0022): its package path and source. */
+export interface ProjectSource {
+  path: string;
   source: string;
-  builtins: (state: FlowState) => Record<string, HostFunction>;
 }
 
-export interface FlowRunResult {
-  entry: string;
-  /** A run started at a script that no entry flow reached, with empty storage instead of the package's state. */
-  isolated: boolean;
-  /** `blocked`: the flow transferred to a script that has no runnable conversion. */
-  status: SmokeRunResult["status"] | "blocked";
-  failure: (NonNullable<SmokeRunResult["failure"]> & { script: string }) | null;
-  blockedTarget: string | null;
-  /** Scripts that ran, in first-visit order. */
-  visited: string[];
-  transfers: number;
+/** A smoke run of a whole project, which starts at `main.tease` and follows its transfers in the runtime itself. */
+export interface ProjectRunResult {
+  status: SmokeRunResult["status"];
+  /** `path` names the project file of `line`. */
+  failure: (NonNullable<SmokeRunResult["failure"]> & { path: string | null }) | null;
   steps: number;
 }
 
-/**
- * Normalized lookup key of a package-relative script path as written in `run` targets: forward slashes, no `.` or
- * `..` segments or repeated separators, and lower case, since the legacy player ran on case-insensitive file systems.
- */
-export function flowKey(scriptPath: string): string {
-  return path.posix
-    .normalize(scriptPath.replaceAll("\\", "/"))
-    .replace(/^(?:\.\/|\/)+/u, "")
-    .toLowerCase();
-}
-
-/**
- * Runs a package the way a player would: from an entry script, following `goto` transfers to other files of the
- * package with shared storage, until the flow exits, fails, reaches an unconverted script, or uses up its steps.
- * `scripts` is keyed by `flowKey()`.
- */
-export function smokeRunFlow(
-  runner: TeaseRunner,
-  entry: string,
-  scripts: ReadonlyMap<string, FlowScript | null>,
-  isolated = false,
-  maxSteps = 5000,
-): FlowRunResult {
-  const state = newFlowState();
-  const visits = new Map<string, Map<unknown, number>>();
-  const visited: string[] = [];
-  let steps = 0;
-  let transfers = 0;
-  const result = (
-    status: FlowRunResult["status"],
-    failure: FlowRunResult["failure"] = null,
-    blockedTarget: string | null = null,
-  ): FlowRunResult => ({
-    entry,
-    isolated,
-    status,
-    failure,
-    blockedTarget,
-    visited,
-    transfers,
-    steps,
-  });
-  for (let current = flowKey(entry); ;) {
-    const script = scripts.get(current);
-    if (script === undefined || script === null) return result("blocked", null, current);
-    if (steps >= maxSteps) return result("stepLimit");
-    if (!visited.includes(current)) visited.push(current);
-    let scriptVisits = visits.get(current);
-    if (scriptVisits === undefined) visits.set(current, (scriptVisits = new Map()));
-    state.transfer = null;
-    const run = runner(script.source, script.builtins(state), {
-      maxSteps: maxSteps - steps,
-      visits: scriptVisits,
-      clock: state.clock,
-      storage: state.storage,
-    });
-    // A transfer counts as a step, so scripts that transfer immediately cannot loop forever.
-    steps += run.steps + 1;
-    if (run.status !== "halted") {
-      return result(run.status, run.failure === null ? null : { ...run.failure, script: current });
-    }
-    if (state.transfer === null) return result("halted");
-    current = flowKey(state.transfer);
-    transfers += 1;
-  }
-}
+export type TeaseProjectRunner = (
+  files: readonly ProjectSource[],
+  builtins: Readonly<Record<string, HostFunction>>,
+  options?: { maxSteps?: number },
+) => ProjectRunResult;
 
 const repositoryIndexUrl = new URL("../../dist/src/index.js", import.meta.url);
 
@@ -167,6 +86,7 @@ interface RuntimeApi {
 
 const RUNTIME_OPERATIONS = [
   "compileSource",
+  "compileProject",
   "createFreshRuntimeSnapshot",
   "run",
   "completeAction",
@@ -174,7 +94,7 @@ const RUNTIME_OPERATIONS = [
   "reportMediaLoad",
 ];
 
-export async function loadRepositoryRunner(): Promise<TeaseRunner> {
+async function loadRuntimeApi(): Promise<RuntimeApi> {
   const module: unknown = await import(repositoryIndexUrl.href);
   const exported = (name: string) => {
     const value = isRecord(module) ? module[name] : undefined;
@@ -183,7 +103,7 @@ export async function loadRepositoryRunner(): Promise<TeaseRunner> {
   };
   const operations = new Map(RUNTIME_OPERATIONS.map((name) => [name, exported(name)]));
   const projection = exported("mediaPlaybackProjection");
-  const api: RuntimeApi = {
+  return {
     call: (name, ...args) => {
       const operation = operations.get(name);
       if (operation === undefined) throw new Error(`Unknown runtime operation ${name}.`);
@@ -196,16 +116,58 @@ export async function loadRepositoryRunner(): Promise<TeaseRunner> {
       return Array.isArray(value) ? value.filter(isRecord) : [];
     },
   };
-  return (source, builtins, options = {}) =>
-    smokeRun(
-      api,
-      source,
-      builtins,
-      options.maxSteps ?? 2000,
-      options.visits ?? new Map(),
-      options.clock ?? { nowMs: 0 },
-      options.storage ?? new Map(),
-    );
+}
+
+const NOT_COMPILED = {
+  status: "failed",
+  failure: { code: "COMPILE", message: "Source does not compile.", line: null, path: null },
+  steps: 0,
+} as const satisfies ProjectRunResult;
+
+/** Runs one source as the `main.tease` of a single-file project. */
+export async function loadRepositoryRunner(): Promise<TeaseRunner> {
+  const api = await loadRuntimeApi();
+  return (source, builtins, options = {}) => {
+    const compiled = api.call("compileSource", source, { builtins: Object.keys(builtins) });
+    const { status, failure, steps } = !isRecord(compiled.plan)
+      ? NOT_COMPILED
+      : smokeRun(
+          api,
+          compiled.plan,
+          builtins,
+          options.maxSteps ?? 2000,
+          options.visits ?? new Map(),
+          options.clock ?? { nowMs: 0 },
+          options.storage ?? new Map(),
+        );
+    return {
+      status,
+      failure:
+        failure === null
+          ? null
+          : { code: failure.code, message: failure.message, line: failure.line },
+      steps,
+    };
+  };
+}
+
+/** Compiles the files of a project into one plan and runs it from `main.tease`, transfers included. */
+export async function loadRepositoryProjectRunner(): Promise<TeaseProjectRunner> {
+  const api = await loadRuntimeApi();
+  return (files, builtins, options = {}) => {
+    const compiled = api.call("compileProject", files, { builtins: Object.keys(builtins) });
+    return !isRecord(compiled.plan)
+      ? NOT_COMPILED
+      : smokeRun(
+          api,
+          compiled.plan,
+          builtins,
+          options.maxSteps ?? 5000,
+          new Map(),
+          { nowMs: 0 },
+          new Map(),
+        );
+  };
 }
 
 function isRuntimeValue(value: unknown): value is RuntimeValue {
@@ -223,22 +185,13 @@ const MEDIA_PASS_MS = 1000;
 
 function smokeRun(
   api: RuntimeApi,
-  source: string,
+  plan: RuntimeData,
   builtins: Readonly<Record<string, HostFunction>>,
   maxSteps: number,
   visits: Map<unknown, number>,
   clock: SmokeClock,
   storage: Map<string, RuntimeValue>,
-): SmokeRunResult {
-  const compiled = api.call("compileSource", source, { builtins: Object.keys(builtins) });
-  if (!isRecord(compiled.plan)) {
-    return {
-      status: "failed",
-      failure: { code: "COMPILE", message: "Source does not compile.", line: null },
-      steps: 0,
-    };
-  }
-  const plan = compiled.plan;
+): ProjectRunResult {
   const capabilities = {
     builtins: Object.fromEntries(
       Object.entries(builtins).map(([name, host]) => [
@@ -282,11 +235,13 @@ function smokeRun(
   let now = 0;
   // When each playback segment was last reported, keyed by media ID and segment.
   const reportedAt = new Map<string, number>();
-  const harness = (message: string, steps: number): SmokeRunResult => ({
-    status: "stuck",
-    failure: { code: "HARNESS", message, line: null },
-    steps,
-  });
+  const done = (
+    status: ProjectRunResult["status"],
+    failure: ProjectRunResult["failure"],
+    steps: number,
+  ): ProjectRunResult => ({ status, failure, steps });
+  const harness = (message: string, steps: number): ProjectRunResult =>
+    done("stuck", { code: "HARNESS", message, line: null, path: null }, steps);
   // Operations return `{ snapshot, outcome, ... }`; the fresh snapshot is the snapshot itself.
   const advance = (result: RuntimeData): void => {
     const next = api.call("run", plan, result.snapshot, capabilities).snapshot;
@@ -314,20 +269,21 @@ function smokeRun(
     clock.nowMs = clockStart + now;
     return api.call("observeTime", plan, snapshot, now, reports);
   };
-  const terminal = (steps: number): SmokeRunResult | null => {
-    if (snapshot.status === "halted") return { status: "halted", failure: null, steps };
+  const terminal = (steps: number): ProjectRunResult | null => {
+    if (snapshot.status === "halted") return done("halted", null, steps);
     if (snapshot.status !== "failed") return null;
     const failure = isRecord(snapshot.failure) ? snapshot.failure : {};
     const start = isRecord(failure.span) && isRecord(failure.span.start) ? failure.span.start : {};
-    return {
-      status: "failed",
-      failure: {
+    return done(
+      "failed",
+      {
         code: typeof failure.code === "string" ? failure.code : "UNKNOWN",
         message: typeof failure.message === "string" ? failure.message : "",
         line: typeof start.line === "number" ? start.line + 1 : null,
+        path: typeof failure.path === "string" ? failure.path : null,
       },
       steps,
-    };
+    );
   };
   // Leaves the run's storage writes in the shared map however the run ends.
   const keepStorage = (): void => {
@@ -339,13 +295,27 @@ function smokeRun(
       }
     }
   };
-  const runActions = (): SmokeRunResult => {
+  const runActions = (): ProjectRunResult => {
     advance({ snapshot });
     for (let steps = 0; steps < maxSteps; steps += 1) {
-      const done = terminal(steps);
-      if (done !== null) return done;
+      const ended = terminal(steps);
+      if (ended !== null) return ended;
       const action = isRecord(snapshot.foregroundAction) ? snapshot.foregroundAction : null;
-      if (action === null) return { status: "stuck", failure: null, steps };
+      if (action === null) return done("stuck", null, steps);
+      if (action.kind === "capture") {
+        // No camera is configured, so takePhoto() returns null, as it does in a Player without one.
+        const completion = api.call("completeAction", plan, snapshot, {
+          actionId: action.actionId,
+          actionKind: "capture",
+          payload: { kind: "unavailable", reason: "unconfigured" },
+        });
+        const outcome = isRecord(completion.outcome) ? completion.outcome : {};
+        if (outcome.kind !== "completed" && outcome.kind !== "executionPending") {
+          return harness(`Camera answer rejected: ${JSON.stringify(outcome)}`, steps);
+        }
+        advance(completion);
+        continue;
+      }
       if (action.kind === "interaction") {
         const visit = visits.get(action.owningInstruction) ?? 0;
         const completion = api.call("completeAction", plan, snapshot, {
@@ -384,7 +354,7 @@ function smokeRun(
       }
       advance(observe(now + MEDIA_PASS_MS));
     }
-    return terminal(maxSteps) ?? { status: "stepLimit", failure: null, steps: maxSteps };
+    return terminal(maxSteps) ?? done("stepLimit", null, maxSteps);
   };
   try {
     return runActions();

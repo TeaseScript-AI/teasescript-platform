@@ -1,14 +1,8 @@
-import {
-  newFlowState,
-  type FlowState,
-  type HostFunction,
-  type RuntimeValue,
-} from "./runtime-check.ts";
+import type { HostFunction, RuntimeValue } from "./runtime-check.ts";
 import { emitTease } from "./emit-tease.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 import { proposalCapability, type ProposalId } from "./proposals.ts";
 import { isRecord } from "./ast.ts";
-import { renameConflictingIdentifiers } from "./naming.ts";
 
 /**
  * Accepted TeaseScript the importer emits although the current compiler does not implement it yet. The
@@ -20,33 +14,12 @@ const PENDING_CALLS = new Map<string, string>([
   ["askBoolean", "askBoolean()"],
   ["askBooleans", "askBooleans()"],
   ["openUrl", "openUrl()"],
-  ["takePhoto", "takePhoto()"],
 ]);
 
 /** Calls that only a proposed language change defines, by the proposal (see proposals.ts). */
 const PROPOSED_CALLS = new Map<string, ProposalId>([["countImages", "media-tags"]]);
 
 const SHIM_PREFIX = "sxPending";
-
-/** Capability of global functions and globals (#570), which `main` does not implement yet. */
-const GLOBALS = "global function (#570)";
-
-/** Whether a statement is a `global` or a `global function`. */
-function isGlobalForm(statement: IrStatement): boolean {
-  return (statement.kind === "let" || statement.kind === "function") && statement.global === true;
-}
-
-/** A `global` as a `let` and a `global function` as a function of the file. */
-function withoutGlobalForm(statement: IrStatement): IrStatement {
-  if (statement.kind !== "let" && statement.kind !== "function") return statement;
-  if (statement.global !== true) return statement;
-  const { global: _global, ...local } = statement;
-  return local;
-}
-
-/** Capabilities of the file transfers of ADR 0022 (#570), which `main` does not implement yet. */
-const GOTO_FILE = "goto to a file (#570)";
-const GOTO_SCRIPT = "goto script() (#570)";
 
 /**
  * Stand-ins whose accepted result is never null, by the conversion that gives the placeholder's untyped result that
@@ -69,48 +42,10 @@ export interface PendingShim {
   capabilities: Set<string>;
 }
 
-export function shimPendingCapabilities(
-  generated: MigrationProgram,
-  /** The package's helpers.tease, whose global functions and globals (#570) the file may use. */
-  helpers: MigrationProgram | null = null,
-): PendingShim {
+export function shimPendingCapabilities(generated: MigrationProgram): PendingShim {
   const builtins = new Set<string>();
   const capabilities = new Set<string>();
-  // Until #570 lands, the file compiles with its own copy of the package's global functions and globals.
-  const shared = (helpers?.statements ?? []).filter(
-    (statement) =>
-      (statement.kind === "function" || statement.kind === "let") && statement.global === true,
-  );
-  const fileNames = new Set<string>();
-  collectNames(generated.statements, fileNames);
-  // Only the global functions and globals the file reaches, also through each other, go into its copy.
-  const needed = new Set<IrStatement>();
-  for (let grown = generated !== helpers; grown;) {
-    grown = false;
-    for (const statement of shared) {
-      if (needed.has(statement)) continue;
-      if (
-        (statement.kind === "function" || statement.kind === "let") &&
-        fileNames.has(statement.name)
-      ) {
-        needed.add(statement);
-        collectNames(statement, fileNames);
-        grown = true;
-      }
-    }
-  }
-  const usesShared = needed.size > 0;
-  if (usesShared || generated.statements.some(isGlobalForm)) capabilities.add(GLOBALS);
-  const combined: MigrationProgram = {
-    ...generated,
-    statements: [
-      ...shared.filter((statement) => needed.has(statement)),
-      ...generated.statements,
-    ].map(withoutGlobalForm),
-  };
-  // In the copy, a parameter or local of a global function may meet a top-level name of the file, which a global
-  // function never sees; it gets another name there.
-  const program = usesShared ? renameConflictingIdentifiers(combined, new Set(), false) : combined;
+  const program = generated;
   // Placeholder names must not collide with names the generated program already uses.
   const used = new Set<string>();
   collectNames(program.statements, used);
@@ -248,16 +183,11 @@ export function shimPendingCapabilities(
         return [{ ...item, key: expression(item.key), value: expression(item.value) }];
       case "delete":
         return [{ ...item, key: expression(item.key) }];
-      // A transfer to another file (ADR 0022, #570) leaves the current file, so the shimmed copy stops there.
       case "goto":
         return [
-          callStatement(
-            item.target.kind === "file"
-              ? call(GOTO_FILE, "goto", [{ kind: "literal", value: item.target.path }])
-              : call(GOTO_SCRIPT, "goto script()", [expression(item.target.path)]),
-            item.span,
-          ),
-          { kind: "exit", span: item.span },
+          item.target.kind === "file"
+            ? item
+            : { ...item, target: { ...item.target, path: expression(item.target.path) } },
         ];
       case "showPopup":
         return [
@@ -362,19 +292,17 @@ export interface MediaFile {
   tags: string[];
 }
 
-/**
- * Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only: a transfer to another file
- * records its target in the flow state, and inputs answer in turn.
- */
+/** Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only; inputs answer in turn. */
 export function pendingHostFunctions(
   shim: PendingShim,
-  state: FlowState = newFlowState(),
+  /** How often each input was answered, shared by the files of one run so that answers rotate across them. */
+  answers: Map<string, number> = new Map(),
   media: readonly MediaFile[] = [],
 ): Record<string, HostFunction> {
-  const next = <T>(operation: string, answers: readonly T[]): T => {
-    const visit = state.answers.get(operation) ?? 0;
-    state.answers.set(operation, visit + 1);
-    return answers[visit % answers.length]!;
+  const next = <T>(operation: string, choices: readonly T[]): T => {
+    const visit = answers.get(operation) ?? 0;
+    answers.set(operation, visit + 1);
+    return choices[visit % choices.length]!;
   };
   const emptyList = { kind: "list", items: [] };
   const listItems = (value: RuntimeValue | undefined): unknown[] | null => {
@@ -392,14 +320,10 @@ export function pendingHostFunctions(
         return media.filter((file) => tags.every((tag) => file.tags.includes(tag))).length;
       },
     ],
-    ["goto", ([script]) => ((state.transfer = String(script)), null)],
-    ["goto script()", ([script]) => ((state.transfer = String(script)), null)],
     ["showPopup", () => null],
     ["askBoolean", () => next("askBoolean", [true, false])],
     ["askBooleans", (_, named) => named.defaults ?? emptyList],
     ["openUrl", () => null],
-    // A photo reference, then null as when the camera is unavailable or the player cancels.
-    ["takePhoto", () => next("takePhoto", ["camera/photo.jpg", null])],
   ]);
   const result: Record<string, HostFunction> = {};
   for (const [shimName, operation] of shim.operations) {

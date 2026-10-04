@@ -15,7 +15,12 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { loadRepositoryCompiler, type TeaseCompiler } from "../src/compile-check.ts";
+import {
+  loadRepositoryCompiler,
+  loadRepositoryProjectCompiler,
+  type TeaseCompiler,
+  type TeaseProjectCompiler,
+} from "../src/compile-check.ts";
 import { emitTease } from "../src/emit-tease.ts";
 import type { MigrationProgram } from "../src/ir.ts";
 import { lowerPackage, lowerSelfContainedPackage } from "../src/package.ts";
@@ -23,9 +28,10 @@ import { pendingHostFunctions, shimPendingCapabilities } from "../src/pending.ts
 import type { ProposalId } from "../src/proposals.ts";
 import { analyzeFeasibility } from "../src/report.ts";
 import {
-  flowKey,
+  loadRepositoryProjectRunner,
   loadRepositoryRunner,
   type HostFunction,
+  type TeaseProjectRunner,
   type TeaseRunner,
 } from "../src/runtime-check.ts";
 import { parseGroovySource } from "../src/source-parser.ts";
@@ -37,6 +43,18 @@ const compilerResult = await loadRepositoryCompiler().then(
 );
 const runnerResult = await loadRepositoryRunner().then(
   (runner): { runner: TeaseRunner } | { reason: string } => ({ runner }),
+  (error: unknown) => ({ reason: error instanceof Error ? error.message : String(error) }),
+);
+// The package gate and smoke runs compile and run a package as one project (ADR 0022).
+const projectResult = await Promise.all([
+  loadRepositoryProjectCompiler(),
+  loadRepositoryProjectRunner(),
+]).then(
+  ([compiler, runner]):
+    { compiler: TeaseProjectCompiler; runner: TeaseProjectRunner } | { reason: string } => ({
+    compiler,
+    runner,
+  }),
   (error: unknown) => ({ reason: error instanceof Error ? error.message : String(error) }),
 );
 
@@ -69,14 +87,14 @@ function registerFixtures(
       },
     );
 
-    const compilerSkip = "reason" in compilerResult ? compilerResult.reason : false;
+    const compilerSkip = "reason" in projectResult ? projectResult.reason : false;
     test(
       usesPendingCapabilities
         ? `${directoryName}/${name} output compiles apart from pending TeaseScript capabilities`
         : `expected ${directoryName}/${name}.tease compiles with the TeaseScript compiler`,
       { skip: compilerSkip || (usesPendingCapabilities && parserUnavailable) },
       async () => {
-        if (!("compiler" in compilerResult)) return;
+        if (!("compiler" in projectResult)) return;
         let source = expected;
         let builtins: string[] = [];
         if (usesPendingCapabilities) {
@@ -85,7 +103,7 @@ function registerFixtures(
           source = shim.source;
           builtins = shim.builtins;
         }
-        const result = compilerResult.compiler(source, builtins);
+        const result = projectResult.compiler(withTransferTargets(source), builtins);
         assert.deepEqual(
           result.diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
           [],
@@ -96,12 +114,12 @@ function registerFixtures(
 
     // One deterministic path through the output runs in the real runtime; pending capabilities use small host
     // stand-ins.
-    const runnerSkip = "reason" in runnerResult ? runnerResult.reason : false;
+    const runnerSkip = "reason" in projectResult ? projectResult.reason : false;
     test(
       `${directoryName}/${name} output runs to the end in the TeaseScript runtime`,
       { skip: runnerSkip || (usesPendingCapabilities && parserUnavailable) },
       async () => {
-        if (!("runner" in runnerResult)) return;
+        if (!("runner" in projectResult)) return;
         let source = expected;
         let builtins: Record<string, HostFunction> = {};
         if (usesPendingCapabilities) {
@@ -109,7 +127,7 @@ function registerFixtures(
           source = shim.source;
           builtins = pendingHostFunctions(shim);
         }
-        const result = runnerResult.runner(source, builtins);
+        const result = projectResult.runner(withTransferTargets(source), builtins);
         assert.deepEqual(
           { status: result.status, failure: result.failure },
           { status: "halted", failure: null },
@@ -117,6 +135,15 @@ function registerFixtures(
       },
     );
   }
+}
+
+/** A fixture as the main.tease of a project, with a file that just ends for each file it transfers to. */
+function withTransferTargets(source: string): Array<{ path: string; source: string }> {
+  const targets = [...source.matchAll(/^\s*goto "([^"]+)"/gmu)].map((match) => match[1]!);
+  return [
+    { path: "main.tease", source },
+    ...[...new Set(targets)].map((target) => ({ path: target, source: "exit\n" })),
+  ];
 }
 
 // Lone CR line endings cannot live in a committed fixture without tripping whitespace checks.
@@ -329,14 +356,9 @@ test(
 
 test(
   "package smoke run follows script transfers with shared storage",
-  {
-    skip:
-      parserUnavailable ||
-      ("reason" in compilerResult ? compilerResult.reason : false) ||
-      ("reason" in runnerResult ? runnerResult.reason : false),
-  },
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
   async () => {
-    if (!("compiler" in compilerResult) || !("runner" in runnerResult)) return;
+    if (!("compiler" in projectResult)) return;
     const directory = mkdtempSync(path.join(tmpdir(), "sexscript-flow-"));
     try {
       mkdirSync(path.join(directory, "pack"));
@@ -351,8 +373,8 @@ test(
         [main, next, unreached].map((file) => parseGroovySource(file)),
       );
       const report = analyzeFeasibility(files, {
-        compiler: compilerResult.compiler,
-        runner: runnerResult.runner,
+        compiler: projectResult.compiler,
+        runner: projectResult.runner,
       });
       assert.deepEqual(
         report.smokeRuns.map(({ entry, isolated, status, visited, transfers }) => ({
@@ -391,14 +413,9 @@ test(
 // starts at main.tease: its one root script, or a generated menu over the scripts the legacy player listed.
 test(
   "converts legacy script chains into goto, goto script(), exit, and one main.tease entry",
-  {
-    skip:
-      parserUnavailable ||
-      ("reason" in compilerResult ? compilerResult.reason : false) ||
-      ("reason" in runnerResult ? runnerResult.reason : false),
-  },
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
   async () => {
-    if (!("compiler" in compilerResult) || !("runner" in runnerResult)) return;
+    if (!("compiler" in projectResult)) return;
     for (const name of ["script-chain", "single-entry", "shared-helpers"]) {
       const directory = fileURLToPath(new URL(`./fixtures/packages/${name}/`, import.meta.url));
       const scripts = path.join(directory, "scripts");
@@ -429,19 +446,25 @@ test(
           readFileSync(path.join(directory, "expected", file), "utf8"),
           `${name}/${file}`,
         );
-        const shim = shimPendingCapabilities(program, helpers);
-        assert.deepEqual(
-          compilerResult.compiler(shim.source, shim.builtins).diagnostics,
-          [],
-          `${name}/${file}`,
-        );
       }
+      // The generated files compile as one project (ADR 0022), so transfers and global functions resolve.
+      const shims = outputs.map(([file, program]) => ({
+        path: file,
+        shim: shimPendingCapabilities(program),
+      }));
+      assert.deepEqual(
+        projectResult.compiler(
+          shims.map(({ path: file, shim }) => ({ path: file, source: shim.source })),
+          shims.flatMap(({ shim }) => shim.builtins),
+        ).diagnostics,
+        [],
+        name,
+      );
       if (name === "shared-helpers") {
         // The scripts call the shared functions, which read the shared table and the global each script assigns.
         const report = analyzeFeasibility(files, {
-          compiler: compilerResult.compiler,
-          runner: runnerResult.runner,
-          packageRoot: scripts,
+          compiler: projectResult.compiler,
+          runner: projectResult.runner,
         });
         assert.deepEqual(
           report.smokeRuns.map(({ entry: start, status, visited }) => ({ start, status, visited })),
@@ -472,9 +495,8 @@ test(
       }
       if (name !== "script-chain") continue;
       const report = analyzeFeasibility(files, {
-        compiler: compilerResult.compiler,
-        runner: runnerResult.runner,
-        packageRoot: scripts,
+        compiler: projectResult.compiler,
+        runner: projectResult.runner,
       });
       assert.deepEqual(
         report.smokeRuns
@@ -501,14 +523,9 @@ test(
 
 test(
   "package smoke run uses the package root for entries and counts only scripts as reached",
-  {
-    skip:
-      parserUnavailable ||
-      ("reason" in compilerResult ? compilerResult.reason : false) ||
-      ("reason" in runnerResult ? runnerResult.reason : false),
-  },
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
   async () => {
-    if (!("compiler" in compilerResult) || !("runner" in runnerResult)) return;
+    if (!("compiler" in projectResult)) return;
     const directory = mkdtempSync(path.join(tmpdir(), "sexscript-root-"));
     try {
       mkdirSync(path.join(directory, "sub"));
@@ -525,9 +542,8 @@ test(
         Object.keys(sources).map((name) => parseGroovySource(path.join(directory, name))),
       );
       const report = analyzeFeasibility(files, {
-        compiler: compilerResult.compiler,
-        runner: runnerResult.runner,
-        packageRoot: directory,
+        compiler: projectResult.compiler,
+        runner: projectResult.runner,
       });
       assert.deepEqual(
         report.smokeRuns.map(({ entry, isolated, status, visited }) => ({
@@ -558,14 +574,9 @@ test(
 
 test(
   "package smoke run blocks scripts whose paths differ only in case",
-  {
-    skip:
-      parserUnavailable ||
-      ("reason" in compilerResult ? compilerResult.reason : false) ||
-      ("reason" in runnerResult ? runnerResult.reason : false),
-  },
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
   async () => {
-    if (!("compiler" in compilerResult) || !("runner" in runnerResult)) return;
+    if (!("compiler" in projectResult)) return;
     const directory = mkdtempSync(path.join(tmpdir(), "sexscript-case-"));
     try {
       writeFileSync(path.join(directory, "A.groovy"), 'show("Upper")\n');
@@ -574,9 +585,8 @@ test(
         ["A.groovy", "a.groovy"].map((name) => parseGroovySource(path.join(directory, name))),
       );
       const report = analyzeFeasibility(files, {
-        compiler: compilerResult.compiler,
-        runner: runnerResult.runner,
-        packageRoot: directory,
+        compiler: projectResult.compiler,
+        runner: projectResult.runner,
       });
       assert.deepEqual(
         report.smokeRuns.map(({ entry, status, blockedTarget }) => ({
@@ -584,8 +594,9 @@ test(
           status,
           blockedTarget,
         })),
-        // The generated entry menu offers both scripts; the first one it reaches is ambiguous.
-        [{ entry: "main.tease", status: "blocked", blockedTarget: "a.tease" }],
+        // The generated entry menu offers both scripts; the first one it reaches is ambiguous, since the legacy
+        // player's file systems held only one of them.
+        [{ entry: "main.tease", status: "blocked", blockedTarget: "A.tease" }],
       );
       assert.equal(report.smokeRunReachedScriptFileCount, 0);
     } finally {
@@ -608,27 +619,24 @@ test(
     // Background media keeps playing while the script waits.
     assert.deepEqual(
       run(
-        'let music = playAudio async "a.wav"\nwhile music.state == "running" {\n  wait 1\n}\nsay "done"\n',
+        'let music = playAudio async "a.wav"\nwhile music.state == "running" {\n  wait 1\n}\nsay "done"\nexit\n',
       ),
       halted,
     );
     // A repeated pass count needs the cumulative progress of all passes.
     assert.deepEqual(
-      run('playAudio(file: "a.wav", async: false, repeat: 3 times)\nsay "done"\n'),
+      run('playAudio(file: "a.wav", async: false, repeat: 3 times)\nsay "done"\nexit\n'),
       halted,
     );
     // A runtime failure caused by the last allowed step is still reported.
-    assert.deepEqual(run("wait 1\nlet item = [1][5]\n", 1), { status: "failed", code: "TSR025" });
+    assert.deepEqual(run("wait 1\nlet item = [1][5]\nexit\n", 1), {
+      status: "failed",
+      code: "TSR025",
+    });
     // Numbered inputs rotate, so a loop waiting for a larger answer ends.
-    assert.deepEqual(run("let n: number = 0\nwhile n < 3 {\n  n = askNumber\n}\n"), halted);
+    assert.deepEqual(run("let n: number = 0\nwhile n < 3 {\n  n = askNumber\n}\nexit\n"), halted);
   },
 );
-
-test("package flow keys normalize paths like the legacy file system", () => {
-  assert.equal(flowKey("pack//next.tease"), "pack/next.tease");
-  assert.equal(flowKey("./Pack/../Next.tease"), "next.tease");
-  assert.equal(flowKey("pack\\sub\\Next.tease"), "pack/sub/next.tease");
-});
 
 // A package whose script loads `metaClass` mixin modules at runtime, like the Toy package.
 test(

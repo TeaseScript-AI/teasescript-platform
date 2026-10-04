@@ -79,6 +79,11 @@ export interface LoweredPackage {
    * `helpers.tease`; null without package context.
    */
   globals: Omit<GlobalPromotion, "programs"> | null;
+  /**
+   * The TeaseScript path of each file relative to the package root, `main.tease` for the entry script; null for files
+   * that are no scripts and for a single script without package context.
+   */
+  paths: Array<string | null>;
 }
 
 /** A package's scripts with their TeaseScript paths, relative to the package root (packageScripts). */
@@ -332,6 +337,7 @@ export function lowerPackage(
             globals: promotion.globals,
             kept: promotion.kept,
           },
+    paths: files.map((_, index) => scripts?.pathOf.get(index) ?? null),
   };
 }
 

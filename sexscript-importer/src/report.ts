@@ -1,18 +1,26 @@
-import path from "node:path";
 import { walkAst, type ParsedGroovyFile } from "./ast.ts";
-import type { TeaseCompileDiagnostic, TeaseCompiler } from "./compile-check.ts";
+import type {
+  TeaseCompileDiagnostic,
+  TeaseProjectCompiler,
+  TeaseProjectCompileResult,
+  TeaseProjectFile,
+} from "./compile-check.ts";
 import { emitTease } from "./emit-tease.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
-import type { IrStatement } from "./ir.ts";
+import type { IrStatement, MigrationProgram } from "./ir.ts";
 import { lowerPackage } from "./package.ts";
 import type { ProposalId } from "./proposals.ts";
-import { pendingHostFunctions, shimPendingCapabilities, type MediaFile } from "./pending.ts";
 import {
-  flowKey,
-  smokeRunFlow,
-  type FlowRunResult,
-  type FlowScript,
-  type TeaseRunner,
+  pendingHostFunctions,
+  shimPendingCapabilities,
+  type MediaFile,
+  type PendingShim,
+} from "./pending.ts";
+import type {
+  HostFunction,
+  ProjectRunResult,
+  RuntimeValue,
+  TeaseProjectRunner,
 } from "./runtime-check.ts";
 
 const SOURCE_STATEMENT_KINDS = new Set([
@@ -55,19 +63,31 @@ export interface FeasibilityFileReport {
 }
 
 export interface FeasibilityOptions {
-  /** Real TeaseScript compiler used for the compiler-clean gate. */
-  compiler?: TeaseCompiler;
-  /** Real TeaseScript runtime used for smoke runs of compiler-clean output; needs `compiler`. */
-  runner?: TeaseRunner;
-  /**
-   * Directory that `run` targets are relative to (the legacy scripts folder); inferred as the files' common
-   * directory when absent.
-   */
-  packageRoot?: string;
+  /** Real TeaseScript project compiler used for the compiler-clean gate; it compiles the package as one project. */
+  compiler?: TeaseProjectCompiler;
+  /** Real TeaseScript runtime used for smoke runs of the package project; needs `compiler`. */
+  runner?: TeaseProjectRunner;
   /** Proposed language changes to emit in their working syntax; the shim makes them compile and run. */
   proposals?: ReadonlySet<ProposalId>;
   /** The package's images, for smoke runs of proposed media tags. */
   media?: readonly MediaFile[];
+}
+
+/** One smoke run of a package project. */
+export interface PackageRunResult {
+  /** `main.tease`, or the file an isolated run started at. */
+  entry: string;
+  /** A run started at a script that no earlier run reached, with empty storage instead of the package's state. */
+  isolated: boolean;
+  /** `blocked`: the run reached a file that has no runnable conversion. */
+  status: ProjectRunResult["status"] | "blocked";
+  /** `script` is the project file of the failure. */
+  failure: (NonNullable<ProjectRunResult["failure"]> & { script: string }) | null;
+  blockedTarget: string | null;
+  /** Project files that ran, in first-visit order. */
+  visited: string[];
+  transfers: number;
+  steps: number;
 }
 
 export interface FeasibilityReport {
@@ -102,11 +122,18 @@ export interface FeasibilityReport {
    */
   blockingPendingCapabilityFileCounts: Record<string, number>;
   /**
-   * Package smoke runs in the real runtime, using the placeholder copies with host stand-ins for pending
-   * capabilities: one per entry script (a script in the package's top directory), then isolated runs of runnable
-   * scripts no earlier run reached. Assumes one package per report.
+   * Whether the package compiles as one project (ADR 0022), with pending capabilities replaced by placeholders and as
+   * generated; null without a compiler.
    */
-  smokeRuns: FlowRunResult[];
+  projectCompiles: boolean | null;
+  projectCompilesAsGenerated: boolean | null;
+  /**
+   * Package smoke runs in the real runtime, which follows the transfers between files itself: the package project
+   * from `main.tease`, then isolated runs of runnable scripts no earlier run reached. Files that do not compile clean
+   * except pending capabilities become stubs that end the run as `blocked`; pending capabilities use placeholder
+   * copies with host stand-ins. Assumes one package per report.
+   */
+  smokeRuns: PackageRunResult[];
   /** Smoke-run outcomes `halted`, `failed`, `blocked`, `stepLimit`, `stuck`; prefixed `isolated` for those runs. */
   smokeRunStatusCounts: Record<string, number>;
   /** Runtime failures of smoke runs, grouped by code and message; prefixed `isolated` for those runs. */
@@ -137,9 +164,48 @@ export function analyzeFeasibility(
     composed: packagePrograms,
     main,
     globals,
+    paths,
   } = lowerPackage(files, options.proposals === undefined ? {} : { proposals: options.proposals });
   const helpers = globals?.helpers ?? null;
-  const entryFile = main !== null && "file" in main ? main.file : null;
+  const isScriptBodyAt = (index: number): boolean =>
+    files[index]!.root?.kind === "scriptBody" && packagePrograms[index]?.module === undefined;
+  // The package as a project (ADR 0022): each script at its path, a single script as main.tease, the generated entry
+  // menu, and helpers.tease.
+  const scriptIndexes = files.flatMap((_, index) => (isScriptBodyAt(index) ? [index] : []));
+  const projectPathOf = new Map<number, string>(
+    scriptIndexes.flatMap((index): Array<[number, string]> => {
+      const own = paths[index] ?? (scriptIndexes.length === 1 ? MAIN : null);
+      return own === null ? [] : [[index, own]];
+    }),
+  );
+  const projectFiles: ProjectEntry[] = [
+    ...[...projectPathOf].map(([index, path]) => ({
+      path,
+      program: packagePrograms[index]!,
+      fileIndex: index,
+    })),
+    ...(main !== null && "menu" in main
+      ? [{ path: MAIN, program: main.menu, fileIndex: null }]
+      : []),
+    ...(helpers === null ? [] : [{ path: HELPERS, program: helpers, fileIndex: null }]),
+  ].map((entry) => ({ ...entry, shim: shimPendingCapabilities(entry.program) }));
+  const shimOf = new Map(projectFiles.map((entry) => [entry.path, entry.shim]));
+  const placeholders = [...new Set(projectFiles.flatMap((entry) => entry.shim.builtins))].sort();
+  const shimmed =
+    options.compiler?.(
+      projectFiles.map(({ path, shim }) => ({ path, source: shim.source })),
+      placeholders,
+    ) ?? null;
+  const generated =
+    options.compiler?.(
+      projectFiles.map(({ path, program }) => ({ path, source: emitTease(program) })),
+    ) ?? null;
+  const shimmedDiagnostics = diagnosticsByPath(shimmed);
+  const generatedDiagnostics = diagnosticsByPath(generated);
+  const errorFree = (
+    diagnostics: ReadonlyMap<string, TeaseCompileDiagnostic[]>,
+    path: string,
+  ): boolean => (diagnostics.get(path) ?? []).every(({ severity }) => severity !== "error");
   const report: FeasibilityReport = {
     fileCount: files.length,
     scriptBodyFileCount: 0,
@@ -160,6 +226,8 @@ export function analyzeFeasibility(
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
     blockingPendingCapabilityFileCounts: emptyCounts(),
+    projectCompiles: shimmed?.compiled ?? null,
+    projectCompilesAsGenerated: generated?.compiled ?? null,
     smokeRuns: [],
     smokeRunStatusCounts: emptyCounts(),
     smokeRunFailuresByMessage: emptyCounts(),
@@ -172,28 +240,23 @@ export function analyzeFeasibility(
             globals: globals.globals,
             kept: globals.kept,
             helpersCompile:
-              helpers === null || options.compiler === undefined
-                ? null
-                : (() => {
-                    const shim = shimPendingCapabilities(helpers);
-                    const result = options.compiler(shim.source, shim.builtins);
-                    return (
-                      result.compiled &&
-                      result.diagnostics.every(({ severity }) => severity !== "error")
-                    );
-                  })(),
+              helpers === null || shimmed === null ? null : errorFree(shimmedDiagnostics, HELPERS),
           },
     smokeRunReachedScriptFileCount: options.runner === undefined ? null : 0,
     files: [],
   };
 
-  const flowScripts: Array<FlowScriptRecord> = [];
+  // The project files a smoke run may execute: every file that compiles clean except pending capabilities.
+  const runnable = new Set<string>();
+  for (const entry of projectFiles) {
+    if (entry.fileIndex === null && shimmed !== null && errorFree(shimmedDiagnostics, entry.path))
+      runnable.add(entry.path);
+  }
   for (let fileIndex = 0; fileIndex < files.length; fileIndex += 1) {
     const file = files[fileIndex]!;
     const parseErrors = file.diagnostics.length;
     // Runtime-loaded mixin modules contribute code to the script that loads them; they are not scripts.
-    const isScriptBody =
-      file.root?.kind === "scriptBody" && packagePrograms[fileIndex]?.module === undefined;
+    const isScriptBody = isScriptBodyAt(fileIndex);
     const recognized = parseErrors === 0 && file.root !== null;
     if (isScriptBody) {
       report.scriptBodyFileCount += 1;
@@ -218,25 +281,21 @@ export function analyzeFeasibility(
     const ir = countIrStatements(packageProgram.statements);
     const lowered = isScriptBody && errors.length === 0;
     const dependencyClosed = lowered && packageErrors.length === 0;
+    const projectPath = projectPathOf.get(fileIndex) ?? null;
+    const shim = (projectPath === null ? undefined : shimOf.get(projectPath)) ?? null;
     let compilerClean: boolean | null = null;
     let compilerCleanExceptPending: boolean | null = null;
     let compilerDiagnostics: TeaseCompileDiagnostic[] = [];
-    const shim = shimPendingCapabilities(packageProgram, helpers);
-    const pendingCapabilities = [...shim.capabilities].sort();
+    const pendingCapabilities = [...(shim?.capabilities ?? [])].sort();
     if (isScriptBody) {
       for (const capability of pendingCapabilities) {
         increment(report.pendingCapabilityFileCounts, capability);
       }
     }
-    if (options.compiler !== undefined && isScriptBody && recognized) {
-      const clean = (result: ReturnType<typeof options.compiler>): boolean =>
-        dependencyClosed &&
-        result.compiled &&
-        result.diagnostics.every((diagnostic) => diagnostic.severity !== "error");
-      compilerClean = clean(options.compiler(emitTease(packageProgram)));
-      const shimmed = options.compiler(shim.source, shim.builtins);
-      compilerCleanExceptPending = clean(shimmed);
-      compilerDiagnostics = shimmed.diagnostics;
+    if (shimmed !== null && isScriptBody && recognized && projectPath !== null) {
+      compilerClean = dependencyClosed && errorFree(generatedDiagnostics, projectPath);
+      compilerCleanExceptPending = dependencyClosed && errorFree(shimmedDiagnostics, projectPath);
+      compilerDiagnostics = shimmedDiagnostics.get(projectPath) ?? [];
       if (compilerClean && report.compilerCleanScriptFileCount !== null) {
         report.compilerCleanScriptFileCount += 1;
       }
@@ -248,22 +307,10 @@ export function analyzeFeasibility(
           increment(report.blockingPendingCapabilityFileCounts, capability);
         }
       }
-      for (const diagnostic of shimmed.diagnostics) {
+      if (compilerCleanExceptPending) runnable.add(projectPath);
+      for (const diagnostic of compilerDiagnostics) {
         increment(report.compilerDiagnosticsByMessage, `${diagnostic.code} ${diagnostic.message}`);
       }
-    }
-    // A file that does not parse may be a script; flows that reach it are blocked.
-    if (isScriptBody || file.root === null) {
-      const source = compilerCleanExceptPending === true ? shim.source : null;
-      flowScripts.push({
-        sourceName: file.sourceName,
-        ...(fileIndex === entryFile ? { key: MAIN } : {}),
-        transfers: ir.transfers,
-        script:
-          source === null
-            ? null
-            : { source, builtins: (state) => pendingHostFunctions(shim, state, options.media) },
-      });
     }
 
     if (errors.length === 0) report.migrationCleanFileCount += 1;
@@ -303,22 +350,23 @@ export function analyzeFeasibility(
   report.blockingPendingCapabilityFileCounts = sortCounts(
     report.blockingPendingCapabilityFileCounts,
   );
-  if (main !== null && "menu" in main) {
-    // The generated entry menu is part of the flows, not a legacy file of the report.
-    const shim = shimPendingCapabilities(main.menu);
-    const compiled = options.compiler?.(shim.source, shim.builtins);
-    flowScripts.push({
-      sourceName: main.menu.sourceName,
-      key: MAIN,
-      transfers: countIrStatements(main.menu.statements).transfers,
-      script:
-        compiled === undefined || compiled.compiled
-          ? { source: shim.source, builtins: (state) => pendingHostFunctions(shim, state) }
-          : null,
-    });
-  }
-  if (options.runner !== undefined) {
-    runPackageFlows(report, flowScripts, options.runner, options.packageRoot);
+  if (options.runner !== undefined && options.compiler !== undefined) {
+    runPackageProject(
+      report,
+      projectFiles,
+      runnable,
+      options.compiler,
+      options.runner,
+      options.media,
+    );
+    const reached = new Set(report.smokeRuns.flatMap(({ visited }) => visited));
+    for (const [index, path] of projectPathOf) {
+      const fileReport = report.files[index]!;
+      if (isScriptBodyAt(index) && reached.has(path)) {
+        fileReport.smokeRunReached = true;
+        report.smokeRunReachedScriptFileCount! += 1;
+      }
+    }
   }
   report.smokeRunStatusCounts = sortCounts(report.smokeRunStatusCounts);
   report.smokeRunFailuresByMessage = sortCounts(report.smokeRunFailuresByMessage);
@@ -330,66 +378,145 @@ export function analyzeFeasibility(
   return report;
 }
 
-interface FlowScriptRecord {
-  sourceName: string;
-  /** The flow key when it is not the file's own path: `main.tease` for the package entry. */
-  key?: string;
-  script: FlowScript | null;
-  transfers: string[];
+/** A file of the package project: its path, its program, and the legacy file it comes from, if any. */
+interface ProjectEntry {
+  path: string;
+  program: MigrationProgram;
+  fileIndex: number | null;
+  shim: PendingShim;
 }
 
-/** The fixed entry file of a package (ADR 0022 §1). */
+/** The fixed entry file of a package (ADR 0022 §1), and the generated file of its global functions (#570). */
 const MAIN = "main.tease";
+const HELPERS = "helpers.tease";
 
-function runPackageFlows(
+/**
+ * Host functions of the smoke harness: each runnable file announces itself when it starts, a stub of an unconverted
+ * file ends the run, and an isolated run starts at its file.
+ */
+const ENTER = "sxSmokeEnter";
+const BLOCKED = "sxSmokeBlocked";
+const START = "sxSmokeStart";
+
+function diagnosticsByPath(
+  result: TeaseProjectCompileResult | null,
+): Map<string, TeaseCompileDiagnostic[]> {
+  const byPath = new Map<string, TeaseCompileDiagnostic[]>();
+  for (const { path, ...diagnostic } of result?.diagnostics ?? [])
+    byPath.set(path, [...(byPath.get(path) ?? []), diagnostic]);
+  return byPath;
+}
+
+/** A stand-in for a file that has no runnable conversion: reaching it ends the run as `blocked`. */
+function stub(path: string): string {
+  return `${BLOCKED}(${JSON.stringify(path)})\nexit\n`;
+}
+
+/**
+ * The shimmed source of a runnable file with a first statement that announces the file, since the runtime reports
+ * no transfers itself; and the line of that statement, which later lines of the generated file follow by one.
+ */
+function announced(path: string, shim: PendingShim): { source: string; line: number } {
+  const source = emitTease({
+    ...shim.program,
+    statements: [
+      {
+        kind: "expression",
+        expression: {
+          kind: "call",
+          name: ENTER,
+          positional: [{ kind: "literal", value: path }],
+          named: {},
+        },
+        span: null,
+      },
+      ...shim.program.statements,
+    ],
+  });
+  const line = source.split("\n").findIndex((text) => text.startsWith(`${ENTER}(`)) + 1;
+  return { source, line };
+}
+
+/**
+ * Runs the package as one project from `main.tease`, then each runnable script no earlier run reached in isolation,
+ * through a `main.tease` that transfers to it. Files that are not runnable, that stop compiling once others became
+ * stubs, or whose paths differ only in case (one file on the legacy player's file systems) are stubs; the runtime
+ * follows the transfers between files.
+ */
+function runPackageProject(
   report: FeasibilityReport,
-  flowScripts: ReadonlyArray<FlowScriptRecord>,
-  runner: TeaseRunner,
-  packageRoot: string | undefined,
+  entries: readonly ProjectEntry[],
+  runnable: ReadonlySet<string>,
+  compiler: TeaseProjectCompiler,
+  runner: TeaseProjectRunner,
+  media: readonly MediaFile[] | undefined,
 ): void {
-  // Parser JSON from Windows may use backslashes.
-  const segments = (file: string): string[] =>
-    path.resolve(file.replaceAll("\\", "/")).split(path.sep);
-  const directories = flowScripts.map(({ sourceName }) => segments(sourceName).slice(0, -1));
-  const root =
-    packageRoot === undefined
-      ? directories.reduce((common, directory) => {
-          let length = 0;
-          while (length < common.length && common[length] === directory[length]) length += 1;
-          return common.slice(0, length);
-        }, directories[0] ?? [])
-      : segments(packageRoot);
-  const pathKey = (sourceName: string): string =>
-    flowKey(
-      segments(sourceName)
-        .slice(root.length)
-        .join("/")
-        .replace(/\.groovy$/iu, ".tease"),
-    );
-  const keyOf = (record: FlowScriptRecord): string =>
-    record.key === undefined ? pathKey(record.sourceName) : flowKey(record.key);
-  // Two files whose paths differ only in case are ambiguous for the legacy player; flows reaching them are blocked.
-  const keyCounts = new Map<string, number>();
-  for (const record of flowScripts) {
-    keyCounts.set(keyOf(record), (keyCounts.get(keyOf(record)) ?? 0) + 1);
-  }
-  const scripts = new Map(
-    flowScripts.map((record) => {
-      const key = keyOf(record);
-      return [key, keyCounts.get(key) === 1 ? record.script : null];
+  if (!entries.some(({ path }) => path === MAIN)) return;
+  const builtins = [
+    ...new Set([...entries.flatMap(({ shim }) => shim.builtins), ENTER, BLOCKED, START]),
+  ].sort();
+  const caseCounts = new Map<string, number>();
+  for (const { path } of entries)
+    caseCounts.set(path.toLowerCase(), (caseCounts.get(path.toLowerCase()) ?? 0) + 1);
+  const probeLines = new Map<string, number>();
+  const sources = new Map(
+    entries.map(({ path, shim, fileIndex }): [string, string] => {
+      if (!runnable.has(path) || caseCounts.get(path.toLowerCase())! > 1) return [path, stub(path)];
+      if (fileIndex === null && path !== MAIN) return [path, shim.source];
+      const { source, line } = announced(path, shim);
+      probeLines.set(path, line);
+      return [path, source];
     }),
   );
-  // A package starts at main.tease (ADR 0022); a single script, which keeps its name, starts each root script.
-  const entries = scripts.has(MAIN)
-    ? [MAIN]
-    : flowScripts
-        .filter((_, index) => directories[index]!.join(path.sep) === root.join(path.sep))
-        .map(keyOf)
-        .filter((key, index, keys) => keys.indexOf(key) === index)
-        .sort();
-  const reached = new Set<string>();
-  const record = (flow: FlowRunResult): void => {
-    const prefix = flow.isolated ? "isolated " : "";
+  const runs = (path: string): boolean => sources.get(path) !== stub(path);
+  // A runnable file may use a global or another file that became a stub; it becomes a stub too.
+  for (;;) {
+    const result = compiler(
+      [...sources].map(([path, source]) => ({ path, source })),
+      builtins,
+    );
+    if (result.compiled) break;
+    const failing = new Set(
+      result.diagnostics
+        .filter(({ severity, path }) => severity === "error" && runs(path))
+        .map(({ path }) => path),
+    );
+    if (failing.size === 0) return;
+    for (const path of failing) {
+      sources.set(path, stub(path));
+      probeLines.delete(path);
+    }
+  }
+  const run = (files: readonly TeaseProjectFile[], entry: string, isolated: boolean): void => {
+    const answers = new Map<string, number>();
+    const visits: string[] = [];
+    let blocked: string | null = null;
+    let started = false;
+    const hosts: Record<string, HostFunction> = {};
+    for (const { shim } of entries)
+      Object.assign(hosts, pendingHostFunctions(shim, answers, media));
+    hosts[ENTER] = ([path]: readonly RuntimeValue[]) => (visits.push(String(path)), null);
+    hosts[BLOCKED] = ([target]: readonly RuntimeValue[]) => ((blocked = String(target)), null);
+    hosts[START] = () => !started && (started = true);
+    const result = runner(files, hosts);
+    const failure = blocked === null ? result.failure : null;
+    // The announcing statement moved the generated file's lines down by one.
+    const probe = failure?.path === null ? undefined : probeLines.get(failure?.path ?? "");
+    const line =
+      failure === null || failure.line === null || probe === undefined || failure.line < probe
+        ? (failure?.line ?? null)
+        : failure.line - 1;
+    const flow: PackageRunResult = {
+      entry,
+      isolated,
+      status: blocked !== null ? "blocked" : result.status,
+      failure: failure === null ? null : { ...failure, line, script: failure.path ?? entry },
+      blockedTarget: blocked,
+      visited: visits.filter((path, index) => visits.indexOf(path) === index),
+      transfers: Math.max(visits.length - 1, 0),
+      steps: result.steps,
+    };
+    const prefix = isolated ? "isolated " : "";
     report.smokeRuns.push(flow);
     increment(report.smokeRunStatusCounts, `${prefix}${flow.status}`);
     if (flow.failure !== null) {
@@ -398,39 +525,33 @@ function runPackageFlows(
         `${prefix}${flow.failure.code} ${flow.failure.message}`,
       );
     }
-    for (const script of flow.visited) reached.add(script);
   };
-  for (const entry of entries) record(smokeRunFlow(runner, entry, scripts));
+  const project = [...sources].map(([path, source]) => ({ path, source }));
+  run(project, MAIN, false);
   // Scripts that no other script transfers to start isolated runs first, so their targets run with their state.
   const targets = new Set(
-    flowScripts.flatMap((record) =>
-      record.script === null
-        ? []
-        : record.transfers.map(flowKey).filter((target) => target !== keyOf(record)),
+    entries.flatMap(({ path, program }) =>
+      runs(path)
+        ? countIrStatements(program.statements).transfers.filter((target) => target !== path)
+        : [],
     ),
   );
-  const unreached = [...scripts]
-    .filter(([, script]) => script !== null)
-    .map(([key]) => key)
+  const unreached = entries
+    .filter(({ path, fileIndex }) => fileIndex !== null && path !== MAIN && runs(path))
+    .map(({ path }) => path)
     .sort(
       (left, right) =>
         Number(targets.has(left)) - Number(targets.has(right)) || left.localeCompare(right),
     );
-  for (const key of unreached) {
-    if (!reached.has(key)) record(smokeRunFlow(runner, key, scripts, true));
+  for (const path of unreached) {
+    if (report.smokeRuns.some(({ visited }) => visited.includes(path))) continue;
+    const start = `if ${START}() {\n  goto ${JSON.stringify(path)}\n}\n${stub(MAIN)}`;
+    run(
+      project.map((file) => (file.path === MAIN ? { path: MAIN, source: start } : file)),
+      path,
+      true,
+    );
   }
-  // Only the legacy script files count; auxiliary classes and modules share no keys with them, and the generated entry
-  // menu is no legacy file.
-  const reportedFiles = new Set(report.files.map(({ sourceName }) => sourceName));
-  const reachedFiles = new Set(
-    flowScripts
-      .filter((record) => reportedFiles.has(record.sourceName) && reached.has(keyOf(record)))
-      .map(({ sourceName }) => sourceName),
-  );
-  for (const file of report.files) {
-    if (reachedFiles.has(file.sourceName)) file.smokeRunReached = true;
-  }
-  report.smokeRunReachedScriptFileCount = reachedFiles.size;
 }
 
 function countIrStatements(statements: IrStatement[]): {

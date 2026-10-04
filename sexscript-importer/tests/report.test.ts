@@ -280,18 +280,29 @@ test("reports recognized, lowered, and dependency-closed script stages separatel
   assert.equal(report.compilerCleanScriptFileCount, null);
   assert.equal(report.files[0]?.compilerClean, null);
 
-  const compiledSources: string[] = [];
+  const compiledProjects: Array<Array<{ path: string; source: string }>> = [];
   const rejecting = analyzeFeasibility([clean], {
-    compiler: (source) => {
-      compiledSources.push(source);
+    compiler: (files) => {
+      compiledProjects.push(files.map(({ path, source }) => ({ path, source })));
       return {
         compiled: false,
-        diagnostics: [{ severity: "error", code: "TSP001", message: "x", line: 1, column: 1 }],
+        diagnostics: [
+          {
+            severity: "error",
+            code: "TSP001",
+            message: "x",
+            line: 1,
+            column: 1,
+            path: "main.tease",
+          },
+        ],
       };
     },
   });
-  // Once as generated and once with pending-capability placeholders (none are needed here).
-  assert.deepEqual(compiledSources, ['say "hello"\nexit\n', 'say "hello"\nexit\n']);
+  // A single script is the main.tease of its project, compiled with pending-capability placeholders (none are needed
+  // here) and as generated.
+  const project = [{ path: "main.tease", source: 'say "hello"\nexit\n' }];
+  assert.deepEqual(compiledProjects, [project, project]);
   assert.equal(rejecting.compilerCleanScriptFileCount, 0);
   assert.equal(rejecting.compilerCleanExceptPendingScriptFileCount, 0);
   assert.equal(rejecting.files[0]?.compilerClean, false);

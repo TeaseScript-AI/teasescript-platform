@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseParsedGroovyFile, type ParsedGroovyFile } from "./ast.ts";
-import { loadRepositoryCompiler, type TeaseCompiler } from "./compile-check.ts";
+import { loadRepositoryProjectCompiler, type TeaseProjectCompiler } from "./compile-check.ts";
 import { emitTease } from "./emit-tease.ts";
 import { inventoryFiles } from "./inventory.ts";
 import { lowerParsedFile } from "./lower.ts";
@@ -9,7 +9,7 @@ import { lowerPackage } from "./package.ts";
 import { parseProposals, type ProposalId } from "./proposals.ts";
 import type { MediaFile } from "./pending.ts";
 import { analyzeFeasibility, type FeasibilityOptions } from "./report.ts";
-import { loadRepositoryRunner } from "./runtime-check.ts";
+import { loadRepositoryProjectRunner } from "./runtime-check.ts";
 import { parseGroovySource } from "./source-parser.ts";
 
 const [command, ...rawArgs] = process.argv.slice(2);
@@ -39,12 +39,10 @@ if (command === "inventory") {
   }
   const files = await readReportInputs(args);
   const options: FeasibilityOptions = { proposals };
-  if (compileRequested) options.compiler = await loadRepositoryCompiler();
-  if (runRequested) options.runner = await loadRepositoryRunner();
-  // One scripts folder is the package root that script transfers are relative to; its sibling images folder
-  // holds the media that proposed media tags count.
+  if (compileRequested) options.compiler = await loadRepositoryProjectCompiler();
+  if (runRequested) options.runner = await loadRepositoryProjectRunner();
+  // A scripts folder's sibling images folder holds the media that proposed media tags count.
   if (args.length === 1 && (await stat(args[0]!)).isDirectory()) {
-    options.packageRoot = args[0]!;
     options.media = await packageMedia(path.join(args[0]!, "..", "images"));
   }
   const report = analyzeFeasibility(files, options);
@@ -62,7 +60,7 @@ if (command === "inventory") {
   if (args.length !== 2) {
     fail("Usage: node src/cli.ts convert-package [--compile] <source-dir> <output-dir>");
   }
-  const compiler = compileRequested ? await loadRepositoryCompiler() : undefined;
+  const compiler = compileRequested ? await loadRepositoryProjectCompiler() : undefined;
   await convertPackage(args[0]!, args[1]!, compiler);
 } else {
   fail("Usage: node src/cli.ts <inventory|report|convert|convert-package> ...");
@@ -93,7 +91,7 @@ async function parseGroovyFiles(sourcePaths: string[]): Promise<ParsedGroovyFile
 async function convertPackage(
   sourceDir: string,
   outputDir: string,
-  compiler: TeaseCompiler | undefined,
+  compiler: TeaseProjectCompiler | undefined,
 ): Promise<void> {
   const sourceRoot = path.resolve(sourceDir);
   const outputRoot = path.resolve(outputDir);
@@ -107,10 +105,12 @@ async function convertPackage(
   const outputs = programs.map((program, index) => ({
     program,
     index,
+    // Transfers name paths relative to the scripts' common folder, which lowerPackage gives.
     relative:
-      index === entry
+      lowered.paths[index] ??
+      (index === entry
         ? "main.tease"
-        : path.relative(sourceRoot, sourcePaths[index]!).replace(/\.groovy$/iu, ".tease"),
+        : path.relative(sourceRoot, sourcePaths[index]!).replace(/\.groovy$/iu, ".tease")),
   }));
   if (lowered.main !== null && "menu" in lowered.main)
     outputs.push({ program: lowered.main.menu, index: -1, relative: "main.tease" });
@@ -119,7 +119,7 @@ async function convertPackage(
     outputs.push({ program: lowered.globals.helpers, index: -1, relative: "helpers.tease" });
   let errors = 0;
   let written = 0;
-  let compilerClean = 0;
+  const project: Array<{ path: string; source: string; outputPath: string }> = [];
   for (const { program, index, relative } of outputs) {
     const file = index < 0 ? null : parsed[index]!;
     // A file that does not parse produces no output but reports its parser errors.
@@ -132,21 +132,25 @@ async function convertPackage(
     await writeFile(outputPath, source, "utf8");
     written += 1;
     errors += reportDiagnostics(program);
-    if (compiler !== undefined) {
-      const compiled = compiler(source);
-      if (compiled.compiled) compilerClean += 1;
-      else process.exitCode = 1;
-      for (const diagnostic of compiled.diagnostics) {
-        const location = diagnostic.line === null ? "" : `:${diagnostic.line}:${diagnostic.column}`;
-        process.stderr.write(
-          `compiler ${diagnostic.severity} ${diagnostic.code} ${path.relative(process.cwd(), outputPath)}${location} ${diagnostic.message}\n`,
-        );
-      }
-    }
+    project.push({ path: relative.replaceAll("\\", "/"), source, outputPath });
   }
   process.stderr.write(`Converted ${written} SexScript source file(s) into ${outputRoot}.\n`);
   if (compiler !== undefined) {
-    process.stderr.write(`${compilerClean}/${written} generated file(s) compile without errors.\n`);
+    // The package compiles as one project (ADR 0022), so transfers and global functions resolve across files.
+    const compiled = compiler(project);
+    if (!compiled.compiled) process.exitCode = 1;
+    const failing = new Set<string>();
+    for (const diagnostic of compiled.diagnostics) {
+      if (diagnostic.severity === "error") failing.add(diagnostic.path);
+      const file = project.find(({ path: filePath }) => filePath === diagnostic.path);
+      const location = diagnostic.line === null ? "" : `:${diagnostic.line}:${diagnostic.column}`;
+      process.stderr.write(
+        `compiler ${diagnostic.severity} ${diagnostic.code} ${path.relative(process.cwd(), file?.outputPath ?? path.join(outputRoot, diagnostic.path))}${location} ${diagnostic.message}\n`,
+      );
+    }
+    process.stderr.write(
+      `${project.length - failing.size}/${written} generated file(s) compile without errors; the project ${compiled.compiled ? "compiles" : "does not compile"}.\n`,
+    );
   }
   if (errors > 0) process.exitCode = 1;
 }
