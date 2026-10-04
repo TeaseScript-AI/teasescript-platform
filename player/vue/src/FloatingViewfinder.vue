@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useResizeObserver } from "@vueuse/core";
-import { GripVertical, MoveDiagonal2 } from "@lucide/vue";
+import { MoveDiagonal2 } from "@lucide/vue";
 import Viewfinder from "./Viewfinder.vue";
 
-// DEMO: the viewfinder as a floating window over the Player, like a mini player. The user moves it by dragging it or
-// with its grip's arrow keys, and resizes it from its corner. Its place lasts while the Player is mounted, also while
+// DEMO: the viewfinder as a floating window over the Player, like a mini player. Like the browsers' own
+// picture-in-picture windows it has no grip: the user drags the window itself, or focuses it and uses the arrow keys,
+// and resizes it from its corner. With a mouse, its controls show while it is hovered or focused. Its place lasts while the Player is mounted, also while
 // the viewfinder is hidden; it is presentation only.
 export interface FloatingPlace {
   readonly x: number;
@@ -103,7 +104,8 @@ function keyboard(event: KeyboardEvent, mode: "move" | "resize") {
   const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[
     event.key
   ];
-  if (!current || !direction) return;
+  // Arrow keys on a control inside the window belong to that control.
+  if (!current || !direction || (mode === "move" && event.target !== event.currentTarget)) return;
   event.preventDefault();
   const [dx, dy] = direction as [number, number];
   const step = event.shiftKey ? STEP * 4 : STEP;
@@ -126,8 +128,13 @@ function measured(next: number) {
     :class="{ 'floating-viewfinder-away': away }"
     :inert="away || undefined"
     data-floating-viewfinder
+    role="group"
+    aria-label="Camera preview window"
+    tabindex="0"
+    title="Drag to move; arrow keys move it too"
     :style="style"
     @pointerdown="drag($event, 'move')"
+    @keydown="keyboard($event, 'move')"
   >
     <Viewfinder
       :track="track"
@@ -135,16 +142,6 @@ function measured(next: number) {
       @aspect="measured"
       @away="away = $event"
     >
-      <!-- The grip moves the window by keyboard; the whole window drags. -->
-      <button
-        type="button"
-        class="floating-viewfinder-grip"
-        aria-label="Move camera preview"
-        title="Drag to move; arrow keys move it too"
-        @keydown="keyboard($event, 'move')"
-      >
-        <GripVertical aria-hidden="true" class="size-3.5" />
-      </button>
       <button
         type="button"
         class="floating-viewfinder-resize"
@@ -168,11 +165,17 @@ function measured(next: number) {
   user-select: none;
 }
 .floating-viewfinder:active { cursor: grabbing; }
+.floating-viewfinder:focus-visible { outline: none; }
+.floating-viewfinder:focus-visible .floating-viewfinder-frame {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
 .floating-viewfinder-away { pointer-events: none; }
 .floating-viewfinder-frame { width: 100%; box-shadow: 0 8px 28px var(--media-shadow); }
-.floating-viewfinder-grip,
 .floating-viewfinder-resize {
   position: absolute;
+  right: 6px;
+  bottom: 6px;
   display: grid;
   place-items: center;
   border: 1px solid var(--media-border);
@@ -183,15 +186,17 @@ function measured(next: number) {
   height: 26px;
   border-radius: 9999px;
   backdrop-filter: blur(3px);
-}
-.floating-viewfinder-grip {
-  top: 8px;
-  left: 8px;
-  cursor: grab;
-}
-.floating-viewfinder-resize {
-  right: 6px;
-  bottom: 6px;
   cursor: nwse-resize;
+}
+/* Touch has no hover, so there the controls stay. */
+@media (hover: hover) and (pointer: fine) {
+  .floating-viewfinder :deep(.viewfinder-pip),
+  .floating-viewfinder-resize {
+    transition: opacity 150ms;
+  }
+  .floating-viewfinder:not(:hover, :focus-within) :deep(.viewfinder-pip),
+  .floating-viewfinder:not(:hover, :focus-within) .floating-viewfinder-resize {
+    opacity: 0;
+  }
 }
 </style>
