@@ -104,24 +104,25 @@ export function argumentCountMessage(member: TextMember, received: number): stri
   return `${member.name}() takes ${expected}, received ${received}.`;
 }
 
-/** An argument of the wrong kind, naming the conversion that fixes it. */
+/** An argument of the wrong kind; `argumentFix` names the conversion that fixes it. */
 export function argumentTypeMessage(
   member: TextMember,
   parameter: TextParameter,
   description: string,
-  kind: ArgumentKind,
 ): string {
-  const text = parameter.kind === "text" || parameter.kind === "nonEmptyText";
-  const fix = text
-    ? kind !== null && kind !== "string"
-      ? " Convert it with toString(...)."
-      : ""
-    : kind === "number"
-      ? " Convert it with toInteger(...), which drops the fraction."
-      : kind === "string"
-        ? " Convert it with toInteger(...)."
-        : "";
-  return `${member.name}() needs ${text ? "text (string)" : "a whole number (integer)"} for '${parameter.name}', not ${description}.${fix}`;
+  return `${member.name}() needs ${isTextParameter(parameter) ? "text (string)" : "a whole number (integer)"} for '${parameter.name}', not ${description}.`;
+}
+
+/** The conversion that turns an argument of scalar `kind` into what `parameter` needs, or nothing. */
+export function argumentFix(parameter: TextParameter, kind: ArgumentKind): string {
+  if (isTextParameter(parameter))
+    return kind !== null && kind !== "string" ? " Convert it with toString(...)." : "";
+  if (kind === "number") return " Convert it with toInteger(...), which drops the fraction.";
+  return kind === "string" ? " Convert it with toInteger(...)." : "";
+}
+
+function isTextParameter(parameter: TextParameter): boolean {
+  return parameter.kind === "text" || parameter.kind === "nonEmptyText";
 }
 
 export function emptyTextMessage(member: TextMember, parameter: TextParameter): string {

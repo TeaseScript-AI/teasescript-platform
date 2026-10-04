@@ -278,6 +278,19 @@ test("misuse the compiler can see is a compile error that names the fix", () => 
       "join() can only join text, numbers, true or false, null, and durations, not a list (integer[]). Select an element or a property first.",
       "[1]",
     ],
+    ["say null.trim()", "TSV043", "Null has no method 'trim'.", "trim"],
+    [
+      "null.length = 0",
+      "TSV043",
+      "Only objects, speakers, and timer and media handles have properties to assign, but this is null.",
+      "null",
+    ],
+    [
+      'let count = 2\nsay "x".repeat(count)\ncount = 2.5',
+      "TSV043",
+      "repeat() needs a whole number (integer) for 'count', not a number. 'count' is a number because line 3 can store a non-whole number in it. Convert it with toInteger(...), which drops the fraction.",
+      "count",
+    ],
   ];
   for (const [source, code, message, text] of cases)
     assert.deepEqual(diagnostics(source), [[code, message, text]], source);

@@ -1350,8 +1350,11 @@ class TypeChecker {
       if (entry?.kind === "function")
         return yield* compileChild(this.#functionCallTask(expression, entry.fn, scope));
       const values: StaticType[] = [];
-      for (const argument of expression.arguments)
-        values.push(yield* compileChild(this.#expressionTask(argument.value, scope)));
+      for (const argument of expression.arguments) {
+        yield* compileChild(this.#expressionTask(argument.value, scope));
+        // A built-in takes each argument as it was evaluated, before later arguments run.
+        values.push(this.#capture(argument.value));
+      }
       if (entry === undefined && this.#builtins.has(callee.name))
         return this.#builtinType(callee.name, expression, values);
       return UNKNOWN_TYPE;
@@ -1363,6 +1366,8 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
+    // The receiver as it was evaluated, before the arguments run, for the member checks.
+    const receiverAtCall = copyType(receiver);
     const method = callee.property.name;
     const value = resolved(nonNullTypeForUse(receiver));
     if ((value.kind === "list" || value.kind === "set") && method === "add") {
@@ -1388,12 +1393,14 @@ class TypeChecker {
       }
     }
     const values: StaticType[] = [];
-    for (const argument of expression.arguments)
-      values.push(yield* compileChild(this.#expressionTask(argument.value, scope)));
+    for (const argument of expression.arguments) {
+      yield* compileChild(this.#expressionTask(argument.value, scope));
+      values.push(this.#capture(argument.value));
+    }
     const typeOf = (argument: Expression): StaticType => this.#typeOf(argument);
     if (value.kind === "list" && method === "join") {
       this.#reportProblems(
-        memberProblems(callee.object, receiver, callee.property, expression, typeOf),
+        memberProblems(callee.object, receiverAtCall, callee.property, expression, typeOf),
       );
       return STRING_TYPE;
     }
@@ -1451,7 +1458,7 @@ class TypeChecker {
     // Text operations (V30 §8), members of other values that have none, and text-only methods on unknown receivers.
     if (["scalar", "null", "range", "unknown", "open"].includes(value.kind)) {
       this.#reportProblems(
-        memberProblems(callee.object, receiver, callee.property, expression, typeOf),
+        memberProblems(callee.object, receiverAtCall, callee.property, expression, typeOf),
       );
       const member = isScalar(value, "string") ? TEXT_MEMBERS.get(method) : undefined;
       return member?.parameters ? textResultType(member) : UNKNOWN_TYPE;
@@ -2066,7 +2073,11 @@ class TypeChecker {
 
   #reportProblems(problems: readonly OperationProblem[]): void {
     for (const problem of problems)
-      this.#report(typeCode[problem.kind], problem.message, problem.span);
+      this.#report(
+        typeCode[problem.kind],
+        `${problem.message}${problem.widened === undefined ? "" : this.#widenedNote(problem.widened)}${problem.fix ?? ""}`,
+        problem.span,
+      );
   }
 
   #report(code: string, message: string, span: SourceSpan): void {

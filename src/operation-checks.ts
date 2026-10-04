@@ -25,6 +25,7 @@ import {
 } from "./static-types.js";
 import {
   argumentCountMessage,
+  argumentFix,
   argumentTypeMessage,
   beyondLengthMessage,
   emptyTextMessage,
@@ -45,6 +46,9 @@ export interface OperationProblem {
   readonly kind: "argumentCount" | "unknownNamedArgument" | "invalidOperand";
   readonly message: string;
   readonly span: SourceSpan;
+  /** An argument whose number type a widened variable may explain; the explanation goes before `fix`. */
+  readonly widened?: Expression;
+  readonly fix?: string;
 }
 
 /**
@@ -60,7 +64,7 @@ export function memberProblems(
   call: CallExpression | null,
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
-  const type = resolved(nonNullType(receiverType));
+  const type = forUse(receiverType);
   const name = property.name;
   const problem = (message: string): OperationProblem[] => [
     { kind: "invalidOperand", message, span: property.span },
@@ -156,7 +160,13 @@ function argumentProblems(
     };
     const text = parameter.kind === "text" || parameter.kind === "nonEmptyText";
     if (!isAssignable(text ? STRING_TYPE : INTEGER_TYPE, type)) {
-      fail(argumentTypeMessage(member, parameter, describeValue(type), argumentKind(type)));
+      problems.push({
+        kind: "invalidOperand",
+        message: argumentTypeMessage(member, parameter, describeValue(type)),
+        span: value.span,
+        ...(text ? {} : { widened: value }),
+        fix: argumentFix(parameter, argumentKind(type)),
+      });
       continue;
     }
     if (text) {
@@ -247,7 +257,7 @@ export function builtinCallProblems(
     result === undefined
       ? isAssignable(NUMBER_TYPE, type)
         ? undefined
-        : `${name}(...) needs a number, not ${describeValue(nonNullType(type))}.${isScalar(nonNullType(type), "string") ? " Convert text with toNumber(...) first." : ""}`
+        : `${name}(...) needs a number, not ${describeValue(forUse(type))}.${isScalar(forUse(type), "string") ? " Convert text with toNumber(...) first." : ""}`
       : conversionProblem(name, result, value, type);
   if (message !== undefined) problems.push({ kind: "invalidOperand", message, span: value.span });
   if (result !== undefined && fallback !== undefined) {
@@ -272,7 +282,7 @@ function conversionProblem(
   value: Expression,
   type: StaticType,
 ): string | undefined {
-  const candidates = members(nonNullType(type)).map(resolved);
+  const candidates = members(forUse(type)).map(resolved);
   if (candidates.length === 0 || candidates.some((candidate) => !isKnown(candidate)))
     return undefined;
   const problems = candidates.map((candidate) =>
@@ -312,7 +322,7 @@ function candidateConversionProblem(
 
 /** The scalar kind of a known argument type, for choosing the conversion a message suggests. */
 function argumentKind(type: StaticType): ArgumentKind {
-  const value = resolved(nonNullType(type));
+  const value = forUse(type);
   if (value.kind !== "scalar") return null;
   return value.name === "string" ||
     value.name === "integer" ||
@@ -328,4 +338,13 @@ function codePointLength(text: string): number {
   for (let index = 0; index < text.length; index += text.codePointAt(index)! > 0xffff ? 2 : 1)
     length += 1;
   return length;
+}
+
+/**
+ * The type an operation acts on: a possibly null value acts on its other members (V30 §34), and a value that is only
+ * `null` stays `null`, so its misuse is still visible.
+ */
+function forUse(type: StaticType): StaticType {
+  const value = resolved(nonNullType(type));
+  return value.kind === "never" ? resolved(type) : value;
 }

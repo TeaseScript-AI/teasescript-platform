@@ -2,6 +2,7 @@ import type { PlanSourceLocation } from "../plan/model.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import {
   argumentCountMessage,
+  argumentFix,
   argumentTypeMessage,
   beyondLengthMessage,
   emptyTextMessage,
@@ -268,7 +269,8 @@ export function checkTextArguments(
       if (typeof value !== "string")
         throw fault(
           "TSR057",
-          argumentTypeMessage(member, parameter, describeRuntimeValue(value), argumentKind(value)),
+          argumentTypeMessage(member, parameter, describeRuntimeValue(value)) +
+            argumentFix(parameter, argumentKind(value)),
           span,
         );
       if (parameter.kind === "nonEmptyText" && value === "")
@@ -276,7 +278,8 @@ export function checkTextArguments(
     } else if (typeof value !== "number" || !Number.isInteger(value)) {
       throw fault(
         position ? "TSR024" : "TSR057",
-        argumentTypeMessage(member, parameter, describeRuntimeValue(value), argumentKind(value)),
+        argumentTypeMessage(member, parameter, describeRuntimeValue(value)) +
+          argumentFix(parameter, argumentKind(value)),
         span,
       );
     } else if (value < 0) {

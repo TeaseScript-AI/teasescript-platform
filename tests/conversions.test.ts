@@ -117,6 +117,7 @@ test("conversions the compiler can prove invalid and misused arguments are compi
       'toBoolean(...) cannot convert "yes"; the text must be "true" or "false".',
       '"yes"',
     ],
+    ["say toNumber(null)", "TSV043", "toNumber(...) converts text and numbers, not null.", "null"],
     [
       "say toNumber(true)",
       "TSV043",
@@ -264,6 +265,26 @@ test("values that do not convert at runtime raise errors that name the fix", () 
       "toString(...) cannot convert a list to text (string). Give a fallback with default: if the value may not convert.",
     ],
   );
+});
+
+test("a conversion checks its value as it was evaluated, before later arguments run", () => {
+  for (const [declaration, read, change] of [
+    ["let value = null", "value", "value = [1]"],
+    ["let box = { value: null }", "box.value", "box.value = [1]"],
+  ])
+    assert.deepEqual(
+      said(
+        [
+          declaration,
+          "function fallback {",
+          `    ${change}`,
+          '    return "fallback"',
+          "}",
+          `say toString(${read}, default: fallback())`,
+        ].join("\n"),
+      ),
+      ["null"],
+    );
 });
 
 test("conversions are checkpoint and resume equivalent", () => {
