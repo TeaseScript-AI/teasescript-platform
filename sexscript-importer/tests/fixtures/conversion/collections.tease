@@ -13,34 +13,25 @@ function sexscriptLegacyShuffled(itemsValue) {
   }
   return shuffled
 }
-function sexscriptLegacyRemoveAt(itemsValue2, position) {
-  let remaining = []
-  for index in 0..itemsValue2.length {
-    if index != position {
-      remaining.add(itemsValue2[index])
-    }
-  }
-  return remaining
-}
-function sexscriptLegacyListMax(itemsValue3) {
-  if itemsValue3.length == 0 {
+function sexscriptLegacyListMax(itemsValue2) {
+  if itemsValue2.length == 0 {
     return null
   }
-  let best = itemsValue3.first
-  for item in itemsValue3 {
+  let best = itemsValue2.first
+  for item in itemsValue2 {
     if item > best {
       best = item
     }
   }
   return best
 }
-function sexscriptLegacyJoin(itemsValue4, separator) {
+function sexscriptLegacyJoin(itemsValue3, separator) {
   let text = ""
-  for index in 0..itemsValue4.length {
+  for index in 0..itemsValue3.length {
     if index == 0 {
-      text = "${itemsValue4[index]}"
+      text = "${itemsValue3[index]}"
     } else {
-      text = "${text}${separator}${itemsValue4[index]}"
+      text = "${text}${separator}${itemsValue3[index]}"
     }
   }
   return text
@@ -87,8 +78,12 @@ for i in 0..items.length {
   say "${i}: ${item}"
 }
 items = sexscriptLegacyShuffled(items)
-items = sexscriptLegacyRemoveAt(items, 0)
+items.removeAt(0)
 items.remove("wait")
+let pairs = [[1, 2], [3, 4]]
+pairs.remove([1, 2])
+let numbers = [5, 6]
+say "Pairs left: ${pairs.length}, took ${numbers.removeAt(0)}"
 say "Best: ${sexscriptLegacyListMax([3, 7, 5])}, joined: ${sexscriptLegacyJoin(items, ", ")}"
 let bigger = sexscriptLegacyMax(total, 4)
 if items.length == 0 {

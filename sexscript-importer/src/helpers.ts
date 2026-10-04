@@ -75,7 +75,6 @@ export type HelperName =
   | "min"
   | "playBackgroundSound"
   | "random"
-  | "removeAt"
   | "shuffled"
   | "stopBackgroundSounds"
   | "unique";
@@ -112,7 +111,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "array",
   "shuffled",
   "unique",
-  "removeAt",
   "menuOptions",
   "listMax",
   "listMin",
@@ -406,24 +404,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ),
           ]),
           ret(v("unique")),
-        ],
-      ),
-  },
-  removeAt: {
-    // Groovy list.remove(index) with a number removes by position; TeaseScript remove(value) removes by value.
-    name: "sexscriptLegacyRemoveAt",
-    build: () =>
-      fn(
-        "sexscriptLegacyRemoveAt",
-        ["items", "position"],
-        [
-          letS("remaining", { kind: "list", items: [] }),
-          forS("index", range(prop(v("items"), "length")), [
-            ifS(bin("!=", v("index"), v("position")), [
-              add("remaining", at(v("items"), v("index"))),
-            ]),
-          ]),
-          ret(v("remaining")),
         ],
       ),
   },

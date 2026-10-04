@@ -2855,16 +2855,19 @@ function lowerCollectionStatement(
   if (call.name === "unique" && call.arguments.length === 0)
     return reassign(useHelper(context, "unique", [list]));
   if (call.name === "remove" && call.arguments.length === 1) {
+    // Groovy remove(int) removes a position and remove(Object) the first equal element; TeaseScript list equality
+    // is structural like Groovy's equals (#517).
     const argument = call.arguments[0]!;
-    const value = lowerExpression(argument, context);
-    if (value === null) return null;
-    if (onlyOf(inferType(argument, context.types), NUMBER))
-      return reassign(useHelper(context, "removeAt", [list, value]));
-    if (onlyOf(inferType(argument, context.types), STRING | BOOLEAN)) {
+    const argumentType = inferType(argument, context.types);
+    const byPosition = onlyOf(argumentType, NUMBER);
+    if (byPosition || onlyOf(argumentType, STRING | BOOLEAN | LIST | OBJECT)) {
+      const value = lowerExpression(argument, context);
+      if (value === null) return null;
+      const name = byPosition ? "removeAt" : "remove";
       return [
         {
           kind: "expression",
-          expression: { kind: "methodCall", target: list, name: "remove", arguments: [value] },
+          expression: { kind: "methodCall", target: list, name, arguments: [value] },
           span,
         },
       ];
@@ -4274,11 +4277,15 @@ function truthiness(
   if (onlyOf(type, BOOLEAN | NULL)) return compare("==", { kind: "literal", value: true });
   if (type === NULL) return notNull;
   if ((type & OBJECT) !== 0 && onlyOf(type, OBJECT | NULL)) {
+    // Groovy treats an empty map as false; objects compare structurally (#517), so `{}` is the empty map.
+    const empty = compare("!=", { kind: "object", properties: [] });
+    if (onlyOf(type, OBJECT)) return empty;
+    if (repeatable) return and(notNull, empty);
     return unsupportedExpression(
       context,
       node,
       "SX_MAP_TRUTHINESS",
-      "Groovy treats an empty map as false; TeaseScript records have no emptiness test and a record is not a condition. Test a specific field or keep an explicit flag.",
+      "Groovy treats a null or empty map as false; testing both here would evaluate this expression twice. Keep the map in a variable and test it.",
     );
   }
   if (onlyOf(type, NUMBER)) return compare("!=", { kind: "literal", value: 0 });
@@ -4868,6 +4875,16 @@ function lowerObjectMethodCallExpression(
     const args = lowerArguments(argumentsNodes, context);
     if (args === null) return null;
     return useHelper(context, "indexOf", [target, args[0]!]);
+  }
+  if (
+    name === "remove" &&
+    argumentsNodes.length === 1 &&
+    onlyOf(inferType(argumentsNodes[0]!, context.types), NUMBER)
+  ) {
+    // Groovy remove(int) returns the removed element, as removeAt does (#517).
+    noteSharedListWrite(targetNode, node, context);
+    const args = lowerArguments(argumentsNodes, context);
+    return args === null ? null : { kind: "methodCall", target, name: "removeAt", arguments: args };
   }
   if (argumentsNodes.length === 0) {
     switch (name) {
