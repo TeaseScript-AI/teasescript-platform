@@ -487,7 +487,7 @@ test("choice diagnostics reject mixed written-value kinds, while values and text
   }
   for (const accepted of [
     'let x = choose first: "Same", second: "Same"',
-    'let x = choose back: "Back", "Spanking", ["Lines", { text: "Corner", value: "corner" }]',
+    'let x = choose back: "Back", "Spanking", [{ text: "Lines" }, { text: "Corner", value: "corner" }]',
     'let x = choose first: "A", first: "B"',
     'let x = choose 1: "A", 1.0: "B"',
     'let x = choose "Same", "Same"',

@@ -1319,8 +1319,10 @@ class TypeChecker {
           content.kind === "listLiteral"
             ? content.elements.length
             : new Set(content.elements.flatMap((element) => staticSetMember(element))).size;
+        // The list or set is checked like any other: its elements share one type (ADR 0021 rule 1.3).
+        yield* compileChild(this.#expressionTask(option.expression, scope));
         for (const element of content.elements) {
-          const value = yield* compileChild(this.#choiceEntryTask(element, scope, true));
+          const value = this.#choiceEntry(element, this.#typeOf(element), true);
           if (written === null) values.push(value);
         }
         // An empty list or set gives no buttons, so its written value is never returned.
@@ -1330,7 +1332,12 @@ class TypeChecker {
       const type = yield* compileChild(this.#expressionTask(option.expression, scope));
       const value = resolved(nonNullType(type));
       if (value.kind === "list" || value.kind === "set") {
-        values.push(written ?? (isNullable(type) ? UNKNOWN_TYPE : value.element));
+        // The elements of a computed collection are not visible here: a choice object among them may return its
+        // value or its text, so only scalar elements give a known result type.
+        const element = resolved(value.element);
+        values.push(
+          written ?? (isNullable(type) || element.kind === "object" ? UNKNOWN_TYPE : value.element),
+        );
         continue;
       }
       if (isKnown(value)) buttons += 1;
@@ -1345,12 +1352,6 @@ class TypeChecker {
       );
     // Integers and numbers together are numbers; values of other different types give a value of unknown type.
     return values.length === 0 ? UNKNOWN_TYPE : (joinTypes(values) ?? UNKNOWN_TYPE);
-  }
-
-  /** Checks an element of a list or set option, which gives one button, and returns the value that button returns. */
-  *#choiceEntryTask(entry: Expression, scope: Scope, inList: boolean): CompileTask<StaticType> {
-    const type = yield* compileChild(this.#expressionTask(entry, scope));
-    return this.#choiceEntry(entry, type, inList);
   }
 
   /**

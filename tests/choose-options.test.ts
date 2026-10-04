@@ -161,7 +161,7 @@ test("a value written before a list option is the value of every button from tha
 
   // Choice objects in the list take the written value too, and an empty list adds no buttons.
   const objects = start(
-    'let empty = []\nlet answer = choose k: [{ text: "A", background: "gold" }, "B"], none: empty',
+    'let empty = []\nlet answer = choose k: [{ text: "A", background: "gold" }], k: "B", none: empty',
   );
   assert.deepEqual(
     buttons(objects.pending.snapshot).map((option) => [option.text, option.value]),
@@ -367,7 +367,7 @@ test("choice options the compiler can see are checked when compiling", () => {
       "Expected an opaque CSS button background colour.",
     ],
     [
-      'let x = choose ["A", 1..2]',
+      "let x = choose [1..2]",
       "TSV029",
       "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
     ],
@@ -417,7 +417,7 @@ test("choice options the compiler can see are checked when compiling", () => {
       "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
     ],
     [
-      'let x = choose ["A", set["B"]]',
+      'let x = choose [set["B"]]',
       "TSV029",
       "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set.",
     ],
@@ -487,4 +487,23 @@ test("choice options known only at runtime are checked before the choice opens",
   );
   assert.equal(tooMany.snapshot.failure?.code, "TSR052");
   assert.equal(tooMany.snapshot.failure?.message, "A choice can show at most 4096 buttons.");
+});
+
+test("a computed list of choice objects returns their values, and a literal option list holds one type", () => {
+  // The objects may return their value or their text, so the result type is not known here.
+  const { plan, pending } = start(
+    'let options = [{ text: "One", value: 1 }]\nlet result: integer = choose options\nsay [result]',
+  );
+  assert.deepEqual(sayTexts(select(plan, pending.snapshot, 0).finished), ["[1]"]);
+  // A literal list or set of options mixes types like any other literal (ADR 0021 rule 1.3).
+  for (const source of [
+    'let result = choose [1, "A"]',
+    'let result = choose set[1, "A"]',
+    'let result = choose key: [1, "A"]',
+  ])
+    assert.deepEqual(
+      compileSource(source).diagnostics.map((diagnostic) => diagnostic.code),
+      ["TSV044"],
+      source,
+    );
 });
