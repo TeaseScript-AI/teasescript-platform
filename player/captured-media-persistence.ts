@@ -3,8 +3,8 @@ import { isCapturedMediaReference, type CapturedMediaStore } from "./captured-me
 import type { ScriptStorageProvider } from "./script-storage.js";
 
 /**
- * Captured-media references inside a stored value: list and set items, object property names and values. A match is
- * only a candidate: an unknown or forged reference stays ordinary data.
+ * Captured-media references inside a stored value: list and set items, object property names and values, and dict
+ * keys and values. A match is only a candidate: an unknown or forged reference stays ordinary data.
  */
 export function capturedMediaReferences(value: SerializableRuntimeValue): Set<string> {
   const found = new Set<string>();
@@ -18,6 +18,8 @@ export function capturedMediaReferences(value: SerializableRuntimeValue): Set<st
         for (const item of current.items) pending.push(item);
       else if (current.kind === "object")
         for (const property of current.properties) pending.push(property.name, property.value);
+      else if (current.kind === "dict")
+        for (const entry of current.entries) pending.push(entry.key, entry.value);
     }
   }
   return found;
