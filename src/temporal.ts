@@ -147,10 +147,10 @@ export function roundToMillisecond(milliseconds: number): number {
 // Strict ISO text
 
 /**
- * The result of reading temporal text. `reason` explains why text of the right form names no real value, such as
- * `"February 2026 has 28 days"`; it is `null` when the text does not have the ISO form at all.
+ * The result of reading temporal text or converting through a zone. `reason` explains a failure, such as
+ * `"February 2026 has 28 days"`; it is `null` when text does not have the ISO form at all.
  */
-export type TemporalTextResult<T> =
+export type TemporalResult<T> =
   { readonly ok: true; readonly value: T } | { readonly ok: false; readonly reason: string | null };
 
 const DATE_TEXT = /^(\d{4})-(\d{2})-(\d{2})$/u;
@@ -158,7 +158,7 @@ const TIME_TEXT = /^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/u;
 const OFFSET_TEXT = /^(?:Z|([+-])(\d{2}):(\d{2}))$/u;
 
 /** Reads `YYYY-MM-DD`. */
-export function parseIsoDate(text: string): TemporalTextResult<DateFields> {
+export function parseIsoDate(text: string): TemporalResult<DateFields> {
   const match = DATE_TEXT.exec(text);
   if (match === null) return { ok: false, reason: null };
   const date = { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
@@ -167,7 +167,7 @@ export function parseIsoDate(text: string): TemporalTextResult<DateFields> {
 }
 
 /** Reads `HH:MM`, `HH:MM:SS`, or `HH:MM:SS.f` with one to three fraction digits. */
-export function parseIsoTime(text: string): TemporalTextResult<TimeFields> {
+export function parseIsoTime(text: string): TemporalResult<TimeFields> {
   const match = TIME_TEXT.exec(text);
   if (match === null) return { ok: false, reason: null };
   const time = {
@@ -181,7 +181,7 @@ export function parseIsoTime(text: string): TemporalTextResult<TimeFields> {
 }
 
 /** Reads a local date and time joined by `T`, without an offset. */
-export function parseIsoDateTime(text: string): TemporalTextResult<DateTimeFields> {
+export function parseIsoDateTime(text: string): TemporalResult<DateTimeFields> {
   const separator = text.indexOf("T");
   if (separator < 0) return { ok: false, reason: null };
   const date = parseIsoDate(text.slice(0, separator));
@@ -192,7 +192,7 @@ export function parseIsoDateTime(text: string): TemporalTextResult<DateTimeField
 }
 
 /** Reads a date and time with `Z` or a `±HH:MM` offset as a timestamp in epoch milliseconds. */
-export function parseIsoTimestamp(text: string): TemporalTextResult<number> {
+export function parseIsoTimestamp(text: string): TemporalResult<number> {
   const offsetStart = Math.max(text.lastIndexOf("Z"), text.lastIndexOf("+"), text.lastIndexOf("-"));
   const timeStart = text.indexOf("T");
   if (timeStart < 0 || offsetStart <= timeStart) return { ok: false, reason: null };
@@ -243,23 +243,25 @@ export function formatIsoTimestamp(epochMilliseconds: number): string {
 // Zone rules
 
 /**
- * The UTC offsets of one time zone, captured by the host. Before the first transition, and before 1970, the initial
- * offset applies; after the last transition, its offset applies, also after 2100.
+ * The UTC offsets of one time zone from 1970 up to 2100, captured by the host. Converting a moment outside that window
+ * fails: the rules there are unknown, and guessing them could silently shift a local time.
  */
 export interface ZoneRules {
   /** The IANA name, such as `Europe/Amsterdam`. */
   readonly name: string;
+  /** The offset at the start of 1970. */
   readonly initialOffsetSeconds: number;
   /** `[epochMilliseconds, offsetSeconds]`: from that moment on, local time is UTC plus the offset. */
   readonly transitions: readonly (readonly [number, number])[];
 }
 
-/** The captured moments span 1970-01-01T00:00Z up to 2100-01-01T00:00Z. */
+/** The captured window: 1970-01-01T00:00Z up to, not including, 2100-01-01T00:00Z. */
 export const ZONE_RULES_START_MILLISECONDS = 0;
 export const ZONE_RULES_END_MILLISECONDS =
   daysFromEpoch({ year: 2100, month: 1, day: 1 }) * MS_PER_DAY;
 const MAX_ZONE_TRANSITIONS = 1_000;
 const MAX_OFFSET_SECONDS = 86_399;
+const OUTSIDE_ZONE_RULES = "the time-zone rules cover 1970 through 2099";
 
 export const UTC_ZONE_RULES: ZoneRules = Object.freeze({
   name: "UTC",
@@ -267,53 +269,46 @@ export const UTC_ZONE_RULES: ZoneRules = Object.freeze({
   transitions: Object.freeze([]),
 });
 
-function offsetSecondsAt(rules: ZoneRules, epochMilliseconds: number): number {
-  let low = 0;
-  let high = rules.transitions.length;
-  while (low < high) {
-    const middle = (low + high) >>> 1;
-    if (rules.transitions[middle]![0] <= epochMilliseconds) low = middle + 1;
-    else high = middle;
-  }
-  return low === 0 ? rules.initialOffsetSeconds : rules.transitions[low - 1]![1];
-}
-
-/** The local date and time of a timestamp in the zone, or `undefined` outside the years 0000 to 9999. */
+/** The local date and time of a moment in the zone. */
 export function localFields(
   rules: ZoneRules,
   epochMilliseconds: number,
-): DateTimeFields | undefined {
-  const local = epochMilliseconds + offsetSecondsAt(rules, epochMilliseconds) * MS_PER_SECOND;
-  return isValidEpochMilliseconds(local) ? utcFields(local) : undefined;
+): TemporalResult<DateTimeFields> {
+  if (!withinZoneRules(epochMilliseconds)) return { ok: false, reason: OUTSIDE_ZONE_RULES };
+  return {
+    ok: true,
+    value: utcFields(epochMilliseconds + offsetSecondsAt(rules, epochMilliseconds) * MS_PER_SECOND),
+  };
 }
 
 /**
- * The timestamp of a local date and time in the zone. A local time that a forward transition skips is shifted forward
- * by the gap; a local time that a backward transition repeats takes the earlier moment. `undefined` when the moment
- * lies outside the years 0000 to 9999 in UTC.
+ * The moment of a local date and time in the zone. A local time that a forward transition skips is moved forward by
+ * the skipped length; a local time that a backward transition repeats takes the earlier moment.
  */
-export function zonedTimestamp(rules: ZoneRules, local: DateTimeFields): number | undefined {
-  const wall = fieldsAsUtc(local);
-  // Every offset is below one day, so only transitions within a day of the wall time can matter.
-  const from = wall - MS_PER_DAY;
-  const until = wall + MS_PER_DAY;
-  const segments: { readonly start: number; readonly offset: number }[] = [
-    { start: -Infinity, offset: offsetSecondsAt(rules, from) * MS_PER_SECOND },
-  ];
-  for (const [moment, offset] of rules.transitions) {
-    if (moment > from && moment <= until)
-      segments.push({ start: moment, offset: offset * MS_PER_SECOND });
+export function zonedTimestamp(rules: ZoneRules, local: DateTimeFields): TemporalResult<number> {
+  let wall = fieldsAsUtc(local);
+  // Each pass finds the earliest moment showing the wall time, or moves the wall time past one skipped range, so the
+  // passes end within the number of transitions.
+  for (let pass = 0; pass <= rules.transitions.length; pass += 1) {
+    const segments = segmentsAround(rules, wall);
+    for (let index = 0; index < segments.length; index += 1) {
+      const moment = wall - segments[index]!.offset;
+      if (moment >= segments[index]!.start && moment < (segments[index + 1]?.start ?? Infinity))
+        return withinZoneRules(moment)
+          ? { ok: true, value: moment }
+          : { ok: false, reason: OUTSIDE_ZONE_RULES };
+    }
+    // Segment `gap` ends at local time `next.start + offset`, and the next one starts later, at `next.start + next.offset`.
+    const gap = segments.findIndex((segment, index) => {
+      const next = segments[index + 1];
+      return (
+        next !== undefined && wall >= next.start + segment.offset && wall < next.start + next.offset
+      );
+    });
+    if (gap < 0) break;
+    wall += segments[gap + 1]!.offset - segments[gap]!.offset;
   }
-  let result: number | undefined;
-  for (let index = 0; index < segments.length && result === undefined; index += 1) {
-    const segment = segments[index]!;
-    const end = segments[index + 1]?.start ?? Infinity;
-    const candidate = wall - segment.offset;
-    if (candidate >= segment.start && candidate < end) result = candidate;
-    // A wall time between this segment's last local time and the next segment's first one was skipped.
-    else if (candidate >= end && wall < end + segments[index + 1]!.offset) result = candidate;
-  }
-  return result !== undefined && isValidEpochMilliseconds(result) ? result : undefined;
+  return { ok: false, reason: OUTSIDE_ZONE_RULES };
 }
 
 /** Why `value` is not valid zone rules, or `null`. */
@@ -327,7 +322,7 @@ export function zoneRulesProblem(value: unknown): string | null {
   const transitions = value.transitions;
   if (!Array.isArray(transitions) || transitions.length > MAX_ZONE_TRANSITIONS)
     return `Zone transitions must be a list of at most ${MAX_ZONE_TRANSITIONS} entries.`;
-  let previous = -Infinity;
+  let previous = ZONE_RULES_START_MILLISECONDS;
   for (const transition of transitions) {
     if (!Array.isArray(transition) || transition.length !== 2)
       return "A zone transition must be [epochMilliseconds, offsetSeconds].";
@@ -335,144 +330,220 @@ export function zoneRulesProblem(value: unknown): string | null {
     if (
       typeof moment !== "number" ||
       !Number.isSafeInteger(moment) ||
-      moment < ZONE_RULES_START_MILLISECONDS ||
-      moment > ZONE_RULES_END_MILLISECONDS
+      moment <= previous ||
+      moment >= ZONE_RULES_END_MILLISECONDS
     )
-      return "A zone transition moment must be whole milliseconds from 1970 through 2100.";
-    if (moment <= previous) return "Zone transitions must be in increasing order.";
+      return "Zone transitions must be whole milliseconds in increasing order, after 1970 and before 2100.";
     if (!isOffsetSeconds(offset)) return "A zone offset must be whole seconds below one day.";
     previous = moment;
   }
   return null;
 }
 
+function withinZoneRules(epochMilliseconds: number): boolean {
+  return (
+    epochMilliseconds >= ZONE_RULES_START_MILLISECONDS &&
+    epochMilliseconds < ZONE_RULES_END_MILLISECONDS
+  );
+}
+
+function offsetSecondsAt(rules: ZoneRules, epochMilliseconds: number): number {
+  let low = 0;
+  let high = rules.transitions.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (rules.transitions[middle]![0] <= epochMilliseconds) low = middle + 1;
+    else high = middle;
+  }
+  return low === 0 ? rules.initialOffsetSeconds : rules.transitions[low - 1]![1];
+}
+
+/** The offsets in force around `wall`, as consecutive segments of moments, with offsets in milliseconds. */
+function segmentsAround(
+  rules: ZoneRules,
+  wall: number,
+): { readonly start: number; readonly offset: number }[] {
+  // Every offset is below one day, so only moments within a day of the wall time can show it.
+  const from = wall - MS_PER_DAY;
+  const until = wall + MS_PER_DAY;
+  const segments = [{ start: -Infinity, offset: offsetSecondsAt(rules, from) * MS_PER_SECOND }];
+  for (const [moment, offset] of rules.transitions) {
+    if (moment > from && moment <= until)
+      segments.push({ start: moment, offset: offset * MS_PER_SECOND });
+  }
+  return segments;
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Presentation
 
+export type HourCycle = "h11" | "h12" | "h23" | "h24";
+
 /**
  * How the player's locale writes numeric dates and times, captured by the host so that text does not depend on host
- * locale data. Digits are always 0–9.
+ * locale data. Each template is literal text with the placeholders `{year}`, `{month}`, `{day}`, `{hour}`,
+ * `{minute}`, `{second}`, and `{dayPeriod}`, such as `"{month}/{day}/{year}, {hour}:{minute} {dayPeriod}"`. Digits are
+ * always 0–9; minutes and seconds always have two digits.
  */
 export interface PresentationSettings {
-  readonly dateOrder: "dmy" | "mdy" | "ymd";
-  readonly dateSeparator: string;
+  readonly date: string;
+  readonly time: string;
+  readonly timeWithSeconds: string;
+  readonly dateTime: string;
+  readonly dateTimeWithSeconds: string;
   readonly padDay: boolean;
   readonly padMonth: boolean;
-  /** Between the date and the time, such as `" "` or `", "`. */
-  readonly dateTimeSeparator: string;
-  readonly hourCycle: "h12" | "h23";
   readonly padHour: boolean;
-  readonly timeSeparator: string;
-  /** The morning and afternoon markers of the 12-hour clock, such as `["AM", "PM"]`. */
+  /** `h11` counts 0–11, `h12` 1–12, `h23` 0–23, and `h24` 1–24. */
+  readonly hourCycle: HourCycle;
+  /** The morning and afternoon markers for `{dayPeriod}`, such as `["AM", "PM"]`. */
   readonly dayPeriods: readonly [string, string];
-  readonly dayPeriodBeforeTime: boolean;
-  /** Between the day-period marker and the time. */
-  readonly dayPeriodSeparator: string;
-  readonly decimalSeparator: string;
 }
 
 /** Locale-neutral settings for hosts that capture none: `2026-10-04 18:30`. */
 export const DEFAULT_PRESENTATION_SETTINGS: PresentationSettings = Object.freeze({
-  dateOrder: "ymd",
-  dateSeparator: "-",
+  date: "{year}-{month}-{day}",
+  time: "{hour}:{minute}",
+  timeWithSeconds: "{hour}:{minute}:{second}",
+  dateTime: "{year}-{month}-{day} {hour}:{minute}",
+  dateTimeWithSeconds: "{year}-{month}-{day} {hour}:{minute}:{second}",
   padDay: true,
   padMonth: true,
-  dateTimeSeparator: " ",
-  hourCycle: "h23",
   padHour: true,
-  timeSeparator: ":",
+  hourCycle: "h23",
   dayPeriods: Object.freeze(["AM", "PM"] as const),
-  dayPeriodBeforeTime: false,
-  dayPeriodSeparator: " ",
-  decimalSeparator: ".",
 });
 
 export function presentDate(settings: PresentationSettings, date: DateFields): string {
-  const day = settings.padDay ? pad(date.day, 2) : String(date.day);
-  const month = settings.padMonth ? pad(date.month, 2) : String(date.month);
-  const year = pad(date.year, 4);
-  const parts =
-    settings.dateOrder === "dmy"
-      ? [day, month, year]
-      : settings.dateOrder === "mdy"
-        ? [month, day, year]
-        : [year, month, day];
-  return parts.join(settings.dateSeparator);
+  return fillTemplate(settings.date, settings, date);
 }
 
-/** Hours and minutes, with seconds when the seconds or milliseconds are not zero and milliseconds when they are not. */
+/** Hours and minutes, with seconds when they are not zero. Milliseconds are not shown. */
 export function presentTime(settings: PresentationSettings, time: TimeFields): string {
-  const twelveHour = settings.hourCycle === "h12";
-  const hourNumber = twelveHour ? ((time.hour + 11) % 12) + 1 : time.hour;
-  let clock = `${settings.padHour ? pad(hourNumber, 2) : String(hourNumber)}${settings.timeSeparator}${pad(time.minute, 2)}`;
-  if (time.second !== 0 || time.millisecond !== 0)
-    clock += `${settings.timeSeparator}${pad(time.second, 2)}`;
-  if (time.millisecond !== 0) clock += `${settings.decimalSeparator}${pad(time.millisecond, 3)}`;
-  if (!twelveHour) return clock;
-  const period = settings.dayPeriods[time.hour < 12 ? 0 : 1];
-  return settings.dayPeriodBeforeTime
-    ? `${period}${settings.dayPeriodSeparator}${clock}`
-    : `${clock}${settings.dayPeriodSeparator}${period}`;
+  return fillTemplate(time.second === 0 ? settings.time : settings.timeWithSeconds, settings, time);
 }
 
 export function presentDateTime(settings: PresentationSettings, dateTime: DateTimeFields): string {
-  return `${presentDate(settings, dateTime)}${settings.dateTimeSeparator}${presentTime(settings, dateTime)}`;
+  const template = dateTime.second === 0 ? settings.dateTime : settings.dateTimeWithSeconds;
+  return fillTemplate(template, settings, dateTime);
 }
 
 /** Why `value` is not valid presentation settings, or `null`. */
 export function presentationSettingsProblem(value: unknown): string | null {
   if (!isRecord(value) || !hasExactKeys(value, PRESENTATION_KEYS))
     return `Presentation settings must have exactly ${PRESENTATION_KEYS.join(", ")}.`;
-  if (value.dateOrder !== "dmy" && value.dateOrder !== "mdy" && value.dateOrder !== "ymd")
-    return 'The date order must be "dmy", "mdy", or "ymd".';
-  if (value.hourCycle !== "h12" && value.hourCycle !== "h23")
-    return 'The hour cycle must be "h12" or "h23".';
-  for (const key of ["padDay", "padMonth", "padHour", "dayPeriodBeforeTime"] as const) {
+  for (const [key, required] of TEMPLATE_FIELDS) {
+    const problem = templateProblem(value[key], required);
+    if (problem !== null) return `The ${key} template ${problem}.`;
+  }
+  for (const key of ["padDay", "padMonth", "padHour"] as const) {
     if (typeof value[key] !== "boolean")
       return `The presentation setting ${key} must be true or false.`;
   }
-  for (const key of [
-    "dateSeparator",
-    "dateTimeSeparator",
-    "timeSeparator",
-    "dayPeriodSeparator",
-    "decimalSeparator",
-  ] as const) {
-    if (!isPresentationText(value[key], 0))
-      return `The presentation setting ${key} must be short plain text.`;
-  }
+  if (!["h11", "h12", "h23", "h24"].includes(String(value.hourCycle)))
+    return 'The hour cycle must be "h11", "h12", "h23", or "h24".';
   const periods = value.dayPeriods;
   if (
     !Array.isArray(periods) ||
     periods.length !== 2 ||
-    !periods.every((period: unknown) => isPresentationText(period, 1))
+    !isPresentationText(periods[0], 1, MAX_DAY_PERIOD_LENGTH) ||
+    !isPresentationText(periods[1], 1, MAX_DAY_PERIOD_LENGTH)
   )
     return "The day periods must be two short plain texts, such as AM and PM.";
   return null;
 }
 
+const DATE_PLACEHOLDERS = ["year", "month", "day"] as const;
+const TIME_PLACEHOLDERS = ["hour", "minute"] as const;
+const TEMPLATE_FIELDS: readonly (readonly [keyof PresentationSettings, readonly string[]])[] = [
+  ["date", DATE_PLACEHOLDERS],
+  ["time", TIME_PLACEHOLDERS],
+  ["timeWithSeconds", [...TIME_PLACEHOLDERS, "second"]],
+  ["dateTime", [...DATE_PLACEHOLDERS, ...TIME_PLACEHOLDERS]],
+  ["dateTimeWithSeconds", [...DATE_PLACEHOLDERS, ...TIME_PLACEHOLDERS, "second"]],
+];
 const PRESENTATION_KEYS = Object.freeze([
-  "dateOrder",
-  "dateSeparator",
+  ...TEMPLATE_FIELDS.map(([key]) => key),
   "padDay",
   "padMonth",
-  "dateTimeSeparator",
-  "hourCycle",
   "padHour",
-  "timeSeparator",
+  "hourCycle",
   "dayPeriods",
-  "dayPeriodBeforeTime",
-  "dayPeriodSeparator",
-  "decimalSeparator",
 ]);
+const PLACEHOLDER = /\{([a-zA-Z]+)\}/gu;
+const MAX_TEMPLATE_LENGTH = 80;
+const MAX_DAY_PERIOD_LENGTH = 16;
 
-const MAX_PRESENTATION_TEXT_LENGTH = 16;
+/**
+ * Why a template is unusable: it must contain each required placeholder once, may contain `{dayPeriod}` once when it
+ * shows the hour, and has no other placeholder, brace, or control character.
+ */
+function templateProblem(template: unknown, required: readonly string[]): string | null {
+  if (!isPresentationText(template, 1, MAX_TEMPLATE_LENGTH))
+    return `must be plain text of at most ${MAX_TEMPLATE_LENGTH} characters`;
+  const names = Array.from(template.matchAll(PLACEHOLDER), (match) => match[1]!);
+  const allowed = required.includes("hour") ? [...required, "dayPeriod"] : required;
+  if (
+    template.replace(PLACEHOLDER, "").includes("{") ||
+    template.replace(PLACEHOLDER, "").includes("}")
+  )
+    return "has a brace outside a placeholder";
+  if (names.some((name) => !allowed.includes(name)) || new Set(names).size !== names.length)
+    return `may only use ${allowed.map((name) => `{${name}}`).join(", ")}, each once`;
+  if (required.some((name) => !names.includes(name)))
+    return `must contain ${required.map((name) => `{${name}}`).join(", ")}`;
+  return null;
+}
 
-function isPresentationText(value: unknown, minimumLength: number): boolean {
+function fillTemplate(
+  template: string,
+  settings: PresentationSettings,
+  fields: Partial<DateTimeFields>,
+): string {
+  return template.replace(PLACEHOLDER, (_placeholder, name: string) => {
+    switch (name) {
+      case "year":
+        return pad(fields.year!, 4);
+      case "month":
+        return settings.padMonth ? pad(fields.month!, 2) : String(fields.month);
+      case "day":
+        return settings.padDay ? pad(fields.day!, 2) : String(fields.day);
+      case "hour": {
+        const hour = displayedHour(settings.hourCycle, fields.hour!);
+        return settings.padHour ? pad(hour, 2) : String(hour);
+      }
+      case "minute":
+        return pad(fields.minute!, 2);
+      case "second":
+        return pad(fields.second!, 2);
+      default:
+        return settings.dayPeriods[fields.hour! < 12 ? 0 : 1];
+    }
+  });
+}
+
+function displayedHour(cycle: HourCycle, hour: number): number {
+  switch (cycle) {
+    case "h11":
+      return hour % 12;
+    case "h12":
+      return ((hour + 11) % 12) + 1;
+    case "h23":
+      return hour;
+    case "h24":
+      return hour === 0 ? 24 : hour;
+  }
+}
+
+function isPresentationText(
+  value: unknown,
+  minimumLength: number,
+  maximumLength: number,
+): value is string {
   return (
     typeof value === "string" &&
     value.length >= minimumLength &&
-    value.length <= MAX_PRESENTATION_TEXT_LENGTH &&
+    value.length <= maximumLength &&
     !/[\p{Cc}\u2028\u2029]/u.test(value)
   );
 }

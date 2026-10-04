@@ -24,7 +24,9 @@ import {
   weekdayName,
   zonedTimestamp,
   zoneRulesProblem,
+  UTC_ZONE_RULES,
   type DateTimeFields,
+  type HourCycle,
   type PresentationSettings,
   type ZoneRules,
 } from "../src/temporal.js";
@@ -49,24 +51,6 @@ const AMSTERDAM: ZoneRules = {
     [utc("2026-03-29T01:00:00"), 7_200],
     [utc("2026-10-25T01:00:00"), 3_600],
   ],
-};
-
-const DUTCH: PresentationSettings = {
-  ...DEFAULT_PRESENTATION_SETTINGS,
-  dateOrder: "dmy",
-  padDay: false,
-  padMonth: false,
-};
-
-const AMERICAN: PresentationSettings = {
-  ...DEFAULT_PRESENTATION_SETTINGS,
-  dateOrder: "mdy",
-  dateSeparator: "/",
-  padDay: false,
-  padMonth: false,
-  dateTimeSeparator: ", ",
-  hourCycle: "h12",
-  padHour: false,
 };
 
 test("UTC fields and weekdays follow the proleptic Gregorian calendar over the whole year range", () => {
@@ -195,37 +179,61 @@ test("ISO output omits zero seconds and milliseconds for local values and always
   assert.equal(formatIsoTimestamp(utc("1969-12-31T23:59:59.250")), "1969-12-31T23:59:59.250Z");
 });
 
+function moment(rules: ZoneRules, text: string): number {
+  const result = zonedTimestamp(rules, dateTime(text));
+  assert.ok(result.ok, text);
+  return result.value;
+}
+
+function local(rules: ZoneRules, epochMilliseconds: number): DateTimeFields {
+  const result = localFields(rules, epochMilliseconds);
+  assert.ok(result.ok, String(epochMilliseconds));
+  return result.value;
+}
+
 test("zone rules map moments to local time and local time back, shifting gaps forward and taking earlier overlaps", () => {
-  assert.deepEqual(
-    localFields(AMSTERDAM, utc("2026-07-01T10:00:00")),
-    dateTime("2026-07-01T12:00"),
-  );
-  assert.deepEqual(
-    localFields(AMSTERDAM, utc("2026-12-01T10:00:00")),
-    dateTime("2026-12-01T11:00"),
-  );
-  assert.equal(zonedTimestamp(AMSTERDAM, dateTime("2026-07-01T12:00")), utc("2026-07-01T10:00:00"));
-  assert.equal(zonedTimestamp(AMSTERDAM, dateTime("2026-12-01T11:00")), utc("2026-12-01T10:00:00"));
+  assert.deepEqual(local(AMSTERDAM, utc("2026-07-01T10:00:00")), dateTime("2026-07-01T12:00"));
+  assert.deepEqual(local(AMSTERDAM, utc("2026-12-01T10:00:00")), dateTime("2026-12-01T11:00"));
+  assert.equal(moment(AMSTERDAM, "2026-07-01T12:00"), utc("2026-07-01T10:00:00"));
+  assert.equal(moment(AMSTERDAM, "2026-12-01T11:00"), utc("2026-12-01T10:00:00"));
 
   // 02:00–03:00 does not exist on 29 March: 02:30 is read as 03:30 summer time.
-  assert.equal(zonedTimestamp(AMSTERDAM, dateTime("2026-03-29T02:30")), utc("2026-03-29T01:30:00"));
-  assert.equal(zonedTimestamp(AMSTERDAM, dateTime("2026-03-29T03:00")), utc("2026-03-29T01:00:00"));
-  assert.equal(
-    zonedTimestamp(AMSTERDAM, dateTime("2026-03-29T01:59:59.999")),
-    utc("2026-03-29T00:59:59.999"),
-  );
+  assert.equal(moment(AMSTERDAM, "2026-03-29T02:30"), utc("2026-03-29T01:30:00"));
+  assert.equal(moment(AMSTERDAM, "2026-03-29T03:00"), utc("2026-03-29T01:00:00"));
+  assert.equal(moment(AMSTERDAM, "2026-03-29T01:59:59.999"), utc("2026-03-29T00:59:59.999"));
   // 02:00–03:00 happens twice on 25 October: the summer-time occurrence comes first.
-  assert.equal(zonedTimestamp(AMSTERDAM, dateTime("2026-10-25T02:30")), utc("2026-10-25T00:30:00"));
-  assert.equal(zonedTimestamp(AMSTERDAM, dateTime("2026-10-25T03:00")), utc("2026-10-25T02:00:00"));
+  assert.equal(moment(AMSTERDAM, "2026-10-25T02:30"), utc("2026-10-25T00:30:00"));
+  assert.equal(moment(AMSTERDAM, "2026-10-25T03:00"), utc("2026-10-25T02:00:00"));
 
   // Elapsed time through the zone: 24 hours after 18:00 on the eve of summer time is 19:00.
-  const evening = zonedTimestamp(AMSTERDAM, dateTime("2026-03-28T18:00"))!;
-  assert.deepEqual(localFields(AMSTERDAM, evening + 86_400_000), dateTime("2026-03-29T19:00"));
+  assert.deepEqual(
+    local(AMSTERDAM, moment(AMSTERDAM, "2026-03-28T18:00") + 86_400_000),
+    dateTime("2026-03-29T19:00"),
+  );
 
-  // Outside the captured transitions the nearest offset applies, and results stay within the year range.
-  assert.equal(zonedTimestamp(AMSTERDAM, dateTime("1900-01-01T12:00")), utc("1900-01-01T11:00:00"));
-  assert.equal(zonedTimestamp(AMSTERDAM, dateTime("0000-01-01T00:30")), undefined);
-  assert.equal(localFields(AMSTERDAM, MAX_EPOCH_MILLISECONDS), undefined);
+  // Close transitions, valid in a table: a local time is found where it really occurs, and a skipped one moves past
+  // every range it falls into. Rules start at UTC; at 01:00 the offset becomes +2 h, at 01:30 +1 h (or +3 h).
+  const close = (offset: number): ZoneRules => ({
+    name: "Test/Close",
+    initialOffsetSeconds: 0,
+    transitions: [
+      [3_600_000, 7_200],
+      [5_400_000, offset],
+    ],
+  });
+  assert.equal(moment(close(3_600), "1970-01-01T02:30"), 5_400_000);
+  assert.equal(moment(close(10_800), "1970-01-01T02:30"), 5_400_000);
+  assert.deepEqual(local(close(10_800), 5_400_000), dateTime("1970-01-01T04:30"));
+});
+
+test("zone conversion outside the captured years fails instead of guessing the rules", () => {
+  const outside = { ok: false, reason: "the time-zone rules cover 1970 through 2099" };
+  assert.deepEqual(localFields(AMSTERDAM, utc("1969-12-31T23:59:59.999")), outside);
+  assert.deepEqual(localFields(AMSTERDAM, utc("2100-01-01T00:00:00")), outside);
+  assert.deepEqual(zonedTimestamp(AMSTERDAM, dateTime("1970-01-01T00:59")), outside);
+  assert.deepEqual(zonedTimestamp(AMSTERDAM, dateTime("2101-07-01T12:00")), outside);
+  assert.equal(moment(AMSTERDAM, "1970-01-01T01:00"), 0);
+  assert.equal(moment(UTC_ZONE_RULES, "2099-12-31T23:59:59.999"), utc("2099-12-31T23:59:59.999"));
 });
 
 test("zone rules from the host are checked before use", () => {
@@ -236,63 +244,80 @@ test("zone rules from the host are checked before use", () => {
     { ...AMSTERDAM, name: "Europe/Amsterdam\n" },
     { ...AMSTERDAM, initialOffsetSeconds: 86_400 },
     { ...AMSTERDAM, initialOffsetSeconds: 3_600.5 },
-    {
-      ...AMSTERDAM,
-      transitions: [
-        [utc("2026-10-25T01:00:00"), 3_600],
-        [utc("2026-03-29T01:00:00"), 7_200],
-      ],
-    },
-    {
-      ...AMSTERDAM,
-      transitions: [
-        [utc("2026-03-29T01:00:00"), 7_200],
-        [utc("2026-03-29T01:00:00"), 3_600],
-      ],
-    },
-    { ...AMSTERDAM, transitions: [[-1, 3_600]] },
-    { ...AMSTERDAM, transitions: [[utc("2100-01-01T00:00:01"), 3_600]] },
+    { ...AMSTERDAM, transitions: [...AMSTERDAM.transitions].reverse() },
+    { ...AMSTERDAM, transitions: [AMSTERDAM.transitions[0], AMSTERDAM.transitions[0]] },
+    { ...AMSTERDAM, transitions: [[0, 3_600]] },
+    { ...AMSTERDAM, transitions: [[utc("2100-01-01T00:00:00"), 3_600]] },
     { ...AMSTERDAM, transitions: [[Number.NaN, 3_600]] },
     { ...AMSTERDAM, transitions: [[utc("2026-03-29T01:00:00")]] },
-    { ...AMSTERDAM, transitions: Array.from({ length: 1_001 }, (_, index) => [index, 3_600]) },
+    { ...AMSTERDAM, transitions: Array.from({ length: 1_001 }, (_, index) => [index + 1, 3_600]) },
   ];
   for (const rules of malformed)
     assert.notEqual(zoneRulesProblem(rules), null, JSON.stringify(rules));
 });
 
-test("presentation writes numeric local text from the captured settings", () => {
-  const evening = dateTime("2026-10-04T18:30");
-  assert.equal(presentDateTime(DUTCH, evening), "4-10-2026 18:30");
-  assert.equal(presentDateTime(AMERICAN, evening), "10/4/2026, 6:30 PM");
-  assert.equal(presentDateTime(DEFAULT_PRESENTATION_SETTINGS, evening), "2026-10-04 18:30");
-  assert.equal(presentDate(AMERICAN, evening), "10/4/2026");
+const DAY_FIRST: PresentationSettings = {
+  ...DEFAULT_PRESENTATION_SETTINGS,
+  date: "{day}-{month}-{year}",
+  dateTime: "{day}-{month}-{year}, {hour}:{minute}",
+  dateTimeWithSeconds: "{day}-{month}-{year}, {hour}:{minute}:{second}",
+  padDay: false,
+  padMonth: false,
+};
 
-  const at = (text: string) => {
-    const result = parseIsoTime(text);
-    assert.ok(result.ok);
-    return result.value;
-  };
-  assert.equal(presentTime(AMERICAN, at("00:05")), "12:05 AM");
-  assert.equal(presentTime(AMERICAN, at("12:00")), "12:00 PM");
-  assert.equal(presentTime(AMERICAN, at("09:05:07")), "9:05:07 AM");
-  assert.equal(presentTime(DUTCH, at("09:05:00.250")), "09:05:00.250");
+const TWELVE_HOUR: PresentationSettings = {
+  date: "{month}/{day}/{year}",
+  time: "{hour}:{minute} {dayPeriod}",
+  timeWithSeconds: "{hour}:{minute}:{second} {dayPeriod}",
+  dateTime: "{month}/{day}/{year}, {hour}:{minute} {dayPeriod}",
+  dateTimeWithSeconds: "{month}/{day}/{year}, {hour}:{minute}:{second} {dayPeriod}",
+  padDay: false,
+  padMonth: false,
+  padHour: false,
+  hourCycle: "h12",
+  dayPeriods: ["AM", "PM"],
+};
+
+test("presentation fills the captured templates, with seconds only when they are not zero", () => {
+  assert.equal(presentDateTime(DAY_FIRST, dateTime("2026-10-04T18:30")), "4-10-2026, 18:30");
+  assert.equal(presentDateTime(TWELVE_HOUR, dateTime("2026-10-04T18:30")), "10/4/2026, 6:30 PM");
   assert.equal(
-    presentTime({ ...AMERICAN, dayPeriods: ["am", "pm"], dayPeriodBeforeTime: true }, at("18:30")),
-    "pm 6:30",
+    presentDateTime(DEFAULT_PRESENTATION_SETTINGS, dateTime("2026-10-04T18:30:00.250")),
+    "2026-10-04 18:30",
   );
+  assert.equal(presentDateTime(DAY_FIRST, dateTime("2026-10-04T18:30:05")), "4-10-2026, 18:30:05");
+  assert.equal(presentDate(TWELVE_HOUR, dateTime("0042-01-05T00:00")), "1/5/0042");
+
+  const hours = (cycle: HourCycle) =>
+    ["00:05", "12:05", "23:05"].map((text) => {
+      const result = parseIsoTime(text);
+      assert.ok(result.ok);
+      return presentTime({ ...TWELVE_HOUR, hourCycle: cycle }, result.value);
+    });
+  assert.deepEqual(hours("h11"), ["0:05 AM", "0:05 PM", "11:05 PM"]);
+  assert.deepEqual(hours("h12"), ["12:05 AM", "12:05 PM", "11:05 PM"]);
+  assert.deepEqual(hours("h23"), ["0:05 AM", "12:05 PM", "23:05 PM"]);
+  assert.deepEqual(hours("h24"), ["24:05 AM", "12:05 PM", "23:05 PM"]);
 });
 
 test("presentation settings from the host are checked before use", () => {
-  assert.equal(presentationSettingsProblem(DUTCH), null);
+  assert.equal(presentationSettingsProblem(TWELVE_HOUR), null);
   const malformed: unknown[] = [
-    { ...DUTCH, dateOrder: "dym" },
-    { ...DUTCH, hourCycle: "h24" },
-    { ...DUTCH, padDay: "yes" },
-    { ...DUTCH, dateSeparator: "\n" },
-    { ...DUTCH, timeSeparator: "x".repeat(17) },
-    { ...DUTCH, dayPeriods: ["AM"] },
-    { ...DUTCH, dayPeriods: ["", "PM"] },
-    { ...DUTCH, extra: 1 },
+    { ...TWELVE_HOUR, date: "{month}/{day}" },
+    { ...TWELVE_HOUR, date: "{month}/{day}/{year}/{day}" },
+    { ...TWELVE_HOUR, date: "{month}/{day}/{year} {hour}" },
+    { ...TWELVE_HOUR, time: "{hour}:{minute}:{second}" },
+    { ...TWELVE_HOUR, time: "{hour}:{minute} {weekday}" },
+    { ...TWELVE_HOUR, time: "{hour}:{minute} {" },
+    { ...TWELVE_HOUR, dateTime: "{month}/{day}/{year}\n{hour}:{minute}" },
+    { ...TWELVE_HOUR, timeWithSeconds: "{hour}:{minute}" },
+    { ...TWELVE_HOUR, hourCycle: "h13" },
+    { ...TWELVE_HOUR, padDay: "yes" },
+    { ...TWELVE_HOUR, dayPeriods: ["AM"] },
+    { ...TWELVE_HOUR, dayPeriods: ["", "PM"] },
+    // A sparse list has length 2 but no markers.
+    { ...TWELVE_HOUR, dayPeriods: Array.from({ length: 2 }).map(() => undefined) },
+    { ...TWELVE_HOUR, extra: 1 },
   ];
   for (const settings of malformed)
     assert.notEqual(presentationSettingsProblem(settings), null, JSON.stringify(settings));
@@ -306,38 +331,91 @@ test("an exact part rounds to a whole millisecond with ties away from zero", () 
   assert.ok(Object.is(roundToMillisecond(-0.4), 0));
 });
 
-test("the host captures zone transitions and locale settings that reproduce its own formatting", () => {
-  const amsterdam = captureZoneRules("Europe/Amsterdam");
-  assert.equal(amsterdam.name, "Europe/Amsterdam");
-  assert.equal(amsterdam.initialOffsetSeconds, 3_600);
-  assert.deepEqual(
-    amsterdam.transitions.filter(([moment]) => new Date(moment).getUTCFullYear() === 2026),
-    AMSTERDAM.transitions,
-  );
-  assert.deepEqual(captureZoneRules("UTC").transitions, []);
-  assert.throws(() => captureZoneRules("Mars/Olympus_Mons"), RangeError);
+/** The host's own `Intl` text for a local value, with the no-break spaces that capture turns into plain spaces. */
+function hostText(locale: string, text: string, options: Intl.DateTimeFormatOptions): string {
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: "UTC",
+    numberingSystem: "latn",
+    calendar: "gregory",
+    ...options,
+  })
+    .format(Date.parse(`${text}Z`))
+    .replace(/[\u00a0\u202f]/gu, " ");
+}
 
-  // The oracle is the host's own Intl output for the same moments, so the check survives locale-data updates.
-  for (const locale of ["nl-NL", "en-US", "en-GB", "de-DE", "fr-FR", "ja-JP", "ko-KR", "sv-SE"]) {
+test("captured presentation reproduces the host's own formatting", () => {
+  // Day-month-year, month-day-year, year-day-month, time before date, outer literals, a leading day period, a pattern
+  // that changes with seconds, and explicitly chosen hour cycles. The oracle is live host data, not fixed strings.
+  const locales = [
+    "nl-NL",
+    "en-US",
+    "ky-KG",
+    "vi-VN",
+    "ko-KR",
+    "eu-ES",
+    "dz-BT",
+    "en-US-u-hc-h11",
+    "en-US-u-hc-h24",
+  ];
+  const date = { year: "numeric", month: "numeric", day: "numeric" } as const;
+  const time = { hour: "numeric", minute: "2-digit" } as const;
+  for (const locale of locales) {
     const settings = capturePresentationSettings(locale);
-    for (const text of ["2026-10-04T18:30", "2033-01-05T09:05", "2026-12-24T00:00:07"]) {
-      const local = dateTime(text);
-      const withSeconds = local.second !== 0;
-      const host = new Intl.DateTimeFormat(locale, {
-        timeZone: "UTC",
-        numberingSystem: "latn",
-        calendar: "gregory",
-        year: "numeric",
-        month: "numeric",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-        ...(withSeconds ? { second: "2-digit" } : {}),
-      })
-        .format(Date.parse(`${text}Z`))
-        .replace(/[\u00a0\u202f]/gu, " ");
-      assert.equal(presentDateTime(settings, local), host, `${locale} ${text}`);
+    for (const text of ["2026-01-05T00:05", "2026-10-04T12:30", "2026-12-24T18:30:07"]) {
+      const value = dateTime(text);
+      const seconds = value.second === 0 ? {} : ({ second: "2-digit" } as const);
+      const label = `${locale} ${text}`;
+      assert.equal(presentDate(settings, value), hostText(locale, text, date), label);
+      assert.equal(
+        presentTime(settings, value),
+        hostText(locale, text, { ...time, ...seconds }),
+        label,
+      );
+      assert.equal(
+        presentDateTime(settings, value),
+        hostText(locale, text, { ...date, ...time, ...seconds }),
+        label,
+      );
     }
   }
   assert.throws(() => capturePresentationSettings("not a locale"), RangeError);
 });
+
+test("captured zone rules reproduce the host's offsets around every transition", () => {
+  const hostOffsetSeconds = (timeZone: string, epochMilliseconds: number) => {
+    const name = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "longOffset" })
+      .formatToParts(epochMilliseconds)
+      .find((part) => part.type === "timeZoneName")!.value;
+    const match = /^GMT(?:([+-])(\d{2}):(\d{2})(?::(\d{2}))?)?$/u.exec(name)!;
+    const seconds =
+      Number(match[2] ?? 0) * 3_600 + Number(match[3] ?? 0) * 60 + Number(match[4] ?? 0);
+    return match[1] === "-" ? -seconds : seconds;
+  };
+  // Half-hour summer time, a 5:45 offset, an offset in seconds before 1972, and Ramadan pauses of summer time in 2010.
+  for (const zone of ["Australia/Lord_Howe", "Asia/Kathmandu", "Africa/Monrovia", "Africa/Cairo"]) {
+    const rules = captureZoneRules(zone);
+    assert.equal(
+      rules.name,
+      new Intl.DateTimeFormat("en-US", { timeZone: zone }).resolvedOptions().timeZone,
+    );
+    const instants = rules.transitions.flatMap(([at]) => [at - 1, at]);
+    for (const at of [0, utc("2026-01-15T00:00:00"), utc("2026-07-15T00:00:00"), ...instants]) {
+      const expected = at + hostOffsetSeconds(zone, at) * 1_000;
+      assert.equal(fieldsAsMilliseconds(local(rules, at)), expected, `${zone} ${at}`);
+    }
+  }
+  assert.deepEqual(captureZoneRules("UTC").transitions, []);
+  assert.throws(() => captureZoneRules("Mars/Olympus_Mons"), RangeError);
+});
+
+function fieldsAsMilliseconds(fields: DateTimeFields): number {
+  return Date.UTC(
+    fields.year,
+    fields.month - 1,
+    fields.day,
+    fields.hour,
+    fields.minute,
+    fields.second,
+    fields.millisecond,
+  );
+}
