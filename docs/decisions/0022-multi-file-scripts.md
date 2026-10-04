@@ -50,7 +50,7 @@ goto script("rooms/${room}.tease", label: "start")
 3. A `goto` back to an earlier label runs the top-level `let`s after it again, which set their variables anew.
 4. A variable of the file may be used after a label only when every way to the label has run its `let`; otherwise it
    is a compile error. A goto has run what came before the statement it stands in, or before the call of its function
-   or the start of its handler.
+   or the start of its handler. The ways are those of the ending check (§4.3), so a goto that cannot run is no way.
 
 ### 4. Endings
 
@@ -60,6 +60,9 @@ goto script("rooms/${room}.tease", label: "start")
 3. A reachable end of a file without `end`, `exit`, or a transfer is a compile error in every file, with a friendly
    message. Branches that all end or transfer need nothing extra, and loops and recursion are fine. A file of
    declarations only runs nothing on its own, so it needs no ending; a `goto` into such a file is a compile error.
+   The compiler follows the statements, with constant conditions, `while true`, and branches that all end; a call
+   counts as returning, also of a function that always ends the session, so the ending after such a call is still
+   written out.
 4. Reaching `end` with no caller continues at the fallback destination when one is set, and is an error otherwise. The
    fallback is never implicit.
 5. `fallback` sets the fallback destination. It takes the same target forms as `goto`:

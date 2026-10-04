@@ -1,4 +1,3 @@
-import { callsNeverReturning, neverReturningFunctions } from "./never-returning.js";
 import type {
   AssignmentStatement,
   Block,
@@ -145,6 +144,14 @@ export interface TypeCheckResult {
   readonly runtimeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
   /** Whether the file has an `exit` that execution can reach; a project needs at least one (ADR 0022). */
   readonly reachesExit: boolean;
+  /** Which statements run, for the checks that follow this flow. */
+  readonly flow: StatementFlow;
+}
+
+/** The statements that never run, and the top-level statements that run and after which execution continues. */
+export interface StatementFlow {
+  readonly unreachable: ReadonlySet<Statement>;
+  readonly continuing: ReadonlySet<Statement>;
 }
 
 /**
@@ -191,6 +198,7 @@ export function checkTypes(program: Program, options: TypeCheckOptions = {}): Ty
         diagnostics: Object.freeze([...checker.diagnostics]),
         runtimeChecks: checker.runtimeChecks(),
         reachesExit: checker.reachesExit,
+        flow: Object.freeze({ unreachable: checker.unreachable, continuing: checker.continuing }),
       });
     checker.widenFollowers();
   }
@@ -386,6 +394,14 @@ class TypeChecker {
   /** Whether a reachable `exit` was checked. */
   reachesExit = false;
 
+  /** The statements that never run, by the flow this check follows. */
+  readonly unreachable = new Set<Statement>();
+
+  /** The top-level statements that run and after which execution continues. */
+  readonly continuing = new Set<Statement>();
+
+  #rootStatements: readonly Statement[] | null = null;
+
   /**
    * List and set literals whose elements mix types, with those types. A literal stored in a place of a declared element
    * type is checked element by element instead; every other one is reported at the end of its statement (rule 1.3).
@@ -456,10 +472,7 @@ class TypeChecker {
       });
   }
 
-  #neverReturning: ReadonlySet<string> = new Set();
-
   public check(program: Program): void {
-    this.#neverReturning = neverReturningFunctions(program.statements);
     for (const statement of program.statements)
       if (statement.kind === "letStatement" || statement.kind === "speakerDeclaration")
         this.#scriptVariables.add(statement.name.name);
@@ -481,12 +494,18 @@ class TypeChecker {
       (statement) => statement.kind !== "functionDeclaration",
     );
     // A file of declarations only runs nothing on its own, so it has no way to its end.
+    this.#rootStatements = rootStatements;
     const continues = runCompileTask(this.#statementsTask(rootStatements, this.#root));
     if (rootStatements.length > 0 && continues) {
+      const last = rootStatements.at(-1)!;
+      const call = last.kind === "expressionStatement" ? unwrapGrouping(last.expression) : null;
+      // A call counts as returning, also of a function that always exits.
       this.#report(
         "TSV052",
-        "The script can run past the end of this file. Add exit where the session should finish, or end to return to the file that called this one.",
-        rootStatements.at(-1)?.span ?? program.span,
+        call?.kind === "callExpression" && call.callee.kind === "identifier"
+          ? `This path reaches the end of the file after ${call.callee.name}(). Even if ${call.callee.name} ends the session, add exit (or end) here so the ending is explicit.`
+          : "The script can run past the end of this file. Add exit where the session should finish, or end to return to the file that called this one.",
+        last.span,
       );
     }
     // Every script variable has its type now, so every function body is checked, also one that waited for one.
@@ -530,7 +549,10 @@ class TypeChecker {
       // A goto can reach a label even when the statements before it never continue.
       if (statement.kind === "labelStatement") continues = true;
       this.#reachable = reachable && continues;
+      if (!this.#reachable) this.unreachable.add(statement);
       if (!(yield* compileChild(this.#statementTask(statement, scope)))) continues = false;
+      else if (this.#reachable && statements === this.#rootStatements)
+        this.continuing.add(statement);
     }
     this.#reachable = reachable;
     return continues;
@@ -557,8 +579,7 @@ class TypeChecker {
         return true;
       case "expressionStatement":
         yield* compileChild(this.#expressionTask(statement.expression, scope));
-        // A call of a function that always ends with exit, end, or goto does not continue.
-        return !callsNeverReturning(statement, this.#neverReturning);
+        return true;
       case "speakerDeclaration":
         scope.declare(statement.name.name, { kind: "speaker" });
         for (const property of statement.properties) {
@@ -5577,4 +5598,9 @@ const TEMPORAL_CONVERSION_NAMES = {
 
 function scalarType(name: ScalarTypeName): StaticType {
   return { kind: "scalar", name };
+}
+
+function unwrapGrouping(expression: Expression): Expression {
+  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
+  return expression;
 }

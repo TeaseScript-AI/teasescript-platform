@@ -262,12 +262,22 @@ test("a goto that skips a let is found where functions and handlers use the vari
   assert.deepEqual(codes("function read { say x }\nread()\nlet x = 1\nread()\nexit"), []);
 });
 
-test("a call of a function that always exits ends the file", () => {
-  assert.deepEqual(codes("function finish { exit }\nfinish()"), []);
-  assert.deepEqual(codes("function finish {\n    let n = 1\n    if n > 0 { exit }\n}\nfinish()"), [
-    ["TSV052", 5],
+test("a call counts as returning, so the file still says how it ends", () => {
+  assert.deepEqual(diagnostics("function finish { exit }\nfinish()"), [
+    [
+      "TSV052",
+      2,
+      "This path reaches the end of the file after finish(). Even if finish ends the session, add exit (or end) here so the ending is explicit.",
+    ],
   ]);
-  assert.deepEqual(codes("function finish { exit }\nfunction leave { finish() }\nleave()"), []);
+  assert.deepEqual(codes("function finish { exit }\nfinish()\nexit"), []);
+  // A goto after a branch that always returns does not run, by the same flow as the ending check.
+  assert.deepEqual(
+    codes(
+      "function f {\n    if true { return }\n    goto later\n}\nf()\nlet x = 1\nlabel later\nsay x\nexit",
+    ),
+    [],
+  );
 });
 
 test("plan validation keeps labels out of blocks, loops, and statements", () => {

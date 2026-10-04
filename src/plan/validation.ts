@@ -10,11 +10,12 @@ import {
 } from "../interaction-limits.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "../project-paths.js";
-import { INSTRUCTION_PLAN_FORMAT, INSTRUCTION_PLAN_VERSION } from "./model.js";
+import { INSTRUCTION_PLAN_FORMAT, INSTRUCTION_PLAN_VERSION, type Instruction } from "./model.js";
 import {
   type PlanFileBoundaries,
   analyzeInstructionStream,
   collectFunctionIds,
+  validateLabelPositions,
   expressionMayReferenceTemporary,
 } from "./instruction-stream-analyses.js";
 import {
@@ -90,6 +91,10 @@ export function validateCapturedInstructionPlan(value: unknown): PlanValidationR
       );
     }
     analyzeInstructionStream(value.instructions, value.functions, files, errors);
+    if (errors.length === 0 && files !== null) {
+      // EVIDENCE: validation: every instruction passed its shape check above, with no error.
+      validateLabelPositions(value.instructions as readonly Instruction[], files, errors);
+    }
   }
   return Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
 }

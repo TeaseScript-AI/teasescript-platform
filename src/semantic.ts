@@ -46,6 +46,7 @@ import {
   isExactDuration,
 } from "./duration.js";
 import { validateSwitchCases } from "./switch-cases.js";
+import type { StatementFlow } from "./type-checker.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -133,9 +134,8 @@ const semanticCode = {
 type FlowContext =
   | { readonly kind: "root"; readonly statement: number }
   | { readonly kind: "function"; readonly name: string }
-  | { readonly kind: "handler"; readonly origin: FlowContext }
-  /** Code that never runs, such as a block created after a transfer. */
-  | { readonly kind: "never" };
+  /** A block runs where its timer or media started: in `origin`, when `created` runs. */
+  | { readonly kind: "handler"; readonly origin: FlowContext; readonly created: Statement };
 
 const OVERFLOW_MESSAGES = {
   zero: "This divides by zero, so it has no result. Divide by a value other than zero.",
@@ -147,9 +147,25 @@ export function validateSemantics(
   program: Program,
   options: SemanticValidationOptions = {},
 ): SemanticValidationResult {
+  return Object.freeze({ diagnostics: validateFileSemantics(program, options).diagnostics });
+}
+
+/** The name checks of one file; the initialization check at labels waits for the flow of the type check. */
+export interface FileSemanticResult {
+  readonly diagnostics: readonly Diagnostic[];
+  checkInitialization(flow: StatementFlow): readonly Diagnostic[];
+}
+
+export function validateFileSemantics(
+  program: Program,
+  options: SemanticValidationOptions = {},
+): FileSemanticResult {
   const validator = new SemanticValidator(options);
   validator.validate(program);
-  return Object.freeze({ diagnostics: Object.freeze([...validator.diagnostics]) });
+  return Object.freeze({
+    diagnostics: Object.freeze([...validator.diagnostics]),
+    checkInitialization: (flow: StatementFlow) => validator.checkInitialization(program, flow),
+  });
 }
 
 class SemanticScope {
@@ -198,6 +214,7 @@ class SemanticValidator {
     readonly owner: "timer" | "media";
     readonly selfHandle: string | null;
     readonly origin: FlowContext;
+    readonly created: Statement;
   }[] = [];
 
   #context: FlowContext = { kind: "root", statement: 0 };
@@ -207,14 +224,23 @@ class SemanticValidator {
     readonly name: string;
     readonly span: SourceSpan;
     readonly context: FlowContext;
+    readonly statement: Statement;
   }[] = [];
 
-  /** Set while checking statements that follow a transfer in their block, which never run. */
-  #unreachable = false;
+  /** The innermost statement being checked, which decides whether what it holds can run. */
+  #statement: Statement | null = null;
 
-  readonly #gotos: { readonly label: string; readonly context: FlowContext }[] = [];
+  readonly #gotos: {
+    readonly label: string;
+    readonly context: FlowContext;
+    readonly statement: Statement;
+  }[] = [];
 
-  readonly #calls: { readonly name: string; readonly context: FlowContext }[] = [];
+  readonly #calls: {
+    readonly name: string;
+    readonly context: FlowContext;
+    readonly statement: Statement;
+  }[] = [];
 
   public constructor(options: SemanticValidationOptions) {
     this.#invalidConfiguredNames = Object.freeze(
@@ -299,10 +325,10 @@ class SemanticValidator {
       }
     }
     for (let index = 0; index < this.#pendingHandlers.length; index += 1) {
-      this.#context = { kind: "handler", origin: this.#pendingHandlers[index]!.origin };
+      const handler = this.#pendingHandlers[index]!;
+      this.#context = { kind: "handler", origin: handler.origin, created: handler.created };
       this.#validateHandler(this.#pendingHandlers[index]!);
     }
-    if (this.#gotos.length > 0) this.#checkInitializationAtLabels(program);
     for (const overflow of findVisibleOverflows(program))
       this.#report(semanticCode.visibleOverflow, OVERFLOW_MESSAGES[overflow.cause], overflow.span);
   }
@@ -448,7 +474,8 @@ class SemanticValidator {
         block: timer.handler,
         owner: "timer",
         selfHandle: null,
-        origin: this.#unreachable ? { kind: "never" } : this.#context,
+        origin: this.#context,
+        created: this.#statement!,
       });
   }
 
@@ -580,7 +607,8 @@ class SemanticValidator {
         block,
         owner: "media",
         selfHandle: media.async ? selfHandle : null,
-        origin: this.#unreachable ? { kind: "never" } : this.#context,
+        origin: this.#context,
+        created: this.#statement!,
       });
     }
   }
@@ -716,22 +744,26 @@ class SemanticValidator {
     scope: SemanticScope,
     loopDepth: number,
   ): CompileTask<void> {
-    const unreachable = this.#unreachable;
     for (const statement of statements) {
       yield* compileChild(this.#validateStatement(statement, scope, loopDepth));
-      // Later statements of this block never run; a label in the outer scope is reached by a goto again.
-      if (
-        endsInTransfer(statement) ||
-        statement.kind === "breakStatement" ||
-        statement.kind === "continueStatement"
-      )
-        this.#unreachable = true;
-      else if (statement.kind === "labelStatement") this.#unreachable = unreachable;
     }
-    this.#unreachable = unreachable;
   }
 
   *#validateStatement(
+    statement: Statement,
+    scope: SemanticScope,
+    loopDepth: number,
+  ): CompileTask<void> {
+    const outer = this.#statement;
+    this.#statement = statement;
+    try {
+      yield* compileChild(this.#validateStatementKind(statement, scope, loopDepth));
+    } finally {
+      this.#statement = outer;
+    }
+  }
+
+  *#validateStatementKind(
     statement: Statement,
     scope: SemanticScope,
     loopDepth: number,
@@ -1005,8 +1037,11 @@ class SemanticValidator {
         }
         return;
       case "gotoStatement":
-        if (!this.#unreachable)
-          this.#gotos.push({ label: statement.label.name, context: this.#context });
+        this.#gotos.push({
+          label: statement.label.name,
+          context: this.#context,
+          statement: this.#statement!,
+        });
         if (!this.#labels.has(statement.label.name)) {
           this.#report(
             semanticCode.invalidLabel,
@@ -1289,7 +1324,7 @@ class SemanticValidator {
           const binding = scope.resolve(name);
           const declaration = this.#functions.get(name);
           if (declaration !== undefined && binding?.kind === "function") {
-            if (!this.#unreachable) this.#calls.push({ name, context: this.#context });
+            this.#calls.push({ name, context: this.#context, statement: this.#statement! });
             this.#validateFunctionCall(expression, declaration);
           } else if (this.#builtins.has(name)) {
             // The type check checks the arguments of the core built-ins it knows.
@@ -1681,11 +1716,11 @@ class SemanticValidator {
 
   #recordRootAccess(name: string, binding: Binding | undefined, span: SourceSpan): void {
     if (
-      !this.#unreachable &&
+      this.#statement !== null &&
       binding?.kind === "variable" &&
       this.#root.bindings.get(name) === binding
     ) {
-      this.#rootAccesses.push({ name, span, context: this.#context });
+      this.#rootAccesses.push({ name, span, context: this.#context, statement: this.#statement });
     }
   }
 
@@ -1693,14 +1728,18 @@ class SemanticValidator {
    * A goto can reach a label without running the top-level `let`s between the place it starts and the label. A use of
    * a variable of the file is an error when a goto can make it miss its `let`: it has a value on every way there
    * without gotos, but not on every way with them. A goto has run what came before the statement it stands in, or
-   * before the call of its function or the start of its handler. Other early uses, such as a function called before
-   * the `let`, are checked when they run.
+   * before the call of its function or the start of its handler. Which statements run and continue is the flow of the
+   * type check, so this check and the ending check agree. Other early uses, such as a function called before the
+   * `let`, are checked when they run.
    */
-  #checkInitializationAtLabels(program: Program): void {
-    const withGotos = this.#initializedVariables(program, true);
-    const withoutGotos = this.#initializedVariables(program, false);
+  checkInitialization(program: Program, flow: StatementFlow): readonly Diagnostic[] {
+    const diagnostics: Diagnostic[] = [];
+    if (this.#gotos.length === 0) return diagnostics;
+    const withGotos = this.#initializedVariables(program, flow, true);
+    const withoutGotos = this.#initializedVariables(program, flow, false);
     const reported = new Set<string>();
     for (const access of this.#rootAccesses) {
+      if (flow.unreachable.has(access.statement)) continue;
       const known = withGotos(access.context);
       const knownWithoutGotos = withoutGotos(access.context);
       if (
@@ -1712,12 +1751,16 @@ class SemanticValidator {
       const key = `${access.span.start.offset}:${access.name}`;
       if (reported.has(key)) continue;
       reported.add(key);
-      this.#report(
-        semanticCode.skippedInitialization,
-        `A goto can reach this line without running 'let ${access.name}' first, so ${access.name} may have no value here. Move the label that the goto jumps to before 'let ${access.name}', or set ${access.name} on every way here.`,
-        access.span,
+      diagnostics.push(
+        createDiagnostic(
+          DiagnosticSeverity.Error,
+          semanticCode.skippedInitialization,
+          `A goto can reach this line without running 'let ${access.name}' first, so ${access.name} may have no value here. Move the label that the goto jumps to before 'let ${access.name}', or set ${access.name} on every way here.`,
+          access.span,
+        ),
       );
     }
+    return diagnostics;
   }
 
   /**
@@ -1726,6 +1769,7 @@ class SemanticValidator {
    */
   #initializedVariables(
     program: Program,
+    flow: StatementFlow,
     followGotos: boolean,
   ): (context: FlowContext) => ReadonlySet<string> | null {
     type Known = ReadonlySet<string> | null;
@@ -1736,7 +1780,11 @@ class SemanticValidator {
         : right === null
           ? left
           : new Set([...left].filter((name) => right.has(name)));
-    const before: Known[] = statements.map((_, index) => (index === 0 ? new Set() : null));
+    // Function declarations run nothing; the file starts at its first other statement.
+    const order = statements.flatMap((statement, index) =>
+      statement.kind === "functionDeclaration" ? [] : [index],
+    );
+    const before: Known[] = statements.map((_, index) => (index === order[0] ? new Set() : null));
     const after = (index: number): Known => {
       const known = before[index]!;
       const statement = statements[index]!;
@@ -1750,16 +1798,18 @@ class SemanticValidator {
         ? before[context.statement]!
         : context.kind === "function"
           ? (functionStart.get(context.name) ?? null)
-          : context.kind === "handler"
-            ? atContext(context.origin)
-            : null;
+          : flow.unreachable.has(context.created)
+            ? null
+            : atContext(context.origin);
+    const calls = this.#calls.filter((call) => !flow.unreachable.has(call.statement));
+    const gotos = this.#gotos.filter((goto) => !flow.unreachable.has(goto.statement));
     for (let changed = true; changed;) {
       changed = false;
       // A function starts with what every call of it has run; one never called adds nothing.
       for (let functionsChanged = true; functionsChanged;) {
         functionsChanged = false;
         const starts = new Map<string, Known>();
-        for (const call of this.#calls) {
+        for (const call of calls) {
           starts.set(
             call.name,
             starts.has(call.name)
@@ -1774,11 +1824,13 @@ class SemanticValidator {
           }
         }
       }
-      for (let index = 1; index < statements.length; index += 1) {
-        let known: Known = continuesAfter(statements[index - 1]!) ? after(index - 1) : null;
+      for (let position = 1; position < order.length; position += 1) {
+        const index = order[position]!;
+        const previous = order[position - 1]!;
+        let known: Known = flow.continuing.has(statements[previous]!) ? after(previous) : null;
         const statement = statements[index]!;
         if (followGotos && statement.kind === "labelStatement") {
-          for (const goto of this.#gotos) {
+          for (const goto of gotos) {
             if (goto.label === statement.name.name) known = meet(known, atContext(goto.context));
           }
         }
@@ -2072,29 +2124,4 @@ function visitExpression(
 function sameKnown(left: ReadonlySet<string> | null, right: ReadonlySet<string> | null): boolean {
   if (left === null || right === null) return left === right;
   return left.size === right.size && [...left].every((name) => right.has(name));
-}
-
-/** Whether execution can continue after a top-level statement; a transfer, or an `if` whose branches all transfer, ends it. */
-function continuesAfter(statement: Statement): boolean {
-  return !endsInTransfer(statement);
-}
-
-function endsInTransfer(statement: Statement | Block): boolean {
-  switch (statement.kind) {
-    case "gotoStatement":
-    case "exitStatement":
-    case "endStatement":
-    case "returnStatement":
-      return true;
-    case "block":
-      return statement.statements.length > 0 && endsInTransfer(statement.statements.at(-1)!);
-    case "ifStatement":
-      return (
-        statement.elseBlock !== null &&
-        endsInTransfer(statement.thenBlock) &&
-        endsInTransfer(statement.elseBlock)
-      );
-    default:
-      return false;
-  }
 }

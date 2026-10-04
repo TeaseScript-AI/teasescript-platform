@@ -10,6 +10,8 @@ import {
   validateSpan,
   validInstructionBoundary,
 } from "./validation-support.js";
+import type { Instruction } from "./model.js";
+import { instructionKilledTemporaries, requiredInstructionTemporaries } from "./temporary-uses.js";
 
 /** Validated instruction boundaries of one plan file. */
 export interface PlanFileBoundaries {
@@ -28,45 +30,69 @@ export function analyzeInstructionStream(
 ): void {
   validateLoopStructure(instructions, errors);
   validatePreparedReferenceStructure(instructions, errors);
-  if (files !== null) validateLabelPositions(instructions, files, errors);
   const validationIndex = validateFunctionDefinitions(functions, instructions, files, errors);
   validateInstructionControlFlowRegions(instructions, validationIndex, errors);
 }
 
 /**
- * A goto leaves every block, loop, and temporary value behind, so a label may only stand where none of them is in
- * use: between two statements of the file's outer scope.
+ * A goto leaves every block, loop, and temporary value behind, so the code from a label on may need none of them: no
+ * temporary that it reads before setting, no block that it leaves before entering, and no loop that it continues or
+ * breaks before starting. Checked backward along the root region's control flow; call only for an otherwise valid
+ * plan.
  */
-function validateLabelPositions(
-  instructions: readonly unknown[],
+export function validateLabelPositions(
+  instructions: readonly Instruction[],
   files: readonly PlanFileBoundaries[],
   errors: PlanValidationError[],
 ): void {
   files.forEach((file, fileIndex) => {
     if (file.labelInstructions.size === 0) return;
-    const loops: { readonly start: number; readonly end: number }[] = [];
-    for (let index = file.startInstruction; index < file.rootEndInstruction; index += 1) {
-      const instruction = instructions[index];
-      if (
-        isRecord(instruction) &&
-        instruction.kind === "loopStart" &&
-        typeof instruction.target === "number" &&
-        typeof instruction.continueTarget === "number"
-      ) {
-        // A while loop starts where its condition is evaluated, before its loopStart.
-        const start = instruction.loopKind === "while" ? instruction.continueTarget : index;
-        loops.push({ start, end: instruction.target });
+    const { startInstruction: start, rootEndInstruction: end } = file;
+    const length = end - start;
+    const temporaries = Array.from({ length }, () => new Set<number>());
+    const scopes = new Array<number>(length).fill(0);
+    const loops = Array.from({ length }, () => new Set<number>());
+    const inRegion = (index: number): boolean => index >= start && index < end;
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let index = end - 1; index >= start; index -= 1) {
+        const instruction = instructions[index]!;
+        const successors = rootSuccessors(instruction, index).filter(inRegion);
+        const neededTemporaries = new Set<number>();
+        let neededScopes = 0;
+        const neededLoops = new Set<number>();
+        for (const successor of successors) {
+          for (const id of temporaries[successor - start]!) neededTemporaries.add(id);
+          neededScopes = Math.max(neededScopes, scopes[successor - start]!);
+          // A loop that starts here is active on the way into its body.
+          const providesLoop =
+            instruction.kind === "loopStart" && successor === index + 1 ? instruction.loopId : null;
+          for (const id of loops[successor - start]!) if (id !== providesLoop) neededLoops.add(id);
+        }
+        for (const id of instructionKilledTemporaries(instruction)) neededTemporaries.delete(id);
+        for (const id of requiredInstructionTemporaries(instruction, null))
+          neededTemporaries.add(id);
+        if (instruction.kind === "enterScope") neededScopes = Math.max(neededScopes - 1, 0);
+        // More open blocks than instructions means a cycle that leaves blocks it never entered.
+        if (instruction.kind === "leaveScope")
+          neededScopes = Math.min(neededScopes + 1, length + 1);
+        if (instruction.kind === "loopControl") neededLoops.add(instruction.loopId);
+        const slot = index - start;
+        if (
+          !sameNumbers(temporaries[slot]!, neededTemporaries) ||
+          scopes[slot] !== neededScopes ||
+          !sameNumbers(loops[slot]!, neededLoops)
+        ) {
+          temporaries[slot] = neededTemporaries;
+          scopes[slot] = neededScopes;
+          loops[slot] = neededLoops;
+          changed = true;
+        }
       }
     }
-    let depth = 0;
-    const live = new Set<number>();
-    for (let index = file.startInstruction; index < file.rootEndInstruction; index += 1) {
-      if (
-        file.labelInstructions.has(index) &&
-        (depth !== 0 ||
-          live.size > 0 ||
-          loops.some((loop) => index > loop.start && index < loop.end))
-      ) {
+    for (const label of file.labelInstructions) {
+      const slot = label - start;
+      if (temporaries[slot]!.size > 0 || scopes[slot]! > 0 || loops[slot]!.size > 0) {
         errors.push(
           planError(
             "TSC002",
@@ -75,30 +101,34 @@ function validateLabelPositions(
           ),
         );
       }
-      const instruction = instructions[index];
-      if (!isRecord(instruction)) continue;
-      switch (instruction.kind) {
-        case "enterScope":
-          depth += 1;
-          break;
-        case "leaveScope":
-          depth -= 1;
-          break;
-        case "clearTemporary":
-          if (typeof instruction.temporaryId === "number") live.delete(instruction.temporaryId);
-          break;
-        case "clearTemporaries":
-          if (Array.isArray(instruction.temporaryIds))
-            for (const id of instruction.temporaryIds) if (typeof id === "number") live.delete(id);
-          break;
-        case "storeTemporary":
-          if (typeof instruction.temporaryId === "number") live.add(instruction.temporaryId);
-          break;
-      }
-      if (typeof instruction.destinationTemporary === "number")
-        live.add(instruction.destinationTemporary);
     }
   });
+}
+
+/** Where execution can continue from a root instruction; transfers and endings leave the region's flow. */
+function rootSuccessors(instruction: Instruction, index: number): readonly number[] {
+  switch (instruction.kind) {
+    case "jump":
+    case "loopControl":
+      return [instruction.target];
+    case "jumpIfFalse":
+    case "loopStart":
+      return [instruction.target, index + 1];
+    case "callFunction":
+      return [instruction.returnInstruction];
+    case "exit":
+    case "end":
+    case "goto":
+    case "returnValue":
+    case "returnVoid":
+      return [];
+    default:
+      return [index + 1];
+  }
+}
+
+function sameNumbers(left: ReadonlySet<number>, right: ReadonlySet<number>): boolean {
+  return left.size === right.size && [...left].every((value) => right.has(value));
 }
 
 function validatePreparedReferenceStructure(

@@ -9,7 +9,7 @@ import { planLocationToSourceSpan } from "./plan/source-location.js";
 import type { TypeCheckPlan } from "./plan/model.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
-import { validateSemantics, type SemanticValidationOptions } from "./semantic.js";
+import { validateFileSemantics, type SemanticValidationOptions } from "./semantic.js";
 import { checkTypes, type RuntimeCheckSite } from "./type-checker.js";
 import { createSourcePosition, createSourceSpan } from "./source.js";
 
@@ -204,13 +204,17 @@ function checkParsedFile(
     ...findNonFiniteNumericLiteralDiagnosticsInStableProgram(parsed.program),
   ]);
   const hasParserErrors = hasErrors(parserDiagnostics);
-  const names = hasParserErrors
-    ? Object.freeze({ diagnostics: Object.freeze([]) })
-    : validateSemantics(parsed.program, options);
+  const names = hasParserErrors ? null : validateFileSemantics(parsed.program, options);
   // Types are checked once every name resolves, so a type message never repeats a name or structure error.
   const types =
-    hasParserErrors || hasErrors(names.diagnostics) ? null : checkTypes(parsed.program, options);
-  const semanticDiagnostics = Object.freeze([...names.diagnostics, ...(types?.diagnostics ?? [])]);
+    names === null || hasErrors(names.diagnostics) ? null : checkTypes(parsed.program, options);
+  // The initialization check at labels follows the flow of the type check.
+  const initialization = types === null ? [] : names!.checkInitialization(types.flow);
+  const semanticDiagnostics = Object.freeze([
+    ...(names?.diagnostics ?? []),
+    ...(types?.diagnostics ?? []),
+    ...initialization,
+  ]);
   return {
     result: Object.freeze({
       path,

@@ -391,7 +391,8 @@ The implementation includes:
 - explicit function definitions, parameter prologues, calls, serializable call frames, returns, and recursion;
 - labels and `goto` within a file: a `goto` leaves every function, block, loop, and interrupt frame, abandons an
   interrupted action, and continues at a label of the file's root region; a top-level `let` that runs again sets its
-  existing variable;
+  existing variable. Plan validation accepts a label only where the code that follows needs no open block, active
+  loop, or temporary from before it;
 - explicit endings: the compiler closes each file's root region with an `end`, so a session halts only through `exit`;
   until files can call each other, reaching `end` fails with `TSR066`;
 - checkpoint restore inside loops, calls, defaults, and across RNG/event boundaries;
