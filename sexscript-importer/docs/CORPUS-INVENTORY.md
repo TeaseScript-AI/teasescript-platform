@@ -24,27 +24,28 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-04 at importer commit `b4d4362b`, after merging `main` at `66f0a750`, with `node src/cli.ts
+Measured on 2026-10-04 at importer commit `79af579f`, after merging `main` at `66f0a750`, with `node src/cli.ts
 report --run <package scripts>` (default conversion, without proposals). Toy's 21 runtime-loaded modules are part of
 its single script `toy.groovy`, so Toy counts as one script whose statements include all module code.
 
 | Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Root errors | Placeholders |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Distribution | 14 | 10 | 10 | 10 | 13 | 11 |
-| Domme3 | 24 | 15 | 12 | 12 | 31 | 33 |
+| Domme3 | 24 | 15 | 12 | 12 | 24 | 26 |
 | DisciplineClinic | 6 | 3 | 3 | 3 | 22 | 22 |
-| Toy expanded | 1 | 0 | 0 | 0 | 254 | 443 |
+| Toy expanded | 1 | 0 | 0 | 0 | 183 | 320 |
 
 Root errors count independent causes that need manual work; placeholders count unconverted statements. Converting a
-statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 254 come
-from about 4,800 source statements, mostly map (dictionary) operations and lookups with runtime keys, Java objects,
+statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 183 come
+from about 4,800 source statements, mostly Java objects and dynamic calls, closures over collections and map entries,
 conditionals in positions where moving them would change evaluation order, and closures that capture variables.
 
 The previous snapshot (2026-10-03, importer `d713b469`) counted 15, 35, 17, and 267 root errors, as did the same
-importer after merging `main` (`6e0d4d03`). Since then menus from runtime lists, text operations, input defaults,
-date formatting, and `getImage` convert by default, while DisciplineClinic's 8 variables that change type (#519) and
-10 reads of never-assigned variables (legacy bugs in Domme3 and DisciplineClinic) are newly reported; see
-[`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md) and [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md).
+importer after merging `main` (`6e0d4d03`). Since then menus from runtime lists, text operations, input defaults, date
+formatting, `getImage`, and lookup-table maps (as `dict`, #536; Toy 254 to 183) convert by default, while
+DisciplineClinic's 8 variables that change type (#519) and 10 reads of never-assigned variables (legacy bugs in Domme3
+and DisciplineClinic) are newly reported; see [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md) and
+[`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md).
 
 Runtime smoke runs of the compiler-clean scripts (placeholder copies with host stand-ins):
 
@@ -79,6 +80,7 @@ scripts use it (capabilities used by fewer than three scripts are omitted):
 | `showPopup` | 10 | 4 |
 | `askInteger()` | 9 | 0 |
 | `: number` for integer widening (#526, #515) | 7 | 1 |
+| `dict` (#536) | 1 | 0 |
 | `choose` list options (#515) | 5 | 0 |
 | `round()` (#518) | 4 | 1 |
 | `getDate().toISO()`, `getTime().formatTime()` (#532) | 3 each | 1 each |

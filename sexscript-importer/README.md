@@ -59,7 +59,7 @@ path executes; `stepLimit` is inconclusive (for example a loop that waits until 
 `TSR037` means the work between two events exceeds the product's instruction budget, which fails in the Player too.
 With a single directory argument, that directory is the package root that script transfers are relative to.
 
-`--proposed` (every proposal) or `--proposed=dictionaries,media-tags` on `convert`, `convert-package`, and `report`
+`--proposed` (every proposal) or `--proposed=media-tags` on `convert`, `convert-package`, and `report`
 emits a working syntax for proposed TeaseScript language changes instead of reporting the construct, to measure what
 they would resolve ([`docs/PROPOSED-LANGUAGE-CHANGES.md`](docs/PROPOSED-LANGUAGE-CHANGES.md)). That output is not
 accepted TeaseScript: the report compiles and runs it through stand-ins in current TeaseScript, counted as `proposed
@@ -85,8 +85,7 @@ node --test tests/*.test.ts
 
 `tests/fixtures/conversion/` pairs real Groovy inputs with the expected `.tease` output; that output must compile with
 the TeaseScript compiler. `tests/fixtures/conversion-accepted/` holds output that uses accepted but not yet implemented
-TeaseScript, including owner-decided syntax whose implementation is still open (such as `choose` list options and
-text operations); it must compile once those capabilities are replaced by placeholder calls.
-`tests/fixtures/conversion-proposed/` holds the working syntax of the remaining proposals. All groups must also run to
-the end in the runtime smoke run. These tests skip with a stated reason when Java/Groovy or the repository build is
+TeaseScript, including owner-decided syntax whose implementation is still open (such as `choose` list options and text
+operations); it must compile once those capabilities are replaced by placeholder calls. Both groups must also run to the
+end in the runtime smoke run. These tests skip with a stated reason when Java/Groovy or the repository build is
 unavailable.

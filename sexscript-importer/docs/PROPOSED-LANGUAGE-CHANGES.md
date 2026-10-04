@@ -30,44 +30,46 @@ with the direction TeaseScript already took, and common practice in other langua
 | C4 | Effective values are unique | Withdrawn: buttons may repeat a value |
 | C5 | Warning when a choice result is compared with a value no option has | Taken up by the owner with #504 |
 | T1 | Type enforcement, union types, type tests, narrowing | #504: enforcement merged (#519); rules, runtime checks, and unions in draft PRs #526, #520, #530 |
-| D1 | Dictionaries: objects with runtime keys (`toys[name]`) | Evaluated on the corpus; taken up by the owner in the language tracker |
+| D1 | Dictionaries: lookup by runtime key (`toys[name]`) | Owner-decided as a separate `dict` type (#536) |
 | M1 | Media selected by tags (include/exclude tags, count matches) | Evaluated (counting); later |
 
 The importer emits L1 and C1–C3 in its default output following the head of PR #515 (`ec4aa657`), and the text
 operations, `join`, and conversions of #508 following the head of PR #518 (`15ee912c`). Until those PRs merge, the
 report's compiler gate and smoke runs replace them with stand-ins, counted as the pending capabilities `choose list
-options` and `text operations`. Only D1 and M1 remain proposals (`--proposed`).
+options` and `text operations`. It also emits the `dict` type of #536 for D1, counted as `dict (#536)` in the compiler
+gate. Only M1 remains a proposal (`--proposed`).
 
 ## Corpus evaluation
 
-Measured on 2026-10-04 at importer commit `b4d4362b` with `node src/cli.ts report --run [--proposed=<id>] <package
-scripts>`, after merging `main` at `66f0a750`. The importer emits a working syntax of its own choosing for the two
-remaining proposals; the report compiles and smoke-runs it through stand-ins in current TeaseScript, so "converted"
+Measured on 2026-10-04 at importer commit `79af579f` with `node src/cli.ts report --run [--proposed=<id>] <package
+scripts>`, after merging `main` at `66f0a750`. The importer emits a working syntax of its own choosing for the
+remaining proposal; the report compiles and smoke-runs it through stand-ins in current TeaseScript, so "converted"
 means converted, compiled, and run, not just emitted. Each cell: root errors / lowered scripts / compiler-clean except
 pending / scripts reached by smoke runs.
 
 | Conversion | Distribution | Domme3 | DisciplineClinic | Toy |
 | --- | --- | --- | --- | --- |
 | default before (`6e0d4d03`) | 15 / 10 / 10 / 10 | 35 / 13 / 10 / 10 | 17 / 3 / 3 / 3 | 267 / 0 / 0 / 0 |
-| default now | 13 / 10 / 10 / 10 | 31 / 15 / 12 / 12 | 22 / 3 / 3 / 3 | 254 / 0 / 0 / 0 |
-| dictionaries (D1) | unchanged | 24 / 15 / 12 / 12 | unchanged | 183 / 0 / 0 / 0 |
-| media-tags (M1) | unchanged | 28 / 17 / 14 / 14 | unchanged | unchanged |
-| both | 13 / 10 / 10 / 10 | 21 / 17 / 14 / 14 | 22 / 3 / 3 / 3 | 183 / 0 / 0 / 0 |
+| default before `dict` (`b4d4362b`) | 13 / 10 / 10 / 10 | 31 / 15 / 12 / 12 | 22 / 3 / 3 / 3 | 254 / 0 / 0 / 0 |
+| default now | 13 / 10 / 10 / 10 | 24 / 15 / 12 / 12 | 22 / 3 / 3 / 3 | 183 / 0 / 0 / 0 |
+| media-tags (M1) | unchanged | 21 / 17 / 14 / 14 | unchanged | unchanged |
 
 The default now includes what the earlier measurement (2026-10-03, importer `d713b469`) counted as the proposals
 choose-lists, string-operations, and input-defaults, everything `main` merged since (#513, #514, #517, #519, #523,
-#524), and the owner decisions on switch, showButton, date and time, and integer widening (#528, #531, #532, #504
-option B). The default before, measured at the `main` merge `6e0d4d03`, matches that earlier baseline. Per package:
+#524), and the owner decisions on switch, showButton, date and time, integer widening, and `dict` (#528, #531, #532,
+#504 option B, #536). The default before, measured at the `main` merge `6e0d4d03`, matches that earlier baseline. Per
+package:
 
 - Distribution: the font menu converts, and `getImage` in `test.groovy` becomes `takePhoto()`.
 - Domme3: 6 of its 9 Java date formats and its `Calendar.DAY_OF_YEAR` read convert (#532), so `task` and `sleep`
   become lowered and run; the 3 formats of a date built from Unix time remain, and 3 reads of never-assigned variables
-  (legacy bugs) are now reported, which keeps `assignments` unlowered. Its 8 string-method errors are `size()` calls
-  on values that may be maps, which only dictionaries count.
+  (legacy bugs) are now reported, which keeps `assignments` unlowered. Its 8 `size()` calls on values of unknown type
+  convert to `.length`, which text, lists, and dicts share (#536), and one inner cause surfaces.
 - DisciplineClinic: 7 of its 9 runtime menus and both `getImage` calls convert, while 8 variables that change type
   (#519) and 7 reads of never-assigned variables are new errors (see [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md)).
   Its three unconverted scripts keep other causes, so the lowered count does not move.
-- Toy: 7 runtime menus and 7 string methods convert; one lookup with a text key is now reported as map access.
+- Toy: 7 runtime menus and 7 string methods convert, and its lookup-table maps become dicts (254 to 183 roots, see
+  below).
 
 Toy remains one script with many independent causes (Java objects, captured closures, evaluation order, persona
 files), so no proposal makes it runnable; its root count shows how much each removes.
@@ -86,15 +88,20 @@ would make this shorter, but the objects work. Unconverted: two DisciplineClinic
 holds text or a number elsewhere (a type change, which TeaseScript now rejects, #519), and Toy menus built inside
 larger expressions.
 
-**D1 dictionaries: valuable, single-package evidence.** Toy's root count drops by 71 net (254 to 183): lookups and
-writes with runtime keys, map method calls (`containsKey`, `keySet`, `values`, `remove`, `clear`), and map literals
-with computed or numeric keys convert, and some inner causes surface. The default conversion reports these lookups.
-No literal map key in the corpus has a dictionary member name; when one does, the output reads it as `map["length"]`
-so the member keeps its meaning. The working syntax needed a literal with computed keys for 34 entries such as
-`{ [COLLAR]: "leather collar" }`. It treats Groovy's numeric keys (12 sites) as text, with a note, and keeps Groovy's
-copy-on-write difference for maps shared by two variables visible as a note. Making `.length` count dictionary keys,
-as text and lists already have a length, removes Domme3's 8 `size()` errors on record fields of unknown type, and one
-inner cause surfaces (32 to 25 roots). No other package uses maps as dictionaries.
+**D1 dictionaries: owner-decided as `dict` (#536), now default.** The working syntax tested objects as dictionaries and
+hit member-name collisions (`map["length"]`) and untypable runtime-key reads; the owner chose a separate `dict` type. A
+Groovy map becomes a dict when a script or its modules look it up by a runtime or non-name key, call lookup methods or
+`each` on it, or build it with computed or number keys; other maps stay objects. Toy's root count drops by 71 (254 to
+183). In Toy the conversion covers 25 dict literals (8 empty), 34 lookups, 25 writes, 14 `containsKey` tests and 10 null
+or truth tests of a lookup (all as `contains`), 5 guarded `remove` calls, 3 `clear` calls, 2 `keys`, 1 `length`, and 1
+key loop from `each { key, value -> }`; 6 object literals declare fields that Groovy added later, such as
+`sessionParams`, a record with mixed field types. The 28 Toy statements that still involve these maps are reported for
+other causes: closures over map entries and method chains on looked-up values (`toys.any { s, t -> ... }`, `findAll`,
+`activityList[name].func()`, 14), Java objects as values (`new Event(...)`, 2), a dict of closures (`funcMap`, 2), and
+boolean `&`, conditionals, and regular expressions around them (10). No runtime map key stays reported. Domme3 drops
+from 31 to 24 because `.length` now covers `size()` on values of unknown type. No other package uses maps as lookup
+tables, apart from a reply of the legacy online service in the distribution's `test.groovy`, which stays unconverted.
+The friction this showed is in [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md).
 
 **Text operations (#508): valuable, cheap, now default.** They remove 7 of Toy's 14 string-method errors; the rest
 need regular expressions, `tokenize`, or a receiver that may be a map. The accepted operations follow Unicode code
@@ -309,24 +316,17 @@ too; one language is enough for now.
 
 ## Later
 
-- **D1 dictionaries.** The owner always meant objects to work as dictionaries: lookup with a runtime key fails today
-  (`toys[k]` raises TSR008 at runtime). Evaluated above with objects as dictionaries (`toys[name]`, `has`, `keys`,
-  `values`, `length`, `remove`, `clear`, computed keys). The owner takes the syntax and typing against #504 up in the
-  language tracker, where a separate `dict` type design awaits the owner's decision; until then the importer keeps
-  its working syntax.
 - **M1 media by tags.** The owner plans to tag every image and select a random image matching included and excluded
   tags, with a count of matches. No tagged media exists yet. Evaluated above for counting; random selection by tags
   and Toy's tag files come later.
 
 ## Next steps
 
-- **D1 in the language tracker.** The owner's dictionary design replaces the working syntax; the importer then follows
-  it and drops the proposal.
-- **Union types (#504).** When draft PR #530 lands, the 7 DisciplineClinic variables that change type could convert
+- **Union types (#504).** When draft PR #530 lands, the 8 DisciplineClinic variables that change type could convert
   to union-typed declarations, and the two menus whose option variable changes type could convert; the importer
   should then decide per variable between a union and separate variables.
-- **Re-measure the corpus** as PRs #515, #518, and #529 and the #531 and #532 implementations merge (their stand-ins
-  then go away), and when #526 or #520 change accepted type behavior. #526 types a function parameter from its default
-  value, which a typed parameter would have to widen (101 generated functions have defaults), while `main` does not
-  compile typed function signatures yet.
+- **Re-measure the corpus** as PRs #515, #518, and #529 and the #531, #532, and #536 implementations merge (their
+  stand-ins then go away), and when #526 or #520 change accepted type behavior. #526 types a function parameter from its
+  default value, which a typed parameter would have to widen (101 generated functions have defaults), while `main` does
+  not compile typed function signatures yet.
 - **M1** stays for later, after tagged media exists.

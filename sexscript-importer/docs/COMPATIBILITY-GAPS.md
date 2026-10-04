@@ -45,7 +45,7 @@ TeaseScript that the compiler gate replaces with stand-ins until it is implement
 | Legacy pattern | TeaseScript form |
 | --- | --- |
 | `"Hi " + name` (string `+`) | `"Hi ${name}"`; TeaseScript `+` is numeric only |
-| Groovy truthiness (`if (name)`, `!count`, `if (map)`) | explicit comparisons chosen from inferred types (`name != ""`, `count == null or count == 0`, `map != {}`) |
+| Groovy truthiness (`if (name)`, `!count`, `if (map)`) | explicit comparisons chosen from inferred types (`name != ""`, `count == null or count == 0`, `map != {}`, `dict.length > 0`) |
 | ternary / Elvis | `if` statements with one assignment or statement per branch |
 | implicit last-expression return | explicit `return`, also in the last statements of `if`/`else` branches |
 | `list[getRandom(list.size())]`, `list[-1]` | `list.random`, `list.last` / `list[list.length - n]` |
@@ -65,6 +65,8 @@ TeaseScript that the compiler gate replaces with stand-ins until it is implement
 | `Calendar.getInstance().get(Calendar.DAY_OF_YEAR)` | `(getDate() - toDate("${getDate().year}-01-01")).days + 1` (#532) |
 | `new Date().format("yyyy-MM-dd")`, `new Date().format("HH:mm")` | `getDate().toISO()`; `getTime().formatTime()`, with a note (#532) |
 | `list + other`, `list << x`, `list.push(x)`, `list += other` | a generated concatenation helper and `add()` |
+| a map used as a lookup table: `[(KEY): v]`, `map[key]`, `containsKey`, `keySet`, `values`, `size`, `put`, `remove`, `clear`, `each { k, v -> }` | a `dict` (#536): `dict{ [KEY]: v }`, `map[key]`, `contains`, `keys`, `values`, `length`, `map[key] = v`, a guarded `remove`, `clear`, `for k in map` |
+| a map with fixed names that gains fields later, and its `clear()` | an object literal that declares every used field (null when added later); `clear()` reassigns it with null fields |
 | `list.remove(index)`, `list.remove(value)` | `list.removeAt(index)`, also as a value; `list.remove(value)` with structural equality (#517) |
 | Groovy string methods (`size()`, `trim()`, `toUpperCase()`, `replace()`, `split()`, ...) | text operations (`text.length`, `trim()`, `uppercase()`, ...; PR #518) |
 | `list.join(separator)`, `"${list}"` | `list.join(separator)`; `"[${list.join(", ")}]"` (PR #518) |
@@ -120,8 +122,16 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   and the corpus scripts that compare a missing key (isolated smoke runs of Domme3 `discipline` and `maintenance`)
   depend on settings saved by the package's introduction anyway.
 - A Groovy map in a condition tests emptiness, which `map != {}` expresses now that objects compare structurally
-  (#517); a map that may also be null is tested with `map != null and map != {}`, and reported when the expression
-  cannot be evaluated twice (`SX_MAP_TRUTHINESS`).
+  (#517), or `dict.length > 0` for a dict; a map that may also be null is tested with `map != null and map != {}`, and
+  reported when the expression cannot be evaluated twice (`SX_MAP_TRUTHINESS`).
+- A Groovy map read a missing key as null; a dict reports it (#536). `map[key] == null` and a lookup used as a
+  condition therefore test `contains(key)` first, and `remove(key)` of a key that may be missing becomes
+  `if map.contains(key) { map.remove(key) }`; any other lookup of a missing key fails where Groovy continued with null.
+  Groovy kept a key's type, so `1` and `"1"` were different keys, while dict keys are text: number keys become text
+  with a note (`SX_DICT_KEY_TEXT`), also a key of unknown type in a dict built with number keys. A repeated literal key
+  kept its first position and its last value, which the dict literal merges with a note (`SX_DICT_DUPLICATE_KEY`). A
+  map whose values have different types, or a runtime key on a map not held in a variable, is reported
+  (`SX_DICT_VALUE_TYPE`, `SX_DYNAMIC_MAP_ACCESS`).
 - Closures kept as values become action IDs called through one dispatcher. Unlike Groovy, the dispatcher ignores extra
   arguments and returns null for an unknown action; Groovy failed in both cases.
 - A `switch` case Groovy tested with `isCase` keeps its meaning only where the case value shows it: equality for
@@ -204,24 +214,39 @@ of its first value (1a) and that an unannotated integer widens to `number` by it
   that callers pass fractions would need `amount: number = 1`; 101 generated functions have defaults, and `main` does
   not compile typed function signatures yet.
 
+## Dict findings (#536)
+
+The owner's `dict` type replaced the importer's objects-as-dictionaries working syntax. Converting Toy's lookup tables
+showed:
+
+- **One value type fits the corpus:** no lookup-table map mixes value types (`SX_DICT_VALUE_TYPE` 0). The one mixed
+  map, Toy's `sessionParams` (booleans, text, numbers), uses fixed names and is a record, as #536 anticipated.
+- **Missing keys need guards:** Groovy read a missing key as null. 10 Toy lookups only test presence or truth and
+  become `contains` tests, and 5 `remove` calls on keys that may be missing need `if map.contains(key) { ... }`. The
+  deferred default lookup form would shorten these and `toynames[t] ?: t.replaceAll("_", " ")` (1 site, which also
+  needs a regular expression).
+- **Number keys:** Toy keeps two tables keyed by level (`[1: 1.25, 2: 1.1, ...][getLevel(DENIAL)]`), so their keys and
+  lookups become text (`dict{ "1": 1.25, ... }["${getLevel(DENIAL)}"]`, 4 `SX_DICT_KEY_TEXT` notes). The deferred
+  non-text keys would keep such tables as written.
+- **Closures over entries stay manual:** `toys.any { s, t -> ... }` and `findAll` chains over maps (with method
+  chains on looked-up values, 14 Toy statements) need loops; only `each { key, value -> }` converts, to
+  `for key in map` with a lookup, since #536 has no two-variable `for` (1 site). `funcMap`, a dict of closures, stays
+  manual like other closures kept as values (2).
+- **Open maps versus fixed properties:** Groovy maps used as records gained fields later (`sessionParams.aborted = r`);
+  with fixed properties the importer declares every field the package uses, null until set (6 literals), and turns
+  `clear()` into a reassignment with null fields. Deciding dict or object needs the uses of a variable in the script
+  and every module that loads it.
+
 ## Capability candidates
 
 Evidence for owner evaluation, ordered by corpus weight. Choices from runtime lists (C1–C3, PR #515), text
-operations (#508, PR #518), and single-field prefill (#510, merged as #514) were candidates here and are now accepted;
-the importer emits them by default.
+operations (#508, PR #518), single-field prefill (#510, merged as #514), and dictionaries (D1, decided as `dict` in
+#536) were candidates here and are now accepted; the importer emits them by default.
 
-1. **Dictionaries.** Toy keeps registries keyed by runtime strings: toys, events, session parameters, and
-   requestable actions (`events.remove(name)`, `positions.keySet()`, `toys.containsKey(t)`, `map[key]`); 71 Toy root
-   errors convert with the proposed working syntax (D1 in
-   [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md)).
-   TeaseScript objects have fixed, dot-accessed properties. A list of `{ key, value }` records with small lookup
-   functions expresses the behavior, at a clear cost in readability. The evidence comes from one package written by an
-   experienced Groovy programmer; the other three packages use maps only as fixed records. The owner takes it up in
-   the language tracker, where a separate `dict` type design awaits a decision.
-2. **Regular expressions.** Toy's `replaceAll(/<[^>]*>/, "")` and a pattern `split` remain manual work, as does a
+1. **Regular expressions.** Toy's `replaceAll(/<[^>]*>/, "")` and a pattern `split` remain manual work, as does a
    locale argument (`toLowerCase(Locale.ENGLISH)`); a synchronous `.ts` text library, once package-library linkage
-   exists, would cover the patterns. Toy's 4 other string-method errors are `size()` calls on values that may be maps.
-3. **Localized script variants.** The distribution ships language variants per script (`intro`, `intro_de`,
+   exists, would cover the patterns.
+2. **Localized script variants.** The distribution ships language variants per script (`intro`, `intro_de`,
    `intro_fr`, ...) selected by the legacy player. The repository has no localization decision; this is a package-level
    product question, not syntax.
 
@@ -280,8 +305,8 @@ separately: `run`/`end`, `switch` (#528, PR #529), `showPopup`, the `showButton`
 `askInteger`, `askBooleans`, date and time (`getDateTime()`, `getDate()`, `getTime()`, `getTimestamp()`,
 `toSeconds()`, `toISO()`, `formatTime()`, `toDate()`, `.days`; #532), `openUrl`, `round`/`floor`/`ceil` and the
 conversions (#518), text operations and `join` (#518), `choose` with list options (#515), `takePhoto()` (camera,
-#475), and integer widening (#504 option B, #526), for which the gate writes `: number`. `run`/`end` dominates: it
-blocks 21 otherwise compiler-clean corpus scripts.
+#475), integer widening (#504 option B, #526), for which the gate writes `: number`, and `dict` (#536). `run`/`end`
+dominates: it blocks 21 otherwise compiler-clean corpus scripts.
 
 ## Open importer work
 
