@@ -96,18 +96,18 @@ test("an unannotated integer variable is a number when one of its assignments ca
     ),
     [["TSV041", "speed"]],
   );
-  // A long chain widens in either order, through arithmetic, a `choose`, a literal read at once, or a function result.
+  // A long chain widens in either order through every way a number flows on: arithmetic, a join such as `choose`, a
+  // part of a collection or object built from it, a method that returns an element, and a function's result.
   const names = Array.from({ length: 2_000 }, (_, index) => `v${index}`);
   const declarations = names.map((name) => `let ${name} = 0`).join("\n");
   for (const copy of [
     (name: string) => `${name} + 1`,
     (name: string) => `choose ${name}, 1`,
     (name: string) => `{ n: ${name} }.n`,
-    (name: string) => `choose { text: ${name} }`,
-    (name: string) => `set[${name}].first`,
-    (name: string) => `read_${name}()`,
+    (name: string) => `[${name}].removeFirst()`,
+    (name: string) => `read_${name}().first`,
   ]) {
-    const functions = names.map((name) => `function read_${name} {\n    return ${name}\n}`);
+    const functions = names.map((name) => `function read_${name} {\n    return [${name}]\n}`);
     const copies = names.slice(1).map((name, index) => `${names[index]} = ${copy(name)}`);
     for (const order of [copies, [...copies].reverse()])
       assert.deepEqual(
@@ -118,7 +118,19 @@ test("an unannotated integer variable is a number when one of its assignments ca
         copy("v"),
       );
   }
-  // Functions that call each other many times share their sources once.
+  // What a number derives from never makes types differ: numbers from different variables share one element type, and
+  // messages name the plain type.
+  assert.deepEqual(
+    codes(
+      "let a = 1\nlet b = 2\nlet both = [a, b, 1]\nboth.add(a + b)\nlet c: integer = both.first",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    mismatches("let a = 1\nlet s: string = a + 1")[0]?.[1],
+    mismatches("let s: string = 1 + 1")[0]?.[1],
+  );
+  // Functions that call each other many times compile at once.
   const calls = Array.from(
     { length: 24 },
     (_, index) => `function f${index + 1} {\n    return f${index}() + f${index}()\n}`,

@@ -3,9 +3,7 @@ import type {
   Block,
   CallExpression,
   Expression,
-  ForStatement,
   FunctionDeclaration,
-  FunctionParameter,
   Identifier,
   LetStatement,
   MediaParts,
@@ -58,7 +56,10 @@ import {
   typeFromAnnotation,
   typeName,
   UNKNOWN_TYPE,
+  originsOf,
+  ownOrigins,
   widenedType,
+  type Origin,
   type StaticType,
 } from "./static-types.js";
 
@@ -101,7 +102,7 @@ export function checkTypes(program: Program, options: TypeCheckOptions = {}): Ty
 }
 
 /** The declaration of a variable without a type annotation: `let`, a parameter with a default, or a loop variable. */
-type Declaration = LetStatement | FunctionParameter | ForStatement;
+type Declaration = Origin;
 
 /** The variables that one of their assignments gives a non-whole number, with the first such assignment. */
 type Widened = Map<Declaration, SourceSpan>;
@@ -161,8 +162,6 @@ interface FunctionType {
    */
   accepted: readonly Variable[] | null;
   result: StaticType | null;
-  /** For an inferred result, the variables its returned values depend on (see {@link TypeChecker.#numericSources}). */
-  sources: readonly Declaration[];
   checking: boolean;
   /**
    * Calls reached while the function itself is checked, directly or through another function: their arguments, as
@@ -179,11 +178,7 @@ interface FunctionType {
 interface FunctionContext {
   readonly fn: FunctionType;
   readonly declared: StaticType | null;
-  readonly returns: {
-    readonly type: StaticType;
-    readonly span: SourceSpan;
-    readonly expression: Expression;
-  }[];
+  readonly returns: { readonly type: StaticType; readonly span: SourceSpan }[];
   returnsNull: boolean;
 }
 
@@ -253,12 +248,6 @@ class TypeChecker {
 
   readonly #widened: Widened;
 
-  /** The author functions that call expressions call, for the sources of their results. */
-  readonly #calls = new Map<Expression, FunctionType>();
-
-  /** The declarations of the variables that identifier expressions read. */
-  readonly #reads = new Map<Expression, Declaration>();
-
   /**
    * For each integer variable, the integer variables that store its value, directly or through arithmetic, with where:
    * when it widens, they widen too, without one more check per step of a chain.
@@ -286,7 +275,6 @@ class TypeChecker {
         parameters: null,
         accepted: null,
         result: null,
-        sources: [],
         checking: false,
         pending: [],
       };
@@ -473,7 +461,10 @@ class TypeChecker {
           kind: "variable",
           variable: {
             name: statement.variable.name,
-            type: this.#widened.has(statement) ? widenedType(loopType) : loopType,
+            type: ownOrigins(
+              this.#widened.has(statement) ? widenedType(loopType) : loopType,
+              statement,
+            ),
             declaration: statement,
           },
         });
@@ -520,6 +511,8 @@ class TypeChecker {
     if (statement.typeAnnotation === null) {
       type = this.#newPlaceType(statement.initializer, value);
       if (this.#widened.has(statement)) type = widenedType(type);
+      // A number this variable holds derives from the variable itself (rule 1.2).
+      type = ownOrigins(type, statement);
       if (initializer.kind === "listLiteral" || initializer.kind === "setLiteral")
         this.#declaredBy.set(initializer, name);
     } else {
@@ -696,10 +689,14 @@ class TypeChecker {
     return true;
   }
 
-  /** Records that an integer variable stores a value whose sources (see {@link #numericSources}) widen it with them. */
+  /**
+   * Records that an integer variable stores a value that derives from other variables (see the `origins` of a scalar
+   * type), so it widens together with them.
+   */
   #follow(place: Place, value: StaticType, expression: Expression): void {
     if (place.declaration === undefined || !isScalar(nonNullType(value), "integer")) return;
-    for (const source of this.#numericSources(expression)) {
+    for (const origin of originsOf(value)) {
+      const source = origin;
       if (source === place.declaration) continue;
       const followers = this.#followers.get(source) ?? [];
       followers.push({ declaration: place.declaration, at: expression.span });
@@ -707,83 +704,13 @@ class TypeChecker {
     }
   }
 
-  /**
-   * The variables whose integer type a checked expression's integer value depends on: when one of them widens to a
-   * number, so does the value. They are read directly or through arithmetic that stays whole only while its operands
-   * do, through a `choose` option, through a part of a literal that is read at once, or through the returns of a
-   * function whose result type is inferred. A built-in such as `round(...)` stays whole whatever its argument is.
-   */
-  #numericSources(expression: Expression): Declaration[] {
-    // Each variable once: calls of functions that call each other would otherwise repeat their sources.
-    const sources = new Set<Declaration>();
-    const pending = [expression];
-    while (pending.length > 0) {
-      const node = unwrap(pending.pop()!);
-      const read = this.#reads.get(node);
-      if (read !== undefined) {
-        sources.add(read);
-        continue;
-      }
-      switch (node.kind) {
-        case "binaryExpression":
-          if (WHOLE_ARITHMETIC.has(node.operator)) pending.push(node.left, node.right);
-          break;
-        case "unaryExpression":
-          if (node.operator === "-") pending.push(node.operand);
-          break;
-        case "interactionExpression":
-          for (const option of node.options)
-            if (option.value === null) pending.push(option.expression);
-          break;
-        case "listLiteral":
-        case "setLiteral":
-          for (const element of node.elements) pending.push(element);
-          break;
-        case "objectLiteral": {
-          // A choice object returns its value, or else its text.
-          const returned =
-            node.properties.find((property) => property.name.name === "value") ??
-            node.properties.find((property) => property.name.name === "text");
-          if (returned !== undefined) pending.push(returned.value);
-          break;
-        }
-        case "propertyAccessExpression": {
-          const object = unwrap(node.object);
-          if (object.kind === "objectLiteral")
-            for (const property of object.properties)
-              if (property.name.name === node.property.name) pending.push(property.value);
-          if (
-            (object.kind === "listLiteral" || object.kind === "setLiteral") &&
-            LIST_ELEMENT_READS.has(node.property.name)
-          )
-            for (const element of object.elements) pending.push(element);
-          break;
-        }
-        case "indexExpression": {
-          const object = unwrap(node.object);
-          if (object.kind === "listLiteral")
-            for (const element of object.elements) pending.push(element);
-          break;
-        }
-        case "callExpression": {
-          const fn = this.#calls.get(node);
-          if (fn !== undefined) for (const source of fn.sources) sources.add(source);
-          break;
-        }
-        default:
-          break;
-      }
-    }
-    return [...sources];
-  }
-
-  /** Why a value is a number when a non-whole number widened a variable it depends on, naming that assignment. */
+  /** Why a value is a number when a non-whole number widened a variable it derives from, naming that assignment. */
   #widenedNote(expression: Expression | null): string {
     if (expression === null) return "";
-    for (const source of this.#numericSources(expression)) {
-      const at = this.#widened.get(source);
+    for (const origin of originsOf(this.#typeOf(expression))) {
+      const at = this.#widened.get(origin);
       if (at !== undefined)
-        return ` '${declarationName(source)}' is a number because line ${at.start.line + 1} can store a non-whole number in it.`;
+        return ` '${declarationName(origin)}' is a number because line ${at.start.line + 1} can store a non-whole number in it.`;
     }
     return "";
   }
@@ -853,11 +780,7 @@ class TypeChecker {
       return;
     }
     // The result is joined once the body is complete; a later statement may still change the place a value was read from.
-    context.returns.push({
-      type: this.#capture(statement.value),
-      span: statement.value.span,
-      expression: statement.value,
-    });
+    context.returns.push({ type: this.#capture(statement.value), span: statement.value.span });
   }
 
   // Functions --------------------------------------------------------------------------------------------------------
@@ -906,12 +829,6 @@ class TypeChecker {
     this.#mixedLiterals = outerLiterals;
     if (continues) context.returnsNull = true;
     fn.result = declared ?? this.#inferredResult(context);
-    if (declared === null)
-      fn.sources = [
-        ...new Set(
-          context.returns.flatMap((returned) => this.#numericSources(returned.expression)),
-        ),
-      ];
     if (
       declared !== null &&
       continues &&
@@ -970,6 +887,7 @@ class TypeChecker {
         if (parameter.typeAnnotation === null) {
           type = decidedType(placeType(value));
           if (this.#widened.has(parameter)) type = widenedType(type);
+          type = ownOrigins(type, parameter);
         } else {
           const declared = type;
           yield* compileChild(
@@ -1017,7 +935,6 @@ class TypeChecker {
     }
     // The body is checked before the arguments, so they must fit the parameters as the body uses them.
     const result = copyType(yield* compileChild(this.#functionResultTask(fn)));
-    this.#calls.set(expression, fn);
     if (fn.checking)
       fn.pending.push({ call: expression, values, literals: this.#takeMixedLiterals(expression) });
     else yield* compileChild(this.#argumentsTask(fn, expression, values));
@@ -1140,11 +1057,7 @@ class TypeChecker {
       }
       case "identifier": {
         const entry = scope.resolve(expression.name);
-        if (entry?.kind === "variable") {
-          const declaration = entry.variable.declaration;
-          if (declaration !== undefined) this.#reads.set(expression, declaration);
-          return placeRead(entry.variable.type);
-        }
+        if (entry?.kind === "variable") return placeRead(entry.variable.type);
         if (entry?.kind === "speaker" || (entry === undefined && expression.name === "speaker"))
           return { kind: "speaker" };
         return UNKNOWN_TYPE;
@@ -2036,12 +1949,6 @@ function capitalize(text: string): string {
 }
 
 const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
-
-/** Arithmetic whose result is whole when its operands are, and a number when one of them is. */
-const WHOLE_ARITHMETIC: ReadonlySet<string> = new Set(["+", "-", "*", "%"]);
-
-/** List properties that read one of its elements. */
-const LIST_ELEMENT_READS: ReadonlySet<string> = new Set(["first", "last", "random"]);
 
 /** The name of the variable a declaration declares. */
 function declarationName(declaration: Declaration): string {

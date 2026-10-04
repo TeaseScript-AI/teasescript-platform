@@ -1,4 +1,10 @@
-import type { ScalarTypeName, TypeAnnotation } from "./ast.js";
+import type {
+  ForStatement,
+  FunctionParameter,
+  LetStatement,
+  ScalarTypeName,
+  TypeAnnotation,
+} from "./ast.js";
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import type { SourceSpan } from "./source.js";
 
@@ -15,7 +21,15 @@ export type StaticType =
   | { readonly kind: "unknown" }
   | { readonly kind: "never" }
   | { readonly kind: "null" }
-  | { readonly kind: "scalar"; readonly name: ScalarTypeName }
+  | {
+      readonly kind: "scalar";
+      readonly name: ScalarTypeName;
+      /**
+       * For a number, the variables without a type annotation that its value derives from: when one of them widens to
+       * a number, so does this value (ADR 0021 rule 1.2).
+       */
+      readonly origins?: ReadonlySet<Origin>;
+    }
   | { readonly kind: "list" | "set"; readonly element: StaticType }
   | { readonly kind: "object"; readonly properties: PropertyTable | null }
   | { readonly kind: "union"; readonly members: readonly StaticType[] }
@@ -32,6 +46,8 @@ export interface OpenType {
   sawNull: boolean;
   /** Whether an integer decides the slot as a number, for a variable that also takes non-whole numbers. */
   widens?: boolean;
+  /** For the slot of a variable without a type annotation, that variable, which the deciding number derives from. */
+  origins?: ReadonlySet<Origin>;
 }
 
 /**
@@ -48,6 +64,80 @@ const ANY_OBJECT_TYPE: StaticType = Object.freeze({ kind: "object", properties: 
 
 function scalar(name: ScalarTypeName): StaticType {
   return { kind: "scalar", name };
+}
+
+/**
+ * The declaration of a variable without a type annotation, which a number may derive from (ADR 0021 rule 1.2): `let`, a
+ * parameter with a default, or a loop variable.
+ */
+export type Origin = LetStatement | FunctionParameter | ForStatement;
+
+/** At most this many origins are kept; with fewer, widening may only take one more check. */
+const MAX_ORIGINS = 16;
+
+function mergedOrigins(
+  left: ReadonlySet<Origin> | undefined,
+  right: ReadonlySet<Origin> | undefined,
+): ReadonlySet<Origin> | undefined {
+  if (left === undefined || left.size === 0) return right;
+  if (right === undefined || right.size === 0 || right === left) return left;
+  const merged = new Set(left);
+  for (const origin of right) {
+    if (merged.size >= MAX_ORIGINS) break;
+    merged.add(origin);
+  }
+  return merged.size === left.size ? left : merged;
+}
+
+function scalarOrigins(type: StaticType): ReadonlySet<Origin> | undefined {
+  return type.kind === "scalar" ? type.origins : undefined;
+}
+
+/** A numeric type that also derives from `origins`; other types are returned as they are. */
+function withOrigins(type: StaticType, origins: ReadonlySet<Origin> | undefined): StaticType {
+  if (origins === undefined || origins.size === 0) return type;
+  const value = resolved(type);
+  if (value.kind === "scalar") {
+    if (value.name !== "integer" && value.name !== "number") return type;
+    const merged = mergedOrigins(value.origins, origins);
+    if (merged === undefined || merged === value.origins) return value;
+    return { kind: "scalar", name: value.name, origins: merged };
+  }
+  if (value.kind !== "union" || !value.members.some(isNumeric)) return type;
+  return union(value.members.map((member) => withOrigins(member, origins)));
+}
+
+/** The type with its own numbers deriving from exactly `origins`, or from nothing; parts inside it keep theirs. */
+function replacedOrigins(type: StaticType, origins: ReadonlySet<Origin> | undefined): StaticType {
+  const value = resolved(type);
+  if (value.kind === "scalar") {
+    if (value.name !== "integer" && value.name !== "number") return value;
+    if (value.origins === origins) return value;
+    return origins === undefined
+      ? { kind: "scalar", name: value.name }
+      : { kind: "scalar", name: value.name, origins };
+  }
+  if (value.kind !== "union" || !value.members.some(isNumeric)) return value;
+  return union(value.members.map((member) => replacedOrigins(member, origins)));
+}
+
+/**
+ * The type of a variable without a type annotation: its own numbers derive from the variable itself, not from what its
+ * first value derived from, and a slot that a later value decides takes the variable as well (ADR 0021 rule 1.2).
+ */
+export function ownOrigins(type: StaticType, origin: Origin): StaticType {
+  const own = new Set([origin]);
+  const value = resolved(type);
+  for (const member of value.kind === "union" ? value.members : [value])
+    if (member.kind === "open" && member.resolved === null) member.origins = own;
+  return replacedOrigins(value, own);
+}
+
+/** The variables that a numeric value derives from (see the `origins` of a scalar type). */
+export function originsOf(type: StaticType): ReadonlySet<Origin> {
+  let origins: ReadonlySet<Origin> | undefined;
+  for (const member of members(type)) origins = mergedOrigins(origins, scalarOrigins(member));
+  return origins ?? new Set();
 }
 
 export const STRING_TYPE = scalar("string");
@@ -109,10 +199,19 @@ function union(types: readonly StaticType[]): StaticType {
     }
     if (type.kind === "unknown") return UNKNOWN_TYPE;
     if (type.kind === "never") continue;
-    if (members.some((member) => includes(member, type))) continue;
+    // A member that includes another keeps what the other's value derives from.
+    const including = members.findIndex((member) => includes(member, type));
+    if (including >= 0) {
+      members[including] = withOrigins(members[including]!, scalarOrigins(type));
+      continue;
+    }
+    let origins = scalarOrigins(type);
     for (let index = members.length - 1; index >= 0; index -= 1)
-      if (includes(type, members[index]!)) members.splice(index, 1);
-    members.push(type);
+      if (includes(type, members[index]!)) {
+        origins = mergedOrigins(origins, scalarOrigins(members[index]!));
+        members.splice(index, 1);
+      }
+    members.push(withOrigins(type, origins));
   }
   if (members.length === 0) return NEVER_TYPE;
   return members.length === 1 ? members[0]! : { kind: "union", members };
@@ -275,7 +374,8 @@ function* settleTask(
     }
     // The first other value decides the type by the `let` rule; an earlier null keeps it optional.
     const placed = yield* compileChild(placeTask(source));
-    const value = target.widens === true ? widenedType(placed) : placed;
+    const widened = target.widens === true ? widenedType(placed) : placed;
+    const value = target.origins === undefined ? widened : replacedOrigins(widened, target.origins);
     target.resolved = target.sawNull ? optional(value) : value;
     target.resolvedAt = at;
     return;
@@ -534,8 +634,8 @@ function* joinValuesTask(
     const element = yield* compileChild(joinTask(left.element, right.element, owned, changes));
     return element === undefined ? undefined : { kind: left.kind, element };
   }
-  if (includes(left, right)) return left;
-  if (includes(right, left)) return right;
+  if (includes(left, right)) return withOrigins(left, scalarOrigins(right));
+  if (includes(right, left)) return withOrigins(right, scalarOrigins(left));
   return undefined;
 }
 
@@ -668,9 +768,13 @@ export function arithmeticType(
   if (left.kind !== "scalar" || right.kind !== "scalar") return undefined;
   const numeric = (name: ScalarTypeName): boolean => name === "integer" || name === "number";
   if (numeric(left.name) && numeric(right.name)) {
-    return left.name === "integer" && right.name === "integer" && operator !== "/"
-      ? INTEGER_TYPE
-      : NUMBER_TYPE;
+    // The result derives from what both operands derive from.
+    return withOrigins(
+      left.name === "integer" && right.name === "integer" && operator !== "/"
+        ? INTEGER_TYPE
+        : NUMBER_TYPE,
+      mergedOrigins(left.origins, right.origins),
+    );
   }
   if (left.name === "duration" && right.name === "duration") {
     if (operator === "+" || operator === "-") return DURATION_TYPE;
