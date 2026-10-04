@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  compileProject,
   compileSource,
   createCheckpoint,
   deserializeCheckpoint,
@@ -15,6 +16,7 @@ import {
   type InstructionPlan,
   type InterpreterEvent,
   type ProjectImageFile,
+  type ProjectSourceFile,
   type RuntimeSnapshot,
 } from "../../src/index.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
@@ -45,18 +47,25 @@ export interface RuntimeResumeEquivalenceResult {
   readonly finalSnapshot: RuntimeSnapshot;
 }
 
+/** `source` is one source, the `main.tease` of a single-file project, or the files of a project. */
 export function assertRuntimeResumeEquivalent(
-  source: string,
+  source: string | readonly ProjectSourceFile[],
   options: RuntimeResumeEquivalenceOptions = {},
 ): RuntimeResumeEquivalenceResult {
-  const scenario = options.scenarioName ?? describeScenario(source);
+  const scenario =
+    options.scenarioName ??
+    describeScenario(typeof source === "string" ? source : (source[0]?.source ?? ""));
   const instructionGuard = options.instructionGuard ?? DEFAULT_INSTRUCTION_GUARD;
   assert.ok(
     Number.isInteger(instructionGuard) && instructionGuard > 0,
     `${scenario}: instructionGuard must be a positive integer`,
   );
 
-  const compiled = compileSource(source, { images: options.images ?? [] });
+  const compileOptions = { images: options.images ?? [] };
+  const compiled =
+    typeof source === "string"
+      ? compileSource(source, compileOptions)
+      : compileProject(source, compileOptions);
   assert.deepEqual(
     compiled.diagnostics,
     [],
