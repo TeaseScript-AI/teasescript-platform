@@ -1429,8 +1429,8 @@ export function arithmeticType(
   if (left.name === "duration" && numeric(right.name) && (operator === "*" || operator === "/"))
     return DURATION_TYPE;
   if (numeric(left.name) && right.name === "duration" && operator === "*") return DURATION_TYPE;
-  // A timestamp or a local date and time moves by a duration, and two of one kind differ by one (V30 §35).
-  if (left.name === "timestamp" || left.name === "datetime") {
+  // A date, timestamp, or local date and time moves by a duration, and two of one kind differ by one (V30 §35).
+  if (left.name === "timestamp" || left.name === "datetime" || left.name === "date") {
     if (right.name === "duration" && (operator === "+" || operator === "-"))
       return scalar(left.name);
     if (right.name === left.name && operator === "-") return DURATION_TYPE;

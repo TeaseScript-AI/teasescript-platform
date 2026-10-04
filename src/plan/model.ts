@@ -569,10 +569,15 @@ export interface LiteralExpressionPlan extends ExpressionPlanBase {
   readonly value: string | number | boolean | null;
 }
 
-/** An exact elapsed-duration literal, already converted to milliseconds. */
+/**
+ * A duration literal, already normalized: exact milliseconds, and whole calendar `months` and `days`, present only when
+ * they are not zero.
+ */
 export interface DurationExpressionPlan extends ExpressionPlanBase {
   readonly kind: "duration";
   readonly milliseconds: number;
+  readonly months?: number;
+  readonly days?: number;
 }
 
 export interface IdentifierExpressionPlan extends ExpressionPlanBase {

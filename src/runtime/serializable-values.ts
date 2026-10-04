@@ -1,3 +1,4 @@
+import { isStoredDurationRecord, type StoredDuration } from "../duration.js";
 import { captureExternalData, type ExternalDataFailure } from "../external-data-capture.js";
 import {
   isValidDate,
@@ -52,11 +53,8 @@ export interface SerializableRuntimeRange {
   readonly inclusive: boolean;
 }
 
-/** An exact elapsed duration. Calendar units are not represented. */
-export interface SerializableRuntimeDuration {
-  readonly kind: "duration";
-  readonly milliseconds: number;
-}
+/** A duration: exact milliseconds, and whole calendar `months` and `days` present only when they are not zero. */
+export type SerializableRuntimeDuration = StoredDuration;
 
 /** A local calendar date without a zone (V30 §35). */
 export interface SerializableRuntimeDate extends DateFields {
@@ -564,7 +562,12 @@ function equalsOrDefer(
         right.inclusive === left.inclusive
       );
     case "duration":
-      return right.kind === "duration" && right.milliseconds === left.milliseconds;
+      return (
+        right.kind === "duration" &&
+        right.milliseconds === left.milliseconds &&
+        (right.months ?? 0) === (left.months ?? 0) &&
+        (right.days ?? 0) === (left.days ?? 0)
+      );
     case "date":
     case "time":
     case "datetime":
@@ -857,11 +860,7 @@ const TEMPORAL_KEYS: ReadonlyMap<string, readonly string[]> = new Map([
  */
 function setElementObjectProblem(value: Record<string, unknown>): string | null {
   if (value.kind === "duration")
-    return hasOnlyKeys(value, ["kind", "milliseconds"]) &&
-      typeof value.milliseconds === "number" &&
-      Number.isFinite(value.milliseconds)
-      ? null
-      : "a malformed duration";
+    return isStoredDurationRecord(value) ? null : "a malformed duration";
   const keys = typeof value.kind === "string" ? TEMPORAL_KEYS.get(value.kind) : undefined;
   if (keys === undefined)
     return typeof value.kind === "string" ? `a ${value.kind} value` : "a value without a kind";

@@ -1,3 +1,4 @@
+import { exactDurationMilliseconds } from "./temporal-operations.js";
 import { resolveMessagePresentation } from "./message-presentation.js";
 import type { MessagePresentation } from "../message-presentation.js";
 import type { TemporalContext } from "../temporal.js";
@@ -1519,6 +1520,8 @@ function buttonTimeoutMs(
   snapshot: RuntimeSnapshot,
   span: SourceSpan,
 ): number {
+  // A calendar duration has no fixed length (V30 §35).
+  if (isDuration(value)) exactDurationMilliseconds(value, "A showButton timeout", span);
   const timeoutMs = buttonTimeoutMilliseconds(value);
   if (timeoutMs === null) {
     throw fault(
@@ -1980,7 +1983,10 @@ export function timerDurationMs(
     range === null || range.start < 0
       ? value
       : evaluator.randomIntegerInRange(range, span, "timer");
-  const amount = isDuration(drawn) && unit === null ? drawn.milliseconds : drawn;
+  const amount =
+    isDuration(drawn) && unit === null
+      ? exactDurationMilliseconds(drawn, command === "timer" ? "A timer" : "wait", span)
+      : drawn;
   if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
     throw fault(
       "TSR050",
@@ -2253,7 +2259,7 @@ function mediaMilliseconds(
   span: SourceSpan,
 ): number {
   const milliseconds = isDuration(value)
-    ? value.milliseconds
+    ? exactDurationMilliseconds(value, subject, span)
     : typeof value === "number"
       ? value * 1_000
       : Number.NaN;
@@ -2286,7 +2292,10 @@ function mediaRepeat(
   if (value === true) return { kind: "indefinite" };
   if (value === false) return { kind: "once" };
   if (isDuration(value) && Number.isFinite(value.milliseconds) && value.milliseconds > 0) {
-    return { kind: "budget", milliseconds: value.milliseconds };
+    return {
+      kind: "budget",
+      milliseconds: exactDurationMilliseconds(value, "A repeat budget", repeat.value.span),
+    };
   }
   throw fault(
     "TSR050",

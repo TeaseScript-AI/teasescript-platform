@@ -39,7 +39,12 @@ import {
   mediaOperands,
   showButtonOptions,
 } from "./expression-children.js";
-import { DURATION_UNIT_MILLISECONDS, durationLiteralMilliseconds } from "./duration.js";
+import {
+  DURATION_UNIT_MILLISECONDS,
+  durationLiteralParts,
+  durationParts,
+  isExactDuration,
+} from "./duration.js";
 import { validateSwitchCases } from "./switch-cases.js";
 
 export interface SemanticValidationOptions {
@@ -1633,7 +1638,13 @@ function staticDurationMs(expression: Expression): number | undefined {
     if (current.operator === "-") sign = -sign;
     current = unwrapParentheses(current.operand);
   }
-  if (current.kind === "durationLiteral") return sign * durationLiteralMilliseconds(current);
+  if (current.kind === "durationLiteral") {
+    // A calendar duration has no fixed length, so it gives no media position.
+    const parts = durationLiteralParts(current);
+    return typeof parts === "string" || !isExactDuration(parts)
+      ? undefined
+      : sign * parts.milliseconds;
+  }
   const seconds = staticNumber(expression);
   return seconds === undefined ? undefined : seconds * 1_000;
 }
@@ -1708,8 +1719,8 @@ function knownMilliseconds(expression: Expression, unit: DurationUnit | null): n
   const known = staticQuantity(expression);
   if (known === undefined) return undefined;
   if (typeof known === "number") return known * DURATION_UNIT_MILLISECONDS[unit ?? "s"];
-  // A duration with a trailing unit is a type error of its own.
-  return unit === null ? known.milliseconds : undefined;
+  // A duration with a trailing unit is a type error of its own, and a calendar duration has no fixed length.
+  return unit === null && isExactDuration(durationParts(known)) ? known.milliseconds : undefined;
 }
 
 /** Scene time is at most `Number.MAX_SAFE_INTEGER` milliseconds, so a known longer duration can never be reached. */

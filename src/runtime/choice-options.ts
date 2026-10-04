@@ -111,7 +111,7 @@ function choiceButton(
 
 /** A scalar that `isVisibleScalar` accepted, as a choice value. */
 function choiceValue(value: SerializableRuntimeValue): InteractionChoiceValue {
-  if (isDuration(value)) return { kind: "duration", milliseconds: value.milliseconds };
+  if (isDuration(value)) return { ...value };
   if (isTemporal(value)) return { ...value };
   if (typeof value === "number") return Object.is(value, -0) ? 0 : value;
   if (typeof value === "string" || typeof value === "boolean" || value === null) return value;
