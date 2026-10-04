@@ -130,7 +130,17 @@ export function promoteGlobalFunctions(
 
   function blocker(name: string, users: number[], free: FreeNames): string | null {
     for (const called of free.calls) {
-      if (called === name || candidates.has(called)) continue;
+      if (called === name) continue;
+      const shared = candidates.get(called);
+      // Each script's copy called the script's own function of that name, so all of them must share its body.
+      if (
+        shared !== undefined &&
+        users.some(
+          (script) => fileFunctions[script]!.has(called) && !shared.scripts.includes(script),
+        )
+      )
+        return `calls ${called}, which some of these scripts define with another body`;
+      if (shared !== undefined) continue;
       if (users.some((script) => fileFunctions[script]!.has(called)))
         return `calls ${called}, which stays in each file`;
     }

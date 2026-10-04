@@ -1,6 +1,10 @@
 // mistress is a global of helpers.tease; this script starts it with its own value.
 mistress = load "mistress"
-image()
+function enter {
+  image()
+  say "Come in."
+}
+enter()
 greet()
 taunt()
 goto "rooms/garden.tease"

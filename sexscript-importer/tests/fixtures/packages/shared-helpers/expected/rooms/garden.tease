@@ -4,6 +4,11 @@ mistress = load "mistress"
 function imageLocal {
   showImage "garden.jpg"
 }
-imageLocal()
+// The same text calls each script's own picture, so it stays in each script.
+function enter {
+  imageLocal()
+  say "Come in."
+}
+enter()
 greet()
 exit

@@ -4,8 +4,9 @@ def mistress = loadString("mistress")
 def image = { -> setImage("room.jpg") }
 def taunt = { -> show(phrases[getRandom(phrases.size())]) }
 def greet = { -> show("Welcome to ${mistress}'s house.") }
+def enter = { -> image(); show("Come in.") }
 save("mistress", "Vera")
-image()
+enter()
 taunt()
 greet()
 return "rooms/hall.groovy"
