@@ -21,7 +21,8 @@ export type TeaseType =
   | { kind: "optional"; value: TeaseType }
   | { kind: "object" | "range" | "handle" };
 
-type ScalarName = "string" | "integer" | "number" | "boolean" | "duration";
+const SCALAR_NAMES = ["string", "integer", "number", "boolean", "duration"] as const;
+type ScalarName = (typeof SCALAR_NAMES)[number];
 type LetStatement = Extract<IrStatement, { kind: "let" }>;
 
 export interface TypeConflict {
@@ -65,6 +66,9 @@ interface Binding {
   optional: boolean;
 }
 
+/** What declares a binding: a `let`, a `for` loop, a media handle, or a function parameter. */
+type BindingKey = IrStatement | IrFunctionParameter;
+
 interface Conflict {
   binding: Binding;
   statement: IrStatement;
@@ -74,7 +78,7 @@ interface Conflict {
 }
 
 export function enforceVariableTypes(statements: IrStatement[]): VariableTypeResult {
-  const bindings = new Map<object, Binding>();
+  const bindings = new Map<BindingKey, Binding>();
   let conflicts: Conflict[] = [];
   // Statements whose stored number truncates to an integer.
   const truncations = new Set<IrStatement>();
@@ -244,7 +248,7 @@ interface Analysis {
   appends: Map<IrStatement, boolean>;
 }
 
-function analyse(statements: IrStatement[], bindings: Map<object, Binding>): Analysis {
+function analyse(statements: IrStatement[], bindings: Map<BindingKey, Binding>): Analysis {
   const analysis: Analysis = {
     changed: false,
     conflicts: [],
@@ -254,7 +258,7 @@ function analyse(statements: IrStatement[], bindings: Map<object, Binding>): Ana
   const root = new Scope(null);
   const functions: Array<Extract<IrStatement, { kind: "function" }>> = [];
   const binding = (
-    key: object,
+    key: BindingKey,
     name: string,
     declaration: LetStatement | null,
     fixed: TeaseType | undefined,
@@ -520,9 +524,8 @@ function parseAnnotation(text: string): TeaseType {
   const core = optional ? text.slice(0, -1) : text;
   const list = core.endsWith("[]");
   const name = list ? core.slice(0, -2) : core;
-  const base: TeaseType = ["string", "integer", "number", "boolean", "duration"].includes(name)
-    ? scalar(name as ScalarName)
-    : UNKNOWN;
+  const scalarName = SCALAR_NAMES.find((candidate) => candidate === name);
+  const base: TeaseType = scalarName === undefined ? UNKNOWN : scalar(scalarName);
   const value = list ? listOf(base) : base;
   return optional ? { kind: "optional", value } : value;
 }
