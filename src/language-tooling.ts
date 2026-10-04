@@ -101,7 +101,7 @@ const HELP = Object.freeze({
   say: Object.freeze({
     command: "say" as const,
     summary:
-      "Emits visible chat text; a list, set, or object shows in literal notation without markup. Current pacing supports smart pacing by default, an exact non-negative seconds expression including 0, or instant; skip policy may be skippable or unskippable.",
+      "Emits visible chat text; a list, set, dict, or object shows in literal notation without markup. Current pacing supports smart pacing by default, an exact non-negative seconds expression including 0, or instant; skip policy may be skippable or unskippable.",
     syntax:
       "say [as speaker] [bubble(options)|prose(options)] [skippable|unskippable] text [, pacing|instant]",
   }),
@@ -748,6 +748,12 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
     case "objectLiteral":
       for (const property of expression.properties)
         children.push({ kind: "expression", node: property.value });
+      return;
+    case "dictLiteral":
+      for (const entry of expression.entries) {
+        children.push({ kind: "expression", node: entry.key });
+        children.push({ kind: "expression", node: entry.value });
+      }
       return;
     case "propertyAccessExpression":
       children.push({ kind: "expression", node: expression.object });

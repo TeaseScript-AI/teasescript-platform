@@ -63,6 +63,8 @@ import {
   INTEGER_TYPE,
   isAnnotatable,
   isAssignable,
+  isCollection,
+  type CollectionType,
   isKnown,
   isNullable,
   isNumeric,
@@ -218,8 +220,6 @@ interface Variable {
  * execution cannot reach.
  */
 type Changes = ReadonlyMap<Variable, StaticType | undefined>;
-
-type Collection = Extract<StaticType, { kind: "list" | "set" }>;
 
 /** What a condition changes when it is true and when it is false, from the flow before it. */
 interface Branches {
@@ -721,12 +721,13 @@ class TypeChecker {
       }
       case "forStatement": {
         const iterable = yield* compileChild(this.#expressionTask(statement.iterable, scope));
-        const element = elementType(iterable);
+        // A loop over a dict goes through its keys.
+        const element = elementType(iterable, true);
         this.#reportUnless(
           iterable,
-          (member) => elementType(member) !== undefined,
+          (member) => elementType(member, true) !== undefined,
           statement.iterable,
-          "A for-loop goes through a list, a set, or a range",
+          "A for-loop goes through a list, a set, a dict, or a range",
         );
         // The loop variable is a place: it keeps the plain element type.
         const loopType = element === undefined ? UNKNOWN_TYPE : copyType(plainType(element));
@@ -921,18 +922,20 @@ class TypeChecker {
           this.#recordRuntimeCheck(
             statement,
             elementStoreType(receiver) ?? UNKNOWN_TYPE,
-            runtimePlace(target),
+            runtimePlace(target, isDictReceiver(object)),
             value,
           );
           return;
         }
-        // An element of a union of lists may be any member's, and what is stored must fit all of them.
+        // An element of a union of lists may be any member's, and what is stored must fit all of them. A compound
+        // assignment reads the dict value first, so its key must exist.
         const store = elementStoreType(object);
         const lists = members(nonNullType(object));
-        if (store !== undefined && lists.every(isList)) {
+        const kind = lists.every(isList) ? "list" : lists.every(isDict) ? "dict" : null;
+        if (store !== undefined && kind !== null) {
           const label = expressionLabel(target.object);
           const elements = elementPlace(
-            { kind: "list", element: store },
+            { kind, element: store },
             label,
             isNullable(object),
             this.#inferredCollection(target.object, scope),
@@ -943,7 +946,7 @@ class TypeChecker {
               ? elements
               : {
                   ...elements,
-                  subject: `${label === null ? "This list" : `'${label}'`} holds ${typeName(nonNullType(object)).replaceAll(" | ", " or ")}`,
+                  subject: `${label === null ? `This ${kind}` : `'${label}'`} holds ${typeName(nonNullType(object)).replaceAll(" | ", " or ")}`,
                 };
           read = elementType(object);
         }
@@ -1060,14 +1063,16 @@ class TypeChecker {
     const kept = resolved(nonNullType(place.type));
     if (
       kept.kind === "union" &&
-      (literal.kind === "listLiteral" || literal.kind === "setLiteral")
+      (literal.kind === "listLiteral" ||
+        literal.kind === "setLiteral" ||
+        literal.kind === "dictLiteral")
     ) {
       // A collection literal in a union place is checked against the union's collection of its kind, or the first one
       // that takes every element (rule 3.4).
-      const kind = literal.kind === "listLiteral" ? "list" : "set";
+      const kind = literalCollectionKind(literal);
       const candidates = kept.members
         .map(resolved)
-        .filter((member): member is Collection => member.kind === kind);
+        .filter((member): member is CollectionType => member.kind === kind);
       let fitting = candidates.length === 1 ? candidates[0] : undefined;
       for (const candidate of candidates)
         if (fitting === undefined && (yield* compileChild(this.#fitsTask(candidate, literal))))
@@ -1081,10 +1086,11 @@ class TypeChecker {
     }
     if (
       (kept.kind === "list" && literal.kind === "listLiteral") ||
-      (kept.kind === "set" && literal.kind === "setLiteral")
+      (kept.kind === "set" && literal.kind === "setLiteral") ||
+      (kept.kind === "dict" && literal.kind === "dictLiteral")
     ) {
-      // A declared element type decides what the literal may mix; `list` or `set` of any values does not, so a mixed
-      // literal still needs a declared union.
+      // A declared element type decides what the literal may mix; `list`, `set`, or `dict` of any values does not, so
+      // a mixed literal still needs a declared union.
       if (isKnown(kept.element)) this.#mixedLiterals.delete(literal);
       const elements = elementPlace(
         kept,
@@ -1093,7 +1099,7 @@ class TypeChecker {
         place.inferred !== undefined,
         place.widening,
       );
-      for (const element of literal.elements)
+      for (const element of literalElements(literal))
         yield* compileChild(this.#storeTask(elements, element, this.#typeOf(element), decides));
       return;
     }
@@ -1241,8 +1247,7 @@ class TypeChecker {
     for (const step of place.path) {
       if (type === undefined) return undefined;
       const value = resolved(nonNullType(type));
-      if (step === "[]")
-        type = value.kind === "list" || value.kind === "set" ? value.element : undefined;
+      if (step === "[]") type = isCollection(value) ? value.element : undefined;
       else type = value.kind === "object" ? (value.properties?.get(step) ?? undefined) : undefined;
     }
     return type;
@@ -1305,19 +1310,23 @@ class TypeChecker {
   }
 
   /**
-   * Whether every part of a value fits a type, looking into nested list and set literals, whose own types are not
-   * decided until a place gives them one. It reports nothing and changes no type.
+   * Whether every part of a value fits a type, looking into nested list, set, and dict literals, whose own types are
+   * not decided until a place gives them one. It reports nothing and changes no type.
    */
   *#fitsTask(type: StaticType, expression: Expression): CompileTask<boolean> {
     const literal = unwrap(expression);
-    if (literal.kind !== "listLiteral" && literal.kind !== "setLiteral")
+    if (
+      literal.kind !== "listLiteral" &&
+      literal.kind !== "setLiteral" &&
+      literal.kind !== "dictLiteral"
+    )
       return isAssignable(type, this.#typeOf(expression));
-    const kind = literal.kind === "listLiteral" ? "list" : "set";
+    const kind = literalCollectionKind(literal);
     for (const member of members(nonNullType(type))) {
       if (member.kind === "unknown" || member.kind === "open") return true;
       if (member.kind !== kind) continue;
       let fits = true;
-      for (const element of literal.elements)
+      for (const element of literalElements(literal))
         if (!(yield* compileChild(this.#fitsTask(member.element, element)))) {
           fits = false;
           break;
@@ -1337,6 +1346,7 @@ class TypeChecker {
     expression: Expression,
     value: StaticType,
     scope: Scope,
+    verb?: string,
   ): CompileTask<void> {
     const collections = members(nonNullType(collection)).map(resolved);
     const label = expressionLabel(collectionExpression);
@@ -1347,8 +1357,13 @@ class TypeChecker {
     const inferred = this.#inferredCollection(collectionExpression, scope);
     const owner = collections.length === 1 ? this.#pathOf(collectionExpression, scope) : undefined;
     const places = collections.flatMap((member) =>
-      member.kind === "list" || member.kind === "set"
-        ? [elementPlace(member, label, nullable, inferred, owner)]
+      isCollection(member)
+        ? [
+            {
+              ...elementPlace(member, label, nullable, inferred, owner),
+              ...(verb === undefined ? {} : { verb }),
+            },
+          ]
         : [],
     );
     if (places.length === 1 || places.length < collections.length) {
@@ -1556,6 +1571,7 @@ class TypeChecker {
         case "namedType":
           break;
         case "listType":
+        case "dictType":
           pending.push(part.element);
           break;
         case "setType": {
@@ -1838,6 +1854,8 @@ class TypeChecker {
         for (const element of node.elements) pending.push(element);
       else if (node.kind === "objectLiteral")
         for (const property of node.properties) pending.push(property.value);
+      else if (node.kind === "dictLiteral")
+        for (const entry of node.entries) pending.push(entry.value);
     }
     return taken;
   }
@@ -1929,6 +1947,32 @@ class TypeChecker {
         if (element === undefined || known.length < types.length) element = UNKNOWN_TYPE;
         return { kind: expression.kind === "listLiteral" ? "list" : "set", element };
       }
+      case "dictLiteral": {
+        // Each key is text; the values share one type like the elements of a list (rule 1.3).
+        const types: StaticType[] = [];
+        for (const entry of expression.entries) {
+          const key = yield* compileChild(this.#expressionTask(entry.key, scope));
+          this.#checkDictKey(key, entry.key);
+          yield* compileChild(this.#expressionTask(entry.value, scope));
+          types.push(this.#capture(entry.value));
+        }
+        const known = types.filter((type) => resolved(type).kind !== "unknown");
+        const choice = expression.entries.find((entry) =>
+          this.#mixedChoices.has(unwrap(entry.value)),
+        );
+        let element = types.length === 0 ? openType() : joinTypes(known);
+        if (choice !== undefined) {
+          this.#mixedLiterals.set(
+            expression,
+            members(this.#mixedChoices.get(unwrap(choice.value))!),
+          );
+          element = undefined;
+        }
+        if (element === undefined && choice === undefined)
+          this.#mixedLiterals.set(expression, known);
+        if (element === undefined || known.length < types.length) element = UNKNOWN_TYPE;
+        return { kind: "dict", element };
+      }
       case "objectLiteral": {
         const properties = new Map<string, StaticType>();
         for (const property of expression.properties) {
@@ -1948,6 +1992,7 @@ class TypeChecker {
         const object = yield* compileChild(this.#expressionTask(expression.object, scope));
         const index = yield* compileChild(this.#expressionTask(expression.index, scope));
         this.#checkIndex(object, expression.object, index, expression.index);
+        this.#checkVisibleKey(expression.object, expression.index);
         const element = elementType(object);
         return element === undefined ? UNKNOWN_TYPE : placeRead(element);
       }
@@ -2443,7 +2488,7 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const method = callee.property.name;
-    if (method === "add" && unwrap(callee.object).kind !== "identifier")
+    if ((method === "add" || method === "get") && unwrap(callee.object).kind !== "identifier")
       this.#relaxNarrowedRoot(callee.object, scope);
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
     const value = resolved(receiver);
@@ -2498,6 +2543,32 @@ class TypeChecker {
     }
     if (method === "removeAt" && values.length === 1 && members(value).every(isList))
       this.#checkIndex(value, callee.object, values[0]!, expression.arguments[0]!.value);
+    // A dict method takes a text key; `get` also takes the value it gives for a missing key.
+    let fallback: StaticType | undefined;
+    if (isDictReceiver(value) && DICT_METHODS.has(method)) {
+      if (!this.#checkDictArguments(expression, method)) return UNKNOWN_TYPE;
+      const key = expression.arguments[0];
+      if (key !== undefined) {
+        this.#checkDictKey(values[0]!, key.value);
+        if (method === "remove") this.#checkVisibleKey(callee.object, key.value);
+      }
+      const defaultArgument = expression.arguments[1];
+      if (method === "get" && defaultArgument !== undefined) {
+        fallback = values[1]!;
+        // The default is a value the dict could hold: it must fit, and it decides an undecided value type.
+        const collection = this.#elementReceiver(callee.object, scope, receiver, fallback);
+        yield* compileChild(
+          this.#storeElementTask(
+            collection,
+            callee.object,
+            defaultArgument.value,
+            fallback,
+            scope,
+            "default to",
+          ),
+        );
+      }
+    }
     // A set compares only values it can hold, and a list becomes a set only of such values.
     if ((method === "contains" || method === "remove") && isSetReceiver(value))
       for (const [index, argument] of expression.arguments.entries())
@@ -2537,7 +2608,7 @@ class TypeChecker {
             );
             return results[index]!;
           }
-          return kept.kind === "list" || kept.kind === "set"
+          return isListOrSet(kept)
             ? this.#collectionMethodType(method, kept, callee.property, expression)
             : results[index]!;
         });
@@ -2553,14 +2624,21 @@ class TypeChecker {
             : `${method}() takes no arguments.`,
           callee.property.span,
         );
-      return all.length === 1 ? results[0]! : union(results.map((result) => result!));
+      const result = all.length === 1 ? results[0]! : union(results.map((result) => result!));
+      // A value of unknown type as the default makes the result unknown, so a place checks it when the script runs.
+      return fallback === undefined ? result : union([result, plainType(fallback)]);
     }
     const failing = resolved(all.find((_, index) => results[index] === undefined)!);
     if (passing.length > 0) this.#reportMayBe(callee.object, failing, passing);
     // Text operations and values without methods name what to write instead (V30 §8).
     else if (all.length === 1 && MEMBER_CHECKED_KINDS.has(failing.kind)) memberChecks();
     // A set has no order to sort or shuffle (V30 §16).
-    else if (all.length === 1 && failing.kind === "set" && COLLECTION_METHODS.has(method))
+    else if (
+      all.length === 1 &&
+      isListOrSet(failing) &&
+      failing.kind === "set" &&
+      COLLECTION_METHODS.has(method)
+    )
       this.#reportProblems(
         collectionMethodProblems(method, failing, callee.property, expression, (argument) =>
           this.#typeOf(argument),
@@ -2571,9 +2649,13 @@ class TypeChecker {
         typeCode.invalidOperand,
         failing.kind === "list" || failing.kind === "set"
           ? `${failing.kind === "list" ? "Lists" : "Sets"} have no method '${method}'.`
-          : failing.kind === "timer" || failing.kind === "media"
-            ? handleMemberMessage(failing.kind, method, "call")
-            : `${capitalize(describeValue(failing))} has no method '${method}'.`,
+          : failing.kind === "dict"
+            ? method === "add"
+              ? "Dicts have no method 'add'; store a value by its key, as in dict[key] = value."
+              : `Dicts have no method '${method}'; use contains, remove, clear, or get.`
+            : failing.kind === "timer" || failing.kind === "media"
+              ? handleMemberMessage(failing.kind, method, "call")
+              : `${capitalize(describeValue(failing))} has no method '${method}'.`,
         callee.property.span,
       );
     return UNKNOWN_TYPE;
@@ -2789,31 +2871,59 @@ class TypeChecker {
       typeCode.invalidOperand,
       value.kind === "list" || value.kind === "set"
         ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'; use length, first, last, or random.`
-        : value.kind === "timer" || value.kind === "media"
-          ? handleMemberMessage(value.kind, name, "read")
-          : `${capitalize(describeValue(value))} has no property '${name}'.`,
+        : value.kind === "dict"
+          ? `Dicts have no property '${name}'; use length, keys, or values, or read a value by its key, as in ${expressionLabel(expression.object) ?? "dict"}[${JSON.stringify(name)}].`
+          : value.kind === "timer" || value.kind === "media"
+            ? handleMemberMessage(value.kind, name, "read")
+            : `${capitalize(describeValue(value))} has no property '${name}'.`,
       expression.property.span,
     );
     return UNKNOWN_TYPE;
   }
 
-  /** Checks `object[index]`: only lists are indexed, every member of a union must be one, and an index is whole. */
+  /**
+   * Checks `object[index]`: only lists, indexed by a whole number, and dicts, by a text key, are indexed, and every
+   * member of a union must be the same one. An object has fixed properties, so it points to a dict.
+   */
   #checkIndex(
     object: StaticType,
     objectExpression: Expression,
     index: StaticType,
     expression: Expression,
   ): void {
+    const known = members(nonNullType(object)).filter(isKnown).map(resolved);
+    if (known.length > 0 && known.every((member) => member.kind === "object")) {
+      const key = staticChoiceValue(expression)?.value;
+      const name = expressionLabel(objectExpression);
+      this.#report(
+        typeCode.invalidOperand,
+        `Objects have fixed properties. Use a dict to look up by name.${
+          typeof key === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(key)
+            ? ` Read a fixed property as '${name ?? "object"}.${key}'.`
+            : ""
+        }`,
+        expression.span,
+      );
+      return;
+    }
+    if (known.length > 0 && known.every((member) => member.kind === "dict")) {
+      if (isNullable(object))
+        this.#reportUnless(object, (member) => member.kind !== "null", objectExpression, "");
+      else this.#checkDictKey(index, expression);
+      return;
+    }
     if (members(object).some((member) => isKnown(member) && resolved(member).kind !== "list")) {
       this.#reportUnless(
         object,
         (member) => !isKnown(member) || resolved(member).kind === "list",
         objectExpression,
-        "Only a list can be indexed",
+        "Only a list or a dict can be indexed",
       );
       return;
     }
     const position = nonNullTypeForUse(index);
+    // A value of unknown type may also be a dict, which takes a text key.
+    const keyed = known.length === 0;
     if (isScalar(position, "number"))
       this.#report(
         typeCode.invalidOperand,
@@ -2823,9 +2933,75 @@ class TypeChecker {
     else
       this.#reportUnless(
         index,
-        (member) => isScalar(member, "integer"),
+        (member) => isScalar(member, "integer") || (keyed && isScalar(member, "string")),
         expression,
-        "A list index is a whole number (integer)",
+        keyed
+          ? "An index is a whole number (integer) for a list, or text (string) for a dict"
+          : "A list index is a whole number (integer)",
+      );
+  }
+
+  /**
+   * Checks the arguments of a dict method: `contains(key)` and `remove(key)` take a key, `clear()` none, and
+   * `get(key, default: value)` a key and a `default:`. Returns whether they have that form.
+   */
+  #checkDictArguments(expression: CallExpression, method: string): boolean {
+    const positional = expression.arguments.filter(
+      (argument) => argument.kind === "positionalArgument",
+    );
+    const named = expression.arguments.filter((argument) => argument.kind === "namedArgument");
+    const unknown = named.find((argument) => method !== "get" || argument.name.name !== "default");
+    if (unknown !== undefined) {
+      this.#report(
+        typeCode.unknownNamedArgument,
+        method === "get"
+          ? `get(...) has no parameter '${unknown.name.name}'; its only named argument is 'default:'.`
+          : `${method}(...) takes no named arguments.`,
+        unknown.name.span,
+      );
+      return false;
+    }
+    const keys = method === "clear" ? 0 : 1;
+    if (positional.length === keys && (method !== "get" || named.length === 1)) return true;
+    this.#report(
+      typeCode.argumentCount,
+      method === "get"
+        ? named.length === 0 && positional.length === 1
+          ? "get(key, default: value) needs a 'default:' for a missing key. Read a key that must exist as dict[key]."
+          : "get(key, default: value) takes one key and a 'default:'."
+        : method === "clear"
+          ? "clear() takes no arguments."
+          : `${method}(key) takes one key.`,
+      expression.span,
+    );
+    return false;
+  }
+
+  /** A dict key is text; a number key names the fix, `"${id}"`. */
+  #checkDictKey(type: StaticType, expression: Expression): void {
+    this.#reportUnless(
+      type,
+      (member) => isScalar(member, "string"),
+      expression,
+      "A dict key is text (string)",
+      () =>
+        isNumeric(nonNullTypeForUse(type))
+          ? ` Write a number key as text, as in "\${${expressionLabel(expression) ?? "id"}}".`
+          : "",
+    );
+  }
+
+  /** A key that a dict literal certainly does not have is reported, as it would fail when the script runs. */
+  #checkVisibleKey(dict: Expression, keyExpression: Expression): void {
+    const literal = unwrap(dict);
+    const key = staticChoiceValue(keyExpression)?.value;
+    if (literal.kind !== "dictLiteral" || typeof key !== "string") return;
+    const keys = literal.entries.map((entry) => staticChoiceValue(entry.key)?.value);
+    if (keys.every((written) => typeof written === "string" && written !== key))
+      this.#report(
+        typeCode.invalidOperand,
+        `Dictionary has no key ${JSON.stringify(key)}.`,
+        keyExpression.span,
       );
   }
 
@@ -3031,7 +3207,9 @@ class TypeChecker {
         (member) =>
           this.#report(
             typeCode.unshowableValue,
-            `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, and date and time values, and selects one element of a list.`,
+            member.kind === "dict"
+              ? `"\${...}" cannot show a dict. Select one value with ${expressionLabel(expression) ?? "dict"}[key], or show every value with ${expressionLabel(expression) ?? "dict"}.values.join().`
+              : `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, and date and time values, and selects one element of a list.`,
             expression.span,
           ),
       );
@@ -3475,7 +3653,8 @@ class TypeChecker {
   /** Reports list and set literals that mix types and were not stored in a place of a declared element type. */
   #reportMixedLiterals(): void {
     for (const [literal, types] of this.#mixedLiterals) {
-      const kind = literal.kind === "setLiteral" ? "set" : "list";
+      const kind =
+        literal.kind === "setLiteral" ? "set" : literal.kind === "dictLiteral" ? "dict" : "list";
       const first = types[0]!;
       const other = types.find((type) => joinTypes([first, type]) === undefined) ?? types[1]!;
       const written = typeName({ kind, element: union(types) });
@@ -3860,15 +4039,16 @@ const OPERAND_KINDS: readonly StaticType[] = [
   TIMESTAMP_TYPE,
 ];
 
-/** Whether a variable of this type holds a list or set whose element type no value decided yet. */
+/** Whether a variable of this type holds a list, set, or dict whose element type no value decided yet. */
 function hasUndecidedElements(type: StaticType): boolean {
   return members(nonNullType(type)).some((member) => {
     const value = resolved(member);
-    return (
-      (value.kind === "list" || value.kind === "set") && resolved(value.element).kind === "open"
-    );
+    return isCollection(value) && resolved(value.element).kind === "open";
   });
 }
+
+/** The methods of a dict. */
+const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
 
 const COLLECTION_CHANGES: ReadonlySet<string> = new Set([
   "add",
@@ -4041,7 +4221,7 @@ function variablePlace(variable: Variable): Place {
 }
 
 function elementPlace(
-  collection: StaticType & { readonly kind: "list" | "set" },
+  collection: CollectionType,
   name: string | null,
   nullable: boolean,
   inferred = false,
@@ -4097,16 +4277,20 @@ function propertyPlace(
   };
 }
 
-/** How a runtime type error names an assignment target, such as `'count'` or `property 'door.locked'`. */
-function runtimePlace(target: AssignmentStatement["target"]): string {
+/**
+ * How a runtime type error names an assignment target, such as `'count'`, `property 'door.locked'`, or `a value of
+ * 'toys'` for a value stored in a dict.
+ */
+function runtimePlace(target: AssignmentStatement["target"], dict = false): string {
   if (target.kind === "identifier") return `'${target.name}'`;
   const object = expressionLabel(target.object);
-  if (target.kind === "indexExpression") return elementLabel(object, "list");
+  if (target.kind === "indexExpression") return elementLabel(object, dict ? "dict" : "list");
   return `property '${object === null ? "" : `${object}.`}${target.property.name}'`;
 }
 
-function elementLabel(collection: string | null, kind: "list" | "set"): string {
-  return collection === null ? `an element of this ${kind}` : `an element of '${collection}'`;
+function elementLabel(collection: string | null, kind: "list" | "set" | "dict"): string {
+  const part = kind === "dict" ? "a value" : "an element";
+  return collection === null ? `${part} of this ${kind}` : `${part} of '${collection}'`;
 }
 
 /** `' from line 3'` when the first value stored decided the type, so the message names both places. */
@@ -4180,6 +4364,11 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
     case "set":
       if (name === "length") return INTEGER_TYPE;
       return name === "first" || name === "last" || name === "random" ? value.element : undefined;
+    case "dict":
+      // `keys` and `values` are new lists, in entry order.
+      if (name === "length") return INTEGER_TYPE;
+      if (name === "keys") return { kind: "list", element: STRING_TYPE };
+      return name === "values" ? { kind: "list", element: copyType(value.element) } : undefined;
     case "object":
       return value.properties?.get(name) ?? UNKNOWN_TYPE;
     case "timer":
@@ -4209,6 +4398,12 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     return member?.parameters ? textResultType(member) : undefined;
   }
   if (value.kind === "scalar") return temporalMethodType(value.name, method);
+  if (value.kind === "dict") {
+    if (method === "contains") return BOOLEAN_TYPE;
+    if (method === "clear") return NULL_TYPE;
+    // A removed value leaves the dict, and `get` gives a copy, so the type is a copy for the place that keeps it.
+    return method === "remove" || method === "get" ? copyType(value.element) : undefined;
+  }
   if (value.kind !== "list" && value.kind !== "set") return undefined;
   switch (method) {
     case "join":
@@ -4344,6 +4539,11 @@ function assignableProperty(
     return {
       problem: `Property '${name}' of ${describeValue(member)} cannot be assigned; date and time values do not change.`,
     };
+  if (member.kind === "dict")
+    return {
+      problem: `Dicts have no properties to assign. Store a value by its key, as in dict["${name}"] = value.`,
+      receiver: true,
+    };
   // A problem with the receiver itself points at the receiver.
   if (["scalar", "list", "set", "range", "null"].includes(member.kind))
     return {
@@ -4360,6 +4560,37 @@ function assignableProperty(
 
 function isList(type: StaticType): boolean {
   return resolved(type).kind === "list";
+}
+
+/** Whether a type is a list or a set, which share the collection methods that a dict does not have. */
+function isListOrSet(type: StaticType): type is CollectionType & { readonly kind: "list" | "set" } {
+  return type.kind === "list" || type.kind === "set";
+}
+
+function isDict(type: StaticType): boolean {
+  return resolved(type).kind === "dict";
+}
+
+/** Whether every known member of a receiver is a dict, so an index is a key. */
+function isDictReceiver(type: StaticType): boolean {
+  const known = members(nonNullType(type)).filter(isKnown);
+  return known.length > 0 && known.every(isDict);
+}
+
+/** The collection a list, set, or dict literal builds. */
+function literalCollectionKind(
+  literal: Extract<Expression, { kind: "listLiteral" | "setLiteral" | "dictLiteral" }>,
+): CollectionType["kind"] {
+  return literal.kind === "listLiteral" ? "list" : literal.kind === "setLiteral" ? "set" : "dict";
+}
+
+/** The elements of a list or set literal, or the values of a dict literal. */
+function literalElements(
+  literal: Extract<Expression, { kind: "listLiteral" | "setLiteral" | "dictLiteral" }>,
+): readonly Expression[] {
+  return literal.kind === "dictLiteral"
+    ? literal.entries.map((entry) => entry.value)
+    : literal.elements;
 }
 
 /** Whether a receiver may be a set. */
@@ -4421,6 +4652,7 @@ function declarationName(declaration: Declaration): string {
 const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
   "list",
   "set",
+  "dict",
   "object",
   "range",
   "timer",
@@ -4590,10 +4822,11 @@ function decidedSlot(type: StaticType, at: SourceSpan): StaticType {
   return slot;
 }
 
-/** A literal list, set, or range that certainly has an element, so a loop over it runs at least once. */
+/** A literal list, set, dict, or range that certainly has an element, so a loop over it runs at least once. */
 function isNonEmptyLiteral(expression: Expression): boolean {
   const node = unwrap(expression);
   if (node.kind === "listLiteral" || node.kind === "setLiteral") return node.elements.length > 0;
+  if (node.kind === "dictLiteral") return node.entries.length > 0;
   if (node.kind !== "rangeExpression") return false;
   const start = staticNumber(node.start);
   const end = staticNumber(node.end);
@@ -4855,12 +5088,12 @@ function optionalResultFix(declared: StaticType): string {
 /** How to make a value fit a list or set: allow fractions, or keep other values in a separate collection. */
 function elementFix(
   variable: string | null,
-  collection: StaticType & { readonly kind: "list" | "set" },
+  collection: CollectionType,
   value: StaticType,
   nullable: boolean,
 ): string {
   if (variable !== null && isScalar(collection.element, "integer") && isScalar(value, "number"))
-    return ` To allow fractions, declare it as 'let ${variable}: ${collection.kind === "list" ? "number[]" : "number set"}${nullable ? "?" : ""} = ...'.`;
+    return ` To allow fractions, declare it as 'let ${variable}: ${typeName({ kind: collection.kind, element: NUMBER_TYPE })}${nullable ? "?" : ""} = ...'.`;
   if (isScalar(collection.element, "duration") && isNumeric(value))
     return " Give the number a unit, such as '5 s'.";
   const both: StaticType = { kind: collection.kind, element: union([collection.element, value]) };
@@ -4876,7 +5109,7 @@ function conditionFix(value: StaticType, expression: Expression): string {
   if (isNumeric(value)) return ` Compare it instead, such as '${label} > 0'.`;
   if (isScalar(value, "string")) return ` Compare it instead, such as '${label} != ""'.`;
   const kind = resolved(value).kind;
-  if (kind === "list" || kind === "set")
+  if (kind === "list" || kind === "set" || kind === "dict")
     return ` Check its length instead, such as '${label}.length > 0'.`;
   return "";
 }

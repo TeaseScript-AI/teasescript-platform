@@ -249,11 +249,22 @@ export type ScalarTypeName =
   | "timestamp"
   | "duration";
 
-/** A type name: a scalar type, `null`, any `list`, `set`, or `object`, or a program-control type (ADR 0021). */
+/**
+ * A type name: a scalar type, `null`, any `list`, `set`, `dict`, or `object`, or a program-control type (ADR 0021).
+ */
 export type TypeName =
-  ScalarTypeName | "null" | "list" | "set" | "object" | "range" | "speaker" | "timer" | "media";
+  | ScalarTypeName
+  | "null"
+  | "list"
+  | "set"
+  | "dict"
+  | "object"
+  | "range"
+  | "speaker"
+  | "timer"
+  | "media";
 
-/** A written type: a name, `T[]`, `T set`, `T?`, or a union `A | B`. Parentheses only group. */
+/** A written type: a name, `T[]`, `T set`, `T dict`, `T?`, or a union `A | B`. Parentheses only group. */
 export type TypeAnnotation = NamedType | CollectionType | OptionalType | UnionType;
 
 export interface NamedType {
@@ -262,9 +273,9 @@ export interface NamedType {
   readonly span: SourceSpan;
 }
 
-/** `T[]` or `T set`. */
+/** `T[]`, `T set`, or `T dict`, whose values are of type `T`. */
 export interface CollectionType {
-  readonly kind: "listType" | "setType";
+  readonly kind: "listType" | "setType" | "dictType";
   readonly element: TypeAnnotation;
   readonly span: SourceSpan;
 }
@@ -400,6 +411,7 @@ export type Expression =
   | ListLiteral
   | ObjectLiteral
   | SetLiteral
+  | DictLiteral
   | ParenthesizedExpression
   | PropertyAccessExpression
   | IndexExpression
@@ -533,6 +545,21 @@ export interface ObjectProperty {
 export interface SetLiteral {
   readonly kind: "setLiteral";
   readonly elements: readonly Expression[];
+  readonly span: SourceSpan;
+}
+
+/** `dict{ name: value, "any text": value, [key]: value }`; every key is an expression that gives text. */
+export interface DictLiteral {
+  readonly kind: "dictLiteral";
+  readonly entries: readonly DictEntry[];
+  readonly span: SourceSpan;
+}
+
+/** One entry of a dict literal. A written name such as `collar:` is its text, as if quoted. */
+export interface DictEntry {
+  readonly kind: "dictEntry";
+  readonly key: Expression;
+  readonly value: Expression;
   readonly span: SourceSpan;
 }
 

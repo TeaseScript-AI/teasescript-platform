@@ -48,6 +48,7 @@ const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
   "timestamp",
   "duration",
   "list",
+  "dict",
   "object",
   "range",
   "media",

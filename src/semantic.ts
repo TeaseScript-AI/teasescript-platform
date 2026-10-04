@@ -27,6 +27,7 @@ import {
 } from "./protected-names.js";
 import {
   findVisibleOverflows,
+  staticChoiceValue,
   staticNumber,
   staticQuantity,
   staticVisibleText,
@@ -1113,6 +1114,25 @@ class SemanticValidator {
           this.#validateCollectionExpressionTask(expression, scope, contextualSpeaker),
         );
         return;
+      case "dictLiteral": {
+        // Keys the source shows must differ; keys known only at runtime replace earlier entries instead.
+        const keys = new Set<string>();
+        for (const entry of expression.entries) {
+          yield* compileChild(this.#validateExpressionTask(entry.key, scope, contextualSpeaker));
+          const key = staticChoiceValue(entry.key)?.value;
+          if (typeof key === "string") {
+            if (keys.has(key))
+              this.#report(
+                semanticCode.duplicateProperty,
+                `Duplicate dict key ${JSON.stringify(key)}. Each key appears once; remove one of the entries.`,
+                entry.key.span,
+              );
+            keys.add(key);
+          }
+          yield* compileChild(this.#validateExpressionTask(entry.value, scope, contextualSpeaker));
+        }
+        return;
+      }
       case "propertyAccessExpression":
         yield* compileChild(
           this.#validateExpressionTask(expression.object, scope, contextualSpeaker),
@@ -1641,6 +1661,7 @@ function isDefinitelyNonDuration(expression: Expression): boolean {
     kind === "listLiteral" ||
     kind === "setLiteral" ||
     kind === "objectLiteral" ||
+    kind === "dictLiteral" ||
     kind === "rangeExpression"
   );
 }
@@ -1655,6 +1676,7 @@ function isDefinitelyNonFileReference(expression: Expression): boolean {
     kind === "listLiteral" ||
     kind === "setLiteral" ||
     kind === "objectLiteral" ||
+    kind === "dictLiteral" ||
     kind === "rangeExpression" ||
     kind === "showButtonExpression" ||
     kind === "timerExpression" ||
@@ -1673,6 +1695,7 @@ function isDefinitelyNonText(expression: Expression): boolean {
     expression.kind === "listLiteral" ||
     expression.kind === "setLiteral" ||
     expression.kind === "objectLiteral" ||
+    expression.kind === "dictLiteral" ||
     expression.kind === "rangeExpression"
   );
 }
@@ -1743,6 +1766,7 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "listLiteral" ||
     expression.kind === "setLiteral" ||
     expression.kind === "objectLiteral" ||
+    expression.kind === "dictLiteral" ||
     expression.kind === "rangeExpression" ||
     expression.kind === "durationLiteral" ||
     expression.kind === "showButtonExpression" ||
@@ -1777,6 +1801,7 @@ function isDefinitelyNonString(expression: Expression): boolean {
     expression.kind === "listLiteral" ||
     expression.kind === "setLiteral" ||
     expression.kind === "objectLiteral" ||
+    expression.kind === "dictLiteral" ||
     expression.kind === "rangeExpression" ||
     expression.kind === "unaryExpression" ||
     expression.kind === "showButtonExpression" ||
@@ -1808,7 +1833,8 @@ function isDefinitelyComposite(expression: Expression, scope: SemanticScope): bo
   if (
     expression.kind === "listLiteral" ||
     expression.kind === "objectLiteral" ||
-    expression.kind === "setLiteral"
+    expression.kind === "setLiteral" ||
+    expression.kind === "dictLiteral"
   ) {
     return true;
   }

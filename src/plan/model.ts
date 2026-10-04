@@ -1,7 +1,7 @@
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 37;
+export const INSTRUCTION_PLAN_VERSION = 38;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -546,6 +546,7 @@ export type ExpressionPlan =
   | ListExpressionPlan
   | ObjectExpressionPlan
   | SetExpressionPlan
+  | DictExpressionPlan
   | GroupExpressionPlan
   | TemplateExpressionPlan
   | PropertyExpressionPlan
@@ -602,12 +603,12 @@ export interface TypeCheckPlan {
 }
 
 /**
- * The checked part of a type. A list or set with a `null` element accepts any elements, and an object checks only the
- * listed properties that the value has; the parts the compiler does not know are left out.
+ * The checked part of a type. A list, set, or dict with a `null` element accepts any elements or values, and an object
+ * checks only the listed properties that the value has; the parts the compiler does not know are left out.
  */
 export type TypePlan =
   | { readonly kind: TypePlanName }
-  | { readonly kind: "list" | "set"; readonly element: TypePlan | null }
+  | { readonly kind: "list" | "set" | "dict"; readonly element: TypePlan | null }
   | { readonly kind: "object"; readonly properties: readonly TypePropertyPlan[] }
   | { readonly kind: "union"; readonly members: readonly TypePlan[] };
 
@@ -651,6 +652,18 @@ export interface ObjectExpressionPlan extends ExpressionPlanBase {
 export interface SetExpressionPlan extends ExpressionPlanBase {
   readonly kind: "set";
   readonly elements: readonly ExpressionPlan[];
+}
+
+/** `dict{ ... }`: each entry's key, which must be text, is evaluated before its value, in source order. */
+export interface DictExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "dict";
+  readonly entries: readonly DictEntryPlan[];
+}
+
+export interface DictEntryPlan {
+  readonly key: ExpressionPlan;
+  readonly value: ExpressionPlan;
+  readonly span: PlanSourceLocation;
 }
 
 export interface GroupExpressionPlan extends ExpressionPlanBase {

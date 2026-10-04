@@ -64,6 +64,7 @@ import {
 } from "./script-storage.js";
 import {
   cloneCapturedSerializableValue,
+  createCapturedSerializableList,
   createCapturedSerializableObject,
   getSerializableProperty,
   type SerializableRuntimeList,
@@ -115,6 +116,7 @@ import { executionRunnable, processDueWork } from "./operations/observe-time.js"
 import { cloneTimer } from "./timers.js";
 import { assertValueType } from "./value-types.js";
 import {
+  isDict,
   isDuration,
   isList,
   isObject,
@@ -1299,11 +1301,15 @@ function executeLoopStart(
         callFrameId: currentCallFrameId(snapshot),
       };
     } else {
-      const source = evaluator.evaluate(instruction.expression);
+      const evaluated = evaluator.evaluate(instruction.expression);
+      // A loop over a dict goes through its keys as they are when the loop starts.
+      const source = isDict(evaluated)
+        ? createCapturedSerializableList(evaluated.entries.map((entry) => entry.key))
+        : evaluated;
       if (!isList(source) && !isSet(source) && !isRange(source)) {
         throw fault(
           "TSR044",
-          "for requires a list, set, or range source.",
+          "for requires a list, set, dict, or range source.",
           instruction.expression.span,
         );
       }

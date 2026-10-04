@@ -715,6 +715,16 @@ export function expressionMayReferenceTemporary(value: unknown, temporaryId: num
             isRecord(property) && expressionMayReferenceTemporary(property.value, temporaryId),
         )
       );
+    case "dict":
+      return (
+        Array.isArray(value.entries) &&
+        value.entries.some(
+          (entry) =>
+            isRecord(entry) &&
+            (expressionMayReferenceTemporary(entry.key, temporaryId) ||
+              expressionMayReferenceTemporary(entry.value, temporaryId)),
+        )
+      );
     case "group":
       return expressionMayReferenceTemporary(value.expression, temporaryId);
     case "template":
@@ -1075,6 +1085,16 @@ function expressionGuaranteesTemporaryEvaluation(value: unknown, temporaryId: nu
           (property) =>
             isRecord(property) &&
             expressionGuaranteesTemporaryEvaluation(property.value, temporaryId),
+        )
+      );
+    case "dict":
+      return (
+        Array.isArray(value.entries) &&
+        value.entries.some(
+          (entry) =>
+            isRecord(entry) &&
+            (expressionGuaranteesTemporaryEvaluation(entry.key, temporaryId) ||
+              expressionGuaranteesTemporaryEvaluation(entry.value, temporaryId)),
         )
       );
     case "group":

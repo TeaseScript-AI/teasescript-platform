@@ -50,6 +50,8 @@ import type {
   RepeatStatement,
   ReturnStatement,
   SetLiteral,
+  DictEntry,
+  DictLiteral,
   SpeakerDeclaration,
   SpeakerProperty,
   SpeakerSetterStatement,
@@ -1449,7 +1451,7 @@ class Parser {
     });
   }
 
-  /** A type name or a parenthesized type, followed by any number of `[]`, `set`, and `?` in source order. */
+  /** A type name or a parenthesized type, followed by any number of `[]`, `set`, `dict`, and `?` in source order. */
   *#parsePostfixTypeTask(context: TypeContext): ParseTask<TypeAnnotation | null> {
     const first = this.#peek();
     let type: TypeAnnotation;
@@ -1501,6 +1503,12 @@ class Parser {
           element: type,
           span: spanFrom(first.span, this.#previous().span),
         });
+      } else if (this.#matchDictTypeOperator(context)) {
+        type = Object.freeze({
+          kind: "dictType",
+          element: type,
+          span: spanFrom(first.span, this.#previous().span),
+        });
       } else if (this.#matchTypeOperator(TokenKind.Question, context)) {
         type = Object.freeze({
           kind: "optionalType",
@@ -1511,6 +1519,19 @@ class Parser {
         return type;
       }
     }
+  }
+
+  /** Matches the contextual type operator `dict` in `T dict`, which is a name rather than a keyword token. */
+  #matchDictTypeOperator(context: TypeContext): boolean {
+    let offset = 0;
+    if (context === "delimited" || context === "delimitedTypeTest") {
+      while (this.#peek(offset).kind === TokenKind.Newline) offset += 1;
+    }
+    const token = this.#peek(offset);
+    if (token.kind !== TokenKind.Identifier || token.lexeme !== "dict") return false;
+    this.#skipContinuationNewlines();
+    this.#advance();
+    return true;
   }
 
   /** Matches `|` or a postfix type operator where the type's `context` lets it continue the type. */
@@ -2558,6 +2579,11 @@ class Parser {
     if (this.#match(TokenKind.KeywordNull)) {
       return Object.freeze({ kind: "nullLiteral", value: null, span: copySpan(token.span) });
     }
+    if (this.#checkIdentifier("dict") && this.#peek(1).kind === TokenKind.LeftBrace) {
+      this.#advance();
+      this.#advance();
+      return yield* parseChild(this.#withinDelimiters(this.#parseDictLiteral(token)));
+    }
     if (
       this.#match(TokenKind.Identifier) ||
       this.#match(TokenKind.KeywordSpeaker) ||
@@ -3010,6 +3036,93 @@ class Parser {
     });
   }
 
+  /** `dict{ ... }` after its `{`: entries `key: value`, where a key is a name, quoted text, or `[expression]`. */
+  *#parseDictLiteral(start: Token): ParseTask<DictLiteral> {
+    const entries: DictEntry[] = [];
+    this.#skipNewlines();
+    while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
+      const keyStart = this.#peek();
+      const key = yield* parseChild(this.#parseDictKey());
+      if (key === null) {
+        this.#synchronizeDelimited(TokenKind.RightBrace);
+        break;
+      }
+      if (!this.#match(TokenKind.Colon)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedColon,
+          "Expected ':' after the dict key.",
+        );
+        this.#synchronizeDelimited(TokenKind.RightBrace);
+        break;
+      }
+      const value = yield* parseChild(this.#parseColonValueTask(true));
+      if (value === null) break;
+      entries.push(
+        Object.freeze({ kind: "dictEntry", key, value, span: spanFrom(keyStart.span, value.span) }),
+      );
+      this.#skipNewlines();
+      if (!this.#match(TokenKind.Comma)) break;
+      this.#skipNewlines();
+      if (this.#check(TokenKind.RightBrace)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedPropertyName,
+          "Expected a dict entry after ','.",
+        );
+        break;
+      }
+    }
+    const end = this.#consumeClosingDelimiter(
+      TokenKind.RightBrace,
+      "Expected '}' after the dict literal.",
+    );
+    return Object.freeze({
+      kind: "dictLiteral",
+      entries: Object.freeze(entries),
+      span: spanFrom(start.span, end),
+    });
+  }
+
+  /** A dict key: quoted text, `[expression]`, or a name, which is its own text. */
+  *#parseDictKey(): ParseTask<Expression | null> {
+    const token = this.#peek();
+    if (this.#match(TokenKind.StringStart))
+      return yield* parseChild(this.#parseStringLiteral(token));
+    if (this.#match(TokenKind.LeftBracket)) {
+      this.#skipNewlines();
+      const key = yield* parseChild(this.#parseRequiredExpressionTask());
+      if (key === null) return null;
+      this.#skipNewlines();
+      if (!this.#match(TokenKind.RightBracket)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedDelimiter,
+          "Expected ']' after the computed dict key.",
+        );
+        return null;
+      }
+      return key;
+    }
+    if (!isPropertyName(token)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedPropertyName,
+        "Expected a dict key: a name, quoted text, or [expression].",
+      );
+      return null;
+    }
+    this.#advance();
+    const text: StringText = Object.freeze({
+      kind: "stringText",
+      raw: token.lexeme,
+      value: token.lexeme,
+      span: copySpan(token.span),
+    });
+    return Object.freeze({
+      kind: "stringLiteral",
+      form: "singleLine",
+      parts: Object.freeze([text]),
+      span: copySpan(token.span),
+    });
+  }
+
   *#parseStringLiteral(start: Token): ParseTask<StringLiteral | null> {
     const parts: StringPart[] = [];
     let valid = true;
@@ -3350,6 +3463,7 @@ const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
       "timestamp",
       "duration",
       "list",
+      "dict",
       "object",
       "range",
       "timer",

@@ -1084,6 +1084,26 @@ export class InstructionCompiler {
         return yield* compileChild(this.#lowerCollectionExpressionTask(expression));
       case "objectLiteral":
         return yield* compileChild(this.#lowerCollectionExpressionTask(expression));
+      case "dictLiteral": {
+        // Each key is evaluated before its value, in source order.
+        const parts = yield* compileChild(
+          this.#lowerOrderedExpressionsTask(
+            expression.entries.flatMap((entry) => [entry.key, entry.value]),
+          ),
+        );
+        return {
+          plan: {
+            kind: "dict",
+            entries: expression.entries.map((entry, index) => ({
+              key: parts[2 * index]!.plan,
+              value: parts[2 * index + 1]!.plan,
+              span: copySpan(entry.span),
+            })),
+            span: copySpan(expression.span),
+          },
+          temporaryIds: parts.flatMap((part) => part.temporaryIds),
+        };
+      }
       case "propertyAccessExpression": {
         const object = yield* compileChild(this.#lowerExpressionTask(expression.object));
         return {
@@ -2182,6 +2202,16 @@ function assembleExpression(
           name: property.name.name,
           value: child(property.value),
           span: copySpan(property.span),
+        })),
+        span: copySpan(expression.span),
+      };
+    case "dictLiteral":
+      return {
+        kind: "dict",
+        entries: expression.entries.map((entry) => ({
+          key: child(entry.key),
+          value: child(entry.value),
+          span: copySpan(entry.span),
         })),
         span: copySpan(expression.span),
       };

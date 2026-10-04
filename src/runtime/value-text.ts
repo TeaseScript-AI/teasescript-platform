@@ -20,6 +20,7 @@ import type {
   SerializableTimerHandle,
 } from "./serializable-values.js";
 import {
+  isDict,
   isDuration,
   isList,
   isMediaHandle,
@@ -122,8 +123,9 @@ export function fieldText(
 
 /**
  * Code-like notation of any value, as `say` shows a value that is not a scalar: `["pet", 2.5, { name: "Bo" }]`,
- * `1..=5`, or `<speaker mistress>`. Nested text is quoted with the string-literal escapes, other scalars use
- * `visibleText`, and `handleNotation` describes a timer or media handle from its current state.
+ * `dict{ "collar": "leather" }`, `1..=5`, or `<speaker mistress>`. Nested text and dict keys are quoted with the
+ * string-literal escapes, other scalars use `visibleText`, and `handleNotation` describes a timer or media handle from
+ * its current state.
  */
 export function valueNotation(
   value: SerializableRuntimeValue,
@@ -164,6 +166,18 @@ export function valueNotation(
         work.push({ text: `${index > 0 ? ", " : ""}${name}: ` });
       }
       work.push({ text: "{ " });
+    } else if (isDict(current)) {
+      if (current.entries.length === 0) {
+        output.push("dict{}");
+        continue;
+      }
+      work.push({ text: " }" });
+      for (let index = current.entries.length - 1; index >= 0; index -= 1) {
+        const entry = current.entries[index]!;
+        work.push({ value: entry.value });
+        work.push({ text: `${index > 0 ? ", " : ""}${quotedText(entry.key)}: ` });
+      }
+      work.push({ text: "dict{ " });
     } else if (isRange(current))
       output.push(
         `${plainScalarText(current.start, span)}${current.inclusive ? "..=" : ".."}${plainScalarText(current.end, span)}`,
