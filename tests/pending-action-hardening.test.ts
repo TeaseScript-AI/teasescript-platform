@@ -60,7 +60,7 @@ test("due foreground delays are rejected through direct and checkpoint boundarie
   assert.throws(() => restoreCheckpoint(jsonRoundTrip), checkpointError);
 });
 
-test("terminal root waits validate, round-trip, settle, and resume at the root completion boundary", () => {
+test("a final root wait validates, round-trips, settles, and resumes into exit", () => {
   const compiled = plan("wait 1 ms\nexit");
   const uninterruptedWaiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   assert.equal(uninterruptedWaiting.snapshot.status, "waiting");
@@ -86,26 +86,22 @@ test("terminal root waits validate, round-trip, settle, and resume at the root c
   assert.deepEqual(restoredFinal.snapshot, uninterruptedFinal.snapshot);
   assert.deepEqual(
     uninterruptedFinal.events.map((event) => event.kind),
-    ["complete"],
+    ["exit"],
   );
   assert.equal(validateRuntimeSnapshot(uninterruptedFinal.snapshot, compiled).valid, true);
 });
 
-test("rejects every forged running root-end shape outside the settled terminal delay transition", () => {
+test("a settled final wait runs on at exit, and forged state there or past the root is rejected", () => {
   const compiled = plan("wait 1 ms\nwait 1 ms\nexit");
   const first = run(compiled, createFreshRuntimeSnapshot(compiled));
   const second = run(compiled, observeTime(compiled, first.snapshot, 1).snapshot);
   const settled = observeTime(compiled, second.snapshot, 2).snapshot;
   assert.equal(settled.status, "running");
-  assert.equal(settled.nextInstruction, compiled.files[0]!.rootEndInstruction);
+  assert.equal(compiled.instructions[settled.nextInstruction]?.kind, "exit");
   assert.equal(validateRuntimeSnapshot(settled, compiled).valid, true);
 
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: fixture table: callbacks deliberately violate distinct pending-delay snapshot invariants before validation.
   const invalid: Readonly<Record<string, (snapshot: any) => void>> = {
-    extraRootScope: (snapshot) => {
-      snapshot.frames.push({ id: snapshot.nextScopeId, bindings: [] });
-      snapshot.nextScopeId += 1;
-    },
     retainedTemporary: (snapshot) => {
       snapshot.temporaries.push({ id: 999, value: 1 });
     },
@@ -121,11 +117,8 @@ test("rejects every forged running root-end shape outside the settled terminal d
     backgroundAction: (snapshot) => {
       snapshot.backgroundActions.push({});
     },
-    missingTerminalHandoff: (snapshot) => {
-      snapshot.terminalContinuationHandoff = null;
-    },
-    incompatibleTerminalHandoff: (snapshot) => {
-      snapshot.terminalContinuationHandoff.actionId = 1;
+    pastRoot: (snapshot) => {
+      snapshot.nextInstruction = compiled.files[0]!.rootEndInstruction;
     },
   };
   for (const [name, mutate] of Object.entries(invalid)) {
@@ -144,37 +137,13 @@ test("rejects every forged running root-end shape outside the settled terminal d
   arbitrary.status = "running";
   arbitrary.nextInstruction = compiled.files[0]!.rootEndInstruction;
   assert.equal(validateRuntimeSnapshot(arbitrary, compiled).valid, false);
+  assert.throws(
+    () => executeInstruction(compiled, arbitrary),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
+  );
 });
 
-test("rejects an earlier delay settlement forged onto a terminal positive or zero wait", () => {
-  for (const source of [
-    'wait 1 ms\nsay "must run"\nwait 1 ms\nexit',
-    'wait 1 ms\nsay "must run"\nwait 0\nexit',
-  ]) {
-    const compiled = plan(source);
-    const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
-    const earlierSettlement = observeTime(compiled, waiting.snapshot, 1).snapshot;
-    assert.equal(earlierSettlement.status, "running");
-    assert.notEqual(earlierSettlement.nextInstruction, compiled.files[0]!.rootEndInstruction);
-
-    const forged = mutable(earlierSettlement);
-    forged.nextInstruction = compiled.files[0]!.rootEndInstruction;
-    assert.equal(validateRuntimeSnapshot(forged, compiled).valid, false, source);
-    assert.throws(
-      () =>
-        restoreCheckpoint({ ...createCheckpoint(compiled, earlierSettlement), snapshot: forged }),
-      checkpointError,
-      source,
-    );
-    assert.throws(
-      () => executeInstruction(compiled, forged),
-      (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
-      source,
-    );
-  }
-});
-
-test("terminal delay completion is canonical across execute, event stepping, run, and repeated halted entries", () => {
+test("a settled final delay runs into exit canonically across execute, event stepping, run, and repeated halted entries", () => {
   const compiled = plan('function hidden { say "hidden" }\nwait 1 ms\nexit');
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled));
   const settled = observeTime(compiled, waiting.snapshot, 1);
@@ -189,7 +158,7 @@ test("terminal delay completion is canonical across execute, event stepping, run
     assert.equal(validateRuntimeSnapshot(completed.snapshot, compiled).valid, true);
     assert.deepEqual(
       completed.events.map((event) => event.kind),
-      ["complete"],
+      ["exit"],
     );
     assert.deepEqual(
       completed.events.map((event) => event.sequence),
@@ -199,7 +168,7 @@ test("terminal delay completion is canonical across execute, event stepping, run
   }
 });
 
-test("zero waits remain immediate while terminal waits use ordinary natural completion", () => {
+test("zero waits remain immediate, also right before exit", () => {
   const terminalZero = plan("wait 0\nexit");
   const zeroResult = run(terminalZero, createFreshRuntimeSnapshot(terminalZero));
   assert.equal(zeroResult.snapshot.status, "halted");
@@ -208,23 +177,23 @@ test("zero waits remain immediate while terminal waits use ordinary natural comp
   assert.equal(zeroResult.snapshot.lastSettlement, null);
   assert.deepEqual(
     zeroResult.events.map((event) => event.kind),
-    ["complete"],
+    ["exit"],
   );
 
-  const visible = plan('wait 0\nsay "visible"');
+  const visible = plan('wait 0\nsay "visible"\nexit');
   const visibleResult = run(visible, createImmediatePacingRuntimeSnapshot(visible));
   assert.equal(visibleResult.snapshot.nextActionId, 1);
   assert.equal(visibleResult.snapshot.foregroundAction, null);
   assert.equal(visibleResult.snapshot.lastSettlement, null);
   assert.deepEqual(
     visibleResult.events.map((event) => event.kind),
-    ["say", "complete"],
+    ["say", "exit"],
   );
 
-  const ordinary = plan('say "ordinary"');
+  const ordinary = plan('say "ordinary"\nexit');
   assert.deepEqual(
     run(ordinary, createImmediatePacingRuntimeSnapshot(ordinary)).events.map((event) => event.kind),
-    ["say", "complete"],
+    ["say", "exit"],
   );
 });
 

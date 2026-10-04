@@ -171,7 +171,8 @@ test("chance at both ends of the percentage range is certain", () => {
 });
 
 test("instruction budget stops an infinite while loop", () => {
-  const compiled = plan("while true {}\n");
+  // The exit is never taken; a script needs a reachable one.
+  const compiled = plan("let stop = false\nwhile true {\n  if stop { exit }\n}\n");
   const result = run(compiled, createFreshRuntimeSnapshot(compiled), {}, { instructionBudget: 20 });
 
   assert.equal(result.snapshot.failure?.code, "TSR037");

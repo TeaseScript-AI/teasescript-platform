@@ -90,7 +90,7 @@ test("result interaction destinations are produced only by the interaction and a
   const span = base.instructions[0]!.span;
   const occupiedPlan: InstructionPlan = {
     ...base,
-    files: [{ ...base.files[0]!, rootEndInstruction: 4, endInstruction: 4 }],
+    files: [{ ...base.files[0]!, rootEndInstruction: 5, endInstruction: 5 }],
     instructions: [
       {
         kind: "storeTemporary",
@@ -102,6 +102,7 @@ test("result interaction destinations are produced only by the interaction and a
       base.instructions[0]!,
       { kind: "clearTemporary", temporaryId: 1, span },
       base.instructions[1]!,
+      base.instructions[2]!,
     ],
   };
   assert.deepEqual(
