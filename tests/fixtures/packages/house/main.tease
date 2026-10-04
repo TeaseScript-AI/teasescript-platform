@@ -1,0 +1,7 @@
+---
+title: "The house"
+---
+showImage "images/hall.svg"
+welcome("guest")
+showButton "Leave"
+exit
