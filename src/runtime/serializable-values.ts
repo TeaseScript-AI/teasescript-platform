@@ -370,7 +370,7 @@ export function isSetElement(value: SerializableRuntimeValue): value is Serializ
 }
 
 /** A text that is equal for two set members exactly when they are the same kind and `==` value. */
-export function setMemberKey(value: SerializableSetElement): string {
+function setMemberKey(value: SerializableSetElement): string {
   if (value === null) return "null";
   if (typeof value === "string") return `s${value}`;
   if (typeof value === "number") return `n${value === 0 ? 0 : value}`;
