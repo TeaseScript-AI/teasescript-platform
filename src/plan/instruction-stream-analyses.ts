@@ -349,6 +349,7 @@ interface ValidatedFunctionRange {
   readonly path: string;
   readonly file: number;
   readonly id: number;
+  readonly global: boolean;
   readonly entryInstruction: number;
   readonly bodyEntryInstruction: number;
   readonly implicitReturnInstruction: number;
@@ -835,11 +836,11 @@ function collectPreparedSayPayloadTemporaryReferences(
       collectExpressionTemporaryReferences(instruction.value, output);
       collectExpressionTemporaryReferences(instruction.pacing, output);
       return;
+    case "declareGlobal":
     case "declareBinding":
     case "assign":
     case "storeTemporary":
     case "prepareSayText":
-    case "setDeclaredSpeakerProperty":
     case "returnValue":
       collectExpressionTemporaryReferences(instruction.value, output);
       return;
@@ -1115,7 +1116,6 @@ function validateCanonicalInteractionResultHandoffs(
         "evaluate",
         "storeTemporary",
         "say",
-        "setDeclaredSpeakerProperty",
         "prepareReference",
       ])
     ) {
@@ -1216,11 +1216,11 @@ function canonicalHandoffConsumesTemporary(
         expressionGuaranteesTemporaryEvaluation(instruction.value, temporaryId) ||
         expressionGuaranteesTemporaryEvaluation(instruction.pacing, temporaryId)
       );
+    case "declareGlobal":
     case "declareBinding":
     case "assign":
     case "storeTemporary":
     case "prepareSayText":
-    case "setDeclaredSpeakerProperty":
     case "returnValue":
       expression = instruction.value;
       break;
@@ -1346,6 +1346,7 @@ function validateInstructionRegionTarget(
 const FUNCTION_FIELDS = [
   "id",
   "handler",
+  "global",
   "selfHandle",
   "name",
   "declarationSpan",
@@ -1359,21 +1360,36 @@ const FUNCTION_FIELDS = [
 
 const PARAMETER_FIELDS = ["name", "index", "hasDefault", "declarationSpan", "defaultSpan"];
 
-/** Functions and handlers are local to their file: an instruction may only refer to its own file's regions. */
+/**
+ * Functions and handlers are local to their file, except global functions, which every file may call (ADR 0022 §3). A
+ * global function and its handlers see only the project's names, so they call only global functions, and a handler is
+ * global exactly when the code that registers it is.
+ */
 function reportForeignFunction(
   target: ValidatedFunctionRange | undefined,
   ownerRegion: InstructionExecutionRegion | undefined,
+  call: boolean,
+  index: PlanValidationIndex | null,
   instructionIndex: number,
   errors: PlanValidationError[],
 ): void {
-  if (target === undefined || ownerRegion === undefined || target.file === ownerRegion.file) return;
-  errors.push(
-    planError(
-      "TSC002",
-      "An instruction refers to a function of another file.",
-      `$.instructions[${instructionIndex}]`,
-    ),
-  );
+  if (target === undefined || ownerRegion === undefined) return;
+  const ownerGlobal =
+    ownerRegion.kind === "function" &&
+    index?.functionsById.get(ownerRegion.functionId)?.global === true;
+  const problem = call
+    ? !target.global && (ownerGlobal || target.file !== ownerRegion.file)
+      ? ownerGlobal
+        ? "A global function calls a function that is not global."
+        : "An instruction refers to a function of another file."
+      : null
+    : target.file !== ownerRegion.file
+      ? "An instruction refers to a function of another file."
+      : target.global !== ownerGlobal
+        ? "A handler is global exactly when the code that registers it is."
+        : null;
+  if (problem !== null)
+    errors.push(planError("TSC002", problem, `$.instructions[${instructionIndex}]`));
 }
 
 function validateFunctionDefinitions(
@@ -1428,6 +1444,8 @@ function validateFunctionDefinitions(
     ) {
       errors.push(planError("TSC002", "Only a media handler may bind a self-handle name.", path));
     }
+    if (typeof definition.global !== "boolean")
+      errors.push(planError("TSC002", "Function global must be a boolean.", `${path}.global`));
     validateSpan(definition.declarationSpan, `${path}.declarationSpan`, errors);
     validateSpan(definition.bodySpan, `${path}.bodySpan`, errors);
     if (typeof definition.id === "number") {
@@ -1486,6 +1504,7 @@ function validateFunctionDefinitions(
       definition,
       path,
       file,
+      global: definition.global === true,
       // EVIDENCE: validation: functionId passed the positive safe-integer check above.
       id: functionId as number,
       entryInstruction: entry,
@@ -1581,7 +1600,14 @@ function validateFunctionDefinitions(
           ? instruction.functionId
           : instruction.handlerFunctionId) as number,
       );
-      reportForeignFunction(targetRange, ownerRegion, instructionIndex, errors);
+      reportForeignFunction(
+        targetRange,
+        ownerRegion,
+        instruction.kind === "callFunction",
+        index,
+        instructionIndex,
+        errors,
+      );
       const target = targetRange?.definition;
       if (
         target !== undefined &&
@@ -1608,7 +1634,7 @@ function validateFunctionDefinitions(
       for (const id of handlerIds) {
         if (typeof id !== "number") continue;
         const targetRange = index?.functionsById.get(id);
-        reportForeignFunction(targetRange, ownerRegion, instructionIndex, errors);
+        reportForeignFunction(targetRange, ownerRegion, false, index, instructionIndex, errors);
         const target = targetRange?.definition;
         if (target !== undefined && target.handler !== "media") {
           errors.push(

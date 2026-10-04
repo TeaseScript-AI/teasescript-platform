@@ -109,9 +109,7 @@ test("fresh globals consume one captured proxy observation and never call get", 
 
   const snapshot = createFreshRuntimeSnapshot(compiled, { globals: { payload } });
 
-  assert.deepEqual(snapshot.frames[0]!.bindings, [
-    { name: "payload", value: { kind: "list", items: [0] } },
-  ]);
+  assert.deepEqual(snapshot.globals, [{ name: "payload", value: { kind: "list", items: [0] } }]);
   assert.deepEqual(counts, { ownKeys: 1, descriptors: 2, gets: 0, prototypes: 1 });
 });
 

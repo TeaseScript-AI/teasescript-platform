@@ -57,6 +57,14 @@ const SOURCES: readonly ((value: string, use: string) => string)[] = [
   (value, use) => `let box = { part: ${value} }\n${use.replaceAll("@", "box.part")}\nexit`,
 ];
 
+/** The sources of {@link SOURCES} that a start value may use: a speaker is set up before the story (ADR 0022 §6). */
+const START_SOURCES: readonly ((value: string, use: string) => string)[] = [
+  (value, use) => use.replaceAll("@", value),
+  (value, use) => `global held = ${value}\n${use.replaceAll("@", "held")}`,
+  (value, use) => `global items = [${value}]\n${use.replaceAll("@", "items[0]")}`,
+  (value, use) => `global box = { part: ${value} }\n${use.replaceAll("@", "box.part")}`,
+];
+
 test("built-ins with fixed arguments check their number and names", () => {
   for (const [source, code] of [
     ["say chance()\nexit", "TSV020"],
@@ -118,21 +126,24 @@ test("join checks the element type of a computed list", () => {
 
 test("a speaker's defaultSaySkippable is true or false where it is declared or set", () => {
   // A null element or property is a slot that a later value decides, so it is not known to be null (rule 1.4).
-  for (const [value, wraps] of [
-    ["1", SOURCES],
-    ['"no"', SOURCES],
-    ["[true]", SOURCES],
-    ["null", SOURCES.slice(0, 3)],
-  ] as const)
+  for (const [value, wraps, startWraps] of [
+    ["1", SOURCES, START_SOURCES],
+    ['"no"', SOURCES, START_SOURCES],
+    ["[true]", SOURCES, START_SOURCES],
+    ["null", SOURCES.slice(0, 3), START_SOURCES.slice(0, 2)],
+  ] as const) {
     for (const wrap of wraps) {
       const set = wrap(value, 'speaker guide { firstName: "a" }\nguide.defaultSaySkippable = @');
       assert.equal(errors(set)[0]?.[0], "TSV043", set);
+    }
+    for (const wrap of startWraps) {
       const declared = wrap(
         value,
-        "let flag = @\nspeaker guide {\n    defaultSaySkippable: flag\n}",
+        "global flag = @\nspeaker guide {\n    defaultSaySkippable: flag\n}",
       );
       assert.equal(errors(declared)[0]?.[0], "TSV043", declared);
     }
+  }
   assert.deepEqual(
     says(
       'speaker guide {\n    defaultSaySkippable: true\n}\nguide.defaultSaySkippable = false\nsay as guide "hi"\nexit',

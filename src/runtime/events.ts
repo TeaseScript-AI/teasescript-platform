@@ -73,6 +73,8 @@ export interface RuntimeFailureEvent {
   readonly sequence: number;
   readonly code: string;
   readonly message: string;
+  /** The project file whose source {@link span} is in. */
+  readonly path: string;
   readonly span: SourceSpan;
 }
 

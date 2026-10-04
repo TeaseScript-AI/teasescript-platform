@@ -595,24 +595,16 @@ test("say skip policy follows explicit, speaker, and fallback precedence", () =>
   assert.equal(replacement?.kind, "chatPacingGate");
   if (replacement?.kind === "chatPacingGate") assert.equal(replacement.skippable, true);
 
-  // A host value hides the number from the compiler, which rejects a known non-boolean value itself (#552); the
-  // random title shows that the failed declaration commits no random draw either.
-  const invalid = plan(
-    'speaker vera {\n    title: "${random()}"\n    defaultSaySkippable: flag\n}\nexit',
-    { globals: ["flag"] },
-  );
-  const rejected = run(
-    invalid,
-    createFreshRuntimeSnapshot(invalid, { seed: 77, globals: { flag: 1 } }),
-  );
+  // A host value hides the number from the compiler, which rejects a known non-boolean value itself (#552).
+  const invalid = plan("speaker vera { defaultSaySkippable: flag }\nexit", { globals: ["flag"] });
+  const rejected = run(invalid, createFreshRuntimeSnapshot(invalid, { globals: { flag: 1 } }));
   assert.equal(rejected.snapshot.status, "failed");
   assert.equal(rejected.snapshot.speakers.length, 0);
-  // Only the host value is bound; the failed declaration commits nothing.
+  // Only the host value is a global; the failed declaration commits nothing.
   assert.deepEqual(
-    rejected.snapshot.frames[0]?.bindings.map((binding) => binding.name),
+    rejected.snapshot.globals.map((binding) => binding.name),
     ["flag"],
   );
-  assert.equal(rejected.snapshot.rng.state, 77);
 });
 
 test("invalid runtime pacing fails without committing say evaluation effects", () => {

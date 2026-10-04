@@ -1,3 +1,4 @@
+import { sessionDeclarations } from "./project-globals.js";
 import type {
   Expression,
   InteractionExpression,
@@ -456,10 +457,12 @@ const protectedNames: ReadonlySet<string> = new Set(TEASESCRIPT_PROTECTED_NAMES)
 
 /** Declared speaker names; a protected name such as `set` is an invalid declaration, not a suggestion. */
 function declaredSpeakers(source: string): readonly string[] {
-  const speakers = compileSource(source).program.statements.flatMap((statement) =>
-    statement.kind === "speakerDeclaration" && !protectedNames.has(statement.name.name)
-      ? [statement.name.name]
-      : [],
+  // A speaker belongs to the whole script wherever it is declared.
+  const speakers = sessionDeclarations([compileSource(source).program]).flatMap(
+    ({ declaration }) =>
+      declaration.kind === "speakerDeclaration" && !protectedNames.has(declaration.name.name)
+        ? [declaration.name.name]
+        : [],
   );
   return Object.freeze([...new Set(speakers)]);
 }
@@ -708,6 +711,11 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
       return;
     case "letStatement":
       children.push({ kind: "expression", node: statement.initializer });
+      return;
+    case "globalStatement":
+      if (statement.assignment !== null)
+        children.push({ kind: "expression", node: statement.assignment.value });
+      children.push({ kind: "expression", node: statement.initial });
       return;
     case "assignmentStatement":
       children.push({ kind: "expression", node: statement.target });

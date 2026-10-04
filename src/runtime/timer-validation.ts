@@ -1,4 +1,4 @@
-import type { InstructionPlan } from "../plan/model.js";
+import type { RunnablePlan } from "./runnable-plan.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import { anchoredDeadlineMs } from "./timers.js";
 import { catchUpPaused } from "./action-validation.js";
@@ -43,7 +43,7 @@ function dueDeadlineMayRemain(snapshot: Record<string, unknown>): boolean {
 export function validTimerAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): boolean {
   const now = snapshot.currentSessionTimeMs;
   if (
@@ -159,7 +159,7 @@ function validTimerRecord(
   timer: Record<string, unknown>,
   active: boolean,
   now: unknown,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   allowDue = false,
 ): boolean {
   if (
@@ -223,7 +223,7 @@ function validTimerRecord(
  */
 export function validateTimerState(
   value: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   handleIds: ReadonlySet<number>,
   errors: string[],
 ): void {

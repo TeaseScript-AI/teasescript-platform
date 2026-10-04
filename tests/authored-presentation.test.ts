@@ -496,7 +496,7 @@ exit
       );
     }
     const nullPlan = compileValidPlan(`
-let options = { ${option}: null }
+global options = { ${option}: null }
 speaker vera { bubble: options }
 speaker vera
 say "must not be emitted", instant

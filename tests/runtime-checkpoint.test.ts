@@ -138,33 +138,6 @@ test("preserves nested deep-copy independence and ordered sets after restore", (
   );
 });
 
-test("keeps same-named speakers in sibling lexical scopes as distinct state", () => {
-  const { events } = assertRuntimeResumeEquivalent(
-    [
-      "if true {",
-      '  speaker voice { displayName: "Scope one" }',
-      '  say as voice "First"',
-      "}",
-      "if true {",
-      '  speaker voice { displayName: "Scope two" }',
-      '  say as voice "Second"',
-      "}",
-      "exit",
-    ].join("\n"),
-  );
-
-  // Each say is emitted with the speaker declared in its own scope, told apart by authored display name.
-  assert.deepEqual(
-    events.flatMap((event) =>
-      event.kind === "say" ? [[event.speaker?.displayName, event.text]] : [],
-    ),
-    [
-      ["Scope one", "First"],
-      ["Scope two", "Second"],
-    ],
-  );
-});
-
 test("an unknown root snapshot field is rejected at validation, checkpoint and restore", () => {
   const compiled = plan('say "kept"\nexit');
   const snapshot = createFreshRuntimeSnapshot(compiled);

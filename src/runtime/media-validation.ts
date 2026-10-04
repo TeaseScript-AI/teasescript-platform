@@ -1,4 +1,4 @@
-import type { InstructionPlan } from "../plan/model.js";
+import type { RunnablePlan } from "./runnable-plan.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import {
   reachableMediaCursor,
@@ -45,7 +45,7 @@ const MEDIA_ACTION_KEYS = [
 export function validMediaAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): boolean {
   const now = snapshot.currentSessionTimeMs;
   if (
@@ -90,7 +90,7 @@ function validMediaRecord(
   media: Record<string, unknown>,
   active: boolean,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): boolean {
   if (
     !hasExactKeys(media, MEDIA_KEYS) ||
@@ -325,7 +325,7 @@ function validRepeat(value: unknown): value is RuntimeMediaRepeatSnapshot {
 
 function validCues(
   value: unknown,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
 ): value is RuntimeMediaCueSnapshot[] {
   return (
     isCanonicalJsonArray(value) &&
@@ -342,7 +342,7 @@ function validCues(
 
 function validHandlerId(
   value: unknown,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   nullable: boolean,
 ): boolean {
   if (value === null) return nullable;
@@ -376,7 +376,7 @@ function validPoints(value: unknown, observedSessionTimeMs: unknown): boolean {
  */
 export function validateMediaState(
   value: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: RunnablePlan | undefined,
   handleIds: ReadonlySet<number>,
   errors: string[],
 ): void {

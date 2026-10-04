@@ -14,7 +14,7 @@ export function requiredInstructionTemporaries(
     case "declareSpeaker":
       instruction.properties.forEach((property) => collect(property.value));
       break;
-    case "setDeclaredSpeakerProperty":
+    case "declareGlobal":
     case "declareBinding":
       collect(instruction.value);
       break;

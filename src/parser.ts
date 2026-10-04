@@ -13,6 +13,7 @@ import type {
   ExpressionStatement,
   ForStatement,
   FunctionDeclaration,
+  GlobalStatement,
   FunctionParameter,
   GotoStatement,
   Identifier,
@@ -266,6 +267,9 @@ class Parser {
     if (this.#checkIdentifier("end")) {
       return Object.freeze({ kind: "endStatement", span: copySpan(this.#advance().span) });
     }
+    if (this.#checkIdentifier("global")) {
+      return yield* parseChild(this.#parseGlobalStatement());
+    }
     if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
       const parts = yield* parseChild(this.#parseMediaParts());
       return parts === null
@@ -303,7 +307,7 @@ class Parser {
       case TokenKind.KeywordContinue:
         return this.#parseLoopControl("continueStatement");
       case TokenKind.KeywordFunction:
-        return yield* parseChild(this.#parseFunctionDeclaration());
+        return yield* parseChild(this.#parseFunctionDeclaration(null));
       case TokenKind.KeywordReturn:
         return this.#parseReturnStatement();
       default:
@@ -1631,6 +1635,79 @@ class Parser {
     });
   }
 
+  /**
+   * `global function ...`, or `global name[: Type] = value[, default: start]`. Like the default answer of an ask, a
+   * `, default:` belongs to the nearest construct before it that takes one, so `global level = load "level", default: 1`
+   * gives the fallback to `load`.
+   */
+  *#parseGlobalStatement(): ParseTask<GlobalStatement | FunctionDeclaration | null> {
+    const keyword = this.#advance();
+    if (this.#check(TokenKind.KeywordFunction))
+      return yield* parseChild(this.#parseFunctionDeclaration(keyword));
+    if (!this.#checkDeclarationName()) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedIdentifier,
+        "Expected a variable identifier or 'function' after 'global'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const name = this.#identifier(this.#advance());
+    let typeAnnotation: TypeAnnotation | null = null;
+    if (this.#match(TokenKind.Colon)) {
+      typeAnnotation = this.#parseTypeAnnotation();
+      if (typeAnnotation === null) {
+        this.#synchronizeStatement();
+        return null;
+      }
+    }
+    if (!this.#match(TokenKind.Equal)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedEqual,
+        "Expected '=' in the global declaration.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    this.#skipContinuationNewlines();
+    const value = this.#parseRequiredExpression();
+    if (value === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    const defaultOffset = this.#offsetAfterComma();
+    if (defaultOffset === null || !this.#atInteractionDefault(defaultOffset))
+      return Object.freeze({
+        kind: "globalStatement",
+        name,
+        typeAnnotation,
+        initial: value,
+        assignment: null,
+        span: spanFrom(keyword.span, value.span),
+      });
+    for (let skipped = 0; skipped < defaultOffset + 2; skipped += 1) this.#advance();
+    const start = yield* parseChild(this.#parseColonValueTask(true));
+    if (start === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    const span = spanFrom(keyword.span, start.span);
+    return Object.freeze({
+      kind: "globalStatement",
+      name,
+      typeAnnotation,
+      initial: start,
+      assignment: Object.freeze({
+        kind: "assignmentStatement",
+        operator: "=",
+        target: name,
+        value,
+        span: copySpan(span),
+      }),
+      span,
+    });
+  }
+
   #parseTypeAnnotation(context: TypeContext = "statement"): TypeAnnotation | null {
     return runParse(this.#parseTypeTask(context));
   }
@@ -2049,7 +2126,8 @@ class Parser {
     return Object.freeze({ kind, span: copySpan(keyword.span) });
   }
 
-  *#parseFunctionDeclaration(): ParseTask<FunctionDeclaration | null> {
+  /** A function declaration; `globalKeyword` is the `global` before a global function. */
+  *#parseFunctionDeclaration(globalKeyword: Token | null): ParseTask<FunctionDeclaration | null> {
     const keyword = this.#advance();
     if (!this.#checkDeclarationName() && !this.#check(TokenKind.KeywordWait)) {
       this.#reportInsertion(
@@ -2107,11 +2185,12 @@ class Parser {
     if (body === null) return null;
     return Object.freeze({
       kind: "functionDeclaration",
+      global: globalKeyword !== null,
       name,
       parameters: Object.freeze(parameters),
       returnTypeAnnotation,
       body,
-      span: spanFrom(keyword.span, body.span),
+      span: spanFrom((globalKeyword ?? keyword).span, body.span),
     });
   }
 

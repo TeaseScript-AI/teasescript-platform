@@ -23,6 +23,7 @@ export type Statement =
   | LabelStatement
   | GotoStatement
   | LetStatement
+  | GlobalStatement
   | AssignmentStatement
   | IfStatement
   | SwitchStatement
@@ -297,6 +298,21 @@ export interface LetStatement {
   readonly span: SourceSpan;
 }
 
+/**
+ * `global name[: Type] = value[, default: start]`, a variable of the whole project (ADR 0022 §6). It gets its
+ * session-start value before the story runs, whether or not the declaration ever runs.
+ */
+export interface GlobalStatement {
+  readonly kind: "globalStatement";
+  readonly name: Identifier;
+  readonly typeAnnotation: TypeAnnotation | null;
+  /** The session-start value: `start` with `default:`, otherwise `value`. */
+  readonly initial: Expression;
+  /** With `default:`, the assignment `name = value` that the declaration performs each time it runs. */
+  readonly assignment: AssignmentStatement | null;
+  readonly span: SourceSpan;
+}
+
 export type ScalarTypeName =
   | "string"
   | "boolean"
@@ -433,6 +449,8 @@ export interface ContinueStatement {
 
 export interface FunctionDeclaration {
   readonly kind: "functionDeclaration";
+  /** A `global function`, callable from every file of the project (ADR 0022 §3). */
+  readonly global: boolean;
   readonly name: Identifier;
   readonly parameters: readonly FunctionParameter[];
   readonly returnTypeAnnotation: TypeAnnotation | null;

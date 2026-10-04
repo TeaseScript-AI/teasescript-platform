@@ -14,7 +14,12 @@ import { MAIN_FILE_PATH } from "../project-paths.js";
 import { createSourceSpan } from "../source.js";
 import { sourceSpanToPlanLocation } from "../plan/source-location.js";
 import type { RuntimeCheckSite } from "../type-checker.js";
-import { InstructionCompiler, type LoweringCounters } from "./lowering/compiler.js";
+import {
+  InstructionCompiler,
+  type LoweringCounters,
+  type ProjectFunctions,
+} from "./lowering/compiler.js";
+import { sessionDeclarations } from "../project-globals.js";
 
 export type { InstructionPlan } from "../plan/model.js";
 export { InstructionCompilationError } from "./errors.js";
@@ -23,8 +28,6 @@ export { InstructionCompilationError } from "./errors.js";
 export interface StableProjectFile {
   readonly path: string;
   readonly program: Program;
-  /** The runtime checks the type check recorded for values the compiler cannot know. */
-  readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
 }
 
 /** Lowers the AST of a single-file project, the `main.tease` of `program`. */
@@ -32,25 +35,34 @@ export function compileStableProgram(
   program: Program,
   typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> = new Map(),
 ): InstructionPlan {
-  return compileStableProject([{ path: MAIN_FILE_PATH, program, typeChecks }]);
+  return compileStableProject([{ path: MAIN_FILE_PATH, program }], typeChecks);
 }
 
 /**
  * Lowers parser-owned AST data of every project file after source parsing and semantic validation. Each file becomes
- * one block of the instruction stream: its root statements, then its functions and handlers. `images` is the
+ * one block of the instruction stream: its root statements, then its functions and handlers. The root region of
+ * `main.tease` starts with the start values of the globals and speakers of every file, in session-start order.
+ * `typeChecks` are the runtime checks the type check recorded for values the compiler cannot know, and `images` is the
  * validated image catalog, in path order.
  */
 export function compileStableProject(
   projectFiles: readonly StableProjectFile[],
+  typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> = new Map(),
   onFile: (fileIndex: number) => void = () => {},
   images: readonly PlanImage[] = [],
 ): InstructionPlan {
   const instructions: Instruction[] = [];
   const functions: CompiledFunctionDefinition[] = [];
   const counters: LoweringCounters = { nextLoopId: 1, nextTemporaryId: 1 };
+  const globalFunctions = new Map<string, FunctionDeclaration>();
+  for (const { program } of projectFiles)
+    for (const statement of program.statements)
+      if (statement.kind === "functionDeclaration" && statement.global)
+        globalFunctions.set(statement.name.name, statement);
+  const project: ProjectFunctions = { global: globalFunctions, foreignCalls: [] };
+  const globalIds = new Map<string, number>();
   const files: PlanFile[] = [];
-  for (const [fileIndex, { path, program, typeChecks }] of projectFiles.entries()) {
-    onFile(fileIndex);
+  for (const [fileIndex, { path, program }] of projectFiles.entries()) {
     const declarations = program.statements.filter(
       (statement): statement is FunctionDeclaration => statement.kind === "functionDeclaration",
     );
@@ -60,8 +72,17 @@ export function compileStableProject(
       instructions,
       functions,
       counters,
+      project,
     );
     const startInstruction = instructions.length;
+    if (fileIndex === 0)
+      for (const { file, declaration } of sessionDeclarations(
+        projectFiles.map((projectFile) => projectFile.program),
+      )) {
+        onFile(file);
+        compiler.compileStartValue(declaration, file);
+      }
+    onFile(fileIndex);
     compiler.compileStatements(
       program.statements.filter((statement) => statement.kind !== "functionDeclaration"),
     );
@@ -71,6 +92,9 @@ export function compileStableProject(
     const rootEndInstruction = instructions.length;
     compiler.compileFunctions();
     compiler.resolveGotos();
+    for (const declaration of declarations)
+      if (declaration.global)
+        globalIds.set(declaration.name.name, compiler.functionId(declaration));
     files.push({
       path,
       sourceSpan: sourceSpanToPlanLocation(program.span),
@@ -79,6 +103,12 @@ export function compileStableProject(
       endInstruction: instructions.length,
       labels: compiler.labels,
     });
+  }
+  for (const { instruction, name } of project.foreignCalls) {
+    const call = instructions[instruction];
+    if (call?.kind !== "callFunction" || !globalIds.has(name))
+      throw new TypeError("A call of a global function lost its target during compilation.");
+    instructions[instruction] = { ...call, functionId: globalIds.get(name)! };
   }
   return freezeInstructionPlan({
     format: INSTRUCTION_PLAN_FORMAT,

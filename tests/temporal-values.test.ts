@@ -442,7 +442,7 @@ test("a session keeps the context it started with, whatever the host does with i
 
 test("a speaker's name may be any shown value, in the captured presentation", () => {
   const { result } = start(
-    'speaker vera { firstName: toDate("2026-10-04") }\nsay as vera "hello"\nexit',
+    'speaker vera {}\nvera.firstName = toDate("2026-10-04")\nsay as vera "hello"\nexit',
     AMSTERDAM,
   );
   assert.equal(result.snapshot.failure, null, JSON.stringify(result.snapshot.failure));

@@ -84,6 +84,7 @@ export function registerTeaseScriptLanguage(): void {
         "instant",
         "speaker",
         "let",
+        "global",
         "if",
         "else",
         "switch",
