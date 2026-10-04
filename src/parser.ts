@@ -2251,7 +2251,14 @@ class Parser {
           ? yield* parseChild(this.#parseOr())
           : null;
       let defaultValue: Expression | null = null;
-      const defaultOffset = hint === null ? 0 : this.#interactionDefaultAfterComma();
+      let defaultOffset = hint === null ? 0 : this.#interactionDefaultAfterComma();
+      if (defaultOffset === null && this.#atInteractionDefault(0)) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedDelimiter,
+          "Expected ',' between the hint and 'default:'.",
+        );
+        defaultOffset = 0;
+      }
       if (defaultOffset !== null && this.#atInteractionDefault(defaultOffset)) {
         for (let skipped = 0; skipped < defaultOffset + 2; skipped += 1) this.#advance();
         defaultValue = yield* parseChild(this.#parseColonValueTask(false));

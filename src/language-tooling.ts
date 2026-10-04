@@ -442,11 +442,13 @@ const OPENING_DELIMITERS: ReadonlySet<TokenKind> = new Set([
   TokenKind.LeftParenthesis,
   TokenKind.LeftBracket,
   TokenKind.LeftBrace,
+  TokenKind.InterpolationStart,
 ]);
 const CLOSING_DELIMITERS: ReadonlySet<TokenKind> = new Set([
   TokenKind.RightParenthesis,
   TokenKind.RightBracket,
   TokenKind.RightBrace,
+  TokenKind.InterpolationEnd,
 ]);
 
 function activeParameterFor(

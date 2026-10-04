@@ -1738,7 +1738,10 @@ function preparedUiFitsPresentedUi(
   if (prepared.kind === "button")
     return "background" in ui === (prepared.backgroundTemporary !== undefined);
   if (prepared.kind === "text" || prepared.kind === "number")
-    return (ui.hint === null) === (prepared.hintTemporary === null);
+    return (
+      (ui.hint === null) === (prepared.hintTemporary === null) &&
+      "prefill" in ui === (prepared.prefillTemporary !== undefined)
+    );
   if (
     ui.labelType !== prepared.labelType ||
     !Array.isArray(ui.options) ||

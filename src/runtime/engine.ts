@@ -969,15 +969,23 @@ function interactionPrefill(
 ): string {
   if (kind === "number") {
     if (typeof value !== "number" || !Number.isFinite(value))
-      throw fault("TSR052", "The default answer of askNumber must be a number.", span);
+      throw fault(
+        "TSR052",
+        "The default answer of askNumber must be a finite number. Ask without 'default:' when there is no number to offer.",
+        span,
+      );
     return numberAnswerText(value);
   }
   if (typeof value !== "string")
-    throw fault("TSR052", "The default answer of askText must be text.", span);
+    throw fault(
+      "TSR052",
+      "The default answer of askText must be text. Write the value as text with interpolation: 'default: \"${...}\"'.",
+      span,
+    );
   if (isBlankTextAnswer(value))
     throw fault(
       "TSR052",
-      "The default answer of askText must contain a non-whitespace character.",
+      "The default answer of askText must contain a non-whitespace character. Ask without 'default:' when there is no answer to offer.",
       span,
     );
   return value;

@@ -18,7 +18,10 @@ import { sayTexts } from "./helpers/runtime-events.js";
 type Plan = ReturnType<typeof compileValidPlan>;
 type Snapshot = ReturnType<typeof createImmediatePacingRuntimeSnapshot>;
 
-/** Completes the pending interaction by its second option (or activation) and runs to the next wait. */
+/**
+ * Completes the pending interaction by its second option, its activation, or its unchanged default answer, and runs to
+ * the next wait.
+ */
 function answerSecond(plan: Plan, snapshot: Snapshot) {
   const action = snapshot.foregroundAction;
   assert.ok(action !== null && action.kind === "interaction");
@@ -28,11 +31,13 @@ function answerSecond(plan: Plan, snapshot: Snapshot) {
     actionKind: "interaction",
     interactionKind: action.interactionKind,
     payload:
-      option === null
-        ? { kind: "activate" }
-        : option.label === null
-          ? { kind: "selectedText", selectedText: option.text }
-          : { kind: "selectedLabel", selectedLabel: option.label },
+      action.ui.kind === "text" || action.ui.kind === "number"
+        ? { kind: "submittedText", submittedText: action.ui.prefill! }
+        : option === null
+          ? { kind: "activate" }
+          : option.label === null
+            ? { kind: "selectedText", selectedText: option.text }
+            : { kind: "selectedLabel", selectedLabel: option.label },
   });
   assert.equal(completed.outcome.kind, "completed");
   assert.equal(validateRuntimeSnapshot(completed.snapshot, plan).valid, true);
@@ -56,6 +61,12 @@ const SCENARIOS = [
     name: "a computed button label in a loop",
     source: 'for word in ["Go", "Run"] {\n    showButton word\n}\nsay "done"',
     said: ["done"],
+  },
+  {
+    name: "a computed default answer in a loop",
+    source:
+      'for minutes in [10, 20] {\n    let answer = askNumber "Minutes?", default: minutes * 2\n    say "Answered ${answer}"\n}',
+    said: ["Answered 20", "Answered 40"],
   },
 ] as const;
 

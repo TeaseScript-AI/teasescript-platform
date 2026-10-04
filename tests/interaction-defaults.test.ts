@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { playerRuntimeForeground, createPlayerRuntimeSession } from "../player/runtime-adapter.js";
+import {
+  createPlayerRuntimeRestorePoint,
+  createPlayerRuntimeSession,
+  playerRuntimeForeground,
+  restorePlayerRuntimeSession,
+} from "../player/runtime-adapter.js";
 import { compileSource } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
@@ -57,6 +62,7 @@ test("a default answer prefills the field and submitting it unchanged returns th
     { source: 'let answer = askNumber "How many?", default: 10', prefill: "10", result: 10 },
     { source: "let answer = askNumber default: -2.5e-7", prefill: "-2.5e-7", result: -2.5e-7 },
     { source: "let answer = askNumber default: -0", prefill: "0", result: 0 },
+    { source: "let level = 3\nlet answer = askNumber default: level", prefill: "3", result: 3 },
     {
       source: 'let base = 4\nlet answer = askNumber "Corner time",\n    default: base * 2 + 0.5',
       prefill: "8.5",
@@ -114,46 +120,66 @@ test("a dynamic default is evaluated once after the hint and survives checkpoint
   );
 });
 
-test("a default of the wrong type or a blank text default is a compile error", () => {
+test("a default the compiler knows is wrong is a compile error that names the fix", () => {
   const cases = [
     [
-      'let answer = askNumber "How many?", default: "ten"',
+      'let count = 3\nlet answer = askText "Code?", default: count',
       "TSV039",
-      "The default answer of askNumber must be a number, such as 'default: 10'.",
+      "The default answer of askText must be text, but 'count' holds a whole number (integer). Write it as text: 'default: \"${count}\"'.",
     ],
     [
       'let answer = askText "Code?", default: 10',
       "TSV039",
-      "The default answer of askText must be text. Write a number as text, such as 'default: \"10\"'.",
+      "The default answer of askText must be text, not a whole number (integer). Write it as text: 'default: \"10\"'.",
+    ],
+    [
+      "let answer = askText default: value * 2",
+      "TSV039",
+      "The default answer of askText must be text. Write it as text with interpolation: 'default: \"${...}\"'.",
     ],
     [
       'let answer = askText "Name?", default: "  "',
       "TSV039",
-      "The default answer of askText must contain a non-whitespace character.",
+      "The default answer of askText must contain a non-whitespace character. Remove 'default:' to start with an empty field.",
     ],
     [
-      "let answer = askText default: 1 + 2",
+      "let answer = askText default: null",
       "TSV039",
-      "The default answer of askText must be text. Write a number as text, such as 'default: \"10\"'.",
+      "The default answer of askText must be text, not null. Remove 'default:' to start with an empty field.",
     ],
     [
-      "let answer = askNumber default: not false",
+      'let answer = askNumber "How many?", default: "10"',
       "TSV039",
-      "The default answer of askNumber must be a number, such as 'default: 10'.",
+      "The default answer of askNumber must be a number, not text (string). Write it as a number: 'default: 10'.",
+    ],
+    [
+      'let name = "Ada"\nlet answer = askNumber default: name',
+      "TSV039",
+      "The default answer of askNumber must be a number, but 'name' holds text (string). Use a number, such as 'default: 10'.",
+    ],
+    [
+      "let answer = askNumber default: 1 s + 2 s",
+      "TSV039",
+      "The default answer of askNumber must be a number, not a duration. Use a number, such as 'default: 10'.",
     ],
     [
       "let answer = askNumber default: 1 == 1",
       "TSV039",
-      "The default answer of askNumber must be a number, such as 'default: 10'.",
+      "The default answer of askNumber must be a number, not true or false (boolean). Use a number, such as 'default: 10'.",
     ],
     [
       'let answer = askText "Name?", default:',
       "TSP028",
       "Expected a default answer after 'default:'.",
     ],
+    [
+      'let answer = askText "Name?" default: "Ada"',
+      "TSP017",
+      "Expected ',' between the hint and 'default:'.",
+    ],
   ] as const;
   for (const [source, code, message] of cases) {
-    const result = compileSource(source);
+    const result = compileSource(source, { globals: ["value"] });
     assert.equal(result.plan, null, source);
     assert.deepEqual(
       result.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
@@ -163,18 +189,39 @@ test("a default of the wrong type or a blank text default is a compile error", (
   }
 });
 
+test("inside an object literal, default: belongs to the nearest ask unless parentheses close it", () => {
+  const grouped = compileValidPlan('let o = { name: askText "Name?", default: "Ada" }');
+  assert.equal(pendingInput(grouped).ui.prefill, "Ada");
+
+  const property = compileValidPlan(
+    'let o = { name: (askText "Name?"), default: "Ada" }\nlet answer = o.default',
+  );
+  const { snapshot, ui } = pendingInput(property);
+  assert.equal("prefill" in ui, false);
+  assert.equal(answer(property, submit(property, snapshot, "Grace").snapshot), "Ada");
+});
+
 test("an invalid dynamic default fails before the field opens", () => {
+  const notText =
+    "The default answer of askText must be text. Write the value as text with interpolation: 'default: \"${...}\"'.";
+  const notNumber =
+    "The default answer of askNumber must be a finite number. Ask without 'default:' when there is no number to offer.";
   const cases = [
-    ["let answer = askText default: value", 5],
-    ["let answer = askText default: value", " \n"],
-    ["let answer = askNumber default: value", "10"],
+    ["let answer = askText default: value", 5, notText],
+    [
+      "let answer = askText default: value",
+      " \n",
+      "The default answer of askText must contain a non-whitespace character. Ask without 'default:' when there is no answer to offer.",
+    ],
+    ["let answer = askNumber default: value", "10", notNumber],
+    ["let limit: number? = value\nlet answer = askNumber default: limit", null, notNumber],
   ] as const;
-  for (const [source, value] of cases) {
+  for (const [source, value, message] of cases) {
     const plan = compileValidPlan(source, { globals: ["value"] });
     const failed = run(plan, createFreshRuntimeSnapshot(plan, { globals: { value } }));
-    assert.equal(
-      failed.snapshot.failure?.code,
-      "TSR052",
+    assert.deepEqual(
+      [failed.snapshot.failure?.code, failed.snapshot.failure?.message],
+      ["TSR052", message],
       `${source} with ${JSON.stringify(value)}`,
     );
     assert.equal(failed.snapshot.foregroundAction, null);
@@ -187,11 +234,15 @@ test("an invalid dynamic default fails before the field opens", () => {
 
 test("a computed default keeps its runtime arithmetic errors whether or not the hint is constant", () => {
   for (const hint of ['"N"', "hint"]) {
-    const source = `let answer = askNumber ${hint}, default: 1 / (1e308 * 10)`;
-    const plan = compileValidPlan(source, { globals: ["hint"] });
-    const failed = run(plan, createFreshRuntimeSnapshot(plan, { globals: { hint: "N" } }));
-    assert.equal(failed.snapshot.failure?.code, "TSR036", source);
-    assert.equal(failed.snapshot.foregroundAction, null, source);
+    for (const source of [
+      `let answer = askNumber ${hint}, default: 1 / (1e308 * 10)`,
+      `let answer = askText ${hint}, default: "\${1 / (1e308 * 10)}"`,
+    ]) {
+      const plan = compileValidPlan(source, { globals: ["hint"] });
+      const failed = run(plan, createFreshRuntimeSnapshot(plan, { globals: { hint: "N" } }));
+      assert.equal(failed.snapshot.failure?.code, "TSR036", source);
+      assert.equal(failed.snapshot.foregroundAction, null, source);
+    }
   }
 });
 
@@ -212,14 +263,37 @@ test("plan and checkpoint validation reject a prefill that is not a valid answer
   assert.equal(validateRuntimeSnapshot(tampered, valid).valid, false);
 });
 
-test("the Player composer receives the default answer", () => {
+test("a retained settlement keeps the prefill its field presented", () => {
+  for (const source of ["let answer = askText default: value", "let answer = askText value"]) {
+    const plan = compileValidPlan(source, { globals: ["value"] });
+    const { snapshot } = pendingInput(plan, { value: "Ada" });
+    const done = run(plan, submit(plan, snapshot, "Grace").snapshot).snapshot;
+    assert.equal(validateRuntimeSnapshot(done, plan).valid, true, source);
+    const checkpoint = structuredClone(createCheckpoint(plan, done));
+    const settlement = checkpoint.snapshot.lastSettlement;
+    assert.ok(settlement?.actionKind === "interaction" && settlement.ui.kind === "text", source);
+    assert.equal(settlement.ui.prefill, source.includes("default:") ? "Ada" : undefined, source);
+    // EVIDENCE: the cloned fixture is mutable; it only removes the presented prefill, or adds one never presented.
+    const ui = settlement.ui as { prefill?: string };
+    if (ui.prefill === undefined) ui.prefill = "Ada";
+    else delete ui.prefill;
+    assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), source);
+  }
+});
+
+test("the Player composer receives the default answer, also after a restore", () => {
   const session = createPlayerRuntimeSession('let answer = askNumber "How many?", default: 12');
-  assert.deepEqual(playerRuntimeForeground(session), {
+  const expected = {
     kind: "ask-number",
     accessibleName: "Number",
     hint: "How many?",
     prefill: "12",
-  });
+  };
+  assert.deepEqual(playerRuntimeForeground(session), expected);
+  assert.deepEqual(
+    playerRuntimeForeground(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session))),
+    expected,
+  );
   const withoutDefault = createPlayerRuntimeSession('let answer = askText "Name?"');
   assert.equal(
     playerRuntimeForeground(withoutDefault)?.kind === "ask-text" &&

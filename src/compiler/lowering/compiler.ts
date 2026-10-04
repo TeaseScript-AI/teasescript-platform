@@ -1910,7 +1910,8 @@ function interactionLabelValue(
 
 /**
  * The prefill text of a literal default answer, or `undefined` when the default is evaluated at runtime, where
- * arithmetic keeps its ordinary runtime errors. Semantic validation has already rejected literals of the wrong type.
+ * arithmetic, also inside an interpolation, keeps its ordinary runtime errors. Semantic validation has already rejected
+ * literals of the wrong type.
  */
 function staticInteractionPrefill(expression: InteractionExpression): string | undefined {
   let literal = expression.defaultValue!;
@@ -1930,7 +1931,10 @@ function staticInteractionPrefill(expression: InteractionExpression): string | u
     return literal.kind === "numberLiteral"
       ? numberAnswerText(negative ? -literal.value : literal.value)
       : undefined;
-  return literal.kind === "stringLiteral" ? staticVisibleText(literal) : undefined;
+  return literal.kind === "stringLiteral" &&
+    literal.parts.every((part) => part.kind === "stringText")
+    ? staticVisibleText(literal)
+    : undefined;
 }
 
 function staticInteractionUi(

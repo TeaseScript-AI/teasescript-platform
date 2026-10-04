@@ -22,9 +22,14 @@ import {
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
-import { isBlankTextAnswer } from "./interaction-answers.js";
+import {
+  isBlankTextAnswer,
+  isValidInteractionPrefill,
+  numberAnswerText,
+} from "./interaction-answers.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
+  ARITHMETIC_OPERATORS,
   arithmeticType,
   describeValue,
   elementType,
@@ -1051,7 +1056,11 @@ class SemanticValidator {
             yield* compileChild(
               this.#validateExpressionTask(expression.defaultValue, scope, contextualSpeaker),
             );
-            this.#validateInteractionDefault(expression.interactionKind, expression.defaultValue);
+            this.#validateInteractionDefault(
+              expression.interactionKind,
+              expression.defaultValue,
+              scope,
+            );
           }
         }
         return;
@@ -1463,21 +1472,46 @@ class SemanticValidator {
         : null;
   }
 
-  /** A default answer must be an answer the field accepts; dynamic values are checked when the field opens. */
-  #validateInteractionDefault(kind: "text" | "number", expression: Expression): void {
+  /**
+   * A default answer must be an answer the field accepts: text for askText, a number for askNumber. The compiler rejects
+   * a default it knows is wrong; the runtime checks the others when the field opens.
+   */
+  #validateInteractionDefault(
+    kind: "text" | "number",
+    expression: Expression,
+    scope: SemanticScope,
+  ): void {
+    const type = this.#expressionType(expression, scope);
+    const name = variableName(expression);
+    const holds =
+      type.kind === "unknown"
+        ? ""
+        : name === null
+          ? `, not ${describeValue(type)}`
+          : `, but '${name}' holds ${describeValue(type)}`;
+    const fix =
+      type.kind === "null"
+        ? EMPTY_FIELD_FIX
+        : kind === "number"
+          ? numberDefaultFix(expression)
+          : textDefaultFix(expression);
     if (kind === "number") {
-      if (isDefinitelyNonNumeric(expression) || isDefinitelyBoolean(expression))
+      if (!isAssignable(NUMBER_TYPE, type) || isDefinitelyNonNumeric(expression))
         this.#report(
           semanticCode.invalidInteractionDefault,
-          "The default answer of askNumber must be a number, such as 'default: 10'.",
+          `The default answer of askNumber must be a number${holds}.${fix}`,
           expression.span,
         );
       return;
     }
-    if (isDefinitelyNonString(expression) || isArithmetic(expression)) {
+    if (
+      !isAssignable(STRING_TYPE, type) ||
+      isDefinitelyNonString(expression) ||
+      isArithmetic(expression)
+    ) {
       this.#report(
         semanticCode.invalidInteractionDefault,
-        "The default answer of askText must be text. Write a number as text, such as 'default: \"10\"'.",
+        `The default answer of askText must be text${holds}.${fix}`,
         expression.span,
       );
       return;
@@ -1486,7 +1520,7 @@ class SemanticValidator {
     if (text !== undefined && isBlankTextAnswer(text))
       this.#report(
         semanticCode.invalidInteractionDefault,
-        "The default answer of askText must contain a non-whitespace character.",
+        `The default answer of askText must contain a non-whitespace character.${EMPTY_FIELD_FIX}`,
         expression.span,
       );
   }
@@ -1954,22 +1988,33 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
   );
 }
 
-const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);
+const STRING_TYPE: StaticType = Object.freeze({ kind: "scalar", name: "string" });
+const NUMBER_TYPE: StaticType = Object.freeze({ kind: "scalar", name: "number" });
 
-/** Arithmetic yields a number or a duration, never text. */
+/** Arithmetic yields a number or a duration, never text, even when its operand types are unknown. */
 function isArithmetic(expression: Expression): boolean {
   expression = unwrapParentheses(expression);
   return expression.kind === "binaryExpression" && ARITHMETIC_OPERATORS.has(expression.operator);
 }
 
-/** A boolean literal, `not`, a comparison, or `and`/`or`. */
-function isDefinitelyBoolean(expression: Expression): boolean {
-  expression = unwrapParentheses(expression);
-  return (
-    expression.kind === "booleanLiteral" ||
-    (expression.kind === "unaryExpression" && expression.operator === "not") ||
-    (expression.kind === "binaryExpression" && NON_STRING_OPERATORS.has(expression.operator))
-  );
+const EMPTY_FIELD_FIX = " Remove 'default:' to start with an empty field.";
+
+/** How to offer a non-text default as text: interpolate it explicitly. */
+function textDefaultFix(expression: Expression): string {
+  const name = variableName(expression);
+  if (name !== null) return ` Write it as text: 'default: "\${${name}}"'.`;
+  const literal = unwrapParentheses(expression);
+  if (literal.kind === "numberLiteral")
+    return ` Write it as text: 'default: "${numberAnswerText(literal.value)}"'.`;
+  return " Write it as text with interpolation: 'default: \"${...}\"'.";
+}
+
+/** How to offer a number default: write number text as a number. */
+function numberDefaultFix(expression: Expression): string {
+  const text = staticVisibleText(expression);
+  return text !== undefined && isValidInteractionPrefill("number", text)
+    ? ` Write it as a number: 'default: ${text.trim()}'.`
+    : " Use a number, such as 'default: 10'.";
 }
 
 const LOAD_KEY_MESSAGE =
