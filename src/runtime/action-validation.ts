@@ -15,6 +15,7 @@ import {
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
 import { isOneOf } from "../plan/validation-support.js";
+import { isCanonicalTagList } from "../tags.js";
 import { isMessagePresentation } from "../message-presentation.js";
 import {
   type Instruction,
@@ -239,7 +240,7 @@ function validForegroundActionKind(
   if (action.kind === "capture") {
     // A pending capture may still publish an unavailable-camera warning and its completion.
     return (
-      validCaptureAction(action, snapshot) &&
+      validCaptureAction(action, snapshot, plan) &&
       hasEventSequenceCapacity(snapshot.nextEventSequence, 2)
     );
   }
@@ -275,14 +276,23 @@ function validStorageWriteAction(
   );
 }
 
+/** A pending capture; it carries validated tags exactly when its capture instruction has `tags:`. */
 function validCaptureAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
+  plan: RunnablePlan | undefined,
 ): boolean {
+  const owner =
+    plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)
+      ? undefined
+      : plan.instructions[action.owningInstruction];
   return (
+    (action.tags === null || isCanonicalTagList(action.tags)) &&
+    (owner?.kind !== "capture" || (owner.tags === null) === (action.tags === null)) &&
     hasExactKeys(action, [
       "kind",
       "capture",
+      "tags",
       "actionId",
       "owningInstruction",
       "continuationInstruction",
