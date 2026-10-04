@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { watch } from "vue";
 import Viewfinder from "./Viewfinder.vue";
 const props = defineProps<{
   media: { src: string; alt: string } | undefined;
@@ -7,27 +7,17 @@ const props = defineProps<{
   viewfinder?: MediaStreamTrack | null;
 }>();
 const emit = defineEmits<{ mediaAspect: [ratio: number] }>();
-// While the browser's picture-in-picture window shows the camera, the Stage shows its image again.
-const away = ref(false);
 // Only a new source needs measuring again; an equal source keeps its loaded image and aspect. A leading viewfinder
 // keeps the camera's aspect while its reference image changes.
 watch(
   () => props.media?.src,
-  () => (props.viewfinder && !away.value) || emit("mediaAspect", 0),
+  () => props.viewfinder || emit("mediaAspect", 0),
 );
 // A hidden viewfinder leaves no camera aspect behind; a returning image measures its own again.
 watch(
   () => props.viewfinder,
-  (track) => {
-    away.value = false;
-    if (!track) emit("mediaAspect", 0);
-  },
+  (track) => track || emit("mediaAspect", 0),
 );
-// An image shown meanwhile measures its own aspect; an empty Stage keeps none of the camera's.
-function steppedAside(value: boolean) {
-  away.value = value;
-  if (value) emit("mediaAspect", 0);
-}
 function mediaLoaded(event: Event) {
   const image = event.currentTarget;
   if (image instanceof HTMLImageElement && image.naturalHeight)
@@ -44,17 +34,10 @@ function mediaLoaded(event: Event) {
         :track="viewfinder"
         class="stage-viewfinder"
         @aspect="emit('mediaAspect', $event)"
-        @away="steppedAside"
       >
-        <img v-if="media && !away" :src="media.src" :alt="media.alt" class="stage-viewfinder-reference" />
+        <img v-if="media" :src="media.src" :alt="media.alt" class="stage-viewfinder-reference" />
       </Viewfinder>
-      <img
-        v-if="media && (!viewfinder || away)"
-        :src="media.src"
-        :alt="media.alt"
-        class="stage-media"
-        @load="mediaLoaded"
-      />
+      <img v-else-if="media" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" />
     </div>
   </section>
 </template>

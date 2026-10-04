@@ -6,7 +6,7 @@ import Viewfinder from "./Viewfinder.vue";
 
 // DEMO: the viewfinder as a floating window over the Player, like a mini player. Like the browsers' own
 // picture-in-picture windows it has no grip: the user drags the window itself, or focuses it and uses the arrow keys,
-// and resizes it from its corner. With a mouse, its controls show while it is hovered or focused. Its place lasts while the Player is mounted, also while
+// and resizes it from its corner. With a mouse, its resize control shows while it is hovered or focused. Its place lasts while the Player is mounted, also while
 // the viewfinder is hidden; it is presentation only.
 export interface FloatingPlace {
   readonly x: number;
@@ -22,8 +22,6 @@ const STEP = 16;
 const root = ref<HTMLElement | null>(null);
 const bounds = ref({ width: 0, height: 0 });
 const ratio = ref(4 / 3);
-// While the browser's picture-in-picture window shows the camera, the window keeps its place but is not shown.
-const away = ref(false);
 
 useResizeObserver(
   () => root.value?.parentElement,
@@ -125,8 +123,6 @@ function measured(next: number) {
   <div
     ref="root"
     class="floating-viewfinder"
-    :class="{ 'floating-viewfinder-away': away }"
-    :inert="away || undefined"
     data-floating-viewfinder
     role="group"
     aria-label="Camera preview window"
@@ -140,7 +136,6 @@ function measured(next: number) {
       :track="track"
       class="floating-viewfinder-frame"
       @aspect="measured"
-      @away="away = $event"
     >
       <button
         type="button"
@@ -170,7 +165,6 @@ function measured(next: number) {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
-.floating-viewfinder-away { pointer-events: none; }
 .floating-viewfinder-frame { width: 100%; box-shadow: 0 8px 28px var(--media-shadow); }
 .floating-viewfinder-resize {
   position: absolute;
@@ -188,15 +182,9 @@ function measured(next: number) {
   backdrop-filter: blur(3px);
   cursor: nwse-resize;
 }
-/* Touch has no hover, so there the controls stay. */
+/* Touch has no hover, so there the control stays. */
 @media (hover: hover) and (pointer: fine) {
-  .floating-viewfinder :deep(.viewfinder-pip),
-  .floating-viewfinder-resize {
-    transition: opacity 150ms;
-  }
-  .floating-viewfinder:not(:hover, :focus-within) :deep(.viewfinder-pip),
-  .floating-viewfinder:not(:hover, :focus-within) .floating-viewfinder-resize {
-    opacity: 0;
-  }
+  .floating-viewfinder-resize { transition: opacity 150ms; }
+  .floating-viewfinder:not(:hover, :focus-within) .floating-viewfinder-resize { opacity: 0; }
 }
 </style>

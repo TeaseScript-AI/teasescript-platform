@@ -411,12 +411,9 @@ label; captured photos are not mirrored. Without an available camera it is not s
 Player host shows and hides it, and every new session starts with it hidden. Its presentation is a demo under Owner
 evaluation in the development preview's Visual Lab. By default it floats over the Player as a window without a grip,
 like the browsers' own picture-in-picture windows: the user drags the window itself, or focuses it and uses the arrow
-keys, and resizes it from its corner. With a mouse, its controls show while it is hovered or focused. It keeps its place
-while the Player is mounted. The alternative leads the Stage, with the Stage image as a small reference in its lower
-corner. Where the browser offers it to pages, a button opens the viewfinder in the browser's own picture-in-picture
-window, which also floats over other apps. Meanwhile the Player's own viewfinder steps aside, and a viewfinder leading
-the Stage returns the Stage to its image; closing that window, or its "Back to Player" button, brings the viewfinder
-back where it was, and hiding the viewfinder closes it.
+keys, and resizes it from its corner. With a mouse, its resize control shows while it is hovered or focused. It keeps
+its place while the Player is mounted. The alternative leads the Stage, with the Stage image as a small reference in its
+lower corner. The Player's viewfinder is the only one: the browser's own picture-in-picture is not offered for it.
 
 Media playback is script-controlled. Audio and video elements show no native browser controls, and the Player offers
 no seek, scrub, pause, or skip control of its own: playback the runtime did not command would make reported progress
