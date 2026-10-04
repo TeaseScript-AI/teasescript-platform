@@ -15,6 +15,8 @@ export type StaticType =
 
 const UNKNOWN_TYPE: StaticType = Object.freeze({ kind: "unknown" });
 const NULL_TYPE: StaticType = Object.freeze({ kind: "null" });
+/** List methods that return the element they remove. */
+const LIST_REMOVALS: ReadonlySet<string> = new Set(["removeAt", "removeFirst", "removeLast"]);
 
 function scalar(name: ScalarTypeName): StaticType {
   return { kind: "scalar", name };
@@ -197,11 +199,15 @@ function* expressionTypeTask(
         if (callee.name === "randomInteger") return scalar("integer");
         if (callee.name === "chance") return scalar("boolean");
       }
-      if (callee.kind === "propertyAccessExpression" && callee.property.name === "contains") {
-        const receiver = nonNullType(
-          yield* compileChild(expressionTypeTask(callee.object, context)),
-        );
-        if (receiver.kind === "list" || receiver.kind === "set") return scalar("boolean");
+      if (callee.kind === "propertyAccessExpression") {
+        const removal = LIST_REMOVALS.has(callee.property.name);
+        if (removal || callee.property.name === "contains") {
+          const receiver = nonNullType(
+            yield* compileChild(expressionTypeTask(callee.object, context)),
+          );
+          if (removal) return receiver.kind === "list" ? receiver.element : UNKNOWN_TYPE;
+          if (receiver.kind === "list" || receiver.kind === "set") return scalar("boolean");
+        }
       }
       return UNKNOWN_TYPE;
     }

@@ -1,5 +1,5 @@
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 26;
+export const INSTRUCTION_PLAN_VERSION = 27;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {

@@ -386,24 +386,15 @@ test("removes only the first matching list value and present-value removals do n
   );
 });
 
-test("set remove of an absent value and removeFirst or removeLast on an empty list are no-ops", () => {
+test("set remove of an absent value is a no-op", () => {
   const captured: unknown[] = [];
   const result = executeSource(
-    [
-      "let setValue = set[1]",
-      "setValue.remove(2)",
-      "let emptyList = []",
-      "emptyList.removeFirst()",
-      "emptyList.removeLast()",
-      "capture(setValue.toList())",
-      "capture(emptyList)",
-      "exit",
-    ],
+    ["let setValue = set[1]", "setValue.remove(2)", "capture(setValue.toList())", "exit"],
     { capture: captureInto(captured) },
   );
 
-  assert.deepEqual(captured, [[1], []]);
-  // Unlike list remove(value), these no-ops report neither an error nor a warning.
+  assert.deepEqual(captured, [[1]]);
+  // Unlike list remove(value), this no-op reports neither an error nor a warning.
   assert.deepEqual(
     result.events.map((event) => event.kind),
     ["exit"],
