@@ -28,7 +28,7 @@ import {
   type InteractionChoiceValue,
   type InteractionUiPayload,
   startupDeclarations,
-  type PlanDestination,
+  type PlanTransferDestination,
 } from "../plan/model.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { cloneMessageMarkup } from "../message-markup.js";
@@ -95,7 +95,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 42;
+export const RUNTIME_SNAPSHOT_VERSION = 43;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -321,7 +321,7 @@ export interface RuntimeSnapshot {
   /** Roots of activations that were left but whose timer or media blocks can still run. */
   readonly retainedScopes: RuntimeScopeFrameSnapshot[];
   /** Where an `end` without a calling file continues, set by `fallback`. */
-  fallback: PlanDestination | null;
+  fallback: PlanTransferDestination | null;
   nextEventSequence: number;
   nextScopeId: number;
   nextSpeakerId: number;
@@ -570,7 +570,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     frames: snapshot.frames.map(cloneScopeFrame),
     globals: snapshot.globals.map(cloneBinding),
     retainedScopes: snapshot.retainedScopes.map(cloneScopeFrame),
-    fallback: snapshot.fallback === null ? null : { ...snapshot.fallback },
+    fallback: snapshot.fallback === null ? null : cloneTransferDestination(snapshot.fallback),
     speakers: snapshot.speakers.map((speaker) => ({
       id: speaker.id,
       identifier: speaker.identifier,
@@ -654,6 +654,14 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
 
 function cloneBinding(binding: RuntimeBindingSnapshot): RuntimeBindingSnapshot {
   return { name: binding.name, value: cloneCapturedSerializableValue(binding.value) };
+}
+
+export function cloneTransferDestination(
+  destination: PlanTransferDestination,
+): PlanTransferDestination {
+  return "pick" in destination
+    ? { pick: destination.pick.map((option) => ({ file: option.file, target: option.target })) }
+    : { file: destination.file, target: destination.target };
 }
 
 function cloneScopeFrame(frame: RuntimeScopeFrameSnapshot): RuntimeScopeFrameSnapshot {
@@ -3135,26 +3143,47 @@ function validateRootPlacement(frames: unknown, callFrames: unknown, errors: str
   }
 }
 
-/** `fallback` holds a file's entry or one of its labels. */
+/** Destinations are equal by their files and targets; a glob's files in the same order, which its draws index. */
+function sameTransferDestination(planned: PlanTransferDestination, stored: unknown): boolean {
+  const samePlain = (left: { file: number; target: number }, right: unknown): boolean =>
+    isPlainRecord(right) && right.file === left.file && right.target === left.target;
+  if (!("pick" in planned)) return samePlain(planned, stored);
+  const options: unknown = isPlainRecord(stored) ? stored.pick : undefined;
+  return (
+    Array.isArray(options) &&
+    options.length === planned.pick.length &&
+    planned.pick.every((option, index) => samePlain(option, options[index]))
+  );
+}
+
+/** `fallback` holds the destination of a `fallback` statement: a file's entry or label, or a glob's files. */
 function validateFallback(
   value: unknown,
   plan: InstructionPlan | undefined,
   errors: string[],
 ): void {
   if (value === null) return;
-  const file =
-    isPlainRecord(value) && nonNegativeSafeInteger(value.file)
-      ? plan?.files[value.file]
-      : undefined;
+  const destination = (candidate: unknown): boolean =>
+    isPlainRecord(candidate) &&
+    hasExactKeys(candidate, ["file", "target"]) &&
+    nonNegativeSafeInteger(candidate.file) &&
+    nonNegativeSafeInteger(candidate.target);
+  const shaped =
+    destination(value) ||
+    (isPlainRecord(value) &&
+      hasExactKeys(value, ["pick"]) &&
+      isCanonicalJsonArray(value.pick) &&
+      value.pick.length > 0 &&
+      value.pick.every(destination));
   if (
-    !isPlainRecord(value) ||
-    !hasExactKeys(value, ["file", "target"]) ||
-    !nonNegativeSafeInteger(value.file) ||
-    !nonNegativeSafeInteger(value.target) ||
+    !shaped ||
     (plan !== undefined &&
-      (file === undefined ||
-        (value.target !== file.entryInstruction &&
-          !file.labels.some((label) => label.instruction === value.target))))
+      !plan.instructions.some(
+        (instruction) =>
+          instruction.kind === "setFallback" &&
+          instruction.destination !== null &&
+          sameTransferDestination(instruction.destination, value),
+      ))
   ) {
     errors.push("Runtime fallback is malformed.");
   }

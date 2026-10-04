@@ -32,11 +32,11 @@ goto script("rooms/${room}.tease", label: "start")
 ```
 
 1. `goto` and `call` accept the same targets. A missing file or label is a compile error.
-2. A glob uses `*` for any characters within one folder or file name. Globs are expanded at compile time. With a label,
-   the pick is among the matched files that have that label. It is a compile error only when the glob matches nothing,
-   or no match has the label.
-3. Each time a glob target runs, one draw from the session random generator picks the file. Restoring a checkpoint
-   never draws again.
+2. A glob uses `*` for any characters within one folder or file name. Globs are expanded at compile time. A glob only
+   picks files that do something: the matched files that have the label, when one is given, and do not hold
+   declarations only. It is a compile error only when no such file remains.
+3. Each time a glob target runs, one draw from the session random generator picks the file; a glob `fallback` draws
+   each time the fallback is used. Restoring a checkpoint never draws again.
 4. `script(path, label:)` returns a script reference, of type `script`. Plain text is not a jump target. References can
    be stored in lists, dicts, and globals. A bare variable as a target is grouped: `goto (next)`. A missing file or label
    is a compile error when known, otherwise a runtime error.

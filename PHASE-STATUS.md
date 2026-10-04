@@ -20,8 +20,9 @@ accept syntax, architecture, or implementation details.
   single-line and block strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion,
   control flow, deterministic random, rounding, and `min`/`max` built-ins, text operations and list `join`, the
   `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `sort`/`shuffle` and set operations, top-level
-  user-defined functions, labels with `goto` within a file, and explicit endings with a required `exit` (ADR 0022).
-  Projects of several `.tease` files compile into one plan; `call` and transfers between files are not implemented yet.
+  user-defined functions, labels and `goto`, and explicit endings with a required `exit` (ADR 0022). Projects of several
+  `.tease` files compile into one plan, with globals, global functions, and speakers shared by all files, `goto`,
+  `call`, and `end` between files with a `fallback`, and glob targets.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
 - **Script storage:** `save`/`load`/`delete`, optional lazy defaults, a validated checkpointed session view, and

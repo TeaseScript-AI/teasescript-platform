@@ -2,12 +2,15 @@ import type {
   EndInstruction,
   GotoInstruction,
   PlanDestination,
+  PlanTransferDestination,
   PlanSourceLocation,
   SetFallbackInstruction,
   TransferInstruction,
 } from "../../plan/model.js";
 import { innermostFileCallIndex } from "../activations.js";
 import { RuntimeFault } from "../errors.js";
+import { nextXorShift32 } from "../random.js";
+import { cloneTransferDestination } from "../state.js";
 import type { InterpreterEvent } from "../events.js";
 import type { RuntimeTimerSnapshot } from "../timers.js";
 import type {
@@ -74,7 +77,8 @@ export function executeTransfer(
     }
     assertCounterCanAdvance(snapshot.nextCallFrameId, "nextCallFrameId");
   }
-  const root = freshRoot(snapshot, instruction.destination);
+  const destination = drawDestination(snapshot, instruction.destination);
+  const root = freshRoot(snapshot, destination);
   if (instruction.mode === "goto") {
     const left = activationRootsFrom(snapshot, innermostFileCallIndex(snapshot));
     removeNonPersistentTimers(snapshot, left, instruction.span, events);
@@ -94,7 +98,7 @@ export function executeTransfer(
     snapshot.frames.push(root);
     snapshot.temporaries.length = 0;
   }
-  snapshot.nextInstruction = instruction.destination.target;
+  snapshot.nextInstruction = destination.target;
   sweepRetainedScopes(snapshot);
 }
 
@@ -123,7 +127,8 @@ export function executeEnd(
     events,
   );
   if (index < 0) {
-    const fallback = snapshot.fallback!;
+    // A glob fallback draws its file each time it is used.
+    const fallback = drawDestination(snapshot, snapshot.fallback!);
     replaceCurrentRoot(snapshot, freshRoot(snapshot, fallback));
     snapshot.nextInstruction = fallback.target;
   } else {
@@ -144,9 +149,17 @@ export function executeSetFallback(
   snapshot: RuntimeSnapshot,
 ): void {
   const destination = instruction.destination;
-  snapshot.fallback =
-    destination === null ? null : { file: destination.file, target: destination.target };
+  snapshot.fallback = destination === null ? null : cloneTransferDestination(destination);
   snapshot.nextInstruction += 1;
+}
+
+/** A glob target picks one of its files with one draw from the session random generator, each time it runs. */
+function drawDestination(
+  snapshot: RuntimeSnapshot,
+  destination: PlanTransferDestination,
+): PlanDestination {
+  if (!("pick" in destination)) return destination;
+  return destination.pick[Math.floor(nextXorShift32(snapshot.rng) * destination.pick.length)]!;
 }
 
 /**

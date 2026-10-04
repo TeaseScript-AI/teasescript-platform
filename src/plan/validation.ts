@@ -323,16 +323,26 @@ const FILE_FIELDS = [
 const LABEL_FIELDS = ["name", "instruction"];
 
 /** A destination's file and target must also name that file's entry or a label; the stream analysis checks that. */
+/** A file and its entry or label, or for a glob a non-empty list of them to pick from. */
 function validateDestinationShape(
   value: unknown,
   path: string,
   errors: PlanValidationError[],
 ): void {
+  const single = (candidate: unknown): boolean =>
+    isRecord(candidate) &&
+    hasExactKeys(candidate, ["file", "target"]) &&
+    nonNegativeSafeInteger(candidate.file) &&
+    nonNegativeSafeInteger(candidate.target);
   if (
-    !isRecord(value) ||
-    !hasExactKeys(value, ["file", "target"]) ||
-    !nonNegativeSafeInteger(value.file) ||
-    !nonNegativeSafeInteger(value.target)
+    !single(value) &&
+    !(
+      isRecord(value) &&
+      hasExactKeys(value, ["pick"]) &&
+      Array.isArray(value.pick) &&
+      value.pick.length > 0 &&
+      value.pick.every(single)
+    )
   ) {
     errors.push(planError("TSC002", "Transfer destination is malformed.", path));
   }

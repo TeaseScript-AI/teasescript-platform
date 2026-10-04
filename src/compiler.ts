@@ -1,4 +1,4 @@
-import type { Program } from "./ast.js";
+import type { FileTarget, Program } from "./ast.js";
 import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-validation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { compileStableProject, type InstructionPlan } from "./compiler/compile-program.js";
@@ -146,6 +146,8 @@ interface CompiledProjectFile {
   readonly source: string;
   /** `null` when parsing exhausted the call stack. */
   readonly parsed: ReturnType<typeof parse> | null;
+  /** The files each glob target may pick, once the names are checked. */
+  picks?: ReadonlyMap<FileTarget, readonly string[]>;
 }
 
 /** Valid, unique package paths in plan order, and a `TSC009` diagnostic for every other path or a missing main. */
@@ -249,7 +251,10 @@ function checkProject(
       (index) => files[index]!.parsed !== null && !hasErrors(files[index]!.result.diagnostics),
       track,
     );
-    names.forEach((result, index) => addSemanticDiagnostics(files[index]!, result.diagnostics));
+    names.forEach((result, index) => {
+      addSemanticDiagnostics(files[index]!, result.diagnostics);
+      files[index]!.picks = result.picks;
+    });
     if (files.some((file) => file.parsed === null || hasErrors(file.result.diagnostics)))
       return null;
     // Types are checked once every name resolves, so a type message never repeats a name or structure error.
@@ -321,7 +326,11 @@ function lowerProject(
   let failure: ReturnType<typeof compiledPlanValidationDiagnostic>;
   try {
     const compiled = compileStableProject(
-      files.map((file) => ({ path: file.result.path, program: file.result.program })),
+      files.map((file) => ({
+        path: file.result.path,
+        program: file.result.program,
+        ...(file.picks === undefined ? {} : { picks: file.picks }),
+      })),
       typeChecks,
       (fileIndex) => {
         current = files[fileIndex]!;

@@ -22,7 +22,7 @@ import type {
   TimerParts,
   TypeAnnotation,
 } from "./ast.js";
-import { MAIN_FILE_PATH } from "./project-paths.js";
+import { globMatches, MAIN_FILE_PATH } from "./project-paths.js";
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
@@ -4698,7 +4698,8 @@ function programEffects(program: Program): ProgramEffects {
         statement.kind === "fallbackStatement") &&
       statement.target?.kind === "fileTarget" &&
       statement.target.label === null &&
-      statement.target.path === MAIN_FILE_PATH
+      // A glob may pick main.tease too.
+      globMatches(statement.target.path, [MAIN_FILE_PATH]).length > 0
     )
       entersMain = true;
     // The `default:` form of a global assigns it where the declaration runs.
