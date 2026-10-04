@@ -216,8 +216,8 @@ const CONTROL_TARGETS: ReadonlyMap<string, readonly string[]> = new Map([
 ]);
 
 /**
- * Whether a start value stays in the accepted family: no call, which could run a host effect or change a value, no
- * temporary or prepared reference, which only instructions after it can produce, and no global set up later. The
+ * Whether a start value stays in the accepted family: no call, which could run a host effect or change a value, nor a
+ * tag query, which reads like one, no temporary or prepared reference, which only instructions after it can produce, and no global set up later. The
  * expression's own shape is validated separately; here every nested record is visited, and the only records that use
  * these kinds are expressions.
  */
@@ -234,7 +234,12 @@ function startValueAccepted(
       continue;
     }
     if (!isRecord(node)) continue;
-    if (node.kind === "call" || node.kind === "temporary" || node.kind === "preparedReference")
+    if (
+      node.kind === "call" ||
+      node.kind === "tagQuery" ||
+      node.kind === "temporary" ||
+      node.kind === "preparedReference"
+    )
       return false;
     if (node.kind === "identifier" && (positions.get(node.name) ?? -1) >= firstLater) return false;
     for (const nested of Object.values(node)) work.push(nested);

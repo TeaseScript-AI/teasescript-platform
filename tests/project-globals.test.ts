@@ -196,6 +196,12 @@ test("a start value uses only literals, earlier globals, operators, and load", (
     ]),
   );
   assert.equal(unknown.snapshot.failure?.code, "TSR067");
+  // findImages reads like a call, and is rejected like one.
+  assert.deepEqual(
+    diagnostics([{ path: "main.tease", source: 'global pics = findImages(all: ["room"])\nexit' }]),
+    [["main.tease", "TSV055", 1]],
+  );
+
   // Earlier globals, operators, and load with its default are fine.
   const plan = compiledPlan([
     {
@@ -749,6 +755,22 @@ test("a plan sets up its globals once, with start values of the accepted kinds",
       }),
     ),
     [`$.instructions[2].value ${startValue}`],
+  );
+  const findImages = {
+    kind: "tagQuery",
+    catalog: "images",
+    select: "list",
+    operands: [],
+    steps: [],
+    span,
+  };
+  assert.deepEqual(
+    rejected(
+      changed(0, (instruction) => {
+        instruction.value = findImages;
+      }),
+    ),
+    [`$.instructions[0].value ${startValue}`],
   );
   // A start value reads only globals set up before it; a speaker's properties may read the speaker.
   assert.deepEqual(

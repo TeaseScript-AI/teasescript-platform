@@ -2152,6 +2152,7 @@ class SemanticValidator {
           );
           continue;
         case "callExpression":
+        case "tagQueryExpression":
           this.#report(
             semanticCode.invalidStartValue,
             `${subject} cannot call a function: ${speaker ? "a speaker is set up" : "it is set"} at the start of the session, before the story runs. Use literals, globals declared before it, operators, and 'load ..., default:'.`,
