@@ -7,6 +7,7 @@ import type {
   AssignmentTarget,
   Block,
   CallArgument,
+  DurationUnit,
   Identifier,
   InteractionChoiceOption,
   ShowButtonParts,
@@ -24,7 +25,12 @@ import {
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   TEASESCRIPT_PROTECTED_NAMES,
 } from "./protected-names.js";
-import { staticNumber, staticQuantity, staticVisibleText } from "./static-evaluation.js";
+import {
+  findVisibleOverflows,
+  staticNumber,
+  staticQuantity,
+  staticVisibleText,
+} from "./static-evaluation.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 import {
   expressionChildren,
@@ -32,7 +38,7 @@ import {
   mediaOperands,
   showButtonOptions,
 } from "./expression-children.js";
-import { durationLiteralMilliseconds } from "./duration.js";
+import { DURATION_UNIT_MILLISECONDS, durationLiteralMilliseconds } from "./duration.js";
 import { validateSwitchCases } from "./switch-cases.js";
 
 export interface SemanticValidationOptions {
@@ -113,6 +119,13 @@ const semanticCode = {
   invalidMediaHandleMember: "TSV037",
   invalidStorageKey: "TSV038",
   invalidListIndex: "TSV045",
+  visibleOverflow: "TSV050",
+} as const;
+
+const OVERFLOW_MESSAGES = {
+  zero: "This divides by zero, so it has no result. Divide by a value other than zero.",
+  number: "This calculation gives a number too large to represent. Use smaller values.",
+  duration: "This calculation gives a duration too long to represent. Use a shorter duration.",
 } as const;
 
 export function validateSemantics(
@@ -226,6 +239,8 @@ class SemanticValidator {
     for (let index = 0; index < this.#pendingHandlers.length; index += 1) {
       this.#validateHandler(this.#pendingHandlers[index]!);
     }
+    for (const overflow of findVisibleOverflows(program))
+      this.#report(semanticCode.visibleOverflow, OVERFLOW_MESSAGES[overflow.cause], overflow.span);
   }
 
   /**
@@ -341,6 +356,12 @@ class SemanticValidator {
           timer.repeat
             ? "A repeating timer duration must be greater than zero."
             : "Timer duration must not be negative.",
+          timer.duration.span,
+        );
+      } else if (beyondSceneTime(timer.duration, timer.unit)) {
+        this.#report(
+          semanticCode.invalidRepeatCount,
+          "This timer is too long for scene time to reach. Use a shorter duration.",
           timer.duration.span,
         );
       }
@@ -707,6 +728,12 @@ class SemanticValidator {
           this.#report(
             semanticCode.invalidRepeatCount,
             "Wait duration must not be negative.",
+            statement.duration.span,
+          );
+        } else if (beyondSceneTime(statement.duration, statement.unit)) {
+          this.#report(
+            semanticCode.invalidRepeatCount,
+            "This wait is too long for scene time to reach. Use a shorter duration.",
             statement.duration.span,
           );
         }
@@ -1266,25 +1293,18 @@ class SemanticValidator {
 
   /**
    * When the compiler can fully evaluate a timeout, it reports every failure the runtime would hit: a value of zero or
-   * less, an overflowing step, or one scene time cannot reach. The type checker requires a number or a duration, and
-   * the runtime checks the values the compiler cannot know.
+   * less, or one scene time cannot reach; an overflowing step is a visible-overflow error like anywhere else. The type
+   * checker requires a number or a duration, and the runtime checks the values the compiler cannot know.
    */
   #validateButtonTimeout(expression: Expression): void {
-    const known = staticQuantity(expression);
-    const milliseconds =
-      known === undefined
-        ? undefined
-        : typeof known === "number"
-          ? known * 1_000
-          : known.milliseconds;
+    const milliseconds = knownMilliseconds(expression, null);
     if (milliseconds !== undefined && milliseconds <= 0)
       this.#report(
         semanticCode.invalidRepeatCount,
         "The showButton timeout must be greater than zero. Remove 'timeout:' to wait for the click without a time limit.",
         expression.span,
       );
-    // Scene time is at most `Number.MAX_SAFE_INTEGER` milliseconds, so a longer timeout can never be reached.
-    else if (milliseconds !== undefined && !(milliseconds <= Number.MAX_SAFE_INTEGER))
+    else if (beyondSceneTime(expression, null))
       this.#report(
         semanticCode.invalidRepeatCount,
         "The showButton timeout is too long for scene time to reach. Use a shorter timeout, or remove 'timeout:' to wait without a time limit.",
@@ -1648,6 +1668,24 @@ function isDefinitelyNonText(expression: Expression): boolean {
     expression.kind === "objectLiteral" ||
     expression.kind === "rangeExpression"
   );
+}
+
+/**
+ * The milliseconds of a known wait, timer, or timeout duration: a number counts seconds, or `unit`, and a duration its
+ * own milliseconds. `undefined` when the value is not known or not a finite quantity.
+ */
+function knownMilliseconds(expression: Expression, unit: DurationUnit | null): number | undefined {
+  const known = staticQuantity(expression);
+  if (known === undefined) return undefined;
+  return typeof known === "number"
+    ? known * DURATION_UNIT_MILLISECONDS[unit ?? "s"]
+    : known.milliseconds;
+}
+
+/** Scene time is at most `Number.MAX_SAFE_INTEGER` milliseconds, so a known longer duration can never be reached. */
+function beyondSceneTime(expression: Expression, unit: DurationUnit | null): boolean {
+  const milliseconds = knownMilliseconds(expression, unit);
+  return milliseconds !== undefined && !(milliseconds <= Number.MAX_SAFE_INTEGER);
 }
 
 function isKnownInteger(expression: Expression): boolean {

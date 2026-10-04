@@ -373,6 +373,11 @@ Arithmetic applies to numbers, and to durations as described in [§35](#35-date-
 converts text or booleans: `"a" + "b"` is a compile error, and text is joined with interpolation, as in
 `"${first}${second}"`.
 
+A calculation whose result is too large to represent, or that divides by zero, has no result. When the compiler can
+see every operand of that step, as in `1e308 * 10`, `1 / 0`, or `1e300 s * 1e10`, it is a compile error that names the
+step, anywhere in an expression. A step with an operand that is known only when the script runs is checked then, and
+fails with a runtime error.
+
 ### Randomness
 
 All random operations use one deterministic session RNG. This includes list `.random`, list selection in `${...}` interpolation, random ranges, script globs, and the built-in random functions.
@@ -2443,6 +2448,10 @@ running while a live Player is minimized or in the background; when the Player i
 including on another device, the gap does not consume timer time and the timer continues with its saved remaining
 time. A script plays the same however late or often the Player observes time: everything happens at its own moment
 in scene time. See [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time) for the observation contract.
+
+Scene time counts whole milliseconds up to 2^53 − 1, about 285,000 years. A `wait`, timer, or `showButton` timeout
+longer than that can never end; the compiler rejects one it can see, such as `wait 1e15`, and any other is a runtime
+error.
 
 ## 28. Permanent buttons
 **Status:** Accepted

@@ -1159,7 +1159,7 @@ test("work due exactly at the observed time settles once execution waits or ends
 });
 
 test("a failed session accepts no host input and schedules no further observation", () => {
-  const failed = new Session('say "first", 10\nlet x = 1 / 0', { pacing: true });
+  const failed = new Session('say "first", 10\nlet zero = 0\nlet x = 1 / zero', { pacing: true });
   assert.equal(failed.snapshot.status, "failed");
   const observed = observeTime(failed.plan, failed.snapshot, 5_000).snapshot;
   const gate = observed.backgroundActions.find((action) => action.kind === "chatPacingGate");
