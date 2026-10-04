@@ -1944,7 +1944,7 @@ export class Evaluator {
       });
     const found: SerializableRuntimeValue[] = [];
     if (query.catalog === "scripts") {
-      // The project's files in project order, those `from:` names, each as a reference to its top.
+      // The files that run something, those `from:` names, in path order, each as a reference to its top.
       const named =
         query.from === null
           ? null
@@ -1956,10 +1956,18 @@ export class Evaluator {
                   )
                 : [query.from],
             );
+      const paths: string[] = [];
       for (const file of this.plan.files) {
-        if ((named === null || named.has(file.path)) && matches(imageTags(file)))
-          found.push({ kind: "script", path: file.path, label: null });
+        if (
+          file.tags !== null &&
+          (named === null || named.has(file.path)) &&
+          matches(imageTags(file))
+        )
+          paths.push(file.path);
       }
+      // Plan files start with main.tease; picks and lists see path order, as for images.
+      paths.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+      for (const path of paths) found.push({ kind: "script", path, label: null });
     } else {
       // The package images in path order, then the photos taken with tags in capture order.
       for (const image of this.plan.images) if (matches(imageTags(image))) found.push(image.path);
@@ -2730,11 +2738,11 @@ const imageTagMaps = new WeakMap<object, ReadonlyMap<string, number | null>>();
 
 /** An image's tags by name, built once per catalog entry: a plan image or a photo taken with tags. */
 function imageTags(image: {
-  readonly tags: readonly PlanTag[];
+  readonly tags: readonly PlanTag[] | null;
 }): ReadonlyMap<string, number | null> {
   let tags = imageTagMaps.get(image);
   if (tags === undefined) {
-    tags = new Map(image.tags.map((tag) => [tag.name, tag.value]));
+    tags = new Map((image.tags ?? []).map((tag) => [tag.name, tag.value]));
     imageTagMaps.set(image, tags);
   }
   return tags;

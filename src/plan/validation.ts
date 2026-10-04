@@ -493,11 +493,11 @@ function validatePlanFiles(
         ),
       );
     }
-    if (!isCanonicalTagList(file.tags)) {
+    if (file.tags !== null && !isCanonicalTagList(file.tags)) {
       errors.push(
         planError(
           "TSC002",
-          "A file's tags are canonical names, each once, in name order, with a finite number or null.",
+          "A file's tags are null, or canonical names, each once, in name order, with a finite number or null.",
           `${path}.tags`,
         ),
       );

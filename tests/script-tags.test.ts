@@ -9,6 +9,9 @@ import type { InterpreterEvent } from "../src/runtime/events.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 
+const NO_FILE =
+  "No file in the project that runs something has these tags; a file of declarations only is never picked.";
+
 /** Tagged modules that finish with `ending`: `exit` after a `goto`, `end` to return from a `call`. */
 function modules(ending: "end" | "exit"): Record<string, string> {
   return {
@@ -89,7 +92,7 @@ test("a file's header tags are in the plan file table, in name order", () => {
   assert.equal(validateInstructionPlan(plan).valid, true);
 });
 
-test("findScripts lists script references to the matching files, in project order", () => {
+test("findScripts lists script references to the matching files, in path order", () => {
   assert.deepEqual(
     said(
       [
@@ -136,19 +139,15 @@ test("fallback tagged picks the file when the statement runs", () => {
 });
 
 test("a pick whose literal tags match no file is a compile error; one that only may match fails at runtime", () => {
-  assert.deepEqual(errors('goto tagged "attic"'), [
-    ["TST002", "No file in the project has these tags."],
-  ]);
-  assert.deepEqual(errors('goto tagged "public", from: "rooms/s*.tease"'), [
-    ["TST002", "No file in the project has these tags."],
-  ]);
+  assert.deepEqual(errors('goto tagged "attic"'), [["TST002", NO_FILE]]);
+  assert.deepEqual(errors('goto tagged "public", from: "rooms/s*.tease"'), [["TST002", NO_FILE]]);
   // Grouping keeps a written list literal, in every transfer form.
   for (const main of [
     'goto tagged all: (["absent"])',
     'call tagged all: [("absent")]\nexit',
     'fallback tagged "punishment", none: (["punishment"])\nexit',
   ]) {
-    assert.deepEqual(errors(main), [["TST002", "No file in the project has these tags."]], main);
+    assert.deepEqual(errors(main), [["TST002", NO_FILE]], main);
   }
   const plan = compiled('let minimum = 9\ngoto tagged "punishment" > minimum');
   const failed = run(plan, createImmediatePacingRuntimeSnapshot(plan));
@@ -250,3 +249,63 @@ function tagQuery(plan: MutablePlan): Record<string, unknown> {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
+
+test("a file of declarations only is never picked or listed, as for globs", () => {
+  const files = (main: string): ProjectSourceFile[] => [
+    { path: "main.tease", source: main },
+    { path: "lib.tease", source: '---\ntags: "helpers"\n---\nfunction help { say "help" }' },
+    { path: "room.tease", source: '---\ntags: "helpers"\n---\nsay "room"\nend' },
+  ];
+  const result = compileProject(
+    files('say findScripts(where: "helpers")\ncall tagged "helpers"\nexit'),
+  );
+  assert.deepEqual(result.diagnostics, []);
+  // The plan marks the file that runs nothing, so no query sees its tags.
+  assert.deepEqual(
+    result.plan!.files.map((file) => [file.path, file.tags]),
+    [
+      ["main.tease", []],
+      ["lib.tease", null],
+      ["room.tease", [{ name: "helpers", value: null }]],
+    ],
+  );
+  assert.deepEqual(
+    says(
+      assertRuntimeResumeEquivalent(
+        files('say findScripts(where: "helpers").length\ncall tagged "helpers"\nexit'),
+      ).events,
+    ),
+    ["1", "room"],
+  );
+
+  // Only a file that runs something counts; a pick that finds none is a compile error.
+  const onlyLib = (main: string) =>
+    compileProject([files(main)[0]!, files(main)[1]!])
+      .diagnostics.filter((diagnostic) => diagnostic.severity === "error")
+      .map((diagnostic) => [diagnostic.code, diagnostic.message]);
+  assert.deepEqual(onlyLib('call tagged "helpers"\nexit'), [
+    [
+      "TST002",
+      "No file in the project that runs something has these tags; a file of declarations only is never picked.",
+    ],
+  ]);
+  assert.deepEqual(onlyLib('let found = findScripts(from: "lib.tease")\nexit'), [
+    [
+      "TST006",
+      "Every file matching 'lib.tease' holds declarations only and runs nothing, so there is nothing to pick.",
+    ],
+  ]);
+});
+
+test("picks and lists see path order, also with main.tease among the matches", () => {
+  const files: ProjectSourceFile[] = [
+    {
+      path: "main.tease",
+      source: '---\ntags: "start"\n---\nsay findScripts(where: "start")\nexit',
+    },
+    { path: "a.tease", source: '---\ntags: "start"\n---\nsay "a"\nexit' },
+  ];
+  assert.deepEqual(says(assertRuntimeResumeEquivalent(files).events), [
+    '[script("a.tease"), script("main.tease")]',
+  ]);
+});

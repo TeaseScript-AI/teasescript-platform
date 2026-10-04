@@ -4447,16 +4447,18 @@ if pool.length > 0 { goto (pool.random) } else { goto "fallback.tease" }
   all matching images in path order, as a `string[]`, which may be empty. Without arguments it returns every image.
 - `goto tagged`, `call tagged`, and `fallback tagged` pick a file of the project by the tags of its header
   ([File header](#file-header)) and enter it at its top, as `goto (reference)` does
-  ([§29](#29-script-files-and-paths)). Every file is a candidate, `main.tease` and the current file too. The option
-  `from:` limits the candidates to a path or glob written out in quotes, as for `goto`; one that matches no file is a
-  compile error. `findScripts` takes `where:`, `all:`, `none:`, `any:`, and `from:` as named arguments and returns
-  `script` references to all matching files in project order, as a `script[]`. A `fallback tagged` picks its file
+  ([§29](#29-script-files-and-paths)). Every file that runs something is a candidate, `main.tease` and the current
+  file too; a file of declarations only runs nothing on its own and is skipped, as for a glob
+  ([§29](#29-script-files-and-paths)). The option `from:` limits the candidates to a path or glob written out in quotes, as
+  for `goto`; one that names no file that runs something is a compile error. `findScripts` takes `where:`, `all:`,
+  `none:`, `any:`, and `from:` as named arguments and returns `script` references to all matching candidates in path
+  order, as a `script[]`. A pick, too, chooses among the candidates in path order. A `fallback tagged` picks its file
   when the statement runs.
 - Comparison bounds and tag lists are evaluated once, in written order, before any candidate is matched. Matching draws
   no random number. A pick (`showImage tagged`, `goto tagged`, `call tagged`, `fallback tagged`) draws once from the
   session random generator, and restoring a checkpoint never draws again.
-- A `goto tagged`, `call tagged`, or `fallback tagged` whose tag tests and literal tag lists match no file, within its
-  `from:`, is a compile error: every file's header is known when the project compiles. Comparisons and computed lists
+- A `goto tagged`, `call tagged`, or `fallback tagged` whose tag tests and literal tag lists match no candidate, within
+  its `from:`, is a compile error: every file's header is known when the project compiles. Comparisons and computed lists
   are not evaluated for this.
 - When the compilation is given the package images and no file takes photos with tags, a `showImage tagged` whose tag
   tests and literal tag lists match none of them is a compile error; comparisons and computed lists are not evaluated

@@ -32,8 +32,8 @@ export interface StableProjectFile {
   readonly program: Program;
   /** The files each glob target may pick, from semantic validation. */
   readonly picks?: ReadonlyMap<FileTarget, readonly string[]>;
-  /** The tags of the file's header, in name order. */
-  readonly tags?: readonly PlanTag[];
+  /** The tags of the file's header, in name order; `null` for a file of declarations only. */
+  readonly tags?: readonly PlanTag[] | null;
 }
 
 /** Lowers the AST of a single-file project, the `main.tease` of `program`. */
@@ -115,7 +115,8 @@ export function compileStableProject(
       rootEndInstruction,
       endInstruction: instructions.length,
       labels: compiler.labels,
-      tags: (tags ?? []).map((tag) => ({ name: tag.name, value: tag.value })),
+      tags:
+        tags === null ? null : (tags ?? []).map((tag) => ({ name: tag.name, value: tag.value })),
     });
   }
   for (const { instruction, name } of project.foreignCalls) {

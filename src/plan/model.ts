@@ -51,8 +51,12 @@ export interface PlanFile {
   readonly endInstruction: number;
   /** The labels of the file's outer scope, in source order, each at the root instruction where it stands. */
   readonly labels: readonly PlanLabel[];
-  /** The tags of the file's header, each name once, in name order, which script tag queries search (ADR 0023). */
-  readonly tags: readonly PlanTag[];
+  /**
+   * The tags of the file's header, each name once, in name order, which script tag queries match (ADR 0023); `null`
+   * for a file of declarations only, which runs nothing on its own, so no script tag query picks or lists it, as no
+   * glob does (ADR 0022 §4.3).
+   */
+  readonly tags: readonly PlanTag[] | null;
 }
 
 export interface PlanLabel {

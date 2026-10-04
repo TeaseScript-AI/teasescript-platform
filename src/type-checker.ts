@@ -157,8 +157,14 @@ export interface TypeCheckOptions {
   readonly imageCatalog?: readonly PlanImage[];
   /** Whether some file of the project takes photos with tags, which join the catalog at runtime. */
   readonly capturesTaggedPhotos?: boolean;
-  /** The project's files with the tags of their headers, in project order, which script tag queries search. */
-  readonly scriptCatalog?: readonly { readonly path: string; readonly tags: readonly PlanTag[] }[];
+  /**
+   * The project's files with the tags of their headers, which script tag queries match; `null` tags for a file of
+   * declarations only, which is never picked or listed.
+   */
+  readonly scriptCatalog?: readonly {
+    readonly path: string;
+    readonly tags: readonly PlanTag[] | null;
+  }[];
 }
 
 export interface TypeCheckResult {
@@ -409,9 +415,10 @@ class TypeChecker {
 
   readonly #capturesTaggedPhotos: boolean;
 
-  /** The project's files and their tags by name; `null` when the check was not given them. */
+  /** The project's files and their tags by name, `null` for declarations only; `null` when not given. */
   readonly #scriptCatalog:
-    readonly { readonly path: string; readonly tags: ReadonlyMap<string, number | null> }[] | null;
+    | readonly { readonly path: string; readonly tags: ReadonlyMap<string, number | null> | null }[]
+    | null;
 
   /** The project's names: host globals, globals, speakers, and global functions. */
   readonly #project = new Scope(null);
@@ -543,7 +550,7 @@ class TypeChecker {
     this.#scriptCatalog =
       options.scriptCatalog?.map((file) => ({
         path: file.path,
-        tags: new Map(file.tags.map((tag) => [tag.name, tag.value])),
+        tags: file.tags === null ? null : new Map(file.tags.map((tag) => [tag.name, tag.value])),
       })) ?? null;
     this.#imageTags =
       options.imageCatalog?.map(
@@ -2566,7 +2573,7 @@ class TypeChecker {
     this.#report(
       typeCode.emptyTagQuery,
       query.catalog === "scripts"
-        ? "No file in the project has these tags."
+        ? "No file in the project that runs something has these tags; a file of declarations only is never picked."
         : candidates.length === 0
           ? "The package has no images to pick from."
           : "No image in the package has these tags.",
@@ -2575,13 +2582,17 @@ class TypeChecker {
   }
 
   /**
-   * The tags of the files a script query may pick: every file, or those its `from:` names. Reports a `from:` that is
-   * not a package path or glob, or matches no file; `null` when the project's files are not known.
+   * The tags of the files a script query may pick or list: every file that runs something, or those its `from:` names.
+   * Reports a `from:` that is not a package path or glob, or names no file that runs something; `null` when the
+   * project's files are not known.
    */
   #scriptCandidates(query: TagQueryExpression): ReadonlyMap<string, number | null>[] | null {
     if (this.#scriptCatalog === null) return null;
+    const runnable = (
+      files: readonly { readonly tags: ReadonlyMap<string, number | null> | null }[],
+    ) => files.flatMap((file) => (file.tags === null ? [] : [file.tags]));
     const from = query.from;
-    if (from === null) return this.#scriptCatalog.map((file) => file.tags);
+    if (from === null) return runnable(this.#scriptCatalog);
     const problem = isPathGlob(from.pattern)
       ? packageGlobProblem(from.pattern)
       : packagePathProblem(from.pattern);
@@ -2594,17 +2605,20 @@ class TypeChecker {
             ),
           )
         : new Set<string>();
-    if (problem !== null || matched.size === 0) {
+    const candidates = runnable(this.#scriptCatalog.filter((file) => matched.has(file.path)));
+    if (problem !== null || candidates.length === 0) {
       this.#report(
         typeCode.invalidTagQueryFrom,
-        problem === null
-          ? `from: '${from.pattern}' matches no file of the project.`
-          : `from: '${from.pattern}' is not a package file path or glob: ${problem}.`,
+        problem !== null
+          ? `from: '${from.pattern}' is not a package file path or glob: ${problem}.`
+          : matched.size === 0
+            ? `from: '${from.pattern}' matches no file of the project.`
+            : `Every file matching '${from.pattern}' holds declarations only and runs nothing, so there is nothing to pick.`,
         from.span,
       );
       return null;
     }
-    return this.#scriptCatalog.filter((file) => matched.has(file.path)).map((file) => file.tags);
+    return candidates;
   }
 
   /** The value of a test or logical expression used as a value: the flows of both outcomes join afterwards. */
