@@ -1204,6 +1204,13 @@ export class Evaluator {
     const result = (parts: DurationParts | string): SerializableRuntimeDuration => {
       if (typeof parts === "string")
         throw fault("TSR009", `Operator '${operator}': ${parts}.`, span);
+      // Calendar parts must stay whole numbers that a value can store, like the milliseconds' finite range.
+      if (!Number.isSafeInteger(parts.months) || !Number.isSafeInteger(parts.days))
+        throw fault(
+          "TSR036",
+          `Operator '${operator}': the result has too many calendar days or months to represent.`,
+          span,
+        );
       return storedDuration({ ...parts, milliseconds: this.#finite(parts.milliseconds, span) });
     };
     if (isDuration(left) && isDuration(right)) {
@@ -1987,8 +1994,17 @@ export class Evaluator {
         if (name === "min" ? candidate < best : candidate > best) best = candidate;
       return withoutNegativeZero(best);
     }
-    // Durations order only within one family (V30 §35); the result keeps its own parts.
+    // Durations order only within one family (V30 §35), also those that do not win; zero belongs to every family. The
+    // result keeps its own parts.
     const durations = positional.filter(isDuration);
+    const families = new Set(durations.map((item) => durationFamily(durationParts(item))));
+    families.delete("zero");
+    if (families.size > 1 || families.has("mixed"))
+      throw fault(
+        "TSR059",
+        `${name}(...) compares durations of one kind only: exact time, days and weeks, or months and years.`,
+        span,
+      );
     let best = durations[0]!;
     for (const candidate of durations) {
       const order = compareDurationParts(durationParts(candidate), durationParts(best));

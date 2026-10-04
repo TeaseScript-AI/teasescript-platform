@@ -432,7 +432,9 @@ class SemanticValidator {
           repeat.value.span,
         );
       } else if (kind === "durationLiteral") {
-        if (!(staticDurationMs(repeat.value)! > 0)) {
+        // A calendar duration has no fixed length; the type check reports it as such (V30 §35).
+        const milliseconds = staticDurationMs(repeat.value);
+        if (milliseconds !== undefined && !(milliseconds > 0)) {
           this.#report(
             semanticCode.invalidMedia,
             "A repeat duration must be greater than zero.",

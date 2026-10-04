@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { withValidationTestStatistics } from "../src/validation-testing.js";
 import {
   createCheckpoint,
   deserializeCheckpoint,
@@ -104,6 +105,10 @@ test("durations compare and divide within one family, and equality compares thei
     "let x = 1 day >= 24 h",
     "let x = 1 month >= 30 days",
     "let x = 1 week / 2 h",
+    "let x = 1 month * 1.5",
+    "let x = 1.5 * 1 month",
+    "let x = (1 month).days",
+    "let x = (1 day).months",
   ])
     assert.ok(compileErrors(source).includes("TSV043"), source);
   // A zero of any family divides by zero, as `1 s / 0 s` does.
@@ -162,6 +167,12 @@ test("sort, min, max, and set operations treat calendar durations by their parts
   ])
     assert.equal(runtimeFailure(source), "TSR060", source);
   assert.equal(runtimeFailure(`${DYNAMIC}say min(dynamic(1 day), dynamic(24 h))`), "TSR059");
+  // A zero winner does not hide the other arguments' families.
+  assert.ok(compileErrors("say min(0 s, 1 day, 1 month)").includes("TSV043"));
+  assert.equal(
+    runtimeFailure(`${DYNAMIC}say max(0 s, dynamic(-1 day), dynamic(-1 month))`),
+    "TSR059",
+  );
 });
 
 test("dates move by calendar days and months with clamping, and subtract to whole days", () => {
@@ -230,6 +241,36 @@ test("a timestamp moves only by exact time, and elapsed-time consumers reject ca
     "TSR065",
   );
   assert.equal(runtimeFailure(`${DYNAMIC}showButton "Go", timeout: dynamic(1 day)`), "TSR065");
+  // A calendar repeat budget is reported as having no fixed length, not as too short.
+  assert.deepEqual(compileErrors('playAudio(file: "a", repeat: 1 day)'), ["TSV043"]);
+  assert.equal(runtimeFailure(`${DYNAMIC}playAudio(file: "a", repeat: dynamic(1 day))`), "TSR065");
+});
+
+test("calendar parts that grow past whole numbers a value can keep fail where they are computed", () => {
+  for (const source of [
+    `${DYNAMIC}let result = dynamic(9007199254740991 days) + 1 day`,
+    `${DYNAMIC}let result = dynamic(9007199254740991 months) * 2`,
+  ])
+    assert.equal(runtimeFailure(source), "TSR036", source);
+});
+
+test("folding known durations takes work in proportion to the source", () => {
+  const shapes: Record<string, (steps: number) => string> = {
+    "number sums": (steps) => Array<string>(steps).fill("1").join(" + "),
+    "duration sums": (steps) => Array<string>(steps).fill("1 day").join(" + "),
+    "duration products": (steps) => `1 day${" * 1".repeat(steps)}`,
+    "right-nested sums": (steps) => `${"1 day + (".repeat(steps)}1 day${")".repeat(steps)}`,
+  };
+  const folds = (source: string) =>
+    withValidationTestStatistics((finish) => {
+      compileSource(`let x = ${source}`);
+      return finish().counts.staticFolds ?? 0;
+    });
+  for (const [name, shape] of Object.entries(shapes)) {
+    const [small, large] = [folds(shape(400)), folds(shape(800))];
+    // Twice the steps take at most about twice the folds; refolding each operand's subtree would take four times.
+    assert.ok(large <= 2.5 * small, `${name}: ${small} folds for 400 steps, ${large} for 800`);
+  }
 });
 
 test("calendar durations survive checkpoints and choices with their parts", () => {

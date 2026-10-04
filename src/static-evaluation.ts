@@ -15,6 +15,7 @@ import {
   type StoredDuration,
 } from "./duration.js";
 import type { SourceSpan } from "./source.js";
+import { recordValidationTestWork } from "./validation-testing.js";
 
 export function staticNumber(expression: Expression): number | undefined {
   return runCompileTask(staticNumberTask(expression));
@@ -108,6 +109,7 @@ function scalarText(value: StaticScalar): string {
 function* staticScalarTask(
   expression: Expression,
 ): CompileTask<{ readonly value: StaticScalar } | undefined> {
+  recordValidationTestWork("staticFolds");
   expression = unwrapParentheses(expression);
   switch (expression.kind) {
     case "stringLiteral": {
@@ -283,10 +285,42 @@ export function findVisibleOverflows(program: Program): readonly VisibleOverflow
   return found.sort((left, right) => left.span.start.offset - right.span.start.offset);
 }
 
+/**
+ * The operands whose known values decide `expression`'s known value in `knownStep`: a grouping's or sign's operand, or
+ * both operands of an arithmetic step. Other expressions have none.
+ */
+export function knownOperands(expression: Expression): readonly Expression[] {
+  switch (expression.kind) {
+    case "parenthesizedExpression":
+      return [expression.expression];
+    case "unaryExpression":
+      return [expression.operand];
+    case "binaryExpression":
+      return ARITHMETIC_OPERATORS.has(expression.operator)
+        ? [expression.left, expression.right]
+        : [];
+    default:
+      return [];
+  }
+}
+
+/**
+ * The finite number or duration a literal, grouping, sign, or arithmetic step is known to have, from its operands'
+ * known values, or `undefined`. Callers that keep each expression's result fold any expression in linear time.
+ */
+export function knownStep(
+  expression: Expression,
+  known: (operand: Expression) => StaticScalar | undefined,
+): StaticScalar | undefined {
+  recordValidationTestWork("staticFolds");
+  const value = knownValue(expression, { get: known });
+  return value === undefined ? undefined : finite(value)?.value;
+}
+
 /** The value of a literal, grouping, sign, or arithmetic step from its operands' known values, before any check. */
 function knownValue(
   expression: Expression,
-  known: ReadonlyMap<Expression, StaticScalar>,
+  known: { get(operand: Expression): StaticScalar | undefined },
 ): StaticScalar | undefined {
   switch (expression.kind) {
     case "numberLiteral":

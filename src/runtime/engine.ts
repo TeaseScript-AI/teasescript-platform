@@ -2291,11 +2291,10 @@ function mediaRepeat(
   }
   if (value === true) return { kind: "indefinite" };
   if (value === false) return { kind: "once" };
-  if (isDuration(value) && Number.isFinite(value.milliseconds) && value.milliseconds > 0) {
-    return {
-      kind: "budget",
-      milliseconds: exactDurationMilliseconds(value, "A repeat budget", repeat.value.span),
-    };
+  if (isDuration(value)) {
+    // A calendar duration has no fixed length (V30 §35), whatever its exact part.
+    const milliseconds = exactDurationMilliseconds(value, "A repeat budget", repeat.value.span);
+    if (Number.isFinite(milliseconds) && milliseconds > 0) return { kind: "budget", milliseconds };
   }
   throw fault(
     "TSR050",
