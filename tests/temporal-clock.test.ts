@@ -153,7 +153,7 @@ test("a choice shown before a Continue keeps its buttons, and later text uses th
 
 test("without a clock the getters fail, and a Continue capture is checked before it is recorded", () => {
   const noClock = fresh("say getDate()", null);
-  assert.equal(noClock.first.snapshot.failure?.code, "TSR061");
+  assert.equal(noClock.first.snapshot.failure?.code, "TSR064");
 
   const { plan, first } = fresh("wait 1 s");
   for (const capture of [

@@ -76,7 +76,7 @@ export function temporalNow(
   const epochMilliseconds = wallClockAt(capture, atMs);
   if (epochMilliseconds === undefined)
     throw fault(
-      "TSR061",
+      "TSR064",
       `${name}() needs the current time, but this Player supplied no clock when the session started or continued.`,
       span,
     );

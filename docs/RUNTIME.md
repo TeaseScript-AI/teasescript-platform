@@ -831,7 +831,7 @@ one. Restore itself records nothing.
   boundary keeps the earlier capture and execution from the boundary on uses the new one.
 - `getTimestamp()` is the capture's wall clock plus the scene time since its boundary, rounded to whole milliseconds; it
   never goes backwards within one capture. `getDate()`, `getTime()`, and `getDateTime()` read that moment through the
-  capture's zone. Without a clock they fail with `TSR061`.
+  capture's zone. Without a clock they fail with `TSR064`.
 - Interaction buttons keep the presentation they were shown with: validation derives them again with the capture in
   force at the interaction's `createdAtMs` among those recorded before its request event.
 - A capture replaces the previous one only when nothing happened in between. Recording a capture drops captures no
