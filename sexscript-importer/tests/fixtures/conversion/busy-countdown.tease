@@ -5,7 +5,7 @@ let waitedTime = getTimestamp().toSeconds() - startTime
 timer 5
 say "Time is up"
 // A variable that starts as null takes the clock's seconds, so the time between two readings is a number.
-let before = null
+let before = 0
 before = getTimestamp().toSeconds()
 let after = getTimestamp().toSeconds()
 if after - before >= 0 {

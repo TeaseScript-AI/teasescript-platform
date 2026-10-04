@@ -1,0 +1,22 @@
+// Numbers declared without a value, or as null, that functions set start at 0: no code compares them with null, and
+// Groovy truth treats null and 0 alike.
+def score
+def bonus = null
+def award = { ->
+	score = 10
+	bonus = 2
+}
+if (!score) show("No score yet")
+award()
+show("Total ${score + bonus}")
+// A number that a function can show before its first value showed null in Groovy; it shows 0 now.
+def strokes = null
+def report = { -> show("Strokes so far: ${strokes}") }
+report()
+strokes = 5
+report()
+// A number that the code compares with null keeps its null start, since null and 0 differ there.
+def level = null
+def pick = { -> level = getInteger("Level?", 3) }
+if (level == null) pick()
+show("Level ${level}")

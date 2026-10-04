@@ -26,7 +26,7 @@ int stored = loadInteger("x.count")
 save("x.ratio", 2.5)
 int ratio = loadFloat("x.ratio")
 show("Ratio ${ratio}")
-// A variable that starts as null keeps the type of its first value.
+// A number that starts as null, and that nothing compares with null, starts at 0.
 def later = null
 later = 1
 later = 2.5

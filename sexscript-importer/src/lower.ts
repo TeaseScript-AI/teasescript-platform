@@ -254,6 +254,13 @@ export interface MapUses {
    * an empty list behave differently. Groovy truth treats them alike.
    */
   nullTested: Set<string>;
+  /**
+   * Variables a text can show before their first assignment: shown inside a function, which may run first, or at the
+   * top level before the top level assigns them.
+   */
+  shownEarly: Set<string>;
+  /** Numbers that start as null and that nothing tests for null, which start at 0 (owner decision 2026-10-05). */
+  zeroStartNumbers: Set<string>;
 }
 
 /** One analysed body: a script, an object script with its members, or a mixin module. */
@@ -368,9 +375,29 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
     presentKeys: new Map(),
     clearedRecords: new Set(),
     nullTested: new Set(),
+    shownEarly: new Set(),
+    zeroStartNumbers: new Set(),
   };
   const removed = new Map<string, Set<string> | "all">();
   for (const body of bodies) collectMapUses(body, uses, removed);
+  for (const body of bodies) collectEarlyDisplays(body, uses.shownEarly);
+  for (const { body, types, keys } of bodies) {
+    walkAst(body, (node) => {
+      const right = node.kind === "declaration" ? asNode(node.right) : null;
+      const key = right === null ? null : bindingKey(asNode(node.left), keys);
+      const name = variableName(node.left);
+      const type = name === null ? UNKNOWN : (types.variables.get(name) ?? UNKNOWN);
+      if (
+        key !== null &&
+        (isEmptyGroovyExpression(right!) || isNullConstant(right!)) &&
+        !PRIMITIVE_DEFAULTS.has(text(asNode(node.left)?.originType) ?? "") &&
+        !uses.nullTested.has(key) &&
+        onlyOf(type, NUMBER | NULL) &&
+        (type & NUMBER) !== 0
+      )
+        uses.zeroStartNumbers.add(key);
+    });
+  }
   for (const [name, keys] of removed) {
     const present = uses.presentKeys.get(name);
     if (present === undefined) continue;
@@ -378,6 +405,74 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
     else for (const key of keys) present.delete(key);
   }
   return uses;
+}
+
+/** SexScript calls that show their arguments as text. */
+const DISPLAY_CALLS = new Set(["show", "showButton", "showPopup"]);
+
+/**
+ * Adds the variables of a body that a text can show before their first assignment (MapUses.shownEarly): read in a
+ * shown text inside a closure, or at the top level on a line before the top level first assigns them.
+ */
+function collectEarlyDisplays({ body, keys }: MapBody, shownEarly: Set<string>): void {
+  // The variables each closure kept in a variable assigns, so that a top-level call of it counts as their assignment.
+  const assignedBy = new Map<string, string[]>();
+  walkAst(body, (node) => {
+    const closure = node.kind === "declaration" ? asNode(node.right) : null;
+    const name = variableName(node.left);
+    if (closure?.kind !== "closure" || name === null) return;
+    const assigned: string[] = [];
+    walkAst(closure, (inner) => {
+      const target =
+        inner.kind === "binary" && inner.operator === "="
+          ? bindingKey(asNode(inner.left), keys)
+          : null;
+      if (target !== null) assigned.push(target);
+    });
+    assignedBy.set(name, assigned);
+  });
+  const firstAssigned = new Map<string, number>();
+  const shown: Array<{ key: string; line: number; inFunction: boolean }> = [];
+  const visit = (node: AstNode, inFunction: boolean, displayed: boolean): void => {
+    const inside = inFunction || node.kind === "closure";
+    const key = node.kind === "variable" ? bindingKey(node, keys) : null;
+    if (displayed && key !== null)
+      shown.push({ key, line: node.span?.line ?? 0, inFunction: inside });
+    const assigns =
+      (node.kind === "binary" && node.operator === "=") ||
+      (node.kind === "declaration" &&
+        asNode(node.right) !== null &&
+        !isEmptyGroovyExpression(asNode(node.right)!) &&
+        !isNullConstant(asNode(node.right)!));
+    const target = assigns ? bindingKey(asNode(node.left), keys) : null;
+    if (!inside && target !== null && !firstAssigned.has(target))
+      firstAssigned.set(target, node.span?.line ?? 0);
+    const called =
+      !inside && node.kind === "methodCall" && node.implicitThis === true
+        ? assignedBy.get(constantString(node.method) ?? "")
+        : undefined;
+    for (const assigned of called ?? [])
+      if (!firstAssigned.has(assigned)) firstAssigned.set(assigned, node.span?.line ?? 0);
+    const shows =
+      node.kind === "gstring" ||
+      (node.kind === "binary" &&
+        node.operator === "+" &&
+        [node.left, node.right].some((side) => {
+          const operand = asNode(side);
+          return operand?.kind === "gstring" || constantString(operand) !== null;
+        })) ||
+      (node.kind === "methodCall" &&
+        node.implicitThis === true &&
+        DISPLAY_CALLS.has(constantString(node.method) ?? ""));
+    for (const child of Object.values(node)) {
+      for (const item of Array.isArray(child) ? child : [child])
+        if (isAstNode(item)) visit(item, inside, displayed || shows);
+    }
+  };
+  visit(body, false, false);
+  for (const { key, line, inFunction } of shown)
+    if (inFunction || line < (firstAssigned.get(key) ?? Number.POSITIVE_INFINITY))
+      shownEarly.add(key);
 }
 
 /**
@@ -763,7 +858,14 @@ export function lowerParsedFile(
       const name = bindingName(key);
       if (type !== 0) listElements.set(name, (listElements.get(name) ?? 0) | type);
     }
-    context.types = { ...context.types, listElements };
+    // A number that starts at 0 instead of null holds no null.
+    const variables = new Map(context.types.variables);
+    for (const key of context.mapUses.zeroStartNumbers) {
+      const name = bindingName(key);
+      const type = variables.get(name);
+      if (type !== undefined) variables.set(name, type & ~NULL);
+    }
+    context.types = { ...context.types, variables, listElements };
     const helpers = collectLegacyHelperBindings(body);
     context.classLoaderVariables = helpers.classLoaders;
     context.legacyHelperClasses = helpers.helperClasses;
@@ -2616,6 +2718,18 @@ function lowerDeclaration(
         ...(listType === null ? {} : { type: listType }),
       },
     ];
+  }
+  // A number that starts as null starts at 0 on the same condition: Groovy truth treats null and 0 alike.
+  if (startsNull && key !== null && context.mapUses.zeroStartNumbers.has(key)) {
+    if (context.mapUses.shownEarly.has(key))
+      addDiagnostic(
+        context,
+        "SX_NULL_START_NUMBER",
+        "warning",
+        `Groovy showed ${name} as null until its first value; it starts at 0 here, so a text shown before then says 0.`,
+        span,
+      );
+    return [{ kind: "let", name, value: { kind: "literal", value: 0 }, span }];
   }
   const optionalType = startsNull ? nullableValueType(name, context) : null;
   if (
