@@ -1120,9 +1120,7 @@ class TypeChecker {
     // A call while the store was evaluated may have ended the narrowing: the variable's own members that the evaluated
     // receiver may be check it then, which keeps what was known, such as that it is not null.
     if (this.#flow.get(entry.variable) === undefined) {
-      const kept = members(entry.variable.type).filter(
-        (member) => narrowTo(member, current).kind !== "never",
-      );
+      const kept = ownMembers(entry.variable, current);
       return kept.length === 0 ? current : union(kept);
     }
     // The fact stays only when the stored value certainly keeps it; a value of unknown type may not. A first store
@@ -1143,9 +1141,11 @@ class TypeChecker {
   #relaxNarrowing(variable: Variable): void {
     const fact = this.#flow.get(variable);
     if (fact === undefined) return;
-    const all = members(variable.type);
-    const kept = all.filter((member) => narrowTo(member, fact).kind !== "never");
-    this.#flow.set(variable, kept.length === all.length ? undefined : union(kept));
+    const kept = ownMembers(variable, fact);
+    this.#flow.set(
+      variable,
+      kept.length === members(variable.type).length ? undefined : union(kept),
+    );
   }
 
   /**
@@ -1903,8 +1903,16 @@ class TypeChecker {
       const impossible = all.find(
         (member) => member.kind !== "null" && isKnown(member) && !possible(member, index),
       );
-      if (impossible !== undefined)
-        return { failed: index === 0 ? [impossible, UNKNOWN_TYPE] : [UNKNOWN_TYPE, impossible] };
+      if (impossible === undefined) continue;
+      // The members that work besides it are what a test keeps (ADR 0021 rule 3.5).
+      const passing = all.filter(
+        (member) => member.kind !== "null" && isKnown(member) && possible(member, index),
+      );
+      if (passing.length > 0) {
+        this.#reportMayBe(expressions[index]!, impossible, passing);
+        return { type: UNKNOWN_TYPE };
+      }
+      return { failed: index === 0 ? [impossible, UNKNOWN_TYPE] : [UNKNOWN_TYPE, impossible] };
     }
     // An operand that may be null needs a check first (owner decision on #504 Q1), whatever the other operand is.
     const named = new Set<string>();
@@ -2467,8 +2475,9 @@ class TypeChecker {
   ): boolean {
     const passing: StaticType[] = [];
     const failing: StaticType[] = [];
-    for (const member of members(nonNullType(type)).map(resolved)) {
-      // A member that is not a collection passed the check of the whole value, so it is a way the value is accepted.
+    for (const member of members(type).map(resolved)) {
+      // A member that is not a collection, null included, passed the check of the whole value, so it is a way the value
+      // is accepted.
       if (member.kind !== "list" && member.kind !== "set") {
         if (isKnown(member)) passing.push(member);
         continue;
@@ -3202,6 +3211,23 @@ const COLLECTION_CHANGES: ReadonlySet<string> = new Set([
   "removeFirst",
   "removeLast",
 ]);
+
+/**
+ * The members of a variable's own type that hold what it is known to hold, such as `integer[]` of `integer[] | string[]`
+ * for a list of integers. Every list type holds the empty list, so an overlap decides only when no member holds it.
+ */
+function ownMembers(variable: Variable, known: StaticType): StaticType[] {
+  const all = members(variable.type);
+  const kept = new Set<StaticType>();
+  for (const part of members(known)) {
+    const holding = all.filter((member) => coversType(member, part));
+    for (const member of holding.length > 0
+      ? holding
+      : all.filter((other) => narrowTo(other, part).kind !== "never"))
+      kept.add(member);
+  }
+  return all.filter((member) => kept.has(member));
+}
 
 /** The variable a place belongs to, such as `xs` for `xs[0].name`, or `null` for a place no variable holds. */
 function rootName(expression: Expression): string | null {

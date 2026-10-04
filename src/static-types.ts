@@ -840,6 +840,12 @@ function* memberIntersectionTask(left: StaticType, right: StaticType): CompileTa
  */
 function* guardedTask(value: StaticType, test: StaticType): CompileTask<StaticType> {
   const kept = resolved(value);
+  // Each member is kept whole by the test member that admits it, such as the `integer` of an `integer | null` element.
+  if (kept.kind === "union") {
+    const parts: StaticType[] = [];
+    for (const member of kept.members) parts.push(yield* compileChild(guardedTask(member, test)));
+    return parts.every((part, index) => part === kept.members[index]) ? value : union(parts);
+  }
   const passed = resolved(test);
   if (passed.kind === "union") {
     const member = passed.members.find((part) => includes(part, kept));

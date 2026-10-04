@@ -110,6 +110,11 @@ test("an operation on a union needs every member to support it, and the message 
   );
   // Members that all support an operation give its result: integer | number is a number.
   assert.deepEqual(codes("let ratio: integer | number = 1\nlet half = ratio / 2"), []);
+  // The test is named also when the other operand is of unknown type.
+  assert.deepEqual(
+    diagnostics("function f(n: (integer | string)?, other) {\n    return n + other\n}"),
+    [["TSV043", "'n' may be text (string). Check it first: if n is integer { ... }", "n"]],
+  );
   const flag = "let flag: boolean | integer = true\nif chance(50) {\n    flag = 1\n}\n";
   assert.deepEqual(codes(`${flag}if flag {\n    say "x"\n}`), [["TSV043", "flag"]]);
 });
@@ -148,6 +153,12 @@ test("a union receiver checks element stores, property writes, compound assignme
   assert.deepEqual(codes("function f(xs: integer[] | string[]) {\n    let n = xs.first + 1\n}"), [
     ["TSV043", "xs.first"],
   ]);
+  // A call while a store is evaluated does not bring back a member that the assignment excluded: the store goes to the
+  // list that was evaluated.
+  const reassigned =
+    'let p: integer[] | string[] = [1]\nfunction amount {\n    p = ["x"]\n    return 2\n}\n';
+  for (const store of ["p.add(amount())", "p[0] = amount()"])
+    assert.deepEqual(codes(`${reassigned}${store}`), [], store);
   // Lists of different element types share only the empty list, which the runtime check still accepts.
   const nested = `${dynamic}function f(xs: integer[][] | string[][]) {\n    xs.add(dynamic(VALUE))\n}\nf([[1]])`;
   assert.equal(runValidSource(nested.replace("VALUE", "[true]")).snapshot.failure?.code, "TSR058");
@@ -199,12 +210,18 @@ test("display, choice, and speaker text checks look at every member of a union",
     "function f(xs: string[] | timer[]) {\n    let answer = choose xs\n}",
   ])
     assert.deepEqual(codes(source), [["TSV043", "xs"]], source);
-  // A value that may also be text names the test for text.
-  for (const source of [
-    'function f(n: string | object[]) {\n    say "${n}"\n}',
-    "function f(n: string | timer[]) {\n    let answer = choose n\n}",
-  ])
-    assert.match(diagnostics(source)[0]?.[1] ?? "", /Check it first: if n is string/, source);
+  // A value that may also be text or null names the test for it.
+  for (const [source, test] of [
+    ['function f(n: string | object[]) {\n    say "${n}"\n}', "string"],
+    ["function f(n: string | timer[]) {\n    let answer = choose n\n}", "string"],
+    ['function f(n: object[]?) {\n    say "${n}"\n}', "null"],
+    ["function f(n: timer[]?) {\n    let answer = choose n\n}", "null"],
+  ] as const)
+    assert.match(
+      diagnostics(source)[0]?.[1] ?? "",
+      new RegExp(`Check it first: if n is ${test} `),
+      source,
+    );
   assert.deepEqual(codes("function f(xs: timer[]) {\n    let answer = choose xs\n}"), [
     ["TSV029", "xs"],
   ]);

@@ -358,6 +358,14 @@ test("an assignment narrows the variable to the assigned value's type", () => {
     errors("let v = 0\nlet x = 0\nif v is number {\n    x = v\n}\nv = 0.5\nlet k: integer = x"),
     [["TSV041", "x"]],
   );
+  // An element that may be null keeps its whole numbers apart from null.
+  const nullable = (guard: string) =>
+    errors(
+      `let v = 0\nlet p = [v, null]\nlet x = null\n${guard}\nv = 0.5\nif x != null {\n    let k: integer = x\n}`,
+    );
+  for (const test of ["integer?[]", "(integer | null)[]"])
+    assert.deepEqual(nullable(`if p is ${test} {\n    x = p.first\n}`), [], test);
+  assert.deepEqual(nullable("if p is number?[] {\n    x = p.first\n}"), [["TSV041", "x"]]);
   // Relaxing the narrowing of an object keeps the object, so a later read is still checked.
   assert.deepEqual(
     errors(
