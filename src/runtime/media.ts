@@ -656,9 +656,10 @@ export function pruneMediaPoints(media: RuntimeMediaSnapshot, atMs: number): voi
 }
 
 /**
- * Script controls reach only loaded or settled media: a play binds its handle after the load report, and host values
- * cannot carry handles. Pause, resume, and seeks therefore always have a timeline; before the load, only Stage
- * replacement or the end of the session stops media.
+ * Scripts get handles only to loaded or settled media: a play binds its handle after the load report, and host values
+ * cannot carry handles. Pause, resume, and seeks therefore always have a timeline; unloaded media can only stop, through
+ * a load failure, Stage replacement, or the end of the session. Restore validation does not check this for state the
+ * runtime does not produce, such as a hand-edited checkpoint that binds the handle of loading media.
  */
 export function pauseMedia(media: RuntimeMediaSnapshot, atMs: number): MediaWarning | null {
   if (media.state === "paused") return null;
