@@ -62,11 +62,21 @@ test("misuse the compiler can see is a compile error", () => {
     [
       "say max(1, 2 s)",
       "TSV043",
-      "max(...) needs all numbers or all durations, but this is a duration and an earlier one is a number.",
+      "max(...) needs values of one kind, but this is a duration and an earlier one is a number.",
       "2 s",
     ],
-    ['say min(1, "2")', "TSV043", "min(...) needs numbers or durations, not text (string).", '"2"'],
-    ["say max(null, 1)", "TSV043", "max(...) needs numbers or durations, not null.", "null"],
+    [
+      'say min(1, "2")',
+      "TSV043",
+      "min(...) needs numbers, durations, or date and time values, not text (string).",
+      '"2"',
+    ],
+    [
+      "say max(null, 1)",
+      "TSV043",
+      "max(...) needs numbers, durations, or date and time values, not null.",
+      "null",
+    ],
     ["say min(1, 2, to: 3)", "TSV022", "min(...) takes no named arguments; remove 'to:'.", "to"],
     [
       "let max = 10",
@@ -83,11 +93,11 @@ test("values the compiler cannot know are checked at runtime", () => {
   const cases: [string, string][] = [
     [
       `${DYNAMIC}say max(dynamic(1), dynamic(2 s))`,
-      "max(...) needs all numbers or all durations, not a mix of both.",
+      "max(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or timestamps.",
     ],
     [
       `${DYNAMIC}say min(dynamic("1"), 2)`,
-      "min(...) needs numbers or durations, not text (string).",
+      "min(...) needs numbers, durations, or date and time values, not text (string).",
     ],
   ];
   for (const [source, message] of cases) {

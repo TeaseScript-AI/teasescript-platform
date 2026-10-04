@@ -1,6 +1,7 @@
 import { temporalCaptureAt } from "./temporal-captures.js";
 import {
   combinedDateAndTime,
+  compareTemporal,
   hasTemporalMethod,
   exactDurationMilliseconds,
   TEMPORAL_GETTERS,
@@ -91,6 +92,7 @@ import {
   type SerializableRuntimeObject,
   type SerializableRuntimeRange,
   type SerializableRuntimeSet,
+  type SerializableRuntimeTemporal,
   type SerializableRuntimeValue,
   type SerializableTimerHandle,
   type SerializableMediaHandle,
@@ -1962,7 +1964,7 @@ export class Evaluator {
       : withoutNegativeZero(Math.trunc(number));
   }
 
-  /** `min` or `max` of two or more values that are all numbers or all durations. */
+  /** `min` or `max` of two or more values that are all numbers, all durations, or all date or time values of one kind. */
   #minMaxBuiltin(
     name: string,
     positional: readonly SerializableRuntimeValue[],
@@ -1972,19 +1974,34 @@ export class Evaluator {
     if (positional.length < 2 || Object.keys(named).length !== 0)
       throw fault(
         "TSR028",
-        `${name}(...) takes two or more numbers or durations, such as ${name}(20, total).`,
+        `${name}(...) takes two or more numbers, durations, or date and time values, such as ${name}(20, total).`,
         span,
       );
     const numbers = positional.every((value) => typeof value === "number");
-    if (!numbers && !positional.every(isDuration)) {
-      const other = positional.find((value) => typeof value !== "number" && !isDuration(value));
+    const first = positional[0]!;
+    const temporals = positional.filter(
+      (value): value is SerializableRuntimeTemporal =>
+        isTemporal(value) && isTemporal(first) && value.kind === first.kind,
+    );
+    if (!numbers && !positional.every(isDuration) && temporals.length !== positional.length) {
+      const other = positional.find(
+        (value) => typeof value !== "number" && !isDuration(value) && !isTemporal(value),
+      );
       throw fault(
         "TSR059",
         other === undefined
-          ? `${name}(...) needs all numbers or all durations, not a mix of both.`
-          : `${name}(...) needs numbers or durations, not ${describeRuntimeValue(other)}.`,
+          ? `${name}(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or timestamps.`
+          : `${name}(...) needs numbers, durations, or date and time values, not ${describeRuntimeValue(other)}.`,
         span,
       );
+    }
+    if (temporals.length === positional.length) {
+      let best = temporals[0]!;
+      for (const candidate of temporals) {
+        const order = compareTemporal(candidate, best);
+        if (name === "min" ? order < 0 : order > 0) best = candidate;
+      }
+      return cloneSerializableValue(best);
     }
     // A loop, not a spread into Math.min/Math.max, so a call with very many arguments cannot overflow the native stack.
     if (numbers) {

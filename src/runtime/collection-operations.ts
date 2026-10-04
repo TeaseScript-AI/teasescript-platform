@@ -8,7 +8,8 @@ import {
   type SerializableRuntimeDuration,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
-import { describeRuntimeValue, isDuration } from "./value-predicates.js";
+import { compareTemporal } from "./temporal-operations.js";
+import { describeRuntimeValue, isDuration, isTemporal } from "./value-predicates.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
@@ -17,10 +18,11 @@ export const SET_OPERATIONS: ReadonlySet<string> = new Set(["intersection", "uni
 
 /**
  * The ascending, stable order of sortable list items as their old indexes: numbers (integers and numbers together),
- * text by Unicode code point, or durations. Every item must be of one of these kinds, and all of the same kind.
+ * text by Unicode code point, durations, or date and time values. Every item must be of one of these kinds, and all of
+ * the same kind; dates, times, datetimes, and timestamps are four kinds (V30 §35).
  */
 export function sortOrder(items: readonly SerializableRuntimeValue[], span: SourceSpan): number[] {
-  let kind: "number" | "text" | "duration" | undefined;
+  let kind: keyof typeof KIND_DESCRIPTIONS | undefined;
   for (const item of items) {
     const itemKind =
       typeof item === "number"
@@ -29,11 +31,13 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
           ? "text"
           : isDuration(item)
             ? "duration"
-            : undefined;
+            : isTemporal(item)
+              ? item.kind
+              : undefined;
     if (itemKind === undefined)
       throw fault(
         "TSR060",
-        `sort() sorts numbers, text, or durations, not ${describeRuntimeValue(item)}.`,
+        `sort() sorts numbers, text, durations, or date and time values, not ${describeRuntimeValue(item)}.`,
         span,
       );
     if (kind !== undefined && itemKind !== kind)
@@ -64,6 +68,7 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
       const order = compareDurationParts(durationParts(left), durationParts(right));
       return typeof order === "number" ? order : 0;
     }
+    if (isTemporal(left) && isTemporal(right)) return compareTemporal(left, right);
     return sortKey(left) - sortKey(right);
   };
   // Ties keep their order, so the sort is stable without relying on the engine's sort.
@@ -72,7 +77,15 @@ export function sortOrder(items: readonly SerializableRuntimeValue[], span: Sour
     .sort((left, right) => compare(items[left]!, items[right]!) || left - right);
 }
 
-const KIND_DESCRIPTIONS = { number: "numbers", text: "text", duration: "durations" } as const;
+const KIND_DESCRIPTIONS = {
+  number: "numbers",
+  text: "text",
+  duration: "durations",
+  date: "dates",
+  time: "times",
+  datetime: "dates and times",
+  timestamp: "timestamps",
+} as const;
 
 function sortKey(value: SerializableRuntimeValue): number {
   return typeof value === "number" ? value : 0;

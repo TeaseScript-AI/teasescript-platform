@@ -2994,12 +2994,19 @@ class TypeChecker {
       case "max": {
         const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
         // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5,
-        // #504 Q1): each of its members must be of the family the other arguments decide, numbers or durations.
+        // #504 Q1): each of its members must be of the family the other arguments decide: numbers, durations, or one kind
+        // of date or time value.
         const several = problems.every((problem) => problem.kind === "invalidOperand")
           ? expression.arguments.filter((item) => members(this.#typeOf(item.value)).length > 1)
           : [];
         const familyOf = (member: StaticType): string | undefined =>
-          isNumeric(member) ? "numbers" : isScalar(member, "duration") ? "durations" : undefined;
+          isNumeric(member)
+            ? "numbers"
+            : isScalar(member, "duration")
+              ? "durations"
+              : isTemporal(member)
+                ? typeName(member)
+                : undefined;
         const families = expression.arguments.map((item) => [
           ...new Set(members(nonNullType(this.#typeOf(item.value))).map(familyOf)),
         ]);
@@ -3029,12 +3036,19 @@ class TypeChecker {
             this.#typeOf(item.value),
             (member) => familyOf(member) !== undefined && familyOf(member) === family,
             item.value,
-            `${name}(...) needs all numbers or all durations`,
+            `${name}(...) needs values of one kind: all numbers, all durations, or all dates, times, datetimes, or timestamps`,
           );
         // The result is an integer when every argument is one, like arithmetic on them (ADR 0021 rule 2.2).
         const numbers = values.map(nonNullTypeForUse);
         if (numbers.length < 2) return UNKNOWN_TYPE;
         if (numbers.every((number) => isScalar(number, "duration"))) return DURATION_TYPE;
+        // Date and time values of one kind give a value of that kind (V30 §35).
+        if (
+          numbers.every(
+            (number) => isTemporal(number) && typeName(number) === typeName(numbers[0]!),
+          )
+        )
+          return numbers[0]!;
         let result: StaticType | undefined = numbers[0];
         for (const number of numbers.slice(1))
           result = result === undefined ? undefined : arithmeticType("+", result, number);

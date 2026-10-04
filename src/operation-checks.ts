@@ -15,6 +15,8 @@ import {
 import type { SourceSpan } from "./source.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
+  DATE_TYPE,
+  DATETIME_TYPE,
   describeValue,
   DURATION_TYPE,
   INTEGER_TYPE,
@@ -26,6 +28,8 @@ import {
   NUMBER_TYPE,
   resolved,
   STRING_TYPE,
+  TIME_TYPE,
+  TIMESTAMP_TYPE,
   type StaticType,
 } from "./static-types.js";
 import {
@@ -310,20 +314,21 @@ function minMaxProblems(
         span: call.span,
       },
     ];
-  let family: "numbers" | "durations" | undefined;
+  let family: StaticType | undefined;
   for (const argument of call.arguments) {
     const type = typeOf(argument.value);
     if (!isKnown(forUse(type))) continue;
+    // Numbers, durations, or date and time values of one kind (V30 §35) compare with each other.
     const kind = isAssignable(NUMBER_TYPE, type)
-      ? "numbers"
-      : isAssignable(DURATION_TYPE, type)
-        ? "durations"
-        : undefined;
+      ? NUMBER_TYPE
+      : [DURATION_TYPE, DATE_TYPE, TIME_TYPE, DATETIME_TYPE, TIMESTAMP_TYPE].find((candidate) =>
+          isAssignable(candidate, type),
+        );
     const message =
       kind === undefined
-        ? `${name}(...) needs numbers or durations, not ${describeValue(forUse(type))}.`
+        ? `${name}(...) needs numbers, durations, or date and time values, not ${describeValue(forUse(type))}.`
         : family !== undefined && kind !== family
-          ? `${name}(...) needs all numbers or all durations, but this is ${kind === "numbers" ? "a number" : "a duration"} and an earlier one is ${family === "numbers" ? "a number" : "a duration"}.`
+          ? `${name}(...) needs values of one kind, but this is ${describeValue(kind)} and an earlier one is ${describeValue(family)}.`
           : undefined;
     if (message !== undefined)
       return [{ kind: "invalidOperand", message, span: argument.value.span }];
@@ -569,10 +574,18 @@ function sortProblem(element: StaticType): string | undefined {
         ? "text"
         : isScalar(candidate, "duration")
           ? "durations"
-          : undefined;
+          : isScalar(candidate, "date")
+            ? "dates"
+            : isScalar(candidate, "time")
+              ? "times"
+              : isScalar(candidate, "datetime")
+                ? "dates and times"
+                : isScalar(candidate, "timestamp")
+                  ? "timestamps"
+                  : undefined;
   const unsortable = candidates.find((candidate) => kindOf(candidate) === undefined);
   if (unsortable !== undefined)
-    return `sort() sorts numbers, text, or durations, not ${describeValue(unsortable)}.`;
+    return `sort() sorts numbers, text, durations, or date and time values, not ${describeValue(unsortable)}.`;
   const kinds = new Set(candidates.map(kindOf));
   return kinds.size > 1
     ? `sort() needs elements of one kind, but this list may hold ${[...kinds].join(" and ")}.`
