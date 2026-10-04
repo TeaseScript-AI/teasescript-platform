@@ -1,9 +1,10 @@
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, resolve, sep } from "node:path";
+import { extname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { PLAYGROUND_EXAMPLES } from "./examples.js";
+import { PACKAGE_IMAGE_EXTENSIONS, PackageFolder } from "./package-folder.js";
 import {
   compileWorkspaceSource,
   executeWorkspaceSource,
@@ -12,6 +13,11 @@ import {
 
 export interface PlaygroundServerOptions {
   readonly projectRoot?: string;
+  /**
+   * A development package folder (#572): its images and their XMP tags are offered at `/dev-package/catalog.json` and
+   * `/dev-package/files/<path>`. Without it, both routes are absent.
+   */
+  readonly packageRoot?: string;
 }
 
 export interface StartPlaygroundServerOptions extends PlaygroundServerOptions {
@@ -24,6 +30,8 @@ export function createPlaygroundServer(options: PlaygroundServerOptions = {}): S
   const playgroundRoot = resolve(projectRoot, "playground");
   const distRoot = resolve(projectRoot, "dist");
   const examplesRoot = resolve(projectRoot, "examples");
+  const packageFolder =
+    options.packageRoot === undefined ? null : new PackageFolder(resolve(options.packageRoot));
   const workspace: AutomationWorkspace = {
     source: "",
     sourceRevision: 0,
@@ -35,7 +43,7 @@ export function createPlaygroundServer(options: PlaygroundServerOptions = {}): S
   return createServer((request, response) => {
     void serveRequest(
       request,
-      { projectRoot, playgroundRoot, distRoot, examplesRoot },
+      { projectRoot, playgroundRoot, distRoot, examplesRoot, packageFolder },
       workspace,
       response,
     ).catch(() => {
@@ -55,7 +63,11 @@ export async function startPlaygroundServer(
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new RangeError("PORT must be an integer from 1 through 65535.");
   }
-  const server = createPlaygroundServer(options);
+  const packageRoot = options.packageRoot ?? process.env.PLAYGROUND_PACKAGE;
+  const server = createPlaygroundServer({
+    ...options,
+    ...(packageRoot === undefined || packageRoot === "" ? {} : { packageRoot }),
+  });
   await new Promise<void>((resolveListen, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {
@@ -65,6 +77,9 @@ export async function startPlaygroundServer(
   });
   const printableHost = host.includes(":") ? `[${host}]` : host;
   process.stdout.write(`TeaseScript playground: http://${printableHost}:${port}/\n`);
+  if (packageRoot !== undefined && packageRoot !== "") {
+    process.stdout.write(`Development package: ${resolve(packageRoot)}\n`);
+  }
   return server;
 }
 
@@ -73,6 +88,7 @@ interface StaticRoots {
   readonly playgroundRoot: string;
   readonly distRoot: string;
   readonly examplesRoot: string;
+  readonly packageFolder: PackageFolder | null;
 }
 
 interface AutomationWorkspace {
@@ -113,6 +129,10 @@ async function serveRequest(
     sendText(response, 400, "Rejected unsafe request path.\n", method === "HEAD");
     return;
   }
+  if (pathname === "/dev-package/catalog.json" && roots.packageFolder !== null) {
+    sendJson(response, 200, await roots.packageFolder.scan());
+    return;
+  }
 
   const target = resolveTarget(pathname, roots);
   if (target === null) {
@@ -126,6 +146,14 @@ async function serveRequest(
     ]);
     if (!isInside(canonicalRoot, canonicalPath)) {
       sendText(response, 400, "Rejected unsafe request path.\n", method === "HEAD");
+      return;
+    }
+    // The package file route serves exactly what the catalog lists, which leaves out links.
+    if (
+      target.linksAllowed === false &&
+      canonicalPath !== resolve(canonicalRoot, relative(target.root, target.path))
+    ) {
+      sendText(response, 404, "Not found.\n", method === "HEAD");
       return;
     }
     const information = await stat(canonicalPath);
@@ -310,6 +338,8 @@ async function hasUnexpectedBody(request: IncomingMessage): Promise<boolean> {
 interface StaticTarget {
   readonly root: string;
   readonly path: string;
+  /** Whether the path may pass through a link, as long as it stays inside the root. */
+  readonly linksAllowed?: false;
 }
 
 function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | null {
@@ -334,6 +364,16 @@ function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | nul
   }
   if (pathname.startsWith("/dist/")) {
     return resolveInside(roots.distRoot, pathname.slice("/dist/".length));
+  }
+  if (pathname.startsWith("/dev-package/files/") && roots.packageFolder !== null) {
+    const relativePath = pathname.slice("/dev-package/files/".length);
+    if (
+      !PACKAGE_IMAGE_EXTENSIONS.has(extname(relativePath).toLowerCase()) ||
+      relativePath.split("/").some((segment) => segment.startsWith("."))
+    )
+      return null;
+    const target = resolveInside(roots.packageFolder.root, relativePath);
+    return target === null ? null : { ...target, linksAllowed: false };
   }
   if (pathname.startsWith("/examples/")) {
     const relativePath = pathname.slice("/examples/".length);
@@ -364,7 +404,7 @@ function unsafePath(pathname: string): boolean {
 }
 
 function contentType(path: string): string {
-  switch (extname(path)) {
+  switch (extname(path).toLowerCase()) {
     case ".html":
       return "text/html; charset=utf-8";
     case ".css":
@@ -378,6 +418,13 @@ function contentType(path: string): string {
       return "image/png";
     case ".webp":
       return "image/webp";
+    case ".gif":
+      return "image/gif";
+    case ".tif":
+    case ".tiff":
+      return "image/tiff";
+    case ".svg":
+      return "image/svg+xml";
     case ".json":
     case ".map":
       return "application/json; charset=utf-8";

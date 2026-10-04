@@ -29,6 +29,11 @@ export { parse, type ParseResult } from "./parser.js";
 export type { ScriptHeader } from "./script-header.js";
 export { normalizeTagName, type Tag } from "./tags.js";
 export {
+  readImageXmpKeywords,
+  readXmpPacketKeywords,
+  type XmpKeywordsResult,
+} from "./xmp-keywords.js";
+export {
   CORE_RUNTIME_BUILTINS,
   PLATFORM_STANDARD_LIBRARY_PRELUDE,
   compileProject,
