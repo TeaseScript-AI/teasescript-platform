@@ -135,9 +135,9 @@ test("text known only at runtime converts, falls back to default:, or fails with
     ["2026-10-04", "2000-01-01", "2000-01-01T00:00:00Z"],
   );
   const failure = failureOf(`${DYNAMIC}let day = toDate(dynamic("2026-02-30"))`);
-  assert.equal(failure?.code, "TSR060");
+  assert.equal(failure?.code, "TSR063");
   assert.match(failure?.message ?? "", /February 2026 has 28 days/u);
-  assert.equal(failureOf(`${DYNAMIC}let day = toTime(dynamic("2:30 PM"))`)?.code, "TSR060");
+  assert.equal(failureOf(`${DYNAMIC}let day = toTime(dynamic("2:30 PM"))`)?.code, "TSR063");
 });
 
 test("say, interpolation, and format methods use the captured presentation; collections use fixed notation", () => {
@@ -251,7 +251,7 @@ test("exact durations move datetimes through the captured zone and timestamps by
     ],
   );
   const failure = failureOf('let x = toDateTime("2101-07-01T12:00").toTimestamp()', AMSTERDAM);
-  assert.equal(failure?.code, "TSR060");
+  assert.equal(failure?.code, "TSR063");
   assert.match(failure?.message ?? "", /1970 through 2099/u);
 });
 

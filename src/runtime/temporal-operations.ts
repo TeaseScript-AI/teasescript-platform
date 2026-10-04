@@ -49,7 +49,7 @@ import { describeValue } from "./value-types.js";
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 /** Failed temporal conversion or arithmetic: invalid text, a result outside the years 0000–9999 or the zone rules. */
-const TEMPORAL_FAILURE = "TSR060";
+const TEMPORAL_FAILURE = "TSR063";
 
 export const TEMPORAL_CONVERSIONS: ReadonlySet<string> = new Set([
   "toDate",

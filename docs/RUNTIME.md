@@ -808,7 +808,7 @@ them as data in `FreshRuntimeOptions.temporalContext` and records them in `Runti
 and replay compute the same local times and text on every host:
 
 - `zone`: the IANA name, the offset at the start of 1970, and the offset transitions up to 2100, each located to the
-  second. Converting a moment outside 1970 through 2099 fails with `TSR060` instead of guessing the rules.
+  second. Converting a moment outside 1970 through 2099 fails with `TSR063` instead of guessing the rules.
 - `presentation`: templates for numeric dates, times, and both, with and without seconds, using the placeholders
   `{year}`, `{month}`, `{day}`, `{hour}`, `{minute}`, `{second}`, and `{dayPeriod}`; whether day, month, and hour are
   padded; the hour cycle (`h11`, `h12`, `h23`, or `h24`); and the two day-period markers. Digits are Latin and the

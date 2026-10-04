@@ -61,7 +61,7 @@ function temporalText(
       const local = localFields(context.zone, value.epochMilliseconds);
       if (!local.ok)
         throw fault(
-          "TSR060",
+          "TSR063",
           `This timestamp cannot be shown as local time: ${local.reason}. Show it with toISO() instead.`,
           span,
         );
