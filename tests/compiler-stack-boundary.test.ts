@@ -69,7 +69,7 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     const compiledSet = compileSource(process.env.TEASESCRIPT_SET_SOURCE);
     const compiledObject = compileSource(process.env.TEASESCRIPT_OBJECT_SOURCE);
     const deepObject = "{ x: ".repeat(1024) + "1" + " }".repeat(1024);
-    const innerObjectCodes = ["{a:1, b:{q:1}}", "{a:{q:1}, b:2}", "{a:{q:1}.q}", "{a:{q:1} + 2}"].map((leaf) =>
+    const innerObjectCodes = ["{a:1, b:{q:1}}", "{a:{q:1}, b:2}", "{a:{q:1}.q}", "{a:{q:1}.q + 2}"].map((leaf) =>
       compileSource("let value = " + "{x:".repeat(1024) + leaf + "}".repeat(1024)).diagnostics.map((diagnostic) => diagnostic.code),
     );
     const siblingObjects = ["{ before: 2, child: " + deepObject + " }", "{ child: " + deepObject + ", after: 2 }"].map((expression) => {
@@ -195,6 +195,35 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     blockSpan: [0, blockSource.length],
     blockRuntimeStatus: "halted",
   });
+});
+
+test("type checking follows long function, default, and property chains and wide literals with a constrained host stack", () => {
+  const compilerUrl = new URL("../src/compiler.js", import.meta.url).href;
+  // The child builds the sources itself: they are larger than an environment variable may be.
+  const script = `
+    const { compileSource } = await import(${JSON.stringify(compilerUrl)});
+    const chain = (link) => Array.from({ length: 512 }, (_, index) => link(index, index === 511 ? "1" : "f" + (index + 1) + "()"));
+    const sources = [
+      chain((index, next) => "function f" + index + " { return " + next + " }").join("\\n") + "\\nlet result = f0()",
+      chain((index, next) => "function f" + index + "(x = " + next + ") { return x }").join("\\n") + "\\nlet result = f0()",
+      "function f(obj) { obj" + ".x".repeat(4096) + ".p = 1 }\\nexit",
+      "let wide = [" + "1, ".repeat(32767) + "1]\\nexit",
+    ];
+    process.stdout.write(JSON.stringify(sources.map((source) => {
+      const compiled = compileSource(source);
+      return { codes: compiled.diagnostics.map((diagnostic) => diagnostic.code), plan: compiled.plan !== null };
+    })));
+  `;
+  const child = spawnSync(
+    process.execPath,
+    ["--stack-size=256", "--input-type=module", "--eval", script],
+    { encoding: "utf8", timeout: 60_000, maxBuffer: 256 * 1024 },
+  );
+  assert.equal(child.status, 0, child.stderr);
+  assert.deepEqual(
+    JSON.parse(child.stdout),
+    Array.from({ length: 4 }, () => ({ codes: [], plan: true })),
+  );
 });
 
 test("compiler containment recognizes native stack failures without relying on a failure depth", () => {

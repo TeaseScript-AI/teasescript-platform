@@ -52,6 +52,9 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "random",
   "randomInteger",
   "chance",
+  "round",
+  "floor",
+  "ceil",
   "toString",
   "toNumber",
   "toInteger",
@@ -105,7 +108,14 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "getPlayerHistory",
 ] as const);
 
-export const CORE_RUNTIME_BUILTINS = Object.freeze(["random", "chance", "randomInteger"] as const);
+export const CORE_RUNTIME_BUILTINS = Object.freeze([
+  "random",
+  "chance",
+  "randomInteger",
+  "round",
+  "floor",
+  "ceil",
+] as const);
 
 /** Temporary direct-call bridge for implemented Platform Standard Library helpers. */
 export const PLATFORM_STANDARD_LIBRARY_PRELUDE = Object.freeze(["escapeMarkup"] as const);

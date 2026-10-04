@@ -365,7 +365,7 @@ test("snapshots earlier composite values before a later user call mutates their 
   const result = runSource(
     [
       "let items = [1]",
-      "function mutate { items.add(2)\nreturn 0 }",
+      "function mutate { items.add(2)\nreturn [0] }",
       "let combined = [items, mutate()]",
       "say combined[0].length",
       "say items.length",
@@ -391,7 +391,9 @@ test("keeps a prepared collection receiver attached through argument side effect
 test("fails an invalid prepared receiver before evaluating a user-call argument", () => {
   const source = [
     "let order = []",
-    "let scalar = 1",
+    // `dynamic` hides the receiver's type from the compiler, which rejects a known integer receiver before runtime.
+    "function dynamic(value) { return value }",
+    "let scalar = dynamic(1)",
     'function argument { order.add("argument")\nreturn 2 }',
     "scalar.add(argument())",
   ].join("\n");
@@ -459,7 +461,8 @@ test("rebases prepared list descendants when earlier removals shift retained ite
   const result = runSource(
     [
       "let firstItems = [{ value: 0 }, { value: 1 }]",
-      "let middleItems = [0, 1, { value: 2 }]",
+      "function dynamic(value) { return value }",
+      "let middleItems = [dynamic(0), dynamic(1), { value: 2 }]",
       "let lastItems = [{ value: 0 }, { value: 1 }]",
       "let positionItems = [{ value: 0 }, { value: 1 }, { value: 2 }]",
       "function removeFirstItem { firstItems.removeFirst()\nreturn 9 }",

@@ -487,7 +487,7 @@ test("choice diagnostics reject mixed written-value kinds, while values and text
   }
   for (const accepted of [
     'let x = choose first: "Same", second: "Same"',
-    'let x = choose back: "Back", "Spanking", ["Lines", { text: "Corner", value: "corner" }]',
+    'let x = choose back: "Back", "Spanking", [{ text: "Lines" }, { text: "Corner", value: "corner" }]',
     'let x = choose first: "A", first: "B"',
     'let x = choose 1: "A", 1.0: "B"',
     'let x = choose "Same", "Same"',
@@ -550,10 +550,11 @@ test("interaction result domains participate in existing numeric semantic checks
     'let values = (choose { text: "A" })..3',
     'let values = (choose [{ text: "A" }, { text: 1, value: "b" }])..3',
   ]) {
+    // The type check knows what a choice returns, so it reports the text range bound.
     const textChoice = compileSource(source);
     assert.equal(textChoice.plan, null, source);
     assert.ok(
-      textChoice.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV010"),
+      textChoice.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV043"),
       source,
     );
   }
@@ -694,7 +695,7 @@ test("dynamic interaction UI converts scalars once and selects from a list only 
   );
 
   const listPlan = compiled(
-    'let left = ["left", 2]\nlet right = ["right", 3]\nlet result = choose "${left}", "${right}"',
+    'function dynamic(value) {\n  return value\n}\nlet left = [dynamic("left"), 2]\nlet right = [dynamic("right"), 3]\nlet result = choose "${left}", "${right}"',
   );
   const randomValues = [0.75, 0.75];
   let randomCalls = 0;
@@ -1011,7 +1012,10 @@ test("blocking interactions resume through ordinary expression contexts and para
     assert.equal(validateInstructionPlan(defaultResult.plan).valid, true);
   }
 
-  const pairPlan = compiled("let pair = [askText, askNumber]");
+  // `dynamic` hides the number's type, so the list may hold text and a number.
+  const pairPlan = compiled(
+    "function dynamic(value) {\n  return value\n}\nlet pair = [askText, dynamic(askNumber)]",
+  );
   const firstPending = run(pairPlan, createFreshRuntimeSnapshot(pairPlan));
   assert.equal(firstPending.snapshot.status, "waiting");
   assert.equal(
@@ -1041,7 +1045,7 @@ test("blocking interactions resume through ordinary expression contexts and para
   assert.equal(pairDone.snapshot.status, "halted");
   assert.deepEqual(rootBinding(pairDone.snapshot, "pair"), createSerializableList(["alpha", 2.5]));
 
-  const shortCircuit = compiled("let value = false and askText");
+  const shortCircuit = compiled('let value = false and askText == "yes"');
   const shortCircuitDone = run(shortCircuit, createFreshRuntimeSnapshot(shortCircuit));
   assert.equal(shortCircuitDone.snapshot.status, "halted");
   assert.equal(shortCircuitDone.snapshot.foregroundAction, null);

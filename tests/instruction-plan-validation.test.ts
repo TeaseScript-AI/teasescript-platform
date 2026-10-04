@@ -564,8 +564,8 @@ test("rejects forged prepared say fields and lifetimes before any script event e
       name: "contextual capture pair after text-side call short-circuit payload",
       source: [
         'speaker vera { title: "Captain" }',
-        "function use(x) { return x.title }",
-        "say as vera use(true or speaker), instant",
+        "function use(x) { return x }",
+        "say as vera use(true or speaker == vera), instant",
       ].join("\n"),
       consumerKind: "callFunction",
     },
@@ -631,7 +631,7 @@ test("rejects forged prepared say fields and lifetimes before any script event e
     [
       'function textValue { return "hello" }',
       "function pace { return 1 }",
-      "say false and textValue(), pace()",
+      'say false and textValue() == "hello", pace()',
     ].join("\n"),
   );
   const bypassSay = bypassable.instructions.findIndex((instruction) => instruction.kind === "say");

@@ -308,12 +308,21 @@ test("a blocking timer evaluates a named display expression like an async timer"
   assert.equal(invalid.snapshot.failure?.code, "TSR050");
 });
 
-test("static handle hints do not leak from untaken or reassigned paths", () => {
-  const compiled = compileSource(
-    // `load` values have no static type, so these variables may hold a handle on one path and an object on another.
-    'let o = load "o"\nif false {\n  o = timer async 1\n}\nsay "${o.x}"\nlet t = timer async 1\nt = load "t"\nsay "${t.x}"',
+test("static handle hints do not leak from untaken paths, and a variable keeps its handle type", () => {
+  // A `load` value has no static type, so `o` may hold a handle on one path and an object on another.
+  const untaken = compileSource(
+    'let o = load "o"\nif false {\n  o = timer async 1\n}\nsay "${o.x}"',
   );
-  assert.deepEqual(compiled.diagnostics, []);
+  assert.deepEqual(untaken.diagnostics, []);
+  // `t` keeps its timer type, so a loaded value must be a timer too, and timers have no property `x`.
+  const reassigned = 'let t = timer async 1\nt = load "t"\nsay "${t.x}"';
+  assert.deepEqual(
+    compileSource(reassigned).diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      reassigned.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
+    ]),
+    [["TSV043", "x"]],
+  );
 });
 
 test("a whole-second range may carry a trailing seconds unit", () => {

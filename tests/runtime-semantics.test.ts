@@ -202,13 +202,15 @@ test("set literals reject each value before evaluating the next element", () => 
 });
 
 test("rejects composite values through set add, contains, and list toSet", () => {
+  // `dynamic` hides each value's type; a known composite value is a compile error (TSV006).
+  const dynamic = "function dynamic(value) { return value }\n";
   for (const source of [
-    "let values = set[]\nvalues.add([1])",
-    "let values = set[1]\nlet found = values.contains([1])",
-    "let source = [{ value: 1 }]\nlet values = source.toSet()",
-    "let source = [set[1]]\nlet values = source.toSet()",
+    "let values = set[]\nvalues.add(dynamic([1]))",
+    "let values = set[1]\nlet found = values.contains(dynamic([1]))",
+    "let source = dynamic([{ value: 1 }])\nlet values = source.toSet()",
+    "let source = dynamic([set[1]])\nlet values = source.toSet()",
   ]) {
-    const result = executeSource(source);
+    const result = executeSource(dynamic + source);
     assert.deepEqual(
       result.errors.map((error) => error.code),
       ["TSR032"],
@@ -220,7 +222,9 @@ test("uses scalar equality for set uniqueness and retains insertion order", () =
   const captured: unknown[] = [];
   const result = executeSource(
     [
-      'let values = set["a", "a", true, true, 1, 1.0, null, null, false]',
+      // `dynamic` hides each value's type, so the set may hold values of several kinds.
+      "function dynamic(value) { return value }",
+      'let values = set["a", "a", dynamic(true), dynamic(true), dynamic(1), dynamic(1.0), null, null, dynamic(false)]',
       "capture(values.toList())",
     ],
     { capture: captureInto(captured) },

@@ -8,8 +8,8 @@ speaker guide {
 
 speaker guide
 
-function hold(round) {
-    say "Round ${round}: hold still until the timer ends.", instant
+function hold(pass) {
+    say "Round ${pass}: hold still until the timer ends.", instant
     timer 3..=5
 }
 
@@ -19,8 +19,8 @@ say "Next, a timer between 4 and 8 seconds. Save a checkpoint while it runs, the
 timer 4..=8
 say "A hidden wait pauses without any timer.", instant
 wait 3
-for round in 1..=2 {
-    hold(round)
+for pass in 1..=2 {
+    hold(pass)
 }
 say "Every timer has settled.", instant
 showButton "Finish"
