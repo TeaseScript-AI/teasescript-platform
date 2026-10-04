@@ -3,6 +3,7 @@ import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-val
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { compileStableProject, type InstructionPlan } from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
+import type { ScriptHeader } from "./script-header.js";
 import { validateCapturedInstructionPlan } from "./plan/validation.js";
 import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutable.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
@@ -17,6 +18,8 @@ export interface CompileOptions extends SemanticValidationOptions {}
 
 export interface CompilationResult {
   readonly program: Program;
+  /** The file's `---` header, or `null` when it has none. */
+  readonly header: ScriptHeader | null;
   readonly parserDiagnostics: readonly Diagnostic[];
   readonly semanticDiagnostics: readonly Diagnostic[];
   readonly diagnostics: readonly Diagnostic[];
@@ -158,14 +161,24 @@ function compileFile(path: string, source: string, options: CompileOptions): Com
     parsed = parse(source);
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
-    return { result: stackExhaustionResult(path, source, null), typeChecks: null, parsed: null };
+    return {
+      result: stackExhaustionResult(path, source, null, null),
+      typeChecks: null,
+      parsed: null,
+    };
   }
   try {
     return checkParsedFile(path, parsed, options);
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
     return {
-      result: stackExhaustionResult(path, source, parsed.program, parsed.diagnostics),
+      result: stackExhaustionResult(
+        path,
+        source,
+        parsed.program,
+        parsed.header,
+        parsed.diagnostics,
+      ),
       typeChecks: null,
       parsed,
     };
@@ -193,6 +206,7 @@ function checkParsedFile(
     result: Object.freeze({
       path,
       program: parsed.program,
+      header: parsed.header,
       parserDiagnostics,
       semanticDiagnostics,
       diagnostics: Object.freeze([...parserDiagnostics, ...semanticDiagnostics]),
@@ -230,6 +244,7 @@ function lowerProject(files: CompiledProjectFile[]): InstructionPlan | null {
       current.result.path,
       "",
       parsed.program,
+      parsed.header,
       parsed.diagnostics,
     );
     return null;
@@ -246,6 +261,7 @@ function stackExhaustionResult(
   path: string,
   source: string,
   parsedProgram: Program | null,
+  header: ScriptHeader | null,
   parserDiagnostics: readonly Diagnostic[] = [],
 ): ProjectFileCompilation {
   const sourceSpan = parsedProgram?.span ?? completeSourceSpan(source);
@@ -262,6 +278,7 @@ function stackExhaustionResult(
     program:
       parsedProgram ??
       Object.freeze({ kind: "program", statements: Object.freeze([]), span: sourceSpan }),
+    header,
     parserDiagnostics: frozenParserDiagnostics,
     semanticDiagnostics,
     diagnostics: Object.freeze([...frozenParserDiagnostics, stackDiagnostic]),

@@ -666,7 +666,10 @@ either an arrival — the next cue point, the end of the pass, or the end of a r
 progress reaches it, or a departure — the cues at a start position after load, seek, or a pass wrap — due when
 playback proceeds from that position (the right edge of a stall there). `processDueWork` orders media events with
 delays, pacing gates, and timers by `(scene time, phase, action ID)`, where departures have phase 1 and all other work
-phase 0, and commits one event per step, so queued cue blocks hold catch-up exactly like timer expiry blocks. An
+phase 0, and commits one event per step, so queued cue blocks hold catch-up exactly like timer expiry blocks. Pass
+ends of repeating media without cues in their active range produce nothing observable; like silent timer rounds, they
+settle as if each was committed on time, and the implementation skips them arithmetically up to the next other due
+work. An
 arrival queues every cue exactly at its point in source order and, at the end of the range, completes the pass
 atomically: the next pass restarts at `startAt` with its start cues pending, or the media finishes and queues `finish`.
 A repeat duration that ends mid-pass queues the cues reached there, then finishes. Every event's segment progress is
@@ -830,9 +833,9 @@ state. Without a context a session uses UTC and locale-neutral text such as `202
 Each capture records a context, the UTC wall clock (or `null` when the host supplied none), its boundary scene time,
 and the session's next event sequence when it was recorded. Session start records the first capture at
 `initialSessionTimeMs`. When the player continues a restored session, the host calls
-`recordContinueCapture(plan, snapshot, { wallClockMs, temporalContext? })` before the scene clock resumes; this
-recorded input takes effect at the saved `observedSessionTimeMs`, and a new context may be omitted to keep the earlier
-one. Restore itself records nothing.
+`recordContinueCapture(plan, snapshot, { wallClockMs, temporalContext? })`, which executes nothing, and then runs the
+session before the scene clock resumes; this recorded input takes effect at the saved `observedSessionTimeMs`, and a
+new context may be omitted to keep the earlier one. Restore itself records nothing.
 
 - Execution at scene time `t` uses the last capture whose boundary is not later than `t`, so saved catch-up before the
   boundary keeps the earlier capture and execution from the boundary on uses the new one.

@@ -13,6 +13,12 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
+import {
+  compileSource,
+  createCheckpoint,
+  createFreshRuntimeSnapshot,
+  serializeCheckpoint,
+} from "../src/index.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
 import { AMSTERDAM, utc } from "./helpers/temporal-fixtures.js";
 
@@ -449,4 +455,32 @@ test("Vue host resolves the player's zone and presentation again at Start and at
     choice.ui.options.map((option) => option.text),
     ["4-10-2026"],
   );
+});
+
+test("Vue host's Continue resumes a restored ready session within the activating call", (context) => {
+  const { host } = createHost(context, {
+    scope: "test",
+    load: async () => [],
+    write: async () => {},
+    clear: async () => {},
+  });
+  const { plan } = compileSource('say "Resumed", instant');
+  assert.ok(plan);
+  host.prepareRestore(
+    restorePlayerRuntimeSession({
+      checkpointJson: serializeCheckpoint(createCheckpoint(plan, createFreshRuntimeSnapshot(plan))),
+      events: [],
+    }),
+  );
+  const beforeActivation = host.session.value;
+  assert.equal(host.activation.value, "continue");
+  assert.equal(beforeActivation, null);
+
+  // No timer, observation, or page lifecycle event is needed after the click.
+  host.activate();
+  assert.deepEqual(
+    host.session.value?.transcriptEntries.map((entry) => entry.text),
+    ["Resumed"],
+  );
+  assert.equal(host.session.value?.snapshot.status, "halted");
 });
