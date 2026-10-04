@@ -2219,7 +2219,19 @@ class TypeChecker {
         return INTEGER_TYPE;
       case "min":
       case "max": {
-        this.#reportProblems(builtinCallProblems(name, expression, (item) => this.#typeOf(item)));
+        const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+        // A union or a possibly null argument names the test or the check first (ADR 0021 rule 3.5, #504 Q1).
+        const several = problems.every((problem) => problem.kind === "invalidOperand")
+          ? expression.arguments.filter((item) => members(this.#typeOf(item.value)).length > 1)
+          : [];
+        if (several.length === 0) this.#reportProblems(problems);
+        for (const item of several)
+          this.#reportUnless(
+            this.#typeOf(item.value),
+            (member) => isNumeric(member) || isScalar(member, "duration"),
+            item.value,
+            `${name}(...) takes numbers or durations`,
+          );
         // The result is an integer when every argument is one, like arithmetic on them (ADR 0021 rule 2.2).
         const numbers = values.map(nonNullTypeForUse);
         if (numbers.length < 2) return UNKNOWN_TYPE;

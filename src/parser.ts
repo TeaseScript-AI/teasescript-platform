@@ -168,6 +168,8 @@ class Parser {
    * `save`; groupings such as parentheses start without them.
    */
   #storageDelimiters: ReadonlySet<StorageDelimiter> = NO_STORAGE_DELIMITERS;
+  /** Inside `()`, `[]`, or an object literal, where a line break does not end an expression (V30 §2). */
+  #insideDelimiters = false;
   /** For each token, whether its innermost enclosing opener is `(` or `[`, where a newline may continue a type (V30 §1). */
   readonly #bracketed: readonly boolean[];
 
