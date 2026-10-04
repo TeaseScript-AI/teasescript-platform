@@ -366,7 +366,8 @@ export function temporalBinary(
   }
 }
 
-function compareTemporal(
+/** The order of two date or time values of one kind: negative, zero, or positive. */
+export function compareTemporal(
   left: SerializableRuntimeTemporal,
   right: SerializableRuntimeTemporal,
 ): number {

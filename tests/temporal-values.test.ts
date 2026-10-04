@@ -193,6 +193,53 @@ test("ordering, equality, and set membership compare kind and value", () => {
   assert.equal(failure?.code, "TSR009");
 });
 
+test("sort, min, and max order date and time values of one kind", () => {
+  assert.deepEqual(
+    runSays(
+      [
+        'let days = [toDate("2026-10-05"), toDate("2025-12-31"), toDate("2026-10-04")]',
+        "days.sort()",
+        'say days.join(", ")',
+        'let first: time = min(toTime("14:30"), toTime("09:15:30"), toTime("23:00"))',
+        "say first.toISO()",
+        'say max(toTimestamp("2026-10-04T12:00:00Z"), toTimestamp("2026-10-04T13:00:00+02:00")).toISO()',
+        'say max(toDateTime("2026-10-04T18:00"), toDateTime("2026-10-04T18:00:00.001")).toISO()',
+      ].join("\n"),
+    ),
+    [
+      "2025-12-31, 2026-10-04, 2026-10-05",
+      "09:15:30",
+      "2026-10-04T12:00:00Z",
+      "2026-10-04T18:00:00.001",
+    ],
+  );
+  const compileErrors = (source: string) =>
+    compileSource(source).diagnostics.map((diagnostic) => diagnostic.message);
+  assert.deepEqual(compileErrors('let x = min(toDate("2026-10-04"), toTime("14:30"))'), [
+    "min(...) needs values of one kind, but this is a time and an earlier one is a date.",
+  ]);
+  assert.deepEqual(
+    compileErrors(
+      'let mixed: (date | time)[] = [toDate("2026-10-04"), toTime("14:30")]\nmixed.sort()',
+    ),
+    ["sort() needs elements of one kind, but this list may hold dates and times."],
+  );
+  const mixedSort = failureOf(
+    `${DYNAMIC}let mixed = [dynamic(toDate("2026-10-04")), dynamic(toTime("14:30"))]\nmixed.sort()`,
+  );
+  assert.equal(mixedSort?.code, "TSR060");
+  assert.equal(
+    mixedSort?.message,
+    "sort() needs elements of one kind, but this list has dates and times.",
+  );
+  assert.equal(
+    failureOf(
+      `${DYNAMIC}let x = max(dynamic(toDate("2026-10-04")), dynamic(toDateTime("2026-10-04T18:00")))`,
+    )?.code,
+    "TSR059",
+  );
+});
+
 test("exact durations move datetimes through the captured zone and timestamps by elapsed time", () => {
   assert.deepEqual(
     runSays(
