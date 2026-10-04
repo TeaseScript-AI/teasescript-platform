@@ -177,22 +177,22 @@ test("the compiler rejects a timeout it can see is invalid and names the fix", (
     { source: 'showButton "Go", timeout: -2 s', code: "TSV011", fix: "Remove 'timeout:'" },
     { source: 'showButton "Go", timeout: 2 min - 150 s', code: "TSV011", fix: "Remove 'timeout:'" },
     { source: 'showButton "Go", timeout: 1e308', code: "TSV011", fix: "shorter timeout" },
-    { source: 'showButton "Go", timeout: 1e308 * 10', code: "TSV011", fix: "shorter timeout" },
+    // An overflowing step is the language-wide overflow error, even when later arithmetic would bring the value back.
+    { source: 'showButton "Go", timeout: 1e308 * 10', code: "TSV050", fix: "smaller values" },
     {
       source: 'showButton "Go", timeout: 1e300 h / 1e-300',
-      code: "TSV011",
-      fix: "shorter timeout",
+      code: "TSV050",
+      fix: "shorter duration",
     },
-    // An overflowing step fails at runtime even when later arithmetic would bring the value back.
     {
       source: 'showButton "Go", timeout: 1 / (1e308 * 10) + 1',
-      code: "TSV011",
-      fix: "shorter timeout",
+      code: "TSV050",
+      fix: "smaller values",
     },
     {
       source: 'showButton "Go", timeout: 1 s + 1 h / (1e300 * 1e10)',
-      code: "TSV011",
-      fix: "shorter timeout",
+      code: "TSV050",
+      fix: "smaller values",
     },
     {
       source: 'showButton "Go", timeout: 9007199254740992 ms',
