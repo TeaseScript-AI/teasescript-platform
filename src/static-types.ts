@@ -89,6 +89,9 @@ export function markMaybeMissing(table: PropertyTable, name: string): void {
  */
 const openTables = new WeakSet<PropertyTable>();
 
+/** Undecided slots that took a value the compiler cannot know: the type a later value decides is open too. */
+const openSlots = new WeakSet<OpenType>();
+
 /** Marks every object table in a place's type as open (see {@link openTables}). */
 export function markOpen(type: StaticType): void {
   const pending = [type];
@@ -97,8 +100,9 @@ export function markOpen(type: StaticType): void {
     const value = resolved(pending.pop()!);
     if (seen.has(value)) continue;
     seen.add(value);
-    if (value.kind === "union") pending.push(...value.members);
-    else if (value.kind === "list" || value.kind === "set") pending.push(value.element);
+    if (value.kind === "open") openSlots.add(value);
+    else if (value.kind === "union") pending.push(...value.members);
+    else if (isCollection(value)) pending.push(value.element);
     else if (value.kind === "object" && value.properties !== null) {
       openTables.add(value.properties);
       pending.push(...value.properties.values());
@@ -124,7 +128,7 @@ function keepMaybeMissing(from: PropertyTable, to: PropertyTable): void {
   if (from === to) return;
   for (const name of maybeMissing.get(from) ?? []) markMaybeMissing(to, name);
   const sources = madeFrom.get(to) ?? [];
-  sources.push(from);
+  if (!sources.includes(from)) sources.push(from);
   madeFrom.set(to, sources);
 }
 
@@ -718,6 +722,7 @@ function* settleTask(
     const value = target.origins === undefined ? widened : replacedOrigins(widened, target.origins);
     target.resolved = target.sawNull ? optional(value) : value;
     target.resolvedAt = at;
+    if (openSlots.has(target)) markOpen(target.resolved);
     return;
   }
   if (target.kind === "union") {
@@ -741,9 +746,16 @@ function* settleTask(
     if (target.properties === null || source.properties === null) return;
     for (const [name, value] of source.properties) {
       const kept = target.properties.get(name);
-      if (kept === undefined) target.properties.set(name, yield* compileChild(placeTask(value)));
-      else yield* compileChild(settleTask(kept, value, at));
+      if (kept === undefined) {
+        target.properties.set(name, yield* compileChild(placeTask(value)));
+        markMaybeMissing(target.properties, name);
+      } else yield* compileChild(settleTask(kept, value, at));
     }
+    // The place may now hold this object instead: a property the object may lack may be missing, and it may have the
+    // object's other properties.
+    for (const name of target.properties.keys())
+      if (!surelyHasProperty(source.properties, name)) markMaybeMissing(target.properties, name);
+    keepMaybeMissing(source.properties, target.properties);
   }
 }
 
@@ -758,9 +770,12 @@ export function copyType(type: StaticType): StaticType {
 function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
   const type = resolved(typeToCopy);
   switch (type.kind) {
-    case "open":
+    case "open": {
       // A copy decides its type on its own, but keeps what the original saw: a first null stays a first null.
-      return { ...openType(), sawNull: type.sawNull };
+      const slot: OpenType = { ...openType(), sawNull: type.sawNull };
+      if (openSlots.has(type)) openSlots.add(slot);
+      return slot;
+    }
     case "list":
     case "set":
     case "dict":

@@ -1218,6 +1218,12 @@ class TypeChecker {
           properties.set(name, type);
           markMaybeMissing(properties, name);
         }
+      // The place may now hold this object, which lacks the properties it does not write.
+      if (decides) {
+        const written = new Set(literal.properties.map((property) => property.name.name));
+        for (const name of properties.keys())
+          if (!written.has(name)) markMaybeMissing(properties, name);
+      }
       if (decides && fits && added.length > 0 && place.widening !== undefined)
         this.#rewiden(place.widening.root);
       return;

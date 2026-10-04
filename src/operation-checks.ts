@@ -237,12 +237,6 @@ function capitalized(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/**
- * Compile-time problems with a call of a conversion (`toString`, `toNumber`, `toInteger`, `toBoolean`, and the date and
- * time conversions) or rounding built-in (`round`, `floor`, `ceil`): its arguments, a value of a known type it cannot
- * convert, constant text that cannot convert (V30 §13, §35), and a `default:` of another type than the result. Other
- * callees give no problems.
- */
 /** The parameters of the built-ins that take a fixed number of positional arguments and no names (V30 §7, §8). */
 const FIXED_PARAMETERS: ReadonlyMap<string, readonly string[]> = new Map([
   ["random", []],
@@ -277,6 +271,12 @@ export function builtinShapeProblems(name: string, call: CallExpression): Operat
   ];
 }
 
+/**
+ * Compile-time problems with a call of a conversion (`toString`, `toNumber`, `toInteger`, `toBoolean`, and the date and
+ * time conversions) or rounding built-in (`round`, `floor`, `ceil`): its arguments, a value of a known type it cannot
+ * convert, constant text that cannot convert (V30 §13, §35), and a `default:` of another type than the result. Other
+ * callees give no problems.
+ */
 export function builtinCallProblems(
   name: string,
   call: CallExpression,

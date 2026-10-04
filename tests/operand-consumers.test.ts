@@ -101,6 +101,32 @@ test("a property that a known object never gets is an error where it is read", (
     assert.deepEqual(errors(source), [], source);
 });
 
+test("an object that a whole store, a dict, or an unknown value reaches may lack or have properties", () => {
+  // A whole object replaces the value: the properties it does not write may be missing, and the ones it adds too.
+  for (const source of [
+    'let option = { text: "A", value: [1] }\noption = { text: "B" }\nlet answer = choose option',
+    'let option = { text: "A" }\nlet other = { text: "B", value: [1] }\nif false {\n    option = other\n}\nlet answer = choose option',
+  ])
+    assert.deepEqual(errors(source), [], source);
+  assert.deepEqual(
+    errors(
+      'let option = { text: "A", value: [1] }\noption = { text: "B", value: [2] }\nlet answer = choose option',
+    ).map(([code]) => code),
+    ["TSV029"],
+  );
+  assert.deepEqual(errors("let box = { a: 1 }\nbox = { b: 2 }\nsay box.c"), [["TSV043", "c"]]);
+  // A dict parameter's objects, and a place that took an unknown value before a later value decided its type, may have
+  // more properties than the compiler knows.
+  const dynamic = "function dynamic(value) {\n    return value\n}\n";
+  for (const source of [
+    'function read(table = dict{ a: {} }) {\n    say table["a"].b\n}\nread(dict{ a: { b: 1 } })',
+    `${dynamic}let items = []\nitems.add(dynamic({ b: 1 }))\nif false {\n    items.add({ a: 1 })\n}\nsay items[0].b`,
+    `${dynamic}let items = []\nitems.add(dynamic({ b: 1 }))\nlet copy = items\nif false {\n    copy.add({ a: 1 })\n}\nsay copy[0].b`,
+    `${dynamic}let box = null\nbox = dynamic({ b: 1 })\nif false {\n    box = { a: 1 }\n}\nif box != null {\n    say box.b\n}`,
+  ])
+    assert.deepEqual(says(source), ["1"], source);
+});
+
 test("join checks the element type of a computed list", () => {
   for (const value of ["{ x: 1 }", "[1]"])
     for (const source of SOURCES.slice(1).map((wrap) => wrap(`[${value}]`, 'say @.join(", ")')))
