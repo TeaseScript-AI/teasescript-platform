@@ -29,3 +29,13 @@ def a = [3, 1]
 def b = a
 a = a.sort()
 save("first", a[0])
+// An indexed compound assignment reads the element before the condition changes it.
+def xs = [10]
+def bump = { -> xs[0] = 20; return true }
+xs[0] += (bump() ? 2 : 3)
+save("indexed", xs[0])
+// A loop's receiver that reads the destination runs before the destination changes.
+def ys = [7]
+def items = { -> return ys }
+ys = items().collect { it -> it }
+save("receiver", ys[0])

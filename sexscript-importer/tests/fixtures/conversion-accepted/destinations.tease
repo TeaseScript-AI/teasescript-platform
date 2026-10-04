@@ -77,3 +77,27 @@ let b = a
 // NOTE SX_SHARED_LIST_WRITE line 30: Groovy shared the list in a with another variable assigned from it, so this change affected both; in TeaseScript the variables hold separate copies (ADR 0014).
 a.sort()
 save a[0] as "first"
+// An indexed compound assignment reads the element before the condition changes it.
+let xs = [10]
+function bump {
+  xs[0] = 20
+  return true
+}
+let earlier2 = xs[0]
+let conditional3 = 3
+if bump() {
+  conditional3 = 2
+}
+xs[0] = earlier2 + conditional3
+save xs[0] as "indexed"
+// A loop's receiver that reads the destination runs before the destination changes.
+let ys = [7]
+function items {
+  return ys
+}
+let collectResult = []
+for it in items() {
+  collectResult.add(it)
+}
+ys = collectResult
+save ys[0] as "receiver"

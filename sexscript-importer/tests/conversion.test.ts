@@ -671,7 +671,40 @@ test(
       tags: "ab",
       found: "x",
       first: 1,
+      indexed: 12,
+      receiver: 7,
     });
+    const fieldPath = fileURLToPath(
+      new URL("./fixtures/conversion/destination-field.groovy", import.meta.url),
+    );
+    const fieldShim = shimPendingCapabilities(await convert(fieldPath));
+    const fieldStorage = new Map();
+    const fieldResult = runnerResult.runner(fieldShim.source, pendingHostFunctions(fieldShim), {
+      storage: fieldStorage,
+    });
+    assert.equal(fieldResult.status, "halted");
+    assert.deepEqual(Object.fromEntries(fieldStorage), { inner: 1, result: 7 });
+  },
+);
+
+// A read with a default for a missing key uses get(key, default:) only with a default of the dict's value type.
+test(
+  "keeps read-then-default code whose default has another type than the dict's values",
+  { skip: parserUnavailable },
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-default-"));
+    try {
+      const sourcePath = path.join(directory, "default.groovy");
+      writeFileSync(
+        sourcePath,
+        'def m = [a: "text"]\ndef k = "b"\ndef x = m[k]\nif (x == null) x = 3\nsave("result", x)\n',
+      );
+      const output = emitTease(await convert(sourcePath));
+      assert.doesNotMatch(output, /m\.get\(/u);
+      assert.match(output, /^if x == null \{$/mu);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   },
 );
 

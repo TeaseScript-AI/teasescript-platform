@@ -1517,10 +1517,12 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
   // while the write stays with `x`.
   const compoundOperator =
     root.kind === "binary" && typeof root.operator === "string" ? root.operator : "";
+  const compoundTarget = asNode(root.left);
   if (
     ["+=", "-=", "*=", "/="].includes(compoundOperator) &&
-    asNode(root.left)?.kind === "variable" &&
-    node.kind === "expressionStatement"
+    node.kind === "expressionStatement" &&
+    (compoundTarget?.kind === "variable" ||
+      (compoundTarget !== null && isRepeatableIndex(compoundTarget)))
   ) {
     const expanded: AstNode = {
       kind: "binary",
@@ -1570,6 +1572,7 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
         deferred,
         span,
         context,
+        target,
       ) ?? [
         unsupportedStatement(
           context,
@@ -1721,7 +1724,7 @@ function needsOwnStatement(node: AstNode, context: LowerContext): boolean {
 
 /**
  * The parts of an expression in Groovy's evaluation order; an assignment's variable target, a method name, and the
- * implicit receiver of a script call are not evaluated.
+ * implicit receiver of a script call are not evaluated, and an indexed target evaluates its list and position.
  */
 function evaluationChildren(node: AstNode): AstNode[] {
   if (node.kind === "closure") return [];
@@ -1734,7 +1737,13 @@ function evaluationChildren(node: AstNode): AstNode[] {
     const left = asNode(node.left);
     const right = asNode(node.right);
     const evaluated = left !== null && left.kind !== "variable" && left.kind !== "arguments";
-    return [...(evaluated ? [left] : []), ...(right === null ? [] : [right])];
+    const targetParts =
+      left !== null && left.kind === "binary" && left.operator === "["
+        ? evaluationChildren(left)
+        : evaluated
+          ? [left]
+          : [];
+    return [...targetParts, ...(right === null ? [] : [right])];
   }
   return nodeChildren(node);
 }
@@ -1769,8 +1778,19 @@ function hoistDeferred(
     const children = evaluationChildren(path[index]!);
     earlier.push(...children.slice(0, children.indexOf(path[index + 1]!)));
   }
+  // The list an indexed assignment writes into stays itself: a temporary would hold a copy (ADR 0014).
+  const destinations = new Set(
+    path.flatMap((node) => {
+      const left = node.kind === "binary" && node.operator === "=" ? asNode(node.left) : null;
+      return left?.kind === "binary" && left.operator === "[" && variableName(left.left) !== null
+        ? [asNode(left.left)!]
+        : [];
+    }),
+  );
   const moved = earlier.filter(
-    (part) => !isPure(part, context) || deferredMayChange(part, deferred, context),
+    (part) =>
+      !destinations.has(part) &&
+      (!isPure(part, context) || deferredMayChange(part, deferred, context)),
   );
   const assignmentTargets = new Set(
     path.flatMap((node) =>
@@ -1852,9 +1872,12 @@ function hoistDeferred(
  */
 function deferredMayChange(part: AstNode, deferred: AstNode, context: LowerContext): boolean {
   const reads = new Set<string>();
+  const readNodes: AstNode[] = [];
   walkAst(part, (node) => {
     const name = node.kind === "variable" ? variableName(node) : null;
-    if (name !== null) reads.add(name);
+    if (name === null) return;
+    reads.add(name);
+    readNodes.push(node);
   });
   if (reads.size === 0) return false;
   let writes = false;
@@ -1882,20 +1905,41 @@ function deferredMayChange(part: AstNode, deferred: AstNode, context: LowerConte
     )
       calls = true;
   });
-  // Locals of the current function and generated temporaries are out of reach of other functions.
-  const locals = context.currentFunction?.locals ?? new Set<string>();
-  return (
-    writes ||
-    (calls && [...reads].some((name) => !locals.has(name) && !context.generatedNames.has(name)))
-  );
+  return writes || (calls && readNodes.some((node) => !outOfReach(node, context)));
 }
 
 /**
- * Whether evaluating `node` may read the variable `name`: it names it, or it calls a function or a closure value
- * (other than the SexScript API) while the variable is one that functions can reach, not a local of the current
- * function or a generated temporary. A destination such a part may read must not hold a partial result.
+ * Whether no other function can read the variable a reference names: a generated temporary, or a local binding of
+ * the current function (bindingKeys) that no closure inside it mentions. A script variable or object field is in
+ * reach, also when a nested block declares a local of the same name.
  */
-function mayReadDestination(node: AstNode, name: string, context: LowerContext): boolean {
+function outOfReach(node: AstNode, context: LowerContext): boolean {
+  const name = variableName(node);
+  if (name === null) return false;
+  if (context.generatedNames.has(name)) return true;
+  const key = bindingKey(node, context.bindings);
+  const body = context.currentFunction?.body;
+  if (key === null || key === name || body === undefined) return false;
+  let captured = false;
+  walkAst(body, (inner) => {
+    if (inner.kind !== "closure") return;
+    walkAst(inner.body, (reference) => {
+      const call = reference.kind === "methodCall" ? callParts(reference) : null;
+      if (variableName(reference) === name || (call?.inherited === true && call.name === name))
+        captured = true;
+    });
+  });
+  return !captured;
+}
+
+/**
+ * Whether evaluating `node` may read the variable a `destination` reference names: it names it, or it calls a
+ * function or a closure value (other than the SexScript API) while the variable is in reach of other functions
+ * (outOfReach). A destination such a part may read must not hold a partial result.
+ */
+function mayReadDestination(node: AstNode, destination: AstNode, context: LowerContext): boolean {
+  const name = variableName(destination);
+  if (name === null) return true;
   let names = false;
   let calls = false;
   walkAst(node, (inner) => {
@@ -1908,9 +1952,7 @@ function mayReadDestination(node: AstNode, name: string, context: LowerContext):
       if (call === null || call.inherited || !reading) calls = true;
     }
   });
-  const reachable =
-    context.currentFunction?.locals.has(name) !== true && !context.generatedNames.has(name);
-  return names || (calls && reachable);
+  return names || (calls && !outOfReach(destination, context));
 }
 
 /** Collection methods that read their receiver without changing it. */
@@ -1960,7 +2002,7 @@ function lowerConditionalAssignment(
       : conditional.kind === "elvis" && variableName(asNode(conditional.boolean)) !== targetName
         ? asNode(conditional.false)
         : null;
-  if (!declaration && later !== null && mayReadDestination(later, targetName, context)) {
+  if (!declaration && later !== null && mayReadDestination(later, target, context)) {
     const temporary = freshName("conditional", context);
     const variables = new Map(context.types.variables);
     variables.set(temporary, inferType(conditional, context.types));
@@ -2166,7 +2208,12 @@ function isHoistable(
       name === "this" ||
       (name !== null &&
         (context.types.singleAssignment?.has(name) === true || context.stableNames.has(name)));
-    if ((node.kind === "variable" && !stable) || node.kind === "property") readsBefore = true;
+    // A list element or a method's view of a value may change even when its variable cannot.
+    const readsContent =
+      (node.kind === "binary" && node.operator === "[") ||
+      (node.kind === "methodCall" && node.implicitThis !== true);
+    if ((node.kind === "variable" && !stable) || node.kind === "property" || readsContent)
+      readsBefore = true;
     return false;
   };
   visit(root, false);
@@ -2392,7 +2439,14 @@ function lowerDeclaration(
     return [];
   }
   // A non-closure declaration that shares a closure's name is a nested local in Groovy; naming renames it.
-  const collectionLoop = lowerCollectionAssignment(true, name, right, span, context);
+  const collectionLoop = lowerCollectionAssignment(
+    true,
+    name,
+    right,
+    span,
+    context,
+    asNode(node.left) ?? undefined,
+  );
   if (collectionLoop !== null) return collectionLoop;
   // `def x` without an initializer starts as null in Groovy; primitive declarations start at 0 or false.
   const declaredType = text(asNode(node.left)?.originType) ?? "";
@@ -3123,7 +3177,14 @@ function lowerAssignment(
   }
   const variableTarget = variableName(targetNode);
   if (operator === "=" && variableTarget !== null) {
-    const collectionLoop = lowerCollectionAssignment(false, variableTarget, right, span, context);
+    const collectionLoop = lowerCollectionAssignment(
+      false,
+      variableTarget,
+      right,
+      span,
+      context,
+      targetNode,
+    );
     if (collectionLoop !== null) return collectionLoop;
   }
   if (operator !== "=" && variableTarget === null && isRepeatableIndex(targetNode)) {
@@ -3610,6 +3671,8 @@ function lowerCollectionAssignment(
   right: AstNode,
   span: SourceSpan | null,
   context: LowerContext,
+  /** The reference the value is assigned to, which tells whether other functions can read the variable. */
+  destination: AstNode = syntheticVariable(target, span),
 ): IrStatement[] | null {
   const call = callParts(right);
   const receiver = asNode(right.object);
@@ -3634,8 +3697,6 @@ function lowerCollectionAssignment(
   }
   if (!["collect", "findAll", "find", "any", "every", "sum"].includes(call.name)) return null;
   if (receiver.kind !== "range" && !isKnownListExpression(receiver, context)) return null;
-  // The loop reads the receiver after the target is initialized, so the receiver must not mention it.
-  if (closureUsesName({ kind: "closure", span: null, body: receiver }, target)) return null;
   const argument =
     call.arguments.length === 0 && call.name === "sum" ? null : closureArgument(call.arguments);
   if (argument === null && !(call.name === "sum" && call.arguments.length === 0)) return null;
@@ -3674,7 +3735,11 @@ function lowerCollectionAssignment(
   const collection = lowerExpression(receiver, context);
   if (collection === null) return failed();
   // A loop body that reads the target sees its old value only through a separate result variable.
-  const readsTarget = argument !== null && mayReadDestination(argument.closure, target, context);
+  // The loop reads the receiver and runs the closure after the result starts; when either may read the
+  // destination, a separate variable collects the result, which the destination gets last.
+  const readsTarget =
+    mayReadDestination(receiver, destination, context) ||
+    (argument !== null && mayReadDestination(argument.closure, destination, context));
   const accumulator = readsTarget ? freshName(`${call.name}Result`, context) : target;
   const targetVariable: IrExpression = { kind: "variable", name: accumulator };
   const item: IrExpression = { kind: "variable", name: variable };
@@ -5958,15 +6023,7 @@ function dictDefault(
     return null;
   const dict = bindingKey(parts.receiver, context.bindings) ?? "";
   // The default has the dict's value type (#536); another fallback keeps the conditional.
-  const values = (context.mapUses.dictionaryValues.get(dict) ?? 0) & ~NULL;
-  const fallbackType = inferType(fallback, context.types) & ~NULL;
-  if (
-    values !== 0 &&
-    fallbackType !== 0 &&
-    fallbackType !== (UNKNOWN & ~NULL) &&
-    (fallbackType & ~values) !== 0
-  )
-    return null;
+  if (!dictDefaultFits(parts, fallback, context)) return null;
   let exact = test === "contains" || !context.mapUses.nullableValues.has(dict);
   if (exact && test === "truth") {
     // Groovy's truth test also replaced the value type's false, 0, or empty value, which is exact only as default.
@@ -5979,6 +6036,23 @@ function dictDefault(
       (values === LIST && fallback.kind === "list" && nodeArray(fallback.items).length === 0);
   }
   return { parts, fallback, exact };
+}
+
+/** Whether a fallback may be a dict's `get` default: not of a type other than the dict's values (#536). */
+function dictDefaultFits(
+  parts: DictLookupParts,
+  fallback: AstNode,
+  context: LowerContext,
+): boolean {
+  const dict = bindingKey(parts.receiver, context.bindings) ?? "";
+  const values = (context.mapUses.dictionaryValues.get(dict) ?? 0) & ~NULL;
+  const fallbackType = inferType(fallback, context.types) & ~NULL;
+  return (
+    values === 0 ||
+    fallbackType === 0 ||
+    fallbackType === (UNKNOWN & ~NULL) ||
+    (fallbackType & ~values) === 0
+  );
 }
 
 /** A key test of a Groovy condition: `containsKey` or `in`, a null test, or a truth test of a lookup. */
@@ -6089,11 +6163,14 @@ function readThenDefault(
     isNullConstant(fallback) ||
     !isPure(fallback, context) ||
     // The default runs after the read stored null in the variable.
-    mayReadDestination(fallback, name, context) ||
+    mayReadDestination(fallback, asNode(expression!.left)!, context) ||
     !(
       dictLookupParts(read, context) !== null ||
       TYPED_STORAGE_LOADS.has(legacyApiCall(read, context)?.name ?? "")
-    )
+    ) ||
+    // A dict's default has its value type, as for `?:` (dictDefaultFits).
+    (dictLookupParts(read, context) !== null &&
+      !dictDefaultFits(dictLookupParts(read, context)!, fallback, context))
   )
     return null;
   const merged: AstNode = { kind: "readDefault", span: read.span, read, fallback };
@@ -7518,11 +7595,12 @@ function lowerRegexWorkaround(
   node: AstNode,
   span: SourceSpan | null,
   context: LowerContext,
+  destination: AstNode = syntheticVariable(target, span),
 ): IrStatement[] | null {
   const kind = regexWorkaround(node);
   const sourceNode = asNode(node.object)!;
   // A source that may read the destination is read while a temporary collects the result.
-  if (kind !== null && !declaration && mayReadDestination(sourceNode, target, context)) {
+  if (kind !== null && !declaration && mayReadDestination(sourceNode, destination, context)) {
     const temporary = freshName(kind === "words" ? "words" : "withoutTags", context);
     const built = lowerRegexWorkaround(true, temporary, node, span, context);
     return built === null
