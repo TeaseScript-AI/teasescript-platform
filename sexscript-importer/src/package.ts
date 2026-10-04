@@ -55,13 +55,18 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
 export interface PackageOptions {
   /** Proposed language changes to emit in their working syntax (see proposals.ts). */
   proposals?: ReadonlySet<ProposalId>;
+  /**
+   * A lone file converted on its own, without a package around it: it keeps its name, and a transfer names the
+   * converted file of any legacy script name. Otherwise a package's only script becomes its main.tease.
+   */
+  standalone?: boolean;
 }
 
 export function lowerSelfContainedPackage(
   files: readonly ParsedGroovyFile[],
   options: PackageOptions = {},
 ): MigrationProgram[] {
-  return lowerPackage(files, options).composed;
+  return lowerPackage(files, { standalone: true, ...options }).composed;
 }
 
 export interface LoweredPackage {
@@ -71,7 +76,7 @@ export interface LoweredPackage {
   composed: MigrationProgram[];
   /**
    * The package's entry, `main.tease` (ADR 0022 §1): the index of the script that becomes it, or a generated menu over
-   * the scripts the legacy player listed. Null for a single script, which keeps its name.
+   * the scripts the legacy player listed. Null for a lone file converted on its own, which keeps its name.
    */
   main: { file: number } | { menu: MigrationProgram } | null;
   /**
@@ -104,12 +109,15 @@ interface PackageScripts {
  * The scripts of a package, with their paths from the package root, the common directory of the scripts. A single
  * script in the root is the entry and becomes `main.tease`, as is one named `main.groovy`.
  */
-function packageScripts(files: readonly ParsedGroovyFile[]): PackageScripts | null {
+function packageScripts(
+  files: readonly ParsedGroovyFile[],
+  standalone: boolean,
+): PackageScripts | null {
   const scripts = files.flatMap((file, index) =>
     file.root?.kind === "scriptBody" && describeMixinModule(file) === null ? [index] : [],
   );
-  // A file converted alone has no package around it; a script with its modules or helpers is a package.
-  if (scripts.length === 0 || files.length < 2) return null;
+  // A file converted alone has no package around it; a package's only script is its main.tease (ADR 0022 §1).
+  if (scripts.length === 0 || (standalone && files.length < 2)) return null;
   const segments = new Map(
     scripts.map((index) => [index, files[index]!.sourceName.replaceAll("\\", "/").split("/")]),
   );
@@ -251,7 +259,7 @@ export function lowerPackage(
     directoryFiles.set(directory, [...(directoryFiles.get(directory) ?? []), file.sourceName]);
   }
   // Map uses are shared within a composition group, like function names and field types.
-  const scripts = packageScripts(files);
+  const scripts = packageScripts(files, options.standalone === true);
   const functionResults = files.map((_, index) => packageFunctionResults(groups[index]!));
   const mapUses = files.map((_, index) => packageMapUses(groups[index]!, functionResults[index]!));
   const lowered = files.map((file, index) =>
