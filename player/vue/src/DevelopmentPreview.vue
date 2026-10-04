@@ -11,6 +11,7 @@ import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
 import LayoutDebug from "./LayoutDebug.vue";
 import PlayerApp from "./PlayerApp.vue";
 import type { PlayerTool } from "./PlayerToolsShell.vue";
+import { resolveDemoAsset } from "./demoHost";
 import { resolveDevelopmentAsset } from "./developmentMedia";
 import { cameraScenarioSource, openingScenario } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
@@ -46,7 +47,10 @@ const props = defineProps<{ capturedMediaRepository?: CapturedMediaRepository | 
 // a saved photo is shown again in a later run.
 const cameraScenario = new URLSearchParams(window.location.search).get("scenario") === "camera";
 const player = usePlayerSession({
-  resolveAsset: resolveDevelopmentAsset,
+  // The camera scenario speaks as the repository demo's Mistress and uses its images and sounds.
+  resolveAsset: cameraScenario
+    ? (path) => resolveDevelopmentAsset(path) ?? resolveDemoAsset(path)
+    : resolveDevelopmentAsset,
   capabilities: { camera: cameraScenario },
   ...(cameraScenario && {
     scriptStorage: createLocalScriptStorage(browserStorage(), "development-camera"),

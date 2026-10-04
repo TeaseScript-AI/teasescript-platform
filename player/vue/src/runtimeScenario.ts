@@ -13,26 +13,33 @@ showButton as guide "Finish"
 exit
 `;
 
-// Development camera content: the session camera opens after Start, `takePhoto()` captures silently from it, and
-// the saved photo is shown again in a later run.
+// Development camera content in the repository demo's voice: the session camera opens after Start, `takePhoto()`
+// captures silently from it once she has said so, and the saved photo is shown again in a later run.
 export const cameraScenarioSource = `
-speaker guide { title: "Camera Guide" }
-playAudio async "sounds/chime.wav"
+speaker mistressVera {
+    title: "Mistress"
+    firstName: "Vera"
+    color: "#c2185b"
+    avatar: "avatars/mistress-vera.svg"
+}
+speaker mistressVera
+showImage "images/playroom.svg"
+playAudio async "sounds/command-chime.wav"
 let previous: string? = load "camera.photo"
 if previous != null {
     showImage previous
-    say as guide "Your previous photo.", instant
-    showButton as guide "Take a new photo"
+    say "Look what I kept from last time.", instant
+    showButton "Take another, Mistress"
 }
-say as guide "The camera is ready.", instant
+say "Face the camera and hold still. I'm taking your picture.", instant
 let photo: string? = takePhoto()
 if photo != null {
     showImage photo
     save photo as "camera.photo"
-    say as guide "Captured.", instant
+    say "Got you. That one is mine now.", instant
 } else {
-    say as guide "No camera; continuing without a photo.", instant
+    say "No camera? Then you stay unseen, for now. We go on without a photo.", instant
 }
-showButton as guide "Finish"
+showButton "Yes, Mistress"
 exit
 `;

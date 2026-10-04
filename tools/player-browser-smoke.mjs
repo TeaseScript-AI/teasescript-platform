@@ -1036,7 +1036,7 @@ async function cameraScenario(cdp, origin) {
   const takeNewPhoto = () =>
     evaluate(
       cdp,
-      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Take a new photo').click()`,
+      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Take another, Mistress').click()`,
     );
   // A decoded photo, not merely an image element with a captured URL.
   const capturedImages = `[...document.querySelectorAll('img')].filter((image) => image.src.startsWith('blob:') && image.complete && image.naturalWidth > 0).length`;
@@ -1074,7 +1074,7 @@ async function cameraScenario(cdp, origin) {
     setting: "granted",
   });
   await start();
-  await waitFor(cdp, `document.body.innerText.includes('Captured.')`);
+  await waitFor(cdp, `document.body.innerText.includes('Got you. That one is mine now.')`);
   await waitFor(cdp, `${capturedImages} === 1`);
   assertTestCard(
     await value(cdp, photoColors),
@@ -1086,7 +1086,7 @@ async function cameraScenario(cdp, origin) {
 
   // A new run loads the saved reference and shows the same stored photo.
   await start();
-  await waitFor(cdp, `document.body.innerText.includes('Your previous photo.')`);
+  await waitFor(cdp, `document.body.innerText.includes('Look what I kept from last time.')`);
   await waitFor(
     cdp,
     `${capturedImages} === 1`,
@@ -1095,7 +1095,7 @@ async function cameraScenario(cdp, origin) {
   );
   assertTestCard(await value(cdp, photoColors), "The saved photo does not show the captured frame");
   await takeNewPhoto();
-  await waitFor(cdp, `document.body.innerText.includes('Captured.')`);
+  await waitFor(cdp, `document.body.innerText.includes('Got you. That one is mine now.')`);
   const second = await value(cdp, savedPhoto);
   assertEqual(
     second !== first && String(second).startsWith("captured-media:"),
@@ -1117,9 +1117,12 @@ async function cameraScenario(cdp, origin) {
     setting: "denied",
   });
   await start();
-  await waitFor(cdp, `document.body.innerText.includes('Your previous photo.')`);
+  await waitFor(cdp, `document.body.innerText.includes('Look what I kept from last time.')`);
   await takeNewPhoto();
-  await waitFor(cdp, `document.body.innerText.includes('No camera; continuing without a photo.')`);
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('No camera? Then you stay unseen, for now. We go on without a photo.')`,
+  );
   assertEqual(await value(cdp, savedPhoto), second, "A denied camera replaced the saved photo");
 
   // A forged reference in saved data is ordinary text: it resolves to no photo, and the script continues.
@@ -1128,11 +1131,14 @@ async function cameraScenario(cdp, origin) {
     `localStorage.setItem(${savedItem}, JSON.stringify({ v: 1, value: 'captured-media:00000000-0000-4000-8000-000000000000:1' }))`,
   );
   await start();
-  await waitFor(cdp, `document.body.innerText.includes('Your previous photo.')`);
+  await waitFor(cdp, `document.body.innerText.includes('Look what I kept from last time.')`);
   await delay(500);
   assertEqual(await value(cdp, capturedImages), 0, "A forged reference resolved to a photo");
   await takeNewPhoto();
-  await waitFor(cdp, `document.body.innerText.includes('No camera; continuing without a photo.')`);
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('No camera? Then you stay unseen, for now. We go on without a photo.')`,
+  );
   await cdp.call("Browser.resetPermissions");
 }
 
