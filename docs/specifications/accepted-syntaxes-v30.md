@@ -1014,6 +1014,7 @@ if reward is integer {
 After a test, the compiler knows the narrower type:
 
 - in the branches of `if`/`else`, in the right operand of `and` and `or`, and in the body of `while`;
+- in the case blocks and the `default` of a `switch` ([§32](#32-switch-statements));
 - after an `if` whose branch ends with `return`, `exit`, `break`, or `continue`;
 - `x != null` and `x == null` narrow like `x is not null` and `x is null`.
 
@@ -2873,6 +2874,22 @@ Rules:
 - A range matches a number within its bounds (§6): `1..5` matches `1 <= value < 5` and `1..=5` matches
   `1 <= value <= 5`, including numbers that are not whole, such as `4.5`. A value that is not a number, such as `null`,
   never matches a range.
+- A type case, `case is T` or `case is not T`, tests the switched value like `value is T` ([§13](#13-explicit-types)).
+  It tests one type; a union covers several, as in `case is integer | string`. A case has either values or a type test.
+- When the switched value is a plain variable, it narrows as in an `if`/`else if` chain: the block of `case is T` knows
+  the type `T`, the block of `case is not T` what remains without `T`, and a `case null` block knows `null`. Every later
+  case and `default` know only what the cases above did not take.
+
+```text
+function describe(answer: integer | string?) {
+    switch answer {
+        case null { say "No answer" }
+        case is integer { say "Number ${answer + 1}" }
+        default { say "Text of length ${answer.length}" }    // answer is a string here
+    }
+}
+```
+
 - `default` is optional. It comes after the last case, runs when no case matches, and appears at most once.
 - `return`, `break`, and `continue` inside a case block behave as inside an `if` block; `break` and `continue` apply to
   the enclosing loop.
@@ -2883,6 +2900,9 @@ Rules:
   - a case value that repeats or overlaps an earlier case value (§6), such as `2` after `2.0` or after `1..5`;
   - a case value whose type can never match the switched value's known type, such as `case "x"` on an `integer`, or a
     range on text.
+- Compile warnings: a case that can never match because of what the switched value can hold, such as a type case that
+  no value left by the cases above passes, `case 5` after `case is integer`, or `case "maybe"` on a `choose` that only
+  returns `"yes"` or `"no"`.
 
 ## 33. Browser API: file, folder, camera, and URL references
 **Status:** Accepted

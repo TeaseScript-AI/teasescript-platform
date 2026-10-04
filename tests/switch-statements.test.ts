@@ -423,3 +423,155 @@ test("rejects case values whose type can never match the switched value's known 
       "Use a case value of the same type.",
   );
 });
+
+test("type cases test the switched value's type and narrow the switched variable", () => {
+  const source = [
+    "function describe(answer: integer | string?) {",
+    "  switch answer {",
+    '    case null { say "none" }',
+    '    case is integer { say "number ${answer + 1}" }',
+    '    default { say "text ${answer.length}" }',
+    "  }",
+    "}",
+    "function kind(value) {",
+    "  switch value {",
+    '    case is not integer | string { say "other" }',
+    '    case is integer { say "integer" }',
+    '    default { say "string" }',
+    "  }",
+    "}",
+    "describe(null)",
+    "describe(4)",
+    'describe("abc")',
+    "kind(true)",
+    "kind(2)",
+    'kind("x")',
+    "kind(2.5)",
+  ].join("\n");
+
+  assert.deepEqual(says(source), [
+    "none",
+    "number 5",
+    "text 3",
+    "other",
+    "integer",
+    "string",
+    "other",
+  ]);
+  // `default` knows only what the cases above did not take: here text, so `+ 1` is a type error.
+  const leftover = compileSource(
+    "function f(x: integer | string) {\n  switch x {\n    case is integer { }\n    default { say x + 1 }\n  }\n}",
+  );
+  assert.deepEqual(
+    leftover.diagnostics.map((item) => item.code),
+    ["TSV043"],
+  );
+});
+
+test("a case that can never match is a warning that does not block the script", () => {
+  const warnings = (source: string) => {
+    const result = compileSource(source);
+    assert.notEqual(result.plan, null, source);
+    return result.diagnostics.map(
+      (item) =>
+        `${item.severity} ${item.code} ${item.span.start.line + 1}:${item.span.start.column + 1}`,
+    );
+  };
+  const inFunction = (subject: string, cases: string) =>
+    `function f(x: ${subject}) {\n  switch x {\n${cases}\n  }\n}`;
+
+  assert.deepEqual(warnings(inFunction("integer", "    case is string { }")), [
+    "warning TSV046 3:10",
+  ]);
+  assert.deepEqual(warnings(inFunction("integer", "    case is not integer { }")), [
+    "warning TSV046 3:10",
+  ]);
+  assert.deepEqual(
+    warnings(inFunction("integer | string", "    case is integer { }\n    case is integer { }")),
+    ["warning TSV046 4:10"],
+  );
+  assert.deepEqual(
+    warnings(inFunction("integer | string", "    case is integer { }\n    case 5 { }")),
+    ["warning TSV046 4:10"],
+  );
+  assert.equal(
+    compileSource(inFunction("integer | string", "    case is integer { }\n    case 5 { }"))
+      .diagnostics[0]?.message,
+    "'x' holds text (string) here, after the cases above, so this case never matches.",
+  );
+  // A value the compiler cannot know keeps every case possible.
+  assert.deepEqual(
+    warnings("function f(x) {\n  switch x {\n    case is integer { }\n    case 5 { }\n  }\n}"),
+    [],
+  );
+});
+
+test("a type case names its fix when it is not one type", () => {
+  assert.deepEqual(diagnostics('switch 5 {\n  case is "open" { }\n}'), ["TSP021 2:11"]);
+  assert.deepEqual(diagnostics('switch 5 {\n  case is integer, "x" { }\n}'), ["TSP038 2:18"]);
+});
+
+test("a type case block resumes after a checkpoint", () => {
+  const { events, finalSnapshot } = assertRuntimeResumeEquivalent(
+    [
+      "function f(value) {",
+      "  switch value {",
+      "    case is integer {",
+      "      wait 1 s",
+      "      say value + 1",
+      "    }",
+      '    default { say "other" }',
+      "  }",
+      "}",
+      "f(3)",
+      'f("x")',
+    ].join("\n"),
+    { seed: 3 },
+  );
+
+  assert.deepEqual(
+    events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["4", "other"],
+  );
+  assert.deepEqual(finalSnapshot.temporaries, []);
+});
+
+test("value cases keep the narrowing of the cases above, and a never-matching case does not continue", () => {
+  // The value case and the code after the switch know `x` is text once the integer case returned.
+  const narrowed = [
+    "function f(x: integer | string) {",
+    "  switch x {",
+    "    case is integer { return }",
+    '    case "a" { say x.length }',
+    "  }",
+    "  say x.length",
+    "}",
+    'f("a")',
+  ].join("\n");
+  assert.deepEqual(says(narrowed), ["1", "1"]);
+
+  // `case 5` never matches after `case is integer`, so the function cannot end without a value.
+  const ended = compileSource(
+    "function f(x: integer): integer {\n  switch x {\n    case is integer { return 1 }\n    case 5 { }\n  }\n}\nsay f(5)",
+  );
+  assert.deepEqual(
+    ended.diagnostics.map((item) => `${item.severity} ${item.code}`),
+    ["warning TSV046"],
+  );
+  assert.notEqual(ended.plan, null);
+  // A case value of the wrong type is only that error.
+  assert.deepEqual(
+    compileSource(
+      'function f(x: integer): integer {\n  switch x {\n    case is integer { return 1 }\n    case "a" { }\n  }\n}',
+    ).diagnostics.map((item) => item.code),
+    ["TSV049"],
+  );
+
+  // Like `x is T`, a type case may continue on the next line.
+  assert.deepEqual(
+    says(
+      'switch 1 {\n  case is\n    integer { say 1 }\n}\nswitch "a" {\n  case is not\n    integer { say 2 }\n}',
+    ),
+    ["1", "2"],
+  );
+});
