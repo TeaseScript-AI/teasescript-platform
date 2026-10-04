@@ -4,6 +4,8 @@ import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
 import {
+  isDate,
+  isDateTime,
   isDuration,
   isList,
   isMediaHandle,
@@ -11,6 +13,7 @@ import {
   isRange,
   isSet,
   isSpeakerReference,
+  isTime,
   isTimerHandle,
 } from "./value-predicates.js";
 
@@ -147,10 +150,11 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
     case "media":
       return isMediaHandle(value);
     case "date":
+      return isDate(value);
     case "time":
+      return isTime(value);
     case "datetime":
-      // These types have no runtime values yet.
-      return false;
+      return isDateTime(value);
     case "never":
       // No value fits, so a list of it is only ever empty, as for an element both list types share.
       return false;
@@ -166,6 +170,7 @@ const NAMED_DESCRIPTIONS: Readonly<Record<string, string>> = {
   date: "a date",
   time: "a time",
   datetime: "a date and time",
+  timestamp: "a timestamp",
   null: "null",
   range: "a range",
   speaker: "a speaker",
@@ -239,7 +244,7 @@ function joinTypeName(type: TypePlan, names: readonly string[]): string {
 }
 
 /** A plain-language description of a runtime value's kind, in the compiler's wording. */
-function describeValue(value: SerializableRuntimeValue): string {
+export function describeValue(value: SerializableRuntimeValue): string {
   if (value === null) return "null";
   if (typeof value === "string") return "text (string)";
   if (typeof value === "boolean") return "true or false (boolean)";

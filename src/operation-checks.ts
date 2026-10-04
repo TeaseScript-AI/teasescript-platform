@@ -92,7 +92,7 @@ export function memberProblems(
     if (element !== undefined)
       problems.push({
         kind: "invalidOperand",
-        message: `join() can only join text, numbers, true or false, null, and durations, not ${describeValue(element.type)}. Select an element or a property first.`,
+        message: `join() can only join text, numbers, true or false, null, durations, and date and time values, not ${describeValue(element.type)}. Select an element or a property first.`,
         span: element.expression.span,
       });
     return problems;
@@ -204,7 +204,7 @@ function unshowableElement(
   while (receiver.kind === "parenthesizedExpression") receiver = receiver.expression;
   if (receiver.kind !== "listLiteral") return undefined;
   for (const expression of receiver.elements) {
-    // An element that may be text, a number, true or false, a duration, or null may be shown; `join` checks its value.
+    // An element that may be text, a number, true or false, a duration, a date or time value, or null may be shown; `join` checks its value.
     const type = typeOf(expression);
     const showable = members(type).some(
       (member) => !isKnown(member) || ["scalar", "null"].includes(resolved(member).kind),

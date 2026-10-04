@@ -19,11 +19,13 @@ import {
 import type { SerializableRuntimeObject } from "../src/runtime/serializable-values.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 
-type Mutable<T> = T extends readonly (infer Item)[]
-  ? Array<Mutable<Item>>
-  : T extends object
-    ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
-    : T;
+type Mutable<T> = T extends readonly [infer First, infer Second]
+  ? [Mutable<First>, Mutable<Second>]
+  : T extends readonly (infer Item)[]
+    ? Array<Mutable<Item>>
+    : T extends object
+      ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
+      : T;
 
 function checkpointSnapshot(
   compiled: ReturnType<typeof plan>,

@@ -466,7 +466,7 @@ test("choice options known only at runtime are checked before the choice opens",
       "Keep one.",
     ],
     ['let o = [{ value: "a" }]\nlet x = choose o', "A choice object requires text."],
-    ['let o = [{ text: "A", value: ["a"] }]\nlet x = choose o', "or a duration."],
+    ['let o = [{ text: "A", value: ["a"] }]\nlet x = choose o', "or a date or time value."],
     // The compiler rejects a known set or range element itself; `dynamic` hides it until the choice opens.
     [
       "function dynamic(value) {\n    return value\n}\nlet o = [dynamic(set[1])]\nlet x = choose o",

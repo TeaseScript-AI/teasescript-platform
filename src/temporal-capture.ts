@@ -11,6 +11,7 @@ import {
   zoneRulesProblem,
   type HourCycle,
   type PresentationSettings,
+  type TemporalContext,
   type ZoneRules,
 } from "./temporal.js";
 
@@ -22,6 +23,11 @@ const MS_PER_SECOND = 1_000;
 const SCAN_STEP_MS = 86_400_000;
 
 const capturedZones = new Map<string, ZoneRules>();
+
+/** The zone rules and presentation of a player's IANA time zone and locale, for a session to record. */
+export function captureTemporalContext(timeZone: string, locale: string): TemporalContext {
+  return { zone: captureZoneRules(timeZone), presentation: capturePresentationSettings(locale) };
+}
 
 /**
  * The UTC offsets of an IANA time zone from 1970 up to 2100, as this host's time-zone data defines them. Throws a

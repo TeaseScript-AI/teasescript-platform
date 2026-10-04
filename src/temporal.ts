@@ -251,8 +251,8 @@ export interface ZoneRules {
   readonly name: string;
   /** The offset at the start of 1970. */
   readonly initialOffsetSeconds: number;
-  /** `[epochMilliseconds, offsetSeconds]`: from that moment on, local time is UTC plus the offset. */
-  readonly transitions: readonly (readonly [number, number])[];
+  /** Pairs `[epochMilliseconds, offsetSeconds]`: from that moment on, local time is UTC plus the offset. */
+  readonly transitions: readonly (readonly number[])[];
 }
 
 /** The captured window: 1970-01-01T00:00Z up to, not including, 2100-01-01T00:00Z. */
@@ -352,10 +352,10 @@ function offsetSecondsAt(rules: ZoneRules, epochMilliseconds: number): number {
   let high = rules.transitions.length;
   while (low < high) {
     const middle = (low + high) >>> 1;
-    if (rules.transitions[middle]![0] <= epochMilliseconds) low = middle + 1;
+    if (rules.transitions[middle]![0]! <= epochMilliseconds) low = middle + 1;
     else high = middle;
   }
-  return low === 0 ? rules.initialOffsetSeconds : rules.transitions[low - 1]![1];
+  return low === 0 ? rules.initialOffsetSeconds : rules.transitions[low - 1]![1]!;
 }
 
 /** The offsets in force around `wall`, as consecutive segments of moments, with offsets in milliseconds. */
@@ -367,9 +367,10 @@ function segmentsAround(
   const from = wall - MS_PER_DAY;
   const until = wall + MS_PER_DAY;
   const segments = [{ start: -Infinity, offset: offsetSecondsAt(rules, from) * MS_PER_SECOND }];
-  for (const [moment, offset] of rules.transitions) {
+  for (const transition of rules.transitions) {
+    const moment = transition[0]!;
     if (moment > from && moment <= until)
-      segments.push({ start: moment, offset: offset * MS_PER_SECOND });
+      segments.push({ start: moment, offset: transition[1]! * MS_PER_SECOND });
   }
   return segments;
 }
@@ -546,6 +547,49 @@ function isPresentationText(
     value.length <= maximumLength &&
     !/[\p{Cc}\u2028\u2029]/u.test(value)
   );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Session context
+
+/** What the host captured about the player for a session: the zone rules and the numeric presentation. */
+export interface TemporalContext {
+  readonly zone: ZoneRules;
+  readonly presentation: PresentationSettings;
+}
+
+/** UTC with locale-neutral presentation, for hosts that capture nothing, such as tests and command-line tools. */
+export const DEFAULT_TEMPORAL_CONTEXT: TemporalContext = Object.freeze({
+  zone: UTC_ZONE_RULES,
+  presentation: DEFAULT_PRESENTATION_SETTINGS,
+});
+
+/** Why `value` is not a valid temporal context, or `null`. */
+export function temporalContextProblem(value: unknown): string | null {
+  if (!isRecord(value) || !hasExactKeys(value, ["zone", "presentation"]))
+    return "A temporal context must be { zone, presentation }.";
+  return zoneRulesProblem(value.zone) ?? presentationSettingsProblem(value.presentation);
+}
+
+/**
+ * A deeply frozen copy of a valid temporal context, or the context itself when it is already frozen. Frozen contexts
+ * can be shared between snapshots instead of copying their zone transitions.
+ */
+export function frozenTemporalContext(context: TemporalContext): TemporalContext {
+  if (Object.isFrozen(context) && Object.isFrozen(context.zone.transitions)) return context;
+  return Object.freeze({
+    zone: Object.freeze({
+      name: context.zone.name,
+      initialOffsetSeconds: context.zone.initialOffsetSeconds,
+      transitions: Object.freeze(
+        context.zone.transitions.map((transition) => Object.freeze([...transition])),
+      ),
+    }),
+    presentation: Object.freeze({
+      ...context.presentation,
+      dayPeriods: Object.freeze([...context.presentation.dayPeriods] as const),
+    }),
+  });
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

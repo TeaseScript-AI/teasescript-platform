@@ -29,11 +29,13 @@ import {
 } from "../src/runtime/state.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 
-type Mutable<T> = T extends readonly (infer Item)[]
-  ? Array<Mutable<Item>>
-  : T extends object
-    ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
-    : T;
+type Mutable<T> = T extends readonly [infer First, infer Second]
+  ? [Mutable<First>, Mutable<Second>]
+  : T extends readonly (infer Item)[]
+    ? Array<Mutable<Item>>
+    : T extends object
+      ? { -readonly [Key in keyof T]: Mutable<T[Key]> }
+      : T;
 
 function interactionPlan(
   interactionKind: InteractionInstruction["interactionKind"],

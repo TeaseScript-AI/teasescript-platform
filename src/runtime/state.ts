@@ -1,4 +1,10 @@
 import { isOneOf } from "../plan/validation-support.js";
+import {
+  DEFAULT_TEMPORAL_CONTEXT,
+  frozenTemporalContext,
+  temporalContextProblem,
+  type TemporalContext,
+} from "../temporal.js";
 import type {
   RuntimeActionSettlementSnapshot,
   RuntimeDelayActionSnapshot,
@@ -68,7 +74,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 31;
+export const RUNTIME_SNAPSHOT_VERSION = 32;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -97,6 +103,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "currentSessionTimeMs",
   "observedSessionTimeMs",
   "chatPacingSettings",
+  "temporalContext",
   "foregroundAction",
   "backgroundActions",
   "nextActionId",
@@ -277,6 +284,8 @@ export interface RuntimeSnapshot {
    */
   observedSessionTimeMs: number;
   readonly chatPacingSettings: ChatPacingSettings;
+  /** The player's zone rules and numeric date and time presentation, captured when the session started. */
+  readonly temporalContext: TemporalContext;
   foregroundAction: RuntimeForegroundActionSnapshot | null;
   readonly backgroundActions: RuntimePendingActionSnapshot[];
   nextActionId: number;
@@ -323,6 +332,11 @@ export interface FreshRuntimeOptions {
   readonly baseDelayMs?: number;
   readonly delayPerWordMs?: number;
   readonly delayPerCharacterMs?: number;
+  /**
+   * The player's zone rules and numeric presentation, as `captureTemporalContext` returns them. Without one the
+   * session uses UTC and locale-neutral text such as `2026-10-04 18:30`.
+   */
+  readonly temporalContext?: TemporalContext;
 }
 
 export interface SnapshotValidationResult {
@@ -366,6 +380,13 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
   const maxCallDepthValue = capturedOptions.maxCallDepth;
   const initialSessionTimeMs = capturedOptions.initialSessionTimeMs ?? 0;
   const chatPacingSettings = captureChatPacingSettings(capturedOptions);
+  let temporalContext = DEFAULT_TEMPORAL_CONTEXT;
+  if (capturedOptions.temporalContext !== undefined) {
+    const problem = temporalContextProblem(capturedOptions.temporalContext);
+    if (problem !== null) throw new RangeError(`temporalContext is malformed: ${problem}`);
+    // EVIDENCE: validation: temporalContextProblem accepted the captured option.
+    temporalContext = frozenTemporalContext(capturedOptions.temporalContext as TemporalContext);
+  }
   if (!validSessionTime(initialSessionTimeMs)) {
     throw new RangeError(
       `initialSessionTimeMs must be a finite number from 0 through ${MAX_RUNTIME_SESSION_TIME_MS}.`,
@@ -432,6 +453,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     currentSessionTimeMs: initialSessionTimeMs,
     observedSessionTimeMs: initialSessionTimeMs,
     chatPacingSettings,
+    temporalContext,
     foregroundAction: null,
     backgroundActions: [],
     nextActionId: 1,
@@ -531,6 +553,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     currentSessionTimeMs: snapshot.currentSessionTimeMs,
     observedSessionTimeMs: snapshot.observedSessionTimeMs,
     chatPacingSettings: cloneChatPacingSettings(snapshot.chatPacingSettings),
+    temporalContext: frozenTemporalContext(snapshot.temporalContext),
     foregroundAction:
       snapshot.foregroundAction === null ? null : cloneForegroundAction(snapshot.foregroundAction),
     backgroundActions: snapshot.backgroundActions.map(clonePendingAction),
@@ -858,6 +881,9 @@ function validateCapturedRuntimeSnapshotDetails(
   if (!validChatPacingSettings(value.chatPacingSettings)) {
     errors.push("Runtime chatPacingSettings is malformed.");
   }
+  const temporalProblem = temporalContextProblem(value.temporalContext);
+  if (temporalProblem !== null)
+    errors.push(`Runtime temporalContext is malformed: ${temporalProblem}`);
   const analysis = plan === undefined ? undefined : createSnapshotValidationAnalysis(plan);
   const instructionLimit = plan?.instructions.length;
   if (

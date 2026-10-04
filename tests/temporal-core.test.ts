@@ -398,7 +398,7 @@ test("captured zone rules reproduce the host's offsets around every transition",
       rules.name,
       new Intl.DateTimeFormat("en-US", { timeZone: zone }).resolvedOptions().timeZone,
     );
-    const instants = rules.transitions.flatMap(([at]) => [at - 1, at]);
+    const instants = rules.transitions.flatMap(([at]) => [at! - 1, at!]);
     for (const at of [0, utc("2026-01-15T00:00:00"), utc("2026-07-15T00:00:00"), ...instants]) {
       const expected = at + hostOffsetSeconds(zone, at) * 1_000;
       assert.equal(fieldsAsMilliseconds(local(rules, at)), expected, `${zone} ${at}`);
