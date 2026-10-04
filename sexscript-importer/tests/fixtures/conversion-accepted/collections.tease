@@ -1,6 +1,3 @@
-// MIGRATION INCOMPLETE: 1 error diagnostic.
-// Review diagnostics before treating this file as behaviorally equivalent.
-
 function sexscriptLegacyShuffled(itemsValue) {
   let shuffled = itemsValue
   let index = shuffled.length - 1
@@ -36,8 +33,12 @@ let upper = []
 for it in items {
   upper.add("${it}!")
 }
-// TODO SX_STRING_METHOD line 3: Groovy size() here may measure a map; TeaseScript text and lists have a length, objects do not (dictionaries are only proposed). Prove the receiver is text or a list.
-// | def longOnes = items.findAll { item -> item.size() > 4 }
+let longOnes = []
+for item in items {
+  if item.length > 4 {
+    longOnes.add(item)
+  }
+}
 let found = null
 for it in items {
   if it == "wait" {

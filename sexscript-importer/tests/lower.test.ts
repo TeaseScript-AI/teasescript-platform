@@ -1203,7 +1203,7 @@ test("reports a read of a variable that nothing in the package assigns, a legacy
   );
 });
 
-test("reports a lookup with a text key as map access instead of list indexing", () => {
+test("turns a lookup with a text key into a dict lookup (#536)", () => {
   const declaration = (name: string, right: AstNode): AstNode =>
     statement({
       kind: "declaration",
@@ -1214,6 +1214,7 @@ test("reports a lookup with a text key as map access instead of list indexing", 
     });
   const program = lowerParsedFile(
     file([
+      declaration("registry", { kind: "map", span, entries: [] }),
       declaration("key", constant("collar")),
       declaration("found", {
         kind: "binary",
@@ -1224,9 +1225,10 @@ test("reports a lookup with a text key as map access instead of list indexing", 
       }),
     ]),
   );
-  assert.deepEqual(
-    program.diagnostics.map(({ code }) => code),
-    ["SX_DYNAMIC_MAP_ACCESS", "SX_UNSUPPORTED_DECLARATION_VALUE"],
+  assert.deepEqual(program.diagnostics, []);
+  assert.equal(
+    emitTease(program),
+    'let registry = dict{}\nlet key = "collar"\nlet found = registry[key]\n',
   );
 });
 

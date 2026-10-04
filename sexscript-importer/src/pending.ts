@@ -37,6 +37,9 @@ const PENDING_CALLS = new Map<string, string>([
 /** Current-time getters whose conversion and format methods (#532) the shim replaces together with the getter. */
 const TEMPORAL_GETTERS = new Set(["getDate", "getTime", "getDateTime", "getTimestamp"]);
 
+/** Capability name of the accepted dict (#536), which main does not implement yet. */
+const DICT = "dict (#536)";
+
 /** Calls that only a proposed language change defines, by the proposal (see proposals.ts). */
 const PROPOSED_CALLS = new Map<string, ProposalId>([["countImages", "media-tags"]]);
 
@@ -96,7 +99,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
     named: Record<string, IrExpression> = {},
   ): IrExpression => {
     capabilities.add(capability);
-    // Operation names of members (`text.length`, `dictionaries.has()`) become identifier-safe shim names.
+    // Operation names of members (`text.length`, `dict.contains()`) become identifier-safe shim names.
     const words = name.split(/[^A-Za-z0-9]+/u).filter((word) => word !== "");
     const shim = shimName(
       `${SHIM_PREFIX}${words.map((word) => `${word[0]!.toUpperCase()}${word.slice(1)}`).join("")}`,
@@ -150,9 +153,9 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
       case "list":
         return { ...value, items: value.items.map(expression) };
       case "object":
-        if (value.properties.some((property) => property.key !== undefined)) {
-          // A literal with computed keys becomes a dictionary built from key-value pairs.
-          return call(proposalCapability("dictionaries"), "dictionaries.literal", [
+        if (value.dict === true) {
+          // A dict literal (#536) becomes a stand-in built from key-value pairs.
+          return call(DICT, "dict.literal", [
             {
               kind: "list",
               items: value.properties.map((property) => ({
@@ -175,19 +178,13 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
           })),
         };
       case "index":
-        if (value.proposed !== undefined) {
-          return call(proposalCapability(value.proposed), `${value.proposed}.get`, [
-            expression(value.target),
-            expression(value.index),
-          ]);
+        if (value.dict === true) {
+          return call(DICT, "dict.get", [expression(value.target), expression(value.index)]);
         }
         return { ...value, target: expression(value.target), index: expression(value.index) };
       case "property":
-        if (value.proposed !== undefined) {
-          return call(proposalCapability(value.proposed), `${value.proposed}.${value.name}`, [
-            expression(value.target),
-          ]);
-        }
+        if (value.dict === true)
+          return call(DICT, `dict.${value.name}`, [expression(value.target)]);
         if (value.pending === true) {
           return call("text operations", `text.${value.name}`, [expression(value.target)]);
         }
@@ -214,8 +211,8 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
           const operation = `${value.target.name}().${value.name}()`;
           return call(operation, operation, value.arguments.map(expression));
         }
-        if (value.proposed !== undefined) {
-          return call(proposalCapability(value.proposed), `${value.proposed}.${value.name}()`, [
+        if (value.dict === true) {
+          return call(DICT, `dict.${value.name}()`, [
             expression(value.target),
             ...value.arguments.map(expression),
           ]);
@@ -379,7 +376,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
       }
       case "assign": {
         const target = item.target;
-        if (target.kind === "index" && target.proposed === "dictionaries") {
+        if (target.kind === "index" && target.dict === true) {
           // A dictionary write replaces the dictionary with an updated copy.
           const dictionary = expression(target.target);
           const key = expression(target.index);
@@ -390,10 +387,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
               : {
                   kind: "binary",
                   operator: item.operator === "+=" ? "+" : "-",
-                  left: call(proposalCapability("dictionaries"), "dictionaries.get", [
-                    dictionary,
-                    key,
-                  ]),
+                  left: call(DICT, "dict.get", [dictionary, key]),
                   right: assigned,
                 };
           return [
@@ -401,11 +395,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
               ...item,
               operator: "=",
               target: dictionary,
-              value: call(proposalCapability("dictionaries"), "dictionaries.set", [
-                dictionary,
-                key,
-                value,
-              ]),
+              value: call(DICT, "dict.set", [dictionary, key, value]),
             },
           ];
         }
@@ -415,7 +405,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         const value = item.expression;
         if (
           value.kind === "methodCall" &&
-          value.proposed === "dictionaries" &&
+          value.dict === true &&
           (value.name === "remove" || value.name === "clear")
         ) {
           const dictionary = expression(value.target);
@@ -424,7 +414,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
               kind: "assign",
               operator: "=",
               target: dictionary,
-              value: call(proposalCapability("dictionaries"), `dictionaries.${value.name}()`, [
+              value: call(DICT, `dict.${value.name}()`, [
                 dictionary,
                 ...value.arguments.map(expression),
               ]),
@@ -463,8 +453,17 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         return [{ ...item, condition: expression(item.condition), body: statements(item.body) }];
       case "repeat":
         return [{ ...item, count: expression(item.count), body: statements(item.body) }];
-      case "for":
-        return [{ ...item, collection: expression(item.collection), body: statements(item.body) }];
+      case "for": {
+        // A loop over a dict visits its keys as they were when the loop started (#536).
+        const collection = expression(item.collection);
+        return [
+          {
+            ...item,
+            collection: item.dict === true ? call(DICT, "dict.keys", [collection]) : collection,
+            body: statements(item.body),
+          },
+        ];
+      }
       case "hideImage":
       case "break":
       case "continue":
@@ -742,43 +741,19 @@ export function pendingHostFunctions(
         return media.filter((file) => tags.every((tag) => file.tags.includes(tag))).length;
       },
     ],
+    // A missing key is an error (#536), where Groovy read null.
     [
-      "dictionaries.get",
+      "dict.get",
       ([target, key]) => {
-        const elements = listItems(target);
-        if (elements !== null) {
-          if (
-            typeof key !== "number" ||
-            !Number.isInteger(key) ||
-            key < 0 ||
-            key >= elements.length
-          ) {
-            throw new Error("Invalid list index.");
-          }
-          return runtimeValue(elements[key]);
-        }
         const name = keyText(key);
         const entry = entries("[key]", target).find((property) => property.name === name);
-        return entry === undefined ? null : runtimeValue(entry.value);
+        if (entry === undefined) throw new Error(`Dictionary has no key ${JSON.stringify(name)}.`);
+        return runtimeValue(entry.value);
       },
     ],
     [
-      "dictionaries.set",
+      "dict.set",
       ([target, key, value]) => {
-        const elements = listItems(target);
-        if (elements !== null) {
-          if (
-            typeof key !== "number" ||
-            !Number.isInteger(key) ||
-            key < 0 ||
-            key >= elements.length
-          ) {
-            throw new Error("Invalid list index.");
-          }
-          return items(
-            elements.map((element, index) => runtimeValue(index === key ? value : element)),
-          );
-        }
         const name = keyText(key);
         const properties = entries("[key] =", target);
         const replaced = properties.some((property) => property.name === name);
@@ -790,40 +765,33 @@ export function pendingHostFunctions(
       },
     ],
     [
-      "dictionaries.has()",
+      "dict.contains()",
       ([target, key]) =>
-        entries("has()", target).some((property) => property.name === keyText(key)),
+        entries("contains()", target).some((property) => property.name === keyText(key)),
     ],
     [
-      "dictionaries.keys",
+      "dict.keys",
       ([target]) => items(entries("keys", target).map((property) => runtimeValue(property.name))),
     ],
     [
-      "dictionaries.values",
+      "dict.values",
       ([target]) =>
         items(entries("values", target).map((property) => runtimeValue(property.value))),
     ],
+    ["dict.length", ([target]) => entries("length", target).length],
     [
-      "dictionaries.length",
-      ([target]) =>
-        typeof target === "string"
-          ? [...target].length
-          : (listItems(target)?.length ?? entries("length", target).length),
+      "dict.remove()",
+      ([target, key]) => {
+        const name = keyText(key);
+        const properties = entries("remove()", target);
+        if (!properties.some((property) => property.name === name))
+          throw new Error(`Dictionary has no key ${JSON.stringify(name)}.`);
+        return dictionary(properties.filter((property) => property.name !== name));
+      },
     ],
+    ["dict.clear()", ([target]) => (entries("clear()", target), dictionary([]))],
     [
-      "dictionaries.remove()",
-      ([target, key]) =>
-        dictionary(
-          entries("remove()", target).filter((property) => property.name !== keyText(key)),
-        ),
-    ],
-    [
-      "dictionaries.clear()",
-      ([target]) =>
-        listItems(target) === null ? (entries("clear()", target), dictionary([])) : items([]),
-    ],
-    [
-      "dictionaries.literal",
+      "dict.literal",
       ([pairs]) => {
         const properties: Array<Record<string, unknown>> = [];
         for (const pair of listItems(pairs) ?? []) {
@@ -843,7 +811,8 @@ export function pendingHostFunctions(
       ([value]) => {
         if (typeof value === "string") return [...value].length;
         const elements = listItems(value);
-        if (elements === null) throw new Error("length needs text or a list.");
+        // A value of unknown type may also be a dict, which counts its entries.
+        if (elements === null) return entries("length", value).length;
         return elements.length;
       },
     ],

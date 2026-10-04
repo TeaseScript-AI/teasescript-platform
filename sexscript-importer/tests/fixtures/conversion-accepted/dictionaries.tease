@@ -1,0 +1,63 @@
+// Registries keyed by runtime strings become dicts (#536); maps with fixed names stay objects.
+let COLLAR = "collar"
+let GAG = "gag"
+let toyNames = dict{ [COLLAR]: "leather collar", [GAG]: "ball gag" }
+let owned = dict{}
+let chosen = COLLAR
+// NOTE SX_SHARED_MAP_WRITE line 7: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+if not owned.contains(chosen) {
+  owned[chosen] = 1
+}
+// NOTE SX_SHARED_MAP_WRITE line 8: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+owned[GAG] = 2
+// NOTE SX_SHARED_MAP_WRITE line 9: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+owned["plug"] = 3
+say "You wear the ${toyNames[chosen]}"
+for name in owned.keys {
+  say "${name}: ${owned[name]}"
+}
+for name in owned {
+  let count = owned[name]
+  say "${name} counted ${count}"
+}
+say "Toys: ${owned.length}"
+// NOTE SX_SHARED_MAP_WRITE line 16: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+if owned.contains(GAG) {
+  owned.remove(GAG)
+}
+// NOTE SX_SHARED_MAP_WRITE line 17: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+if owned.contains("missing") {
+  owned.remove("missing")
+}
+if not owned.contains(GAG) {
+  say "No gag"
+}
+if owned.contains("plug") and owned["plug"] != 0 {
+  say "Plug in use"
+}
+if owned.length != 0 {
+  say "Still owned: ${owned.values[0]}"
+}
+// NOTE SX_SHARED_MAP_WRITE line 21: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+owned.clear()
+if not owned.length > 0 {
+  say "Nothing owned"
+}
+// Number keys become text, and a repeated key keeps its first position and last value.
+// NOTE SX_DICT_DUPLICATE_KEY line 24: Groovy kept the first position and the last value of the repeated key "1"; a dict literal may not repeat a key (#536), so the entries are merged.
+// NOTE SX_DICT_KEY_TEXT line 24: Groovy kept this key's type, so 1 and "1" were different keys; dict keys are text (#536).
+let levels = dict{ "1": "gentle", "2": "hard" }
+say "${levels["1"]} / ${levels["2"]}"
+let tier = 2
+// NOTE SX_DICT_KEY_TEXT line 27: Groovy kept this key's type, so 1 and "1" were different keys; dict keys are text (#536).
+// NOTE SX_DICT_KEY_TEXT line 27: Groovy kept this key's type, so 1 and "1" were different keys; dict keys are text (#536).
+say "Tier ${dict{ "1": "low", "2": "high" }["${tier}"]}"
+// A map with fixed names is an object: fields set later are declared, and clear() empties them.
+let session = { mood: "calm", aborted: null }
+// NOTE SX_SHARED_MAP_WRITE line 30: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+session.aborted = false
+// NOTE SX_SHARED_MAP_WRITE line 31: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+session = { mood: null, aborted: null }
+// NOTE SX_SHARED_MAP_WRITE line 32: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+session.mood = "tense"
+say "Mood ${session.mood}, aborted ${session.aborted}"

@@ -222,15 +222,23 @@ export function emitExpression(expression: IrExpression): string {
       return expression.name;
     case "list":
       return `[${expression.items.map(emitExpression).join(", ")}]`;
-    case "object":
+    case "object": {
+      const prefix = expression.dict === true ? "dict" : "";
+      const key = (property: (typeof expression.properties)[number]): string => {
+        if (property.key === undefined) return property.name;
+        // A dict key written as a name or as quoted text; any other key is computed.
+        if (property.key.kind === "literal" && typeof property.key.value === "string")
+          return /^[A-Za-z_][A-Za-z0-9_]*$/u.test(property.key.value)
+            ? property.key.value
+            : emitExpression(property.key);
+        return `[${emitExpression(property.key)}]`;
+      };
       return expression.properties.length === 0
-        ? "{}"
-        : `{ ${expression.properties
-            .map(
-              (property) =>
-                `${property.key === undefined ? property.name : `[${emitExpression(property.key)}]`}: ${emitExpression(property.value)}`,
-            )
+        ? `${prefix}{}`
+        : `${prefix}{ ${expression.properties
+            .map((property) => `${key(property)}: ${emitExpression(property.value)}`)
             .join(", ")} }`;
+    }
     case "index":
       return `${operand(expression.target, POSTFIX)}[${emitExpression(expression.index)}]`;
     case "property":

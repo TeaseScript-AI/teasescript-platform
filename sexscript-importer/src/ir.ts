@@ -1,5 +1,4 @@
 import type { SourceSpan } from "./ast.ts";
-import type { ProposalId } from "./proposals.ts";
 
 export type DiagnosticSeverity = "info" | "warning" | "error";
 
@@ -111,7 +110,14 @@ export type IrStatement =
   | (IrBase & { kind: "if"; condition: IrExpression; then: IrStatement[]; else: IrStatement[] })
   | (IrBase & { kind: "while"; condition: IrExpression; body: IrStatement[] })
   | (IrBase & { kind: "repeat"; count: IrExpression; body: IrStatement[] })
-  | (IrBase & { kind: "for"; variable: string; collection: IrExpression; body: IrStatement[] })
+  /** `dict` marks a loop over the keys of a dict (#536). */
+  | (IrBase & {
+      kind: "for";
+      variable: string;
+      collection: IrExpression;
+      body: IrStatement[];
+      dict?: true;
+    })
   | (IrBase & {
       kind: "switch";
       value: IrExpression;
@@ -151,21 +157,29 @@ export type IrExpression =
   | { kind: "literal"; value: string | number | boolean | null; action?: true }
   | { kind: "variable"; name: string }
   | { kind: "list"; items: IrExpression[] }
-  /** A property with `key` (proposed dictionaries) has a computed key, written `[key]: value`; `name` is unused. */
-  | { kind: "object"; properties: Array<{ name: string; value: IrExpression; key?: IrExpression }> }
-  | { kind: "index"; target: IrExpression; index: IrExpression; proposed?: ProposalId }
   /**
-   * `proposed` marks a member that only a proposed language change defines (see proposals.ts); `pending` marks an
-   * accepted text operation or list `join` that main does not implement yet (V30 §8 and §16 as accepted in PR #518).
+   * An object literal, or with `dict` a dict literal `dict{ ... }` (#536). A property with `key` has a key that is
+   * computed or not a name, written `[key]: value` or `"key": value`; `name` is unused then.
    */
-  | { kind: "property"; target: IrExpression; name: string; proposed?: ProposalId; pending?: true }
+  | {
+      kind: "object";
+      properties: Array<{ name: string; value: IrExpression; key?: IrExpression }>;
+      dict?: true;
+    }
+  /** `dict` marks a dict lookup, whose missing key is an error (#536). */
+  | { kind: "index"; target: IrExpression; index: IrExpression; dict?: true }
+  /**
+   * `pending` marks an accepted text operation or list `join` that main does not implement yet (V30 §8 and §16 as
+   * accepted in PR #518); `dict` marks a member of a dict (#536).
+   */
+  | { kind: "property"; target: IrExpression; name: string; pending?: true; dict?: true }
   | {
       kind: "methodCall";
       target: IrExpression;
       name: string;
       arguments: IrExpression[];
-      proposed?: ProposalId;
       pending?: true;
+      dict?: true;
     }
   /** `load key` returns null for a missing key; `defaultValue` replaces that null without writing storage. */
   | { kind: "load"; key: IrExpression; defaultValue?: IrExpression }

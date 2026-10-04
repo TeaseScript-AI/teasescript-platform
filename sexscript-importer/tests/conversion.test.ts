@@ -20,7 +20,7 @@ import { emitTease } from "../src/emit-tease.ts";
 import type { MigrationProgram } from "../src/ir.ts";
 import { lowerSelfContainedPackage } from "../src/package.ts";
 import { pendingHostFunctions, shimPendingCapabilities } from "../src/pending.ts";
-import { PROPOSALS, type ProposalId } from "../src/proposals.ts";
+import type { ProposalId } from "../src/proposals.ts";
 import { analyzeFeasibility } from "../src/report.ts";
 import {
   flowKey,
@@ -46,9 +46,6 @@ registerFixtures("conversion", false);
 // (storage, script chaining, popups, boolean/integer input, ...) must compile once those capabilities are
 // replaced by placeholder calls, so everything except the pending capabilities is compiler-checked.
 registerFixtures("conversion-accepted", true);
-// Output in the working syntax of proposed language changes (not accepted TeaseScript) must compile and run once
-// the shim replaces the proposed constructs with stand-ins in current TeaseScript.
-registerFixtures("conversion-proposed", true, new Set(PROPOSALS));
 
 function registerFixtures(
   directoryName: string,
@@ -203,6 +200,44 @@ test(
         [
           { code: "SX_TYPE_CHANGE", line: 1 },
           { code: "SX_TYPE_CHANGE", line: 5 },
+        ],
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+// A dict has one value type, and only a map held in a variable converts to one (#536).
+test(
+  "reports dicts with mixed values and runtime keys on maps not held in a variable",
+  { skip: parserUnavailable },
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-dict-"));
+    try {
+      const sourcePath = path.join(directory, "dict.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          "def params = [:]",
+          'def key = "level"',
+          "params[key] = 3",
+          'params["name"] = "Ada"',
+          "def holder = [inner: 1]",
+          "holder.inner[key] = 1",
+          "",
+        ].join("\n"),
+      );
+      const program = await convert(sourcePath);
+      assert.deepEqual(
+        program.diagnostics
+          .filter((diagnostic) => diagnostic.severity === "error")
+          .map(({ code, span }) => ({ code, line: span?.line })),
+        [
+          { code: "SX_DICT_VALUE_TYPE", line: 1 },
+          { code: "SX_UNSUPPORTED_DECLARATION_VALUE", line: 1 },
+          { code: "SX_DYNAMIC_MAP_ACCESS", line: 6 },
+          { code: "SX_UNSUPPORTED_ASSIGNMENT_TARGET", line: 6 },
         ],
       );
     } finally {

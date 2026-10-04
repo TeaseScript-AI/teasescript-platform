@@ -20,7 +20,7 @@ export type TeaseType =
   | { kind: "scalar"; name: ScalarName }
   | { kind: "list"; element: TeaseType }
   | { kind: "optional"; value: TeaseType }
-  | { kind: "object" | "range" | "handle" }
+  | { kind: "object" | "range" | "handle" | "dict" }
   /** A local date, time, or datetime, or a fixed timestamp (#532). */
   | { kind: "temporal"; name: "date" | "time" | "datetime" | "timestamp" };
 
@@ -456,7 +456,7 @@ function analyse(
   const findIndexes = (value: IrExpression, scope: Scope): void => {
     forEachExpression(value, (child) => {
       const position =
-        child.kind === "index" && child.proposed === undefined
+        child.kind === "index" && child.dict !== true
           ? child.index
           : child.kind === "methodCall" && child.name === "removeAt" && child.arguments.length === 1
             ? child.arguments[0]!
@@ -559,7 +559,7 @@ function analyse(
           value.name === "add" &&
           value.arguments.length === 1 &&
           value.target.kind === "variable" &&
-          value.proposed === undefined
+          value.dict !== true
         ) {
           const list = scope.resolve(value.target.name);
           if (list !== undefined) storeElement(list, typeOf(value.arguments[0]!, scope), item);
@@ -583,8 +583,11 @@ function analyse(
       case "for": {
         const inner = new Scope(scope);
         const variable = binding(item, item.variable, null, UNKNOWN);
-        // The collection's element type may widen between rounds.
-        variable.fixed = elementType(typeOf(item.collection, scope)) ?? UNKNOWN;
+        // The collection's element type may widen between rounds; a dict loop visits its text keys.
+        variable.fixed =
+          item.dict === true
+            ? scalar("string")
+            : (elementType(typeOf(item.collection, scope)) ?? UNKNOWN);
         inner.names.set(item.variable, variable);
         for (const child of item.body) statement(child, inner);
         return;
@@ -776,6 +779,8 @@ function describeValue(type: TeaseType): string {
       return "null";
     case "object":
       return "an object";
+    case "dict":
+      return "a dict";
     case "range":
       return "a range";
     case "handle":
@@ -876,6 +881,13 @@ const TEMPORAL_GETTERS = new Map<string, "date" | "time" | "datetime" | "timesta
   ["getTimestamp", "timestamp"],
 ]);
 
+/** Members of a dict (#536). */
+const DICT_MEMBERS = new Map<string, TeaseType>([
+  ["length", scalar("integer")],
+  ["keys", listOf(scalar("string"))],
+  ["values", listOf(UNKNOWN)],
+]);
+
 const TEMPORAL_FIELDS = new Map<string, TeaseType>([
   ...["year", "month", "day", "hour", "minute", "second", "millisecond", "weekdayNumber"].map(
     (name): [string, TeaseType] => [name, scalar("integer")],
@@ -932,14 +944,14 @@ export function expressionType(
     case "list":
       return listOf(commonType(value.items.map(type)));
     case "object":
-      return { kind: "object" };
+      return { kind: value.dict === true ? "dict" : "object" };
     case "index": {
-      if (value.proposed !== undefined) return UNKNOWN;
+      if (value.dict === true) return UNKNOWN;
       const target = nonNull(type(value.target));
       return target.kind === "list" ? target.element : UNKNOWN;
     }
     case "property": {
-      if (value.proposed !== undefined) return UNKNOWN;
+      if (value.dict === true) return DICT_MEMBERS.get(value.name) ?? UNKNOWN;
       // `(date - date).days` counts whole calendar days (#532).
       if (value.name === "days" && value.target.kind === "binary" && value.target.operator === "-")
         return scalar("integer");
@@ -954,7 +966,7 @@ export function expressionType(
       return UNKNOWN;
     }
     case "methodCall": {
-      if (value.proposed !== undefined) return UNKNOWN;
+      if (value.dict === true) return value.name === "contains" ? scalar("boolean") : UNKNOWN;
       const target = nonNull(type(value.target));
       if (target.kind === "list") {
         if (["removeAt", "removeFirst", "removeLast"].includes(value.name)) return target.element;

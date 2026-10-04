@@ -89,6 +89,14 @@ export interface LowerOptions {
   renameIdentifiers?: boolean;
   /** Proposed language changes to emit in their working syntax instead of reporting the construct. */
   proposals?: ReadonlySet<ProposalId>;
+  /** Dict variables of the script and the modules it loads (packageDictionaryNames). */
+  dictionaries?: ReadonlySet<string>;
+  /** Fields read or written on object variables anywhere in the package (packageMapUses). */
+  recordFields?: ReadonlyMap<string, readonly string[]>;
+  /** Legacy types of the values stored in each dict anywhere in the package (packageMapUses). */
+  dictionaryValues?: ReadonlyMap<string, number>;
+  /** Dicts built with number keys anywhere in the package (packageMapUses). */
+  numberKeyedDictionaries?: ReadonlySet<string>;
 }
 
 interface LowerContext {
@@ -155,6 +163,14 @@ interface LowerContext {
   dateValues: ReadonlySet<string>;
   /** List variables that Groovy shared with another variable by an assignment of one to the other. */
   aliasedLists: ReadonlySet<string>;
+  /** Variables that hold a map used as a lookup table, converted to `dict` (#536). */
+  dictionaries: ReadonlySet<string>;
+  /** Fields used on object variables, which their literals declare (null when Groovy added them later). */
+  recordFields: ReadonlyMap<string, readonly string[]>;
+  /** Legacy types of the values stored in each dict. */
+  dictionaryValues: ReadonlyMap<string, number>;
+  /** Dicts built with number keys, whose keys of unknown type become text. */
+  numberKeyedDictionaries: ReadonlySet<string>;
   proposals: ReadonlySet<ProposalId>;
   /**
    * Whether a read of a name nothing assigns is reported. Only with package context: a file converted alone, such
@@ -207,6 +223,147 @@ export function lowerParsedFiles(files: readonly ParsedGroovyFile[]): MigrationP
   return files.map((file) => lowerParsedFile(file, { helperRegistry }));
 }
 
+/** Fields read or written on non-dict variables through `name.field` or `name["field"]`. */
+function recordFields(body: AstNode, dictionaries: ReadonlySet<string>): Map<string, string[]> {
+  const fields = new Map<string, Set<string>>();
+  walkAst(body, (node) => {
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    const assigned = assigns ? variableName(node.left) : null;
+    const literal = assigns ? asNode(node.right) : null;
+    if (assigned !== null && literal?.kind === "map" && !dictionaries.has(assigned)) {
+      for (const entry of nodeArray(literal.entries)) {
+        const key = constantString(entry.key);
+        if (key !== null && isTeaseObjectPropertyName(key))
+          fields.set(assigned, (fields.get(assigned) ?? new Set()).add(key));
+      }
+    }
+    const name =
+      node.kind === "property" || (node.kind === "binary" && node.operator === "[")
+        ? variableName(node.kind === "property" ? node.object : node.left)
+        : null;
+    if (name === null || dictionaries.has(name)) return;
+    const field =
+      node.kind === "property" ? constantString(node.property) : constantString(node.right);
+    if (field === null || !isTeaseObjectPropertyName(field)) return;
+    fields.set(name, (fields.get(name) ?? new Set()).add(field));
+  });
+  return new Map([...fields].map(([name, set]) => [name, [...set]]));
+}
+
+/**
+ * The legacy types of the values stored in each dict: literal values, `map[key] = value`, and `put(key, value)`.
+ * Values of unknown type add nothing.
+ */
+function dictionaryValueTypes(
+  body: AstNode,
+  dictionaries: ReadonlySet<string>,
+  types: TypeEnvironment,
+): Map<string, number> {
+  const values = new Map<string, number>();
+  const add = (name: string | null, value: AstNode | null): void => {
+    if (name === null || value === null || !dictionaries.has(name)) return;
+    const type = inferType(value, types);
+    values.set(name, (values.get(name) ?? 0) | (type === UNKNOWN ? 0 : type));
+  };
+  walkAst(body, (node) => {
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    const target = assigns ? asNode(node.left) : null;
+    const right = assigns ? asNode(node.right) : null;
+    if (target !== null && right?.kind === "map") {
+      for (const entry of nodeArray(right.entries)) add(variableName(target), asNode(entry.value));
+    }
+    if (target?.kind === "binary" && target.operator === "[") add(variableName(target.left), right);
+    if (node.kind === "methodCall" && constantString(node.method) === "put") {
+      const args = nodeArray(asNode(node.arguments)?.items);
+      if (args.length === 2) add(variableName(node.object), args[1]!);
+    }
+  });
+  return values;
+}
+
+/** Dicts assigned a map literal with a number key. */
+function numberKeyedDictionaries(body: AstNode, dictionaries: ReadonlySet<string>): Set<string> {
+  const names = new Set<string>();
+  walkAst(body, (node) => {
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    const name = assigns ? variableName(node.left) : null;
+    const literal = assigns ? asNode(node.right) : null;
+    if (name === null || literal?.kind !== "map" || !dictionaries.has(name)) return;
+    if (
+      nodeArray(literal.entries).some(
+        (entry) => typeof constantValue(asNode(entry.key) ?? undefined) === "number",
+      )
+    )
+      names.add(name);
+  });
+  return names;
+}
+
+/**
+ * How a script and the mixin modules it loads use their maps, which modules reach by name: a map that one file uses
+ * as a lookup table is a dict in all of them (#536), and the other maps declare every field any file uses.
+ */
+export function packageMapUses(files: readonly ParsedGroovyFile[]): {
+  dictionaries: Set<string>;
+  recordFields: Map<string, string[]>;
+  dictionaryValues: Map<string, number>;
+  numberKeyedDictionaries: Set<string>;
+} {
+  const dictionaries = new Set<string>();
+  const globalTypes = packageGlobalTypes(files);
+  const functions = packageFunctionNames(files);
+  const bodies: Array<{ body: AstNode; types: TypeEnvironment }> = [];
+  for (const file of files) {
+    const rawBody = asNode(file.root?.body);
+    if (rawBody === null || file.root?.kind !== "scriptBody") continue;
+    // A module's methods reach the script's maps through its receiver; an object script keeps them in fields.
+    const moduleBody = desugarMixinModule(rawBody, file.sourceName)?.body;
+    const fields = nodeArray(file.root.classes).flatMap((objectClass) => [
+      ...nodeArray(objectClass.fields).map((field) => ({
+        kind: "expressionStatement",
+        span: field.span,
+        expression: {
+          kind: "declaration",
+          span: field.span,
+          left: syntheticVariable(String(field.name), field.span),
+          right: asNode(field.initialExpression) ?? { kind: "constant", span: null, value: null },
+        },
+      })),
+      ...nodeArray(objectClass.methods).flatMap((method) => asNode(method.body) ?? []),
+    ]);
+    const body: AstNode = {
+      kind: "block",
+      span: null,
+      statements: [...fields, ...(moduleBody === undefined ? [rawBody] : [moduleBody])],
+    };
+    const types = withGlobalTypes(inferVariableTypes(body, [], functions), globalTypes);
+    bodies.push({ body, types });
+    for (const name of dictionaryVariables(body, types)) dictionaries.add(name);
+  }
+  const recordFieldSets = new Map<string, Set<string>>();
+  const dictionaryValues = new Map<string, number>();
+  const numberKeyed = new Set<string>();
+  for (const { body, types } of bodies) {
+    for (const name of numberKeyedDictionaries(body, dictionaries)) numberKeyed.add(name);
+    for (const [name, fields] of recordFields(body, dictionaries)) {
+      const set = recordFieldSets.get(name) ?? new Set<string>();
+      for (const field of fields) set.add(field);
+      recordFieldSets.set(name, set);
+    }
+    for (const [name, type] of dictionaryValueTypes(body, dictionaries, types))
+      dictionaryValues.set(name, (dictionaryValues.get(name) ?? 0) | type);
+  }
+  return {
+    dictionaries,
+    recordFields: new Map([...recordFieldSets].map(([name, set]) => [name, [...set]])),
+    dictionaryValues,
+    numberKeyedDictionaries: numberKeyed,
+  };
+}
+
 export function lowerParsedFile(
   file: ParsedGroovyFile,
   options: LowerOptions = {},
@@ -247,6 +404,10 @@ export function lowerParsedFile(
     directoryFiles: options.directoryFiles ?? new Map(),
     dateValues: new Set(),
     aliasedLists: new Set(),
+    dictionaries: new Set(),
+    recordFields: new Map(),
+    dictionaryValues: new Map(),
+    numberKeyedDictionaries: new Set(),
     proposals: options.proposals ?? new Set(),
     checksUndefinedVariables: options.packageFunctions !== undefined,
   };
@@ -295,6 +456,24 @@ export function lowerParsedFile(
     );
     context.dateValues = currentDateVariables(body, context.types);
     context.aliasedLists = aliasedListVariables(body, context.types);
+    context.dictionaries = new Set([
+      ...dictionaryVariables(body, context.types),
+      ...(options.dictionaries ?? []),
+    ]);
+    context.recordFields = options.recordFields ?? recordFields(body, context.dictionaries);
+    // A lookup reads the type of the dict's values, as an index reads a list's element type.
+    const dictionaryValues =
+      options.dictionaryValues ?? dictionaryValueTypes(body, context.dictionaries, context.types);
+    context.dictionaryValues = dictionaryValues;
+    context.numberKeyedDictionaries =
+      options.numberKeyedDictionaries ?? numberKeyedDictionaries(body, context.dictionaries);
+    context.types = {
+      ...context.types,
+      listElements: new Map([
+        ...(context.types.listElements ?? []),
+        ...[...dictionaryValues].filter(([, type]) => type !== 0),
+      ]),
+    };
     const helpers = collectLegacyHelperBindings(body);
     context.classLoaderVariables = helpers.classLoaders;
     context.legacyHelperClasses = helpers.helperClasses;
@@ -577,6 +756,10 @@ function lowerHelperMethod(
     directoryFiles: baseContext.directoryFiles,
     dateValues: new Set(),
     aliasedLists: new Set(),
+    dictionaries: baseContext.dictionaries,
+    recordFields: baseContext.recordFields,
+    dictionaryValues: baseContext.dictionaryValues,
+    numberKeyedDictionaries: baseContext.numberKeyedDictionaries,
     proposals: baseContext.proposals,
     checksUndefinedVariables: baseContext.checksUndefinedVariables,
     currentFunction: {
@@ -1458,7 +1641,9 @@ function lowerDeclaration(
   const declaredType = text(asNode(node.left)?.originType) ?? "";
   const value = isEmptyGroovyExpression(right)
     ? { kind: "literal" as const, value: PRIMITIVE_DEFAULTS.get(declaredType) ?? null }
-    : lowerExpression(right, context);
+    : right.kind === "map"
+      ? namedMapLiteral(name, right, context)
+      : lowerExpression(right, context);
   if (value === null) {
     return [
       unsupportedStatement(
@@ -2212,9 +2397,7 @@ function lowerAssignment(
       target = lowerExpression(targetNode, context);
     }
     if (target !== null) noteSharedListWrite(asNode(targetNode.left), node, context);
-    if (target?.kind === "index" && target.proposed === "dictionaries") {
-      noteSharedMapWrite(node.span, context);
-    }
+    if (target?.kind === "index" && target.dict === true) noteSharedMapWrite(node.span, context);
   } else if (operator === "=" && targetNode.kind === "property") {
     target = lowerExpression(targetNode, context);
     if (target !== null) noteSharedMapWrite(node.span, context);
@@ -2229,7 +2412,10 @@ function lowerAssignment(
       ),
     ];
   }
-  const value = lowerExpression(right, context);
+  const value =
+    right.kind === "map" && variableTarget !== null && operator === "="
+      ? namedMapLiteral(variableTarget, right, context)
+      : lowerExpression(right, context);
   if (value === null) {
     const targetName = variableTarget ?? "indexed target";
     return [
@@ -2313,6 +2499,39 @@ function lowerCallStatement(
   context: LowerContext,
 ): IrStatement[] {
   const call = callParts(node);
+  const receiver = asNode(node.object);
+  if (call !== null && !call.inherited && receiver !== null && isDictionary(receiver, context)) {
+    const dictionary = dictStatement(receiver, call, span, context);
+    if (dictionary !== null) return dictionary;
+  }
+  const recordName = receiver === null ? null : variableName(receiver);
+  if (
+    call?.name === "clear" &&
+    call.arguments.length === 0 &&
+    !call.inherited &&
+    recordName !== null &&
+    receiver !== null &&
+    isKnownMapExpression(receiver, context)
+  ) {
+    // Clearing a map that is an object: every field reads as null again, as Groovy's missing keys did.
+    const fields = context.recordFields.get(recordName) ?? [];
+    noteSharedMapWrite(span, context);
+    return [
+      {
+        kind: "assign",
+        target: { kind: "variable", name: recordName },
+        operator: "=",
+        value: {
+          kind: "object",
+          properties: fields.map((field) => ({
+            name: field,
+            value: { kind: "literal", value: null },
+          })),
+        },
+        span,
+      },
+    ];
+  }
   if (call !== null && !call.inherited && (call.name === "each" || call.name === "forEach")) {
     return lowerEachStatement(node, call.arguments, span, context);
   }
@@ -4106,62 +4325,161 @@ function lowerGString(node: AstNode, context: LowerContext): IrExpression | null
   return templateOrLiteral(parts);
 }
 
-function lowerMapExpression(node: AstNode, context: LowerContext): IrExpression | null {
-  const properties: Array<{ name: string; value: IrExpression; key?: IrExpression }> = [];
-  for (const entry of nodeArray(node.entries)) {
-    if (entry.kind !== "mapEntry") {
-      return unsupportedExpression(
-        context,
-        node,
-        "SX_MAP_ENTRY",
-        "Groovy map contains an invalid entry.",
-      );
-    }
-    const name = constantString(entry.key);
-    const valueNode = asNode(entry.value);
-    if (
-      (name === null || !isTeaseObjectPropertyName(name)) &&
-      context.proposals.has("dictionaries")
-    ) {
-      // A computed or non-identifier key: a proposed dictionary literal entry `[key]: value`.
-      const keyNode = asNode(entry.key);
-      const keyType = inferType(keyNode, context.types);
-      if (name === "" || (keyType & NULL) !== 0) {
-        return unsupportedExpression(
-          context,
-          entry,
-          "SX_DICTIONARY_KEY",
-          "This map key may be empty or null; proposed dictionary keys are non-empty text.",
-        );
-      }
-      if (!onlyOf(keyType, STRING)) {
-        addDiagnostic(
-          context,
-          "SX_DICTIONARY_KEY_TEXT",
-          "warning",
-          'Groovy kept this key\'s type, so 1 and "1" were different keys; proposed dictionary keys are text.',
-          entry.span,
-        );
-      }
-      const key = keyNode === null ? null : lowerExpression(keyNode, context);
+/** A map literal stored in a variable: a dict for a dict variable, else an object that declares every used field. */
+function namedMapLiteral(name: string, node: AstNode, context: LowerContext): IrExpression | null {
+  if (!context.dictionaries.has(name))
+    return lowerMapExpression(node, context, false, context.recordFields.get(name) ?? []);
+  if (!isSingleValueType((context.dictionaryValues.get(name) ?? 0) & ~NULL)) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_DICT_VALUE_TYPE",
+      `The map ${name} holds values of different types; a dict has one value type (#536) and union types are not accepted yet. Split the map, or give its values one type.`,
+    );
+  }
+  return lowerMapExpression(node, context, true);
+}
+
+/**
+ * A Groovy map literal: an object when every key is a name (with `fields` added as null, so reads of fields assigned
+ * later find them, as Groovy returned null), else, or with `asDict`, a dict literal (#536).
+ */
+function lowerMapExpression(
+  node: AstNode,
+  context: LowerContext,
+  asDict = false,
+  fields: readonly string[] = [],
+): IrExpression | null {
+  const entries = nodeArray(node.entries);
+  if (entries.some((entry) => entry.kind !== "mapEntry")) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_MAP_ENTRY",
+      "Groovy map contains an invalid entry.",
+    );
+  }
+  const names = entries.map((entry) => constantString(entry.key));
+  if (!asDict && names.every((name) => name !== null && isTeaseObjectPropertyName(name))) {
+    const properties: Array<{ name: string; value: IrExpression }> = [];
+    for (const [index, entry] of entries.entries()) {
+      const valueNode = asNode(entry.value);
       const value = valueNode === null ? null : lowerExpression(valueNode, context);
-      if (key === null || value === null) return null;
-      properties.push({ name: "", key, value });
-      continue;
+      if (value === null) return null;
+      properties.push({ name: names[index]!, value });
     }
-    if (name === null || !isTeaseObjectPropertyName(name)) {
-      return unsupportedExpression(
-        context,
-        entry,
-        "SX_DYNAMIC_MAP_KEY",
-        "Only static identifier-like Groovy map keys lower to TeaseScript object properties.",
-      );
+    for (const field of fields) {
+      if (!properties.some((property) => property.name === field))
+        properties.push({ name: field, value: { kind: "literal", value: null } });
+    }
+    return { kind: "object", properties };
+  }
+  return dictLiteral(node, entries, context);
+}
+
+/**
+ * A Groovy map used as a lookup table as a dict literal (#536): keys are text, so a number key becomes text with a
+ * note; a repeated literal key keeps its first position and its last value, as in Groovy, with a note; and the
+ * values must share one type, since a dict has one value type.
+ */
+function dictLiteral(
+  node: AstNode,
+  entries: AstNode[],
+  context: LowerContext,
+): IrExpression | null {
+  const properties: Array<{ name: string; value: IrExpression; key: IrExpression }> = [];
+  const literalKeys = new Map<string, number>();
+  let valueTypes = 0;
+  let textKeys = false;
+  for (const entry of entries) {
+    const keyNode = asNode(entry.key);
+    const valueNode = asNode(entry.value);
+    const literal = keyNode === null ? undefined : constantValue(keyNode);
+    let key: IrExpression | null;
+    if (
+      typeof literal === "string" ||
+      typeof literal === "number" ||
+      typeof literal === "boolean"
+    ) {
+      textKeys ||= typeof literal !== "string";
+      key = { kind: "literal", value: String(literal) };
+    } else {
+      key = keyNode === null ? null : dictKey(keyNode, entry, context);
     }
     const value = valueNode === null ? null : lowerExpression(valueNode, context);
-    if (value === null) return null;
-    properties.push({ name, value });
+    if (key === null || value === null) return null;
+    const valueType = inferType(valueNode, context.types);
+    if (valueType !== UNKNOWN) valueTypes |= valueType & ~NULL;
+    const text = key.kind === "literal" && typeof key.value === "string" ? key.value : null;
+    const earlier = text === null ? undefined : literalKeys.get(text);
+    if (earlier !== undefined) {
+      addDiagnostic(
+        context,
+        "SX_DICT_DUPLICATE_KEY",
+        "warning",
+        `Groovy kept the first position and the last value of the repeated key ${JSON.stringify(text)}; a dict literal may not repeat a key (#536), so the entries are merged.`,
+        entry.span,
+      );
+      properties[earlier] = { ...properties[earlier]!, value };
+      continue;
+    }
+    if (text !== null) literalKeys.set(text, properties.length);
+    properties.push({ name: "", key, value });
   }
-  return { kind: "object", properties };
+  if (textKeys) noteDictKeyText(node, context);
+  if (!isSingleValueType(valueTypes)) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_DICT_VALUE_TYPE",
+      "This map holds values of different types; a dict has one value type (#536) and union types are not accepted yet. Split the map, or give its values one type.",
+    );
+  }
+  return { kind: "object", properties, dict: true };
+}
+
+/** Whether a legacy type set holds at most one kind of value (null aside). */
+function isSingleValueType(type: number): boolean {
+  return [STRING, NUMBER, BOOLEAN, LIST, OBJECT].filter((kind) => (type & kind) !== 0).length <= 1;
+}
+
+/** A dict key (#536): text; a number becomes text with a note, and a key that may be null is reported. */
+function dictKey(
+  keyNode: AstNode,
+  node: AstNode,
+  context: LowerContext,
+  /** Whether the dict was built with number keys, so a key of unknown type is most likely a number. */
+  numberKeys = false,
+): IrExpression | null {
+  // A written number key is visibly the same text key; the literal that created it carries the note.
+  const literal = constantValue(keyNode);
+  if (typeof literal === "number" || typeof literal === "boolean") {
+    return { kind: "literal", value: String(literal) };
+  }
+  const keyType = inferType(keyNode, context.types);
+  if ((keyType & NULL) !== 0 && keyType !== UNKNOWN) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_DICT_KEY",
+      "This map key may be null; dict keys are text (#536).",
+    );
+  }
+  const key = lowerExpression(keyNode, context);
+  if (key === null) return null;
+  if (onlyOf(keyType, STRING) || (keyType === UNKNOWN && !numberKeys)) return key;
+  noteDictKeyText(node, context);
+  return templateOrLiteral([{ value: key }]);
+}
+
+function noteDictKeyText(node: AstNode, context: LowerContext): void {
+  addDiagnostic(
+    context,
+    "SX_DICT_KEY_TEXT",
+    "warning",
+    'Groovy kept this key\'s type, so 1 and "1" were different keys; dict keys are text (#536).',
+    node.span,
+  );
 }
 
 function isTeaseObjectPropertyName(value: string): boolean {
@@ -4173,8 +4491,22 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   if (operator === "[") {
     const targetNode = asNode(node.left);
     const indexNode = asNode(node.right);
-    const target = targetNode === null ? null : lowerExpression(targetNode, context);
+    // A map literal indexed in place is a lookup table (#536).
+    const inlineTable = targetNode?.kind === "map";
+    const target =
+      targetNode === null
+        ? null
+        : inlineTable
+          ? lowerMapExpression(targetNode, context, true)
+          : lowerExpression(targetNode, context);
     if (target === null || indexNode === null) return null;
+    if (inlineTable) {
+      const numberKeys = nodeArray(targetNode.entries).some(
+        (entry) => typeof constantValue(asNode(entry.key) ?? undefined) === "number",
+      );
+      const key = dictKey(indexNode, node, context, numberKeys);
+      return key === null ? null : { kind: "index", target, index: key, dict: true };
+    }
     const negativeIndex = negativeConstantIndex(indexNode);
     if (
       negativeIndex !== null &&
@@ -4213,29 +4545,20 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       // `items[getRandom(items.size())]` picks one element uniformly, which is TeaseScript `items.random`.
       return { kind: "property", target, name: "random" };
     }
+    if (targetNode !== null && isDictionary(targetNode, context)) {
+      // A lookup in a map used as a lookup table: a dict (#536).
+      const numberKeys = context.numberKeyedDictionaries.has(variableName(targetNode) ?? "");
+      const key = dictKey(indexNode, node, context, numberKeys);
+      return key === null ? null : { kind: "index", target, index: key, dict: true };
+    }
     const propertyName = constantString(indexNode);
     if (propertyName !== null) {
-      // A key that is not a property name, or that a dictionary member would shadow, stays a lookup.
-      const dictionaryLookup =
-        context.proposals.has("dictionaries") &&
-        (!isTeaseObjectPropertyName(propertyName) ||
-          (DICTIONARY_MEMBERS.has(propertyName) &&
-            targetNode !== null &&
-            mayBeMap(targetNode, context)));
-      if (dictionaryLookup) {
-        return {
-          kind: "index",
-          target,
-          index: { kind: "literal", value: propertyName },
-          proposed: "dictionaries",
-        };
-      }
       if (!isTeaseObjectPropertyName(propertyName)) {
         return unsupportedExpression(
           context,
           node,
           "SX_DYNAMIC_MAP_KEY",
-          `Groovy map key ${JSON.stringify(propertyName)} is not a TeaseScript object property name.`,
+          `Groovy map key ${JSON.stringify(propertyName)} is not a TeaseScript object property name, and this map is not held in a variable that the importer converts to a dict (#536).`,
         );
       }
       return { kind: "property", target, name: propertyName };
@@ -4245,27 +4568,18 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       (isKnownMapExpression(targetNode, context) ||
         onlyOf(inferType(indexNode, context.types), STRING))
     ) {
-      // A runtime key on a map: TeaseScript object properties are fixed, so only a dictionary can look it up. A text
-      // key cannot index a list, so its receiver is a map too.
-      if (!context.proposals.has("dictionaries")) {
-        return unsupportedExpression(
-          context,
-          node,
-          "SX_DYNAMIC_MAP_ACCESS",
-          "Groovy looked up this map key at runtime; TeaseScript objects have fixed properties, so the key needs a written-out property or a list of records.",
-        );
-      }
-      const key = lowerExpression(indexNode, context);
-      return key === null ? null : { kind: "index", target, index: key, proposed: "dictionaries" };
+      // A runtime key on a map that is not a dict variable: objects have fixed properties (#536). A text key cannot
+      // index a list, so its receiver is a map too.
+      return unsupportedExpression(
+        context,
+        node,
+        "SX_DYNAMIC_MAP_ACCESS",
+        "Groovy looked up this map key at runtime; TeaseScript objects have fixed properties, and only a map held in a variable converts to a dict (#536). Keep the map in a variable, or write the property out.",
+      );
     }
     const index = lowerExpression(indexNode, context);
     if (index === null) return null;
-    // `[key]` reads lists and dictionaries alike; a receiver that may be a map gets dictionary semantics.
-    return context.proposals.has("dictionaries") &&
-      targetNode !== null &&
-      mayBeMap(targetNode, context)
-      ? { kind: "index", target, index, proposed: "dictionaries" }
-      : { kind: "index", target, index };
+    return { kind: "index", target, index };
   }
   if (operator === "&&" || operator === "||") {
     const leftNode = asNode(node.left);
@@ -4306,6 +4620,16 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   }
   const leftNode = asNode(node.left);
   const rightNode = asNode(node.right);
+  if ((mapped === "==" || mapped === "!=") && leftNode !== null && rightNode !== null) {
+    // Groovy read a missing key as null; a dict reports it, so the comparison tests the key.
+    const [lookupNode, other] = isNullConstant(rightNode)
+      ? [leftNode, rightNode]
+      : [rightNode, leftNode];
+    const lookup = isNullConstant(other) ? dictLookup(lookupNode, context) : undefined;
+    if (lookup === null) return null;
+    if (lookup !== undefined)
+      return mapped === "!=" ? lookup : { kind: "unary", operator: "not", value: lookup };
+  }
   const left = leftNode === null ? null : lowerExpression(leftNode, context);
   const right = rightNode === null ? null : lowerExpression(rightNode, context);
   return left === null || right === null ? null : { kind: "binary", operator: mapped, left, right };
@@ -4356,6 +4680,15 @@ function lowerCondition(node: AstNode, context: LowerContext): IrExpression | nu
       right: { kind: "binary", operator: "!=", left: read(), right: legacyLoad.falseValue },
     };
   }
+  const lookup = dictLookup(node, context);
+  if (lookup !== undefined) {
+    // A missing key read as null, which is false; a dict reports a missing key, so the test comes first.
+    if (lookup === null) return null;
+    const value = lowerExpression(node, context);
+    if (value === null) return null;
+    const truth = truthiness(value, inferType(node, context.types), true, node, context);
+    return truth === null ? null : { kind: "binary", operator: "and", left: lookup, right: truth };
+  }
   const value = lowerExpression(node, context);
   if (value === null) return null;
   return truthiness(
@@ -4365,6 +4698,25 @@ function lowerCondition(node: AstNode, context: LowerContext): IrExpression | nu
     node,
     context,
   );
+}
+
+/**
+ * `dict.contains(key)` for a Groovy lookup `map[key]` or `map.key` on a dict with a key that may be evaluated twice;
+ * undefined for any other expression.
+ */
+function dictLookup(node: AstNode, context: LowerContext): IrExpression | null | undefined {
+  const receiver = asNode(node.kind === "property" ? node.object : node.left);
+  const keyNode = node.kind === "binary" && node.operator === "[" ? asNode(node.right) : null;
+  const name = node.kind === "property" ? constantString(node.property) : null;
+  if (receiver === null || !isDictionary(receiver, context)) return undefined;
+  if (keyNode === null && name === null) return undefined;
+  if (keyNode !== null && !isRepeatableExpression(keyNode)) return undefined;
+  const dict = lowerExpression(receiver, context);
+  const key: IrExpression | null =
+    keyNode === null ? { kind: "literal", value: name } : dictKey(keyNode, node, context);
+  return dict === null || key === null
+    ? null
+    : { kind: "methodCall", target: dict, name: "contains", arguments: [key], dict: true };
 }
 
 /** Groovy truth of a lowered value of the given legacy type, as an explicit boolean expression. */
@@ -4391,6 +4743,15 @@ function truthiness(
   });
   if (onlyOf(type, BOOLEAN | NULL)) return compare("==", { kind: "literal", value: true });
   if (type === NULL) return notNull;
+  if (isDictionary(node, context)) {
+    // A dict is false when it is empty, as a Groovy map was.
+    return {
+      kind: "binary",
+      operator: ">",
+      left: { kind: "property", target: value, name: "length", dict: true },
+      right: { kind: "literal", value: 0 },
+    };
+  }
   if ((type & OBJECT) !== 0 && onlyOf(type, OBJECT | NULL)) {
     // Groovy treats an empty map as false; objects compare structurally (#517), so `{}` is the empty map.
     const empty = compare("!=", { kind: "object", properties: [] });
@@ -4784,21 +5145,12 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
     const target = lowerExpression(targetNode, context);
     return target === null ? null : { kind: "property", target, name: "length" };
   }
-  if (
-    context.proposals.has("dictionaries") &&
-    DICTIONARY_MEMBERS.has(property) &&
-    isKnownMapExpression(targetNode, context)
-  ) {
-    // Groovy `map.length` reads the key "length", which the proposed dictionary member would shadow.
+  if (isDictionary(targetNode, context)) {
+    // Groovy `map.name` reads the key "name"; a dict reads it as `map["name"]` (#536).
     const target = lowerExpression(targetNode, context);
     return target === null
       ? null
-      : {
-          kind: "index",
-          target,
-          index: { kind: "literal", value: property },
-          proposed: "dictionaries",
-        };
+      : { kind: "index", target, index: { kind: "literal", value: property }, dict: true };
   }
   if (!isRecordFieldAccess(targetNode, property, context)) {
     return unsupportedExpression(
@@ -4962,9 +5314,9 @@ function lowerObjectMethodCallExpression(
     const proposed = proposedImageCount(node, name, argumentsNodes, context);
     if (proposed !== undefined) return proposed;
   }
-  if (targetNode !== null && context.proposals.has("dictionaries")) {
-    const proposed = proposedDictionaryOperation(node, targetNode, name, argumentsNodes, context);
-    if (proposed !== undefined) return proposed;
+  if (targetNode !== null && isDictionary(targetNode, context)) {
+    const operation = dictOperation(node, targetNode, name, argumentsNodes, context);
+    if (operation !== undefined) return operation;
   }
   const textReceiver =
     targetNode !== null &&
@@ -4981,7 +5333,7 @@ function lowerObjectMethodCallExpression(
       node,
       "SX_STRING_METHOD",
       name === "size" || name === "length"
-        ? `Groovy ${name}() here may measure a map; TeaseScript text and lists have a length, objects do not (dictionaries are only proposed). Prove the receiver is text or a list.`
+        ? `Groovy ${name}() counted the entries of this map, which is an object with fixed properties here; objects have no length. Use the map as a dict (#536) if it is a lookup table.`
         : `Groovy string method ${name}() has no TeaseScript text operation in this form: regular expressions and tokenize() need manual work (a future .ts text library).`,
     );
   }
@@ -5094,9 +5446,9 @@ function listJoin(list: IrExpression, separator: IrExpression): IrExpression {
 /**
  * Groovy string methods as accepted TeaseScript text operations (V30 §8 as accepted in PR #518): `text.length`,
  * `uppercase()`, `trim()`, and so on. Text operations follow Unicode code points and full case mapping, which differ
- * from Java only for rare text (see COMPATIBILITY-GAPS.md). The length also counts list elements, so receivers that
- * may be text or a list need no proof; a receiver that may be a map needs the dictionaries proposal, which counts
- * keys. Returns undefined for methods or arguments without a text operation (regular expressions, tokenize).
+ * from Java only for rare text (see COMPATIBILITY-GAPS.md). The length also counts list elements and dict entries, so
+ * a receiver needs no proof unless it is known to be an object. Returns undefined for methods or arguments without a
+ * text operation (regular expressions, tokenize).
  */
 function textOperation(
   node: AstNode,
@@ -5105,7 +5457,6 @@ function textOperation(
   argumentsNodes: AstNode[],
   context: LowerContext,
 ): IrExpression | null | undefined {
-  const mayBeMap = (inferType(targetNode, context.types) & OBJECT) !== 0;
   const member = (operation: string, args: IrExpression[], target: IrExpression): IrExpression => ({
     kind: "methodCall",
     target,
@@ -5136,14 +5487,12 @@ function textOperation(
     case "size":
     case "length": {
       if (argumentsNodes.length !== 0) return undefined;
-      if (mayBeMap && !context.proposals.has("dictionaries")) return undefined;
+      // Text, lists, and dicts have a length (#536); an object with fixed properties does not.
+      if (isKnownMapExpression(targetNode, context)) return undefined;
       const target = lowerExpression(targetNode, context);
       if (target === null) return null;
       noteCodePoints();
-      // A dictionary's length counts its keys; that stays with the dictionaries proposal (D1).
-      return mayBeMap
-        ? { kind: "property", target, name: "length", proposed: "dictionaries" }
-        : { kind: "property", target, name: "length", pending: true };
+      return { kind: "property", target, name: "length", pending: true };
     }
     case "toUpperCase":
     case "toLowerCase":
@@ -5359,6 +5708,96 @@ function aliasedListVariables(body: AstNode, types: TypeEnvironment): Set<string
       names.add(source);
     }
   });
+  return names;
+}
+
+/** Groovy map methods that use a map as a lookup table (#536); `clear`, `size`, and `isEmpty` alone do not. */
+const LOOKUP_METHODS = new Set([
+  "containsKey",
+  "keySet",
+  "values",
+  "entrySet",
+  "put",
+  "get",
+  "remove",
+  "each",
+  "eachWithIndex",
+  "findAll",
+  "collect",
+  "any",
+  "every",
+  "find",
+]);
+
+/**
+ * Variables that hold a Groovy map used as a lookup table, which becomes a `dict` (#536): looked up by a runtime key,
+ * given lookup methods or a loop, or built with computed or non-name keys. Other maps stay objects with fixed
+ * properties. A map assigned to or from a dict variable is a dict too.
+ */
+function dictionaryVariables(body: AstNode, types: TypeEnvironment): Set<string> {
+  const names = new Set<string>();
+  const maybeMap = (name: string): boolean =>
+    ((types.variables.get(name) ?? UNKNOWN) & OBJECT) !== 0;
+  const knownMap = (name: string): boolean => {
+    const type = types.variables.get(name) ?? UNKNOWN;
+    return onlyOf(type, OBJECT | NULL) && (type & OBJECT) !== 0;
+  };
+  const lookupKey = (key: AstNode | null): boolean => {
+    if (key === null) return false;
+    const literal = constantValue(key);
+    if (typeof literal === "string") return !isTeaseObjectPropertyName(literal);
+    return literal !== undefined || onlyOf(inferType(key, types), STRING);
+  };
+  const aliases: Array<[string, string]> = [];
+  walkAst(body, (node) => {
+    if (node.kind === "binary" && node.operator === "[") {
+      const name = variableName(node.left);
+      const key = asNode(node.right);
+      // A runtime text key cannot index a list; on a map, a runtime or non-name key needs a dict.
+      const runtimeKey = key !== null && constantValue(key) === undefined;
+      if (
+        name !== null &&
+        ((runtimeKey && onlyOf(inferType(key, types), STRING)) ||
+          (knownMap(name) && (runtimeKey || lookupKey(key))))
+      )
+        names.add(name);
+    }
+    if (node.kind === "methodCall") {
+      const name = variableName(node.object);
+      const method = constantString(node.method);
+      if (name !== null && method !== null && LOOKUP_METHODS.has(method)) {
+        const mapOnly = ["containsKey", "keySet", "entrySet", "put"].includes(method);
+        if (knownMap(name) || (mapOnly && maybeMap(name))) names.add(name);
+      }
+    }
+    if (node.kind === "for") {
+      const name = variableName(node.collection);
+      if (name !== null && knownMap(name)) names.add(name);
+    }
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    const target = assigns ? variableName(node.left) : null;
+    const value = assigns ? asNode(node.right) : null;
+    if (target === null || value === null) return;
+    if (value.kind === "map") {
+      for (const entry of nodeArray(value.entries)) {
+        const key = constantString(entry.key);
+        if (key === null || !isTeaseObjectPropertyName(key)) names.add(target);
+      }
+    }
+    const source = variableName(value);
+    if (source !== null) aliases.push([target, source]);
+  });
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [target, source] of aliases) {
+      if (names.has(target) !== names.has(source)) {
+        names.add(target);
+        names.add(source);
+        changed = true;
+      }
+    }
+  }
   return names;
 }
 
@@ -5617,13 +6056,6 @@ function isKnownMapExpression(node: AstNode, context: LowerContext): boolean {
   return onlyOf(type, OBJECT | NULL) && (type & OBJECT) !== 0;
 }
 
-function mayBeMap(node: AstNode, context: LowerContext): boolean {
-  return (inferType(node, context.types) & OBJECT) !== 0;
-}
-
-/** Members of a proposed dictionary; a map key with one of these names is read as `map["name"]`. */
-const DICTIONARY_MEMBERS = new Set(["clear", "has", "keys", "length", "remove", "values"]);
-
 /**
  * `new File(folder).listFiles()`, optionally filtered by file name, then `.size()`, over a package image folder as a
  * proposed tag count (media-tags, M1): every folder below `images/` is a tag of the images it holds (matched without
@@ -5773,49 +6205,34 @@ function noteSharedMapWrite(span: SourceSpan | null, context: LowerContext): voi
   );
 }
 
-/** Groovy methods that only maps have, so the receiver is a map even when its type is not inferred. */
-const MAP_ONLY_METHODS = new Set(["containsKey", "keySet", "values"]);
-
 /**
- * Groovy map operations as proposed dictionary members (dictionaries, D1): `has(key)`, `keys`, `values`, `length`,
- * `remove(key)` and `clear()`, plus `[key]` lookups. Removing and clearing change the map, so they are covered only
- * as whole statements. Returns undefined for operations the working syntax does not cover.
+ * Groovy map methods on a dict (#536) used as values: `contains(key)`, `keys`, `values`, `length`, and `[key]` for
+ * `get`. Statements that change the dict (`put`, `remove`, `clear`, `each`) are lowered by dictStatement. Returns
+ * undefined for other methods.
  */
-function proposedDictionaryOperation(
+function dictOperation(
   node: AstNode,
   targetNode: AstNode,
   name: string,
   argumentsNodes: AstNode[],
   context: LowerContext,
 ): IrExpression | null | undefined {
-  const knownMap = isKnownMapExpression(targetNode, context);
-  if (!knownMap && !(MAP_ONLY_METHODS.has(name) && !isKnownListExpression(targetNode, context))) {
-    return undefined;
-  }
-  const wholeStatement = asNode(context.statementRoot?.expression) === node;
   const target = (): IrExpression | null => lowerExpression(targetNode, context);
   const property = (member: string): IrExpression | null => {
     const lowered = target();
     return lowered === null
       ? null
-      : { kind: "property", target: lowered, name: member, proposed: "dictionaries" };
-  };
-  const method = (member: string): IrExpression | null => {
-    const lowered = target();
-    const args = lowered === null ? null : lowerArguments(argumentsNodes, context);
-    return lowered === null || args === null
-      ? null
-      : {
-          kind: "methodCall",
-          target: lowered,
-          name: member,
-          arguments: args,
-          proposed: "dictionaries",
-        };
+      : { kind: "property", target: lowered, name: member, dict: true };
   };
   switch (name) {
-    case "containsKey":
-      return argumentsNodes.length === 1 ? method("has") : undefined;
+    case "containsKey": {
+      if (argumentsNodes.length !== 1) return undefined;
+      const lowered = target();
+      const key = dictKey(argumentsNodes[0]!, node, context);
+      return lowered === null || key === null
+        ? null
+        : { kind: "methodCall", target: lowered, name: "contains", arguments: [key], dict: true };
+    }
     case "keySet":
       return argumentsNodes.length === 0 ? property("keys") : undefined;
     case "values":
@@ -5832,21 +6249,140 @@ function proposedDictionaryOperation(
     case "get": {
       if (argumentsNodes.length !== 1) return undefined;
       const lowered = target();
-      const key = lowerExpression(argumentsNodes[0]!, context);
+      const key = dictKey(argumentsNodes[0]!, node, context);
       return lowered === null || key === null
         ? null
-        : { kind: "index", target: lowered, index: key, proposed: "dictionaries" };
-    }
-    case "remove":
-    case "clear": {
-      if (!wholeStatement || argumentsNodes.length !== (name === "remove" ? 1 : 0))
-        return undefined;
-      noteSharedMapWrite(node.span, context);
-      return method(name);
+        : { kind: "index", target: lowered, index: key, dict: true };
     }
     default:
       return undefined;
   }
+}
+
+/**
+ * Groovy map statements on a dict (#536): `put` writes `map[key]`, `remove` of a key that may be missing is guarded
+ * (Groovy ignored a missing key, a dict reports it), `clear()` empties it, and `each { key, value -> }` loops over the
+ * keys as they were when the loop started. Returns null for other statements.
+ */
+function dictStatement(
+  receiver: AstNode,
+  call: { name: string; arguments: AstNode[] },
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] | null {
+  const dict = lowerExpression(receiver, context);
+  if (dict === null) return null;
+  const node = context.statementRoot ?? receiver;
+  switch (call.name) {
+    case "put": {
+      if (call.arguments.length !== 2) return null;
+      const key = dictKey(call.arguments[0]!, node, context);
+      const value = lowerExpression(call.arguments[1]!, context);
+      if (key === null || value === null) return null;
+      noteSharedMapWrite(span, context);
+      return [
+        {
+          kind: "assign",
+          target: { kind: "index", target: dict, index: key, dict: true },
+          operator: "=",
+          value,
+          span,
+        },
+      ];
+    }
+    case "remove": {
+      if (call.arguments.length !== 1 || !isRepeatableExpression(call.arguments[0]!)) return null;
+      const key = dictKey(call.arguments[0]!, node, context);
+      if (key === null) return null;
+      noteSharedMapWrite(span, context);
+      const remove: IrStatement = {
+        kind: "expression",
+        expression: {
+          kind: "methodCall",
+          target: dict,
+          name: "remove",
+          arguments: [key],
+          dict: true,
+        },
+        span,
+      };
+      return [
+        {
+          kind: "if",
+          condition: {
+            kind: "methodCall",
+            target: dict,
+            name: "contains",
+            arguments: [key],
+            dict: true,
+          },
+          then: [remove],
+          else: [],
+          span,
+        },
+      ];
+    }
+    case "clear":
+      if (call.arguments.length !== 0) return null;
+      noteSharedMapWrite(span, context);
+      return [
+        {
+          kind: "expression",
+          expression: {
+            kind: "methodCall",
+            target: dict,
+            name: "clear",
+            arguments: [],
+            dict: true,
+          },
+          span,
+        },
+      ];
+    case "each": {
+      const argument = closureArgument(call.arguments);
+      const [key, value] = argument?.parameters ?? [];
+      if (
+        argument === null ||
+        key === undefined ||
+        value === undefined ||
+        argument.parameters.length !== 2
+      )
+        return null;
+      const closureBody = asNode(argument.closure.body);
+      if (closureBody === null || containsReturnForCurrentClosure(closureBody)) return null;
+      return [
+        {
+          kind: "for",
+          variable: key,
+          collection: dict,
+          dict: true,
+          body: [
+            {
+              kind: "let",
+              name: value,
+              value: {
+                kind: "index",
+                target: dict,
+                index: { kind: "variable", name: key },
+                dict: true,
+              },
+              span,
+            },
+            ...lowerBlock(closureBody, context),
+          ],
+          span,
+        },
+      ];
+    }
+    default:
+      return null;
+  }
+}
+
+/** Whether an expression is a variable that holds a map used as a lookup table (#536). */
+function isDictionary(node: AstNode, context: LowerContext): boolean {
+  const name = variableName(node);
+  return name !== null && context.dictionaries.has(name) && !context.shadowingReferences.has(node);
 }
 
 function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpression | null {
