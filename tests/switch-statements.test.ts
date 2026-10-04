@@ -252,6 +252,16 @@ test("a range test in an external plan fails with a structured fault unless its 
   assert.equal(result.snapshot.failure?.code, "TSR035");
 });
 
+test("the block after a switch subject or cue position ends only an ungrouped compact interaction", () => {
+  for (const source of [
+    'switch askNumber "How many?" { case 1 {} }',
+    'switch (askNumber { hint: "Number" }.hint) { case 1 {} }',
+    'playAudio "a" {\n  at (askNumber { hint: "Number" }.hint) {}\n}',
+  ]) {
+    assert.deepEqual(compileSource(source).diagnostics, [], source);
+  }
+});
+
 test("reports malformed switch structure", () => {
   assert.deepEqual(diagnostics("switch 1 {\n  default {}\n  case 1 {}\n}"), ["TSP038 3:3"]);
   assert.deepEqual(diagnostics("switch 1 {\n  case 1 {}\n  default {}\n  default {}\n}"), [
@@ -260,7 +270,10 @@ test("reports malformed switch structure", () => {
   assert.deepEqual(diagnostics('switch 1 {\n  say "hi"\n  case 1 {}\n}'), ["TSP038 2:3"]);
   assert.deepEqual(diagnostics("switch {\n  case 1 {}\n}"), ["TSP012 1:8"]);
   assert.deepEqual(diagnostics("switch 1 {\n  case {}\n  case 2 {}\n}"), ["TSP012 2:8"]);
-  // A clause without a block keeps the rest of the switch and its enclosing block intact.
+  // A missing `{` or clause block keeps the rest of the switch and its enclosing block intact.
+  assert.deepEqual(diagnostics('if true {\n  switch 1\n    case 1 {}\n  }\n  say "inside"\n}'), [
+    "TSP018 3:5",
+  ]);
   assert.deepEqual(
     diagnostics('if true {\n  switch 1 {\n    case 1\n    case 2 {}\n  }\n  say "inside"\n}'),
     ["TSP018 4:5"],

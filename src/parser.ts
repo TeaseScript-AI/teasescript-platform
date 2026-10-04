@@ -724,7 +724,7 @@ class Parser {
       this.#check(TokenKind.LeftParenthesis) &&
       this.#peek().span.start.offset === command.span.end.offset
     ) {
-      return yield* parseChild(this.#withoutStorageDelimiters(this.#parseNamedTimer(command)));
+      return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseNamedTimer(command)));
     }
     const async = this.#checkIdentifier("async");
     if (async) this.#advance();
@@ -1029,7 +1029,7 @@ class Parser {
       this.#peek().span.start.offset === command.span.end.offset
     ) {
       return yield* parseChild(
-        this.#withoutStorageDelimiters(this.#parseNamedMedia(command, media)),
+        this.#withoutEnclosingDelimiters(this.#parseNamedMedia(command, media)),
       );
     }
     const async = this.#checkIdentifier("async");
@@ -1185,13 +1185,7 @@ class Parser {
    */
   *#parseMediaHandlers(): ParseTask<MediaHandlers | null | false> {
     if (!this.#check(TokenKind.LeftBrace)) return null;
-    const enclosingBlockEndsChoice = this.#blockEndsCompactInteraction;
-    this.#blockEndsCompactInteraction = false;
-    const handlers = yield* parseChild(
-      this.#withoutStorageDelimiters(this.#parseMediaHandlerBlock()),
-    );
-    this.#blockEndsCompactInteraction = enclosingBlockEndsChoice;
-    return handlers;
+    return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseMediaHandlerBlock()));
   }
 
   *#parseMediaHandlerBlock(): ParseTask<MediaHandlers | false> {
@@ -1476,10 +1470,10 @@ class Parser {
       this.#skipMalformedBlock();
       return null;
     }
-    const enclosingBlockEndsChoice = this.#blockEndsCompactInteraction;
+    const enclosingBlockEndsInteraction = this.#blockEndsCompactInteraction;
     this.#blockEndsCompactInteraction = true;
     const subject = this.#parseRequiredExpression();
-    this.#blockEndsCompactInteraction = enclosingBlockEndsChoice;
+    this.#blockEndsCompactInteraction = enclosingBlockEndsInteraction;
     if (subject === null) {
       this.#synchronizeStatement();
       return null;
@@ -1490,7 +1484,8 @@ class Parser {
         parserDiagnosticCode.expectedBlock,
         "Expected '{' to start the switch cases.",
       );
-      return null;
+      // Clauses that follow show that only the `{` is missing, so the switch still owns its closing `}`.
+      if (!this.#checkIdentifier("case") && !this.#checkIdentifier("default")) return null;
     }
     const cases: SwitchCase[] = [];
     let defaultBlock: Block | null = null;
@@ -1816,11 +1811,7 @@ class Parser {
 
   /** A statement block; statements inside it are not part of an enclosing cue position or switch subject. */
   *#parseBlock(): ParseTask<Block | null> {
-    const enclosingBlockEndsChoice = this.#blockEndsCompactInteraction;
-    this.#blockEndsCompactInteraction = false;
-    const block = yield* parseChild(this.#withoutStorageDelimiters(this.#parseBlockStatements()));
-    this.#blockEndsCompactInteraction = enclosingBlockEndsChoice;
-    return block;
+    return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseBlockStatements()));
   }
 
   *#parseBlockStatements(): ParseTask<Block | null> {
@@ -2190,7 +2181,7 @@ class Parser {
         const start = expression;
         this.#skipNewlines();
         const index = yield* parseChild(
-          this.#withoutStorageDelimiters(this.#parseRequiredExpressionTask()),
+          this.#withoutEnclosingDelimiters(this.#parseRequiredExpressionTask()),
         );
         this.#skipNewlines();
         if (index === null || !this.#match(TokenKind.RightBracket)) {
@@ -2212,7 +2203,7 @@ class Parser {
       }
       if (this.#match(TokenKind.LeftParenthesis)) {
         expression = yield* parseChild(
-          this.#withoutStorageDelimiters(this.#finishCall(expression, this.#previous())),
+          this.#withoutEnclosingDelimiters(this.#finishCall(expression, this.#previous())),
         );
         continue;
       }
@@ -2367,18 +2358,20 @@ class Parser {
       return this.#identifier(token);
     }
     if (this.#match(TokenKind.StringStart)) {
-      return yield* parseChild(this.#withoutStorageDelimiters(this.#parseStringLiteral(token)));
+      return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseStringLiteral(token)));
     }
     if (this.#match(TokenKind.LeftParenthesis)) {
-      return yield* parseChild(this.#withoutStorageDelimiters(this.#parseParenthesized(token)));
+      return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseParenthesized(token)));
     }
     if (this.#match(TokenKind.LeftBracket)) {
       return yield* parseChild(
-        this.#withoutStorageDelimiters(this.#parseCollectionLiteralElements(token, "listLiteral")),
+        this.#withoutEnclosingDelimiters(
+          this.#parseCollectionLiteralElements(token, "listLiteral"),
+        ),
       );
     }
     if (this.#match(TokenKind.LeftBrace)) {
-      return yield* parseChild(this.#withoutStorageDelimiters(this.#parseObjectLiteral(token)));
+      return yield* parseChild(this.#withoutEnclosingDelimiters(this.#parseObjectLiteral(token)));
     }
     if (this.#match(TokenKind.KeywordSet)) {
       if (!this.#match(TokenKind.LeftBracket)) {
@@ -2386,7 +2379,7 @@ class Parser {
         return null;
       }
       return yield* parseChild(
-        this.#withoutStorageDelimiters(this.#parseCollectionLiteralElements(token, "setLiteral")),
+        this.#withoutEnclosingDelimiters(this.#parseCollectionLiteralElements(token, "setLiteral")),
       );
     }
     return null;
@@ -2622,13 +2615,20 @@ class Parser {
     );
   }
 
-  *#withoutStorageDelimiters<T>(task: ParseTask<T>): ParseTask<T> {
-    const enclosing = this.#storageDelimiters;
+  /**
+   * Parses a grouping or block in which the delimiters that end an enclosing operand do not apply: the storage `as`
+   * and `default`, and the block `{` after a cue position or switch subject.
+   */
+  *#withoutEnclosingDelimiters<T>(task: ParseTask<T>): ParseTask<T> {
+    const enclosingStorageDelimiters = this.#storageDelimiters;
+    const enclosingBlockEndsInteraction = this.#blockEndsCompactInteraction;
     this.#storageDelimiters = NO_STORAGE_DELIMITERS;
+    this.#blockEndsCompactInteraction = false;
     try {
       return yield* parseChild(task);
     } finally {
-      this.#storageDelimiters = enclosing;
+      this.#storageDelimiters = enclosingStorageDelimiters;
+      this.#blockEndsCompactInteraction = enclosingBlockEndsInteraction;
     }
   }
 
