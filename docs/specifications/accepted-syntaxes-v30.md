@@ -4347,8 +4347,9 @@ if photos.length > 0 { showImage photos.random }
 - Comparison bounds and tag lists are evaluated once, in written order, before any candidate is matched. Matching draws
   no random number. `showImage tagged` draws once from the session random generator, and restoring a checkpoint never
   draws again.
-- A `showImage tagged` that no image of the package can match is a compile error. One that finds no image only at
-  runtime, because of its bounds or tag lists, is a runtime error.
+- When the compilation is given the package images, a `showImage tagged` whose tag tests and literal tag lists match
+  none of them is a compile error; comparisons and computed lists are not evaluated for this. Any other pick that finds
+  no image is a runtime error.
 
 ### Image tags
 

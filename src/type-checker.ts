@@ -34,7 +34,7 @@ import {
   numberAnswerText,
 } from "./interaction-answers.js";
 import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
-import { compareTagValue, evaluateTagSteps, passesTagList } from "./tag-query.js";
+import { evaluateTagSteps, passesTagList } from "./tag-query.js";
 import { normalizeTagName } from "./tags.js";
 import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
 import {
@@ -140,7 +140,7 @@ import { typePlan } from "./type-plans.js";
 export interface TypeCheckOptions {
   readonly globals?: readonly string[];
   readonly builtins?: readonly string[];
-  /** The package images that tag queries search; none by default. */
+  /** The package images that tag queries search, when the compilation was given them. */
   readonly imageCatalog?: readonly PlanImage[];
 }
 
@@ -361,8 +361,8 @@ class TypeChecker {
 
   readonly #builtins: ReadonlySet<string>;
 
-  /** The tags of each package image, by name. */
-  readonly #imageTags: readonly ReadonlyMap<string, number | null>[];
+  /** The tags of each package image, by name; `null` when the compilation was not given the images. */
+  readonly #imageTags: readonly ReadonlyMap<string, number | null>[] | null;
 
   readonly #root = new Scope(null);
 
@@ -469,9 +469,10 @@ class TypeChecker {
 
   public constructor(options: TypeCheckOptions, widened: Widened) {
     this.#widened = widened;
-    this.#imageTags = (options.imageCatalog ?? []).map(
-      (image) => new Map(image.tags.map((tag) => [tag.name, tag.value])),
-    );
+    this.#imageTags =
+      options.imageCatalog?.map(
+        (image) => new Map(image.tags.map((tag) => [tag.name, tag.value])),
+      ) ?? null;
     this.#builtins = new Set([
       ...CORE_RUNTIME_BUILTINS,
       ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
@@ -2229,9 +2230,12 @@ class TypeChecker {
     }
   }
 
-  /** A query that picks one image and that provably matches none of the package's images is an error (ADR 0023). */
+  /**
+   * A pick from the given images that no image can match by its tag tests and literal tag lists alone is an error
+   * (ADR 0023). Comparisons and other values count as possibly true: this check does no value reasoning.
+   */
   #checkTagQueryCanMatch(query: TagQueryExpression): void {
-    if (query.select !== "random") return;
+    if (query.select !== "random" || this.#imageTags === null) return;
     if (
       this.#imageTags.some(
         (tags) => evaluateTagSteps(query.steps, (step) => staticTagTest(step, tags)) !== false,
@@ -5687,8 +5691,8 @@ function unwrapGrouping(expression: Expression): Expression {
 }
 
 /**
- * A tag test, comparison, or tag list for an image with these tags, or `null` when it depends on a value known only at
- * runtime: a comparison whose bound is not a number literal, or a tag list that is not a list of quoted names.
+ * A tag test or a literal tag list for an image with these tags, or `null` for anything that involves a value: every
+ * comparison, and a tag list that is not a list of quoted names.
  */
 function staticTagTest(
   step: TagQueryStep,
@@ -5697,13 +5701,6 @@ function staticTagTest(
   switch (step.kind) {
     case "tag":
       return tags.has(step.name);
-    case "tagCompare": {
-      const value = tags.get(step.name);
-      if (value === null || value === undefined) return false;
-      return step.bound.kind === "numberLiteral"
-        ? compareTagValue(value, step.operator, step.bound.value)
-        : null;
-    }
     case "tagList": {
       if (step.value.kind !== "listLiteral") return null;
       const names: string[] = [];

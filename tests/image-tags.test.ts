@@ -239,26 +239,32 @@ test("restoring a checkpoint inside or after a query never evaluates or draws ag
   assert.deepEqual(restored.plan.images, plan.images);
 });
 
-test("a pick that provably matches no image is a compile error; one that only may match fails at runtime", () => {
+test("with known images, a pick whose literal tags match none is a compile error; otherwise it fails at runtime", () => {
   assert.deepEqual(errors('showImage tagged "attic"\nexit'), [
-    ["TST002", "No image in the package has these tags."],
-  ]);
-  assert.deepEqual(errors('showImage tagged "hall", "punishment" > 0\nexit'), [
     ["TST002", "No image in the package has these tags."],
   ]);
   assert.deepEqual(errors('showImage tagged "bedroom", none: ["bedroom"]\nexit'), [
     ["TST002", "No image in the package has these tags."],
   ]);
-  assert.deepEqual(errors('showImage tagged "bedroom"\nexit', {}), [
+  assert.deepEqual(errors('showImage tagged "bedroom"\nexit', { images: [] }), [
     ["TST002", "The package has no images to pick from."],
   ]);
   // A list may be empty.
   assert.deepEqual(errors('let none = findImages(where: "attic")\nexit'), []);
 
-  const plan = compiled('let minimum = 9\nshowImage tagged "punishment" > minimum\nexit');
-  const failed = run(plan, createImmediatePacingRuntimeSnapshot(plan));
-  assert.equal(failed.snapshot.status, "failed");
-  assert.equal(failed.snapshot.failure?.code, "TSR082");
+  // Comparisons and computed lists involve values, so only running the pick shows that nothing matches. The same holds
+  // when the compilation is not given the images.
+  for (const [source, compileOptions] of [
+    ['showImage tagged "hall", "punishment" > 0\nexit', options],
+    ['let minimum = 9\nshowImage tagged "punishment" > minimum\nexit', options],
+    ['let names = ["attic"]\nshowImage tagged "bedroom", all: names\nexit', options],
+    ['showImage tagged "bedroom"\nexit', {}],
+  ] as const) {
+    const plan = compiled(source, compileOptions);
+    const failed = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+    assert.equal(failed.snapshot.status, "failed", source);
+    assert.equal(failed.snapshot.failure?.code, "TSR082", source);
+  }
 });
 
 test("tag lists and bounds are checked for their types, and runtime values are validated", () => {

@@ -20,9 +20,9 @@ export interface CompileOptions extends SemanticValidationOptions {
   readonly images?: readonly ProjectImageFile[];
 }
 
-/** What every file of a project is checked with: the options, the built-ins, and the image catalog. */
+/** What every file of a project is checked with: the options, the built-ins, and the image catalog when given. */
 interface ProjectCheckOptions extends CompileOptions {
-  readonly imageCatalog: readonly PlanImage[];
+  readonly imageCatalog?: readonly PlanImage[];
 }
 
 export interface CompilationResult {
@@ -82,7 +82,7 @@ export function compileProject(
   const validationOptions: ProjectCheckOptions = {
     ...options,
     builtins: Object.freeze([...CORE_RUNTIME_BUILTINS, ...(options.builtins ?? [])]),
-    imageCatalog: catalog.images,
+    ...(options.images === undefined ? {} : { imageCatalog: catalog.images }),
   };
   const files = inventory.files.map(({ path, source }) =>
     compileFile(path, source, validationOptions),
