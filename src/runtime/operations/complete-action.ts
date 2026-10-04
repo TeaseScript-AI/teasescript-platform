@@ -1,4 +1,5 @@
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
+import { interruptFrame } from "../activations.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import {
   currentTemporalContext,
@@ -74,11 +75,7 @@ export function completeAction(
       ? current.foregroundAction
       : (current.backgroundActions.find((action) => action.actionId === actionId) ?? null);
   if (active === null) {
-    if (
-      current.callFrames.some(
-        (frame) => frame.timerInterruption?.suspendedAction?.actionId === actionId,
-      )
-    ) {
+    if (interruptFrame(current)?.timerInterruption?.suspendedAction?.actionId === actionId) {
       // An interrupted action is inert while a timer expiry block runs; it is not settled.
       return pendingResult(current, [], { kind: "suspendedAction" as const, actionId });
     }

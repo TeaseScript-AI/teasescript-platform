@@ -1,4 +1,5 @@
 import { type InstructionPlan, type PlanSourceLocation, mainSourceSpan } from "../../plan/model.js";
+import { interruptRunning } from "../activations.js";
 import type { SourceSpan } from "../../source.js";
 import type {
   RuntimeTimerActionSnapshot,
@@ -48,7 +49,7 @@ function timerHandlerQueuedAndUnblocked(snapshot: RuntimeSnapshot): boolean {
   if (snapshot.pendingTimerHandlers.length === 0) return false;
   if (snapshot.status !== "ready" && snapshot.status !== "running" && snapshot.status !== "waiting")
     return false;
-  if (snapshot.callFrames.some((frame) => frame.timerInterruption !== null)) return false;
+  if (interruptRunning(snapshot)) return false;
   return snapshot.preparedSayOutput === null && snapshot.interactionResultHandoff === null;
 }
 
@@ -142,7 +143,13 @@ export function expireTimerAction(
     timer.anchoredRounds = null;
   }
   if (timer.handlerFunctionId !== null) {
-    queueTimerHandler(snapshot, timer.timerId, timer.handlerFunctionId, endedAtMs);
+    queueTimerHandler(
+      snapshot,
+      timer.timerId,
+      timer.handlerFunctionId,
+      timer.rootScopeId,
+      endedAtMs,
+    );
   }
   if (timer.state === "finished") settleTimerAction(snapshot, action, span, events);
 }
@@ -183,6 +190,7 @@ function queueTimerHandler(
   snapshot: RuntimeSnapshot,
   timerId: number,
   handlerFunctionId: number,
+  rootScopeId: number,
   dueAtMs: number,
 ): void {
   // Keep the queue in due order: an expiry processed late may be due before one queued at an earlier observation.
@@ -200,7 +208,7 @@ function queueTimerHandler(
     previous.count += 1;
     return;
   }
-  queue.splice(index, 0, { timerId, handlerFunctionId, dueAtMs, count: 1 });
+  queue.splice(index, 0, { timerId, handlerFunctionId, rootScopeId, dueAtMs, count: 1 });
 }
 
 /** Draws a repeat round from the persisted session RNG. */

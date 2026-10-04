@@ -1,59 +1,261 @@
-import type { EndInstruction, GotoInstruction } from "../../plan/model.js";
+import type {
+  EndInstruction,
+  GotoInstruction,
+  PlanDestination,
+  PlanSourceLocation,
+  SetFallbackInstruction,
+  TransferInstruction,
+} from "../../plan/model.js";
+import { innermostFileCallIndex } from "../activations.js";
 import { RuntimeFault } from "../errors.js";
 import type { InterpreterEvent } from "../events.js";
-import type { RuntimeSnapshot } from "../state.js";
-import { assertEventSequenceCapacity, copySpan } from "./support.js";
+import type { RuntimeTimerSnapshot } from "../timers.js";
+import type {
+  RuntimeFileCallFrameSnapshot,
+  RuntimeScopeFrameSnapshot,
+  RuntimeSnapshot,
+} from "../state.js";
+import { assertCounterCanAdvance, assertEventSequenceCapacity, copySpan } from "./support.js";
 import { stopTimerAction } from "./timer-lifecycle.js";
 
+/*
+ * Transfers (ADR 0022 §5). Each entry into a file is an activation with its own top-level variables, in a root scope.
+ * The current activation is the innermost one: the base activation, or the file called last. A transfer leaves the
+ * functions, expiry or media blocks, loops, and blocks of the activation it continues in, so an action that a block
+ * interrupted is abandoned rather than resumed. A non-persistent timer belongs to the activation that started it and
+ * stops, with its queued blocks, when that activation is left: by a goto from it, by its end, or when a block's goto
+ * abandons it. A call leaves nothing. Persistent timers and all media keep running (V30 §22, §27). A root that leaves
+ * the stack stays retained while a block may still need it.
+ */
+
 /**
- * `goto label`: leaves every function, expiry or media block, loop, and block of the file, so an action that a block
- * interrupted is abandoned rather than resumed. Non-persistent timers stop, with their queued blocks; persistent
- * timers and all media keep running (V30 §22, §27).
+ * `goto label` continues the activation the code runs in: the current one, or one that called the current file, whose
+ * later calls are then dropped. A block of a file the session has left brings that activation back in place of the
+ * current one.
  */
 export function executeGoto(
   instruction: GotoInstruction,
   snapshot: RuntimeSnapshot,
+  rootId: number,
   events: InterpreterEvent[],
 ): void {
-  removeNonPersistentTimers(snapshot, instruction, events);
-  snapshot.callFrames.length = 0;
-  snapshot.loopFrames.length = 0;
-  snapshot.frames.splice(1);
-  snapshot.temporaries.length = 0;
+  const segment = activationIndex(snapshot, rootId);
+  const retained =
+    segment === undefined ? snapshot.retainedScopes.findIndex((root) => root.id === rootId) : -1;
+  if (segment === undefined && retained < 0) {
+    throw new Error("A goto runs in an activation that no longer exists.");
+  }
+  // The goto leaves its own activation and abandons those above it, or the current one for a left one.
+  const left =
+    segment !== undefined
+      ? activationRootsFrom(snapshot, segment)
+      : new Set([rootId, ...activationRootsFrom(snapshot, innermostFileCallIndex(snapshot))]);
+  removeNonPersistentTimers(snapshot, left, instruction.span, events);
+  if (segment !== undefined) resetActivation(snapshot, segment);
+  else replaceCurrentRoot(snapshot, snapshot.retainedScopes.splice(retained, 1)[0]!);
   snapshot.nextInstruction = instruction.target;
+  sweepRetainedScopes(snapshot);
 }
 
-/** `end` returns to the file that called this one; no file has called it yet. */
-export function executeEnd(instruction: EndInstruction): never {
-  throw new RuntimeFault(
-    "TSR066",
-    "This file ended, but no file called it, so there is nothing to return to. Use exit where the session should finish.",
-    copySpan(instruction.span),
+/** `goto` or `call` naming a file, or `call label`: a fresh activation of the destination's file. */
+export function executeTransfer(
+  instruction: TransferInstruction,
+  snapshot: RuntimeSnapshot,
+  events: InterpreterEvent[],
+): void {
+  assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
+  if (instruction.mode === "call") {
+    if (snapshot.callFrames.length >= snapshot.maxCallDepth) {
+      throw new RuntimeFault(
+        "TSR047",
+        `Maximum TeaseScript call depth of ${snapshot.maxCallDepth} exceeded.`,
+        copySpan(instruction.span),
+      );
+    }
+    assertCounterCanAdvance(snapshot.nextCallFrameId, "nextCallFrameId");
+  }
+  const root = freshRoot(snapshot, instruction.destination);
+  if (instruction.mode === "goto") {
+    const left = activationRootsFrom(snapshot, innermostFileCallIndex(snapshot));
+    removeNonPersistentTimers(snapshot, left, instruction.span, events);
+    replaceCurrentRoot(snapshot, root);
+  } else {
+    const call: RuntimeFileCallFrameSnapshot = {
+      kind: "file",
+      id: snapshot.nextCallFrameId,
+      callSiteSpan: copySpan(instruction.span),
+      returnInstruction: snapshot.nextInstruction + 1,
+      callerTemporaries: snapshot.temporaries.map((temporary) => ({ ...temporary })),
+      scopeBaseDepth: snapshot.frames.length,
+      loopBaseDepth: snapshot.loopFrames.length,
+    };
+    snapshot.nextCallFrameId += 1;
+    snapshot.callFrames.push(call);
+    snapshot.frames.push(root);
+    snapshot.temporaries.length = 0;
+  }
+  snapshot.nextInstruction = instruction.destination.target;
+  sweepRetainedScopes(snapshot);
+}
+
+/**
+ * `end` ends the current activation, also from one of its functions or blocks. It returns after the `call` of the file,
+ * or without one continues at the fallback destination.
+ */
+export function executeEnd(
+  instruction: EndInstruction,
+  snapshot: RuntimeSnapshot,
+  events: InterpreterEvent[],
+): void {
+  const index = innermostFileCallIndex(snapshot);
+  if (index < 0 && snapshot.fallback === null) {
+    throw new RuntimeFault(
+      "TSR066",
+      "This file ended, but no file called it, so there is nothing to return to. Use exit where the session should finish.",
+      copySpan(instruction.span),
+    );
+  }
+  if (index < 0) assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
+  removeNonPersistentTimers(
+    snapshot,
+    activationRootsFrom(snapshot, index),
+    instruction.span,
+    events,
   );
+  if (index < 0) {
+    const fallback = snapshot.fallback!;
+    replaceCurrentRoot(snapshot, freshRoot(snapshot, fallback));
+    snapshot.nextInstruction = fallback.target;
+  } else {
+    const call = fileCall(snapshot, index);
+    resetActivation(snapshot, index);
+    snapshot.retainedScopes.push(snapshot.frames[call.scopeBaseDepth]!);
+    snapshot.frames.length = call.scopeBaseDepth;
+    snapshot.callFrames.length = index;
+    for (const temporary of call.callerTemporaries) snapshot.temporaries.push({ ...temporary });
+    snapshot.nextInstruction = call.returnInstruction;
+  }
+  sweepRetainedScopes(snapshot);
 }
 
+/** `fallback target` and `fallback none`: the latest one executed wins. */
+export function executeSetFallback(
+  instruction: SetFallbackInstruction,
+  snapshot: RuntimeSnapshot,
+): void {
+  const destination = instruction.destination;
+  snapshot.fallback =
+    destination === null ? null : { file: destination.file, target: destination.target };
+  snapshot.nextInstruction += 1;
+}
+
+/**
+ * Drops the roots no block can reach anymore: a retained root stays while a running or queued block, a block of a
+ * running timer or media, or a function frame refers to it.
+ */
+function sweepRetainedScopes(snapshot: RuntimeSnapshot): void {
+  if (snapshot.retainedScopes.length === 0) return;
+  const referenced = new Set<number>();
+  for (const frame of snapshot.callFrames)
+    if (frame.kind === "function") referenced.add(frame.rootScopeId);
+  for (const invocation of snapshot.pendingTimerHandlers) referenced.add(invocation.rootScopeId);
+  for (const action of snapshot.backgroundActions) {
+    const owner =
+      action.kind === "timer"
+        ? action.timer.handlerFunctionId === null
+          ? null
+          : action.timer.rootScopeId
+        : action.kind === "media"
+          ? action.media.handlerRootScopeId
+          : null;
+    if (owner !== null) referenced.add(owner);
+  }
+  let kept = 0;
+  for (const root of snapshot.retainedScopes) {
+    if (referenced.has(root.id)) snapshot.retainedScopes[kept++] = root;
+  }
+  snapshot.retainedScopes.length = kept;
+}
+
+/** The index of the file call whose activation has this root, -1 for the base activation, or none when left. */
+function activationIndex(snapshot: RuntimeSnapshot, rootId: number): number | undefined {
+  for (let index = snapshot.callFrames.length - 1; index >= 0; index -= 1) {
+    const frame = snapshot.callFrames[index]!;
+    if (frame.kind === "file" && snapshot.frames[frame.scopeBaseDepth]!.id === rootId) return index;
+  }
+  return snapshot.frames[0]!.id === rootId ? -1 : undefined;
+}
+
+/** Leaves everything above an activation's root: later calls, functions, blocks, loops, and temporaries. */
+function resetActivation(snapshot: RuntimeSnapshot, index: number): void {
+  const call = index < 0 ? undefined : fileCall(snapshot, index);
+  const rootDepth = call?.scopeBaseDepth ?? 0;
+  for (let depth = rootDepth + 1; depth < snapshot.frames.length; depth += 1) {
+    const frame = snapshot.frames[depth]!;
+    if (frame.file !== null) snapshot.retainedScopes.push(frame);
+  }
+  snapshot.frames.length = rootDepth + 1;
+  snapshot.callFrames.length = index + 1;
+  snapshot.loopFrames.length = call?.loopBaseDepth ?? 0;
+  snapshot.temporaries.length = 0;
+}
+
+function fileCall(snapshot: RuntimeSnapshot, index: number): RuntimeFileCallFrameSnapshot {
+  const call = snapshot.callFrames[index];
+  if (call?.kind !== "file") throw new Error("An activation's file call is missing.");
+  return call;
+}
+
+/** Replaces the current activation by another: a fresh one, or one the session left that a block brings back. */
+function replaceCurrentRoot(snapshot: RuntimeSnapshot, root: RuntimeScopeFrameSnapshot): void {
+  const index = innermostFileCallIndex(snapshot);
+  resetActivation(snapshot, index);
+  const rootDepth = snapshot.frames.length - 1;
+  snapshot.retainedScopes.push(snapshot.frames[rootDepth]!);
+  snapshot.frames[rootDepth] = root;
+}
+
+function freshRoot(
+  snapshot: RuntimeSnapshot,
+  destination: PlanDestination,
+): RuntimeScopeFrameSnapshot {
+  const root = { id: snapshot.nextScopeId, file: destination.file, bindings: [] };
+  snapshot.nextScopeId += 1;
+  return root;
+}
+
+/** The roots of an activation, by its file call's index or -1 for the base one, and of every activation above it. */
+function activationRootsFrom(snapshot: RuntimeSnapshot, index: number): Set<number> {
+  const roots = new Set<number>();
+  if (index < 0) roots.add(snapshot.frames[0]!.id);
+  for (let position = Math.max(index, 0); position < snapshot.callFrames.length; position += 1) {
+    const frame = snapshot.callFrames[position]!;
+    if (frame.kind === "file") roots.add(snapshot.frames[frame.scopeBaseDepth]!.id);
+  }
+  return roots;
+}
+
+/** Stops the non-persistent timers of the activations a transfer leaves, with their queued blocks. */
 function removeNonPersistentTimers(
   snapshot: RuntimeSnapshot,
-  instruction: GotoInstruction,
+  left: ReadonlySet<number>,
+  span: PlanSourceLocation,
   events: InterpreterEvent[],
 ): void {
+  const leaves = (timer: RuntimeTimerSnapshot): boolean =>
+    !timer.persist && left.has(timer.rootScopeId);
   const stopping = snapshot.backgroundActions.filter(
-    (action) => action.kind === "timer" && !action.timer.persist,
+    (action) => action.kind === "timer" && leaves(action.timer),
   );
-  assertEventSequenceCapacity(snapshot, stopping.length, instruction.span);
+  assertEventSequenceCapacity(snapshot, stopping.length, span);
   for (const action of stopping) {
-    if (action.kind === "timer") stopTimerAction(snapshot, action, instruction.span, events);
+    if (action.kind === "timer") stopTimerAction(snapshot, action, span, events);
   }
-  // A finished timer may still have queued blocks; they belong to the path the goto leaves.
-  const persistent = new Set(
-    snapshot.settledTimers.filter((timer) => timer.persist).map((timer) => timer.timerId),
-  );
-  for (const action of snapshot.backgroundActions) {
-    if (action.kind === "timer") persistent.add(action.timer.timerId);
-  }
+  // A finished timer may still have queued blocks; they belong to the activation the transfer leaves.
+  const dropped = new Set(snapshot.settledTimers.filter(leaves).map((timer) => timer.timerId));
   for (let index = snapshot.pendingTimerHandlers.length - 1; index >= 0; index -= 1) {
     const invocation = snapshot.pendingTimerHandlers[index]!;
-    if ("timerId" in invocation && !persistent.has(invocation.timerId)) {
+    if ("timerId" in invocation && dropped.has(invocation.timerId)) {
       snapshot.pendingTimerHandlers.splice(index, 1);
     }
   }

@@ -874,8 +874,8 @@ punish(3)
   to make that name a global, or to pass it as a parameter.
 - Interactions, timers, media, `goto`, `call`, `end`, `exit`, and recursion work in it as in any function. A bare label
   in it means a label of the file where it is written, like `goto "helpers.tease" start`: the goto enters that file
-  afresh, so a variable of the file used after the label needs its `let` after the label too ([§26](#26-labels-and-goto)).
-  This holds even when nothing calls the function, until it is computed which global functions can be reached.
+  afresh, so a variable of the file used after the label needs its `let` after the label too ([§26](#26-labels-and-goto)),
+  where a call that can run reaches the function.
 - Its name is unique in the package, like that of a global ([§12](#global-variables)).
 
 ## 12. Variable declarations
@@ -2738,10 +2738,10 @@ of the wrong type are rejected.
   every round must last longer than zero. Rounds that expire during one late time observation keep their original
   schedule and each run the expiry block once.
 - Every timer stops on `exit` and when the session ends.
-- On `goto`, `end`, and `call` transfers, non-persistent timers are removed and persistent timers remain active.
-
-`goto` within a file applies these rules; `call`, an `end` that returns to a caller, and transfers to other files are
-not implemented yet.
+- A non-persistent timer belongs to the file entry that started it ([§29](#29-script-files-and-paths)). It is removed
+  when that entry is left: by a `goto`, within the file or to another file, by its `end`, or when a block's `goto`
+  abandons it. A `call` does not leave the caller, so the caller's timers keep running during the call. Persistent
+  timers remain active until `exit`.
 
 ### Expiry blocks
 
@@ -2860,7 +2860,9 @@ let secondButton = showPermanentButton "Unknown" {
 
 Cleanup:
 
-- A non-persistent button is removed on `goto`, `end`, `call`, or `exit`.
+- A non-persistent button belongs to the file entry that showed it, as a non-persistent timer does
+  ([§27](#27-timers)): it is removed when that entry is left by a `goto`, by its `end`, or by a block's `goto` that
+  abandons it, and on `exit`. A `call` keeps it.
 - A persistent button survives `goto`, `end`, and `call`.
 - Every permanent button disappears on `exit`.
 
@@ -2883,6 +2885,7 @@ Call another file, from its top or at a label; execution continues after the `ca
 ```text
 call "corner-time/short.tease"
 call "corner-time/short.tease" start
+call start                          // a label of this file, entered afresh
 ```
 
 A glob pattern picks one matching file at random:
@@ -2908,6 +2911,16 @@ Rules:
   function, loop, and block continuations are discarded.
 - `call` keeps the current position, including an enclosing function or loop, and resumes after the `call` when the
   called file reaches `end`.
+- Each entry into a file, by `goto` or `call` naming it, by `call` of a label, or by the fallback, starts with fresh
+  top-level variables of that file. A `goto` to a label of the file continues with the variables of the entry it runs
+  in.
+- A function sees the top-level variables of the entry that called it, and a timer or media block those of the entry
+  that started it, also after the session has left that entry.
+- `end`, also in a function or block, ends the running file and returns after its `call`. A file called from a block
+  returns into that block.
+- A `goto label` in a block of an entry other than the running one continues that entry at the label, with its own
+  variables. If that entry called the running file, the calls above it are abandoned and its own callers stay; if the
+  session had left that entry, it takes the place of the running one.
 - A path that leaves the package, a missing file, and a missing label are compile errors.
 - In a glob, `*` stands for any characters within one folder or file name. Globs are expanded at compile time. With a
   label, the pick is among the matched files that have it. A glob that matches no file, or no file with the label, is a

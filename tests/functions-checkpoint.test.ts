@@ -19,7 +19,7 @@ import {
   validateRuntimeSnapshot,
   type RuntimeSnapshot,
 } from "../src/runtime/state.js";
-import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { assertRuntimeResumeEquivalent, functionFrames } from "./helpers/runtime-equivalence.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
@@ -38,13 +38,13 @@ test("restores every instruction boundary during defaults and nested calls", () 
   assert.ok(
     observations.some(
       (snapshot) =>
-        snapshot.callFrames.at(-1)?.parameterState.phase === "supplied" &&
-        snapshot.callFrames.at(-1)?.parameterState.parameterIndex === 0,
+        functionFrames(snapshot).at(-1)?.parameterState.phase === "supplied" &&
+        functionFrames(snapshot).at(-1)?.parameterState.parameterIndex === 0,
     ),
   );
   assert.ok(
     observations.some((snapshot) =>
-      snapshot.callFrames.some((frame) => frame.parameterState.phase === "defaults"),
+      functionFrames(snapshot).some((frame) => frame.parameterState.phase === "defaults"),
     ),
   );
   assert.ok(observations.some((snapshot) => snapshot.callFrames.length >= 2));
@@ -117,8 +117,8 @@ test("restores direct and mutual recursion at every instruction boundary", () =>
   assert.ok(
     mutual.some(
       (snapshot) =>
-        snapshot.callFrames.some((frame) => frame.functionName === "even") &&
-        snapshot.callFrames.some((frame) => frame.functionName === "odd"),
+        functionFrames(snapshot).some((frame) => frame.functionName === "even") &&
+        functionFrames(snapshot).some((frame) => frame.functionName === "odd"),
     ),
   );
 });
@@ -146,7 +146,7 @@ test("restores between nested calls, around say events, and after parameter reas
   // The stored argument stays the supplied value while the body's binding changes, and both remain valid state.
   assert.ok(
     observations.some((snapshot) => {
-      const frame = snapshot.callFrames.at(-1);
+      const frame = functionFrames(snapshot).at(-1);
       const binding = snapshot.frames[frame?.scopeBaseDepth ?? -1]?.bindings.find(
         (candidate) => candidate.name === "value",
       );
@@ -177,7 +177,7 @@ test("preserves prepared earlier arguments through a later suspension and a susp
   // While `later` waits, the caller retains the already evaluated first argument.
   assert.ok(
     boundaries.some((snapshot) => {
-      const frame = snapshot.callFrames.at(-1);
+      const frame = functionFrames(snapshot).at(-1);
       return (
         snapshot.status === "waiting" &&
         frame?.functionName === "later" &&
@@ -188,8 +188,10 @@ test("preserves prepared earlier arguments through a later suspension and a susp
   const combineWaiting = boundaries.find(
     (snapshot) =>
       snapshot.status === "waiting" &&
-      snapshot.callFrames.at(-1)?.functionName === "combine" &&
-      snapshot.callFrames.at(-1)?.arguments.every((argument) => argument.supplied),
+      functionFrames(snapshot).at(-1)?.functionName === "combine" &&
+      functionFrames(snapshot)
+        .at(-1)
+        ?.arguments.every((argument) => argument.supplied),
   );
   assert.ok(combineWaiting !== undefined);
   // The last boundary runs the exit, which clears frames and temporaries, so the one before it shows what the call left.
@@ -245,8 +247,8 @@ test("treats unbound call-frame argument values as canonical resumable state", (
   const snapshot = executeUntil(
     compiled,
     (candidate) =>
-      candidate.callFrames.at(-1)?.parameterState.phase === "supplied" &&
-      candidate.callFrames.at(-1)?.parameterState.parameterIndex === 0,
+      functionFrames(candidate).at(-1)?.parameterState.phase === "supplied" &&
+      functionFrames(candidate).at(-1)?.parameterState.parameterIndex === 0,
   );
   const changed: any = structuredClone(snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture changes a deeply nested unbound call argument while preserving its canonical surrounding snapshot.
   changed.callFrames[0].arguments[0].value.properties[0].value.properties[0].value.items[1] = 99;
@@ -319,8 +321,8 @@ test("rejects inconsistent argument supply and parameter bindings", () => {
 
   const suppliedPhase = (parameterIndex: number) => (candidate: RuntimeSnapshot) =>
     candidate.callFrames.length === 1 &&
-    candidate.callFrames[0]!.parameterState.phase === "supplied" &&
-    candidate.callFrames[0]!.parameterState.parameterIndex === parameterIndex;
+    functionFrames(candidate)[0]!.parameterState.phase === "supplied" &&
+    functionFrames(candidate)[0]!.parameterState.parameterIndex === parameterIndex;
   const snapshot = executeUntil(compiled, suppliedPhase(0));
   assert.deepEqual(snapshot.frames[1]?.bindings, []);
 
@@ -402,7 +404,7 @@ test("restores between assignment-target and right-hand call evaluation", () => 
   assert.ok(
     observations.some(
       (snapshot) =>
-        snapshot.callFrames.at(-1)?.functionName === "valueFunction" &&
+        functionFrames(snapshot).at(-1)?.functionName === "valueFunction" &&
         snapshot.callFrames.at(-1)!.callerTemporaries.length > 0,
     ),
   );
@@ -538,7 +540,7 @@ test("rejects malformed prepared-reference state in active and suspended tempora
   const suspended = executeUntil(
     compiled,
     (candidate) =>
-      candidate.callFrames.at(-1)?.functionName === "replacement" &&
+      functionFrames(candidate).at(-1)?.functionName === "replacement" &&
       candidate.callFrames
         .at(-1)!
         .callerTemporaries.some(
@@ -606,7 +608,10 @@ test("rejects missing temporaries in every suspended caller continuation", () =>
     const compiled = plan([...functions, source, "exit"].join("\n"));
     const snapshot = executeUntil(
       compiled,
-      (candidate) => candidate.callFrames.map((frame) => frame.functionName).join(",") === frames,
+      (candidate) =>
+        functionFrames(candidate)
+          .map((frame) => frame.functionName)
+          .join(",") === frames,
     );
     const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
     // The caller of `two` retains the result of `one`; removing it leaves the continuation without input.
@@ -632,7 +637,7 @@ test("rejects missing suspended results at multiple recursion depths", () => {
     compiled,
     (candidate) =>
       candidate.callFrames.length >= 4 &&
-      candidate.callFrames.every((frame) => frame.functionName === "recurse"),
+      functionFrames(candidate).every((frame) => frame.functionName === "recurse"),
   );
 
   for (let frameIndex = 1; frameIndex < snapshot.callFrames.length; frameIndex += 1) {
@@ -664,7 +669,7 @@ test("rejects parameter progress that disagrees with exact default segments", ()
     ].join("\n"),
   );
   const snapshot = executeUntil(compiled, (candidate) => {
-    const frame = candidate.callFrames.at(-1);
+    const frame = functionFrames(candidate).at(-1);
     return (
       frame?.functionName === "sample" &&
       frame.parameterState.phase === "defaults" &&
@@ -691,7 +696,9 @@ test("rejects corrupted outer default progress while an inner call is active", (
   const snapshot = executeUntil(
     compiled,
     (candidate) =>
-      candidate.callFrames.map((frame) => frame.functionName).join(",") === "outer,inner",
+      functionFrames(candidate)
+        .map((frame) => frame.functionName)
+        .join(",") === "outer,inner",
   );
   const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
   checkpoint.snapshot.callFrames[0]!.parameterState.parameterIndex = 1;
@@ -702,7 +709,7 @@ test("rejects structurally valid non-parameter bindings during a prologue", () =
   const compiled = plan("function sample(value = 1) { return value }\nsay sample()\nexit");
   const snapshot = executeUntil(
     compiled,
-    (candidate) => candidate.callFrames.at(-1)?.parameterState.phase === "defaults",
+    (candidate) => functionFrames(candidate).at(-1)?.parameterState.phase === "defaults",
   );
   const checkpoint = mutableCheckpoint(createCheckpoint(compiled, snapshot));
   const frame = checkpoint.snapshot.callFrames.at(-1)!;

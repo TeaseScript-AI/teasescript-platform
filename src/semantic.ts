@@ -20,6 +20,7 @@ import type {
   Program,
   SpeakerDeclaration,
   Statement,
+  TransferTarget,
 } from "./ast.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import type { SourceSpan } from "./source.js";
@@ -50,9 +51,10 @@ import {
   isExactDuration,
 } from "./duration.js";
 import { validateSwitchCases } from "./switch-cases.js";
+import { packagePathProblem } from "./project-paths.js";
 import type { StatementFlow } from "./type-checker.js";
 import { MAIN_FILE_PATH } from "./project-paths.js";
-import { sessionDeclarations } from "./project-globals.js";
+import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
 
 export interface SemanticValidationOptions {
   readonly globals?: readonly string[];
@@ -61,6 +63,12 @@ export interface SemanticValidationOptions {
 
 export interface SemanticValidationResult {
   readonly diagnostics: readonly Diagnostic[];
+}
+
+/** A place where a `goto`, `call`, or `fallback` enters a file with fresh top-level variables: its top or a label. */
+export interface FileEntry {
+  readonly path: string;
+  readonly label: string | null;
 }
 
 /** `global` is a name the host configures; a `global` declared in a script is a project `variable`. */
@@ -149,6 +157,7 @@ const semanticCode = {
   skippedInitialization: "TSV054",
   invalidStartValue: "TSV055",
   fileName: "TSV056",
+  invalidFileTarget: "TSV057",
 } as const;
 
 /** Where code runs, for the initialization check: a top-level statement, a function, or a handler and its origin. */
@@ -175,10 +184,13 @@ export function validateSemantics(
   });
 }
 
-/** The name checks of one file; the initialization check at labels waits for the flow of the type check. */
+/** The name checks of one file; the transfer and initialization checks wait for the flow of the type check. */
 export interface FileSemanticResult {
   readonly diagnostics: readonly Diagnostic[];
-  checkInitialization(flow: StatementFlow): readonly Diagnostic[];
+  /** Where this file's transfers enter files afresh, of those that can run by the flow of the type check. */
+  reachableEntries(flow: StatementFlow): readonly FileEntry[];
+  /** Checks the uses of top-level variables after labels, given the labels of this file that are entered afresh. */
+  checkInitialization(freshLabels: ReadonlySet<string>, flow: StatementFlow): readonly Diagnostic[];
 }
 
 /** A file of a project by its package path, in project order: `main.tease` first, then the others by path. */
@@ -207,11 +219,38 @@ export function validateProjectSemantics(
     validator.validate(file.program);
     return validator;
   });
+  // Code can run in every file's top level, and in the functions that calls which can run reach, across files.
+  const reachability = new WeakMap<StatementFlow, ReadonlySet<string>>();
+  const reachable = (flow: StatementFlow): ReadonlySet<string> => {
+    const known = reachability.get(flow);
+    if (known !== undefined) return known;
+    const callees = new Map<string, string[]>();
+    for (const validator of validators) {
+      for (const [caller, callee] of validator?.callEdges(flow) ?? []) {
+        const list = callees.get(caller) ?? [];
+        list.push(callee);
+        callees.set(caller, list);
+      }
+    }
+    const nodes = new Set(files.map((_, index) => `${index}:`));
+    const pending = [...nodes];
+    while (pending.length > 0) {
+      for (const callee of callees.get(pending.pop()!) ?? []) {
+        if (nodes.has(callee)) continue;
+        nodes.add(callee);
+        pending.push(callee);
+      }
+    }
+    reachability.set(flow, nodes);
+    return nodes;
+  };
   return project.diagnostics.map((diagnostics, index) =>
     Object.freeze({
       diagnostics: Object.freeze([...diagnostics]),
-      checkInitialization: (flow: StatementFlow) =>
-        validators[index]?.checkInitialization(files[index]!.program, flow) ?? [],
+      reachableEntries: (flow: StatementFlow) =>
+        validators[index]?.reachableEntries(flow, reachable(flow)) ?? [],
+      checkInitialization: (freshLabels: ReadonlySet<string>, flow: StatementFlow) =>
+        validators[index]?.checkInitialization(files[index]!.program, freshLabels, flow) ?? [],
     }),
   );
 }
@@ -219,6 +258,12 @@ export function validateProjectSemantics(
 /** The project scope: host globals, then the globals, speakers, and global functions of every file. */
 class ProjectNames {
   readonly scope = new SemanticScope();
+
+  /** The top-level labels of each file, by path, which transfers may name. */
+  readonly labels = new Map<string, ReadonlySet<string>>();
+
+  /** The files that run nothing on their own: they hold declarations only. */
+  readonly declarationsOnly = new Set<string>();
 
   readonly diagnostics: Diagnostic[][];
 
@@ -230,6 +275,17 @@ class ProjectNames {
     options: SemanticValidationOptions,
   ) {
     this.diagnostics = files.map(() => []);
+    for (const { path, program } of files) {
+      this.labels.set(
+        path,
+        new Set(
+          program.statements.flatMap((statement) =>
+            statement.kind === "labelStatement" ? [statement.name.name] : [],
+          ),
+        ),
+      );
+      if (!program.statements.some(runsOnItsOwn)) this.declarationsOnly.add(path);
+    }
     for (const name of options.globals ?? []) this.scope.declare(name, { kind: "global" });
     const protectedNames = new Set([...TEASESCRIPT_PROTECTED_NAMES, ...(options.builtins ?? [])]);
     const declare = (
@@ -406,11 +462,13 @@ class SemanticValidator {
     readonly label: string;
     readonly context: FlowContext;
     readonly statement: Statement;
-    /**
-     * A goto in a global function or its blocks, which may run from any file: its bare label means that label of this
-     * file as a transfer to the file, which enters the file afresh, with none of its top-level `let`s run (ADR 0022 §3).
-     */
-    readonly fresh: boolean;
+  }[] = [];
+
+  /** Every call of an author function, also of another file's global function, by its call-graph node. */
+  readonly #callEdges: {
+    readonly callee: string;
+    readonly context: FlowContext;
+    readonly statement: Statement;
   }[] = [];
 
   readonly #calls: {
@@ -447,6 +505,13 @@ class SemanticValidator {
     ]);
     this.#protectedNames = new Set([...TEASESCRIPT_PROTECTED_NAMES, ...(options.builtins ?? [])]);
   }
+
+  /** Where transfers of this file enter files afresh, with the code that runs them. */
+  readonly #entries: {
+    readonly entry: FileEntry;
+    readonly context: FlowContext;
+    readonly statement: Statement;
+  }[] = [];
 
   public validate(program: Program): void {
     // The configuration belongs to the project, so its problems are reported once, in main.tease.
@@ -1247,21 +1312,94 @@ class SemanticValidator {
         }
         return;
       case "gotoStatement":
-        this.#gotos.push({
-          label: statement.label.name,
-          context: this.#context,
-          statement: this.#statement!,
-          fresh: this.#globalFunction !== null,
-        });
-        if (!this.#labels.has(statement.label.name)) {
-          this.#report(
-            semanticCode.invalidLabel,
-            `This file has no label '${statement.label.name}'. Add 'label ${statement.label.name}' in the outer level of the file.`,
-            statement.label.span,
-          );
+      case "callFileStatement":
+      case "fallbackStatement": {
+        const target = statement.target;
+        if (target === null || !this.#validateTransferTarget(target, statement.kind)) return;
+        if (target.kind === "fileTarget") {
+          this.#entries.push({
+            entry: { path: target.path, label: target.label?.name ?? null },
+            context: this.#context,
+            statement,
+          });
+        } else if (statement.kind === "gotoStatement" && this.#globalFunction === null) {
+          // A goto to a label of the same file keeps the file's variables.
+          this.#gotos.push({
+            label: target.label.name,
+            context: this.#context,
+            statement: this.#statement!,
+          });
+        } else {
+          // `call label` and `fallback label`, and in a global function or its blocks also `goto label`, enter
+          // this file afresh at the label (ADR 0022 §3.5).
+          this.#entries.push({
+            entry: { path: this.project.files[this.file]!.path, label: target.label.name },
+            context: this.#context,
+            statement,
+          });
         }
         return;
+      }
     }
+  }
+
+  /** Reports a missing file or label; a label alone names one of this file. */
+  #validateTransferTarget(
+    target: TransferTarget,
+    transfer: "gotoStatement" | "callFileStatement" | "fallbackStatement",
+  ): boolean {
+    if (target.kind === "labelTarget") {
+      if (this.#labels.has(target.label.name)) return true;
+      this.#report(
+        semanticCode.invalidLabel,
+        `This file has no label '${target.label.name}'. Add 'label ${target.label.name}' in the outer level of the file.`,
+        target.label.span,
+      );
+      return false;
+    }
+    if (target.path.includes("*")) {
+      this.#report(
+        semanticCode.invalidFileTarget,
+        "A glob pattern cannot be a goto, call, or fallback target yet. Name one file.",
+        target.pathSpan,
+      );
+      return false;
+    }
+    const problem = packagePathProblem(target.path);
+    if (problem !== null) {
+      this.#report(
+        semanticCode.invalidFileTarget,
+        `'${target.path}' is not a package file path: ${problem}.`,
+        target.pathSpan,
+      );
+      return false;
+    }
+    const labels = this.project.labels.get(target.path);
+    if (labels === undefined) {
+      this.#report(
+        semanticCode.invalidFileTarget,
+        `The project has no file '${target.path}'. Paths start at the package root, such as "rooms/hall.tease".`,
+        target.pathSpan,
+      );
+      return false;
+    }
+    if (target.label !== null && !labels.has(target.label.name)) {
+      this.#report(
+        semanticCode.invalidLabel,
+        `'${target.path}' has no label '${target.label.name}'.`,
+        target.label.span,
+      );
+      return false;
+    }
+    if (transfer !== "callFileStatement" && this.project.declarationsOnly.has(target.path)) {
+      this.#report(
+        semanticCode.invalidFileTarget,
+        `'${target.path}' holds declarations only and runs nothing, so going there would end nowhere. Call its functions instead.`,
+        target.pathSpan,
+      );
+      return false;
+    }
+    return true;
   }
 
   #validateFunction(declaration: FunctionDeclaration): void {
@@ -1556,6 +1694,11 @@ class SemanticValidator {
             // The initialization check follows the calls of this file's functions.
             if (this.#functions.get(name) === binding.declaration)
               this.#calls.push({ name, context: this.#context, statement: this.#statement! });
+            this.#callEdges.push({
+              callee: binding.declaration.global ? `global:${name}` : `${this.file}:${name}`,
+              context: this.#context,
+              statement: this.#statement!,
+            });
             this.#validateFunctionCall(expression, binding.declaration);
           } else if (this.#builtins.has(name)) {
             // The type check checks the arguments of the core built-ins it knows.
@@ -1986,20 +2129,63 @@ class SemanticValidator {
   }
 
   /**
+   * The entries of transfers that can run: their statement runs by the type check's flow, in the file's top level, a
+   * function that a call which can run reaches, or a block whose timer or media is started where code can run. Like a
+   * goto, a transfer that cannot run enters nothing (ADR 0022 §3.4).
+   */
+  /** The node of the call graph that a context runs in, or `undefined` when a block's start cannot run. */
+  #codeNode(start: FlowContext, flow: StatementFlow): string | undefined {
+    let context = start;
+    while (context.kind === "handler") {
+      if (flow.unreachable.has(context.created)) return undefined;
+      context = context.origin;
+    }
+    if (context.kind === "root") return `${this.file}:`;
+    return this.#functions.get(context.name)?.global === true
+      ? `global:${context.name}`
+      : `${this.file}:${context.name}`;
+  }
+
+  /** The calls of author functions that can run, as edges between the code that calls and the function called. */
+  callEdges(flow: StatementFlow): readonly (readonly [string, string])[] {
+    return this.#callEdges.flatMap(({ callee, context, statement }) => {
+      if (flow.unreachable.has(statement)) return [];
+      const caller = this.#codeNode(context, flow);
+      return caller === undefined ? [] : [[caller, callee] as const];
+    });
+  }
+
+  /** The entries of this file's transfers whose code can run, given the code reachable in the project. */
+  reachableEntries(flow: StatementFlow, reachable: ReadonlySet<string>): readonly FileEntry[] {
+    return this.#entries.flatMap(({ entry, context, statement }) => {
+      const owner = this.#codeNode(context, flow);
+      return !flow.unreachable.has(statement) && owner !== undefined && reachable.has(owner)
+        ? [entry]
+        : [];
+    });
+  }
+
+  /**
    * A goto can reach a label without running the top-level `let`s between the place it starts and the label. A use of
    * a variable of the file is an error when a goto can make it miss its `let`: it has a value on every way there
    * without gotos, but not on every way with them. A goto has run what came before the statement it stands in, or
    * before the call of its function or the start of its handler. Which statements run and continue is the flow of the
-   * type check, so this check and the ending check agree. Other early uses, such as a function called before the
-   * `let`, are checked when they run.
+   * type check, so this check and the ending check agree. A file entered afresh at a label, by a `goto` or `call`
+   * naming a file, a `call` of a label, or a fallback, has run nothing there. Other early uses, such as a function
+   * called before the `let`, are checked when they run.
    */
-  checkInitialization(program: Program, flow: StatementFlow): readonly Diagnostic[] {
+  checkInitialization(
+    program: Program,
+    freshLabels: ReadonlySet<string>,
+    flow: StatementFlow,
+  ): readonly Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
-    if (this.#gotos.length === 0 || this.#rootAccesses.length === 0) return diagnostics;
+    if ((this.#gotos.length === 0 && freshLabels.size === 0) || this.#rootAccesses.length === 0)
+      return diagnostics;
     // Only the variables that are used need following.
     const used = new Set(this.#rootAccesses.map((access) => access.name));
-    const withGotos = this.#initializedVariables(program, flow, used, true);
-    const withoutGotos = this.#initializedVariables(program, flow, used, false);
+    const withGotos = this.#initializedVariables(program, freshLabels, flow, used, true);
+    const withoutGotos = this.#initializedVariables(program, freshLabels, flow, used, false);
     const reported = new Set<string>();
     for (const access of this.#rootAccesses) {
       if (flow.unreachable.has(access.statement)) continue;
@@ -2018,7 +2204,9 @@ class SemanticValidator {
         createDiagnostic(
           DiagnosticSeverity.Error,
           semanticCode.skippedInitialization,
-          `A goto can reach this line without running 'let ${access.name}' first, so ${access.name} may have no value here. Move the label that the goto jumps to before 'let ${access.name}', or set ${access.name} on every way here.`,
+          freshLabels.size === 0
+            ? `A goto can reach this line without running 'let ${access.name}' first, so ${access.name} may have no value here. Move the label that the goto jumps to before 'let ${access.name}', or set ${access.name} on every way here.`
+            : `This line can be reached without running 'let ${access.name}' first, through a goto, call, or fallback to a label after it, so ${access.name} may have no value here. Set ${access.name} after that label, or make it a global.`,
           access.span,
         ),
       );
@@ -2032,6 +2220,7 @@ class SemanticValidator {
    */
   #initializedVariables(
     program: Program,
+    freshLabels: ReadonlySet<string>,
     flow: StatementFlow,
     used: ReadonlySet<string>,
     followGotos: boolean,
@@ -2100,9 +2289,9 @@ class SemanticValidator {
         let known: Known = flow.continuing.has(statements[previous]!) ? after(previous) : null;
         const statement = statements[index]!;
         if (followGotos && statement.kind === "labelStatement") {
+          if (freshLabels.has(statement.name.name)) known = new Set();
           for (const goto of gotos) {
-            if (goto.label === statement.name.name)
-              known = meet(known, goto.fresh ? new Set() : atContext(goto.context));
+            if (goto.label === statement.name.name) known = meet(known, atContext(goto.context));
           }
         }
         if (!sameKnown(before[index]!, known)) {

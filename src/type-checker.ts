@@ -139,7 +139,7 @@ import {
   type StaticType,
 } from "./static-types.js";
 import { typePlan } from "./type-plans.js";
-import { sessionDeclarations } from "./project-globals.js";
+import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
 
 export interface TypeCheckOptions {
   readonly globals?: readonly string[];
@@ -1041,6 +1041,12 @@ class TypeChecker {
       case "endStatement":
       case "gotoStatement":
         return false;
+      case "callFileStatement":
+        // The called file runs until its end, like any suspension.
+        this.#suspend();
+        return true;
+      case "fallbackStatement":
+        return true;
       case "labelStatement":
         // A goto from anywhere in the file may arrive here, so nothing narrowed before the label still holds.
         this.#flow = new Flow();
@@ -4587,6 +4593,8 @@ const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
   "hideImageStatement",
   "saveStatement",
   "deleteStatement",
+  // Blocks of the caller keep running while a called file runs.
+  "callFileStatement",
 ]);
 
 /** What a program's loops and functions may change (ADR 0021 rule 5.5). */
@@ -5968,13 +5976,6 @@ function scalarType(name: ScalarTypeName): StaticType {
  * Whether a top-level statement runs something on its own. A speaker or a `global` without `default:` only declares,
  * like a function, so a file of declarations needs no ending.
  */
-function runsOnItsOwn(statement: Statement): boolean {
-  return !(
-    statement.kind === "speakerDeclaration" ||
-    (statement.kind === "globalStatement" && statement.assignment === null)
-  );
-}
-
 function unwrapGrouping(expression: Expression): Expression {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   return expression;

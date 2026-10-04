@@ -16,6 +16,7 @@ import { instructionKilledTemporaries, requiredInstructionTemporaries } from "./
 /** Validated instruction boundaries of one plan file. */
 export interface PlanFileBoundaries {
   readonly startInstruction: number;
+  readonly entryInstruction: number;
   readonly rootEndInstruction: number;
   readonly endInstruction: number;
   /** Where the file's labels stand: the only targets of a goto in the file. */
@@ -116,6 +117,9 @@ function rootSuccessors(instruction: Instruction, index: number): readonly numbe
       return [instruction.target, index + 1];
     case "callFunction":
       return [instruction.returnInstruction];
+    // A file call returns after it; a goto to a file leaves.
+    case "transfer":
+      return instruction.mode === "call" ? [index + 1] : [];
     case "exit":
     case "end":
     case "goto":
@@ -364,7 +368,9 @@ interface PlanValidationIndex {
   readonly owners: readonly (InstructionExecutionRegion | undefined)[];
   readonly functionsById: ReadonlyMap<number, ValidatedFunctionRange>;
   readonly files: readonly PlanFileBoundaries[];
-  /** Gotos leave their region, so any of them that lands inside a prepared value bypasses it. */
+  /**
+   * Gotos, transfers, and fallbacks leave their region, so any of them that lands inside a prepared value bypasses it.
+   */
   readonly gotoSources: ReadonlySet<number>;
 }
 
@@ -402,7 +408,13 @@ function createPlanValidationIndex(
   }
   const gotoSources = new Set<number>();
   instructions.forEach((instruction, index) => {
-    if (isRecord(instruction) && instruction.kind === "goto") gotoSources.add(index);
+    if (
+      isRecord(instruction) &&
+      (instruction.kind === "goto" ||
+        instruction.kind === "transfer" ||
+        instruction.kind === "setFallback")
+    )
+      gotoSources.add(index);
   });
   return { owners, functionsById, files, gotoSources };
 }
@@ -460,6 +472,21 @@ function validateInstructionControlFlowRegions(
               "TSC002",
               "A goto must continue at a label of its own file.",
               `${instructionPath}.target`,
+            ),
+          );
+        }
+        return;
+      case "transfer":
+      case "setFallback":
+        if (
+          instruction.destination !== null &&
+          !isFileDestination(index, instruction.destination)
+        ) {
+          errors.push(
+            planError(
+              "TSC002",
+              "A transfer must enter a file at its entry or at one of its labels.",
+              `${instructionPath}.destination`,
             ),
           );
         }
@@ -1196,6 +1223,9 @@ function explicitInstructionTargets(instruction: Record<string, unknown>): reado
       return [instruction.returnInstruction];
     case "goto":
       return [instruction.target];
+    case "transfer":
+    case "setFallback":
+      return isRecord(instruction.destination) ? [instruction.destination.target] : [];
     default:
       return [];
   }
@@ -1360,6 +1390,17 @@ const FUNCTION_FIELDS = [
 ];
 
 const PARAMETER_FIELDS = ["name", "index", "hasDefault", "declarationSpan", "defaultSpan"];
+
+function isFileDestination(index: PlanValidationIndex, destination: unknown): boolean {
+  if (!isRecord(destination)) return false;
+  const { file, target } = destination;
+  if (typeof file !== "number" || typeof target !== "number") return false;
+  const boundaries = index.files[file];
+  return (
+    boundaries !== undefined &&
+    (target === boundaries.entryInstruction || boundaries.labelInstructions.has(target))
+  );
+}
 
 /**
  * Functions and handlers are local to their file, except global functions, which every file may call (ADR 0022 §3). A

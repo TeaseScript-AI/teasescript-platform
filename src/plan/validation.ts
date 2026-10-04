@@ -314,12 +314,29 @@ const FILE_FIELDS = [
   "path",
   "sourceSpan",
   "startInstruction",
+  "entryInstruction",
   "rootEndInstruction",
   "endInstruction",
   "labels",
 ];
 
 const LABEL_FIELDS = ["name", "instruction"];
+
+/** A destination's file and target must also name that file's entry or a label; the stream analysis checks that. */
+function validateDestinationShape(
+  value: unknown,
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["file", "target"]) ||
+    !nonNegativeSafeInteger(value.file) ||
+    !nonNegativeSafeInteger(value.target)
+  ) {
+    errors.push(planError("TSC002", "Transfer destination is malformed.", path));
+  }
+}
 
 /**
  * Checks the file table: `main.tease` first, the other package paths in order, and blocks that cover the instruction
@@ -391,6 +408,8 @@ function validatePlanFiles(
   const boundaries: PlanFileBoundaries[] = [];
   let expectedStart = 0;
   let previousPath: string | null = null;
+  let startupEnd = 0;
+  while (isStartupDeclaration(instructions[startupEnd])) startupEnd += 1;
   value.forEach((file: unknown, fileIndex) => {
     const path = `$.files[${fileIndex}]`;
     if (!isRecord(file)) {
@@ -439,8 +458,21 @@ function validatePlanFiles(
         ),
       );
     }
+    // A fresh activation starts at the top of its file, where no block, loop, or temporary is open; in main.tease,
+    // after the start values, which set up the globals once.
+    const entry = file.entryInstruction;
+    if (entry !== (fileIndex === 0 ? startupEnd : start)) {
+      errors.push(
+        planError(
+          "TSC002",
+          "A file's entry must be the start of its root region, after main.tease's start values.",
+          `${path}.entryInstruction`,
+        ),
+      );
+    }
     boundaries.push({
       startInstruction: start,
+      entryInstruction: typeof entry === "number" ? entry : start,
       rootEndInstruction: rootEnd,
       endInstruction: end,
       labelInstructions: validatePlanLabels(file.labels, start, rootEnd, `${path}.labels`, errors),
@@ -468,6 +500,8 @@ const INSTRUCTION_FIELDS = fieldsByKind([
   ["exit"],
   ["end"],
   ["goto", "target"],
+  ["transfer", "mode", "destination"],
+  ["setFallback", "destination"],
   ["declareBinding", "name", "value", "typeCheck"],
   ["prepareReference", "expression", "destinationTemporary"],
   ["validateAssignmentTarget", "target"],
@@ -581,6 +615,17 @@ function validateInstruction(
     case "goto":
       if (!validInstructionBoundary(value.target, instructionCount)) {
         errors.push(planError("TSC002", "Goto target is outside the plan.", `${path}.target`));
+      }
+      return;
+    case "transfer":
+      if (value.mode !== "goto" && value.mode !== "call") {
+        errors.push(planError("TSC002", "Transfer mode is invalid.", `${path}.mode`));
+      }
+      validateDestinationShape(value.destination, `${path}.destination`, errors);
+      return;
+    case "setFallback":
+      if (value.destination !== null) {
+        validateDestinationShape(value.destination, `${path}.destination`, errors);
       }
       return;
     case "declareBinding":

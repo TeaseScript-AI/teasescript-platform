@@ -51,7 +51,11 @@ goto script("rooms/${room}.tease", label: "start")
 3. A `goto` back to an earlier label runs the top-level `let`s after it again, which set their variables anew.
 4. A variable of the file may be used after a label only when every way to the label has run its `let`; otherwise it
    is a compile error. A goto has run what came before the statement it stands in, or before the call of its function
-   or the start of its handler. The ways are those of the ending check (§4.3), so a goto that cannot run is no way.
+   or the start of its handler. The ways are those of the ending check (§4.3), so a goto that cannot run is no way; a
+   transfer that enters a file afresh at a label has run nothing of that file before it. Whether code can run is
+   decided per statement and per function or handler context: a statement that can run, in the file's top level, in
+   a function that a call which can run reaches, or in a block started where code can run. A call in such a statement
+   counts, even in an operand that a constant `and` or `or` skips, or in a parameter default that every call supplies.
    Globals and speakers are not variables of a file: they have their values from the start of the session (§6).
 5. A `global function` is callable from every file, without an import:
 
@@ -66,9 +70,7 @@ goto script("rooms/${room}.tease", label: "start")
    other global functions and built-ins. Breaking either rule is a compile error whose fix is to make the name a global
    or pass it as a parameter. Interactions, `goto`, `call`, `end`, `exit`, and recursion work in it normally; a bare
    label means a label of the file where the function is written, like `goto "helpers.tease" start`. Such a goto
-   enters that file afresh, so for rule 4 none of its top-level `let`s has run there. For rule 4 it counts wherever the
-   function could be called, even when nothing calls it; this is conservative until it is computed which global
-   functions can be reached.
+   enters that file afresh, so for rule 4 none of its top-level `let`s has run there.
 
 6. Speakers are always global: `speaker vera { … }`, declared anywhere in any file, is known in every file and is set up
    at session start under the rules for globals (§6). There is no `global speaker`. `speaker vera`, which sets the
@@ -108,8 +110,11 @@ goto script("rooms/${room}.tease", label: "start")
 2. `call` preserves them and resumes after the `call` when the called file reaches `end`.
 3. A handler that jumps abandons the interrupted action.
 4. Asynchronous media continues across `goto`, `call`, and `end`. `exit` stops it.
-5. Timers and permanent buttons follow V30 §27 and §28: on `goto`, `call`, and `end`, non-persistent ones are removed and
-   persistent ones stay; `exit` removes all.
+5. A non-persistent timer or permanent button belongs to the file entry that started it and goes when that entry is
+   left: by a `goto` from it, by its `end`, or when a block's `goto` abandons it. A `call` does not leave the caller.
+   Persistent ones stay; `exit` removes all (V30 §27, §28).
+6. Each entry into a file has its own top-level variables. V30 §29 states how functions, blocks, `end`, and a block's
+   `goto` relate to entries.
 
 ### 6. Globals
 

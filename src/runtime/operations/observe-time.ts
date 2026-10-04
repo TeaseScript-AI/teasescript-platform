@@ -1,4 +1,5 @@
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
+import { interruptFrame, interruptRunning } from "../activations.js";
 import {
   MAX_RUNTIME_SESSION_TIME_MS,
   type RuntimeCallFrameSnapshot,
@@ -261,7 +262,7 @@ function nextOtherWork(
 function timedWork(snapshot: RuntimeSnapshot): DueWork[] {
   const candidates: DueWork[] = [];
   const foreground = snapshot.foregroundAction;
-  const handlerRunning = snapshot.callFrames.some((frame) => frame.timerInterruption !== null);
+  const handlerRunning = interruptRunning(snapshot);
   const noQueuedBlockFirst = handlerRunning || snapshot.pendingTimerHandlers.length === 0;
   if (
     foreground?.kind === "chatPacingGate" ||
@@ -312,7 +313,8 @@ function timedWork(snapshot: RuntimeSnapshot): DueWork[] {
       }
     }
   }
-  for (const frame of snapshot.callFrames) {
+  const frame = interruptFrame(snapshot);
+  if (frame !== undefined) {
     const suspended = frame.timerInterruption?.suspendedAction;
     if (suspended?.kind === "delay") {
       candidates.push({

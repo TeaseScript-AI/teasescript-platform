@@ -1,4 +1,5 @@
 import { type InstructionPlan, type PlanSourceLocation, mainSourceSpan } from "../../plan/model.js";
+import { interruptFrame } from "../activations.js";
 import type { SourceSpan } from "../../source.js";
 import type {
   RuntimeActionSettlementSnapshot,
@@ -90,11 +91,11 @@ export function applyMediaEvent(
   const media = action.media;
   const outcome = commitMediaEvent(media, event);
   for (const functionId of outcome.cueFunctionIds) {
-    queueMediaCue(snapshot, media.mediaId, functionId, snapshot.currentSessionTimeMs);
+    queueMediaCue(snapshot, media, functionId);
   }
   if (outcome.finished) {
     if (media.finishFunctionId !== null) {
-      queueMediaCue(snapshot, media.mediaId, media.finishFunctionId, snapshot.currentSessionTimeMs);
+      queueMediaCue(snapshot, media, media.finishFunctionId);
     }
     settleMediaAction(plan, snapshot, action, events, span);
   }
@@ -241,9 +242,10 @@ export function releaseMediaWait(
     pushWaitCompletion(events, span, settlement);
     return;
   }
-  for (const frame of snapshot.callFrames) {
+  const frame = interruptFrame(snapshot);
+  if (frame !== undefined) {
     const suspended = frame.timerInterruption?.suspendedAction;
-    if (suspended?.kind !== "mediaPlayback" || !releases(suspended)) continue;
+    if (suspended?.kind !== "mediaPlayback" || !releases(suspended)) return;
     // Like a suspended delay: the continuation runs once the interrupt block returns normally, and the settlement is
     // not retained so released prepared output of the running block keeps its provenance.
     const settlement = mediaWaitSettlement(snapshot, suspended, outcomeFor(suspended));
@@ -292,10 +294,11 @@ function pushWaitCompletion(
 /** Queues a cue block in due order; consecutive invocations of the same block for the same media share one entry. */
 function queueMediaCue(
   snapshot: RuntimeSnapshot,
-  mediaId: number,
+  media: RuntimeMediaSnapshot,
   handlerFunctionId: number,
-  dueAtMs: number,
 ): void {
+  const { mediaId } = media;
+  const dueAtMs = snapshot.currentSessionTimeMs;
   const queue = snapshot.pendingTimerHandlers;
   let index = queue.length;
   while (index > 0 && queue[index - 1]!.dueAtMs > dueAtMs) index -= 1;
@@ -310,7 +313,13 @@ function queueMediaCue(
     previous.count += 1;
     return;
   }
-  queue.splice(index, 0, { mediaId, handlerFunctionId, dueAtMs, count: 1 });
+  queue.splice(index, 0, {
+    mediaId,
+    handlerFunctionId,
+    rootScopeId: media.handlerRootScopeId!,
+    dueAtMs,
+    count: 1,
+  });
 }
 
 /** Cue points outside the active range never fire; tell the developer once the range is known. */

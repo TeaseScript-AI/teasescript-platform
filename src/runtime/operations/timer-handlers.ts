@@ -33,7 +33,9 @@ export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapsh
     throw new Error("Only a foreground delay, interaction, or media wait can be interrupted.");
   }
   const frame: RuntimeCallFrameSnapshot = {
+    kind: "function",
     id: snapshot.nextCallFrameId,
+    rootScopeId: invocation.rootScopeId,
     functionId: definition.id,
     functionName: definition.name,
     callSiteSpan: copySpan(definition.declarationSpan),
@@ -55,6 +57,7 @@ export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapsh
   // A media block of `let NAME = play... async` sees its own handle as a local.
   snapshot.frames.push({
     id: snapshot.nextScopeId,
+    file: null,
     bindings:
       definition.selfHandle !== null && "mediaId" in invocation
         ? [

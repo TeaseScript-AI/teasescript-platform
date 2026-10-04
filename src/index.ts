@@ -201,6 +201,8 @@ export {
   type RuntimeLoopFrameSnapshot,
   type RuntimeCallArgumentSnapshot,
   type RuntimeCallFrameSnapshot,
+  type RuntimeFileCallFrameSnapshot,
+  type RuntimeFrameSnapshot,
   type RuntimeParameterStateSnapshot,
   type RuntimeTemporarySnapshot,
   type RuntimeRepeatLoopFrameSnapshot,

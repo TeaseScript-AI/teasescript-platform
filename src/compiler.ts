@@ -258,11 +258,24 @@ function checkProject(
       options,
       track,
     );
+    // A transfer that can run enters its label afresh, which has then run nothing of its file.
+    const freshLabels = new Map<string, Set<string>>();
+    for (const result of names) {
+      for (const entry of result.reachableEntries(types.flow)) {
+        if (entry.label === null) continue;
+        const fresh = freshLabels.get(entry.path) ?? new Set<string>();
+        fresh.add(entry.label);
+        freshLabels.set(entry.path, fresh);
+      }
+    }
     // The initialization check at labels follows the flow of the type check.
     types.diagnostics.forEach((diagnostics, index) =>
       addSemanticDiagnostics(files[index]!, [
         ...diagnostics,
-        ...names[index]!.checkInitialization(types.flow),
+        ...names[index]!.checkInitialization(
+          freshLabels.get(files[index]!.result.path) ?? new Set(),
+          types.flow,
+        ),
       ]),
     );
     return files.some((file) => hasErrors(file.result.diagnostics))

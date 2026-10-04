@@ -23,6 +23,11 @@ export interface RuntimeTimerSnapshot {
   readonly repeat: boolean;
   readonly persist: boolean;
   readonly handlerFunctionId: number | null;
+  /**
+   * The root of the activation that started the timer, kept after it settles. A non-persistent timer goes when that
+   * activation is left; the expiry block runs in it.
+   */
+  readonly rootScopeId: number;
   /** Present only for a repeating range without a `repeatDuration` override. */
   range: RuntimeTimerRangeSnapshot | null;
   /** Duration of later rounds for a repeating fixed duration or after `repeatDuration` assignment. */
@@ -56,6 +61,8 @@ export interface RuntimeTimerSnapshot {
 export interface RuntimeTimerHandlerInvocationSnapshot {
   readonly timerId: number;
   readonly handlerFunctionId: number;
+  /** The activation root of its timer's block. */
+  readonly rootScopeId: number;
   readonly dueAtMs: number;
   count: number;
 }
