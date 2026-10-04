@@ -8,6 +8,11 @@ import {
   readXmpPacketKeywords,
   type XmpKeywordsResult,
 } from "../src/index.js";
+import {
+  MAX_XMP_ELEMENT_DEPTH,
+  MAX_XMP_KEYWORDS,
+  MAX_XMP_PACKET_BYTES,
+} from "../src/xmp-keywords.js";
 
 const RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const DC = "http://purl.org/dc/elements/1.1/";
@@ -293,6 +298,11 @@ test("reports truncated and malformed image containers as invalid", () => {
   };
   const xpacketEnd = (file: Buffer): number =>
     file.indexOf("?>", file.indexOf("<?xpacket end")) + 2;
+  const gif = fixture("keywords.gif");
+  const tiffXmpEntry = (file: Buffer): number =>
+    file.indexOf(Buffer.from([0xbc, 0x02, 0x01, 0x00])); // Tag 700, type BYTE, little-endian.
+  const tiffDirectory = fixture("keywords-little-endian.tif").readUInt32LE(4);
+  const huge = [0xff, 0xff, 0xff, 0xff];
   const cases: [string, Buffer, RegExp][] = [
     ["truncated JPEG", truncated("keywords.jpg"), /JPEG/],
     ["truncated PNG", truncated("keywords.png"), /PNG/],
@@ -329,19 +339,49 @@ test("reports truncated and malformed image containers as invalid", () => {
       patched("keywords-little-endian.tif", () => 4, [0xff, 0xff]),
       /TIFF/,
     ],
+    ["GIF XMP without its trailer", gif.subarray(0, xpacketEnd(gif)), /GIF/],
+    [
+      "PNG chunk declaring 4 GiB",
+      patched("keywords.png", (file) => file.indexOf("iTXt") - 4, huge),
+      /PNG/,
+    ],
+    ["WebP declaring 4 GiB", patched("keywords.webp", () => 4, huge), /WebP/],
+    [
+      "TIFF directory inside the header",
+      patched("keywords-little-endian.tif", () => 4, [0, 0, 0, 0]),
+      /TIFF/,
+    ],
+    [
+      "TIFF XMP tag declaring 4 GiB",
+      patched("keywords-little-endian.tif", (file) => tiffXmpEntry(file) + 4, huge),
+      /TIFF/,
+    ],
+    [
+      "TIFF XMP tag pointing at its own directory",
+      patched("keywords-little-endian.tif", (file) => tiffXmpEntry(file) + 8, [
+        tiffDirectory & 0xff,
+        tiffDirectory >> 8,
+        0,
+        0,
+      ]),
+      /XMP/,
+    ],
     [
       "TIFF XMP tag of type SHORT",
-      patched(
-        "keywords-little-endian.tif",
-        (file) => file.indexOf(Buffer.from([0xbc, 0x02, 0x01, 0x00])) + 2,
-        [3],
-      ),
+      patched("keywords-little-endian.tif", (file) => tiffXmpEntry(file) + 2, [3]),
       /TIFF/,
     ],
   ];
   for (const [label, bytes, reason] of cases) {
     assertFailure(readImageXmpKeywords(bytes), "invalid", reason, label);
   }
+});
+
+test("reads only the first TIFF directory, so a directory chain that loops back still ends", () => {
+  const tiff = Buffer.from(fixture("keywords-little-endian.tif"));
+  const directory = tiff.readUInt32LE(4);
+  tiff.writeUInt32LE(directory, directory + 2 + 12 * tiff.readUInt16LE(directory));
+  assert.deepEqual(readImageXmpKeywords(tiff), FIXTURE_KEYWORDS);
 });
 
 test("reports XMP that is not well-formed XML, or has a DOCTYPE, as invalid", () => {
@@ -353,6 +393,11 @@ test("reports XMP that is not well-formed XML, or has a DOCTYPE, as invalid", ()
       "a DOCTYPE that defines an entity",
       `<!DOCTYPE x:xmpmeta [<!ENTITY room "bedroom">]>${packet(subject("<rdf:li>&room;</rdf:li>")).toString()}`,
       /DOCTYPE/,
+    ],
+    [
+      "an entity declaration without a DOCTYPE",
+      packet(subject(`<!ENTITY room "bedroom"><rdf:li>&room;</rdf:li>`)).toString(),
+      /markup declaration/,
     ],
     ["a mismatched end tag", packet(subject("<rdf:li>bedroom</rdf:Bag>")).toString(), /closes/],
     ["an unclosed element", valid.replace("</x:xmpmeta>", ""), /never closes/],
@@ -391,6 +436,17 @@ test("reports XMP that is not well-formed XML, or has a DOCTYPE, as invalid", ()
       valid.replace("<rdf:li>", "<!-- <rdf:li>"),
       /missing a closing -->/,
     ],
+    [
+      "an unterminated CDATA section",
+      valid.replace("bedroom", "<![CDATA[bedroom"),
+      /missing a closing \]\]>/,
+    ],
+    ["an unterminated tag", valid.slice(0, valid.indexOf("<rdf:li>") + 6), /malformed/],
+    [
+      "an unterminated attribute value",
+      valid.slice(0, valid.indexOf('xmlns:x="adobe') + 14),
+      /missing a closing "/,
+    ],
     ["no root element", `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>`, /no root/],
   ];
   for (const [label, xmp, reason] of cases) {
@@ -398,12 +454,21 @@ test("reports XMP that is not well-formed XML, or has a DOCTYPE, as invalid", ()
   }
 });
 
-test("reads keywords next to deeply nested elements without native recursion", () => {
-  const depth = 100_000;
-  const nested =
-    `<ex:level xmlns:ex="http://example.com/ns/">`.repeat(depth) + "</ex:level>".repeat(depth);
-  const xmp = packet(
-    `<rdf:Description><ex:holder>${nested}</ex:holder><dc:subject><rdf:Bag><rdf:li>deep</rdf:li></rdf:Bag></dc:subject></rdf:Description>`,
+test("reports XMP beyond the reader's size, nesting, and keyword limits as unsupported", () => {
+  const padded = Buffer.concat([
+    fixture("keywords.jpg.xmp"),
+    Buffer.alloc(MAX_XMP_PACKET_BYTES, " "),
+  ]);
+  assertFailure(readXmpPacketKeywords(padded), "unsupported", /larger than/, "packet size");
+
+  const depth = MAX_XMP_ELEMENT_DEPTH + 1;
+  const nested = "<ex:level>".repeat(depth) + "</ex:level>".repeat(depth);
+  const deep = packet(`<rdf:Description><ex:holder>${nested}</ex:holder></rdf:Description>`);
+  assertFailure(readXmpPacketKeywords(deep), "unsupported", /levels deep/, "nesting");
+
+  const items = "<rdf:li>keyword</rdf:li>".repeat(MAX_XMP_KEYWORDS + 1);
+  const many = packet(
+    `<rdf:Description><dc:subject><rdf:Bag>${items}</rdf:Bag></dc:subject></rdf:Description>`,
   );
-  assert.deepEqual(readXmpPacketKeywords(xmp), { kind: "keywords", keywords: ["deep"] });
+  assertFailure(readXmpPacketKeywords(many), "unsupported", /keywords/, "keywords");
 });

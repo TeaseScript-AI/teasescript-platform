@@ -10,6 +10,20 @@ type Failure = Extract<XmpKeywordsResult, { readonly reason: string }>;
 /** The XMP packet a container holds, `null` when it holds none, or why it cannot be extracted. */
 type Extraction = Uint8Array | null | Failure;
 
+/*
+ * Implementation limits of this reader, not project policy. Photo-tool XMP stays far below them: Lightroom sidecars
+ * reach hundreds of KB, RDF nests about ten elements deep, and images have at most hundreds of keywords. XMP beyond a
+ * limit is `unsupported`. Container walks need no limit of their own: every step moves past a header within the file,
+ * and a TIFF is read from its first image directory only, never following directory offsets, so cyclic offsets cannot
+ * loop.
+ */
+/** The most bytes of one XMP packet or sidecar file that the reader decodes and parses. */
+export const MAX_XMP_PACKET_BYTES = 16 * 1024 * 1024;
+/** The deepest element nesting the reader accepts, counting the root element as depth 1. */
+export const MAX_XMP_ELEMENT_DEPTH = 1_000;
+/** The most `dc:subject` keywords the reader returns from one packet. */
+export const MAX_XMP_KEYWORDS = 10_000;
+
 /** What a packet says about keywords: `null` keywords when it has no `dc:subject` array. */
 interface Packet {
   readonly kind: "packet";
@@ -264,14 +278,19 @@ function tiffPacket(bytes: Uint8Array): Extraction {
   return null;
 }
 
-/** Decodes and reads a packet; a malformed one is `invalid`. */
+/** Decodes and reads a packet; a malformed one is `invalid`, and one beyond a limit is `unsupported`. */
 function readPacket(bytes: Uint8Array): Packet | Failure {
+  if (bytes.length > MAX_XMP_PACKET_BYTES) {
+    return unsupported(
+      `The XMP is larger than ${MAX_XMP_PACKET_BYTES / 1024 / 1024} MiB, the most this reader accepts; save the tags in a smaller sidecar file instead.`,
+    );
+  }
   const text = decodePacket(bytes);
   if (typeof text !== "string") return text;
   try {
     return new SubjectReader(text.replace(/\r\n?/gu, "\n")).read();
   } catch (error) {
-    if (error instanceof MalformedXmp) return invalid(error.message);
+    if (error instanceof PacketFailure) return error.failure;
     throw error;
   }
 }
@@ -300,10 +319,19 @@ function decodePacket(bytes: Uint8Array): string | Failure {
   }
 }
 
-class MalformedXmp extends Error {}
+/** Ends reading a packet with `failure`; `readPacket` returns it. */
+class PacketFailure extends Error {
+  constructor(readonly failure: Failure) {
+    super(failure.reason);
+  }
+}
 
 function malformed(reason: string): never {
-  throw new MalformedXmp(reason);
+  throw new PacketFailure(invalid(reason));
+}
+
+function beyondLimit(reason: string): never {
+  throw new PacketFailure(unsupported(reason));
 }
 
 const RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
@@ -517,6 +545,11 @@ class SubjectReader {
     const [prefix, localName] = splitName(name);
     const namespace = this.namespaceOf(prefix);
 
+    if (this.open.length >= MAX_XMP_ELEMENT_DEPTH) {
+      beyondLimit(
+        `The XMP nests elements more than ${MAX_XMP_ELEMENT_DEPTH} levels deep, the most this reader accepts.`,
+      );
+    }
     const parent = this.open.at(-1);
     if (parent === undefined) {
       if (this.hasRoot) malformed("The XMP has more than one root element.");
@@ -638,7 +671,14 @@ class SubjectReader {
       if (item !== null) {
         const keyword =
           item.value ?? (item.hasElements || item.resource ? null : item.text.join(""));
-        if (keyword !== null) this.keywords?.push(keyword);
+        if (keyword !== null && this.keywords !== null) {
+          if (this.keywords.length >= MAX_XMP_KEYWORDS) {
+            beyondLimit(
+              `The XMP has more than ${MAX_XMP_KEYWORDS} keywords, the most this reader accepts.`,
+            );
+          }
+          this.keywords.push(keyword);
+        }
       }
     } else if (element.role === "value") {
       if (this.item !== null && this.valueText !== null) {
