@@ -47,7 +47,8 @@ node src/cli.ts inventory /path/to/legacy/scripts > inventory.json
 
 `convert-package` writes text `.tease` files only; it never copies legacy media, JARs, or archives. The package starts
 at `main.tease` (ADR 0022): the only script in the package root becomes it, and a root with several scripts gets a
-generated menu over them. Package-local
+generated menu over them. Functions several scripts share become `global function`s in a generated `helpers.tease`
+(#570). Package-local
 auxiliary Groovy classes (such as `Domme3Class`) are migration input: their transitively used methods are embedded as
 ordinary TeaseScript functions so the result depends on neither Groovy nor the old runtime. `report` and `inventory`
 accept `.groovy` files, directories, or parser JSON; inputs of one invocation form one package.

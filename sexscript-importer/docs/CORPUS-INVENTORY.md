@@ -24,13 +24,13 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-04 at importer commit `df3cd3be`, after merging `main` at `2ea87216` (since `337388d2`: `dict`
+Measured on 2026-10-04 at importer commit `870add02`, after merging `main` at `2ea87216` (since `337388d2`: `dict`
 #555, date and time #551, #554, #556, #561, and #563, element widening #538, and the conformance fixes #567; before
 that the type pass #526, runtime type checks #520, unions #530 and #535, text operations #518, `sort` #546,
 `min`/`max` #550, `askInteger` #548, `switch` #529 and #557, the `showButton` timeout #534, and `load` defaults
 #545; ADR 0022 on multi-file scripts, #571), with `node src/cli.ts report --run <package scripts>` (default conversion,
 without proposals). Script chains follow ADR 0022: each package starts at `main.tease`, and scripts transfer with `goto`
-and end with `exit`. Toy's 21 runtime-loaded modules are part of its
+and end with `exit`; functions several scripts share are `global function`s in a generated `helpers.tease` (#570). Toy's 21 runtime-loaded modules are part of its
 single script `toy.groovy`, so Toy counts as one script whose statements include all module code.
 
 | Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Root errors | Placeholders |
@@ -91,13 +91,14 @@ Smoke runs found two importer defects before they reached a snapshot: `getRandom
 and range switch cases tested as lists. A third-round run into DisciplineClinic's main script found a write by
 position into a list that starts empty, which Groovy grew (see `SX_LIST_GROWTH` in `COMPATIBILITY-GAPS.md`).
 
-Three scripts compile as generated (two distribution examples and DisciplineClinic's `Exit`); file transfers are the
-main remaining gap. Scripts using each accepted-but-unimplemented capability, and how many otherwise compiler-clean scripts
+Two scripts compile as generated (two distribution examples; DisciplineClinic's `Exit` now calls global functions);
+file transfers are the main remaining gap. Scripts using each accepted-but-unimplemented capability, and how many otherwise compiler-clean scripts
 use it (capabilities used by fewer than three scripts are omitted):
 
 | Capability | Scripts using it | Otherwise compiler-clean scripts using it |
 | --- | ---: | ---: |
 | `goto` to a file (#570) | 39 | 22 |
+| `global function` and `global` (#570) | 28 | 13 |
 | `askBooleans()` | 10 | 8 |
 | `showPopup` | 10 | 4 |
 | `openUrl()` | 3 | 0 |

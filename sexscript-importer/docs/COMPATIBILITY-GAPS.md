@@ -85,6 +85,7 @@ implemented):
 | `return name` with a computed name | `goto script(name)` (#570), after `exit` when the name is null or empty (`SX_DYNAMIC_SCRIPT`, DisciplineClinic's `returnPoint`) |
 | `return null`, `return`, or the end of a script | `exit`: every file ends with a transfer or `exit` (ADR 0022 §4); parameters and return points passed through storage stay `save` and `load` |
 | the scripts the legacy player listed | one entry, `main.tease`: the only script in the package root (Domme3, DisciplineClinic, Toy), or a generated menu that goes to each script no other script chains to (the distribution, `SX_ENTRY_MENU`) |
+| a function several scripts define with the same converted body, such as the embedded `Domme3Class` methods, the importer's own helpers, and functions authors copied between scripts | one `global function` in a generated `helpers.tease` (#570); a file-level value it reads becomes a `global`: a constant table nothing changes is declared there with its value, and any other value is declared there once and assigned where each script declared its own; a same-named function with another body stays in its file as `nameLocal` |
 | `int t = showPopup(m)` (seconds until closed) | `getTimestamp().toSeconds()` before and after `showPopup m`, in whole seconds |
 | `showButton(text, s)` used as a value (seconds until the click) | `(showButton text, timeout: s) / 1 s` (#531) |
 | `showButton(text, 0)` (the button stayed for its 10 ms safety margin; the result was 0) | `showButton text, timeout: 10 ms`, with a note, also for a timeout known before the run (`def t = 0`, `1 - 1`); a used result is `0` |
@@ -380,10 +381,29 @@ Concrete points the migration surfaced in TeaseScript itself:
 
 Converting the corpus's script chains to ADR 0022 surfaced:
 
-- **Shared helpers multiply.** Functions are local to their file (ADR 0022 §3), so every script that uses a helper
-  needs its own copy: Domme3's 19 shared helpers are copied 165 times, 146 of them redundant (`sexscriptLegacyRandom`
+- **Shared helpers multiplied.** Functions are local to their file (ADR 0022 §3), so every script that used a helper
+  needed its own copy: Domme3's 19 shared helpers were copied 165 times, 146 of them redundant (`sexscriptLegacyRandom`
   23 times, `percentChance` and `getImagePath` 22, `image` 18, `punish` 17). Several of them present things (`image`
-  shows a picture, `punish` and `popup` talk and wait), so a synchronous `.ts` library cannot hold them.
+  shows a picture, `punish` and `popup` talk and wait), so a synchronous `.ts` library cannot hold them. The owner's
+  `global function` (#570) resolves this; the results are in the next section.
+- **Global functions in the corpus.** Domme3 promotes 16 functions, which replace 145 identical copies, and one global,
+  `imagePath`, which each script assigns where it computed its own (`imagePath = getImagePath()`). 4 names stay in more
+  than one script, all with bodies that differ: `image` keeps 8 copies of 4 other picture sets as `imageLocal` (one of
+  those sets is shared by 3 scripts and two by 2, but only one body can take the global name), and `kink`, `mast`, and
+  `getInstalledDommePack` differ per script; `punish`, `reward`, `popup`, and `tomSound` each keep one variant as
+  `nameLocal`. DisciplineClinic promotes 25 functions (78 copies) with 8 constant tables (phrase lists, picture counts,
+  `scriptText`) and 6 assigned globals (`mistress`, `scenario`, two picture counts, `receptionSpankingPicsArray`,
+  `assignmentArrayList`); 10 names stay per script, 8 functions whose bodies differ (`saveTempData`, `loadTempData`,
+  `test`, ...) and the importer's two background-sound helpers, whose list of sound handles stays with its file because
+  the legacy player stopped each script's sounds when it ended. The distribution shares no functions, and Toy is one
+  script.
+- **Friction.** Unique global names reach every file: a variant with another body must be renamed, and any file-level
+  variable of a global's name must become an assignment to it. A global's initializer may not call a function (ADR 0022
+  §6.4), so a value a script computes at its start becomes a global with an empty start value and an assignment in each
+  script. A file that only declares global functions and globals still needs an `exit` at its end under §4 as written,
+  although nothing transfers to it; `helpers.tease` has one, which is an open question for #570. 13 otherwise
+  compiler-clean scripts use `helpers.tease`, all of them also blocked by file transfers, and DisciplineClinic's `Exit`
+  no longer compiles as generated because it calls the shared helpers.
 - **Localized variants are chosen by language.** The legacy player looked for `name_<language>_<country>` and
   `name_<language>` before `name`. ADR 0022 selects no file by language, so the converted chains follow the English
   scripts, the distribution's 4 localized targets (`mensclothes_de`, `toys_de`, `toys_fr`, `womensclothes_de`) are not
@@ -419,8 +439,8 @@ Emily persona; the code's default owner `ancilla` is not included.
 
 The importer emits these accepted forms although `main` does not implement them yet; the compiler gate replaces them
 with stand-ins that keep their accepted result types and counts them separately: `goto` to a file and `goto script(...)`
-(ADR 0022, #570), `showPopup`,
-`askBoolean`, `askBooleans`, `openUrl`, and `takePhoto()` (camera, #475). `dict` with `get(key, default:)` (#555), date
+(ADR 0022, #570), `global function` and `global` in `helpers.tease` (#570; the gate compiles each file with a copy of
+the ones it reaches), `showPopup`, `askBoolean`, `askBooleans`, `openUrl`, and `takePhoto()` (camera, #475). `dict` with `get(key, default:)` (#555), date
 and time (`getDateTime()`, `getDate()`, `getTime()`, `getTimestamp()`, `toSeconds()`, `toISO()`, the formats,
 `toDate()`, `.days`; #532), `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger`
 (#548), rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526),

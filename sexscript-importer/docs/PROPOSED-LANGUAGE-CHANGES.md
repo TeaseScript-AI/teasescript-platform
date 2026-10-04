@@ -40,9 +40,9 @@ several types. Only M1 remains a proposal (`--proposed`).
 
 ## Corpus evaluation
 
-Measured on 2026-10-04 at importer commit `df3cd3be` with `node src/cli.ts report --run [--proposed=<id>] <package
+Measured on 2026-10-04 at importer commit `870add02` with `node src/cli.ts report --run [--proposed=<id>] <package
 scripts>`, after merging `main` at `2ea87216`; the merge of `dict` (#555) and date and time (#532), and script chains
-converted to ADR 0022's `goto` and `exit`, changed no cell. The importer emits a working syntax of its own choosing for the
+converted to ADR 0022's `goto` and `exit` with shared helpers as `global function`s (#570), changed no cell. The importer emits a working syntax of its own choosing for the
 remaining proposal; the report compiles and smoke-runs it through stand-ins in current TeaseScript, so "converted"
 means converted, compiled, and run, not just emitted. Each cell: root errors / lowered scripts / compiler-clean except
 pending / scripts reached by smoke runs.
