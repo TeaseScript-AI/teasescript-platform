@@ -1,0 +1,79 @@
+// A variable being assigned never holds a partial result that a later part of its value could read.
+function condition {
+  return false
+}
+let x = 1
+let earlier = x
+let conditional = 3
+if condition() {
+  conditional = 2
+}
+x = earlier + conditional
+save x as "compound"
+let y = false
+let conditional2 = true
+if conditional2 {
+  if y {
+    conditional2 = true
+  } else {
+    conditional2 = false
+  }
+}
+y = conditional2
+save y as "shortCircuit"
+let z = 7
+function readZ {
+  return z
+}
+let sumResult = 0
+for it in [1] {
+  sumResult += readZ()
+}
+z = sumResult
+save z as "accumulator"
+let w = 7
+w = load "missing"
+if w == null {
+  if w == null or w == 0 {
+    w = 3
+  }
+}
+save w as "readDefault"
+let t = "<b>a</b>b"
+// NOTE SX_REGEX_WORKAROUND line 18: Workaround: TeaseScript has no regular expressions yet (a future .ts text library), so a loop that removes each part from a < to the next > stands in for replaceAll(/<[^>]*>/, "").
+let withoutTags = ""
+let rest = t
+while rest.contains("<") {
+  let open = rest.indexOf("<")
+  let close = rest.substring(open).indexOf(">")
+  if close < 0 {
+    break
+  }
+  withoutTags = "${withoutTags}${rest.substring(0, open)}"
+  rest = rest.substring(open + close + 1)
+}
+withoutTags = "${withoutTags}${rest}"
+t = withoutTags
+save t as "tags"
+// A fallback with effects runs only for a missing key.
+let counts = dict{}
+let key = "a"
+// NOTE SX_SHARED_MAP_WRITE line 23: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+counts[key] = "x"
+function asked {
+  save true as "asked"
+  return "fallback"
+}
+let found = null
+if counts.contains(key) {
+  found = counts[key]
+} else {
+  found = asked()
+}
+save found as "found"
+// Sorting a list another variable shares changes both in Groovy.
+let a = [3, 1]
+let b = a
+// NOTE SX_SHARED_LIST_WRITE line 30: Groovy shared the list in a with another variable assigned from it, so this change affected both; in TeaseScript the variables hold separate copies (ADR 0014).
+a.sort()
+save a[0] as "first"

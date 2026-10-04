@@ -1,17 +1,11 @@
-// A variable reused for values of several types, each assigned before it is read, splits by type.
-def response = ""
-def askReady = { ->
-	response = getBoolean("Ready?")
-	if (response) show("Ready")
-}
-def askCount = { ->
-	response = getSelectedValue("How many?", ["One", "Two"])
-	show("Picked ${response + 1}")
-}
-response = "Start"
+// A variable reused in straight-line code for values of several types, each assigned before it is read, splits by
+// type.
+def response = "Start"
 show(response)
-askReady()
-askCount()
+response = getBoolean("Ready?")
+if (response) show("Ready")
+response = getSelectedValue("How many?", ["One", "Two"])
+show("Picked ${response + 1}")
 // An empty-text placeholder that later holds a list starts as an empty list.
 def lines = ""
 def fill = { -> lines = ["Kneel", "Wait"] }

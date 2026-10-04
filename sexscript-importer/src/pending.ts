@@ -680,7 +680,17 @@ export function pendingHostFunctions(
         const name = keyText(key);
         if (fallback === undefined || fallback === null)
           throw new Error("get() needs a default that is not null (#536).");
-        const entry = dictEntries("get()", target).find((property) => property.name === name);
+        const properties = dictEntries("get()", target);
+        // The default has the dict's value type (#536).
+        const kind = (value: RuntimeValue): string =>
+          typeof value === "object" && value !== null ? value.kind : typeof value;
+        if (
+          properties.some(
+            (property) => property.value !== null && kind(property.value) !== kind(fallback),
+          )
+        )
+          throw new Error("get() needs a default of the dict's value type (#536).");
+        const entry = properties.find((property) => property.name === name);
         return entry === undefined ? fallback : entry.value;
       },
     ],
@@ -849,10 +859,18 @@ export function pendingHostFunctions(
     [
       "showButton",
       ([, positionalTimeout], named) => {
-        const timeout = composite(positionalTimeout ?? named.timeout);
+        const given = positionalTimeout ?? named.timeout;
+        const timeout = composite(given);
+        // A timeout is a number of seconds or a duration (#531); without one, the stand-in waits 30 s.
+        if (
+          given !== undefined &&
+          typeof given !== "number" &&
+          (timeout?.kind !== "duration" || typeof timeout.milliseconds !== "number")
+        )
+          throw new Error("showButton needs a number of seconds or a duration as its timeout.");
         const limit =
-          typeof (positionalTimeout ?? named.timeout) === "number"
-            ? Number(positionalTimeout ?? named.timeout) * 1000
+          typeof given === "number"
+            ? given * 1000
             : typeof timeout?.milliseconds === "number"
               ? timeout.milliseconds
               : 30_000;

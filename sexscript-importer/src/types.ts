@@ -458,10 +458,6 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
     }
     elements.set(name, (elements.get(name) ?? 0) | itemsType(value));
   });
-  for (const [name, type] of added) {
-    // Only a list variable gains the elements; a `+=` on a number or text adds nothing.
-    if (elements.has(name)) elements.set(name, elements.get(name)! | type);
-  }
   const flows = [
     ...aliases.flatMap(([target, source]): Array<[string, string]> => [
       [target, source],
@@ -471,6 +467,13 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
   ];
   for (let changed = true; changed;) {
     changed = false;
+    // Only a list variable gains the elements, also one that shares a list through an alias; a `+=` on a number
+    // or text adds nothing.
+    for (const [name, type] of added) {
+      if (!elements.has(name) || (elements.get(name)! | type) === elements.get(name)) continue;
+      elements.set(name, elements.get(name)! | type);
+      changed = true;
+    }
     for (const [target, source] of flows) {
       if (!elements.has(source) && !unknown.has(source)) continue;
       const merged = unknown.has(source)

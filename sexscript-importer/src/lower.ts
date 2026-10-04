@@ -93,8 +93,6 @@ export interface LowerOptions {
   mapUses?: MapUses;
   /** Legacy result types of the functions of the script and its modules (packageFunctionResults). */
   functionResults?: ReadonlyMap<string, number>;
-  /** Functions that nothing in the package calls or uses as a value (packageUnusedFunctions). */
-  unusedFunctions?: ReadonlySet<string>;
 }
 
 interface LowerContext {
@@ -164,11 +162,7 @@ interface LowerContext {
   /** How the maps are used, by binding: dicts (#536), object fields, value and key types. */
   mapUses: MapUses;
   /** Binding keys of variables that closures declare (bindingKeys). */
-  bindings: ReadonlyMap<AstNode, string>;
-  /** Functions nothing in the package calls or uses as a value (packageUnusedFunctions). */
-  unusedFunctions: ReadonlySet<string>;
-  /** Whether the code being lowered belongs to an unused function, which Groovy never ran. */
-  deadCode: boolean;
+  bindings: BindingKeys;
   /** Bindings declared with a Groovy integer type (`int`, `long`, ...), which store whole numbers. */
   integerVariables: ReadonlySet<string>;
   /** Initializers of variables assigned once, by their declaration (staticNumber). */
@@ -253,7 +247,7 @@ export interface MapUses {
 interface MapBody {
   body: AstNode;
   types: TypeEnvironment;
-  keys: ReadonlyMap<AstNode, string>;
+  keys: BindingKeys;
 }
 
 /**
@@ -302,10 +296,11 @@ export function packageFunctionResults(files: readonly ParsedGroovyFile[]): Map<
 }
 
 /**
- * Functions (closures kept in a variable, and object script methods) that nothing in the package names outside their
- * own body, neither as a call nor as a value, so Groovy never ran them. None when a call names its method at runtime.
+ * Functions (closures kept in a variable, and object script methods) that no legacy code of the package names outside
+ * their own body, as a call, a value, or a property. None when a call computes its method name, since such a call
+ * could reach any function.
  */
-export function packageUnusedFunctions(files: readonly ParsedGroovyFile[]): Set<string> {
+export function legacyUnreferencedFunctions(files: readonly ParsedGroovyFile[]): Set<string> {
   const defined = new Set<string>();
   const referenced = new Set<string>();
   let dynamicCalls = false;
@@ -323,6 +318,7 @@ export function packageUnusedFunctions(files: readonly ParsedGroovyFile[]): Set<
       names.push(constantString(node.method));
     }
     if (node.kind === "property") names.push(constantString(node.property));
+    if (node.kind === "constant" && typeof node.value === "string") names.push(node.value);
     for (const name of names) if (name !== null && name !== owner) referenced.add(name);
     for (const child of nodeChildren(node)) visit(child, owner);
   };
@@ -533,8 +529,14 @@ function collectMapUses(
  * are variables apart from script-level names of the same spelling, so their key adds the source position of the
  * declaration. Script-level names, which mixin modules reach by name, keep their name and have no entry.
  */
-function bindingKeys(body: AstNode, sourceName: string): Map<AstNode, string> {
-  const keys = new Map<AstNode, string>();
+function bindingKeys(body: AstNode, sourceName: string): Map<AstNode | string, string> {
+  const keys = new Map<AstNode | string, string>();
+  // A copy of a node (substituteNodes) keeps its span, so the key is found by span too.
+  const setKey = (node: AstNode, key: string): void => {
+    keys.set(node, key);
+    const id = bindingSpanId(node);
+    if (id !== null) keys.set(id, key);
+  };
   const keyAt = (name: string, span: SourceSpan | null | undefined): string =>
     `${name}@${sourceName}:${span?.line ?? 0}:${span?.column ?? 0}`;
   const visit = (value: unknown, scopes: ReadonlyArray<Map<string, string>>): void => {
@@ -557,7 +559,7 @@ function bindingKeys(body: AstNode, sourceName: string): Map<AstNode, string> {
       if (node.kind === "for" && typeof node.variable === "string") {
         // The loop node carries its variable's key, since the variable is not a node.
         scope.set(node.variable, keyAt(node.variable, node.span));
-        keys.set(node, keyAt(node.variable, node.span));
+        setKey(node, keyAt(node.variable, node.span));
       }
       for (const child of nodeChildren(node)) visit(child, [...scopes, scope]);
       return;
@@ -570,7 +572,7 @@ function bindingKeys(body: AstNode, sourceName: string): Map<AstNode, string> {
         if (target === null || name === null) continue;
         const key = keyAt(name, target.span);
         scopes.at(-1)!.set(name, key);
-        keys.set(target, key);
+        setKey(target, key);
       }
       return;
     }
@@ -578,7 +580,7 @@ function bindingKeys(body: AstNode, sourceName: string): Map<AstNode, string> {
       const name = variableName(node);
       const key =
         name === null ? undefined : scopes.findLast((scope) => scope.has(name))?.get(name);
-      if (key !== undefined) keys.set(node, key);
+      if (key !== undefined) setKey(node, key);
       return;
     }
     for (const child of nodeChildren(node)) visit(child, scopes);
@@ -588,10 +590,22 @@ function bindingKeys(body: AstNode, sourceName: string): Map<AstNode, string> {
 }
 
 /** The binding a variable reference names (see `bindingKeys`); null for any other expression. */
-function bindingKey(node: unknown, keys: ReadonlyMap<AstNode, string>): string | null {
+function bindingKey(node: unknown, keys: BindingKeys): string | null {
   const name = variableName(node);
-  if (name === null) return null;
-  return (isAstNode(node) ? keys.get(node) : undefined) ?? name;
+  if (name === null || !isAstNode(node)) return name;
+  const id = bindingSpanId(node);
+  return keys.get(node) ?? (id === null ? undefined : keys.get(id)) ?? name;
+}
+
+/** Binding keys of variable nodes (and loop nodes, for their variable), also by source position (bindingSpanId). */
+type BindingKeys = ReadonlyMap<AstNode | string, string>;
+
+/** A node's kind, name, and source position, which a copy of the node keeps; null without a position. */
+function bindingSpanId(node: AstNode): string | null {
+  const span = node.span;
+  if (span === null || span === undefined) return null;
+  const name = node.kind === "for" ? String(node.variable) : variableName(node);
+  return `${node.kind}|${name}|${span.line}:${span.column}:${span.endLine}:${span.endColumn}`;
 }
 
 /** The variable name of a binding key. */
@@ -641,8 +655,6 @@ export function lowerParsedFile(
     aliasedLists: new Set(),
     mapUses: mapUsesOf([]),
     bindings: new Map(),
-    unusedFunctions: new Set(),
-    deadCode: false,
     integerVariables: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
@@ -709,7 +721,6 @@ export function lowerParsedFile(
     context.dateValues = currentDateVariables(body, context.types);
     context.aliasedLists = aliasedListVariables(body, context.types);
     context.bindings = bindingKeys(body, file.sourceName);
-    context.unusedFunctions = options.unusedFunctions ?? packageUnusedFunctions([file]);
     context.constantInitializers = declarationInitializers(body, context.types);
     context.integerVariables = integerVariables(body, context.bindings);
     context.mapUses =
@@ -1046,8 +1057,6 @@ function lowerHelperMethod(
     aliasedLists: new Set(),
     mapUses: baseContext.mapUses,
     bindings: new Map(),
-    unusedFunctions: new Set(),
-    deadCode: false,
     integerVariables: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
@@ -1504,6 +1513,30 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
   const deferred = root === null ? null : findDeferred(root, context);
   if (root === null || deferred === null) return null;
   const span = node.span;
+  // `x += c ? a : b` reads `x` first and writes it last: as `x = x + (c ? a : b)`, the read may move into a temporary
+  // while the write stays with `x`.
+  const compoundOperator =
+    root.kind === "binary" && typeof root.operator === "string" ? root.operator : "";
+  if (
+    ["+=", "-=", "*=", "/="].includes(compoundOperator) &&
+    asNode(root.left)?.kind === "variable" &&
+    node.kind === "expressionStatement"
+  ) {
+    const expanded: AstNode = {
+      kind: "binary",
+      span: root.span,
+      operator: "=",
+      left: root.left,
+      right: {
+        kind: "binary",
+        span: root.span,
+        operator: compoundOperator.slice(0, -1),
+        left: { ...asNode(root.left)! },
+        right: root.right,
+      },
+    };
+    return lowerStatement({ ...node, expression: expanded }, context);
+  }
   // A menu converts in place where its loop may run before the statement.
   const menu = legacyApiCall(deferred, context)?.name === "getSelectedValue";
   const menuList = menu ? listPlusOperands(callParts(deferred)!.arguments[1]!).at(-1)! : null;
@@ -1857,6 +1890,29 @@ function deferredMayChange(part: AstNode, deferred: AstNode, context: LowerConte
   );
 }
 
+/**
+ * Whether evaluating `node` may read the variable `name`: it names it, or it calls a function or a closure value
+ * (other than the SexScript API) while the variable is one that functions can reach, not a local of the current
+ * function or a generated temporary. A destination such a part may read must not hold a partial result.
+ */
+function mayReadDestination(node: AstNode, name: string, context: LowerContext): boolean {
+  let names = false;
+  let calls = false;
+  walkAst(node, (inner) => {
+    const call = inner.kind === "methodCall" ? callParts(inner) : null;
+    if (variableName(inner) === name || (call?.inherited === true && call.name === name))
+      names = true;
+    if (inner.kind === "methodCall" && legacyApiCall(inner, context) === null) {
+      const method = constantString(inner.method) ?? "";
+      const reading = PURE_OBJECT_METHODS.has(method) || READING_COLLECTION_METHODS.has(method);
+      if (call === null || call.inherited || !reading) calls = true;
+    }
+  });
+  const reachable =
+    context.currentFunction?.locals.has(name) !== true && !context.generatedNames.has(name);
+  return names || (calls && reachable);
+}
+
 /** Collection methods that read their receiver without changing it. */
 const READING_COLLECTION_METHODS = new Set([
   "any",
@@ -1895,6 +1951,26 @@ function lowerConditionalAssignment(
 ): IrStatement[] {
   const assign = (value: AstNode): AstNode => syntheticAssignment(declaration, target, value, span);
   const update = (value: AstNode): AstNode => syntheticAssignment(false, target, value, span);
+  // The forms below store a first value in the variable before the rest runs; a rest that may read the variable
+  // computes into a temporary, and the variable gets the result last.
+  const targetName = variableName(target)!;
+  const later =
+    conditional.kind === "binary"
+      ? asNode(conditional.right)
+      : conditional.kind === "elvis" && variableName(asNode(conditional.boolean)) !== targetName
+        ? asNode(conditional.false)
+        : null;
+  if (!declaration && later !== null && mayReadDestination(later, targetName, context)) {
+    const temporary = freshName("conditional", context);
+    const variables = new Map(context.types.variables);
+    variables.set(temporary, inferType(conditional, context.types));
+    context.types = { ...context.types, variables };
+    const temporaryNode = syntheticVariable(temporary, span);
+    return [
+      ...lowerStatement(syntheticAssignment(true, temporaryNode, conditional, span), context),
+      ...lowerStatement(update(temporaryNode), context),
+    ];
+  }
   if (
     conditional.kind === "binary" &&
     (conditional.operator === "&&" || conditional.operator === "||")
@@ -2472,9 +2548,8 @@ function lowerClosureDeclaration(
       ),
     ];
   }
-  // Groovy never ran the body of a function nothing calls, so what it cannot convert does not block the script.
-  const outerDead = context.deadCode;
-  context.deadCode ||= context.unusedFunctions.has(name);
+  // What the body cannot convert belongs to this function, which may turn out to be unreferenced (uncalledCode).
+  const firstDiagnostic = context.diagnostics.length;
   const outerFunction = context.currentFunction;
   context.currentFunction = {
     name,
@@ -2489,23 +2564,27 @@ function lowerClosureDeclaration(
   // A function body runs later, when keys known present here may be gone.
   const outerKeys = context.knownKeys.splice(0);
   try {
+    const lowered = lowerBlock(
+      closure.implicitReturn === false || !context.resultUses.has(name)
+        ? body
+        : withImplicitReturn(body, context),
+      context,
+    );
+    const ownDiagnostics = context.diagnostics.slice(firstDiagnostic);
     return [
       {
         kind: "function",
         name,
         parameters,
-        body: lowerBlock(
-          closure.implicitReturn === false || !context.resultUses.has(name)
-            ? body
-            : withImplicitReturn(body, context),
-          context,
-        ),
+        body: lowered,
         span,
+        ...(ownDiagnostics.some((diagnostic) => diagnostic.severity === "error")
+          ? { ownDiagnostics }
+          : {}),
       },
     ];
   } finally {
     context.functionDepth -= 1;
-    context.deadCode = outerDead;
     context.currentFunction = outerFunction;
     context.knownKeys.splice(0, context.knownKeys.length, ...outerKeys);
   }
@@ -3543,6 +3622,7 @@ function lowerCollectionAssignment(
     isKnownListExpression(receiver, context)
   ) {
     // `list = list.sort()` sorts the list in place, which TeaseScript sort() does as well.
+    noteSharedListWrite(receiver, right, context);
     const list: IrExpression = { kind: "variable", name: target };
     return [
       {
@@ -3594,7 +3674,7 @@ function lowerCollectionAssignment(
   const collection = lowerExpression(receiver, context);
   if (collection === null) return failed();
   // A loop body that reads the target sees its old value only through a separate result variable.
-  const readsTarget = argument !== null && closureUsesName(argument.closure, target);
+  const readsTarget = argument !== null && mayReadDestination(argument.closure, target, context);
   const accumulator = readsTarget ? freshName(`${call.name}Result`, context) : target;
   const targetVariable: IrExpression = { kind: "variable", name: accumulator };
   const item: IrExpression = { kind: "variable", name: variable };
@@ -3863,6 +3943,7 @@ function lowerCollectionStatement(
     return reassign(useHelper(context, "unique", [list]));
   if (call.name === "sort" && call.arguments.length === 0) {
     // Groovy sort() sorts the list in place, as TeaseScript sort() does.
+    noteSharedListWrite(listTarget, node, context);
     return [
       {
         kind: "expression",
@@ -4360,7 +4441,10 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
       : null;
   const dict =
     keysOf !== null && isDictionary(keysOf, context) ? bindingKey(keysOf, context.bindings) : null;
-  const facts = dict === null ? [] : [`${dict}\u0000$${context.bindings.get(node) ?? variable}`];
+  const loopId = bindingSpanId(node);
+  const loopKey =
+    context.bindings.get(node) ?? (loopId === null ? undefined : context.bindings.get(loopId));
+  const facts = dict === null ? [] : [`${dict}\u0000$${loopKey ?? variable}`];
   const loweredBody = withPresentKeys(facts, body, context, () => lowerBlock(body, context));
   return [{ kind: "for", variable, collection, body: loweredBody, span: node.span }];
 }
@@ -5817,6 +5901,21 @@ function dictLookup(node: AstNode, context: LowerContext): IrExpression | null |
     : { kind: "methodCall", target: dict, name: "contains", arguments: [key], dict: true };
 }
 
+/** Whether evaluating an expression has no effect: pure (isPure), or text operations on such values. */
+function sideEffectFree(node: AstNode, context: LowerContext): boolean {
+  if (isPure(node, context)) return true;
+  const call = node.kind === "methodCall" ? callParts(node) : null;
+  const receiver = asNode(node.object);
+  return (
+    call !== null &&
+    !call.inherited &&
+    receiver !== null &&
+    (STRING_METHODS.has(call.name) || TEXT_ONLY_METHODS.has(call.name)) &&
+    sideEffectFree(receiver, context) &&
+    call.arguments.every((argument) => sideEffectFree(argument, context))
+  );
+}
+
 /**
  * A Groovy fallback for a dict key as `dict.get(key, default: value)` (#536): `m[k] ?: d`,
  * `m.containsKey(k) ? m[k] : d`, and `m[k] != null ? m[k] : d`, also with the test negated and the branches swapped.
@@ -5848,8 +5947,26 @@ function dictDefault(
     test = tested.test;
   }
   const parts = read === null ? null : dictLookupParts(read, context);
-  if (parts === null || fallback === null || isNullConstant(fallback)) return null;
+  // `default:` always evaluates its value, which Groovy evaluated only for a missing key: a fallback with effects
+  // keeps the conditional.
+  if (
+    parts === null ||
+    fallback === null ||
+    isNullConstant(fallback) ||
+    !sideEffectFree(fallback, context)
+  )
+    return null;
   const dict = bindingKey(parts.receiver, context.bindings) ?? "";
+  // The default has the dict's value type (#536); another fallback keeps the conditional.
+  const values = (context.mapUses.dictionaryValues.get(dict) ?? 0) & ~NULL;
+  const fallbackType = inferType(fallback, context.types) & ~NULL;
+  if (
+    values !== 0 &&
+    fallbackType !== 0 &&
+    fallbackType !== (UNKNOWN & ~NULL) &&
+    (fallbackType & ~values) !== 0
+  )
+    return null;
   let exact = test === "contains" || !context.mapUses.nullableValues.has(dict);
   if (exact && test === "truth") {
     // Groovy's truth test also replaced the value type's false, 0, or empty value, which is exact only as default.
@@ -5971,6 +6088,8 @@ function readThenDefault(
     fallback === null ||
     isNullConstant(fallback) ||
     !isPure(fallback, context) ||
+    // The default runs after the read stored null in the variable.
+    mayReadDestination(fallback, name, context) ||
     !(
       dictLookupParts(read, context) !== null ||
       TYPED_STORAGE_LOADS.has(legacyApiCall(read, context)?.name ?? "")
@@ -6810,6 +6929,18 @@ function textOperation(
       const target = lowerExpression(targetNode, context);
       if (target === null) return null;
       if (name !== "isEmpty") noteCodePoints();
+      if (
+        (inferType(targetNode, context.types) & OBJECT) !== 0 &&
+        !isDictionary(targetNode, context)
+      ) {
+        addDiagnostic(
+          context,
+          "SX_LENGTH_RECEIVER",
+          "warning",
+          `Groovy ${name}() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.`,
+          node.span,
+        );
+      }
       const length: IrExpression = { kind: "property", target, name: "length", pending: true };
       return name === "isEmpty"
         ? { kind: "binary", operator: "==", left: length, right: { kind: "literal", value: 0 } }
@@ -7060,7 +7191,7 @@ const LOOKUP_METHODS = new Set([
 function dictionaryVariables(
   body: AstNode,
   types: TypeEnvironment,
-  keys: ReadonlyMap<AstNode, string>,
+  keys: BindingKeys,
 ): Set<string> {
   const names = new Set<string>();
   const keyOf = (node: unknown): string | null => bindingKey(node, keys);
@@ -7141,22 +7272,22 @@ function dictionaryVariables(
 }
 
 /**
- * Splits scratch variables: a script variable such as `response` that the script and every function assign before
- * each read, but with values of different types (text, then a yes/no answer, then a menu position). Each value type
- * gets its own variable, declared next to the original with its type's empty value, which no read can see. Only for
- * a script without mixin modules, which could reach the variable by name.
+ * Splits scratch variables: a script variable that holds values of several types, where every write and read of it is
+ * a statement of one straight-line stretch of the block that declares it (no loop, switch, `break`, `continue`, or
+ * `return` between them) and no function, mixin module, or helper class writes or reads it. Each read then sees the value of the write before it, so
+ * each value type gets its own variable, declared next to the original with its type's empty value, which no read can
+ * see. Anything else is a type change the type pass reports.
  */
 function splitScratchVariables(body: AstNode, context: LowerContext): AstNode {
-  if (body.kind !== "block" || context.mixinModules.length > 0) return body;
+  // Mixin modules and helper classes reach script variables by name.
+  if (
+    body.kind !== "block" ||
+    context.mixinModules.length > 0 ||
+    context.packageHelperRegistry.size > 0
+  )
+    return body;
   const types = context.types;
-  const declarations = new Map<string, AstNode>();
-  for (const statement of nodeArray(body.statements)) {
-    const expression =
-      statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
-    const name = expression?.kind === "declaration" ? variableName(expression.left) : null;
-    if (name !== null && asNode(expression!.right)?.kind !== "closure")
-      declarations.set(name, statement);
-  }
+  const statements = nodeArray(body.statements);
   const kindOf = (value: AstNode | null): string | null => {
     const type = inferType(value, types);
     if (onlyOf(type, STRING)) return "Text";
@@ -7165,140 +7296,87 @@ function splitScratchVariables(body: AstNode, context: LowerContext): AstNode {
     if (onlyOf(type, LIST)) return "List";
     return null;
   };
-  // Only names assigned values of several kinds need the analysis.
-  const assignedKinds = new Map<string, Set<string | null>>();
-  walkAst(body, (node) => {
-    if (node.kind !== "declaration" && !(node.kind === "binary" && node.operator === "=")) return;
-    const name = variableName(node.left);
-    if (name === null || !declarations.has(name)) return;
-    assignedKinds.set(name, (assignedKinds.get(name) ?? new Set()).add(kindOf(asNode(node.right))));
-  });
   const replacements = new Map<AstNode, AstNode>();
   const added: AstNode[] = [];
-  for (const [name, declaration] of declarations) {
-    if ((assignedKinds.get(name)?.size ?? 0) < 2) continue;
-    const declared = asNode(declaration.expression)!;
-    const initial = asNode(declared.right);
-    const initialKind = kindOf(initial);
-    if (initialKind === null) continue;
-    // Functions that assign the variable; calling one of them, or a function value, leaves its kind unknown.
-    const writers = new Set<string>();
-    walkAst(body, (node) => {
-      const closure = node.kind === "declaration" ? asNode(node.right) : null;
-      const owner = variableName(node.left);
-      if (closure?.kind !== "closure" || owner === null) return;
-      walkAst(closure.body, (inner) => {
-        const assigns =
-          (inner.kind === "binary" &&
-            typeof inner.operator === "string" &&
-            inner.operator.endsWith("=") &&
-            !["==", "!=", "<=", ">="].includes(inner.operator)) ||
-          inner.kind === "postfix" ||
-          inner.kind === "prefix";
-        if (assigns && variableName(inner.kind === "binary" ? inner.left : inner.value) === name)
-          writers.add(owner);
+  for (const [declarationIndex, declaration] of statements.entries()) {
+    const declared =
+      declaration.kind === "expressionStatement" ? asNode(declaration.expression) : null;
+    const name = declared?.kind === "declaration" ? variableName(declared.left) : null;
+    const initial = asNode(declared?.right);
+    if (name === null || initial === null || initial.kind === "closure") continue;
+    // Every occurrence of the script variable, by the top-level statement that holds it.
+    const occurrences = new Map<AstNode, number>();
+    let elsewhere = false;
+    for (const [index, statement] of statements.entries()) {
+      walkAst(statement, (node) => {
+        if (variableName(node) !== name || bindingKey(node, context.bindings) !== name) return;
+        if (node === declared!.left) return;
+        occurrences.set(node, index);
       });
-    });
-    // Each read takes the kind of the value assigned last; a read whose last value is not known fails the split.
-    const reads = new Map<AstNode, string>();
+    }
+    // Occurrences inside a closure, a nested block, or a branch are not straight-line code here; an `if` condition
+    // runs in line.
+    for (const [node, index] of occurrences) {
+      const statement = statements[index]!;
+      const holder =
+        statement.kind === "expressionStatement"
+          ? asNode(statement.expression)
+          : statement.kind === "if"
+            ? asNode(statement.condition)
+            : null;
+      let nested = holder === null || !closureContains(holder, node);
+      walkAst(holder, (inner) => {
+        if (inner.kind === "closure" && closureContains(inner, node)) nested = true;
+      });
+      if (nested) elsewhere = true;
+    }
+    if (elsewhere || occurrences.size === 0) continue;
+    const last = Math.max(...occurrences.values());
+    const crossing = statements
+      .slice(declarationIndex + 1, last)
+      .some((statement) =>
+        ["for", "while", "switch", "break", "continue", "return"].includes(statement.kind),
+      );
+    if (crossing) continue;
+    // Walk the stretch in order: each read takes the kind of the write before it.
     const writes = new Map<AstNode, string>();
-    let valid = true;
-    type State = string | null | "mixed" | "none";
-    const merge = (left: State, right: State): State =>
-      left === "none" ? right : right === "none" ? left : left === right ? left : "mixed";
-    const expression = (node: AstNode | null, state: State): State => {
-      if (node === null || !valid) return state;
-      if (node.kind === "closure") {
-        bodyState(asNode(node.body), null);
-        return state;
-      }
-      if (node === declared) return expression(initial, state) === "none" ? "none" : initialKind;
+    const reads = new Map<AstNode, string>();
+    let current = kindOf(initial);
+    let valid = current !== null;
+    const visit = (node: AstNode): void => {
+      if (!valid) return;
       if ((node.kind === "binary" && node.operator === "=") || node.kind === "declaration") {
+        const right = asNode(node.right);
+        if (right !== null) visit(right);
         const target = asNode(node.left);
-        const after = expression(asNode(node.right), state);
-        if (variableName(target) === name && bindingKey(target, context.bindings) === name) {
-          const kind = kindOf(asNode(node.right));
-          if (kind === null || node.kind === "declaration") valid = false;
-          else writes.set(target!, kind);
-          return kind;
-        }
-        return target === null ? after : expression(target, after);
+        if (target !== null && occurrences.has(target)) {
+          current = kindOf(right);
+          if (current === null) valid = false;
+          else writes.set(target, current);
+        } else if (target !== null) visit(target);
+        return;
       }
-      if (node.kind === "variable" && variableName(node) === name) {
-        if (bindingKey(node, context.bindings) !== name) return state;
-        if (state === null || state === "mixed" || state === "none") valid = false;
-        else reads.set(node, state);
-        return state;
+      if (occurrences.has(node)) {
+        // A compound assignment or increment both reads and writes; it keeps the kind only for numbers or text.
+        reads.set(node, current!);
+        return;
       }
-      // Compound assignments and increments read and write the variable; they keep its kind.
-      let current = state;
-      for (const child of evaluationChildren(node)) current = expression(child, current);
-      const call = node.kind === "methodCall" ? callParts(node) : null;
-      const calls =
-        call !== null &&
-        (call.name === "call" ||
-          (call.inherited && (writers.has(call.name) || context.functions.has(call.name))));
-      if (calls && writers.size > 0) return "mixed";
-      return current;
+      for (const child of evaluationChildren(node)) visit(child);
     };
-    const statements = (items: AstNode[], state: State): State => {
-      let current = state;
-      for (const item of items) current = statementState(item, current);
-      return current;
-    };
-    const branch = (node: unknown, state: State): State => {
-      const item = asNode(node);
-      return item === null || item.kind === "empty" ? state : statementState(item, state);
-    };
-    const statementState = (node: AstNode, state: State): State => {
-      if (!valid || state === "none") return state;
-      switch (node.kind) {
-        case "block":
-          return statements(nodeArray(node.statements), state);
-        case "expressionStatement":
-          return expression(asNode(node.expression), state);
-        case "if": {
-          const condition = expression(asNode(node.condition), state);
-          return merge(branch(node.then, condition), branch(node.else, condition));
-        }
-        case "while":
-        case "for": {
-          // A loop body may run again with what it left, so it runs twice here.
-          const head = (entry: State): State =>
-            expression(asNode(node.kind === "while" ? node.condition : node.collection), entry);
-          const first = branch(node.body, head(state));
-          const entry = merge(state, first);
-          return merge(entry, branch(node.body, head(entry)));
-        }
-        case "switch": {
-          const value = expression(asNode(node.expression), state);
-          let result: State = "none";
-          for (const item of nodeArray(node.cases)) {
-            const matched = expression(asNode(item.expression), value);
-            result = merge(result, branch(item.body, matched));
-          }
-          return merge(result, branch(node.default, value));
-        }
-        case "return":
-          expression(asNode(node.value), state);
-          return "none";
-        case "break":
-        case "continue":
-          return "none";
-        default:
-          walkAst(node, (child) => {
-            if (variableName(child) === name) valid = false;
-          });
-          return state;
-      }
-    };
-    const bodyState = (node: AstNode | null, state: State): void => {
-      if (node !== null) statementState(node, state);
-    };
-    statementState(body, null);
+    for (const statement of statements.slice(declarationIndex + 1, last + 1)) {
+      const holder =
+        statement.kind === "expressionStatement"
+          ? asNode(statement.expression)
+          : statement.kind === "if"
+            ? asNode(statement.condition)
+            : null;
+      if (holder !== null) visit(holder);
+    }
+    const initialKind = kindOf(initial);
+    if (!valid || initialKind === null) continue;
     const kinds = new Set([...writes.values(), initialKind]);
-    if (!valid || kinds.size < 2) continue;
-    // The declaration keeps its kind and name; each other kind gets a variable of its own.
+    if (kinds.size < 2) continue;
+    if (occurrences.size !== writes.size + reads.size) continue;
     const names = new Map<string, string>([[initialKind, name]]);
     for (const kind of kinds) {
       if (kind === initialKind) continue;
@@ -7329,13 +7407,22 @@ function splitScratchVariables(body: AstNode, context: LowerContext): AstNode {
       context,
       "SX_SCRATCH_VARIABLE",
       "info",
-      `Groovy reused '${name}' for values of several types, each assigned before it is read; each type has its own variable here (${[...names.values()].join(", ")}).`,
+      `Groovy reused '${name}' for values of several types in straight-line code, each assigned before it is read; each type has its own variable here (${[...names.values()].join(", ")}).`,
       declaration.span,
     );
   }
   if (replacements.size === 0) return body;
   const rewritten = substituteNodes(body, replacements);
   return { ...rewritten, statements: [...added, ...nodeArray(rewritten.statements)] };
+}
+
+/** Whether `node` lies inside the closure `closure`. */
+function closureContains(closure: AstNode, node: AstNode): boolean {
+  let found = false;
+  walkAst(closure, (inner) => {
+    if (inner === node) found = true;
+  });
+  return found;
 }
 
 /**
@@ -7432,7 +7519,25 @@ function lowerRegexWorkaround(
   context: LowerContext,
 ): IrStatement[] | null {
   const kind = regexWorkaround(node);
-  const source = lowerExpression(asNode(node.object)!, context);
+  const sourceNode = asNode(node.object)!;
+  // A source that may read the destination is read while a temporary collects the result.
+  if (kind !== null && !declaration && mayReadDestination(sourceNode, target, context)) {
+    const temporary = freshName(kind === "words" ? "words" : "withoutTags", context);
+    const built = lowerRegexWorkaround(true, temporary, node, span, context);
+    return built === null
+      ? null
+      : [
+          ...built,
+          {
+            kind: "assign",
+            target: { kind: "variable", name: target },
+            operator: "=",
+            value: { kind: "variable", name: temporary },
+            span,
+          },
+        ];
+  }
+  const source = lowerExpression(sourceNode, context);
   if (kind === null || source === null) return null;
   const text = (operation: string, args: IrExpression[], value: IrExpression): IrExpression => ({
     kind: "methodCall",
@@ -7556,8 +7661,103 @@ function lowerRegexWorkaround(
   ];
 }
 
+/**
+ * Groovy never ran a function that nothing references: no call, action ID, or use as a value in the generated program
+ * (after module loaders, setups, and the action dispatcher are composed), and no reference in the legacy code either,
+ * which also counts statements the conversion could not convert (legacyUnreferencedFunctions). What such a function
+ * cannot convert becomes a note, so it does not block the script.
+ */
+export function uncalledDiagnostics(
+  program: MigrationProgram,
+  legacyUnreferenced: ReadonlySet<string>,
+): MigrationDiagnostic[] {
+  const functions = program.statements.filter(
+    (statement): statement is Extract<IrStatement, { kind: "function" }> =>
+      statement.kind === "function",
+  );
+  if (!functions.some((statement) => statement.ownDiagnostics !== undefined)) return [];
+  const references = (value: unknown, names: Map<string, number>): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) references(item, names);
+      return;
+    }
+    if (!isRecord(value)) return;
+    const name =
+      value.kind === "call" || value.kind === "variable"
+        ? value.name
+        : value.kind === "literal" && value.action === true
+          ? value.value
+          : null;
+    if (typeof name === "string") names.set(name, (names.get(name) ?? 0) + 1);
+    for (const [key, child] of Object.entries(value))
+      if (key !== "ownDiagnostics") references(child, names);
+  };
+  const all = new Map<string, number>();
+  references(program.statements, all);
+  const uncalled = new Set<MigrationDiagnostic>();
+  for (const statement of functions) {
+    if (statement.ownDiagnostics === undefined || !legacyUnreferenced.has(statement.name)) continue;
+    const own = new Map<string, number>();
+    references(statement.body, own);
+    // References inside the function itself do not call it.
+    if ((all.get(statement.name) ?? 0) > (own.get(statement.name) ?? 0)) continue;
+    for (const diagnostic of statement.ownDiagnostics) uncalled.add(diagnostic);
+  }
+  return [...uncalled].filter((diagnostic) => diagnostic.severity === "error");
+}
+
+/** A program whose `uncalled` diagnostics (uncalledDiagnostics) are notes, also in its rendered comments. */
+export function withUncalledNotes(
+  program: MigrationProgram,
+  uncalled: readonly MigrationDiagnostic[],
+): MigrationProgram {
+  if (uncalled.length === 0) return program;
+  const suffix = " Nothing in the program references this function, so Groovy never ran this code.";
+  const key = (diagnostic: MigrationDiagnostic): string =>
+    `${diagnostic.code}|${diagnostic.message}|${JSON.stringify(diagnostic.span)}`;
+  const keys = new Set(uncalled.map(key));
+  const todo = new Map(
+    uncalled.map((item) => [
+      `// TODO ${item.code}${item.span === null ? "" : ` line ${item.span.line}`}: ${singleLine(item.message)}`,
+      `// NOTE ${item.code}${item.span === null ? "" : ` line ${item.span.line}`}: ${singleLine(item.message + suffix)}`,
+    ]),
+  );
+  const rewrite = (statements: IrStatement[]): IrStatement[] =>
+    statements.map((statement): IrStatement => {
+      switch (statement.kind) {
+        case "comment":
+          return { ...statement, text: todo.get(statement.text) ?? statement.text };
+        case "function":
+          return { ...statement, body: rewrite(statement.body) };
+        case "if":
+          return { ...statement, then: rewrite(statement.then), else: rewrite(statement.else) };
+        case "while":
+        case "repeat":
+        case "for":
+          return { ...statement, body: rewrite(statement.body) };
+        case "switch":
+          return {
+            ...statement,
+            cases: statement.cases.map((item) => ({ ...item, body: rewrite(item.body) })),
+            default: rewrite(statement.default),
+          };
+        default:
+          return statement;
+      }
+    });
+  return {
+    ...program,
+    statements: rewrite(program.statements),
+    diagnostics: program.diagnostics.map((diagnostic) =>
+      keys.has(key(diagnostic))
+        ? { ...diagnostic, severity: "warning", message: diagnostic.message + suffix }
+        : diagnostic,
+    ),
+  };
+}
+
 /** Bindings declared with a Groovy integer type. */
-function integerVariables(body: AstNode, keys: ReadonlyMap<AstNode, string>): Set<string> {
+function integerVariables(body: AstNode, keys: BindingKeys): Set<string> {
   const names = new Set<string>();
   walkAst(body, (node) => {
     const left = node.kind === "declaration" ? asNode(node.left) : null;
@@ -9821,15 +10021,6 @@ function addDiagnostic(
   message: string,
   span: SourceSpan | null,
 ): void {
-  if (context.deadCode && severity === "error") {
-    context.diagnostics.push({
-      code,
-      severity: "warning",
-      message: `${message} Nothing in the package calls this function, so Groovy never ran this code.`,
-      span,
-    });
-    return;
-  }
   context.diagnostics.push({ code, severity, message, span });
 }
 

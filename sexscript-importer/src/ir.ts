@@ -81,6 +81,8 @@ export type IrStatement =
       body: IrStatement[];
       /** Legacy comments that preceded the function declaration. */
       leadingComments?: string[];
+      /** Diagnostics of the legacy function body, which become notes if nothing references it (uncalledCode). */
+      ownDiagnostics?: MigrationDiagnostic[];
     })
   | (IrBase & { kind: "return"; value: IrExpression | null })
   /**

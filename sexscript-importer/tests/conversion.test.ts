@@ -130,6 +130,7 @@ test(
     const operations = new Map([
       ["sxLiteral", "dict.literal"],
       ["sxGet", "dict.get"],
+      ["sxDefault", "dict.get(default:)"],
       ["sxButton", "showButton"],
       ["sxToDate", "toDate"],
       ["sxNow", "getDateTime"],
@@ -166,6 +167,10 @@ test(
     );
     assert.equal(run('let value = sxGet(sxLiteral([["1", 3]]), 1)\n'), "failed");
     assert.equal(run('let elapsed = sxButton("Go", 0)\n'), "failed");
+    // A default has the dict's value type (#536), and a timeout is seconds or a duration (#531).
+    assert.equal(run('let value = sxDefault(sxLiteral([["a", "x"]]), "b", 3)\n'), "failed");
+    assert.equal(run('let value = sxDefault(sxLiteral([["a", "x"]]), "b", "y")\n'), "halted");
+    assert.equal(run('let elapsed = sxButton("Go", "soon")\n'), "failed");
   },
 );
 
@@ -349,6 +354,10 @@ test(
           'show(ys.join(", "))',
           'def digit = "3"',
           "int code = digit",
+          'def zs = ["a"]',
+          "def ws = zs",
+          "ws.add([1, 2])",
+          'show(ws.join("|"))',
           "",
         ].join("\n"),
       );
@@ -373,6 +382,8 @@ test(
       assert.match(output, /^\/\/ TODO SX_LIST_JOIN line 19: /mu);
       // Groovy stored a one-character text in an int as its character code.
       assert.match(output, /^\/\/ TODO SX_INTEGER_FROM_TEXT line 21: /mu);
+      // Elements added through an alias reach the list it shares.
+      assert.match(output, /^\/\/ TODO SX_LIST_JOIN line 25: /mu);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -599,6 +610,121 @@ test(
       { status: run.status, failure: run.failure },
       { status: "halted", failure: null },
     );
+  },
+);
+
+// A variable splits by type only in straight-line code of the block that declares it, which no function writes; a
+// write through a function, a function value, or a loop with break is a type change.
+test(
+  "reports variables of several types that functions or loops write",
+  { skip: parserUnavailable },
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-scratch-"));
+    try {
+      const sources = {
+        wrapper:
+          'def response = "seed"\ndef writer = { -> response = [1, 2] }\ndef wrapper = { -> writer() }\nresponse = "ready"\nwrapper()\nsave("result", response)\n',
+        callback:
+          'def response = "seed"\ndef writer = { -> response = [1, 2] }\ndef callback = writer\nresponse = "ready"\ncallback()\nsave("result", response)\n',
+        loop: 'def response = "seed"\nresponse = 1\nwhile (true) { response = "changed"; break }\nsave("result", response)\n',
+      };
+      for (const [name, source] of Object.entries(sources)) {
+        const sourcePath = path.join(directory, `${name}.groovy`);
+        writeFileSync(sourcePath, source);
+        const program = await convert(sourcePath);
+        assert.deepEqual(
+          program.diagnostics
+            .filter((diagnostic) => diagnostic.severity === "error")
+            .map(({ code, span }) => ({ code, line: span?.line })),
+          [{ code: "SX_TYPE_CHANGE", line: 1 }],
+          name,
+        );
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+// The generated values match Groovy's: a destination never holds a partial result, and an effectful fallback runs
+// only when Groovy ran it.
+test(
+  "destinations computed through temporaries keep Groovy's values",
+  { skip: parserUnavailable || ("reason" in runnerResult ? runnerResult.reason : false) },
+  async () => {
+    if (!("runner" in runnerResult)) return;
+    const sourcePath = fileURLToPath(
+      new URL("./fixtures/conversion-accepted/destinations.groovy", import.meta.url),
+    );
+    const shim = shimPendingCapabilities(await convert(sourcePath));
+    const storage = new Map();
+    const result = runnerResult.runner(shim.source, pendingHostFunctions(shim), { storage });
+    assert.equal(result.status, "halted");
+    // The values Groovy 2.5.21 computes for the same script.
+    assert.deepEqual(Object.fromEntries(storage), {
+      compound: 4,
+      shortCircuit: false,
+      accumulator: 7,
+      readDefault: 3,
+      tags: "ab",
+      found: "x",
+      first: 1,
+    });
+  },
+);
+
+// Only a function that nothing references loses its TODOs: module loads and setups count as calls.
+test(
+  "keeps the diagnostics of module code the loader runs and notes those of unreferenced functions",
+  { skip: parserUnavailable },
+  async () => {
+    const fixture = fileURLToPath(new URL("./fixtures/packages/mixin-modules/", import.meta.url));
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-uncalled-"));
+    try {
+      // The module loader reads the scripts folder of the package.
+      const scripts = path.join(directory, "scripts");
+      mkdirSync(path.join(scripts, "demo"), { recursive: true });
+      const script = readFileSync(path.join(fixture, "scripts", "demo.groovy"), "utf8").replace(
+        "\tint rounds = 2",
+        '\tdef neverCalled = { -> new File("debug.txt").delete() }\n\tint rounds = 2',
+      );
+      writeFileSync(path.join(scripts, "demo.groovy"), script);
+      for (const module of ["greeting", "later", "pause"]) {
+        writeFileSync(
+          path.join(scripts, "demo", `${module}.groovy`),
+          readFileSync(path.join(fixture, "scripts", "demo", `${module}.groovy`), "utf8"),
+        );
+      }
+      writeFileSync(
+        path.join(scripts, "demo", "broken.groovy"),
+        '{ toy ->\n\tnew File("cache.txt").delete()\n\treturn null\n}\n',
+      );
+      const files = await Promise.all(
+        [
+          "demo.groovy",
+          "demo/broken.groovy",
+          "demo/greeting.groovy",
+          "demo/later.groovy",
+          "demo/pause.groovy",
+        ].map((name) => parseGroovySource(path.join(scripts, name))),
+      );
+      const program = lowerSelfContainedPackage(files)[0]!;
+      const javaCalls = program.diagnostics.filter(
+        (diagnostic) => diagnostic.code === "SX_JAVA_OBJECT_CALL",
+      );
+      assert.deepEqual(
+        javaCalls.map(({ severity, sourceName }) => ({
+          severity,
+          module: sourceName?.endsWith("broken.groovy") === true,
+        })),
+        [
+          { severity: "warning", module: false },
+          { severity: "error", module: true },
+        ].sort((left, right) => Number(left.module) - Number(right.module)),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   },
 );
 

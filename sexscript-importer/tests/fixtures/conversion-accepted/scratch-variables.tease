@@ -1,25 +1,19 @@
-// A variable reused for values of several types, each assigned before it is read, splits by type.
+// A variable reused in straight-line code for values of several types, each assigned before it is read, splits by
+// type.
 let responseBoolean = false
 let responseNumber = 0
-let response = ""
-function askReady {
-  say "Ready?"
-  responseBoolean = (choose yes: "Yes", no: "No") == "yes"
-  if responseBoolean {
-    say "Ready"
-  }
-}
-function askCount {
-  say "How many?"
-  responseNumber = choose 0: "One", 1: "Two"
-  say "Picked ${responseNumber + 1}"
-}
-response = "Start"
+let response = "Start"
 say response
-askReady()
-askCount()
+say "Ready?"
+responseBoolean = (choose yes: "Yes", no: "No") == "yes"
+if responseBoolean {
+  say "Ready"
+}
+say "How many?"
+responseNumber = choose 0: "One", 1: "Two"
+say "Picked ${responseNumber + 1}"
 // An empty-text placeholder that later holds a list starts as an empty list.
-// NOTE SX_PLACEHOLDER_TYPE line 16: Groovy started 'lines' as empty text and later stored a list (string[]); TeaseScript variables keep one type, so it starts as the empty value of that type, which differs only where the empty text was read.
+// NOTE SX_PLACEHOLDER_TYPE line 10: Groovy started 'lines' as empty text and later stored a list (string[]); TeaseScript variables keep one type, so it starts as the empty value of that type, which differs only where the empty text was read.
 let lines: string[] = []
 function fill {
   lines = ["Kneel", "Wait"]
@@ -30,7 +24,7 @@ say lines.join(", ")
 let rounds = []
 let i = 0
 while i < 3 {
-  // NOTE SX_LIST_GROWTH line 22: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+  // NOTE SX_LIST_GROWTH line 16: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
   if i < rounds.length {
     rounds[i] = i * 2
   } else {
@@ -41,6 +35,6 @@ while i < 3 {
 say "Rounds ${rounds.length}"
 // A function nothing calls never ran in Groovy, so what it cannot convert does not block the script.
 function debugImages {
-  // NOTE SX_UNDEFINED_VARIABLE line 26: missingCount is never assigned in this script or its package; SexScript failed with a missing property whenever this ran. Nothing in the package calls this function, so Groovy never ran this code.
+  // NOTE SX_UNDEFINED_VARIABLE line 20: missingCount is never assigned in this script or its package; SexScript failed with a missing property whenever this ran. Nothing in the program references this function, so Groovy never ran this code.
   // | for (int n = 1; n <= missingCount; n++) show("Image ${n}")
 }

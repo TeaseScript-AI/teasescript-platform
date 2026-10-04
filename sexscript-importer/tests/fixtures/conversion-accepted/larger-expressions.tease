@@ -72,6 +72,7 @@ if anyResult and total > 2 {
 }
 // isEmpty() on text, a list, or a dict tests the length.
 function empty(items) {
+  // NOTE SX_LENGTH_RECEIVER line 18: Groovy isEmpty() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
   return items.length == 0
 }
 if not empty(toys) {

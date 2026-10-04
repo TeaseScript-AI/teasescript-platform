@@ -8,7 +8,9 @@ import {
   packageFunctionNames,
   packageGlobalTypes,
   packageFunctionResults,
-  packageUnusedFunctions,
+  uncalledDiagnostics,
+  withUncalledNotes,
+  legacyUnreferencedFunctions,
   packageMapUses,
   packageResultUses,
   packageStableNames,
@@ -91,7 +93,6 @@ export function lowerPackage(
     lowerParsedFile(file, {
       mapUses: mapUses[index]!,
       functionResults: functionResults[index]!,
-      unusedFunctions: packageUnusedFunctions(groups[index]!),
       helperRegistry,
       mixinModules,
       packageFunctions: packageFunctionNames(groups[index]!),
@@ -110,11 +111,18 @@ export function lowerPackage(
   const functionCatalog = buildFunctionCatalog(helperPrograms);
   const modulePrograms = lowered.filter((program) => program.module !== undefined);
 
+  // What a function nothing references cannot convert becomes a note, in the file and in the composed script.
+  const uncalled: MigrationDiagnostic[][] = files.map(() => []);
   const composed = lowered.map((program, index) => {
     if (files[index]?.root?.kind !== "scriptBody" || program.module !== undefined) return program;
-    return composeProgram(withLoadedModules(program, modulePrograms), functionCatalog);
+    const script = composeProgram(withLoadedModules(program, modulePrograms), functionCatalog);
+    uncalled[index] = uncalledDiagnostics(script, legacyUnreferencedFunctions(groups[index]!));
+    return withUncalledNotes(script, uncalled[index]!);
   });
-  return { lowered, composed };
+  return {
+    lowered: lowered.map((program, index) => withUncalledNotes(program, uncalled[index]!)),
+    composed,
+  };
 }
 
 /**
