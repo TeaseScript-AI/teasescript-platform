@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, useId } from "vue";
 import { useResizeObserver } from "@vueuse/core";
 import Viewfinder from "./Viewfinder.vue";
 import ViewfinderMirrorButton from "./ViewfinderMirrorButton.vue";
@@ -21,7 +21,7 @@ const EDGE = 8;
 const MIN_WIDTH = 140;
 const STEP = 16;
 /** The title bar's height in pixels, part of the window's height. */
-const BAR = 24;
+const BAR = 32;
 // The edge or corner a resize drags: which way it moves the left/right and top/bottom side, or 0 where it keeps it.
 const HANDLES = [
   { name: "n", x: 0, y: -1 },
@@ -35,6 +35,7 @@ const HANDLES = [
 ] as const;
 type Handle = (typeof HANDLES)[number];
 const root = ref<HTMLElement | null>(null);
+const helpId = useId();
 const bounds = ref({ width: 0, height: 0 });
 const ratio = ref(4 / 3);
 
@@ -172,12 +173,15 @@ function measured(next: number) {
     data-floating-viewfinder
     role="group"
     aria-label="Camera preview window"
+    :aria-describedby="helpId"
     tabindex="0"
-    title="Drag to move, drag an edge to resize; arrow keys move it, + and - resize it"
     :style="style"
     @pointerdown="drag($event, null)"
     @keydown="keyboard"
   >
+    <span :id="helpId" class="sr-only">
+      Drag to move, or drag an edge to resize. Arrow keys move it; plus and minus resize it.
+    </span>
     <div class="floating-viewfinder-window">
       <div class="floating-viewfinder-bar" :style="{ height: `${BAR}px` }">
         <ViewfinderMirrorButton v-model="mirrored" />
@@ -222,7 +226,8 @@ function measured(next: number) {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding-inline: 4px;
+  padding-inline: 2px;
+  color: var(--media-text);
   border-bottom: 1px solid var(--media-border);
   backdrop-filter: blur(6px);
 }

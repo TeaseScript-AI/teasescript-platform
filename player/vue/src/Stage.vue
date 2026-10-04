@@ -39,7 +39,9 @@ function mediaLoaded(event: Event) {
         @aspect="emit('mediaAspect', $event)"
       >
         <img v-if="media" :src="media.src" :alt="media.alt" class="stage-viewfinder-reference" />
-        <ViewfinderMirrorButton v-model="viewfinderMirrored" class="stage-viewfinder-mirror" />
+        <div class="stage-viewfinder-mirror">
+          <ViewfinderMirrorButton v-model="viewfinderMirrored" />
+        </div>
       </Viewfinder>
       <img v-else-if="media" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" />
     </div>
@@ -65,8 +67,9 @@ function mediaLoaded(event: Event) {
   width: min(100%, 100cqh * var(--viewfinder-ratio)); max-height: 100%;
 }
 .stage-viewfinder-mirror {
-  position: absolute; top: 10px; right: 10px;
-  border-color: var(--media-border); background: var(--media-surface); backdrop-filter: blur(3px);
+  position: absolute; top: 10px; right: 10px; display: flex;
+  border: 1px solid var(--media-border); border-radius: 8px; color: var(--media-text);
+  background: var(--media-surface); box-shadow: 0 1px 3px var(--media-shadow); backdrop-filter: blur(3px);
 }
 .stage-viewfinder-reference {
   position: absolute; left: 10px; bottom: 10px;
