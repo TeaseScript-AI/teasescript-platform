@@ -2517,7 +2517,10 @@ function lowerCallStatement(
           ),
         ];
       }
-      return [{ kind: "showButton", label, timeout, span }];
+      const legacyTimeout = buttonTimeout(args[1], node, context);
+      if (legacyTimeout === null)
+        return [unsupportedStatement(context, node, "SX_BUTTON_TIMEOUT", NEGATIVE_TIMEOUT)];
+      return [{ kind: "showButton", label, timeout: legacyTimeout ?? timeout, span }];
     }
     case "showPopup":
       return oneArgumentStatement(args, context, node, (message) => ({
@@ -6048,8 +6051,31 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
             "SX_BOOLEANS_ARITY",
             "getBooleans() must have exactly three arguments.",
           );
-    case "showButton":
+    case "showButton": {
       // Legacy returned the seconds until the click; TeaseScript returns the elapsed duration (V30 §21, #531).
+      const legacyTimeout =
+        args.length === 2 ? buttonTimeout(call.arguments[1], node, context) : undefined;
+      if (legacyTimeout === null)
+        return unsupportedExpression(context, node, "SX_BUTTON_TIMEOUT", NEGATIVE_TIMEOUT);
+      if (legacyTimeout !== undefined) {
+        // A zero timeout always returned 0 seconds, after the button's 10 ms.
+        const root = context.statementRoot;
+        if (root === null || !isHoistable(root, node, context)) {
+          return unsupportedExpression(
+            context,
+            node,
+            "SX_BUTTON_TIMEOUT",
+            "This button with a zero timeout is used inside a larger expression that cannot run around it; assign showButton() to a variable first.",
+          );
+        }
+        context.prelude.push({
+          kind: "showButton",
+          label: args[0]!,
+          timeout: legacyTimeout,
+          span: node.span,
+        });
+        return { kind: "literal", value: 0 };
+      }
       return args.length === 1 || args.length === 2
         ? {
             kind: "binary",
@@ -6063,6 +6089,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
             "SX_BUTTON_ARITY",
             "showButton() must have one or two arguments.",
           );
+    }
     case "useUrl":
       return args.length === 1
         ? { kind: "call", name: "openUrl", positional: args, named: {} }
@@ -6114,6 +6141,38 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         `Unsupported SexScript expression call: ${call.name}`,
       );
   }
+}
+
+const NEGATIVE_TIMEOUT =
+  "A negative showButton() timeout made the legacy button wait fail; TeaseScript rejects it too (#531). Use a positive timeout.";
+
+/**
+ * A literal zero timeout showed the legacy button only for its 10 ms safety margin, and the result was 0; #531 rejects a
+ * zero timeout, so the conversion keeps the 10 ms (with a note). Returns that timeout, null for a negative literal,
+ * and undefined for any other timeout.
+ */
+function buttonTimeout(
+  timeoutNode: AstNode | undefined,
+  node: AstNode,
+  context: LowerContext,
+): IrExpression | null | undefined {
+  if (timeoutNode === undefined) return undefined;
+  const negated = timeoutNode.kind === "unaryMinus" ? asNode(timeoutNode.value) : null;
+  const value = constantValue(timeoutNode);
+  if (
+    (negated !== null && typeof constantValue(negated) === "number") ||
+    (typeof value === "number" && value < 0)
+  )
+    return null;
+  if (value !== 0) return undefined;
+  addDiagnostic(
+    context,
+    "SX_BUTTON_TIMEOUT",
+    "warning",
+    "With a zero timeout the legacy button stayed visible only for its 10 ms safety margin, and the result was 0; TeaseScript rejects a zero timeout (#531), so the button keeps the 10 ms.",
+    node.span,
+  );
+  return { kind: "duration", value: 10, unit: "ms" };
 }
 
 /**

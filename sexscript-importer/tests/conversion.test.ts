@@ -235,6 +235,7 @@ test(
           "switch (getRandom(9)) { case [1..3, 5]: show('hit'); break; case 7: show('seven') }",
           'def code = getString("Code?", 42)',
           'def answer = getString("Settings?", [level: 2])',
+          'showButton("Too late", -1)',
           "",
         ].join("\n"),
       );
@@ -252,6 +253,8 @@ test(
       // Legacy showed a number default as text; a map default has no text form.
       assert.match(output, /^let code = askText default: "42"$/mu);
       assert.match(output, /^\/\/ TODO SX_INPUT_PREFILL_VALUE line 13: /mu);
+      // A negative button timeout failed in legacy and is rejected by TeaseScript.
+      assert.match(output, /^\/\/ TODO SX_BUTTON_TIMEOUT line 14: /mu);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

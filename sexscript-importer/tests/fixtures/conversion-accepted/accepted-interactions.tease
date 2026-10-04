@@ -5,8 +5,14 @@ let sure = (choose yes: "Yes, Mistress", no: "No") == "yes"
 let count = askInteger("How many?", default: 10)
 showPopup "Session starts now"
 showButton "Quick!", timeout: 3
+// A zero timeout showed the button for its 10 ms safety margin and returned 0.
+// NOTE SX_BUTTON_TIMEOUT line 7: With a zero timeout the legacy button stayed visible only for its 10 ms safety margin, and the result was 0; TeaseScript rejects a zero timeout (#531), so the button keeps the 10 ms.
+showButton "Flash", timeout: 10 ms
+// NOTE SX_BUTTON_TIMEOUT line 8: With a zero timeout the legacy button stayed visible only for its 10 ms safety margin, and the result was 0; TeaseScript rejects a zero timeout (#531), so the button keeps the 10 ms.
+showButton "Blink", timeout: 10 ms
+let instant = 0
 let elapsed = (showButton "Done", timeout: 30) / 1 s
-if elapsed >= 30 {
+if elapsed >= 30 or instant > 0 {
   say "Too slow"
 }
 openUrl("https://example.com")
@@ -15,7 +21,7 @@ if ready and sure {
   say "Starting ${count} rounds at ${start}"
 }
 // showPopup() returned the seconds until the player closed it.
-// NOTE SX_POPUP_ELAPSED line 12: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getTimestamp().toSeconds(), in whole seconds.
+// NOTE SX_POPUP_ELAPSED line 15: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getTimestamp().toSeconds(), in whole seconds.
 let popupStart = getTimestamp().toSeconds()
 showPopup "Come here!"
 let late = getTimestamp().toSeconds() - popupStart
@@ -26,13 +32,13 @@ function title {
   wait 1
   return "Ready?"
 }
-// NOTE SX_POPUP_ELAPSED line 15: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getTimestamp().toSeconds(), in whole seconds.
+// NOTE SX_POPUP_ELAPSED line 18: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getTimestamp().toSeconds(), in whole seconds.
 let popupMessage2 = title()
 let popupStart2 = getTimestamp().toSeconds()
 showPopup popupMessage2
 let slow = getTimestamp().toSeconds() - popupStart2
 // getImage() took a webcam picture and returned its path, or null.
-// NOTE SX_CAMERA_FALLBACK line 17: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
+// NOTE SX_CAMERA_FALLBACK line 20: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
 let photo = takePhoto()
 if photo != null {
   showImage photo
