@@ -4153,10 +4153,11 @@ for name in toys { ... }                // the keys
   written type widens to numbers. Values of different types need a declared union, such as `(integer | string) dict`.
   `T dict` is written like `T[]` and `T set`, and `dict` alone holds any values ([§13](#13-explicit-types)).
 - **Missing keys:** reading or removing a key that the dict does not have is runtime error `TSR061`, which names the
-  check, such as `Dictionary has no key "collar". Check toys.contains(name) first.` A dict literal read with a key it
-  does not have, such as `dict{ a: 1 }["b"]`, is a compile error. `get(key, default: value)` gives `value` instead; its
-  `default:` is required and must fit the value type like a value stored in the dict, and its result has the value
-  type. Like any argument, the default is evaluated before the lookup.
+  check, such as `Dictionary has no key "collar". Check toys.contains(name) first.` A missing key is visible to the
+  compiler only for a literal dict, so `dict{ a: 1 }["b"]` is a compile error; for any other dict, check
+  `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key; its `default:`
+  is required and must fit the value type like a value stored in the dict, and its result has the value type. Like any
+  argument, the default is evaluated before the lookup.
 - **Iteration:** `for key in toys` goes through the keys as they were when the loop started
   ([§23](#23-loops)), so changing the dict inside the loop is safe. There is no two-variable `for`.
 - **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an
