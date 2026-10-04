@@ -977,9 +977,10 @@ Rules:
 - Declarations are collected at compile time. Globals and speakers ([§37](#37-dynamic-speaker-terms)) are initialized
   once at session start, before the story runs, whether or not the surrounding block ever runs: `main.tease` first, then
   the other files in path order, each in source order. Reaching the declaration later does nothing.
-- An initializer may use literals, earlier globals, side-effect-free operators, and `load … , default:`. It may not use
-  local values, interactions, calls, or random numbers, including the element that `.random` or a list in `${...}`
-  selects, or read a global initialized after it. These rules also hold inside a `load` default.
+- An initializer may use literals, earlier globals, side-effect-free operators, and `load … , default:`. A
+  `script(...)` reference ([§29](#29-script-files-and-paths)) counts as a literal, with arguments under the same rules.
+  It may not use local values, interactions, other calls, or random numbers, including the element that `.random` or a
+  list in `${...}` selects, or read a global initialized after it. These rules also hold inside a `load` default.
 - Types follow the `let` rules above, across all files. Values are checkpointed and live for the session; `save` and
   `load` keep a value beyond it.
 

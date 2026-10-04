@@ -136,9 +136,9 @@ global level = load "level", default: 1
    `main.tease` first, then the other files in path order, each in source order. An initializer that reads a global
    initialized after it is a compile error.
 4. Initializers, including speaker properties, may use literals, earlier globals, side-effect-free operators, and
-   `load … , default:`. They may not use local values, interactions, calls, or random numbers, including the random
-   element that `.random` or a list in `${...}` selects. Nested and lazy parts, such as a `load` default, follow the
-   same rules.
+   `load … , default:`; a `script(...)` reference counts as a literal, with arguments under the same rules. They may
+   not use local values, interactions, other calls, or random numbers, including the random element that `.random` or
+   a list in `${...}` selects. Nested and lazy parts, such as a `load` default, follow the same rules.
 5. With `default:`, the global gets the `default:` value at session start, and the declaration assigns its initializer,
    which may be any expression, each time it runs:
 

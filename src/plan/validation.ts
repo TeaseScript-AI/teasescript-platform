@@ -234,8 +234,11 @@ function startValueAccepted(
       continue;
     }
     if (!isRecord(node)) continue;
+    // A script reference is made without effects, like a literal (ADR 0022 §6).
+    const scriptReference =
+      isRecord(node.callee) && node.callee.kind === "identifier" && node.callee.name === "script";
     if (
-      node.kind === "call" ||
+      (node.kind === "call" && !scriptReference) ||
       node.kind === "tagQuery" ||
       node.kind === "temporary" ||
       node.kind === "preparedReference"

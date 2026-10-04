@@ -321,6 +321,33 @@ test("script(...) marks the labels it may enter afresh by whether its path and l
   ]);
   // A grouped target adds nothing by itself: its reference came from a script(...) or from load.
   assert.deepEqual(codes('let next = load "next", default: script("main.tease")\ngoto (next)'), []);
+  // A reference in code that cannot run marks nothing; a global's start value always runs.
+  const again = 'script("main.tease", label: "again")';
+  assert.deepEqual(codes(`function never { let next = ${again} }\nexit`), []);
+  assert.deepEqual(codes(`if false { global next = ${again} }\nexit`), ["main.tease TSV054"]);
+});
+
+test("a global holds a reference from the start of the session or from a later assignment, in every file", () => {
+  assert.deepEqual(
+    said(
+      project(
+        [
+          'global next = script("rooms/hall.tease", label: "start")',
+          'global after = script("rooms/a.tease")',
+          'call "rooms/setup.tease"',
+          "call (after)",
+          "goto (next)",
+        ].join("\n"),
+        {
+          "rooms/setup.tease": 'after = script("rooms/yard.tease")\nend',
+          "rooms/a.tease": 'say "a"\nend',
+          "rooms/yard.tease": 'say "yard"\nend',
+          "rooms/hall.tease": 'say "skipped"\nlabel start\nsay "hall ${next}"\nexit',
+        },
+      ),
+    ),
+    ["yard", 'hall script("rooms/hall.tease", label: "start")', "exit"],
+  );
 });
 
 test("plan and restore validation check the expression of a computed target", () => {
