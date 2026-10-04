@@ -61,10 +61,8 @@ import {
   WRITE_KEY_MESSAGE,
   writeScriptStorage,
 } from "./script-storage.js";
-import type { XorShift32State } from "./random.js";
 import {
   cloneCapturedSerializableValue,
-  createCapturedSerializableList,
   createCapturedSerializableObject,
   getSerializableProperty,
   type SerializableRuntimeList,
@@ -122,6 +120,9 @@ import {
   isMediaHandle,
   isSpeakerReference,
 } from "./value-predicates.js";
+import { fieldText } from "./value-text.js";
+import { expandChoiceOptions } from "./choice-options.js";
+import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { DURATION_UNIT_MILLISECONDS } from "../duration.js";
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
@@ -488,7 +489,7 @@ function executePlannedInstruction(
       setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
-        evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span),
+        evaluator.sayText(evaluator.evaluate(instruction.value), instruction.value.span),
       );
       advance(snapshot);
       return;
@@ -690,14 +691,8 @@ function executePlannedInstruction(
             ? null
             : evaluator.speakerById(snapshot.defaultSpeaker, instruction.span);
       const materialized = prepared
-        ? materializeInteractionUi(
-            instruction.preparedUi,
-            snapshot.temporaries,
-            snapshot.rng,
-            evaluator,
-            instruction.span,
-          )
-        : { ui: instruction.ui, stagedWrites: [] as const, rngState: snapshot.rng.state };
+        ? materializeInteractionUi(instruction.preparedUi, snapshot.temporaries, instruction.span)
+        : { ui: instruction.ui, stagedWrites: [] as const };
       const backgroundGate = snapshot.backgroundActions.find(
         (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
       );
@@ -727,7 +722,7 @@ function executePlannedInstruction(
         ui: cloneInteractionUi(materialized.ui),
         requestEventSequence: sequence,
       });
-      commitInteractionMaterialization(snapshot, materialized.stagedWrites, materialized.rngState);
+      commitInteractionMaterialization(snapshot, materialized.stagedWrites);
       const committedSequence = takeSequence(snapshot);
       if (committedSequence !== sequence) {
         throw new Error("Interaction event-sequence staging drifted unexpectedly.");
@@ -815,20 +810,13 @@ interface MaterializedInteractionUi {
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
   }[];
-  readonly rngState: number;
 }
 
 function materializeInteractionUi(
   prepared: PreparedInteractionUiPayload,
   temporaries: RuntimeTemporarySnapshot[],
-  canonicalRng: XorShift32State,
-  evaluator: Evaluator,
   span: SourceSpan,
 ): MaterializedInteractionUi {
-  const stagedRng: XorShift32State = {
-    algorithm: canonicalRng.algorithm,
-    state: canonicalRng.state,
-  };
   const stagedWrites: Array<{
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
@@ -841,7 +829,7 @@ function materializeInteractionUi(
   };
   const readText = (temporaryId: number): string => {
     const temporary = read(temporaryId);
-    const text = evaluator.visibleTextWithRng(temporary.value, span, stagedRng);
+    const text = fieldText(temporary.value, span);
     stagedWrites.push({ temporaryId: temporary.id, value: text });
     return text;
   };
@@ -879,74 +867,21 @@ function materializeInteractionUi(
     };
   } else {
     const source = read(prepared.optionsTemporary);
-    if (!isList(source.value) || source.value.items.length !== prepared.optionCount) {
+    if (!isList(source.value) || source.value.items.length !== prepared.values.length) {
       throw fault(
         "TSR052",
-        "Prepared choice options do not match the canonical option count.",
-        span,
-      );
-    }
-    const presentations = source.value.items.map((value) => {
-      if (!isObject(value)) return { text: evaluator.visibleTextWithRng(value, span, stagedRng) };
-      if (
-        value.properties.some(
-          (property) => property.name !== "text" && property.name !== "background",
-        )
-      )
-        throw fault("TSR052", "Choice options support text and background only.", span);
-      const textValue = getSerializableProperty(value, "text");
-      if (textValue === undefined) throw fault("TSR052", "A choice object requires text.", span);
-      const text = evaluator.visibleTextWithRng(textValue, span, stagedRng);
-      const background = getSerializableProperty(value, "background");
-      return {
-        text,
-        ...(background === undefined ? {} : { background: backgroundColor(background) }),
-      };
-    });
-    const labels = prepared.labelType === "none" ? null : prepared.labels;
-    if (
-      prepared.labelType !== "none" &&
-      (labels === null || labels.length !== presentations.length)
-    ) {
-      throw fault(
-        "TSR052",
-        "Prepared choice labels do not match the canonical option count.",
+        "Prepared choice options do not match the authored option count.",
         span,
       );
     }
     ui = {
       kind: "choice",
-      labelType: prepared.labelType,
-      options: presentations.map((presentation, index) => ({
-        ...presentation,
-        label: labels?.[index] ?? null,
-      })),
+      options: expandChoiceOptions(source.value.items, prepared.values, span),
       accessibleName: prepared.accessibleName,
     };
-    stagedWrites.push({
-      temporaryId: source.id,
-      value: createCapturedSerializableList(
-        presentations.map((presentation) =>
-          presentation.background === undefined
-            ? presentation.text
-            : createCapturedSerializableObject([
-                { name: "text", value: presentation.text },
-                { name: "background", value: presentation.background },
-              ]),
-        ),
-      ),
-    });
   }
 
   assertInteractionUiLimits(ui, span);
-  if (ui.kind === "choice" && ui.labelType === "none") {
-    const visible = new Set<string>();
-    for (const option of ui.options) {
-      if (visible.has(option.text))
-        throw fault("TSR052", "Unlabelled choice text must evaluate to unique strings.", span);
-      visible.add(option.text);
-    }
-  }
   return Object.freeze({
     ui,
     stagedWrites: Object.freeze(
@@ -957,7 +892,6 @@ function materializeInteractionUi(
         }),
       ),
     ),
-    rngState: stagedRng.state,
   });
 }
 
@@ -997,7 +931,6 @@ function commitInteractionMaterialization(
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
   }[],
-  rngState: number,
 ): void {
   for (const staged of stagedWrites) {
     const temporary = snapshot.temporaries.find((item) => item.id === staged.temporaryId);
@@ -1008,7 +941,6 @@ function commitInteractionMaterialization(
     }
     temporary.value = cloneCapturedSerializableValue(staged.value);
   }
-  snapshot.rng.state = rngState;
 }
 
 function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): void {
@@ -1021,7 +953,8 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   } else {
     for (const option of ui.options) {
       strings.push(option.text);
-      if (typeof option.label === "string") strings.push(option.label);
+      if (typeof option.value === "string" && option.value !== option.text)
+        strings.push(option.value);
     }
   }
   let aggregate = 0;
@@ -1478,10 +1411,10 @@ function cloneInteractionUi(
   if (ui.kind === "choice") {
     const options = ui.options.map((option) => ({
       text: option.text,
-      label: option.label,
+      value: cloneInteractionChoiceValue(option.value),
       ...(option.background === undefined ? {} : { background: option.background }),
     }));
-    return { kind: "choice", labelType: ui.labelType, options, accessibleName };
+    return { kind: "choice", options, accessibleName };
   }
   if (ui.kind === "button")
     return {
@@ -1657,7 +1590,7 @@ function executeSay(
   );
   const authoredText =
     instruction.textTemporary === undefined
-      ? evaluator.visibleText(evaluator.evaluate(instruction.value), instruction.value.span)
+      ? evaluator.sayText(evaluator.evaluate(instruction.value), instruction.value.span)
       : preparedSayText(snapshot.temporaries, instruction.textTemporary, instruction.span);
   const content = parseMessageMarkup(authoredText);
   const text = content.visibleText;
@@ -2012,6 +1945,12 @@ function commandName(command: "wait" | "timer"): string {
 }
 
 export function timerLabel(value: SerializableRuntimeValue, span: SourceSpan): string {
+  if (isList(value))
+    throw fault(
+      "TSR050",
+      'A list cannot be a timer label. Select one element with "${list}" or list.random.',
+      span,
+    );
   if (typeof value !== "string") throw fault("TSR050", "A timer label must be a string.", span);
   return value;
 }

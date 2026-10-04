@@ -260,3 +260,38 @@ test("type inference handles deeply nested expressions without native recursion"
   const source = `let total = ${Array.from({ length: 20_000 }, () => "1").join(" + ")}\ntotal = 2`;
   assert.deepEqual(compileSource(source).diagnostics, []);
 });
+
+test("a choice result has the type of its values, and an option without a written value returns itself", () => {
+  const codes = (source: string) => mismatches(source).map(([code, , text]) => [code, text]);
+  assert.deepEqual(codes("let n = choose [5, 10, 15]\nn = 2.5"), [["TSV041", "2.5"]]);
+  assert.deepEqual(codes("let n = choose 5, 10\nn = 20"), []);
+  assert.deepEqual(codes("let n = choose set[5, 10]\nn = 2.5"), [["TSV041", "2.5"]]);
+  // An empty list or set gives no buttons, so its written value is never the result.
+  assert.deepEqual(codes('let n: integer = choose 1.5: [], 2: ["Only"]'), []);
+  assert.deepEqual(codes('let n: integer = choose 1.5: set[], 2: ["Only"]'), []);
+  assert.deepEqual(codes("let n: string = choose 5, 10"), [["TSV041", "choose 5, 10"]]);
+  assert.deepEqual(codes('let n = choose 1: "One", 2.5: "Two"\nn = 0.5'), []);
+  assert.deepEqual(codes("let d = choose [1 min, 90 seconds]\nd = 5"), [["TSV041", "5"]]);
+  assert.deepEqual(codes('let n = choose [{ text: "Five", value: 5 }]\nn = "five"'), [
+    ["TSV041", '"five"'],
+  ]);
+  assert.deepEqual(codes('let pets = ["pet", "toy"]\nlet pick = choose pets\npick = 3'), [
+    ["TSV041", "3"],
+  ]);
+  assert.deepEqual(codes('let answer = choose back: "Back", "Corner"\nanswer = "other"'), []);
+  // A `null` value and an optional option keep their types.
+  assert.deepEqual(codes('let answer: integer = choose { text: "Nothing", value: null }'), [
+    ["TSV041", 'choose { text: "Nothing", value: null }'],
+  ]);
+  assert.deepEqual(
+    codes("let value: integer? = null\nlet answer = choose value\nanswer = null"),
+    [],
+  );
+  // A computed choice object returns its value or text, whose type is not known here.
+  assert.deepEqual(
+    codes(
+      'let option = { text: "Yes" }\nlet answer: string = choose option\nlet other = choose [option]\nsay "${other}"',
+    ),
+    [],
+  );
+});

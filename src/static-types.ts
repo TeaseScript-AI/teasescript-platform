@@ -229,14 +229,45 @@ function* expressionTypeTask(
     }
     case "rangeExpression":
       return { kind: "range" };
-    case "interactionExpression":
-      return scalar(
-        expression.interactionKind === "number" ||
-          (expression.interactionKind === "choice" &&
-            expression.options[0]?.label?.kind === "numberLiteral")
-          ? "number"
-          : "string",
-      );
+    case "interactionExpression": {
+      if (expression.interactionKind !== "choice")
+        return scalar(expression.interactionKind === "number" ? "number" : "string");
+      // `choose` returns a button's value: one written before `:`, or else the option's own value with its type.
+      const values: StaticType[] = [];
+      for (const option of expression.options) {
+        let content = option.expression;
+        while (content.kind === "parenthesizedExpression") content = content.expression;
+        // An empty list or set gives no buttons, so its written value is never returned.
+        if (
+          (content.kind === "listLiteral" || content.kind === "setLiteral") &&
+          content.elements.length === 0
+        )
+          continue;
+        if (option.value !== null) {
+          values.push(
+            scalar(option.value.kind === "identifier" ? "string" : option.value.numericType),
+          );
+          continue;
+        }
+        let value = option.expression;
+        while (value.kind === "parenthesizedExpression") value = value.expression;
+        if (value.kind === "listLiteral" || value.kind === "setLiteral") {
+          for (const element of value.elements)
+            values.push(yield* compileChild(choiceEntryTypeTask(element, context)));
+          continue;
+        }
+        const type = yield* compileChild(choiceEntryTypeTask(value, context));
+        // A list or set option gives a button per element; an optional one may also be one `null` button.
+        values.push(
+          type.kind === "list" || type.kind === "set"
+            ? type.element
+            : type.kind === "optional" && (type.value.kind === "list" || type.value.kind === "set")
+              ? UNKNOWN_TYPE
+              : type,
+        );
+      }
+      return sharedValueType(values);
+    }
     case "timerExpression":
       return expression.async ? { kind: "timerHandle" } : UNKNOWN_TYPE;
     case "playMediaExpression":
@@ -244,6 +275,42 @@ function* expressionTypeTask(
     case "loadExpression":
       return UNKNOWN_TYPE;
   }
+}
+
+/**
+ * The type all choice values share; integers and numbers together are numbers. Values of different types give
+ * `unknown`, because the compiler never infers a union or an optional type.
+ */
+function sharedValueType(values: readonly StaticType[]): StaticType {
+  const numeric = (type: StaticType): boolean =>
+    type.kind === "scalar" && (type.name === "integer" || type.name === "number");
+  let shared: StaticType | undefined;
+  for (const value of values) {
+    if (value.kind === "unknown") return UNKNOWN_TYPE;
+    if (shared === undefined || typeName(shared) === typeName(value)) shared ??= value;
+    else if (numeric(shared) && numeric(value)) shared = scalar("number");
+    else return UNKNOWN_TYPE;
+  }
+  return shared ?? UNKNOWN_TYPE;
+}
+
+/** The value type of one choice button: a choice object's `value`, else its `text`, else the option itself. */
+function* choiceEntryTypeTask(
+  entry: Expression,
+  context: StaticTypeContext,
+): CompileTask<StaticType> {
+  while (entry.kind === "parenthesizedExpression") entry = entry.expression;
+  if (entry.kind !== "objectLiteral") {
+    const type = yield* compileChild(expressionTypeTask(entry, context));
+    // A computed choice object's value type is not known.
+    return nonNullType(type).kind === "object" ? UNKNOWN_TYPE : type;
+  }
+  const property =
+    entry.properties.find((candidate) => candidate.name.name === "value") ??
+    entry.properties.find((candidate) => candidate.name.name === "text");
+  return property === undefined
+    ? UNKNOWN_TYPE
+    : yield* compileChild(expressionTypeTask(property.value, context));
 }
 
 export const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "%"]);

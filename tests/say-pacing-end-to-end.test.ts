@@ -17,7 +17,7 @@ test("multiple pacing cycles preserve prepared output, identities, replay, and c
     [
       'say "one"',
       'say \"two ${["alpha", "beta"]}\"',
-      'say ["three", "three-alt"]',
+      'say "${["three", "three-alt"]}"',
       'say "four"',
       "exit",
     ].join("\n"),

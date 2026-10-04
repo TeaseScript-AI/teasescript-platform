@@ -12,8 +12,10 @@ import type {
   ExpressionPlan,
   Instruction,
   InstructionPlan,
+  InteractionChoiceValue,
   InteractionUiPayload,
 } from "../plan/model.js";
+import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { cloneMessageMarkup } from "../message-markup.js";
 import { captureOrReuseInstructionPlan } from "../plan/capture.js";
 import { captureExternalData, type ExternalDataFailureKind } from "../external-data-capture.js";
@@ -65,7 +67,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 28;
+export const RUNTIME_SNAPSHOT_VERSION = 29;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -228,7 +230,7 @@ export interface RuntimeInteractionResultHandoffSnapshot {
   readonly continuationInstruction: number;
   readonly ownerCallFrameId: number | null;
   readonly destinationTemporary: number;
-  readonly result: string | number;
+  readonly result: InteractionChoiceValue;
 }
 
 /**
@@ -585,7 +587,7 @@ function cloneInteractionResultHandoff(
     continuationInstruction: handoff.continuationInstruction,
     ownerCallFrameId: handoff.ownerCallFrameId,
     destinationTemporary: handoff.destinationTemporary,
-    result: handoff.result,
+    result: cloneInteractionChoiceValue(handoff.result),
   };
 }
 
@@ -684,10 +686,9 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
   if (ui.kind === "choice")
     return {
       kind: "choice",
-      labelType: ui.labelType,
       options: ui.options.map((option) => ({
         text: option.text,
-        label: option.label,
+        value: cloneInteractionChoiceValue(option.value),
         ...(option.background === undefined ? {} : { background: option.background }),
       })),
       accessibleName,
@@ -740,7 +741,7 @@ function cloneSettlement(
     requestEventSequence: settlement.requestEventSequence,
     transcriptEventSequence: settlement.transcriptEventSequence,
     completionEventSequence: settlement.completionEventSequence,
-    result: settlement.result,
+    result: cloneInteractionChoiceValue(settlement.result),
     transcriptText: settlement.transcriptText,
     ui: cloneInteractionUi(settlement.ui),
   };

@@ -66,10 +66,6 @@ export interface WorkspaceControlResult<T = WorkspaceControlOutcome> {
   readonly presentation: WorkspacePlayerPresentation;
 }
 
-export type WorkspaceRenderedChoiceSelection =
-  | { readonly kind: "label"; readonly value: string | number }
-  | { readonly kind: "text"; readonly value: string };
-
 export function inspectWorkspacePlayerPresentation(
   snapshot: RuntimeSnapshot,
 ): WorkspacePlayerPresentation {
@@ -102,27 +98,31 @@ export function submitWorkspaceComposer(
   return completeWorkspaceAction(plan, snapshot, action, payload);
 }
 
+const STALE_CONTROL_MESSAGE = "This control belongs to an interaction that is no longer active.";
+
+/** Activates the button rendered for the interaction `actionId`. */
 export function activateWorkspaceButton(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
+  actionId: number,
 ): WorkspaceControlResult {
   const action = activeInteraction(snapshot, "button");
   if (action === null) return localRejection(snapshot, "No active button interaction.");
+  if (action.actionId !== actionId) return localRejection(snapshot, STALE_CONTROL_MESSAGE);
   return completeWorkspaceAction(plan, snapshot, action, { kind: "activate" });
 }
 
+/** Selects the choice button at `optionIndex` that was rendered for the interaction `actionId`. */
 export function selectWorkspaceChoice(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
-  selection: WorkspaceRenderedChoiceSelection,
+  actionId: number,
+  optionIndex: number,
 ): WorkspaceControlResult {
   const action = activeInteraction(snapshot, "choice");
   if (action === null) return localRejection(snapshot, "No active choice interaction.");
-  const payload =
-    selection.kind === "label"
-      ? { kind: "selectedLabel", selectedLabel: selection.value }
-      : { kind: "selectedText", selectedText: selection.value };
-  return completeWorkspaceAction(plan, snapshot, action, payload);
+  if (action.actionId !== actionId) return localRejection(snapshot, STALE_CONTROL_MESSAGE);
+  return completeWorkspaceAction(plan, snapshot, action, { kind: "selectedOption", optionIndex });
 }
 
 export function skipWorkspacePacing(

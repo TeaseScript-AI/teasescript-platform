@@ -44,9 +44,11 @@ function interactionPlan(
   const expectedResult =
     interactionKind === "button"
       ? "none"
-      : interactionKind === "number" || (ui.kind === "choice" && ui.labelType === "number")
+      : interactionKind === "number"
         ? "number"
-        : "string";
+        : interactionKind === "choice"
+          ? "choice"
+          : "string";
   const interaction: InteractionInstruction = {
     kind: "interaction",
     interactionKind,
@@ -241,9 +243,7 @@ function injectInteraction(
   );
   const span = original.span;
   const expectedResult =
-    interactionKind === "number" || (ui.kind === "choice" && ui.labelType === "number")
-      ? "number"
-      : "string";
+    interactionKind === "number" ? "number" : interactionKind === "choice" ? "choice" : "string";
   const interaction: InteractionInstruction = {
     kind: "interaction",
     interactionKind,

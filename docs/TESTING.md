@@ -507,10 +507,10 @@ Timed actions must use an injected fake clock or equivalent deterministic time s
 
 ADR 0016 defines the shared contract; action-specific tests remain required for each later API and UI behavior.
 
-The implemented ADR 0018 interaction slice covers button, text, number, unlabelled choice, identifier-labelled choice,
-and numeric-labelled choice through both direct validated plans and real compact source. Tests cover exact parser spans
+The implemented ADR 0018 interaction slice covers button, text, number, and choice with options without a written value,
+with identifier and numeric values, and list options through both direct validated plans and real compact source. Tests cover exact parser spans
 and recovery, V30 comma-newline continuation and enclosing-delimiter composition for compact `choose`, protected prelude
-names, choice domains and duplicates, requesting-speaker capture, prepared UI provenance while preparation state exists,
+names, choice domains and repeated values, requesting-speaker capture, prepared UI provenance while preparation state exists,
 intrinsic post-cleanup settlement checks, source-order evaluation, sequential blocking expressions, function arguments,
 root/function checkpoint resume, typed completion, transcript behavior, located diagnostics for compiled interaction
 data that plan validation rejects, and atomic rejection. The single-use handoff tests cover one row per accepted handoff

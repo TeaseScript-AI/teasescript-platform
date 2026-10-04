@@ -282,7 +282,7 @@ function completeInteraction(
     return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
   }
   assertEventSequenceCapacity(current, 2);
-  if (action.destinationTemporary !== null && resolved.result !== null) {
+  if (action.destinationTemporary !== null) {
     setTemporary(current.temporaries, action.destinationTemporary, resolved.result);
   }
   const transcriptSequence = takeSequence(current, 2);
@@ -304,7 +304,7 @@ function completeInteraction(
     ui: action.ui,
   });
   const handoff: RuntimeInteractionResultHandoffSnapshot | null =
-    action.destinationTemporary === null || resolved.result === null
+    action.destinationTemporary === null
       ? null
       : Object.freeze({
           actionId: action.actionId,
