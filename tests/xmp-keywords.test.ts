@@ -265,6 +265,13 @@ test("reports a JPEG whose standard XMP leaves dc:subject to Extended XMP as uns
     /Extended XMP.*sidecar/,
     "subject in Extended XMP",
   );
+  // Without its Extended XMP segments the file may have lost the keywords; it still holds no readable ones.
+  assertFailure(
+    readImageXmpKeywords(jpeg(standardXmpSegment(withoutSubject, title))),
+    "unsupported",
+    /Extended XMP/,
+    "missing Extended XMP",
+  );
 
   const subject = `  <dc:subject><rdf:Bag><rdf:li>bedroom</rdf:li></rdf:Bag></dc:subject>`;
   const withSubject = "67928C1750FEC1660268C408B2468C58";
@@ -303,6 +310,9 @@ test("reports truncated and malformed image containers as invalid", () => {
     file.indexOf(Buffer.from([0xbc, 0x02, 0x01, 0x00])); // Tag 700, type BYTE, little-endian.
   const tiffDirectory = fixture("keywords-little-endian.tif").readUInt32LE(4);
   const huge = [0xff, 0xff, 0xff, 0xff];
+  const webp = fixture("keywords.webp"); // Its last chunk is XMP of odd size, followed by a pad byte.
+  const unpaddedWebp = Buffer.from(webp.subarray(0, webp.length - 1));
+  unpaddedWebp.writeUInt32LE(webp.readUInt32LE(4) - 1, 4);
   const cases: [string, Buffer, RegExp][] = [
     ["truncated JPEG", truncated("keywords.jpg"), /JPEG/],
     ["truncated PNG", truncated("keywords.png"), /PNG/],
@@ -312,11 +322,6 @@ test("reports truncated and malformed image containers as invalid", () => {
     [
       "JPEG with data where the marker after its first segment belongs",
       patched("keywords.jpg", (file) => 4 + file.readUInt16BE(4), [0x00]),
-      /JPEG/,
-    ],
-    [
-      "JPEG Extended XMP without a GUID",
-      jpeg(app1Segment("http://ns.adobe.com/xmp/extension/\0", "0123")),
       /JPEG/,
     ],
     [
@@ -339,6 +344,7 @@ test("reports truncated and malformed image containers as invalid", () => {
       patched("keywords-little-endian.tif", () => 4, [0xff, 0xff]),
       /TIFF/,
     ],
+    ["WebP odd chunk without its pad byte", unpaddedWebp, /WebP/],
     ["GIF XMP without its trailer", gif.subarray(0, xpacketEnd(gif)), /GIF/],
     [
       "PNG chunk declaring 4 GiB",
@@ -448,27 +454,84 @@ test("reports XMP that is not well-formed XML, or has a DOCTYPE, as invalid", ()
       /missing a closing "/,
     ],
     ["no root element", `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>`, /no root/],
+    ["-- inside a comment", valid.replace("<rdf:li>", "<!-- a -- b --><rdf:li>"), /-- inside/],
+    [
+      "a processing instruction target run into its data",
+      valid.replace("<rdf:li>", "<?pi=data?><rdf:li>"),
+      /processing instruction/,
+    ],
+    [
+      "an XML declaration after the start",
+      valid.replace("<rdf:li>", '<?xml version="1.0"?><rdf:li>'),
+      /XML declaration/,
+    ],
+    [
+      "]]> outside a CDATA section",
+      packet(subject("<rdf:li>room]]></rdf:li>")).toString(),
+      /CDATA/,
+    ],
+    [
+      "the xml prefix bound to another namespace",
+      packet(`<rdf:Description xmlns:xml="${DC}"><xml:subject/></rdf:Description>`).toString(),
+      /reserved/,
+    ],
+    [
+      "one attribute under two prefixes",
+      packet(subject(`<rdf:li rdf:value="first" r:value="second" xmlns:r="${RDF}"/>`)).toString(),
+      /repeats/,
+    ],
+    [
+      "a local name starting with a digit",
+      packet(subject("<rdf:li>bedroom</rdf:li><ex:1st/>")).toString(),
+      /malformed name/,
+    ],
   ];
   for (const [label, xmp, reason] of cases) {
     assertFailure(readXmpPacketKeywords(Buffer.from(xmp)), "invalid", reason, label);
   }
 });
 
-test("reports XMP beyond the reader's size, nesting, and keyword limits as unsupported", () => {
-  const padded = Buffer.concat([
-    fixture("keywords.jpg.xmp"),
-    Buffer.alloc(MAX_XMP_PACKET_BYTES, " "),
-  ]);
-  assertFailure(readXmpPacketKeywords(padded), "unsupported", /larger than/, "packet size");
-
-  const depth = MAX_XMP_ELEMENT_DEPTH + 1;
-  const nested = "<ex:level>".repeat(depth) + "</ex:level>".repeat(depth);
-  const deep = packet(`<rdf:Description><ex:holder>${nested}</ex:holder></rdf:Description>`);
-  assertFailure(readXmpPacketKeywords(deep), "unsupported", /levels deep/, "nesting");
-
-  const items = "<rdf:li>keyword</rdf:li>".repeat(MAX_XMP_KEYWORDS + 1);
-  const many = packet(
-    `<rdf:Description><dc:subject><rdf:Bag>${items}</rdf:Bag></dc:subject></rdf:Description>`,
+test("reads XMP up to the reader's size, nesting, and keyword limits and reports XMP beyond them as unsupported", () => {
+  const sidecar = fixture("keywords.jpg.xmp");
+  const padded = (bytes: number): Buffer =>
+    Buffer.concat([sidecar, Buffer.alloc(bytes - sidecar.length, " ")]); // Whitespace may follow the root.
+  assert.deepEqual(readXmpPacketKeywords(padded(MAX_XMP_PACKET_BYTES)), FIXTURE_KEYWORDS);
+  assertFailure(
+    readXmpPacketKeywords(padded(MAX_XMP_PACKET_BYTES + 1)),
+    "unsupported",
+    /larger than/,
+    "size",
   );
-  assertFailure(readXmpPacketKeywords(many), "unsupported", /keywords/, "keywords");
+
+  // x:xmpmeta, rdf:RDF, rdf:Description, and ex:holder are the first four levels.
+  const nested = (depth: number): Buffer =>
+    packet(
+      `<rdf:Description><dc:subject><rdf:Bag><rdf:li>deep</rdf:li></rdf:Bag></dc:subject><ex:holder>${"<ex:level>".repeat(depth - 4)}${"</ex:level>".repeat(depth - 4)}</ex:holder></rdf:Description>`,
+    );
+  assert.deepEqual(readXmpPacketKeywords(nested(MAX_XMP_ELEMENT_DEPTH)), {
+    kind: "keywords",
+    keywords: ["deep"],
+  });
+  assertFailure(
+    readXmpPacketKeywords(nested(MAX_XMP_ELEMENT_DEPTH + 1)),
+    "unsupported",
+    /levels deep/,
+    "depth",
+  );
+
+  const subject = (count: number): Buffer =>
+    packet(
+      `<rdf:Description><dc:subject><rdf:Bag>${"<rdf:li>keyword</rdf:li>".repeat(count)}</rdf:Bag></dc:subject></rdf:Description>`,
+    );
+  const atLimit = readXmpPacketKeywords(subject(MAX_XMP_KEYWORDS));
+  assert.equal(
+    atLimit.kind === "keywords" ? atLimit.keywords.length : atLimit.kind,
+    MAX_XMP_KEYWORDS,
+  );
+  assertFailure(
+    readXmpPacketKeywords(subject(MAX_XMP_KEYWORDS + 1)),
+    "unsupported",
+    /keywords/,
+    "keywords",
+  );
 });

@@ -11,11 +11,10 @@ type Failure = Extract<XmpKeywordsResult, { readonly reason: string }>;
 type Extraction = Uint8Array | null | Failure;
 
 /*
- * Implementation limits of this reader, not project policy. Photo-tool XMP stays far below them: Lightroom sidecars
- * reach hundreds of KB, RDF nests about ten elements deep, and images have at most hundreds of keywords. XMP beyond a
- * limit is `unsupported`. Container walks need no limit of their own: every step moves past a header within the file,
- * and a TIFF is read from its first image directory only, never following directory offsets, so cyclic offsets cannot
- * loop.
+ * Implementation limits of this reader, not project policy, set well above typical photo-tool XMP such as Lightroom
+ * sidecars of hundreds of KB. XMP beyond a limit is `unsupported`. Container walks need no limit of their own: every
+ * step moves past a header within the file, and a TIFF is read from its first image directory only, never following
+ * directory offsets, so cyclic offsets cannot loop.
  */
 /** The most bytes of one XMP packet or sidecar file that the reader decodes and parses. */
 export const MAX_XMP_PACKET_BYTES = 16 * 1024 * 1024;
@@ -28,8 +27,8 @@ export const MAX_XMP_KEYWORDS = 10_000;
 interface Packet {
   readonly kind: "packet";
   readonly keywords: readonly string[] | null;
-  /** The GUID of the Extended XMP a JPEG's standard packet refers to, if any. */
-  readonly extendedXmp: string | null;
+  /** Whether a top-level description has `xmpNote:HasExtendedXMP`: a JPEG's standard packet refers to Extended XMP. */
+  readonly hasExtendedXmp: boolean;
 }
 
 /** The `dc:subject` keywords embedded in an image, detected by its signature: JPEG, PNG, WebP, GIF, or TIFF. */
@@ -92,18 +91,16 @@ function hasAscii(bytes: Uint8Array, at: number, text: string, limit = bytes.len
 }
 
 const JPEG_XMP = "http://ns.adobe.com/xap/1.0/\0";
-const JPEG_EXTENDED_XMP = "http://ns.adobe.com/xmp/extension/\0";
 const JPEG_MALFORMED = "The JPEG has a malformed or truncated segment.";
 
 /**
  * Walks the JPEG marker segments before the image data (SOS) and reads the standard XMP packet of the first APP1
- * segment that has one. Extended XMP is not read; when the standard packet has no `dc:subject` and refers to Extended
- * XMP that the file holds, the keywords may be there.
+ * segment that has one. Extended XMP is not read; when the standard packet has no `dc:subject` but refers to Extended
+ * XMP, the keywords may be there.
  */
 function readJpegKeywords(bytes: Uint8Array): XmpKeywordsResult {
   const data = view(bytes);
   let packet: Uint8Array | null = null;
-  const extendedGuids = new Set<string>();
   let at = 2;
   for (;;) {
     if (bytes[at] !== 0xff) return invalid(JPEG_MALFORMED);
@@ -118,10 +115,6 @@ function readJpegKeywords(bytes: Uint8Array): XmpKeywordsResult {
     if (end < at + 2 || end > bytes.length) return invalid(JPEG_MALFORMED);
     if (marker === 0xe1 && packet === null && hasAscii(bytes, at + 2, JPEG_XMP, end)) {
       packet = bytes.subarray(at + 2 + JPEG_XMP.length, end);
-    } else if (marker === 0xe1 && hasAscii(bytes, at + 2, JPEG_EXTENDED_XMP, end)) {
-      const guid = at + 2 + JPEG_EXTENDED_XMP.length;
-      if (guid + 32 > end) return invalid(JPEG_MALFORMED);
-      extendedGuids.add(String.fromCharCode(...bytes.subarray(guid, guid + 32)));
     }
     at = end;
   }
@@ -129,7 +122,7 @@ function readJpegKeywords(bytes: Uint8Array): XmpKeywordsResult {
   const xmp = readPacket(packet);
   if (xmp.kind !== "packet") return xmp;
   if (xmp.keywords !== null) return { kind: "keywords", keywords: xmp.keywords };
-  if (xmp.extendedXmp !== null && extendedGuids.has(xmp.extendedXmp)) {
+  if (xmp.hasExtendedXmp) {
     return unsupported(
       "The JPEG stores part of its XMP as Extended XMP, which may hold its keywords; save the tags in a sidecar file instead.",
     );
@@ -182,9 +175,10 @@ function webpPacket(bytes: Uint8Array): Extraction {
     if (at + 8 > riffEnd) return invalid(WEBP_MALFORMED);
     const size = data.getUint32(at + 4, true);
     const end = at + 8 + size;
-    if (end > riffEnd) return invalid(WEBP_MALFORMED);
+    const next = end + (size % 2); // Odd-sized chunks have a pad byte.
+    if (next > riffEnd) return invalid(WEBP_MALFORMED);
     if (hasAscii(bytes, at, "XMP ")) return bytes.subarray(at + 8, end);
-    at = end + (size % 2); // Odd-sized chunks have a pad byte.
+    at = next;
   }
   return null;
 }
@@ -339,17 +333,9 @@ const DUBLIN_CORE = "http://purl.org/dc/elements/1.1/";
 const ADOBE_META = "adobe:ns:meta/";
 const XMP_NOTE = "http://ns.adobe.com/xmp/note/";
 const XML = "http://www.w3.org/XML/1998/namespace";
+const XMLNS = "http://www.w3.org/2000/xmlns/";
 
-const NAME_START_CHARACTERS =
-  ":A-Z_a-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02FF\\u0370-\\u037D\\u037F-\\u1FFF\\u200C\\u200D" +
-  "\\u2070-\\u218F\\u2C00-\\u2FEF\\u3001-\\uD7FF\\uF900-\\uFDCF\\uFDF0-\\uFFFD\\u{10000}-\\u{EFFFF}";
-/** An XML 1.0 `Name`, matched at `lastIndex`. */
-const NAME = new RegExp(
-  `[${NAME_START_CHARACTERS}][${NAME_START_CHARACTERS}\\-.0-9\\u00B7\\u0300-\\u036F\\u203F\\u2040]*`,
-  "uy",
-);
 const NOT_XML_CHARACTER = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/u;
-const SPACE = /[ \t\n\r]*/y;
 const PREDEFINED_ENTITIES = new Map([
   ["amp", "&"],
   ["lt", "<"],
@@ -368,7 +354,6 @@ type Role =
   | "rdf"
   | "description"
   | "subject"
-  | "extendedXmpNote"
   | "array"
   | "item"
   | "itemDescription"
@@ -408,11 +393,10 @@ class SubjectReader {
   private readonly shadowed: [prefix: string, namespace: string | undefined][] = [];
   private hasRoot = false;
   private keywords: string[] | null = null;
-  private extendedXmp: string | null = null;
+  private hasExtendedXmp = false;
   private item: Item | null = null;
   /** The text of the open `rdf:value`, or `null` when it is not plain text. */
   private valueText: string[] | null = null;
-  private noteText: string[] = [];
 
   constructor(private readonly text: string) {}
 
@@ -427,7 +411,10 @@ class SubjectReader {
       if (textEnd > this.at) this.characters(text.slice(this.at, textEnd), false);
       if (markup < 0) break;
       if (text.startsWith("<!--", markup)) {
-        this.at = this.endOf("-->", markup + 4);
+        const close = text.indexOf("--", markup + 4); // A comment cannot contain --.
+        if (close < 0) malformed("The XMP is missing a closing -->.");
+        if (text[close + 2] !== ">") malformed("The XMP has -- inside a comment.");
+        this.at = close + 3;
       } else if (text.startsWith("<![CDATA[", markup)) {
         this.at = this.endOf("]]>", markup + 9);
         this.characters(text.slice(markup + 9, this.at - 3), true);
@@ -437,8 +424,7 @@ class SubjectReader {
         );
       } else if (text.startsWith("<?", markup)) {
         this.at = markup + 2;
-        this.name(); // Processing instruction target, such as `xpacket`.
-        this.at = this.endOf("?>", this.at);
+        this.processingInstruction(markup);
       } else if (text.startsWith("</", markup)) {
         this.at = markup + 2;
         this.endTag();
@@ -450,7 +436,7 @@ class SubjectReader {
     const unclosed = this.open.at(-1);
     if (unclosed !== undefined) malformed(`The XMP never closes <${unclosed.name}>.`);
     if (!this.hasRoot) malformed("The XMP has no root element.");
-    return { kind: "packet", keywords: this.keywords, extendedXmp: this.extendedXmp };
+    return { kind: "packet", keywords: this.keywords, hasExtendedXmp: this.hasExtendedXmp };
   }
 
   /** The position after the next `delimiter` at or after `from`. */
@@ -460,33 +446,53 @@ class SubjectReader {
     return at + delimiter.length;
   }
 
+  /** Reads an XML 1.0 `Name`, which may contain colons. */
   private name(): string {
-    NAME.lastIndex = this.at;
-    const name = NAME.exec(this.text)?.[0];
-    if (name === undefined) malformed("The XMP has a malformed tag or name.");
-    this.at += name.length;
-    return name;
+    const start = this.at;
+    for (;;) {
+      const code = this.text.codePointAt(this.at);
+      const isNameCharacter =
+        code !== undefined &&
+        (code === 0x3a || (this.at === start ? isNameStart(code) : isNamePart(code)));
+      if (!isNameCharacter) break;
+      this.at += code > 0xffff ? 2 : 1;
+    }
+    if (this.at === start) malformed("The XMP has a malformed tag or name.");
+    return this.text.slice(start, this.at);
   }
 
   /** Skips whitespace and returns whether there was any. */
   private skipSpace(): boolean {
-    SPACE.lastIndex = this.at;
-    SPACE.test(this.text);
-    const skipped = SPACE.lastIndex > this.at;
-    this.at = SPACE.lastIndex;
-    return skipped;
+    const start = this.at;
+    while (isSpace(this.text.charCodeAt(this.at))) this.at += 1;
+    return this.at > start;
+  }
+
+  /** Reads a processing instruction such as `<?xpacket begin="" ?>`, or the XML declaration at the start. */
+  private processingInstruction(markup: number): void {
+    const target = this.name();
+    const end = this.endOf("?>", this.at);
+    const content = this.text.slice(this.at, end - 2);
+    this.at = end;
+    if (content !== "" && !isSpace(content.charCodeAt(0))) {
+      malformed(`The XMP has a malformed <?${target}?> processing instruction.`);
+    }
+    const isDeclaration = target.toLowerCase() === "xml";
+    if (isDeclaration && (target !== "xml" || markup !== 0 || !hasXmlVersion(content))) {
+      malformed("The XMP has a malformed XML declaration, or one that is not at its start.");
+    }
   }
 
   private characters(raw: string, cdata: boolean): void {
     const role = this.open.at(-1)?.role;
     if (role === undefined) {
-      if (!cdata && /^[ \t\n\r]*$/u.test(raw)) return;
+      if (!cdata && isBlank(raw)) return;
       malformed("The XMP has text outside its root element.");
     }
+    if (!cdata && raw.includes("]]>")) malformed("The XMP has ]]> outside a CDATA section.");
     const text = cdata ? raw : decodeReferences(raw);
     if (role === "item") this.item?.text.push(text);
     else if (role === "value") this.valueText?.push(text);
-    else if (role === "extendedXmpNote") this.noteText.push(text);
   }
 
   private startTag(): void {
@@ -533,14 +539,17 @@ class SubjectReader {
       this.bind(localName, value);
     }
     const attributes: Attribute[] = [];
+    const expandedNames = new Set<string>();
     for (const [attribute, value] of rawAttributes) {
       const [prefix, localName] = splitName(attribute);
       if (prefix === "xmlns" || attribute === "xmlns") continue;
-      attributes.push({
-        namespace: prefix === "" ? "" : this.namespaceOf(prefix),
-        localName,
-        value,
-      });
+      const namespace = prefix === "" ? "" : this.namespaceOf(prefix);
+      const expandedName = `${namespace} ${localName}`; // A local name has no space.
+      if (expandedNames.has(expandedName)) {
+        malformed(`The XMP repeats the attribute ${attribute} under another prefix in <${name}>.`);
+      }
+      expandedNames.add(expandedName);
+      attributes.push({ namespace, localName, value });
     }
     const [prefix, localName] = splitName(name);
     const namespace = this.namespaceOf(prefix);
@@ -581,6 +590,9 @@ class SubjectReader {
   }
 
   private bind(prefix: string, namespace: string): void {
+    if (prefix === "xmlns" || namespace === XMLNS || (prefix === "xml") !== (namespace === XML)) {
+      malformed("The XMP binds the reserved xml or xmlns prefix or namespace.");
+    }
     this.shadowed.push([prefix, this.namespaces.get(prefix)]);
     this.namespaces.set(prefix, namespace);
   }
@@ -615,18 +627,19 @@ class SubjectReader {
         return isRdf("RDF") ? "rdf" : "other";
       case "rdf": {
         if (!isRdf("Description")) return "other";
-        const note = attributes.find(
-          (attribute) =>
-            attribute.namespace === XMP_NOTE && attribute.localName === "HasExtendedXMP",
-        );
-        if (note !== undefined) this.extendedXmp ??= note.value.trim();
+        if (
+          attributes.some((attribute) =>
+            isExtendedXmpNote(attribute.namespace, attribute.localName),
+          )
+        ) {
+          this.hasExtendedXmp = true;
+        }
         return "description";
       }
       case "description":
         if (namespace === DUBLIN_CORE && localName === "subject") return "subject";
-        if (namespace !== XMP_NOTE || localName !== "HasExtendedXMP") return "other";
-        this.noteText = [];
-        return "extendedXmpNote";
+        if (isExtendedXmpNote(namespace, localName)) this.hasExtendedXmp = true;
+        return "other";
       case "subject":
         if (!isRdf("Bag") && !isRdf("Seq")) return "other";
         this.keywords ??= [];
@@ -685,8 +698,6 @@ class SubjectReader {
         this.item.value ??= this.valueText.join("");
       }
       this.valueText = null;
-    } else if (element.role === "extendedXmpNote") {
-      this.extendedXmp ??= this.noteText.join("").trim();
     }
     for (const [prefix, namespace] of this.shadowed.splice(element.scope).reverse()) {
       if (namespace === undefined) this.namespaces.delete(prefix);
@@ -695,12 +706,99 @@ class SubjectReader {
   }
 }
 
+function isExtendedXmpNote(namespace: string, localName: string): boolean {
+  return namespace === XMP_NOTE && localName === "HasExtendedXMP";
+}
+
+// Character tests use loops rather than regular expressions with repetition, which can exhaust V8's regular expression
+// stack on runs of millions of characters.
+
+function isSpace(code: number): boolean {
+  return code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d;
+}
+
+function isBlank(text: string): boolean {
+  for (let index = 0; index < text.length; index += 1) {
+    if (!isSpace(text.charCodeAt(index))) return false;
+  }
+  return true;
+}
+
+/** Whether `code` may start an XML name, other than `:`; this also starts a namespace `NCName`. */
+function isNameStart(code: number): boolean {
+  return (
+    (code >= 0x61 && code <= 0x7a) ||
+    (code >= 0x41 && code <= 0x5a) ||
+    code === 0x5f ||
+    (code >= 0xc0 && code <= 0xd6) ||
+    (code >= 0xd8 && code <= 0xf6) ||
+    (code >= 0xf8 && code <= 0x2ff) ||
+    (code >= 0x370 && code <= 0x37d) ||
+    (code >= 0x37f && code <= 0x1fff) ||
+    code === 0x200c ||
+    code === 0x200d ||
+    (code >= 0x2070 && code <= 0x218f) ||
+    (code >= 0x2c00 && code <= 0x2fef) ||
+    (code >= 0x3001 && code <= 0xd7ff) ||
+    (code >= 0xf900 && code <= 0xfdcf) ||
+    (code >= 0xfdf0 && code <= 0xfffd) ||
+    (code >= 0x10000 && code <= 0xeffff)
+  );
+}
+
+/** Whether `code` may follow the first character of an XML name, other than `:`. */
+function isNamePart(code: number): boolean {
+  return (
+    isNameStart(code) ||
+    code === 0x2d ||
+    code === 0x2e ||
+    (code >= 0x30 && code <= 0x39) ||
+    code === 0xb7 ||
+    (code >= 0x300 && code <= 0x36f) ||
+    code === 0x203f ||
+    code === 0x2040
+  );
+}
+
+/** Whether `text` is one or more digits in base 10 or 16. */
+function isNumeral(text: string, radix: 10 | 16): boolean {
+  if (text === "") return false;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    const isDigit =
+      (code >= 0x30 && code <= 0x39) ||
+      (radix === 16 && ((code >= 0x41 && code <= 0x46) || (code >= 0x61 && code <= 0x66)));
+    if (!isDigit) return false;
+  }
+  return true;
+}
+
+/** Whether the content of `<?xml …?>` starts with whitespace and `version="1.x"`. */
+function hasXmlVersion(content: string): boolean {
+  let at = 0;
+  const skipSpace = (): number => {
+    const start = at;
+    while (isSpace(content.charCodeAt(at))) at += 1;
+    return at - start;
+  };
+  if (skipSpace() === 0 || !content.startsWith("version", at)) return false;
+  at += "version".length;
+  skipSpace();
+  if (content[at] !== "=") return false;
+  at += 1;
+  skipSpace();
+  const quote = content[at];
+  if ((quote !== '"' && quote !== "'") || !content.startsWith("1.", at + 1)) return false;
+  const close = content.indexOf(quote, at + 3);
+  return close >= 0 && isNumeral(content.slice(at + 3, close), 10);
+}
+
 /** The prefix (empty when there is none) and local part of a namespace-qualified name. */
 function splitName(name: string): [prefix: string, localName: string] {
   const colon = name.indexOf(":");
   if (colon < 0) return ["", name];
   const localName = name.slice(colon + 1);
-  if (colon === 0 || localName === "" || localName.includes(":")) {
+  if (colon === 0 || localName.includes(":") || !isNameStart(localName.codePointAt(0) ?? -1)) {
     malformed(`The XMP has a malformed name ${name}.`);
   }
   return [name.slice(0, colon), localName];
@@ -725,9 +823,11 @@ function decodeReferences(raw: string): string {
 function referencedText(reference: string): string {
   const entity = PREDEFINED_ENTITIES.get(reference);
   if (entity !== undefined) return entity;
-  const digits = /^#(?:x([0-9A-Fa-f]+)|([0-9]+))$/u.exec(reference);
+  const hexadecimal = reference.startsWith("#x");
+  const digits = reference.slice(hexadecimal ? 2 : 1);
+  const radix = hexadecimal ? 16 : 10;
   const code =
-    digits === null ? NaN : digits[1] !== undefined ? parseInt(digits[1], 16) : Number(digits[2]);
+    reference.startsWith("#") && isNumeral(digits, radix) ? parseInt(digits, radix) : NaN;
   const isXmlCharacter =
     code === 0x09 ||
     code === 0x0a ||
