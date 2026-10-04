@@ -118,6 +118,17 @@ test("an unannotated integer variable is a number when one of its assignments ca
         copy("v"),
       );
   }
+  // A value that derives from many variables keeps every one, so the changing one may come after all others.
+  const stable = Array.from({ length: 16 }, (_, index) => `s${index}`);
+  const sums = names
+    .slice(1, 500)
+    .map((name, index) => `${names[index]} = ${[...stable, name].join(" + ")}`);
+  assert.deepEqual(
+    codes(
+      `${declarations}\n${stable.map((name) => `let ${name} = 0`).join("\n")}\n${sums.join("\n")}\nv499 = 0.5\nlet k: integer = v0`,
+    ),
+    [["TSV041", "v0"]],
+  );
   // A variable's first value counts as well: a chain of variables each starting as the next one widens at once.
   const firsts = names.slice(1).map((name, index) => `let first_${names[index]} = ${name}`);
   const fromFirsts = names.slice(1).map((_, index) => `${names[index]} = first_${names[index]}`);

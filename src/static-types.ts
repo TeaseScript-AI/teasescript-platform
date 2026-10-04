@@ -28,7 +28,7 @@ export type StaticType =
        * For a number, the variables without a type annotation that its value derives from: when one of them widens to
        * a number, so does this value (ADR 0021 rule 1.2).
        */
-      readonly origins?: ReadonlySet<Origin>;
+      readonly origins?: Origins;
     }
   | { readonly kind: "list" | "set"; readonly element: StaticType }
   | { readonly kind: "object"; readonly properties: PropertyTable | null }
@@ -47,7 +47,7 @@ export interface OpenType {
   /** Whether an integer decides the slot as a number, for a variable that also takes non-whole numbers. */
   widens?: boolean;
   /** For the slot of a variable without a type annotation, that variable, which the deciding number derives from. */
-  origins?: ReadonlySet<Origin>;
+  origins?: Origins;
 }
 
 /**
@@ -72,30 +72,57 @@ function scalar(name: ScalarTypeName): StaticType {
  */
 export type Origin = LetStatement | FunctionParameter | ForStatement;
 
-/** At most this many origins are kept; with fewer, widening may only take one more check. */
-const MAX_ORIGINS = 16;
+/**
+ * What a number derives from: origins that merge without copying, so a long sum stays cheap, and that keep every
+ * origin they merged, so no dependency of a widening is lost.
+ */
+class Origins implements Iterable<Origin> {
+  readonly #origin: Origin | undefined;
+  readonly #parts: readonly Origins[];
 
-function mergedOrigins(
-  left: ReadonlySet<Origin> | undefined,
-  right: ReadonlySet<Origin> | undefined,
-): ReadonlySet<Origin> | undefined {
-  if (left === undefined || left.size === 0) return right;
-  if (right === undefined || right.size === 0 || right === left) return left;
-  const merged = new Set(left);
-  for (const origin of right) {
-    if (merged.size >= MAX_ORIGINS) break;
-    merged.add(origin);
+  private constructor(origin: Origin | undefined, parts: readonly Origins[]) {
+    this.#origin = origin;
+    this.#parts = parts;
   }
-  return merged.size === left.size ? left : merged;
+
+  static of(origin: Origin): Origins {
+    return new Origins(origin, []);
+  }
+
+  /** These origins and the other ones. */
+  merge(other: Origins | undefined): Origins {
+    return other === undefined || other === this ? this : new Origins(undefined, [this, other]);
+  }
+
+  /** Each origin once, also when merged groups share parts. */
+  *[Symbol.iterator](): Iterator<Origin> {
+    const seen = new Set<Origins>();
+    const found = new Set<Origin>();
+    const pending: Origins[] = [this];
+    while (pending.length > 0) {
+      const group = pending.pop()!;
+      if (seen.has(group)) continue;
+      seen.add(group);
+      if (group.#origin !== undefined && !found.has(group.#origin)) {
+        found.add(group.#origin);
+        yield group.#origin;
+      }
+      for (const part of group.#parts) pending.push(part);
+    }
+  }
 }
 
-function scalarOrigins(type: StaticType): ReadonlySet<Origin> | undefined {
+function mergedOrigins(left: Origins | undefined, right: Origins | undefined): Origins | undefined {
+  return left === undefined ? right : left.merge(right);
+}
+
+function scalarOrigins(type: StaticType): Origins | undefined {
   return type.kind === "scalar" ? type.origins : undefined;
 }
 
 /** A numeric type that also derives from `origins`; other types are returned as they are. */
-function withOrigins(type: StaticType, origins: ReadonlySet<Origin> | undefined): StaticType {
-  if (origins === undefined || origins.size === 0) return type;
+function withOrigins(type: StaticType, origins: Origins | undefined): StaticType {
+  if (origins === undefined) return type;
   const value = resolved(type);
   if (value.kind === "scalar") {
     if (value.name !== "integer" && value.name !== "number") return type;
@@ -108,7 +135,7 @@ function withOrigins(type: StaticType, origins: ReadonlySet<Origin> | undefined)
 }
 
 /** The type with its own numbers deriving from exactly `origins`, or from nothing; parts inside it keep theirs. */
-function replacedOrigins(type: StaticType, origins: ReadonlySet<Origin> | undefined): StaticType {
+function replacedOrigins(type: StaticType, origins: Origins | undefined): StaticType {
   const value = resolved(type);
   if (value.kind === "scalar") {
     if (value.name !== "integer" && value.name !== "number") return value;
@@ -126,7 +153,7 @@ function replacedOrigins(type: StaticType, origins: ReadonlySet<Origin> | undefi
  * first value derived from, and a slot that a later value decides takes the variable as well (ADR 0021 rule 1.2).
  */
 export function ownOrigins(type: StaticType, origin: Origin): StaticType {
-  const own = new Set([origin]);
+  const own = Origins.of(origin);
   const value = resolved(type);
   for (const member of value.kind === "union" ? value.members : [value])
     if (member.kind === "open" && member.resolved === null) member.origins = own;
@@ -134,10 +161,10 @@ export function ownOrigins(type: StaticType, origin: Origin): StaticType {
 }
 
 /** The variables that a numeric value derives from (see the `origins` of a scalar type). */
-export function originsOf(type: StaticType): ReadonlySet<Origin> {
-  let origins: ReadonlySet<Origin> | undefined;
+export function originsOf(type: StaticType): Iterable<Origin> {
+  let origins: Origins | undefined;
   for (const member of members(type)) origins = mergedOrigins(origins, scalarOrigins(member));
-  return origins ?? new Set();
+  return origins ?? [];
 }
 
 export const STRING_TYPE = scalar("string");
