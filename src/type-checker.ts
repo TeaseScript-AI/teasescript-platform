@@ -1414,11 +1414,10 @@ class TypeChecker {
       return STRING_TYPE;
     }
     if ((value.kind === "list" || value.kind === "set") && COLLECTION_METHODS.has(method)) {
-      this.#reportProblems(
-        collectionMethodProblems(method, value, callee.property, expression, typeOf),
-      );
+      const problems = collectionMethodProblems(method, value, callee.property, expression, typeOf);
+      this.#reportProblems(problems);
       if (method === "sort" || method === "shuffle") return NULL_TYPE;
-      return this.#setOperationType(method, value, expression);
+      return this.#setOperationType(method, value, expression, problems.length === 0);
     }
     if (value.kind === "list" || value.kind === "set") {
       // A set compares only values it can hold.
@@ -1496,6 +1495,7 @@ class TypeChecker {
     method: string,
     receiver: StaticType & { readonly kind: "list" | "set" },
     expression: CallExpression,
+    reportMix: boolean,
   ): StaticType {
     const own = copyType(receiver.element);
     const argumentExpression = expression.arguments[0]?.value;
@@ -1509,11 +1509,12 @@ class TypeChecker {
       return { kind: receiver.kind, element: UNKNOWN_TYPE };
     const element = joinTypes([own, other]);
     if (element === undefined) {
-      this.#report(
-        typeCode.mixedTypes,
-        `union() would mix ${mixDescription(own, other)}. A ${receiver.kind} holds one type; keep values of different types in separate ${receiver.kind}s.`,
-        expression.span,
-      );
+      if (reportMix)
+        this.#report(
+          typeCode.mixedTypes,
+          `union() would mix ${mixDescription(own, other)}. A ${receiver.kind} holds one type; keep values of different types in separate ${receiver.kind}s.`,
+          expression.span,
+        );
       return { kind: receiver.kind, element: UNKNOWN_TYPE };
     }
     return { kind: receiver.kind, element };

@@ -404,15 +404,29 @@ export function collectionMethodProblems(
   if (reorders) return [];
   const argument = call.arguments[0]!.value;
   const type = forUse(typeOf(argument));
-  return !isKnown(type) || type.kind === "list" || type.kind === "set"
-    ? []
-    : [
+  if (isKnown(type) && type.kind !== "list" && type.kind !== "set")
+    return [
+      {
+        kind: "invalidOperand",
+        message: `${name}() needs a list or a set, not ${describeValue(type)}.`,
+        span: argument.span,
+      },
+    ];
+  // A set holds only scalar values (ADR 0013), so its union cannot take a list's objects or lists.
+  if (name === "union" && receiverType.kind === "set" && type.kind === "list") {
+    const element = members(type.element)
+      .map(resolved)
+      .find((member) => isKnown(member) && member.kind !== "scalar" && member.kind !== "null");
+    if (element !== undefined)
+      return [
         {
           kind: "invalidOperand",
-          message: `${name}() needs a list or a set, not ${describeValue(type)}.`,
+          message: `A set holds only text, numbers, true or false, and null, so union() cannot add ${describeValue(element)}. Use toList().union(...) to get a list instead.`,
           span: argument.span,
         },
       ];
+  }
+  return [];
 }
 
 /** Why elements of `element` type cannot be sorted, or `undefined` when they can or may. */

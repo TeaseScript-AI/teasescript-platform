@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { run } from "../src/runtime/engine.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { runValidSource } from "./helpers/run-valid-source.js";
 import { sayTexts } from "./helpers/runtime-events.js";
@@ -66,6 +69,30 @@ test("shuffle reorders in place with the session RNG, drawing once per element a
   const untouched = said('say "${randomInteger(1..=1000000)}"', 99)[0];
   assert.equal(said(source("[]"), 99)[0], `|${untouched}`);
   assert.equal(said(source('["only"]'), 99)[0], `only|${untouched}`);
+});
+
+test("shuffle is a Fisher-Yates shuffle over the session's random draws", () => {
+  // From the last position down, each draw picks the element to swap in from the positions not yet fixed.
+  const shuffled = (draws: readonly number[]): [string[], number] => {
+    const plan = compileValidPlan(
+      'let items = ["a", "b", "c", "d"]\nitems.shuffle()\nsay items.join()',
+    );
+    const queue = [...draws];
+    let calls = 0;
+    const result = run(plan, createImmediatePacingRuntimeSnapshot(plan), {
+      random: {
+        next: () => {
+          calls += 1;
+          return queue.shift() ?? 0;
+        },
+      },
+    });
+    assert.equal(result.snapshot.failure, null);
+    return [sayTexts(result), calls];
+  };
+  assert.deepEqual(shuffled([0, 0, 0]), [["b, c, d, a"], 3]);
+  assert.deepEqual(shuffled([0.5, 0, 0.75]), [["d, b, a, c"], 3]);
+  assert.deepEqual(shuffled([0.99, 0.99, 0.99]), [["a, b, c, d"], 3]);
 });
 
 test("sort, shuffle, and set operations are checkpoint and resume equivalent", () => {
@@ -153,6 +180,12 @@ test("misuse the compiler can see is a compile error", () => {
       "TSV043",
       "union() needs a list or a set, not a whole number (integer).",
       "5",
+    ],
+    [
+      "let tags = set[1]\nsay tags.union([{ n: 1 }])",
+      "TSV043",
+      "A set holds only text, numbers, true or false, and null, so union() cannot add an object. Use toList().union(...) to get a list instead.",
+      "[{ n: 1 }]",
     ],
     [
       'let items = [1]\nsay items.union(["x"])',
