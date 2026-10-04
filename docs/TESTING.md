@@ -592,8 +592,10 @@ executable is an explicit skip; an available browser must pass the configured sm
 
 The Monaco editor has a separate route outside `npm run check`: `npm run test:editor-browser` builds the editor and runs
 `tools/editor-browser-smoke.mjs`. Chromium may resolve only the local preview, so a build that needs remote code to
-start fails, and the editor must become ready with an accessible name. Chromium selection and the explicit skip without
-a browser match the Player smoke.
+start fails, and the editor must become ready with an accessible name. An uncaught exception or rejection,
+`console.error`, or failed resource load in the page or one of its web workers fails the smoke; a typed link must
+appear, which Monaco detects in its web worker, so the bundled worker must start and answer. Chromium selection and the
+explicit skip without a browser match the Player smoke.
 
 Production browser E2E coverage becomes required after the cross-origin host shell and player exist. It should then
 include:
