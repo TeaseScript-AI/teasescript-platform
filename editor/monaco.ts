@@ -24,6 +24,7 @@ export function registerTeaseScriptLanguage(): void {
             {
               cases: {
                 "@keywords": "keyword",
+                "@types": "type",
                 "@commands": "type.identifier",
                 "@default": "identifier",
               },
@@ -40,7 +41,7 @@ export function registerTeaseScriptLanguage(): void {
               },
             },
           ],
-          [/[{}()[\],:]/, "delimiter"],
+          [/[{}()[\],:|?]/, "delimiter"],
         ],
         singleLineString: [
           [
@@ -94,6 +95,22 @@ export function registerTeaseScriptLanguage(): void {
         "in",
         "function",
         "return",
+        "is",
+      ],
+      types: [
+        "string",
+        "boolean",
+        "integer",
+        "number",
+        "date",
+        "time",
+        "datetime",
+        "duration",
+        "list",
+        "set",
+        "object",
+        "range",
+        "media",
       ],
       commands: [
         "showButton",

@@ -4,6 +4,7 @@ import type {
   LetStatement,
   ScalarTypeName,
   TypeAnnotation,
+  TypeName,
 } from "./ast.js";
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import type { SourceSpan } from "./source.js";
@@ -198,11 +199,60 @@ export function isKnown(type: StaticType): boolean {
   return value.kind !== "unknown" && value.kind !== "open" && value.kind !== "never";
 }
 
+/** The type a written type means (ADR 0021): `T?` is `T | null`, and `list`, `set`, and `object` hold any values. */
 export function typeFromAnnotation(annotation: TypeAnnotation): StaticType {
-  const named = scalar(annotation.name);
-  const collection =
-    annotation.collection === null ? named : { kind: annotation.collection, element: named };
-  return annotation.optional ? optional(collection) : collection;
+  return runCompileTask(annotationTask(annotation));
+}
+
+/** The type of each written type, built once: no value ever changes a written type. */
+const annotationTypes = new WeakMap<TypeAnnotation, StaticType>();
+
+function* annotationTask(annotation: TypeAnnotation): CompileTask<StaticType> {
+  const known = annotationTypes.get(annotation);
+  if (known !== undefined) return known;
+  const type = yield* compileChild(writtenTypeTask(annotation));
+  annotationTypes.set(annotation, type);
+  return type;
+}
+
+function* writtenTypeTask(annotation: TypeAnnotation): CompileTask<StaticType> {
+  switch (annotation.kind) {
+    case "namedType":
+      return namedType(annotation.name);
+    case "listType":
+    case "setType":
+      return {
+        kind: annotation.kind === "listType" ? "list" : "set",
+        element: yield* compileChild(annotationTask(annotation.element)),
+      };
+    case "optionalType":
+      return optional(yield* compileChild(annotationTask(annotation.value)));
+    case "unionType": {
+      const types: StaticType[] = [];
+      for (const member of annotation.members)
+        types.push(yield* compileChild(annotationTask(member)));
+      return union(types);
+    }
+  }
+}
+
+function namedType(name: TypeName): StaticType {
+  switch (name) {
+    case "null":
+      return NULL_TYPE;
+    case "list":
+    case "set":
+      return { kind: name, element: UNKNOWN_TYPE };
+    case "object":
+      return ANY_OBJECT_TYPE;
+    case "range":
+    case "speaker":
+    case "timer":
+    case "media":
+      return { kind: name };
+    default:
+      return scalar(name);
+  }
 }
 
 /** `T?`, which is `T | null`. */
@@ -215,13 +265,21 @@ export function optional(type: StaticType): StaticType {
  * includes is dropped (an integer is a number), and a single member stands alone. Any unknown member makes the whole
  * union unknown, and an empty union is `never`.
  */
-function union(types: readonly StaticType[]): StaticType {
+export function union(types: readonly StaticType[]): StaticType {
+  const present = types.filter((type) => resolved(type).kind !== "never");
+  if (present.length === 1) return canonical(present[0]!);
   const members: StaticType[] = [];
-  const pending = [...types];
-  while (pending.length > 0) {
-    const type = resolved(pending.shift()!);
+  // Nested unions are flattened in order with an explicit stack, so a wide union never spreads its members.
+  const stack: { readonly types: readonly StaticType[]; next: number }[] = [{ types, next: 0 }];
+  while (stack.length > 0) {
+    const top = stack.at(-1)!;
+    if (top.next === top.types.length) {
+      stack.pop();
+      continue;
+    }
+    const type = resolved(top.types[top.next++]!);
     if (type.kind === "union") {
-      pending.unshift(...type.members);
+      stack.push({ types: type.members, next: 0 });
       continue;
     }
     if (type.kind === "unknown") return UNKNOWN_TYPE;
@@ -241,13 +299,55 @@ function union(types: readonly StaticType[]): StaticType {
     members.push(withOrigins(type, origins));
   }
   if (members.length === 0) return NEVER_TYPE;
-  return members.length === 1 ? members[0]! : { kind: "union", members };
+  if (members.length === 1) return members[0]!;
+  const result: StaticType = { kind: "union", members };
+  if (isSettled(result)) settledForms.set(result, result);
+  return result;
 }
+
+/** Whether a type can no longer change: it holds no undecided slot and no property table that may still grow. */
+function isSettled(type: StaticType): boolean {
+  return !containsType(
+    type,
+    (part) => part.kind === "open" || (part.kind === "object" && part.properties !== null),
+  );
+}
+
+/**
+ * Canonical forms of unions whose members can no longer change, such as written types: they hold no undecided slot and
+ * no property table that may still grow, so normalizing them once is enough.
+ */
+const settledForms = new WeakMap<StaticType, StaticType>();
 
 /** The type with decided open slots followed and a union normalized again, because decisions can merge members. */
 function canonical(type: StaticType): StaticType {
   const value = resolved(type);
-  return value.kind === "union" ? union(value.members) : value;
+  if (value.kind !== "union") return value;
+  const settled = settledForms.get(value);
+  if (settled !== undefined) return settled;
+  const normalized = union(value.members);
+  // A union already in canonical form stays the same object, so what is cached for it is found again.
+  const result =
+    normalized.kind === "union" &&
+    normalized.members.length === value.members.length &&
+    normalized.members.every((member, index) => member === value.members[index])
+      ? value
+      : normalized;
+  if (isSettled(result)) {
+    settledForms.set(value, result);
+    settledForms.set(result, result);
+  }
+  return result;
+}
+
+/** Some members of a union in canonical form, which stay canonical because no member includes another. */
+function memberSubset(type: StaticType, kept: readonly StaticType[]): StaticType {
+  if (kept.length === members(type).length) return canonical(type);
+  if (kept.length === 0) return NEVER_TYPE;
+  if (kept.length === 1) return kept[0]!;
+  const result: StaticType = { kind: "union", members: kept };
+  if (settledForms.has(canonical(type))) settledForms.set(result, result);
+  return result;
 }
 
 /** The members of a union in canonical form, or the type itself. */
@@ -258,7 +358,9 @@ export function members(type: StaticType): readonly StaticType[] {
 
 /** The type without `null`. Operations on a possibly null value act on its other members (V30 §34). */
 export function nonNullType(type: StaticType): StaticType {
-  return union(members(type).filter((member) => member.kind !== "null"));
+  const all = members(type);
+  const kept = all.filter((member) => member.kind !== "null");
+  return kept.length === all.length ? canonical(type) : memberSubset(type, kept);
 }
 
 export function isNullable(type: StaticType): boolean {
@@ -266,6 +368,11 @@ export function isNullable(type: StaticType): boolean {
 }
 
 /** Whether every value of `inner` is also a value of `outer`, ignoring open slots. It keeps unions minimal. */
+/** Whether every value of `inner` is also a value of `outer`; an undecided slot is covered by nothing but unknown. */
+export function coversType(outer: StaticType, inner: StaticType): boolean {
+  return canonical(outer) === canonical(inner) || includes(outer, inner);
+}
+
 function includes(outer: StaticType, inner: StaticType): boolean {
   return runCompileTask(includesTask(outer, inner));
 }
@@ -459,6 +566,8 @@ function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
       return { kind: "object", properties };
     }
     case "union": {
+      // A union whose members can no longer change needs no copy of its own.
+      if (settledForms.get(type) === type) return type;
       const copied: StaticType[] = [];
       for (const member of type.members) copied.push(yield* compileChild(copyTask(member)));
       return { kind: "union", members: copied };
@@ -683,20 +792,119 @@ function isOpen(type: StaticType): boolean {
   return type.kind === "open";
 }
 
-/** The type of a list or set element, of a loop variable over an iterable, or `undefined` for other types. */
-export function elementType(type: StaticType): StaticType | undefined {
-  const value = resolved(nonNullType(type));
-  if (value.kind === "list" || value.kind === "set") return value.element;
-  if (value.kind === "range") return INTEGER_TYPE;
-  return undefined;
+/**
+ * The type of a value of type `type` that passes the test `is test` (ADR 0021 rule 5.1). A value of unknown type takes
+ * the tested type. Tests can overlap: a `number` that passes `is integer` is an `integer`.
+ */
+export function narrowTo(type: StaticType, test: StaticType): StaticType {
+  return runCompileTask(intersectionTask(type, test));
 }
 
-/** Whether a type can be written as an annotation today: a scalar type, or a list or set of one. */
+/** The values two types share, member by member, also inside lists and sets. */
+function* intersectionTask(left: StaticType, right: StaticType): CompileTask<StaticType> {
+  const lefts = members(left);
+  const parts: StaticType[] = [];
+  for (const a of lefts)
+    for (const b of members(right)) parts.push(yield* compileChild(memberIntersectionTask(a, b)));
+  // Members that pass whole, or not at all, are some members of `left` and need no normalizing again.
+  const whole =
+    parts.length === lefts.length &&
+    parts.every((part, index) => part === lefts[index] || part.kind === "never");
+  return whole
+    ? memberSubset(
+        left,
+        lefts.filter((_, index) => parts[index] === lefts[index]),
+      )
+    : union(parts);
+}
+
+function* memberIntersectionTask(left: StaticType, right: StaticType): CompileTask<StaticType> {
+  // A value of unknown type, or a place no value decided yet, may hold anything that passes.
+  if (left.kind === "unknown" || left.kind === "open") return copyType(right);
+  if (right.kind === "unknown" || right.kind === "open") return left;
+  if (includes(right, left)) return left;
+  if (includes(left, right)) return right;
+  if ((left.kind === "list" || left.kind === "set") && right.kind === left.kind) {
+    // An empty collection passes a test of any element type, so collections always share at least that one.
+    const element = yield* compileChild(intersectionTask(left.element, right.element));
+    return { kind: left.kind, element };
+  }
+  return NEVER_TYPE;
+}
+
+/**
+ * The type of a value of type `type` that fails the test `is test`. Only members the test provably covers are removed
+ * (ADR 0021 rule 5.3): a `number` that fails `is integer` is still a `number`.
+ */
+export function excludeType(type: StaticType, test: StaticType): StaticType {
+  const value = canonical(type);
+  if (value.kind === "unknown") return value;
+  return memberSubset(
+    value,
+    members(value).filter((member) => !includes(test, member)),
+  );
+}
+
+/**
+ * The type a variable of `declared` type is known to hold directly after a value of type `value` is stored in it
+ * (ADR 0021 rule 5.2): the declared members that the value fits, or the value's type for a variable of unknown type.
+ */
+export function assignedType(declared: StaticType, value: StaticType): StaticType {
+  const kept = canonical(declared);
+  const stored = canonical(value);
+  if (stored.kind === "unknown") return kept;
+  if (kept.kind === "unknown") return stored;
+  if (kept.kind !== "union") return kept;
+  const parts = members(stored).map((part) =>
+    union(kept.members.filter((member) => isAssignable(member, part))),
+  );
+  const narrowed = union(parts);
+  return narrowed.kind === "never" ? kept : narrowed;
+}
+
+/** The type of a list or set element, of a loop variable over an iterable, or `undefined` for other types. */
+export function elementType(type: StaticType): StaticType | undefined {
+  const elements: StaticType[] = [];
+  for (const member of members(nonNullType(type))) {
+    const value = resolved(member);
+    if (value.kind === "list" || value.kind === "set") elements.push(value.element);
+    else if (value.kind === "range") elements.push(INTEGER_TYPE);
+    else if (value.kind === "unknown") elements.push(UNKNOWN_TYPE);
+    else return undefined;
+  }
+  return elements.length === 1 ? elements[0] : union(elements);
+}
+
+/**
+ * The type an element stored in a list or set of `type` must have: for a union of collections, what every member's
+ * elements share, because the compiler does not know which member holds the collection. `undefined` for other types.
+ */
+export function elementStoreType(type: StaticType): StaticType | undefined {
+  let shared: StaticType | undefined;
+  for (const member of members(nonNullType(type))) {
+    const value = resolved(member);
+    if (value.kind === "unknown") return UNKNOWN_TYPE;
+    if (value.kind !== "list" && value.kind !== "set") return undefined;
+    shared = shared === undefined ? value.element : narrowTo(shared, value.element);
+  }
+  return shared;
+}
+
+/**
+ * Whether a type can be written as an annotation without losing what the compiler knows. Objects with known properties
+ * cannot, because a property type has no written form.
+ */
 export function isAnnotatable(type: StaticType): boolean {
-  const value = resolved(nonNullType(type));
-  if (value.kind === "scalar") return true;
-  if (value.kind !== "list" && value.kind !== "set") return false;
-  return resolved(value.element).kind === "scalar";
+  return (
+    resolved(type).kind !== "unknown" &&
+    !containsType(
+      type,
+      (part) =>
+        part.kind === "never" ||
+        part.kind === "open" ||
+        (part.kind === "object" && part.properties !== null),
+    )
+  );
 }
 
 /** The author-facing type name, as written in an annotation where one exists. */
@@ -727,11 +935,13 @@ function* typeNameTask(typeToName: StaticType): CompileTask<string> {
     case "object":
       return "object";
     case "union": {
-      const nonNull = union(type.members.filter((member) => member.kind !== "null"));
-      if (nonNull.kind !== "union" && members(type).length === 2)
-        return `${yield* compileChild(typeNameTask(nonNull))}?`;
+      const nonNull = type.members.filter((member) => member.kind !== "null");
+      const nullable = nonNull.length < type.members.length;
+      if (nullable && nonNull.length === 1)
+        return `${yield* compileChild(typeNameTask(nonNull[0]!))}?`;
       const names: string[] = [];
-      for (const member of type.members) names.push(yield* compileChild(typeNameTask(member)));
+      for (const member of nonNull) names.push(yield* compileChild(typeNameTask(member)));
+      if (nullable) names.push("null");
       return names.join(" | ");
     }
     default:

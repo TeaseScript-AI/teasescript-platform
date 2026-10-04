@@ -1,0 +1,380 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { compileSource } from "../src/compiler.js";
+import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
+import { run } from "../src/runtime/engine.js";
+import type { RuntimeScriptStorageEntrySnapshot } from "../src/runtime/script-storage.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
+import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
+import { runValidSource } from "./helpers/run-valid-source.js";
+
+function diagnostics(source: string): [string, string, string, string][] {
+  return compileSource(source).diagnostics.map((diagnostic) => [
+    diagnostic.severity,
+    diagnostic.code,
+    diagnostic.message,
+    source.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
+  ]);
+}
+
+function errors(source: string): [string, string][] {
+  return diagnostics(source)
+    .filter(([severity]) => severity === "error")
+    .map(([, code, , text]) => [code, text]);
+}
+
+function sayTexts(source: string): string[] {
+  const result = runValidSource(source);
+  assert.equal(result.snapshot.failure, null, JSON.stringify(result.snapshot.failure));
+  return result.events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+}
+
+/** Hides a value's type from the compiler, so a test decides it at runtime. */
+const DYNAMIC = "function dynamic(value) {\n    return value\n}\n";
+
+test("a type test is true exactly when the value may be stored in a place of that type", () => {
+  const cases: readonly (readonly [value: string, type: string, expected: boolean])[] = [
+    ['"a"', "string", true],
+    ["5", "integer", true],
+    ["2.0", "integer", true],
+    ["2.5", "integer", false],
+    ["5", "number", true],
+    ["true", "boolean", true],
+    ["2 s", "duration", true],
+    ["null", "null", true],
+    ["null", "integer?", true],
+    ["5", "integer?", true],
+    ['"a"', "integer | string", true],
+    ["[1, 2]", "integer[]", true],
+    ["[1, 2.5]", "integer[]", false],
+    ["[]", "integer[]", true],
+    ["mixed", "(integer | string)[]", true],
+    ["mixed", "integer[] | string[]", false],
+    ["[1]", "list", true],
+    ['set["a"]', "string set", true],
+    ["set[1]", "set", true],
+    ["{ a: 1 }", "object", true],
+    ["1..3", "range", true],
+    ["[1]", "object", false],
+    ['"2026-01-01"', "date", false],
+  ];
+  const source =
+    DYNAMIC +
+    'let mixed: (integer | string)[] = [1, "a"]\n' +
+    cases
+      .map(
+        ([value, type], index) =>
+          `let v${index} = dynamic(${value})\nsay "\${v${index} is ${type}}"`,
+      )
+      .join("\n");
+  assert.deepEqual(
+    sayTexts(source),
+    cases.map(([, , expected]) => String(expected)),
+  );
+  assert.deepEqual(
+    sayTexts(
+      `${DYNAMIC}speaker vera {}\nlet voice = dynamic(vera)\nlet clock = dynamic(timer async 5)\nsay "\${voice is speaker} \${clock is timer} \${clock is media} \${voice is not speaker}"`,
+    ),
+    ["true true false false"],
+  );
+});
+
+test("a type test evaluates its operand once and never changes it", () => {
+  const result = assertRuntimeResumeEquivalent(
+    [
+      DYNAMIC,
+      "let count = 0",
+      "function next {\n    count += 1\n    return count\n}",
+      'let first = dynamic(next()) is integer\nsay "${first} ${count}"',
+      "let items = [1, 2]",
+      'let typed = dynamic(items) is integer[]\nsay "${typed} ${items.length}"',
+    ].join("\n"),
+  );
+  assert.deepEqual(
+    result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["true 1", "true 2"],
+  );
+});
+
+test("a test on a value of unknown type narrows it, for example a loaded value", () => {
+  const source = [
+    'let saved = load "level"',
+    "let level = 1",
+    "if saved is integer {",
+    "    level = saved",
+    "} else {",
+    '    say "Your saved level was invalid, starting over."',
+    "}",
+    'say "${level}"',
+  ].join("\n");
+  assert.deepEqual(errors(source), []);
+  const compiled = compileSource(source).plan!;
+  const run_ = (value: RuntimeScriptStorageEntrySnapshot["value"]) =>
+    run(
+      compiled,
+      createFreshRuntimeSnapshot(compiled, {
+        scriptStorage: [{ key: "level", value }],
+        baseDelayMs: 0,
+        delayPerWordMs: 0,
+        delayPerCharacterMs: 0,
+      }),
+    ).events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+  assert.deepEqual(run_(7), ["7"]);
+  assert.deepEqual(run_("high"), ["Your saved level was invalid, starting over.", "1"]);
+});
+
+test("if, else, and, or, while, and early exits narrow a plain variable", () => {
+  const union = 'let reward: integer | string = 10\nif chance(50) {\n    reward = "long"\n}\n';
+  for (const body of [
+    'if reward is integer {\n    say "${reward + 1}"\n} else {\n    let s: string = reward\n}',
+    "if reward is not integer {\n    let s: string = reward\n} else {\n    let n: integer = reward\n}",
+    "let big = reward is integer and reward > 3",
+    "let small = reward is string or reward < 3",
+    "while reward is integer {\n    reward = reward + 1\n    if reward > 3 {\n        break\n    }\n}",
+    "if reward is string {\n    exit\n}\nlet n: integer = reward",
+    "function f(x: integer | string): integer {\n    if x is string {\n        return 0\n    }\n    return x + 1\n}",
+    'let maybe: string? = null\nif chance(50) {\n    maybe = "x"\n}\nif maybe != null and maybe == "x" {\n    say maybe\n}',
+  ])
+    assert.deepEqual(errors(union + body), [], body);
+});
+
+test("tests overlap: an else branch keeps what the test cannot exclude", () => {
+  assert.deepEqual(
+    errors(
+      "let r: number = 2.5\nif r is integer {\n    let i: integer = r\n} else {\n    let n: number = r\n}",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    errors(
+      "let r: number = 2.5\nif chance(50) {\n    r = 2\n}\nif r is not integer {\n    let i: integer = r\n}",
+    ),
+    [["TSV041", "r"]],
+  );
+});
+
+test("only plain variables narrow, and a call, wait, or shared assignment cancels narrowing", () => {
+  const union = 'let v: integer | string = 1\nif chance(50) {\n    v = "y"\n}\n';
+  const change = 'function change {\n    v = "x"\n}\n';
+  // A function that may assign `v` runs, so the test no longer holds.
+  assert.deepEqual(
+    errors(`${union}${change}if v is integer {\n    change()\n    let i: integer = v\n}`),
+    [["TSV041", "v"]],
+  );
+  assert.deepEqual(
+    errors(`${union}${change}if v is integer {\n    wait 1\n    let i: integer = v\n}`),
+    [["TSV041", "v"]],
+  );
+  // Nothing else assigns `v`, so a wait keeps it narrowed.
+  assert.deepEqual(errors(`${union}if v is integer {\n    wait 1\n    let i: integer = v\n}`), []);
+  // An assignment in a loop cancels narrowing at the loop's start.
+  assert.deepEqual(
+    errors(
+      `${union}if v is integer {\n    repeat 2 {\n        let i: integer = v\n        v = "z"\n    }\n}`,
+    ),
+    [["TSV041", "v"]],
+  );
+  // A property or element does not narrow.
+  assert.deepEqual(
+    errors(
+      "let box = { value: 1 }\nlet items: (integer | string)[] = [1]\nif items[0] is integer {\n    let i: integer = items[0]\n}",
+    ),
+    [["TSV041", "items[0]"]],
+  );
+  // A function body does not inherit narrowed facts.
+  assert.deepEqual(
+    errors(`${union}if v is integer {\n    say "x"\n}\nfunction f {\n    let i: integer = v\n}`),
+    [["TSV041", "v"]],
+  );
+});
+
+test("media pacing and loading, and handle writes, cancel narrowing where a handler may run", () => {
+  const shared = 'let reward: integer | string = 1\ntimer async 1 {\n    reward = "changed"\n}\n';
+  const music = 'let music = playAudio async "a.mp3"\n';
+  for (const body of [
+    'if reward is integer {\n    let clip = playAudio async "a.mp3"\n    let result: integer = reward\n}',
+    `${music}if reward is integer {\n    music.pause()\n    let result: integer = reward\n}`,
+    // A media volume write waits for pacing before its value is evaluated.
+    `${music}if reward is integer {\n    music.volume = reward\n}`,
+    "function finish(handle: timer | media) {\n    if reward is integer {\n        handle.remaining = 0 s\n        let result: integer = reward\n    }\n}",
+  ])
+    assert.deepEqual(errors(shared + body), [["TSV041", "reward"]], body);
+});
+
+test("a break keeps what is known where it happens, and exhaustive tests end a function", () => {
+  assert.deepEqual(
+    errors(
+      "function pick(value: integer | string): integer {\n    while true {\n        break\n        value = 1\n    }\n    return value\n}",
+    ),
+    [["TSV041", "value"]],
+  );
+  assert.deepEqual(
+    errors(
+      'function f(x: integer | string): integer {\n    if x is integer {\n        return x\n    }\n    if x is string {\n        return 0\n    }\n}\nlet answer = f("x")',
+    ),
+    [],
+  );
+});
+
+test("tests on undecided places and on collections keep every value that may pass", () => {
+  // A place decided only by a value of unknown type takes the tested type.
+  assert.deepEqual(
+    errors(
+      `${DYNAMIC}let x = null\nx = dynamic(1)\nif x is integer {\n    let text: string = x\n}`,
+    ),
+    [["TSV041", "x"]],
+  );
+  // An empty list passes a test of any element type, and element unions overlap member by member.
+  assert.deepEqual(sayTexts('let xs: integer[] = []\nsay "${xs is string[]}"'), ["true"]);
+  assert.deepEqual(
+    sayTexts(
+      'function f(xs: (integer | string)[]) {\n    say "${xs is (integer | boolean)[]}"\n}\nf([1])',
+    ),
+    ["true"],
+  );
+});
+
+test("a write that may break a narrowed collection, and an impossible test outcome, are followed exactly", () => {
+  // An element of unknown type may not keep `xs is integer[]`, so the next read is checked again at runtime.
+  assert.equal(
+    runValidSource(
+      `${DYNAMIC}let xs: list = [1]\nif xs is integer[] {\n    xs.add(dynamic("x"))\n    let n: integer = xs[1]\n}`,
+    ).snapshot.failure?.code,
+    "TSR058",
+  );
+  for (const body of [
+    "while true {\n        if x is string {\n            break\n        }\n        return 1\n    }",
+    "if x is string or true {\n        return 1\n    }",
+  ])
+    assert.deepEqual(
+      errors(`function f(x: integer): integer {\n    ${body}\n}\nsay "\${f(1)}"`),
+      [],
+      body,
+    );
+});
+
+test("a type test inside parentheses or brackets continues before '|', and 'is' explains a set value", () => {
+  for (const [before, after] of [
+    ["let passed = (", ')\nsay "${passed}"'],
+    ['function show(value) {\n    say "${value}"\n}\nshow(', ")"],
+    ["let passed = [", ']\nsay "${passed[0]}"'],
+  ])
+    assert.deepEqual(sayTexts(`${DYNAMIC}${before}dynamic(1) is integer\n    | string${after}`), [
+      "true",
+    ]);
+  // Parameter defaults and named arguments are inside parentheses too; a block or text inside them is not.
+  for (const source of [
+    'function show(passed = 1 is integer\n    | string) {\n    say "${passed}"\n}\nshow()',
+    'let m = playAudio(file: "a.mp3", async: true, repeat: 1 is integer\n    | string)',
+    'let m = (playAudio async "a.mp3" {\n    let passed = 1 is integer\n    [1].removeLast()\n})',
+  ])
+    assert.deepEqual(errors(source), [], source);
+  assert.notDeepEqual(errors('let t = (timer async 0 """${1 is integer\n    | string}""")'), []);
+  assert.deepEqual(diagnostics("let x = set[1]\nlet passed = x is set[1]"), [
+    ["error", "TSP021", "'is' checks a type; use '==' to compare values.", "set[1]"],
+  ]);
+});
+
+test("an assignment narrows the variable to the assigned value's type", () => {
+  assert.deepEqual(errors("let reward: integer | string = 10\nlet points = reward + 1"), []);
+  assert.deepEqual(
+    errors('let reward: integer | string = 10\nreward = "x"\nlet points = reward + 1')[0]?.[0],
+    "TSV043",
+  );
+});
+
+test("a type test continues after 'is', and a type inside parentheses continues before '|' or '[]'", () => {
+  const source = `function show(value: integer
+    | string[]) {
+    let whole = value is
+        not string[]
+    say "\${whole}"
+}
+let tags: (integer
+    | string
+    []) = ["a"]
+show(tags)
+show(2)`;
+  assert.deepEqual(sayTexts(source), ["false", "true"]);
+});
+
+test("is checks a type, and a provably constant test is a warning", () => {
+  // Also for a value in an interpolation or in parentheses; '||' after a test is the symbolic 'or'.
+  const valueTest = "'is' checks a type; use '==' to compare values.";
+  assert.deepEqual(
+    diagnostics(
+      'let mood = "happy"\nif mood is "happy" {\n    say "x"\n}\nsay "${mood is "happy"}"\nlet same = mood is ("happy")\nlet both = mood is string || false',
+    ),
+    [
+      ["error", "TSP021", valueTest, '"happy"'],
+      ["error", "TSP021", valueTest, '"happy"'],
+      ["error", "TSP021", valueTest, '("happy")'],
+      [
+        "error",
+        "TSP037",
+        "Use 'or' to combine conditions. '|' only separates the types of a union, as in 'integer | string'.",
+        "||",
+      ],
+    ],
+  );
+  assert.deepEqual(
+    errors("let x: integer | string = 1\nlet y = x is integer is boolean")[0]?.[0],
+    "TSP020",
+  );
+  assert.deepEqual(diagnostics("let n = 5\nlet a = n is number\nlet b = n is string"), [
+    [
+      "warning",
+      "TSV046",
+      "'n' always holds a whole number (integer), so this test is always true.",
+      "n is number",
+    ],
+    [
+      "warning",
+      "TSV046",
+      "'n' holds a whole number (integer), never string, so this test is always false.",
+      "n is string",
+    ],
+  ]);
+  // A number may still be whole, and a value of unknown type may be anything.
+  assert.deepEqual(
+    diagnostics('let r = 2.5\nlet a = r is integer\nlet s = load "s"\nlet b = s is integer'),
+    [],
+  );
+  assert.notEqual(compileSource("let n = 5\nlet a = n is number").plan, null);
+});
+
+/** The first plan object of `kind`, with its validator path such as `$.instructions[2].value`. */
+function findKind(
+  value: unknown,
+  kind: string,
+  path = "$",
+): { readonly path: string; readonly node: object } | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  if ("kind" in value && value.kind === kind) return { path, node: value };
+  for (const [key, item] of Object.entries(value)) {
+    const found = findKind(item, kind, Array.isArray(value) ? `${path}[${key}]` : `${path}.${key}`);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+test("plan validation rejects a malformed type test at its path", () => {
+  const compiled = compileValidPlan('let saved = load "level"\nlet whole = saved is integer');
+  for (const [description, field, value, path] of [
+    ["negated that is not true or false", "negated", "yes", "negated"],
+    ["unknown type kind", "type", { kind: "whole" }, "type.kind"],
+    ["unknown field", "operator", "is", "operator"],
+  ] as const) {
+    const plan: unknown = structuredClone(compiled);
+    const typeTest = findKind(plan, "typeTest");
+    assert.ok(typeTest !== undefined);
+    Reflect.set(typeTest.node, field, value);
+    assert.deepEqual(
+      validateInstructionPlan(plan).errors.map((error) => [error.code, error.path]),
+      [["TSC002", `${typeTest.path}.${path}`]],
+      description,
+    );
+  }
+});

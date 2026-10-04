@@ -65,12 +65,12 @@ test("list elements and object fields copy composite values when each is evaluat
   const result = executeSource(
     [
       "let source = [1]",
-      "let list = [source, source.add(2)]",
-      "let object = { first: source, second: source.add(3) }",
+      "let copies = [source, source.add(2)]",
+      "let record = { first: source, second: source.add(3) }",
       "source.add(4)",
       "capture(source)",
-      "capture(list)",
-      "capture(object.first)",
+      "capture(copies)",
+      "capture(record.first)",
     ],
     { capture: captureInto(captured) },
   );
@@ -222,9 +222,7 @@ test("uses scalar equality for set uniqueness and retains insertion order", () =
   const captured: unknown[] = [];
   const result = executeSource(
     [
-      // `dynamic` hides each value's type, so the set may hold values of several kinds.
-      "function dynamic(value) { return value }",
-      'let values = set["a", "a", dynamic(true), dynamic(true), dynamic(1), dynamic(1.0), null, null, dynamic(false)]',
+      'let values: (string | boolean | number | null) set = set["a", "a", true, true, 1, 1.0, null, null, false]',
       "capture(values.toList())",
     ],
     { capture: captureInto(captured) },

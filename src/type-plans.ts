@@ -27,10 +27,12 @@ function* typePlanTask(type: StaticType): CompileTask<TypePlan | null> {
   switch (value.kind) {
     case "unknown":
     case "open":
-    case "never":
     // `members` never gives a union as a member.
     case "union":
       return null;
+    case "never":
+      // No value fits, for example in the elements both `integer[][]` and `string[][]` accept: only empty lists.
+      return { kind: "never" };
     case "scalar":
       return { kind: value.name };
     case "list":

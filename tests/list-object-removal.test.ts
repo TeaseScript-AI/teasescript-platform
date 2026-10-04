@@ -160,7 +160,7 @@ test("the compiler reports a list index it can see is invalid", () => {
     ["items.removeAt(1.0)", fractional],
     ["let index: number = 0\nsay items[index]", fractional],
     ["let s = set[1]\ns.removeAt(0)", "TSV043 Sets have no method 'removeAt'."],
-    ["let index: integer? = null\nitems.removeAt(index)", null],
+    ["function remove(index: integer?) {\n    items.removeAt(index)\n}", null],
   ] as const;
   for (const [statement, expected] of cases) {
     const diagnostics = compileSource(`let items = [1]\n${statement}`).diagnostics;

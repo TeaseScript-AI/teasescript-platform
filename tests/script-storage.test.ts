@@ -46,9 +46,8 @@ test("host-acknowledged saves seed a new session without losing stored value typ
       'save "Ada" as "name"',
       'save 2.5 as "score"',
       'save false as "enabled"',
-      // `dynamic` hides the text's type, so the saved list may hold numbers and text.
-      "function dynamic(value) {\n  return value\n}",
-      'save [1, null, dynamic("two")] as "list"',
+      'let savedList: (integer | string | null)[] = [1, null, "two"]',
+      'save savedList as "list"',
       'save { nested: [true, null] } as "object"',
       'save set["a", "b"] as "set"',
       'save 2..=5 as "range"',
@@ -597,12 +596,12 @@ test("statically non-string storage keys get TSV038 after unwrapping parentheses
 });
 
 test("string-producing keys compile and run for save, load, and delete", () => {
-  const keys = ["keys[0]", "key", "keyFunction()", "object.key", '"${key}-interpolated"'];
+  const keys = ["keys[0]", "key", "keyFunction()", "record.key", '"${key}-interpolated"'];
   const result = assertRuntimeResumeEquivalent(
     [
       'let key = "variable"',
       'let keys = ["indexed"]',
-      'let object = { key: "property" }',
+      'let record = { key: "property" }',
       'function keyFunction { return "function" }',
       ...keys.flatMap((key, index) => [
         `save 7 as ${key}`,

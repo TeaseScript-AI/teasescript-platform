@@ -34,6 +34,7 @@ const TEASESCRIPT_GRAMMAR_KEYWORDS = Object.freeze([
   "save",
   "load",
   "delete",
+  "is",
 ] as const);
 
 const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
@@ -45,6 +46,10 @@ const TEASESCRIPT_PROTECTED_TYPE_NAMES = Object.freeze([
   "time",
   "datetime",
   "duration",
+  "list",
+  "object",
+  "range",
+  "media",
 ] as const);
 
 const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([

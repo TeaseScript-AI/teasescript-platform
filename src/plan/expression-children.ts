@@ -24,6 +24,8 @@ export function expressionPlanChildren(expression: ExpressionPlan): readonly Exp
       return [expression.callee, ...expression.arguments.map((a) => a.value)];
     case "unary":
       return [expression.operand];
+    case "typeTest":
+      return [expression.value];
     case "binary":
       return [expression.left, expression.right];
     case "range":

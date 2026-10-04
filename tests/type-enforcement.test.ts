@@ -16,14 +16,14 @@ test("a variable keeps its declared or inferred type", () => {
   assert.deepEqual(mismatches('let score: number = "high"'), [
     [
       "TSV041",
-      "'score' is declared as number, so it cannot start as text (string). Use a separate variable for a value of another type.",
+      "'score' is declared as number, so it cannot start as text (string). To allow both, declare it as 'let score: number | string = ...'.",
       '"high"',
     ],
   ]);
   assert.deepEqual(mismatches('let score = 10\nscore = "high"'), [
     [
       "TSV041",
-      "'score' holds a whole number (integer), so it cannot be set to text (string). Use a separate variable for a value of another type.",
+      "'score' holds a whole number (integer), so it cannot be set to text (string). To allow both, declare it as 'let score: integer | string = ...'.",
       '"high"',
     ],
   ]);
@@ -239,12 +239,12 @@ test("lists keep their element type, and loop variables take it", () => {
   assert.deepEqual(mismatches('let scores = [1, 2]\nscores.add("x")\nscores[0] = "y"'), [
     [
       "TSV041",
-      "'scores' holds integer values (integer[]), so it cannot contain text (string). Use a separate list for values of another type.",
+      "'scores' holds integer values (integer[]), so it cannot contain text (string). To allow both, declare it as 'let scores: (integer | string)[] = ...'.",
       '"x"',
     ],
     [
       "TSV041",
-      "'scores' holds integer values (integer[]), so it cannot contain text (string). Use a separate list for values of another type.",
+      "'scores' holds integer values (integer[]), so it cannot contain text (string). To allow both, declare it as 'let scores: (integer | string)[] = ...'.",
       '"y"',
     ],
   ]);
@@ -252,14 +252,14 @@ test("lists keep their element type, and loop variables take it", () => {
   assert.deepEqual(mismatches('let names: string set = set[]\nnames.add("Ada")\nnames.add(1)'), [
     [
       "TSV041",
-      "'names' holds string values (string set), so it cannot contain a whole number (integer). Use a separate set for values of another type.",
+      "'names' holds string values (string set), so it cannot contain a whole number (integer). To allow both, declare it as 'let names: (string | integer) set = ...'.",
       "1",
     ],
   ]);
   assert.deepEqual(mismatches('for step in 1..=3 {\n    step = "x"\n}'), [
     [
       "TSV041",
-      "'step' holds a whole number (integer), so it cannot be set to text (string). Use a separate variable for a value of another type.",
+      "'step' holds a whole number (integer), so it cannot be set to text (string). To allow both, declare it as 'let step: integer | string = ...'.",
       '"x"',
     ],
   ]);
@@ -274,7 +274,7 @@ test("handles, speakers, and a typed load default keep their types", () => {
   assert.deepEqual(mismatches('let level: integer = load "level", default: "high"'), [
     [
       "TSV041",
-      "'level' is declared as integer, so it cannot start as text (string). Use a separate variable for a value of another type.",
+      "'level' is declared as integer, so it cannot start as text (string). To allow both, declare it as 'let level: integer | string = ...'.",
       '"high"',
     ],
   ]);
@@ -284,7 +284,7 @@ test("a list or set literal is checked element by element against a known elemen
   assert.deepEqual(mismatches('let names: string[] = ["a", 1]'), [
     [
       "TSV041",
-      "'names' holds string values (string[]), so it cannot contain a whole number (integer). Use a separate list for values of another type.",
+      "'names' holds string values (string[]), so it cannot contain a whole number (integer). To allow both, declare it as 'let names: (string | integer)[] = ...'.",
       "1",
     ],
   ]);
@@ -314,7 +314,9 @@ test("optional types keep their non-null type in operations, elements, and loops
   // An optional whole number may serve as an index or a repeat count, and an optional value as a built-in's argument;
   // only a null value fails at runtime.
   assert.deepEqual(
-    codes('let n: integer? = 0\nlet items = [1]\nsay "${items[n]}"\nrepeat n {\n    say "x"\n}'),
+    codes(
+      'let items = [1]\nfunction f(n: integer?) {\n    say "${items[n]}"\n    repeat n {\n        say "x"\n    }\n}',
+    ),
     [],
   );
   assert.deepEqual(
@@ -359,17 +361,22 @@ test("null suggestions name only annotations that exist", () => {
 });
 
 test("an optional operand and a parenthesized method keep their checks", () => {
-  assert.deepEqual(mismatches('let count = 1\nlet text: string? = "x"\ncount += text'), [
+  assert.deepEqual(
+    mismatches(
+      'function maybeText: string? {\n    return "x"\n}\nlet count = 1\nlet text = maybeText()\ncount += text',
+    ),
     [
-      "TSV041",
-      "'count' holds a whole number (integer), so text (string) or null cannot be added to it. Use a number instead.",
-      "text",
+      [
+        "TSV041",
+        "'count' holds a whole number (integer), so text (string) or null cannot be added to it. Use a number instead.",
+        "text",
+      ],
     ],
-  ]);
+  );
   assert.deepEqual(mismatches('let items = [1]\n(items.add)("x")'), [
     [
       "TSV041",
-      "'items' holds integer values (integer[]), so it cannot contain text (string). Use a separate list for values of another type.",
+      "'items' holds integer values (integer[]), so it cannot contain text (string). To allow both, declare it as 'let items: (integer | string)[] = ...'.",
       '"x"',
     ],
   ]);
@@ -525,7 +532,7 @@ test("an empty list or set takes its element type from the first element, and nu
   assert.deepEqual(mismatches('let items = []\nitems.add(1)\nitems.add("x")'), [
     [
       "TSV041",
-      "'items' holds integer values (integer[]) since line 2, so it cannot contain text (string). Use a separate list for values of another type.",
+      "'items' holds integer values (integer[]) since line 2, so it cannot contain text (string). To allow both, declare it as 'let items: (integer | string)[] = ...'.",
       '"x"',
     ],
   ]);
@@ -592,7 +599,7 @@ test("a function's result type comes from its return values, and returns of diff
     [
       [
         "TSV044",
-        "'pick' returns a whole number (integer) here, but text (string) on line 3. A function returns one type; use a separate function for values of another type.",
+        "'pick' returns a whole number (integer) here, but text (string) on line 3. To return both, declare the result type, as in 'function pick(...): string | integer'.",
         "1",
       ],
     ],
@@ -790,7 +797,7 @@ test("a list or set literal of known types holds one type, also in nested lists 
   assert.deepEqual(mismatches('let values = ["Level", 2, 3.5]'), [
     [
       "TSV044",
-      "This list mixes text (string) and a whole number (integer). A list holds one type; keep values of different types in separate lists.",
+      "This list mixes text (string) and a whole number (integer). A list holds one type; to keep both, declare a union type, as in 'let values: (string | number)[] = ...'.",
       '["Level", 2, 3.5]',
     ],
   ]);
@@ -800,7 +807,7 @@ test("a list or set literal of known types holds one type, also in nested lists 
   ]);
   assert.deepEqual(
     mismatches('let people = [{ name: 1 }, { name: "Ada" }]')[0]?.[1],
-    "This list mixes objects whose property 'name' holds a whole number (integer) in one and text (string) in another. A list holds one type; keep values of different types in separate lists.",
+    "This list mixes objects whose property 'name' holds a whole number (integer) in one and text (string) in another. A list holds one type; give 'name' one type in every element.",
   );
   // A declared element type checks each element instead, and unknown elements leave the element type unknown.
   assert.deepEqual(

@@ -43,6 +43,8 @@ import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralMilliseconds } from "../../duration.js";
 import type { RuntimeCheckSite } from "../../type-checker.js";
+import { typeFromAnnotation } from "../../static-types.js";
+import { typePlan } from "../../type-plans.js";
 import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
 import {
   expressionChildren as instructionEmissionChildren,
@@ -1222,6 +1224,10 @@ export class InstructionCompiler {
           temporaryIds: [...start!.temporaryIds, ...end!.temporaryIds],
         };
       }
+      case "typeTestExpression": {
+        const value = yield* compileChild(this.#lowerExpressionTask(expression.value));
+        return { plan: typeTestPlan(expression, value.plan), temporaryIds: value.temporaryIds };
+      }
     }
   }
 
@@ -2247,5 +2253,24 @@ function assembleExpression(
       throw new TypeError(
         "Interactions, timers, and media must be lowered before expression-plan compilation.",
       );
+    case "typeTestExpression":
+      return typeTestPlan(expression, child(expression.value));
   }
+}
+
+/** A type test; a type the runtime cannot narrow down, which no written type is, makes the test constant. */
+function typeTestPlan(
+  expression: Extract<Expression, { kind: "typeTestExpression" }>,
+  value: ExpressionPlan,
+): ExpressionPlan {
+  const type = typePlan(typeFromAnnotation(expression.type));
+  return type === null
+    ? { kind: "literal", value: !expression.negated, span: copySpan(expression.span) }
+    : {
+        kind: "typeTest",
+        value,
+        type,
+        negated: expression.negated,
+        span: copySpan(expression.span),
+      };
 }

@@ -461,8 +461,7 @@ test("rebases prepared list descendants when earlier removals shift retained ite
   const result = runSource(
     [
       "let firstItems = [{ value: 0 }, { value: 1 }]",
-      "function dynamic(value) { return value }",
-      "let middleItems = [dynamic(0), dynamic(1), { value: 2 }]",
+      "let middleItems: list = [0, 1, { value: 2 }]",
       "let lastItems = [{ value: 0 }, { value: 1 }]",
       "let positionItems = [{ value: 0 }, { value: 1 }, { value: 2 }]",
       "function removeFirstItem { firstItems.removeFirst()\nreturn 9 }",
