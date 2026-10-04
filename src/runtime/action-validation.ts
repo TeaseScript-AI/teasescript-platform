@@ -1,6 +1,6 @@
 import type { TemporalContext } from "../temporal.js";
 import {
-  temporalCaptureAt,
+  temporalCaptureShownAt,
   temporalCapturesProblem,
   type RuntimeTemporalCapture,
 } from "./temporal-captures.js";
@@ -1404,9 +1404,8 @@ function snapshotTemporalContextAt(
     return undefined;
   // EVIDENCE: validation: temporalCapturesProblem accepted the snapshot's captures.
   const captures = snapshot.temporalCaptures as RuntimeTemporalCapture[];
-  return captures[0]!.boundaryMs > atMs
-    ? undefined
-    : temporalCaptureAt(captures, atMs, eventSequence).context;
+  // Without a capture recorded before the request, the shown texts cannot be derived again, so they do not validate.
+  return temporalCaptureShownAt(captures, atMs, eventSequence)?.context;
 }
 
 // oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: boundary: a temporary payload remains unvalidated while snapshot consistency is checked.

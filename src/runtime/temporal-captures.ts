@@ -24,21 +24,31 @@ export interface RuntimeTemporalCapture {
   readonly context: TemporalContext;
 }
 
-const MAX_TEMPORAL_CAPTURES = 1_000;
-
 /**
- * The capture in force at scene time `atMs`: the last one whose boundary is not later. With `eventSequence`, only the
- * captures recorded before that event count, which gives the capture an earlier action was shown with.
+ * The capture in force at scene time `atMs`: the last one whose boundary is not later. A valid list's first capture is
+ * in force at the current scene time, so execution always finds one.
  */
 export function temporalCaptureAt(
   captures: readonly RuntimeTemporalCapture[],
   atMs: number,
-  eventSequence = Infinity,
 ): RuntimeTemporalCapture {
   let found = captures[0]!;
-  for (const capture of captures) {
+  for (const capture of captures) if (capture.boundaryMs <= atMs) found = capture;
+  return found;
+}
+
+/**
+ * The capture an action requested by event `eventSequence` at scene time `atMs` was shown with: the last one recorded
+ * before that event whose boundary is not later, or `undefined` when the list no longer has it.
+ */
+export function temporalCaptureShownAt(
+  captures: readonly RuntimeTemporalCapture[],
+  atMs: number,
+  eventSequence: number,
+): RuntimeTemporalCapture | undefined {
+  let found: RuntimeTemporalCapture | undefined;
+  for (const capture of captures)
     if (capture.boundaryMs <= atMs && capture.sinceEventSequence <= eventSequence) found = capture;
-  }
   return found;
 }
 
@@ -74,8 +84,8 @@ export function temporalCapturesProblem(
   observedSessionTimeMs: number,
   nextEventSequence: number,
 ): string | null {
-  if (!Array.isArray(value) || value.length === 0 || value.length > MAX_TEMPORAL_CAPTURES)
-    return `Temporal captures must be a list of 1 to ${MAX_TEMPORAL_CAPTURES} entries.`;
+  if (!Array.isArray(value) || value.length === 0)
+    return "Temporal captures must be a list of at least one entry.";
   let previous = -Infinity;
   let previousSequence = -Infinity;
   for (const capture of value) {
@@ -102,6 +112,7 @@ export function temporalCapturesProblem(
     if (
       typeof sinceEventSequence !== "number" ||
       !Number.isSafeInteger(sinceEventSequence) ||
+      sinceEventSequence < 0 ||
       sinceEventSequence < previousSequence ||
       (sinceEventSequence === previousSequence && boundaryMs === previous) ||
       sinceEventSequence > nextEventSequence

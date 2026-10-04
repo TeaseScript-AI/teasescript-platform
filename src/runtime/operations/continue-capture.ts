@@ -7,7 +7,11 @@ import {
   type TemporalContext,
 } from "../../temporal.js";
 import type { RuntimeSnapshot } from "../state.js";
-import { temporalCaptureAt, type RuntimeTemporalCapture } from "../temporal-captures.js";
+import {
+  temporalCaptureAt,
+  temporalCaptureShownAt,
+  type RuntimeTemporalCapture,
+} from "../temporal-captures.js";
 import type { PendingActionOperationResult } from "./model.js";
 import { captureExecutableData, isPlainRecord, pendingResult } from "./support.js";
 
@@ -78,8 +82,14 @@ function neededCaptures(
     snapshot.foregroundAction,
     ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
   ])
-    if (action?.kind === "interaction")
-      kept.add(temporalCaptureAt(captures, action.createdAtMs, action.requestEventSequence));
+    if (action?.kind === "interaction") {
+      const shown = temporalCaptureShownAt(
+        captures,
+        action.createdAtMs,
+        action.requestEventSequence,
+      );
+      if (shown !== undefined) kept.add(shown);
+    }
   return captures.filter(
     (capture) => kept.has(capture) || capture.boundaryMs > snapshot.currentSessionTimeMs,
   );
