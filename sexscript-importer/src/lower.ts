@@ -243,6 +243,11 @@ export interface MapUses {
   presentKeys: Map<string, Set<string>>;
   /** Maps that stay objects and that `clear()` empties, so that every field may hold null. */
   clearedRecords: Set<string>;
+  /**
+   * Variables the code tests for null itself: compared with `== null` or `!= null`, or read with `?.`, where null and
+   * an empty list behave differently. Groovy truth treats them alike.
+   */
+  nullTested: Set<string>;
 }
 
 /** One analysed body: a script, an object script with its members, or a mixin module. */
@@ -356,6 +361,7 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
     dictionaryKeys: new Map(),
     presentKeys: new Map(),
     clearedRecords: new Set(),
+    nullTested: new Set(),
   };
   const removed = new Map<string, Set<string> | "all">();
   for (const body of bodies) collectMapUses(body, uses, removed);
@@ -442,6 +448,20 @@ function collectMapUses(
     else removed.set(name, earlier.add(key));
   };
   walkAst(body, (node) => {
+    if (node.kind === "binary" && (node.operator === "==" || node.operator === "!=")) {
+      for (const [side, other] of [
+        [node.left, node.right],
+        [node.right, node.left],
+      ]) {
+        const tested = keyOf(side);
+        if (tested !== null && isNullConstant(asNode(other) ?? undefined))
+          uses.nullTested.add(tested);
+      }
+    }
+    if ((node.kind === "property" || node.kind === "methodCall") && node.safe === true) {
+      const tested = keyOf(node.object);
+      if (tested !== null) uses.nullTested.add(tested);
+    }
     const assigns =
       node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
     const target = assigns ? asNode(node.left) : null;
@@ -2497,9 +2517,28 @@ function lowerDeclaration(
       ),
     ];
   }
-  const optionalType =
-    value.kind === "literal" && value.value === null ? nullableValueType(name, context) : null;
   const key = bindingKey(asNode(node.left), context.bindings);
+  const startsNull = value.kind === "literal" && value.value === null;
+  // A list that starts as null starts empty where no code tests it for null: Groovy truth treats null and an empty list
+  // alike, and without an optional type its reads need no null tests after the calls that cancel narrowing.
+  if (
+    startsNull &&
+    key !== null &&
+    !context.mapUses.nullTested.has(key) &&
+    isListType(context.types.variables.get(name) ?? UNKNOWN)
+  ) {
+    const listType = nullableValueType(name, context);
+    return [
+      {
+        kind: "let",
+        name,
+        value: { kind: "list", items: [] },
+        span,
+        ...(listType === null ? {} : { type: listType }),
+      },
+    ];
+  }
+  const optionalType = startsNull ? nullableValueType(name, context) : null;
   if (
     value.kind === "object" &&
     key !== null &&
@@ -6325,6 +6364,14 @@ function truthiness(
   }
   if (repeatable && onlyOf(type, STRING | NULL)) {
     return and(notNull, compare("!=", { kind: "literal", value: "" }));
+  }
+  if (repeatable && isListType(type)) {
+    return and(notNull, {
+      kind: "binary",
+      operator: ">",
+      left: { kind: "property", target: value, name: "length" },
+      right: { kind: "literal", value: 0 },
+    });
   }
   addDiagnostic(
     context,

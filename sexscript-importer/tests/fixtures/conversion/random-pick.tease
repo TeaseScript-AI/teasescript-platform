@@ -11,7 +11,7 @@ function sexscriptLegacyRandom(limit) {
   }
   return 0
 }
-let lines: string[]? = null
+let lines: string[] = []
 let line = ""
 lines = ["Good.", "Very good.", "Keep going."]
 line = lines.random

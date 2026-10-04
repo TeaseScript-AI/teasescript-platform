@@ -528,6 +528,19 @@ function analyse(
     )
       return;
     const type = bindingType(target);
+    // A list that starts empty takes its element type from its first elements (ADR 0021 rule 1.3), so elements of
+    // several types need that union written on the declaration.
+    if (
+      type?.kind === "list" &&
+      type.element.kind === "unknown" &&
+      target.declaration !== null &&
+      target.fixed === undefined &&
+      target.union === undefined &&
+      value.kind === "list" &&
+      hasUnion(value) &&
+      annotation(value) !== null
+    )
+      return change(() => (target.union = value));
     if (type === undefined || isAssignable(type, value)) return;
     // Only a declaration can take an annotation; a loop variable keeps its element type.
     const declared = target.declaration !== null;
@@ -771,6 +784,17 @@ function analyse(
     const type = bindingType(list);
     const collection = type === undefined ? undefined : nonNull(type);
     if (collection?.kind !== "list" || nonNull(value).kind === "unknown") return;
+    // A list that starts empty takes its element type from its first element (ADR 0021 rule 1.3), so an element that
+    // holds several types needs that union written on the declaration.
+    if (
+      collection.element.kind === "unknown" &&
+      list.declaration !== null &&
+      list.fixed === undefined &&
+      list.union === undefined &&
+      hasUnion(value) &&
+      annotation(listOf(value)) !== null
+    )
+      return change(() => (list.union = listOf(value)));
     if (isAssignable(collection.element, value)) return;
     if (list.declaration !== null && canWiden(collection.element, value) && !list.widened)
       return change(() => (list.widened = true));

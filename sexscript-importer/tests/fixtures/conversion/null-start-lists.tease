@@ -1,0 +1,18 @@
+// Lists declared without a value, or as null, that functions fill start empty: no code compares them with null, and
+// Groovy truth treats null and an empty list alike.
+let prompts: string[] = []
+let extras: (string | integer)[][] = []
+function fill {
+  prompts = ["Kneel.", "Wait."]
+  extras = [["late", 2]]
+}
+function last(size) {
+  return size - 1
+}
+if prompts == null or not prompts.length > 0 {
+  say "No prompts yet"
+}
+fill()
+let index = last(prompts.length)
+say prompts[index]
+save extras.length as "extras"
