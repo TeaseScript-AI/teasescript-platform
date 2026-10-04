@@ -535,3 +535,36 @@ test("a type case block resumes after a checkpoint", () => {
   );
   assert.deepEqual(finalSnapshot.temporaries, []);
 });
+
+test("value cases keep the narrowing of the cases above, and a never-matching case does not continue", () => {
+  // The value case and the code after the switch know `x` is text once the integer case returned.
+  const narrowed = [
+    "function f(x: integer | string) {",
+    "  switch x {",
+    "    case is integer { return }",
+    '    case "a" { say x.length }',
+    "  }",
+    "  say x.length",
+    "}",
+    'f("a")',
+  ].join("\n");
+  assert.deepEqual(says(narrowed), ["1", "1"]);
+
+  // `case 5` never matches after `case is integer`, so the function cannot end without a value.
+  const ended = compileSource(
+    "function f(x: integer): integer {\n  switch x {\n    case is integer { return 1 }\n    case 5 { }\n  }\n}\nsay f(5)",
+  );
+  assert.deepEqual(
+    ended.diagnostics.map((item) => `${item.severity} ${item.code}`),
+    ["warning TSV046"],
+  );
+  assert.notEqual(ended.plan, null);
+
+  // Like `x is T`, a type case may continue on the next line.
+  assert.deepEqual(
+    says(
+      'switch 1 {\n  case is\n    integer { say 1 }\n}\nswitch "a" {\n  case is not\n    integer { say 2 }\n}',
+    ),
+    ["1", "2"],
+  );
+});

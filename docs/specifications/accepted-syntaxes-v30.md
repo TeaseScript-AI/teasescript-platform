@@ -2876,9 +2876,9 @@ Rules:
   never matches a range.
 - A type case, `case is T` or `case is not T`, tests the switched value like `value is T` ([§13](#13-explicit-types)).
   It tests one type; a union covers several, as in `case is integer | string`. A case has either values or a type test.
-- When the switched value is a plain variable, it narrows as in an `if`/`else if` chain: a type case's block knows the
-  tested type, a `case null` block knows `null`, and each later case and `default` know only what the cases above did
-  not take.
+- When the switched value is a plain variable, it narrows as in an `if`/`else if` chain: the block of `case is T` knows
+  the type `T`, the block of `case is not T` what remains without `T`, and a `case null` block knows `null`. Every later
+  case and `default` know only what the cases above did not take.
 
 ```text
 function describe(answer: integer | string?) {

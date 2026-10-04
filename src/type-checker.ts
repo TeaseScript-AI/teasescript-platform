@@ -566,6 +566,7 @@ class TypeChecker {
         for (const switchCase of statement.cases) {
           // What the block may assume about the value, or `null` when the case does not narrow it.
           let taken: StaticType | null = null;
+          let reached: boolean;
           if (switchCase.typeTest !== null) {
             const test = this.#annotationType(switchCase.typeTest.type);
             const passed = narrowTo(remaining, test);
@@ -579,20 +580,42 @@ class TypeChecker {
               taken,
             );
             remaining = switchCase.typeTest.negated ? passed : failed;
+            reached = taken.kind !== "never";
           } else {
+            // The block is reached when one of its values can still match what the cases above left.
+            let matchable = false;
             for (const value of switchCase.values) {
               const valueType = yield* compileChild(this.#expressionTask(value, scope));
               const message = impossibleCaseMessage(statement.subject, subject, value, valueType);
-              if (message !== undefined) this.#report(typeCode.impossibleCase, message, value.span);
-              else this.#warnImpossibleCase(statement.subject, remaining, value, valueType);
+              if (message !== undefined) {
+                this.#report(typeCode.impossibleCase, message, value.span);
+                matchable = true;
+                continue;
+              }
+              const never = this.#neverMatchingCaseValue(
+                statement.subject,
+                remaining,
+                value,
+                valueType,
+              );
+              if (never === undefined) matchable = true;
+              else
+                this.diagnostics.push(
+                  createDiagnostic(
+                    DiagnosticSeverity.Warning,
+                    typeCode.constantTest,
+                    never,
+                    value.span,
+                  ),
+                );
             }
-            // `case null` narrows like `x == null`.
+            // A value case keeps what the cases above left, and `case null` narrows like `x == null`.
+            reached = matchable;
             if (switchCase.values.every((value) => unwrap(value).kind === "nullLiteral")) {
               taken = narrowTo(remaining, NULL_TYPE);
               remaining = excludeType(remaining, NULL_TYPE);
-            }
+            } else taken = remaining;
           }
-          const reached = taken?.kind !== "never";
           this.#flow.restore(start);
           if (variable !== null && taken !== null && reached)
             this.#flow.apply(this.#flow.since(start, new Map([[variable, taken]])));
@@ -1939,7 +1962,7 @@ class TypeChecker {
 
   /**
    * Warns about `==` or `!=` with a value that one side can never hold, such as a `choose` result compared with a value
-   * no button returns (#511 C5); {@link #warnImpossibleCase} applies it to a literal `case` value.
+   * no button returns (#511 C5); {@link #neverMatchingCaseValue} applies it to a literal `case` value.
    */
   #warnImpossibleComparison(
     expression: Extract<Expression, { kind: "binaryExpression" }>,
@@ -1968,36 +1991,27 @@ class TypeChecker {
   }
 
   /**
-   * Warns about a literal `case` value that a `choose` result never is: the case compares with `==` (V30 §32), so it
-   * never matches (#511 C5).
+   * Why a literal `case` value never matches what the switched value can still hold, or `undefined` when it may: the
+   * cases above took every value of its type, as `case is integer` before `case 5`, or a `choose` result never is it
+   * (#511 C5). The case compares with `==` (V30 §32).
    */
-  #warnImpossibleCase(
+  #neverMatchingCaseValue(
     subjectExpression: Expression,
     subject: StaticType,
     value: Expression,
     valueType: StaticType,
-  ): void {
+  ): string | undefined {
     const label = expressionLabel(subjectExpression);
     const holder = label === null ? "This value" : `'${label}'`;
+    if (subject.kind === "never")
+      return "The cases above take every value, so this case never matches.";
     // The cases above may have taken every value of this case's type, as `case is integer` before `case 5`.
     if (
-      subject.kind === "never" ||
-      (isKnown(subject) &&
-        !containsType(subject, (part) => part.kind === "open") &&
-        impossibleCaseMessage(subjectExpression, subject, value, valueType) !== undefined)
-    ) {
-      this.diagnostics.push(
-        createDiagnostic(
-          DiagnosticSeverity.Warning,
-          typeCode.constantTest,
-          subject.kind === "never"
-            ? "The cases above take every value, so this case never matches."
-            : `${holder} holds ${describeValue(subject)} here, after the cases above, so this case never matches.`,
-          value.span,
-        ),
-      );
-      return;
-    }
+      isKnown(subject) &&
+      !containsType(subject, (part) => part.kind === "open") &&
+      impossibleCaseMessage(subjectExpression, subject, value, valueType) !== undefined
+    )
+      return `${holder} holds ${describeValue(subject)} here, after the cases above, so this case never matches.`;
     const possible = possibleValues(subject);
     const literal = comparedLiteral(value);
     if (
@@ -2005,15 +2019,8 @@ class TypeChecker {
       literal === undefined ||
       literal.some((one) => mayEqual(subject, one))
     )
-      return;
-    this.diagnostics.push(
-      createDiagnostic(
-        DiagnosticSeverity.Warning,
-        typeCode.constantTest,
-        `${holder} is always ${describeLiterals(possible)} here, so this case never matches.`,
-        value.span,
-      ),
-    );
+      return undefined;
+    return `${holder} is always ${describeLiterals(possible)} here, so this case never matches.`;
   }
 
   /** Warns about `case is T` or `case is not T` that no value left by the cases above can pass, like a constant test. */

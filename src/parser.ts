@@ -1685,7 +1685,9 @@ class Parser {
   /** `is T` or `is not T` after `case`: one type, or a union for several, as in `case is integer | string`. */
   *#parseCaseTypeTestTask(): ParseTask<SwitchTypeTest | null> {
     const keyword = this.#advance();
+    this.#skipContinuationNewlines();
     const negated = this.#match(TokenKind.KeywordNot);
+    this.#skipContinuationNewlines();
     if (this.#atComparedValue()) {
       this.#reportToken(
         parserDiagnosticCode.invalidType,
