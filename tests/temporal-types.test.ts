@@ -326,11 +326,4 @@ test("date and time values show as text, give buttons, and are set elements", ()
     ),
     [],
   );
-  assert.deepEqual(diagnostics("let lists: datetime[] set = set[]"), [
-    [
-      "TSV006",
-      "A set holds only text, numbers, true or false, durations, date and time values, or null, so it cannot hold datetime[] values. Use a list instead, as in 'datetime[][]'.",
-      "datetime[] set",
-    ],
-  ]);
 });

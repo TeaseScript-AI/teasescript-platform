@@ -433,13 +433,13 @@ choices, so larger explicit-seed campaigns explore additional meaningful source
 strings. This is not a grammar framework or an arbitrary-token fuzzer.
 
 - Valid source templates cover literals, unary/binary expressions, ranges and
-  templates; variables, lexical scope, lists, objects, scalar sets and `for`;
-  conditions, `repeat`, `while`, `break` and `continue`; defaults, named calls
-  and bounded recursion; speaker output and `say as`; and deterministic random
-  built-ins.
+  templates; variables, lexical scope, lists, objects, sets of text and of
+  lists, and `for`; conditions, `repeat`, `while`, `break` and `continue`;
+  defaults, named calls and bounded recursion; speaker output and `say as`; and
+  deterministic random built-ins.
 - Near-valid templates apply one targeted current diagnostic mutation: a missing
   declaration identifier or template expression, out-of-loop `break`, unknown
-  name, duplicate function parameter, or composite set element.
+  name, duplicate function parameter, or duplicate dict key.
 
 Every valid case is at most 512 source characters, uses nesting at most three,
 collections and loop/recursion counts at most four, and runs with a 200

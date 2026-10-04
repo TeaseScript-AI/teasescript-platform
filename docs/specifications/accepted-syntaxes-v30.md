@@ -970,8 +970,8 @@ integer?[]           // a list of integers or nulls
 integer[]?           // a list of integers, or null
 ```
 
-`[]`, `set`, `dict`, and `?` follow a type and bind tighter than `|`; parentheses group. A set holds only `string`,
-`boolean`, `integer`, `number`, and `null` values, so `integer[] set` is a compile error.
+`[]`, `set`, `dict`, and `?` follow a type and bind tighter than `|`; parentheses group. A set may hold any value a list
+may hold, so `integer[] set` is a set of lists of integers ([§16](#16-lists)).
 
 ### Union types
 
@@ -1427,8 +1427,13 @@ Runtime behavior:
   when they have the same members in any order; two ranges are equal when they are written with the same bounds and
   the same inclusiveness, so `1..=2 != 1..3` although both produce `1` and `2`. Values of different kinds, such as a
   list and a set, are never equal. List `contains(value)` and `remove(value)` use this equality, so they also find
-  objects and nested lists; `remove(value)` removes the first equal element. Set elements are scalar values,
-  durations, and date and time values ([§35](#35-date-time-durations-and-timestamps)).
+  objects and nested lists; `remove(value)` removes the first equal element.
+- A set may hold any value a list may hold: text, numbers, `true` and `false`, `null`, durations, date and time values
+  ([§35](#35-date-time-durations-and-timestamps)), lists, objects, dicts, sets, ranges, speakers, and timer and media
+  handles. Collections nest in every direction, such as sets of lists, sets in dicts, and lists in lists. A set keeps
+  the first of members that are equal (`==`), in insertion order, so `set[[1, 2], [1, 2]]` has one member, and its
+  `contains(value)` and `remove(value)` use the same equality. A member is copied when it is added, and `.first`,
+  `.last`, `.random`, and a `for` loop give copies, so changing one does not change the set.
 - The operands of `==` and `!=` are read when they are evaluated, left to right, so a change made while evaluating the
   right operand does not affect the left one: `items == [items.removeAt(0)]` is `true` for `items = [1]`.
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.

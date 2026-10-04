@@ -33,7 +33,7 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
   const source = flatChain(1_024);
   const nestedSource = `let value = ${"(".repeat(1_024)}1${")".repeat(1_024)}`;
   const collectionSource = `let value = ${"[".repeat(1_024)}1${"]".repeat(1_024)}\nexit`;
-  const setSource = `let value = ${"set[".repeat(1_024)}1${"]".repeat(1_024)}`;
+  const setSource = `let value = ${"set[".repeat(1_024)}1${"]".repeat(1_024)}\nexit`;
   const objectSource = `let value = ${"{ value: ".repeat(1_024)}1${" }".repeat(1_024)}\nexit`;
   const blockSource = `${"if true {".repeat(1_024)}exit${"}".repeat(1_024)}`;
   const compilerUrl = new URL("../src/compiler.js", import.meta.url).href;
@@ -106,6 +106,15 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     });
     const objectRuntime = run(compiledObject.plan, createFreshRuntimeSnapshot(compiledObject.plan));
     const restoredObject = restoreCheckpoint(createCheckpoint(compiledObject.plan, objectRuntime.snapshot));
+    // Sets nest like lists: a member is keyed, copied, validated, and restored without native recursion.
+    const setRuntime = run(compiledSet.plan, createFreshRuntimeSnapshot(compiledSet.plan));
+    const restoredSet = restoreCheckpoint(createCheckpoint(compiledSet.plan, setRuntime.snapshot));
+    let setValue = restoredSet.snapshot.frames[0]?.bindings[0]?.value;
+    let setDepth = 0;
+    while (setValue?.kind === "set") {
+      setDepth += 1;
+      setValue = setValue.items[0];
+    }
     let objectValue = restoredObject.snapshot.frames[0]?.bindings[0]?.value;
     let objectDepth = 0;
     while (objectValue?.kind === "object") {
@@ -131,8 +140,10 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
       collectionCodes: compiledCollection.diagnostics.map((diagnostic) => diagnostic.code),
       collectionRuntimeStatus: runtimeResult.snapshot.status,
       collectionDepth,
-      setDistinctCodes: [...new Set(compiledSet.diagnostics.map((diagnostic) => diagnostic.code))],
-      setStarts: compiledSet.diagnostics.map((diagnostic) => diagnostic.span.start.offset).sort((left, right) => left - right),
+      setCodes: compiledSet.diagnostics.map((diagnostic) => diagnostic.code),
+      setRuntimeStatus: setRuntime.snapshot.status,
+      setDepth,
+      setLeaf: setValue,
       blockCodes: compiledBlock.diagnostics.map((diagnostic) => diagnostic.code),
       blockProgramStatements: compiledBlock.program.statements.length,
       blockSpan: [compiledBlock.program.span.start.offset, compiledBlock.program.span.end.offset],
@@ -187,9 +198,10 @@ test("flat, parenthesis, collection, object, and block compilation remain iterat
     collectionCodes: [],
     collectionRuntimeStatus: "halted",
     collectionDepth: 1_024,
-    setDistinctCodes: ["TSV006"],
-    // Every set except the outermost is an invalid set element; "let value = " is 12 characters.
-    setStarts: Array.from({ length: 1_023 }, (_, index) => 12 + 4 * (index + 1)),
+    setCodes: [],
+    setRuntimeStatus: "halted",
+    setDepth: 1_024,
+    setLeaf: 1,
     blockCodes: [],
     blockProgramStatements: 1,
     blockSpan: [0, blockSource.length],

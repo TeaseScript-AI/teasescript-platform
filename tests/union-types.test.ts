@@ -72,14 +72,6 @@ test("type names cover null, any list, set, or object, and program-control value
       ["TSV041", "[1]"],
     ],
   );
-  // A set holds only scalar values (ADR 0014).
-  assert.deepEqual(diagnostics("let groups: integer[] set = set[]"), [
-    [
-      "TSV006",
-      "A set holds only text, numbers, true or false, durations, date and time values, or null, so it cannot hold integer[] values. Use a list instead, as in 'integer[][]'.",
-      "integer[] set",
-    ],
-  ]);
   assert.deepEqual(codes("let flags: integer? set = set[1, null]"), []);
   for (const name of ["list", "object", "range", "media"])
     assert.equal(compileSource(`let ${name} = 1`).diagnostics[0]?.code, "TSV001", name);

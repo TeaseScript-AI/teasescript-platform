@@ -155,7 +155,6 @@ export type RuntimeCheckSite =
   | Extract<Statement, { kind: "returnStatement" }>;
 
 const typeCode = {
-  invalidSetElement: "TSV006",
   argumentCount: "TSV020",
   unknownNamedArgument: "TSV022",
   invalidInteractionChoice: "TSV029",
@@ -1652,20 +1651,10 @@ class TypeChecker {
         case "namedType":
           break;
         case "listType":
+        case "setType":
         case "dictType":
           pending.push(part.element);
           break;
-        case "setType": {
-          pending.push(part.element);
-          const element = typeFromAnnotation(part.element);
-          if (!members(element).every(isSetElement))
-            this.#report(
-              typeCode.invalidSetElement,
-              `A set holds only text, numbers, true or false, durations, date and time values, or null, so it cannot hold ${typeName(element)} values. Use a list instead, as in '${typeName({ kind: "list", element })}'.`,
-              part.span,
-            );
-          break;
-        }
         case "optionalType":
           pending.push(part.value);
           break;
@@ -2020,7 +2009,6 @@ class TypeChecker {
         for (const item of expression.elements) {
           yield* compileChild(this.#expressionTask(item, scope));
           types.push(this.#capture(item));
-          if (expression.kind === "setLiteral") this.#checkSetElement(item, this.#typeOf(item));
         }
         // Elements of known types must share one type; an element of unknown type leaves the element type unknown. A
         // `choose` that returns values of different types mixes them too.
@@ -2707,8 +2695,6 @@ class TypeChecker {
       const argument = expression.arguments[0];
       if (argument !== undefined && expression.arguments.length === 1) {
         const type = yield* compileChild(this.#expressionTask(argument.value, scope));
-        if (isSetReceiver(receiver) && !this.#checkSetElement(argument.value, type))
-          return NULL_TYPE;
         const collection = this.#elementReceiver(callee.object, scope, receiver, type);
         yield* compileChild(
           this.#storeElementTask(collection, callee.object, argument.value, type, scope),
@@ -2776,13 +2762,6 @@ class TypeChecker {
         );
       }
     }
-    // A set compares only values it can hold, and a list becomes a set only of such values.
-    if ((method === "contains" || method === "remove") && isSetReceiver(value))
-      for (const [index, argument] of expression.arguments.entries())
-        this.#checkSetElement(argument.value, values[index]!);
-    if (method === "toSet")
-      for (const member of members(nonNullType(value)).map(resolved))
-        if (member.kind === "list" && !this.#checkSetElement(expression, member.element)) break;
     // Every member of a union must have the method (ADR 0021 rule 3.5).
     const all = members(value);
     const results = all.map((member) => memberMethodType(member, method));
@@ -2881,21 +2860,7 @@ class TypeChecker {
     const problems = collectionMethodProblems(method, value, property, expression, typeOf);
     this.#reportProblems(problems);
     if (method === "sort" || method === "shuffle") return NULL_TYPE;
-    // A set's union adds the argument's elements, which must be values a set can hold.
-    const argument = expression.arguments[0]?.value;
-    const lists =
-      argument === undefined || method !== "union" || value.kind !== "set"
-        ? []
-        : members(nonNullTypeForUse(typeOf(argument)))
-            .map(resolved)
-            .filter((member) => member.kind === "list");
-    let held = true;
-    for (const list of lists)
-      if (list.kind === "list" && !this.#checkSetElement(argument!, list.element)) {
-        held = false;
-        break;
-      }
-    return this.#setOperationType(method, value, expression, problems.length === 0 && held);
+    return this.#setOperationType(method, value, expression, problems.length === 0);
   }
 
   /**
@@ -3947,22 +3912,6 @@ class TypeChecker {
     );
   }
 
-  /**
-   * Reports a value that a set cannot hold: a set holds only text, numbers, true or false, durations, date and time
-   * values, and null (V30 §16). A value of unknown type is checked when the script runs. Returns whether the value may
-   * be held.
-   */
-  #checkSetElement(expression: Expression, type: StaticType): boolean {
-    const rejected = members(type).find((member) => isKnown(member) && !isSetElement(member));
-    if (rejected === undefined) return true;
-    this.#report(
-      typeCode.invalidSetElement,
-      `A set holds only text, numbers, true or false, durations, date and time values, or null, so it cannot hold ${describeValue(rejected)}.`,
-      expression.span,
-    );
-    return false;
-  }
-
   /** Reports list and set literals that mix types and were not stored in a place of a declared element type. */
   #reportMixedLiterals(): void {
     for (const [literal, types] of this.#mixedLiterals) {
@@ -4915,16 +4864,6 @@ function literalElements(
   return literal.kind === "dictLiteral"
     ? literal.entries.map((entry) => entry.value)
     : literal.elements;
-}
-
-/** Whether a receiver may be a set. */
-function isSetReceiver(type: StaticType): boolean {
-  return members(nonNullType(type)).some((member) => resolved(member).kind === "set");
-}
-
-function isSetElement(type: StaticType): boolean {
-  const value = resolved(type);
-  return value.kind === "null" || value.kind === "unknown" || value.kind === "scalar";
 }
 
 /**
