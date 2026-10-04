@@ -2282,7 +2282,10 @@ class SemanticValidator {
     });
   }
 
-  /** The entries of this file's transfers whose code can run, given the code reachable in the project. */
+  /**
+   * The entries of this file's transfers and script references whose code can run, given the code reachable in the
+   * project, and those of its start values, which always run.
+   */
   reachableEntries(flow: StatementFlow, reachable: ReadonlySet<string>): readonly FileEntry[] {
     return [
       ...this.#startEntries,
