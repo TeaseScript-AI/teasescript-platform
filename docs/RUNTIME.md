@@ -977,8 +977,8 @@ The start values of all globals and speakers form a startup prefix at the beginn
 one `declareGlobal` (with an optional runtime `typeCheck`) or `declareSpeaker` instruction each, in session-start order,
 each with the index of the `file` whose source its locations refer to. The declarations themselves emit nothing, except
 a `global` with `default:`, which assigns its value where it stands. Plan validation accepts these instructions only as
-that prefix, each name once, with start values of the accepted kinds (no call, temporary, or global set up later), and
-no label, `goto`, jump, or call return leads back into it. Function definitions record whether they are `global`, which a timer or media block is
+that prefix, each name once, with start values of the accepted kinds (no calls other than `script(...)`, no temporaries,
+and no globals set up later), and no label, `goto`, jump, or call return leads back into it. Function definitions record whether they are `global`, which a timer or media block is
 exactly when the code that registers it is. An instruction may call a function of another file only when it is global,
 and a global function or block calls only global functions.
 
