@@ -2340,7 +2340,7 @@ class TypeChecker {
       return yield* compileChild(this.#valueOfConditionTask(expression, scope));
     const left = yield* compileChild(this.#expressionTask(expression.left, scope));
     const right = yield* compileChild(this.#expressionTask(expression.right, scope));
-    this.#checkKnownDurations(expression, left);
+    this.#checkKnownDurations(expression, left, right);
     switch (expression.operator) {
       case "==":
       case "!=":
@@ -2374,14 +2374,22 @@ class TypeChecker {
   #checkKnownDurations(
     expression: Extract<Expression, { kind: "binaryExpression" }>,
     left: StaticType,
+    right: StaticType,
   ): void {
+    // Folding an operand walks its whole subtree, so only the operands a check needs are folded: none unless one is a
+    // duration, and for `+` and `-` only the right one, which keeps a long chain of steps linear.
+    const leftDuration = isScalar(left, "duration");
+    if (!leftDuration && !isScalar(right, "duration")) return;
+    const operator = expression.operator;
     const known = (operand: Expression) => staticChoiceValue(operand)?.value;
     const asDuration = (value: StaticScalar | undefined) =>
       value !== null && typeof value === "object" ? durationParts(value) : undefined;
-    const a = asDuration(known(expression.left));
+    const a =
+      leftDuration && operator !== "+" && operator !== "-"
+        ? asDuration(known(expression.left))
+        : undefined;
     const rightValue = known(expression.right);
     const b = asDuration(rightValue);
-    const operator = expression.operator;
     let problem: string | number | DurationParts | undefined;
     if (a !== undefined && b !== undefined && ["<", "<=", ">", ">="].includes(operator))
       problem = compareDurationParts(a, b);
