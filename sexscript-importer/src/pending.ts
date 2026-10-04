@@ -18,21 +18,9 @@ import { isRecord } from "./ast.ts";
 const PENDING_CALLS = new Map<string, string>([
   ["askBoolean", "askBoolean()"],
   ["askBooleans", "askBooleans()"],
-  ["getDate", "getDate()"],
-  ["getDateTime", "getDateTime()"],
   ["openUrl", "openUrl()"],
   ["takePhoto", "takePhoto()"],
-  ["toDate", "toDate()"],
 ]);
-
-/** Current-time getters whose conversion and format methods (#532) the shim replaces together with the getter. */
-const TEMPORAL_GETTERS = new Set(["getDate", "getTime", "getDateTime", "getTimestamp"]);
-
-/** Capability name of the accepted dict (#536), which main does not implement yet. */
-const DICT = "dict (#536)";
-/** The property of the object that stands in for a dict in smoke runs, and the prefix of its entry names. */
-const DICT_PROPERTY = "dict (#536)";
-const DICT_KEY_PREFIX = "key ";
 
 /** Calls that only a proposed language change defines, by the proposal (see proposals.ts). */
 const PROPOSED_CALLS = new Map<string, ProposalId>([["countImages", "media-tags"]]);
@@ -45,15 +33,6 @@ const SHIM_PREFIX = "sxPending";
  */
 const TYPED_RESULTS = new Map<string, "toInteger" | "toString" | "toBoolean">([
   ["askBoolean", "toBoolean"],
-  ["dict.contains()", "toBoolean"],
-  ["dict.length", "toInteger"],
-  ["(date - date).days", "toInteger"],
-  ["getTimestamp().toSeconds()", "toInteger"],
-  ["getTimestamp().toMilliseconds()", "toInteger"],
-  ["getDate().toISO()", "toString"],
-  ["getDate().formatDate()", "toString"],
-  ["getTime().formatTime()", "toString"],
-  ["getDateTime().formatDateTime()", "toString"],
   ["media-tags.countImages", "toInteger"],
 ]);
 
@@ -93,7 +72,7 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
     named: Record<string, IrExpression> = {},
   ): IrExpression => {
     capabilities.add(capability);
-    // Operation names of members (`text.length`, `dict.contains()`) become identifier-safe shim names.
+    // Operation names such as `media-tags.countImages` become identifier-safe shim names.
     const words = name.split(/[^A-Za-z0-9]+/u).filter((word) => word !== "");
     const shim = shimName(
       `${SHIM_PREFIX}${words.map((word) => `${word[0]!.toUpperCase()}${word.slice(1)}`).join("")}`,
@@ -137,70 +116,19 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
       case "list":
         return { ...value, items: value.items.map(expression) };
       case "object":
-        if (value.dict === true) {
-          // A dict literal (#536) becomes a stand-in built from a list of keys and a list of their values, so each
-          // list holds one type.
-          return call(DICT, "dict.literal", [
-            {
-              kind: "list",
-              items: value.properties.map((property) =>
-                property.key === undefined
-                  ? { kind: "literal", value: property.name }
-                  : expression(property.key),
-              ),
-            },
-            { kind: "list", items: value.properties.map((property) => expression(property.value)) },
-          ]);
-        }
         return {
           ...value,
           properties: value.properties.map((property) => ({
             ...property,
+            ...(property.key === undefined ? {} : { key: expression(property.key) }),
             value: expression(property.value),
           })),
         };
       case "index":
-        if (value.dict === true) {
-          return call(DICT, "dict.get", [expression(value.target), expression(value.index)]);
-        }
         return { ...value, target: expression(value.target), index: expression(value.index) };
       case "property":
-        if (value.dict === true)
-          return call(DICT, `dict.${value.name}`, [expression(value.target)]);
-        if (
-          value.name === "days" &&
-          value.target.kind === "binary" &&
-          value.target.operator === "-"
-        ) {
-          // Calendar days between two dates (#532), with the dates' stand-ins as arguments.
-          return call("(date - date).days", "(date - date).days", [
-            expression(value.target.left),
-            expression(value.target.right),
-          ]);
-        }
         return { ...value, target: expression(value.target) };
       case "methodCall":
-        if (
-          value.target.kind === "call" &&
-          value.target.local !== true &&
-          TEMPORAL_GETTERS.has(value.target.name) &&
-          value.target.positional.length === 0
-        ) {
-          // A conversion or format method of the current date or time (#532), as one placeholder.
-          const operation = `${value.target.name}().${value.name}()`;
-          return call(operation, operation, value.arguments.map(expression));
-        }
-        if (value.dict === true) {
-          // `get(key, default: value)` is apart from the `[key]` read, which is `dict.get`.
-          const operation =
-            value.name === "get" && value.arguments.length === 2
-              ? "dict.get(default:)"
-              : `dict.${value.name}()`;
-          return call(DICT, operation, [
-            expression(value.target),
-            ...value.arguments.map(expression),
-          ]);
-        }
         return {
           ...value,
           target: expression(value.target),
@@ -300,56 +228,10 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         return [{ ...item, body: statements(item.body) }];
       case "let":
         return [{ ...item, value: expression(item.value) }];
-      case "assign": {
-        const target = item.target;
-        if (target.kind === "index" && target.dict === true) {
-          // A dictionary write replaces the dictionary with an updated copy.
-          const dictionary = expression(target.target);
-          const key = expression(target.index);
-          const assigned = expression(item.value);
-          const value: IrExpression =
-            item.operator === "="
-              ? assigned
-              : {
-                  kind: "binary",
-                  operator: item.operator === "+=" ? "+" : "-",
-                  left: call(DICT, "dict.get", [dictionary, key]),
-                  right: assigned,
-                };
-          return [
-            {
-              ...item,
-              operator: "=",
-              target: dictionary,
-              value: call(DICT, "dict.set", [dictionary, key, value]),
-            },
-          ];
-        }
+      case "assign":
         return [{ ...item, target: expression(item.target), value: expression(item.value) }];
-      }
-      case "expression": {
-        const value = item.expression;
-        if (
-          value.kind === "methodCall" &&
-          value.dict === true &&
-          (value.name === "remove" || value.name === "clear")
-        ) {
-          const dictionary = expression(value.target);
-          return [
-            {
-              kind: "assign",
-              operator: "=",
-              target: dictionary,
-              value: call(DICT, `dict.${value.name}()`, [
-                dictionary,
-                ...value.arguments.map(expression),
-              ]),
-              span: item.span,
-            },
-          ];
-        }
+      case "expression":
         return [{ ...item, expression: expression(item.expression) }];
-      }
       case "say":
         return [{ ...item, value: expression(item.value) }];
       case "wait":
@@ -379,17 +261,8 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         return [{ ...item, condition: expression(item.condition), body: statements(item.body) }];
       case "repeat":
         return [{ ...item, count: expression(item.count), body: statements(item.body) }];
-      case "for": {
-        // A loop over a dict visits its keys as they were when the loop started (#536).
-        const collection = expression(item.collection);
-        return [
-          {
-            ...item,
-            collection: item.dict === true ? call(DICT, "dict.keys", [collection]) : collection,
-            body: statements(item.body),
-          },
-        ];
-      }
+      case "for":
+        return [{ ...item, collection: expression(item.collection), body: statements(item.body) }];
       case "hideImage":
       case "break":
       case "continue":
@@ -431,7 +304,7 @@ export interface MediaFile {
 
 /**
  * Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only: `run` records its target in
- * the flow state, and time and dates follow the simulated clock from 2026-10-02 12:00 UTC.
+ * the flow state, and inputs answer in turn.
  */
 export function pendingHostFunctions(
   shim: PendingShim,
@@ -444,93 +317,9 @@ export function pendingHostFunctions(
     return answers[visit % answers.length]!;
   };
   const emptyList = { kind: "list", items: [] };
-  const epochMs = Date.UTC(2026, 9, 2, 12, 0, 0);
-  const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  const date = (withTime: boolean): RuntimeValue => {
-    const moment = new Date(epochMs + state.clock.nowMs);
-    const fields: Array<[string, RuntimeValue]> = [
-      ["year", moment.getUTCFullYear()],
-      ["month", moment.getUTCMonth() + 1],
-      ["day", moment.getUTCDate()],
-      ["weekday", weekdays[moment.getUTCDay()]!],
-      ["weekdayNumber", moment.getUTCDay() === 0 ? 7 : moment.getUTCDay()],
-    ];
-    if (withTime) {
-      fields.push(
-        ["hour", moment.getUTCHours()],
-        ["minute", moment.getUTCMinutes()],
-        ["second", moment.getUTCSeconds()],
-        ["millisecond", moment.getUTCMilliseconds()],
-      );
-    }
-    const value = {
-      kind: "object",
-      properties: fields.map(([name, item]) => ({ name, value: item })),
-    };
-    return value;
-  };
-  const items = (value: RuntimeValue[]): RuntimeValue => {
-    const list = { kind: "list", items: value };
-    return list;
-  };
-  const composite = (value: RuntimeValue | undefined): Record<string, unknown> | null => {
-    const fields: unknown = value;
-    return isRecord(fields) ? fields : null;
-  };
-  const entries = (operation: string, value: RuntimeValue | undefined) => {
-    const object = composite(value);
-    if (object === null || !Array.isArray(object.properties)) {
-      throw new Error(`${operation} needs an object.`);
-    }
-    return object.properties.filter(isRecord);
-  };
-  // A dict (#536) is an object with one property, DICT_PROPERTY, whose object has a property per entry, named with
-  // DICT_KEY_PREFIX before the key so that the empty text is a key too. It never equals an object, two dicts compare
-  // without regard to order, and keys are text only.
-  const dictEntries = (operation: string, value: RuntimeValue | undefined) => {
-    const [wrapper] = entries(operation, value);
-    const table = wrapper?.name === DICT_PROPERTY ? composite(runtimeValue(wrapper.value)) : null;
-    if (table === null || !Array.isArray(table.properties))
-      throw new Error(`${operation} needs a dict.`);
-    return table.properties
-      .filter(isRecord)
-      .map((property) => ({
-        name: String(property.name).slice(DICT_KEY_PREFIX.length),
-        value: runtimeValue(property.value),
-      }));
-  };
-  const keyText = (key: RuntimeValue | undefined): string => {
-    if (typeof key !== "string") throw new Error("A dict key must be text (#536).");
-    return key;
-  };
-  const dictionary = (
-    properties: ReadonlyArray<{ name: string; value: RuntimeValue }>,
-  ): RuntimeValue => {
-    const table = {
-      kind: "object",
-      properties: properties.map(({ name, value }) => ({
-        name: `${DICT_KEY_PREFIX}${name}`,
-        value,
-      })),
-    };
-    const dict = { kind: "object", properties: [{ name: DICT_PROPERTY, value: table }] };
-    return dict;
-  };
   const listItems = (value: RuntimeValue | undefined): unknown[] | null => {
-    const object = composite(value);
-    return object !== null && Array.isArray(object.items) ? object.items : null;
-  };
-  const runtimeValue = (value: unknown): RuntimeValue => {
-    if (
-      value === null ||
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "boolean"
-    ) {
-      return value;
-    }
-    if (isRecord(value) && typeof value.kind === "string") return { ...value, kind: value.kind };
-    throw new Error("Unexpected runtime value.");
+    const object: unknown = value;
+    return isRecord(object) && Array.isArray(object.items) ? object.items : null;
   };
   const implementations = new Map<string, HostFunction>([
     // Proposed media tags (M1): images counted by the folders they are in, compared without regard to case.
@@ -539,95 +328,8 @@ export function pendingHostFunctions(
       (_, named) => {
         const wanted = listItems(named.tags);
         if (wanted === null) throw new Error("countImages() needs a list of tags.");
-        const tags = wanted.map((tag) => String(runtimeValue(tag)).toLowerCase());
+        const tags = wanted.map((tag) => String(tag).toLowerCase());
         return media.filter((file) => tags.every((tag) => file.tags.includes(tag))).length;
-      },
-    ],
-    // A missing key is an error (#536), where Groovy read null.
-    [
-      "dict.get",
-      ([target, key]) => {
-        const name = keyText(key);
-        const entry = dictEntries("[key]", target).find((property) => property.name === name);
-        if (entry === undefined) throw new Error(`Dictionary has no key ${JSON.stringify(name)}.`);
-        return entry.value;
-      },
-    ],
-    [
-      "dict.get(default:)",
-      ([target, key, fallback]) => {
-        const name = keyText(key);
-        if (fallback === undefined || fallback === null)
-          throw new Error("get() needs a default that is not null (#536).");
-        const properties = dictEntries("get()", target);
-        // The default has the dict's value type (#536).
-        const kind = (value: RuntimeValue): string =>
-          typeof value === "object" && value !== null ? value.kind : typeof value;
-        if (
-          properties.some(
-            (property) => property.value !== null && kind(property.value) !== kind(fallback),
-          )
-        )
-          throw new Error("get() needs a default of the dict's value type (#536).");
-        const entry = properties.find((property) => property.name === name);
-        return entry === undefined ? fallback : entry.value;
-      },
-    ],
-    [
-      "dict.set",
-      ([target, key, value]) => {
-        const name = keyText(key);
-        const stored = value ?? null;
-        const properties = dictEntries("[key] =", target);
-        const replaced = properties.some((property) => property.name === name);
-        return dictionary(
-          replaced
-            ? properties.map((property) =>
-                property.name === name ? { name, value: stored } : property,
-              )
-            : [...properties, { name, value: stored }],
-        );
-      },
-    ],
-    [
-      "dict.contains()",
-      ([target, key]) =>
-        dictEntries("contains()", target).some((property) => property.name === keyText(key)),
-    ],
-    [
-      "dict.keys",
-      ([target]) => items(dictEntries("keys", target).map((property) => property.name)),
-    ],
-    [
-      "dict.values",
-      ([target]) => items(dictEntries("values", target).map((property) => property.value)),
-    ],
-    ["dict.length", ([target]) => dictEntries("length", target).length],
-    [
-      "dict.remove()",
-      ([target, key]) => {
-        const name = keyText(key);
-        const properties = dictEntries("remove()", target);
-        if (!properties.some((property) => property.name === name))
-          throw new Error(`Dictionary has no key ${JSON.stringify(name)}.`);
-        return dictionary(properties.filter((property) => property.name !== name));
-      },
-    ],
-    ["dict.clear()", ([target]) => (dictEntries("clear()", target), dictionary([]))],
-    [
-      "dict.literal",
-      ([keys, values]) => {
-        const properties: Array<{ name: string; value: RuntimeValue }> = [];
-        const entryValues = listItems(values) ?? [];
-        for (const [position, key] of (listItems(keys) ?? []).entries()) {
-          const value = runtimeValue(entryValues[position]);
-          const name = keyText(runtimeValue(key));
-          // A repeated key keeps its first position and takes the later value, as in a Groovy map.
-          const index = properties.findIndex((property) => property.name === name);
-          if (index >= 0) properties[index] = { name, value };
-          else properties.push({ name, value });
-        }
-        return dictionary(properties);
       },
     ],
     ["run", ([script]) => ((state.transfer = String(script)), null)],
@@ -635,70 +337,6 @@ export function pendingHostFunctions(
     ["showPopup", () => null],
     ["askBoolean", () => next("askBoolean", [true, false])],
     ["askBooleans", (_, named) => named.defaults ?? emptyList],
-    ["getTimestamp().toSeconds()", () => Math.floor((epochMs + state.clock.nowMs) / 1000)],
-    ["getTimestamp().toMilliseconds()", () => epochMs + state.clock.nowMs],
-    // A date from strict ISO text, or the date of a datetime (#532), with the fields the getDate() stand-in has.
-    [
-      "toDate",
-      ([text]) => {
-        const datetime =
-          typeof text === "object" && text !== null ? entries("toDate()", text) : null;
-        if (datetime !== null) {
-          const value = {
-            kind: "object",
-            properties: datetime.filter((property) =>
-              ["year", "month", "day", "weekday", "weekdayNumber"].includes(String(property.name)),
-            ),
-          };
-          return value;
-        }
-        const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(typeof text === "string" ? text : "");
-        if (match === null) throw new Error(`toDate() cannot convert ${JSON.stringify(text)}.`);
-        const fields: Array<[string, RuntimeValue]> = [
-          ["year", Number(match[1])],
-          ["month", Number(match[2])],
-          ["day", Number(match[3])],
-        ];
-        const value = {
-          kind: "object",
-          properties: fields.map(([name, item]) => ({ name, value: item })),
-        };
-        return value;
-      },
-    ],
-    // Whole calendar days between two dates: `(left - right).days`.
-    [
-      "(date - date).days",
-      ([left, right]) => {
-        const day = (value: RuntimeValue | undefined): number => {
-          const fields = new Map(
-            entries("(date - date).days", value).map((property) => [property.name, property.value]),
-          );
-          return Date.UTC(
-            Number(fields.get("year")),
-            Number(fields.get("month")) - 1,
-            Number(fields.get("day")),
-          );
-        };
-        return Math.round((day(left) - day(right)) / 86_400_000);
-      },
-    ],
-    ["getDate().toISO()", () => new Date(epochMs + state.clock.nowMs).toISOString().slice(0, 10)],
-    // The player's local presentation; the stand-in uses the ISO form.
-    [
-      "getDate().formatDate()",
-      () => new Date(epochMs + state.clock.nowMs).toISOString().slice(0, 10),
-    ],
-    [
-      "getTime().formatTime()",
-      () => new Date(epochMs + state.clock.nowMs).toISOString().slice(11, 16),
-    ],
-    [
-      "getDateTime().formatDateTime()",
-      () => new Date(epochMs + state.clock.nowMs).toISOString().slice(0, 16).replace("T", " "),
-    ],
-    ["getDateTime", () => date(true)],
-    ["getDate", () => date(false)],
     ["openUrl", () => null],
     // A photo reference, then null as when the camera is unavailable or the player cancels.
     ["takePhoto", () => next("takePhoto", ["camera/photo.jpg", null])],

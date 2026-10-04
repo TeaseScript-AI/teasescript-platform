@@ -5,8 +5,8 @@ import { isRecord } from "./ast.ts";
  * Deterministic smoke run of generated TeaseScript in the real runtime: buttons are pressed, each visit of a choice
  * takes the next option in turn (so loops waiting for a particular answer end), text and number inputs cycle
  * through fixed answers, waits and timers advance simulated time, and media plays in simulated real time after a
- * successful load of one second per pass. It proves that one path through the script executes without runtime
- * errors; it does not explore every branch.
+ * successful load of one second per pass. The wall clock starts at 2026-10-02 12:00 UTC and follows simulated time.
+ * It proves that one path through the script executes without runtime errors; it does not explore every branch.
  *
  * `failed` includes `TSR037`: the product's default instruction budget between two events, which the Player uses
  * as well. `stepLimit` is inconclusive.
@@ -25,6 +25,9 @@ export type HostFunction = (
   positional: readonly RuntimeValue[],
   named: Readonly<Record<string, RuntimeValue>>,
 ) => RuntimeValue;
+
+/** The wall clock at simulated time 0: 2026-10-02 12:00 UTC, in epoch milliseconds. */
+const SMOKE_EPOCH_MS = Date.UTC(2026, 9, 2, 12, 0, 0);
 
 /** Simulated time shared with host stand-ins, in milliseconds since the start of the run or flow. */
 export interface SmokeClock {
@@ -273,6 +276,7 @@ function smokeRun(
     delayPerWordMs: 0,
     delayPerCharacterMs: 0,
     scriptStorage,
+    wallClockMs: SMOKE_EPOCH_MS + clock.nowMs,
   });
   const clockStart = clock.nowMs;
   let now = 0;

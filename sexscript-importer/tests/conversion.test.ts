@@ -119,58 +119,6 @@ function registerFixtures(
   }
 }
 
-// The smoke-run stand-ins behave like the accepted capabilities they replace, so a run does not pass where the real
-// implementation would fail: a dict never equals an object and takes only text keys, the empty text included (#536),
-// and toDate() takes the date of a datetime (#532).
-test(
-  "pending stand-ins keep the accepted dict and toDate behavior",
-  { skip: "reason" in runnerResult ? runnerResult.reason : false },
-  () => {
-    if (!("runner" in runnerResult)) return;
-    const operations = new Map([
-      ["sxLiteral", "dict.literal"],
-      ["sxGet", "dict.get"],
-      ["sxDefault", "dict.get(default:)"],
-      ["sxToDate", "toDate"],
-      ["sxNow", "getDateTime"],
-    ]);
-    const builtins = pendingHostFunctions({
-      program: { sourceName: "stand-ins.tease", metadata: null, statements: [], diagnostics: [] },
-      source: "",
-      builtins: [...operations.keys()],
-      operations,
-      capabilities: new Set(),
-    });
-    const run = (source: string) => runnerResult.runner(source, builtins).status;
-    // `[1][5]` fails, so the run halts only when no check fails.
-    assert.equal(
-      run(
-        [
-          'let entries = sxLiteral(["a", "b"], [1, 2])',
-          "if entries == { a: 1, b: 2 } {",
-          "  let unreachable = [1][5]",
-          "}",
-          'if entries != sxLiteral(["b", "a"], [2, 1]) {',
-          "  let unreachable = [1][5]",
-          "}",
-          'if sxGet(sxLiteral([""], [3]), "") != 3 {',
-          "  let unreachable = [1][5]",
-          "}",
-          "if sxToDate(sxNow()).day != sxNow().day {",
-          "  let unreachable = [1][5]",
-          "}",
-          "",
-        ].join("\n"),
-      ),
-      "halted",
-    );
-    assert.equal(run('let value = sxGet(sxLiteral(["1"], [3]), 1)\n'), "failed");
-    // A default has the dict's value type (#536).
-    assert.equal(run('let value = sxDefault(sxLiteral(["a"], ["x"]), "b", 3)\n'), "failed");
-    assert.equal(run('let value = sxDefault(sxLiteral(["a"], ["x"]), "b", "y")\n'), "halted");
-  },
-);
-
 // Lone CR line endings cannot live in a committed fixture without tripping whitespace checks.
 test(
   "keeps lone-CR legacy line endings aligned with comments",
@@ -667,7 +615,7 @@ test(
   async () => {
     if (!("runner" in runnerResult)) return;
     const sourcePath = fileURLToPath(
-      new URL("./fixtures/conversion-accepted/destinations.groovy", import.meta.url),
+      new URL("./fixtures/conversion/destinations.groovy", import.meta.url),
     );
     const shim = shimPendingCapabilities(await convert(sourcePath));
     const storage = new Map();
