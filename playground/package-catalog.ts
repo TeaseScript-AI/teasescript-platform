@@ -1,9 +1,14 @@
 import type { ProjectSourceFile } from "../src/compiler.js";
 import type { ProjectImageFile } from "../src/image-catalog.js";
 
-/** What the playground server lists of a development package: its images, its `.tease` files, and what it skipped. */
+/**
+ * What the playground server lists of a development package: its images, its audio and video files, its `.tease`
+ * files, and what it skipped.
+ */
 export interface PackageCatalog {
   readonly images: readonly ProjectImageFile[];
+  /** Every audio and video file, by its path. */
+  readonly media: readonly string[];
   /** Every `.tease` file; `compileProject` reports a path that is not a package path. */
   readonly sources: readonly ProjectSourceFile[];
   /** Files and folders that could not be read, and images whose tags could not be read, with the reason. */
@@ -23,7 +28,7 @@ function developmentPackageUrl(id: string | null, route: string): string {
   return `/dev-package/${id === null ? "" : `${encodeURIComponent(id)}/`}${route}`;
 }
 
-/** The URL at which the server offers a package image, by its package path. */
+/** The URL at which the server offers a package image, audio, or video file, by its package path. */
 export function developmentPackageFileUrl(id: string | null, path: string): string {
   return developmentPackageUrl(id, `files/${path.split("/").map(encodeURIComponent).join("/")}`);
 }
@@ -51,8 +56,15 @@ export async function loadDevelopmentPackage(id: string): Promise<PackageCatalog
 /** The catalog the server sent, or `null` when it does not have the expected shape. */
 function packageCatalog(value: unknown): PackageCatalog | null {
   if (!isRecord(value)) return null;
-  const { images, sources, problems } = value;
-  if (!Array.isArray(images) || !Array.isArray(sources) || !Array.isArray(problems)) return null;
+  const { images, media, sources, problems } = value;
+  if (
+    !Array.isArray(images) ||
+    !Array.isArray(media) ||
+    !Array.isArray(sources) ||
+    !Array.isArray(problems)
+  )
+    return null;
+  if (!media.every((path) => typeof path === "string")) return null;
   const parsedImages: ProjectImageFile[] = [];
   for (const image of images) {
     if (!isRecord(image)) return null;
@@ -75,7 +87,12 @@ function packageCatalog(value: unknown): PackageCatalog | null {
     if (typeof path !== "string" || typeof message !== "string") return null;
     parsedProblems.push({ path, message });
   }
-  return { images: parsedImages, sources: parsedSources, problems: parsedProblems };
+  return {
+    images: parsedImages,
+    media: [...media],
+    sources: parsedSources,
+    problems: parsedProblems,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

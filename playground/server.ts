@@ -7,6 +7,7 @@ import { PLAYGROUND_EXAMPLES } from "./examples.js";
 import {
   isPackageId,
   PACKAGE_IMAGE_EXTENSIONS,
+  PACKAGE_MEDIA_EXTENSIONS,
   PackageFolder,
   PackageRoot,
 } from "./package-folder.js";
@@ -19,8 +20,9 @@ import {
 export interface PlaygroundServerOptions {
   readonly projectRoot?: string;
   /**
-   * A development package folder (#572): its images with their XMP tags and its `.tease` files are offered at
-   * `/dev-package/catalog.json`, and its images at `/dev-package/files/<path>`. Without it, both routes are absent.
+   * A development package folder (#572): its images with their XMP tags, its audio and video files, and its `.tease`
+   * files are offered at `/dev-package/catalog.json`, and its images, audio, and video at `/dev-package/files/<path>`.
+   * Without it, both routes are absent.
    */
   readonly packageRoot?: string;
   /**
@@ -414,7 +416,7 @@ function resolveTarget(pathname: string, roots: StaticRoots): StaticTarget | nul
     if (!packagePath.route.startsWith("files/")) return null;
     const relativePath = packagePath.route.slice("files/".length);
     if (
-      !PACKAGE_IMAGE_EXTENSIONS.has(extname(relativePath).toLowerCase()) ||
+      !servedExtension(extname(relativePath).toLowerCase()) ||
       relativePath.split("/").some((segment) => segment.startsWith("."))
     )
       return null;
@@ -463,6 +465,11 @@ function developmentPackagePath(
     : null;
 }
 
+/** Whether a package file of this lowercase extension is served: an image, audio, or video file. */
+function servedExtension(extension: string): boolean {
+  return PACKAGE_IMAGE_EXTENSIONS.has(extension) || PACKAGE_MEDIA_EXTENSIONS.has(extension);
+}
+
 function resolveInside(root: string, relativePath: string): StaticTarget | null {
   if (relativePath.length === 0) return null;
   const target = resolve(root, relativePath);
@@ -505,6 +512,16 @@ function contentType(path: string): string {
       return "image/svg+xml";
     case ".ttf":
       return "font/ttf";
+    case ".mp3":
+      return "audio/mpeg";
+    case ".wav":
+      return "audio/wav";
+    case ".ogg":
+      return "audio/ogg";
+    case ".mp4":
+      return "video/mp4";
+    case ".webm":
+      return "video/webm";
     case ".json":
     case ".map":
       return "application/json; charset=utf-8";

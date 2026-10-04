@@ -22,6 +22,18 @@ export const PACKAGE_IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
   ".svg",
 ]);
 
+/**
+ * The audio and video file types of a development package, by lowercase extension: those the accepted language
+ * specification names for audio and video files.
+ */
+export const PACKAGE_MEDIA_EXTENSIONS: ReadonlySet<string> = new Set([
+  ".mp3",
+  ".wav",
+  ".ogg",
+  ".mp4",
+  ".webm",
+]);
+
 const UTF8 = new TextDecoder("utf-8", { fatal: true });
 
 /** An SVG image's tags come from its sidecar only. */
@@ -42,7 +54,8 @@ export class PackageFolder {
   public constructor(readonly root: string) {}
 
   /**
-   * Every readable image and `.tease` file below the folder, by its path relative to it, in path order. An image has
+   * Every readable image, audio or video file, and `.tease` file below the folder, by its path relative to it, in path
+   * order. An image has
    * the keywords of its sidecar named after the whole file (`room.jpg.xmp`) when it has one, and otherwise of its
    * embedded XMP. What cannot be read is listed in `problems` instead.
    */
@@ -52,6 +65,7 @@ export class PackageFolder {
     const present = new Set(files);
     for (const path of this.#cache.keys()) if (!present.has(path)) this.#cache.delete(path);
     const images: ProjectImageFile[] = [];
+    const media: string[] = [];
     const sources: ProjectSourceFile[] = [];
     for (const path of files) {
       const extension = extname(path).toLowerCase();
@@ -70,10 +84,15 @@ export class PackageFolder {
         }
         continue;
       }
-      if (!PACKAGE_IMAGE_EXTENSIONS.has(extension)) continue;
+      const isMedia = PACKAGE_MEDIA_EXTENSIONS.has(extension);
+      if (!isMedia && !PACKAGE_IMAGE_EXTENSIONS.has(extension)) continue;
       const problem = packageAssetPathProblem(path);
       if (problem !== null) {
         problems.push({ path, message: `Skipped: ${problem}.` });
+        continue;
+      }
+      if (isMedia) {
+        media.push(path);
         continue;
       }
       const sidecar = `${path}.xmp`;
@@ -93,7 +112,7 @@ export class PackageFolder {
         problems.push({ path, message: result.reason });
       }
     }
-    return { images, sources, problems };
+    return { images, media, sources, problems };
   }
 
   async #read(
