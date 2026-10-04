@@ -83,7 +83,14 @@ TeaseScript that the compiler gate replaces with stand-ins until it is implement
 | `m[k] ?: d`, `m.containsKey(k) ? m[k] : d`, `x = m[k]` followed by `if (x == null) x = d` on a dict | `m.get(k, default: d)` (#536) |
 | `getImage(message)` (webcam picture path or null) | `takePhoto()`, with a note (V30 §33) |
 | `playBackgroundSound(null)`, `stopSoundThreads()` | handles of the async sounds kept in a list and stopped by a generated helper |
-| `f(x++)`, `continue` in a C-style `for`, `return` inside `each()` | `f(x)` then `x += 1`; the update step before each `continue`; `continue` |
+| `f(x++)`, `continue` in a C-style `for`, `return` inside `each()` or `times()` | `f(x)` then `x += 1`; the update step before each `continue`; `continue` |
+| `c ? a : b`, `v ?: d`, `a && getBoolean(q)` inside a larger expression or an `if` condition | `let conditional = ...` with one assignment per branch before the statement, which then reads `conditional`; parts Groovy evaluated earlier move into `let earlier = ...` first where their effects or values could change |
+| `a & f()`, `a \| f()` on booleans | `let earlier = a`, `let conditional = f()`, then `earlier and conditional` |
+| `list.findAll { }`, `any`, `every`, `collect`, `find`, `sum` inside a larger expression | the loop into `findAllResult` (and so on) before the statement |
+| `getSelectedValue(q, opts.collect { it.lbl })` inside a larger expression | the menu into `selected` before the statement |
+| `x.isEmpty()`, `n.times { }` on a value of unknown type | `x.length == 0` (text, lists, and dicts); the loop (Groovy has `times()` only on numbers) |
+| `list = list.sort()` | `list.sort()` |
+| A script variable assigned before every read, with values of several types (`response = ""`, later `response = getBoolean(...)`) | one variable per type (`response`, `responseBoolean`, `responseNumber`) |
 | `while (playBackgroundSound(s) \|\| true)` | `while true` with the call as its first statement |
 | `sleep(ms)`, `waitWithGauge(s)` | `wait ... ms`, `timer ...` |
 
@@ -135,7 +142,7 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   that may be missing becomes `if map.contains(key) { map.remove(key) }`. A fallback for a missing key (`m[k] ?: d`,
   `m.containsKey(k) ? m[k] : d`, read-then-default) becomes `m.get(k, default: d)`, with a note where Groovy's fallback
   also replaced a stored null, or with `?:` a stored false, 0, or empty value (`SX_DICT_DEFAULT`). Any other lookup
-  fails where Groovy continued with null, so it gets a note (`SX_DICT_MISSING_KEY`, 26 Toy sites) unless its key is
+  fails where Groovy continued with null, so it gets a note (`SX_DICT_MISSING_KEY`, 14 Toy sites) unless its key is
   proven present: a literal key that every map assigned to the variable has and nothing removes, a key a surrounding
   test found, a key written earlier in the same block, or the key of a loop over `keySet()`. Groovy kept a key's type,
   so `1` and `"1"` were different keys, while dict keys are text: number keys become text with a note
@@ -146,6 +153,15 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   a map that may be an object are reported (`SX_DICT_VALUE_TYPE`, `SX_DYNAMIC_MAP_ACCESS`, `SX_DICT_EQUALITY`); a map
   literal or variable compared with a dict becomes a dict, since a dict never equals an object. Dict analysis follows
   bindings, so a closure's own `def m` is apart from a script `m`.
+- An empty-text placeholder that later holds one other type (`def lineArray = ""`, later a list) starts with that
+  type's empty value (`let lineArray: string[] = []`), which differs only where the empty text was read
+  (`SX_PLACEHOLDER_TYPE`, 5 DisciplineClinic sites). A write by position into a list that starts empty grew the Groovy
+  list, padding with null; the conversion appends when the position is the length and notes the difference beyond it
+  (`SX_LIST_GROWTH`, DisciplineClinic's `assignmentArrayList`).
+- What a function cannot convert does not block the script when nothing in the package calls the function or uses it as
+  a value, since Groovy never ran it: its diagnostics become notes (30 notes in the corpus, such as DisciplineClinic's
+  `testAllImages` and its class-loading `test`). A package with a call whose method name is computed keeps them
+  blocking, since such a call could reach any function.
 - Closures kept as values become action IDs called through one dispatcher. Unlike Groovy, the dispatcher ignores extra
   arguments and returns null for an unknown action; Groovy failed in both cases.
 - A `switch` case Groovy tested with `isCase` keeps its meaning only where the case value shows it: equality for
@@ -247,7 +263,8 @@ showed:
 - **Missing keys need guards:** Groovy read a missing key as null. 10 Toy lookups only test presence or truth and
   become `contains` tests, and 5 `remove` calls on keys that may be missing need `if map.contains(key) { ... }`. The
   default lookup that #536 added, `m.get(k, default: d)`, covers fallbacks for a missing key; Toy has one,
-  `toynames[t] ?: t.replaceAll("_", " ")`, whose fallback still needs a regular expression. 26 Toy lookups have a key
+  `toynames[t] ?: t.replaceAll("_", " ")`, which becomes `toynames.get(t, default: t.replace("_", " "))` with a note,
+  since Groovy's `?:` also replaced a stored empty name. 14 Toy lookups have a key
   the importer cannot prove present (a parameter, a list element, a computed level) and get a note, since they stop
   the script where Groovy read null.
 - **Number keys:** Toy keeps two tables keyed by level (`[1: 1.25, 2: 1.1, ...][getLevel(DENIAL)]`), so their keys and
@@ -325,52 +342,79 @@ Emily persona; the code's default owner `ancilla` is not included.
 
 ## Accepted but not implemented
 
-The importer emits these accepted forms although the current compiler rejects them; the compiler gate counts them
-separately: `run`/`end`, `switch` (#528, PR #529), `showPopup`, the `showButton` timeout and elapsed result (#531),
-`askInteger`, `askBooleans`, date and time (`getDateTime()`, `getDate()`, `getTime()`, `getTimestamp()`,
-`toSeconds()`, `toISO()`, `formatTime()`, `toDate()`, `.days`; #532), `openUrl`, `round`/`floor`/`ceil` and the
-conversions (#518), text operations and `join` (#518), `takePhoto()` (camera,
-#475), integer widening (#504 option B, #526), for which the gate writes `: number`, and `dict` (#536). `run`/`end`
-dominates: it blocks 21 otherwise compiler-clean corpus scripts.
+The importer emits these accepted forms although the current compiler rejects them, or its runtime does not implement
+them; the compiler gate counts them separately: `run`/`end`, `switch` (#528, PR #529), `showPopup`, the `showButton`
+timeout and elapsed result (#531), `askInteger`, `askBooleans`, date and time (`getDateTime()`, `getDate()`,
+`getTime()`, `getTimestamp()`, `toSeconds()`, `toISO()`, `formatTime()`, `toDate()`, `.days`; #532), `openUrl`,
+`round`/`floor`/`ceil` and the conversions (#518), text operations and `join` (#518), list `sort()` (V30 §16),
+`takePhoto()` (camera, #475), integer widening (#504 option B, #526), for which the gate writes `: number`, `dict` with
+`get(key, default:)` (#536), and `load "key", default:` (#541), which the gate writes in the form `main` still
+implements. `run`/`end` dominates: it blocks 24 otherwise compiler-clean corpus scripts.
 
 ## Remaining gaps by workaround class
 
-What still blocks conversion once the open tracker work lands (#504 types, #508 text operations, #511 choose lists,
-#528 switch, #531 `showButton` timeout, #532 date and time, #536 `dict`, camera #475), ranked by whether current
-TeaseScript can express it. Counts are root errors or blocked scripts in default mode at the `dict` round.
+What still blocks conversion once the open tracker work lands (#504 types, #508 text operations, #528 switch, #531
+`showButton` timeout, #532 date and time, #536 `dict`, #541 `load` default, camera #475), ranked by whether current
+TeaseScript can express it. Counts are root errors or blocked scripts in default mode after the third round; the
+column "Before" gives the count at the `dict` round.
 
-**Expressible in current TeaseScript (importer work).** The language already has a clean form; the importer does not
-produce it yet.
+**Expressible in current TeaseScript (importer work).** The language already has a clean form.
 
-| Gap | Corpus | Clean form |
-| --- | --- | --- |
-| Conditional expressions (`?:`, elvis) inside larger expressions | Toy, about 40 | nested `if` with temporaries, keeping the evaluation order |
-| Collection methods (`times` 7, `collect` 6, `findAll` 5, `isEmpty` 3, `collectEntries` 2, text `toList()` 2, and `every`, `any`, `find`, `intersect`, `sort`, `unique`, `eachWithIndex`, `Collections.shuffle`, `values`, `add`, `remove` once each), mostly with closures or on receivers inference does not prove | Toy 36 of its 59 dynamic calls | `for` loops and the list and text operations |
-| Toy menus built inside larger expressions | Toy 6 | the same loops, before the statement |
-| Non-short-circuit `&` and `\|` on booleans | Toy, about 10 | `and`/`or`, with temporaries when an operand has effects |
-| Closures that capture local state; method pointers; calls of closures kept in data (`it.cond()`, `e.event.func(...)`, 4 dynamic calls) | Toy 17 | explicit state parameters; action IDs with a dispatcher |
-| Variables that hold values of two types, such as `response = ""` that later holds `true` (valid dynamic Groovy) | DisciplineClinic 8 | a separate variable per type where their lifetimes do not overlap, or union types (#530) |
-| Persona data files with Groovy expression strings | Toy | data converted at import time |
-| `instanceof`; `asBoolean()`; `Math.floorDiv` | Toy 1 each | `is` (#530); Groovy truth; `floor(a / b)` |
+| Gap | Before | Now | Clean form |
+| --- | --- | --- | --- |
+| Conditional expressions (`?:`, Elvis) inside larger expressions and conditions | Toy about 40 | 0 | a temporary computed before the statement, with earlier parts first (done) |
+| Inputs on the right of `&&`/`\|\|`, `&`/`\|` with effects on the right | Toy about 10, distribution 2 | Toy 1 (`goodToy & ...`, left side not proven boolean) | temporaries and an `if` (done) |
+| Collection methods with closures inside larger expressions; `times`, `isEmpty`, `sort` | Toy 36 of 59 dynamic calls | Toy 25 of 50, all on receivers the importer cannot prove to be lists | loops (done where the receiver is a list or range) |
+| Collection methods on unproven receivers: closure parameters (`texts.collect`), persona data (`DOMME.sessions.forEach`), map entries (`toys.any { s, t -> }`), plus `each`, `sum`, list appends | (in the row above) | Toy 25 dynamic calls, 7 `each`, 4 `sum`, 3 appends, 2 other | a loop once inference proves the list, or a key loop with a lookup for a dict |
+| Menus built inside larger expressions | Toy 6 | Toy 2 (option lists not proven) | the menu into a temporary first (done) |
+| Variables that hold values of two types (valid dynamic Groovy) | DisciplineClinic 8 | 0; Toy 1 | one variable per type where every read follows its own assignment; an empty-text placeholder starts with the later type's empty value (done) |
+| Closures that capture local state | Toy 10 | Toy 10 | explicit state parameters: feasible for 2 local helpers that call sibling local closures (`suck`, `suckBeat`); the other 8 are stored in registries, returned, or evaluate persona expressions |
+| Method pointers; calls of closures kept in data (`it.cond()`, `e.event.func(...)`) | Toy 3 and 4 | Toy 3 and 5 | action IDs with a dispatcher |
+| Persona data files with Groovy expression strings | Toy | Toy | data converted at import time |
+| `instanceof`; `asBoolean()`; `Math.floorDiv` | Toy 1 each | Toy 1 each | `is` (#530); Groovy truth; `floor(a / b)` |
 
 **Workaround possible, but a hack.** Works with current TeaseScript but differs from the intended behavior; the
-accepted implementation is still wanted.
+accepted implementation is still wanted. Each workaround the importer emits carries a note that names it
+(`SX_REGEX_WORKAROUND`, `SX_LOCALE_WORKAROUND`).
 
 | Gap | Corpus | Workaround | What the workaround loses |
 | --- | --- | --- | --- |
-| `askBooleans` | blocks 8 scripts | one yes/no `choose` per item in a loop, then a confirmation | one form with every option; changing an earlier answer |
-| `showPopup` | blocks 4 scripts | `say` plus `showButton "OK"` | the popup presentation |
-| `askInteger` | blocks 1 script (reached with media tags) | `askNumber` in a loop until `round(n) == n` (#518) | validation while typing |
-| Media selected by tags (M1), including Toy's imagery folders with tag files | Domme3 3, Toy imagery | a file list fixed at conversion time, or asking which packs are installed | packs added after conversion |
-| Regular expressions (`replaceAll`, pattern `split`, `tokenize`) | Toy 3 | loops with `indexOf`/`substring` (#518) | readability: one call becomes a loop |
+| `askBooleans` | blocks 8 scripts | not emitted (accepted, waiting for its implementation): one yes/no `choose` per item, then a confirmation | one form with every option; changing an earlier answer |
+| `showPopup` | blocks 4 scripts | not emitted (accepted): `say` plus `showButton "OK"` | the popup presentation |
+| `askInteger` | blocks 1 script | not emitted (accepted, #539): `askNumber` in a loop until `round(n) == n` | validation while typing |
+| Media selected by tags (M1), including Toy's imagery folders with tag files | Domme3 3, Toy imagery | not emitted: a per-pack table of image counts fixed at conversion time | packs added after conversion |
+| Regular expressions | Toy 2 converted, `tokenize` and Java patterns left | emitted: a loop over the parts between spaces for `split(/\s+/)`, and one removing each `<...>` for `replaceAll(/<[^>]*>/, "")` | readability, and exactness for other whitespace and a leading space |
+| The player's language (`Locale.getDefault().getLanguage()`) | distribution 2 converted | emitted: English, `"en"` | the font configuration offer for other languages |
 
 **No reasonable workaround.**
 
 | Gap | Corpus | Why |
 | --- | --- | --- |
-| Script transfers `run`/`call`/`goto`/`end` (syntax under re-evaluation in the tracker) | blocks 21 scripts (distribution 7, Domme3 12, DisciplineClinic 2) | A package is several scripts that transfer to each other. Imitating that means merging every script into one file with a dispatcher loop, with every function passing a pending transfer up to it: a rewrite of the whole package. Only `call` alone maps to a function call within one file. |
-| Desktop and Java APIs: `java.time` formatting and zones (5), files (4), `java.util.Random` (2), JSON and Base64 (2), `Eval.me`, `java.util.function.Function`, `System.getProperty`, OS processes (1 each), Java objects, the Cornertime exchange | Toy 17 of its 59 dynamic calls, distribution | Outside the product boundary by design (see Legacy baggage). `Random.nextInt(n)` alone could become `randomInteger()`, without the seed. |
-| Legacy bugs (variables nothing assigns 10, helpers without the script host 7) | Domme3, DisciplineClinic | Need an author's repair; reporting them is correct. |
+| Script transfers `run`/`call`/`goto`/`end` (syntax under re-evaluation in the tracker) | blocks 24 scripts (distribution 9, Domme3 12, DisciplineClinic 3) | A package is several scripts that transfer to each other. Imitating that means merging every script into one file with a dispatcher loop, with every function passing a pending transfer up to it: a rewrite of the whole package. Only `call` alone maps to a function call within one file. |
+| Desktop and Java APIs: `java.time` formatting and zones (5), files (4), `java.util.Random` (3), JSON and Base64 (2), `Eval.me`, `java.util.function.Function`, `System.getProperty`, OS processes (1 each), Java objects, the Cornertime exchange | Toy 18 of its 50 dynamic calls and 7 constructors, distribution | Outside the product boundary by design (see Legacy baggage). `Random.nextInt(n)` alone could become `randomInteger()`, without the seed. |
+| Legacy bugs (variables nothing assigns, helpers without the script host) | Domme3 3 and 7, DisciplineClinic 1 | Need an author's repair; reporting them is correct. Six more sit in functions nothing calls and are notes now. |
+
+### Third-round findings
+
+Smoke runs that go further surface problems the static gates do not:
+
+- **Groovy lists grow on a write past their end.** DisciplineClinic fills `assignmentArrayList = []` by position
+  (`assignmentArrayList[i] = [...]`), which Groovy grows, padding with null; a TeaseScript position must exist
+  (`TSR025`). The importer appends at the end with a note (`SX_LIST_GROWTH`, 2 sites); a position beyond the end
+  stays different.
+- **Accepted list `sort()` is missing on `main`.** V30 §16 lists `items.sort()`; `main` compiles it but its runtime
+  rejects the method (`TSR016`), so the gate stands in for it (`list sort()`, 1 Toy site).
+- **`main` compiles method calls its runtime does not implement.** Text operations such as `trim()` pass the compiler
+  and fail only at runtime (`TSR016`) until PR #518 lands, so the compiler gate alone would not catch them; the smoke
+  runs do.
+- **Unreachable legacy code blocked whole scripts.** Test functions nothing calls held class loading and reads of
+  never-assigned variables (DisciplineClinic's `testAllImages` and `test`); as notes, DisciplineClinic's entry flow
+  now runs through its main script to the end.
+- **Variables reused for several types are scratch variables.** All three such variables (`dialog`, and `response` in
+  two scripts) are assigned before every read, so one variable per type is exact; five empty-text placeholders later
+  hold lists or yes/no answers.
+- **Isolated runs still fail on settings the introductions save** (Domme3 6 scripts, DisciplineClinic `WaitRoom`):
+  Groovy compared a missing setting as null, which TeaseScript comparisons reject.
 
 ## Open importer work
 
@@ -378,4 +422,6 @@ Found while evaluating the proposals, besides the importer work listed above; no
 
 - **Groovy type inference is per file and flow-insensitive:** a name used in two functions shares one type set, which
   hides lists (the Toy appends above) and makes `size()` on values of unknown type look like possible maps. The
-  never-assigned-variable check is name-based in the same way.
+  never-assigned-variable check is name-based in the same way. Local closure results now have types, also across the
+  script and its modules, but closure parameters stay unknown, which keeps most remaining Toy collection methods
+  unconverted.

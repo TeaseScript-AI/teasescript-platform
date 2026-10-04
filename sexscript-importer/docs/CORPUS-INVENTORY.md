@@ -24,67 +24,74 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-04 at importer commit `79af579f`, after merging `main` at `66f0a750`, with `node src/cli.ts
-report --run <package scripts>` (default conversion, without proposals). Toy's 21 runtime-loaded modules are part of
+Measured on 2026-10-04 at importer commit `7cbd2a2d` plus the loop-receiver fix of the following commit, after
+merging `main` at `b459787c` (#515), with `node src/cli.ts report --run <package scripts>` (default conversion,
+without proposals). Toy's 21 runtime-loaded modules are part of
 its single script `toy.groovy`, so Toy counts as one script whose statements include all module code.
 
 | Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Root errors | Placeholders |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Distribution | 14 | 10 | 10 | 10 | 13 | 11 |
+| Distribution | 14 | 12 | 12 | 12 | 8 | 8 |
 | Domme3 | 24 | 15 | 12 | 12 | 24 | 26 |
-| DisciplineClinic | 6 | 3 | 3 | 3 | 22 | 22 |
-| Toy expanded | 1 | 0 | 0 | 0 | 183 | 320 |
+| DisciplineClinic | 6 | 4 | 4 | 4 | 4 | 13 |
+| Toy expanded | 1 | 0 | 0 | 0 | 104 | 182 |
 
 Root errors count independent causes that need manual work; placeholders count unconverted statements. Converting a
-statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 183 come
-from about 4,800 source statements, mostly Java objects and dynamic calls, closures over collections and map entries,
-conditionals in positions where moving them would change evaluation order, and closures that capture variables.
+statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 104 come
+from about 4,800 source statements, mostly Java objects and APIs, collection methods on receivers the importer cannot
+prove to be lists (closure parameters, persona data, map entries), and closures that capture variables or are kept
+in data.
 
 The previous snapshot (2026-10-03, importer `d713b469`) counted 15, 35, 17, and 267 root errors, as did the same
 importer after merging `main` (`6e0d4d03`). Since then menus from runtime lists, text operations, input defaults, date
 formatting, `getImage`, and lookup-table maps (as `dict`, #536; Toy 254 to 183) convert by default, while
 DisciplineClinic's 8 variables that change type (#519) and 10 reads of never-assigned variables (legacy bugs in Domme3
 and DisciplineClinic) are newly reported; see [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md) and
-[`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md).
+[`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md). The third round (from 13, 24, 22, and 183) converts conditional
+expressions, inputs, and collection loops inside larger expressions through temporaries, splits variables reused for
+several types, notes what functions nothing calls cannot convert, and adds marked workarounds for two regular
+expressions and the system language.
 
 Runtime smoke runs of the compiler-clean scripts (placeholder copies with host stand-ins):
 
-- Distribution: all 10 runnable scripts run to the end; the French introduction's flow passes through three other
-  scripts. The four remaining entry scripts are not converted (locale detection, desktop font configuration, and the
-  adversarial `test.groovy`).
+- Distribution: all 12 runnable scripts run to the end; the English, German, and French introductions' flows each pass
+  through three other scripts. The two remaining entry scripts are not converted (desktop font configuration with
+  `try`/`catch`, and the adversarial `test.groovy`).
 - Domme3: the entry flow stops at the unconverted `introfirst`, which counts installed image packs by listing
   directories. Isolated runs: `implements` and `inform` run to the end, `permission` reaches the step limit in a
   line-writing loop (the typed text must match the shown line), `explain` returns to the entry flow, and six scripts
   (`confess`, `discipline`, `fun` through `spanking`, `maintenance`, `sleep`, `task`) fail comparing or calculating
   with settings that the introduction would have saved (see the null-comparison difference in `COMPATIBILITY-GAPS.md`).
-- DisciplineClinic: the entry flow stops at the unconverted `DisciplineClinicMain` (a menu whose option variable also
-  holds text, Java object calls, and never-assigned variables); `Exit` runs to the end, `WaitRoom` fails on a setting
-  saved by the main script.
+- DisciplineClinic: the entry flow runs through `DisciplineClinicMain` to `Exit` and ends. Its blockers were a menu
+  variable reused for text and lists (now split by type) and two test functions nothing calls (class loading,
+  never-assigned variables), which no longer block. Isolated, `WaitRoom` fails on a setting saved by the main script;
+  `Punish` and `OffenseSelect` are not converted (Java files, a never-assigned variable, a menu over a variable of
+  several types).
 
 Smoke runs found two importer defects before they reached a snapshot: `getRandom(0)` (fixed with the legacy result)
-and range switch cases tested as lists.
+and range switch cases tested as lists. Going further into DisciplineClinic found a write by position into a list
+that starts empty, which Groovy grew (see `SX_LIST_GROWTH` in `COMPATIBILITY-GAPS.md`).
 
-Two scripts compile as generated (a distribution example and DisciplineClinic's entry script); script chaining is the
-main remaining gap. Scripts using each accepted-but-unimplemented capability, and how many otherwise compiler-clean
-scripts use it (capabilities used by fewer than three scripts are omitted):
+One script compiles as generated (a distribution example; DisciplineClinic's `Exit` now uses `load "key", default:`,
+#541); script chaining is the main remaining gap. Scripts using each accepted-but-unimplemented capability, and how many
+otherwise compiler-clean scripts use it (capabilities used by fewer than three scripts are omitted):
 
 | Capability | Scripts using it | Otherwise compiler-clean scripts using it |
 | --- | ---: | ---: |
-| `run`/`end` | 41 | 21 |
-| `switch` (#528) | 26 | 11 |
-| `toInteger()` (#518) | 20 | 5 |
-| `getTimestamp().toSeconds()` (#532) | 18 | 4 |
+| `run`/`end` | 41 | 24 |
+| `switch` (#528) | 26 | 12 |
+| `toInteger()` (#518) | 20 | 6 |
+| `getTimestamp().toSeconds()` (#532) | 18 | 5 |
 | `showButton` timeout/elapsed (#531) | 14 | 5 |
-| `getDateTime()` (#532) | 13 | 4 |
+| `getDateTime()` (#532) | 14 | 5 |
 | `askBooleans()` | 10 | 8 |
 | `showPopup` | 10 | 4 |
-| `askInteger()` | 9 | 0 |
+| `askInteger()` | 9 | 1 |
 | `: number` for integer widening (#526) | 5 | 1 |
-| `dict` (#536) | 1 | 0 |
-| `load "key", default:` (#541) | 5 | 1 |
-| `round()` (#518) | 4 | 1 |
+| `load "key", default:` (#541) | 5 | 2 |
+| `round()` (#518) | 4 | 2 |
 | `getDate().toISO()`, `getTime().formatTime()` (#532) | 3 each | 1 each |
-| `openUrl()` | 3 | 0 |
+| `openUrl()` | 3 | 1 |
 
 The proposal mode's measurements are in [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md).
 

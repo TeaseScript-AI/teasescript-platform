@@ -41,8 +41,8 @@ compiler gate. Only M1 remains a proposal (`--proposed`).
 
 ## Corpus evaluation
 
-Measured on 2026-10-04 at importer commit `79af579f` with `node src/cli.ts report --run [--proposed=<id>] <package
-scripts>`, after merging `main` at `66f0a750`. The importer emits a working syntax of its own choosing for the
+Measured on 2026-10-04 at the third-round head with `node src/cli.ts report --run [--proposed=<id>] <package
+scripts>`, after merging `main` at `b459787c` (#515). The importer emits a working syntax of its own choosing for the
 remaining proposal; the report compiles and smoke-runs it through stand-ins in current TeaseScript, so "converted"
 means converted, compiled, and run, not just emitted. Each cell: root errors / lowered scripts / compiler-clean except
 pending / scripts reached by smoke runs.
@@ -51,8 +51,15 @@ pending / scripts reached by smoke runs.
 | --- | --- | --- | --- | --- |
 | default before (`6e0d4d03`) | 15 / 10 / 10 / 10 | 35 / 13 / 10 / 10 | 17 / 3 / 3 / 3 | 267 / 0 / 0 / 0 |
 | default before `dict` (`b4d4362b`) | 13 / 10 / 10 / 10 | 31 / 15 / 12 / 12 | 22 / 3 / 3 / 3 | 254 / 0 / 0 / 0 |
-| default now | 13 / 10 / 10 / 10 | 24 / 15 / 12 / 12 | 22 / 3 / 3 / 3 | 183 / 0 / 0 / 0 |
+| default after `dict` (`b4f097a9`) | 13 / 10 / 10 / 10 | 24 / 15 / 12 / 12 | 22 / 3 / 3 / 3 | 183 / 0 / 0 / 0 |
+| default now | 8 / 12 / 12 / 12 | 24 / 15 / 12 / 12 | 4 / 4 / 4 / 4 | 103 / 0 / 0 / 0 |
 | media-tags (M1) | unchanged | 21 / 17 / 14 / 14 | unchanged | unchanged |
+
+The third round converts conditional expressions, inputs, collection loops, and menus inside larger expressions
+through temporaries, splits variables reused for several types, notes what functions nothing calls cannot convert,
+and adds marked workarounds for two regular expressions and the system language (see the workaround classes in
+[`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md)). The entry flows of DisciplineClinic and of the distribution's
+English and German introductions now run to their end.
 
 The default now includes what the earlier measurement (2026-10-03, importer `d713b469`) counted as the proposals
 choose-lists, string-operations, and input-defaults, everything `main` merged since (#513, #514, #517, #519, #523,
@@ -101,7 +108,7 @@ other causes: closures over map entries and method chains on looked-up values (`
 boolean `&`, conditionals, and regular expressions around them (10). No runtime map key stays reported. #536 has since
 added a default lookup, `m.get(k, default: d)`, which fallbacks for a missing key now use (`m[k] ?: d`,
 `m.containsKey(k) ? m[k] : d`, read-then-default); a lookup whose key the importer cannot prove present gets a note
-instead (26 Toy sites). Domme3 drops from 31 to 24 because `.length` now covers `size()` on values of unknown type. No
+instead (14 Toy sites). Domme3 drops from 31 to 24 because `.length` now covers `size()` on values of unknown type. No
 other package uses maps as lookup tables, apart from a reply of the legacy online service in the distribution's
 `test.groovy`, which stays unconverted.
 The friction this showed is in [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md).
@@ -324,9 +331,9 @@ work as a `.ts` system library, and localized script variants too; one language 
 
 ## Next steps
 
-- **Union types (#504).** When draft PR #530 lands, the 8 DisciplineClinic variables that change type could convert
-  to union-typed declarations, and the two menus whose option variable changes type could convert; the importer
-  should then decide per variable between a union and separate variables.
+- **Union types (#504).** DisciplineClinic's 8 variables that changed type now convert as one variable per type or
+  start with their later type's empty value; when draft PR #530 lands, the importer should decide per variable between
+  a union and separate variables, also for the menu in OffenseSelect whose option variable holds several types.
 - **Re-measure the corpus** as PRs #518 and #529 and the #531, #532, #536, and #541 implementations merge (their
   stand-ins then go away), and when #526 or #520 change accepted type behavior. #526 types a function parameter from its
   default value, which a typed parameter would have to widen (101 generated functions have defaults), while `main` does
