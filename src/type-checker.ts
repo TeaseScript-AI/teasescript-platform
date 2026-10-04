@@ -59,6 +59,7 @@ import {
   containsType,
   copyType,
   coversType,
+  DATE_TYPE,
   DATETIME_TYPE,
   decidedType,
   describeValue,
@@ -91,6 +92,7 @@ import {
   resolved,
   settle,
   STRING_TYPE,
+  TIME_TYPE,
   TIMESTAMP_TYPE,
   typeFromAnnotation,
   typeName,
@@ -2277,7 +2279,9 @@ class TypeChecker {
         this.#operation(expression.operator, [left, right], expression, (a, b) =>
           (isNumeric(a) && isNumeric(b)) ||
           (isScalar(a, "string") && isScalar(b, "string")) ||
-          (isScalar(a, "duration") && isScalar(b, "duration"))
+          (isScalar(a, "duration") && isScalar(b, "duration")) ||
+          // Date and time values order only within one kind (V30 §35).
+          (isTemporal(a) && typeName(a) === typeName(b))
             ? BOOLEAN_TYPE
             : undefined,
         );
@@ -3928,6 +3932,10 @@ const OPERAND_KINDS: readonly StaticType[] = [
   STRING_TYPE,
   BOOLEAN_TYPE,
   DURATION_TYPE,
+  DATE_TYPE,
+  TIME_TYPE,
+  DATETIME_TYPE,
+  TIMESTAMP_TYPE,
 ];
 
 /** Whether a variable of this type holds a list or set whose element type no value decided yet. */
@@ -4774,8 +4782,12 @@ function operatorMessage(
     return `'${operator}' needs a number or a duration, but this is ${describeValue(left!)}.`;
   const text = (type: StaticType): boolean => isScalar(type, "string");
   const duration = (type: StaticType): boolean => isScalar(type, "duration");
-  if (["<", "<=", ">", ">="].includes(operator))
+  if (["<", "<=", ">", ">="].includes(operator)) {
+    const temporal = isTemporal(left!) ? left! : isTemporal(right!) ? right! : undefined;
+    if (temporal !== undefined)
+      return `'${operator}' compares ${describeValue(temporal)} only with another ${temporalNoun(temporal)}, not with ${describeValue(temporal === left ? right! : left!)}.${expression.kind === "binaryExpression" ? temporalPairFix(expression, operator, left!, right!) : ""}`;
     return `'${operator}' compares two numbers, two texts, or two durations, but these are ${describeValue(left!)} and ${describeValue(right!)}.`;
+  }
   if (operator === "+" && (text(left!) || text(right!)))
     return `'+' does not join text. Put the values in one text instead, such as "\${first}\${second}".`;
   if ((duration(left!) && isNumeric(right!)) || (isNumeric(left!) && duration(right!))) {
@@ -4787,7 +4799,53 @@ function operatorMessage(
         : null;
     return `A duration and a number cannot be combined with '${operator}'. ${unitFix(number)}`;
   }
+  if (isScalar(left!, "time") || isScalar(right!, "time"))
+    return `'${operator}' cannot combine ${describeValue(left!)} and ${describeValue(right!)}: arithmetic on a time is not available. Combine it with a date first, as in 'toDateTime(date, time)'.`;
+  if (expression.kind === "binaryExpression" && (operator === "+" || operator === "-")) {
+    // A timestamp or a date and time moves by a duration written after it.
+    if (isScalar(left!, "timestamp", "datetime")) {
+      const subject = describeValue(left!);
+      const added =
+        operator === "+"
+          ? `'+' adds only a duration to ${subject}`
+          : `'-' subtracts only a duration or another ${temporalNoun(left!)} from ${subject}`;
+      const fix = isNumeric(right!)
+        ? ` ${unitFix(expression.right)}`
+        : operator === "-"
+          ? temporalPairFix(expression, operator, left!, right!)
+          : "";
+      return `${added}, not ${describeValue(right!)}.${fix}`;
+    }
+    if (operator === "+" && duration(left!) && isScalar(right!, "timestamp", "datetime"))
+      return `'+' cannot add ${describeValue(right!)} to a duration. Write it first, as in '${expressionLabel(expression.right) ?? "value"} + 1 h'.`;
+  }
   return `'${operator}' cannot combine ${describeValue(left!)} and ${describeValue(right!)}.`;
+}
+
+/** What a date or time value is called after "another", such as `date and time`. */
+function temporalNoun(type: StaticType): string {
+  return describeValue(type).replace(/^an? /u, "");
+}
+
+/**
+ * How to compare or subtract a date and time and a value of another kind: convert one of them. A date and time and a
+ * timestamp convert through the player's zone; a date or a time is compared with that part of a date and time.
+ */
+function temporalPairFix(
+  expression: Extract<Expression, { kind: "binaryExpression" }>,
+  operator: string,
+  left: StaticType,
+  right: StaticType,
+): string {
+  const local = isScalar(left, "datetime") ? 0 : isScalar(right, "datetime") ? 1 : -1;
+  if (local < 0) return "";
+  const other = local === 0 ? right : left;
+  const label = expressionLabel(local === 0 ? expression.left : expression.right) ?? "value";
+  if (isScalar(other, "timestamp")) return ` Convert one first, as in '${label}.toTimestamp()'.`;
+  if (operator === "-") return "";
+  if (isScalar(other, "date")) return ` Compare its date, as in 'toDate(${label})'.`;
+  if (isScalar(other, "time")) return ` Compare its time, as in 'toTime(${label})'.`;
+  return "";
 }
 
 /** Give a bare number a unit: `'5 s'` for a literal, else multiplication by one second. */
@@ -4802,7 +4860,8 @@ function unitFix(number: Expression | null): string {
 /** How to make an operand fit `+=`/`-=` on a place of `operand` type. */
 function operandFix(operand: StaticType, value: Expression): string {
   if (isNumeric(operand)) return " Use a number instead.";
-  if (isScalar(operand, "duration")) {
+  // A timestamp or a date and time moves by a duration as well.
+  if (isScalar(operand, "duration", "timestamp", "datetime")) {
     const literal = unwrap(value);
     return literal.kind === "numberLiteral"
       ? ` Give the number a unit, such as '${literal.raw} s'.`

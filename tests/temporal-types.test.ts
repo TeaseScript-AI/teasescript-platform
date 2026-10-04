@@ -223,3 +223,80 @@ test("a comparison of weekday fields with values they never have gives a warning
     ],
   );
 });
+
+test("date and time values order within one kind, and timestamps and dates and times move by durations", () => {
+  assert.deepEqual(
+    codes(
+      [
+        "function moments(day: date, clock: time, dinner: datetime, started: timestamp, later: timestamp) {",
+        "    let ordered: boolean = day <= day and clock > clock and dinner < dinner and started >= later",
+        "    let same: boolean = day == dinner",
+        "    let deadline: timestamp = started + 1 h - 30 min",
+        "    let earlier: datetime = dinner - 90 min",
+        "    let waited: duration = later - started",
+        "    let between: duration = dinner - earlier",
+        "    let moving = started",
+        "    moving += 5 min",
+        "}",
+      ].join("\n"),
+    ),
+    [],
+  );
+});
+
+test("ordering and arithmetic across kinds or on other values name the kinds and the fix", () => {
+  assert.deepEqual(
+    diagnostics(
+      [
+        "function moments(day: date, clock: time, dinner: datetime, started: timestamp) {",
+        "    let a = day < dinner",
+        "    let b = dinner >= started",
+        "    let c = started < 5",
+        "    let d = clock + 1 h",
+        "    let e = started + started",
+        "    let f = started - dinner",
+        "    let g = 1 h + started",
+        "    let h = dinner + 5",
+        "}",
+      ].join("\n"),
+    ),
+    [
+      [
+        "TSV043",
+        "'<' compares a date only with another date, not with a date and time. Compare its date, as in 'toDate(dinner)'.",
+        "day < dinner",
+      ],
+      [
+        "TSV043",
+        "'>=' compares a date and time only with another date and time, not with a timestamp. Convert one first, as in 'dinner.toTimestamp()'.",
+        "dinner >= started",
+      ],
+      [
+        "TSV043",
+        "'<' compares a timestamp only with another timestamp, not with a whole number (integer).",
+        "started < 5",
+      ],
+      [
+        "TSV043",
+        "'+' cannot combine a time and a duration: arithmetic on a time is not available. Combine it with a date first, as in 'toDateTime(date, time)'.",
+        "clock + 1 h",
+      ],
+      ["TSV043", "'+' adds only a duration to a timestamp, not a timestamp.", "started + started"],
+      [
+        "TSV043",
+        "'-' subtracts only a duration or another timestamp from a timestamp, not a date and time. Convert one first, as in 'dinner.toTimestamp()'.",
+        "started - dinner",
+      ],
+      [
+        "TSV043",
+        "'+' cannot add a timestamp to a duration. Write it first, as in 'started + 1 h'.",
+        "1 h + started",
+      ],
+      [
+        "TSV043",
+        "'+' adds only a duration to a date and time, not a whole number (integer). Give the number a unit, such as '5 s'.",
+        "dinner + 5",
+      ],
+    ],
+  );
+});
