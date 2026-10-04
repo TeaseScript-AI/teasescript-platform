@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 50;
+export const INSTRUCTION_PLAN_VERSION = 51;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -614,6 +614,11 @@ export type InteractionInstruction = StaticInteractionInstruction | PreparedInte
 export interface CaptureInstruction extends InstructionBase {
   readonly kind: "capture";
   readonly capture: "photo";
+  /**
+   * `takePhoto(tags: …)`: the tags, evaluated and validated before the capture is requested; a captured photo joins
+   * the image catalog with them (ADR 0023). `null` without `tags:`.
+   */
+  readonly tags: ExpressionPlan | null;
   readonly destinationTemporary: number;
 }
 

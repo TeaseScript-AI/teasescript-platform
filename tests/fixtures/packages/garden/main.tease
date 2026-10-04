@@ -1,0 +1,3 @@
+showImage "images/garden.svg"
+say "The garden is quiet."
+exit

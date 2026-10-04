@@ -5,6 +5,7 @@ import type {
   InteractionKind,
   InteractionResultDomain,
   InteractionUiPayload,
+  PlanTag,
 } from "../../plan/model.js";
 import type { MessageMarkup } from "../../message-markup.js";
 import type { RuntimeTimerSnapshot } from "../timers.js";
@@ -159,6 +160,11 @@ export interface RuntimeStorageWriteActionSnapshot {
 export interface RuntimeCaptureActionSnapshot {
   readonly kind: "capture";
   readonly capture: "photo";
+  /**
+   * The validated tags of `takePhoto(tags: …)`, in name order, which a captured photo joins the image catalog with;
+   * `null` without `tags:`.
+   */
+  readonly tags: readonly PlanTag[] | null;
   readonly actionId: number;
   readonly owningInstruction: number;
   readonly continuationInstruction: number;

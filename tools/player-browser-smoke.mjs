@@ -2,6 +2,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createPlaygroundServer } from "../dist/playground/server.js";
 import { findChromium } from "./find-chromium.mjs";
 
@@ -23,7 +24,10 @@ async function main() {
     return;
   }
 
-  const server = createPlaygroundServer();
+  // house compiles and starts at its main.tease; broken does not compile.
+  const server = createPlaygroundServer({
+    packagesRoot: fileURLToPath(new URL("../tests/fixtures/packages/", import.meta.url)),
+  });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
@@ -74,9 +78,10 @@ async function main() {
       await narrowScenario(cdp);
       await scriptStorageScenario(cdp, origin);
       await demoScenario(cdp, origin);
+      await packageScenario(cdp, origin);
       await cameraScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, and the camera scenario",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, and the camera scenario",
       );
     } finally {
       cdp.close();
@@ -1019,6 +1024,84 @@ async function transcriptTexts(cdp) {
   return value(
     cdp,
     `[...document.querySelectorAll('#transcript li')].map((item) => [...item.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join('').trim())`,
+  );
+}
+
+/**
+ * `?package=<id>` opens a package of the server's package root as one project: in the Player and the playground a
+ * valid package starts at its main.tease, and one that does not compile shows each diagnostic with its file and line.
+ */
+async function packageScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  await navigate(cdp, `${origin}/player/?package=house`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  // main.tease shows the package's own image and calls the global function of helpers.tease.
+  await waitFor(
+    cdp,
+    `(() => {
+      const image = document.querySelector('.stage-media');
+      return !!image && image.complete && image.naturalWidth > 0 &&
+        image.getAttribute('src') === '/dev-package/house/files/images/hall.svg' &&
+        [...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Welcome to the house, guest.'));
+    })()`,
+    8_000,
+    "The house package did not start at main.tease with its own Stage image",
+  );
+
+  await navigate(cdp, `${origin}/player/?package=broken`);
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-script-failure]')?.textContent.includes("rooms/cellar.tease, line 3, column 9") === true`,
+    8_000,
+    "The Player did not show the broken package's diagnostic",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('[data-script-failure]').textContent.includes("Unknown variable 'candle'.") && !document.querySelector('[data-session-activation]')`,
+    ),
+    true,
+    "The Player showed Start or no message for a package that does not compile",
+  );
+
+  await navigate(cdp, `${origin}/?package=house`);
+  await waitFor(
+    cdp,
+    `document.querySelector('#loaded-example-name')?.textContent === 'Package house' && document.querySelector('#file-select').value === 'main.tease' && !document.querySelector('#run').disabled`,
+    8_000,
+    "The playground did not open the house package at main.tease",
+  );
+  await click(cdp, "#run");
+  await waitFor(
+    cdp,
+    `document.querySelector('#transcript').textContent.includes('Welcome to the house, guest.')`,
+  );
+
+  await navigate(cdp, `${origin}/?package=broken`);
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('#diagnostics .diagnostic-button')].some((button) => button.textContent.includes('rooms/cellar.tease (3:9)'))`,
+    8_000,
+    "The playground did not list the broken package's diagnostic with its file",
+  );
+  // The diagnostic opens its file at the reported line.
+  await click(cdp, "#diagnostics .diagnostic-button");
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const source = document.querySelector('#source-code'); return document.querySelector('#file-select').value + ':' + source.value.slice(source.selectionStart, source.selectionEnd); })()`,
+    ),
+    "rooms/cellar.tease:candle",
+    "The playground diagnostic did not select its source",
+  );
+
+  await navigate(cdp, `${origin}/editor/?package=broken`);
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-monaco-ready="true"]') !== null && document.querySelector('[data-file-path="rooms/cellar.tease"] .file-problems')?.textContent.trim() === '1 diagnostics'`,
+    8_000,
+    "The editor did not open the broken package's files with their diagnostics",
   );
 }
 

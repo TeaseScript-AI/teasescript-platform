@@ -1027,11 +1027,14 @@ function validateInstruction(
       validateInteractionInstruction(value, path, temporaryCount, errors);
       return;
     case "capture":
-      if (!hasExactKeys(value, ["kind", "capture", "destinationTemporary", "span"])) {
+      if (!hasExactKeys(value, ["kind", "capture", "tags", "destinationTemporary", "span"])) {
         errors.push(planError("TSC002", "Capture instruction has an invalid shape.", path));
       }
       if (value.capture !== "photo")
         errors.push(planError("TSC002", "Capture kind is invalid.", `${path}.capture`));
+      if (value.tags !== null) {
+        validateExpression(value.tags, `${path}.tags`, errors, false, temporaryCount);
+      }
       validateTemporaryId(
         value.destinationTemporary,
         `${path}.destinationTemporary`,

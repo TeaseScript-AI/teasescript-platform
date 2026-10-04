@@ -10,10 +10,12 @@ import {
   type InteractionTemporalKind,
   type InteractionUiPayload,
   type PlanSourceLocation,
+  type PlanTag,
   type PreparedInteractionUiPayload,
   instructionSourcePath,
   mainSourceSpan,
 } from "../plan/model.js";
+import { addTag, readTagText, type Tag } from "../tags.js";
 import { parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
 import { isBlankTextAnswer, numberAnswerText, temporalAnswerText } from "../interaction-answers.js";
 import {
@@ -761,6 +763,11 @@ function executePlannedInstruction(
       return;
     }
     case "capture": {
+      // The tags are checked before the capture is requested, so a pending capture only holds valid ones.
+      const tags =
+        instruction.tags === null
+          ? null
+          : captureTags(evaluator.evaluate(instruction.tags), instruction.tags.span);
       if (
         snapshot.temporaries.some((temporary) => temporary.id === instruction.destinationTemporary)
       ) {
@@ -782,6 +789,7 @@ function executePlannedInstruction(
       const action: RuntimeCaptureActionSnapshot = Object.freeze({
         kind: "capture",
         capture: instruction.capture,
+        tags,
         actionId: snapshot.nextActionId,
         owningInstruction: snapshot.nextInstruction,
         continuationInstruction: snapshot.nextInstruction + 1,
@@ -2589,4 +2597,39 @@ export function timerDisplay(value: SerializableRuntimeValue, span: SourceSpan):
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
+}
+
+/**
+ * The tags of `takePhoto(tags: …)`: a list or set of texts such as `"bedroom"` or `"punishment: 4"`, read as tags in name
+ * order. A repeated tag counts once, and its number wins; anything else fails before the capture is requested.
+ */
+function captureTags(value: SerializableRuntimeValue, span: SourceSpan): readonly PlanTag[] {
+  if (!isList(value) && !isSet(value)) {
+    throw fault(
+      "TSR083",
+      `takePhoto(tags:) takes a list of tags, but this is ${describeRuntimeValue(value)}.`,
+      span,
+    );
+  }
+  const tags = new Map<string, Tag>();
+  for (const item of value.items) {
+    const tag = typeof item === "string" ? readTagText(item) : null;
+    if (tag === null) {
+      throw fault(
+        "TSR083",
+        `takePhoto(tags:) takes tags such as "bedroom" or "punishment: 4", but it holds ${typeof item === "string" ? `'${item}'` : describeRuntimeValue(item)}.`,
+        span,
+      );
+    }
+    if (addTag(tags, tag) === "conflict") {
+      throw fault(
+        "TSR083",
+        `takePhoto(tags:) gives the tag '${tag.name}' two different numbers.`,
+        span,
+      );
+    }
+  }
+  return [...tags.values()]
+    .sort((left, right) => (left.name < right.name ? -1 : 1))
+    .map((tag) => Object.freeze({ name: tag.name, value: tag.value }));
 }

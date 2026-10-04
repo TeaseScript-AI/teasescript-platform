@@ -33,7 +33,7 @@ accept syntax, architecture, or implementation details.
   protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, prepared
   output, typed skip settlement, and interaction/timer composition.
 - **Stage image and media:** `showImage`/`hideImage` Stage state, tag queries over the compiled package image catalog
-  (`showImage tagged`, `findImages`), and blocking or asynchronous `playAudio`/`playVideo`
+  and photos taken with tags (`showImage tagged`, `findImages`, `takePhoto(tags:)`), and blocking or asynchronous `playAudio`/`playVideo`
   with playback ranges, repetition, volume, handles, seeks, timeline cues, Player load/progress observations, and
   checkpoint restore at the language, compiler, and runtime level. The Player shows the Stage image and plays
   audio after explicit Start; browser video playback remains deferred.
@@ -48,8 +48,9 @@ accept syntax, architecture, or implementation details.
   authored runtime timers render in its timer rail on a session-owned scene clock (#444).
   It also has the tools framework and browser-local Player Settings. It shows the runtime Stage image and plays authored
   audio through `player/media-device.ts` after the explicit Start activation (#446). The default build plays the
-  repository demo `examples/demo/demo.tease` (#448); the development server or `?dev` loads the development preview
-  with Visual Lab and Layout Debug instead.
+  repository demo `examples/demo/demo.tease` (#448), or with `?package=<id>` a package of the playground's development
+  package root as one project, listing its diagnostics when it does not compile (#570); the development server or
+  `?dev` loads the development preview with Visual Lab and Layout Debug instead.
 - **Development and verification:** a standalone browser playground with Standard interaction and pacing controls;
   source-to-runtime conformance coverage; focused runtime/checkpoint/state-validation tests; reproducible desktop and
   narrow-screen browser smoke coverage that plays the repository demo, development-preview browser checks, and a bounded

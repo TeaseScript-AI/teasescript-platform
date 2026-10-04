@@ -1,3 +1,4 @@
+import type { ProjectImageFile } from "../image-catalog.js";
 import { languageProjectOverview } from "../language-tooling.js";
 import type { ScriptHeader } from "../script-header.js";
 import { toMonacoMarkers, type MonacoMarker } from "./monaco-mapping.js";
@@ -21,17 +22,19 @@ export interface ProjectFileView {
 }
 
 /**
- * Compiles the models as one project whenever any of them changes, and publishes every file's header and markers,
- * `main.tease` first.
+ * Compiles the models as one project, with the package images when given, whenever any of them changes, and publishes
+ * every file's header and markers, `main.tease` first.
  */
 export function watchProjectDiagnostics(
   models: readonly ProjectModel[],
   severity: { readonly Error: number; readonly Warning: number },
   publish: (files: readonly ProjectFileView[]) => void,
+  options: { readonly images?: readonly ProjectImageFile[] } = {},
 ): { dispose(): void } {
   const refresh = () => {
     const overview = languageProjectOverview(
       models.map(({ path, model }) => ({ path, text: model.getValue() })),
+      options,
     );
     publish(
       overview.map((file) => ({

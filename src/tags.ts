@@ -34,6 +34,29 @@ export function readTagText(text: string): Tag | null {
   return TAG_NUMBER.test(written) && Number.isFinite(value) ? { name, value } : null;
 }
 
+/** Whether a value is a list of tags in canonical form: each name canonical, once, in name order, with a finite number or `null`. */
+export function isCanonicalTagList(value: unknown): value is readonly Tag[] {
+  if (!Array.isArray(value)) return false;
+  let previous: string | null = null;
+  const tags: readonly unknown[] = value;
+  for (const tag of tags) {
+    if (
+      typeof tag !== "object" ||
+      tag === null ||
+      Object.keys(tag).length !== 2 ||
+      !("name" in tag) ||
+      !("value" in tag) ||
+      typeof tag.name !== "string" ||
+      normalizeTagName(tag.name) !== tag.name ||
+      (previous !== null && !(previous < tag.name)) ||
+      !(tag.value === null || (typeof tag.value === "number" && Number.isFinite(tag.value)))
+    )
+      return false;
+    previous = tag.name;
+  }
+  return true;
+}
+
 /**
  * Adds `tag` to `tags`, keyed by name. A repeated name is merged: a number wins over its absence. Two different numbers
  * for one name conflict and leave the first.

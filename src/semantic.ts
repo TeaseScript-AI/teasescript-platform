@@ -1809,10 +1809,15 @@ class SemanticValidator {
           const name = expression.callee.name;
           const binding = scope.resolve(name);
           if (isTakePhotoCall(expression)) {
-            if (expression.arguments.length !== 0) {
+            const [first, ...rest] = expression.arguments;
+            if (
+              rest.length > 0 ||
+              (first !== undefined &&
+                (first.kind !== "namedArgument" || first.name.name !== "tags"))
+            ) {
               this.#report(
                 semanticCode.argumentCount,
-                "takePhoto() takes no arguments.",
+                'takePhoto() takes only tags:, such as takePhoto(tags: ["bedroom"]).',
                 expression.span,
               );
             }
