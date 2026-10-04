@@ -1550,7 +1550,10 @@ class TypeChecker {
     context.returns.push({ type: this.#capture(statement.value), span: statement.value.span });
   }
 
-  /** The type an annotation means. A set holds only text, numbers, true or false, and null (ADR 0014). */
+  /**
+   * The type an annotation means. A set holds only text, numbers, true or false, durations, date and time values, and
+   * null (ADR 0014, V30 §35).
+   */
   #annotationType(annotation: TypeAnnotation): StaticType {
     const pending: TypeAnnotation[] = [annotation];
     while (pending.length > 0) {
@@ -1567,7 +1570,7 @@ class TypeChecker {
           if (!members(element).every(isSetElement))
             this.#report(
               typeCode.invalidSetElement,
-              `A set holds only text, numbers, true or false, or null, so it cannot hold ${typeName(element)} values. Use a list instead, as in '${typeName({ kind: "list", element })}'.`,
+              `A set holds only text, numbers, true or false, durations, date and time values, or null, so it cannot hold ${typeName(element)} values. Use a list instead, as in '${typeName({ kind: "list", element })}'.`,
               part.span,
             );
           break;
@@ -2987,7 +2990,7 @@ class TypeChecker {
             () =>
               this.#report(
                 typeCode.invalidInteractionChoice,
-                "A choice list element must be text, a number, true, false, null, a duration, or a choice object { value?, text, background? }.",
+                "A choice list element must be text, a number, true, false, null, a duration, a date or time value, or a choice object { value?, text, background? }.",
                 option.expression.span,
               ),
           );
@@ -3085,7 +3088,7 @@ class TypeChecker {
         this.#checkMembers(property.value, propertyType, isShowable, () =>
           this.#report(
             typeCode.invalidInteractionChoice,
-            "A choice value must be text, a number, true, false, null, or a duration.",
+            "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
             property.value.span,
           ),
         );
@@ -3109,7 +3112,7 @@ class TypeChecker {
         (member) =>
           this.#report(
             typeCode.unshowableValue,
-            `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, and durations, and selects one element of a list.`,
+            `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, and date and time values, and selects one element of a list.`,
             expression.span,
           ),
       );
@@ -3117,7 +3120,7 @@ class TypeChecker {
         this.#checkElements(expression, type, isShowable, () =>
           this.#report(
             typeCode.unshowableValue,
-            "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
+            "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
             expression.span,
           ),
         );
@@ -3133,7 +3136,7 @@ class TypeChecker {
       this.#checkMembers(element, this.#typeOf(element), isShowable, () =>
         this.#report(
           typeCode.unshowableValue,
-          "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
+          "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
           element.span,
         ),
       );
@@ -4505,11 +4508,7 @@ function isSetReceiver(type: StaticType): boolean {
 
 function isSetElement(type: StaticType): boolean {
   const value = resolved(type);
-  return (
-    value.kind === "null" ||
-    value.kind === "unknown" ||
-    isScalar(value, "string", "boolean", "integer", "number")
-  );
+  return value.kind === "null" || value.kind === "unknown" || value.kind === "scalar";
 }
 
 /**

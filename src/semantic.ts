@@ -1432,7 +1432,7 @@ class SemanticValidator {
       if (root.kind === "setLiteral" && isDefinitelyComposite(element, scope))
         this.#report(
           semanticCode.invalidSetElement,
-          "Sets may contain only string, boolean, integer, number, or null values.",
+          "Sets may contain only string, boolean, integer, number, duration, date, time, datetime, timestamp, or null values.",
           element.span,
         );
     }

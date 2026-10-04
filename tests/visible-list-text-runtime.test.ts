@@ -182,7 +182,7 @@ test("interpolated values the compiler can see are checked when compiling", () =
     [
       'say "${[{}]}"',
       "{}",
-      "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
+      "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
     ],
     [
       'let answer = askText "${[]}"',
@@ -192,12 +192,12 @@ test("interpolated values the compiler can see are checked when compiling", () =
     [
       'speaker vera {}\nsay "${[vera]}"',
       "vera",
-      "An interpolated list may contain only text, numbers, true, false, null, and durations, because one element is shown as text.",
+      "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
     ],
     [
       'say "${{ name: "Bo" }}"',
       '{ name: "Bo" }',
-      '"${...}" cannot show an object. It shows text, numbers, true, false, null, and durations, and selects one element of a list.',
+      '"${...}" cannot show an object. It shows text, numbers, true, false, null, durations, and date and time values, and selects one element of a list.',
     ],
   ] as const;
   for (const [source, at, message] of cases) {

@@ -347,7 +347,7 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       'let x = choose [{ text: "A", value: ["b"] }]',
       "TSV029",
-      "A choice value must be text, a number, true, false, null, or a duration.",
+      "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
     ],
     [
       'let x = choose [{ text: "A", color: "red" }]',
@@ -358,7 +358,7 @@ test("choice options the compiler can see are checked when compiling", () => {
     [
       'let x = choose [{ text: "A", value: 1..2 }]',
       "TSV029",
-      "A choice value must be text, a number, true, false, null, or a duration.",
+      "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
     ],
     ["let x = choose [{ text: {} }]", "TSV042", "The text of a choice option cannot be an object."],
     [
