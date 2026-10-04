@@ -462,9 +462,10 @@ test("a grouped tag name before a comparison is still a tag", () => {
 });
 
 test("compileSource reports the image catalog's diagnostics, naming the image", () => {
+  // An image may share its path with the source file; its diagnostics are still the catalog's.
   const result = compileSource("exit", {
     images: [
-      { path: "a.jpg", keywords: ["p: 1", "p: 2"] },
+      { path: "main.tease", keywords: ["p: 1", "p: 2"] },
       { path: "b.jpg", keywords: ["Long Session"] },
     ],
   });
@@ -476,20 +477,22 @@ test("compileSource reports the image catalog's diagnostics, naming the image", 
       ["TST003", "warning"],
     ],
   );
-  assert.match(result.diagnostics[0]!.message, /'a\.jpg'/u);
+  assert.match(result.diagnostics[0]!.message, /'main\.tease'/u);
   assert.match(result.diagnostics[1]!.message, /'b\.jpg'.*'Long Session'/u);
 });
 
 test("after an incomplete tagged query, a statement on the next line is kept", () => {
-  for (const source of [
-    'showImage tagged "bedroom", none:\nsay "after"\nexit',
-    'showImage tagged "bedroom",\nsay "after"\nexit',
-  ]) {
+  for (const [source, kept] of [
+    ['showImage tagged "bedroom", none:\nsay "after"\nexit', "sayStatement"],
+    ['showImage tagged "bedroom",\nsay "after"\nexit', "sayStatement"],
+    ['showImage tagged "bedroom",\nshowImage "after.jpg"\nexit', "showImageStatement"],
+    ['showImage tagged "bedroom",\nhideImage\nexit', "hideImageStatement"],
+  ] as const) {
     const result = compileSource(source, options);
     assert.equal(result.diagnostics.length, 1, source);
     assert.deepEqual(
       result.program.statements.map((statement) => statement.kind),
-      ["sayStatement", "exitStatement"],
+      [kept, "exitStatement"],
       source,
     );
   }

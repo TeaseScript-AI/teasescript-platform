@@ -1010,6 +1010,11 @@ class Parser {
     let end = tagged.span;
     do {
       this.#skipNewlines();
+      // A statement on the line after a trailing comma is not a tag; the caller keeps it.
+      if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart()) {
+        this.#reportInsertion(parserDiagnosticCode.invalidTagQuery, "Expected a tag after ','.");
+        return null;
+      }
       if (isPropertyName(this.#peek()) && this.#peek(1).kind === TokenKind.Colon) {
         const name = this.#advance();
         this.#advance();

@@ -64,10 +64,12 @@ export { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./prot
 
 /** Parses, validates, and compiles one source as the `main.tease` of a single-file project, without executing it. */
 export function compileSource(source: string, options: CompileOptions = {}): CompilationResult {
-  const result = compileProject([{ path: MAIN_FILE_PATH, source }], options);
+  const { result, imageDiagnostics: images } = compileProjectFiles(
+    [{ path: MAIN_FILE_PATH, source }],
+    options,
+  );
   const { path: _path, ...file } = result.files[0]!;
   // The image catalog's diagnostics name their image; the source's own follow them, as in the project.
-  const images = result.diagnostics.filter((diagnostic) => diagnostic.path !== MAIN_FILE_PATH);
   return Object.freeze({
     ...file,
     diagnostics:
@@ -84,6 +86,17 @@ export function compileProject(
   sources: readonly ProjectSourceFile[],
   options: CompileOptions = {},
 ): ProjectCompilationResult {
+  return compileProjectFiles(sources, options).result;
+}
+
+/** A project compilation, and the image catalog's share of its diagnostics. */
+function compileProjectFiles(
+  sources: readonly ProjectSourceFile[],
+  options: CompileOptions,
+): {
+  readonly result: ProjectCompilationResult;
+  readonly imageDiagnostics: readonly ProjectDiagnostic[];
+} {
   const inventory = checkProjectFiles(sources);
   const catalog = imageCatalog(options.images ?? []);
   const validationOptions: ProjectCheckOptions = {
@@ -118,7 +131,7 @@ export function compileProject(
     }
   }
   const results = files.map((file) => file.result);
-  return Object.freeze({
+  const result = Object.freeze({
     files: Object.freeze(results),
     diagnostics: Object.freeze([
       ...inventory.diagnostics,
@@ -129,6 +142,7 @@ export function compileProject(
     ]),
     plan,
   });
+  return { result, imageDiagnostics: catalog.diagnostics };
 }
 
 interface CompiledProjectFile {
