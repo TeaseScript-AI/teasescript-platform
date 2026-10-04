@@ -95,10 +95,7 @@ class HeaderReader {
       header === null ? this.tokens : Object.freeze(this.tokens.slice(this.#index));
     // A digit-first name such as `1easy` or `2e-test` starts like a malformed exponent; as a tag name it is valid.
     const lexer = lexerDiagnostics.filter(
-      ({ span }) =>
-        !this.#unquotedNames.some(
-          (name) => span.start.offset >= name.start && span.end.offset <= name.end,
-        ),
+      ({ span }) => !withinRange(this.#unquotedNames, span.start.offset, span.end.offset),
     );
     return Object.freeze({
       header,
@@ -464,6 +461,24 @@ class HeaderReader {
   ): void {
     this.#diagnostics.push(createDiagnostic(severity, code, message, span));
   }
+}
+
+/** Whether `start`–`end` lies within one of the ranges, which are in source order and do not overlap. */
+function withinRange(
+  ranges: readonly { readonly start: number; readonly end: number }[],
+  start: number,
+  end: number,
+): boolean {
+  // The last range that starts at or before `start` is the only one that can hold it.
+  let low = 0;
+  let high = ranges.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (ranges[middle]!.start <= start) low = middle + 1;
+    else high = middle;
+  }
+  const range = ranges[low - 1];
+  return range !== undefined && end <= range.end;
 }
 
 /** Whether a standalone `---` line starts at `index`. */
