@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId } from "vue";
+import { computed, nextTick, ref, useId, watch } from "vue";
 import { useTextareaAutosize } from "@vueuse/core";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -97,6 +97,22 @@ function keepMouseEditingFocus(event: MouseEvent): void {
   if (document.activeElement === input.value) event.preventDefault();
 }
 
+// A date or time control and the text field replace each other; the field removed while focused blurs, and its
+// keyboard state carries over to the replacement instead of being released.
+let replacingField = false;
+watch(
+  () => props.inputType === "text",
+  () => {
+    replacingField = true;
+    void nextTick(() => (replacingField = false));
+  },
+  { flush: "pre" },
+);
+
+function releaseOnBlur(): void {
+  if (!replacingField) allowSoftwareKeyboard();
+}
+
 function allowSoftwareKeyboard(): void {
   if (!suppressSoftwareKeyboard.value) return;
   suppressSoftwareKeyboard.value = false;
@@ -130,10 +146,13 @@ defineExpose({ focusInput });
             :aria-label="placeholder ? `${accessibleName}: ${placeholder}` : accessibleName"
             :aria-invalid="feedback ? true : undefined"
             :aria-describedby="feedback ? feedbackId : undefined"
+            :inputmode="effectiveInputMode"
             :disabled="disabled"
             class="composer-input composer-picker"
             @input="updateFromPicker"
             @keydown="handleKeydown"
+            @pointerdown="allowSoftwareKeyboard"
+            @blur="releaseOnBlur"
           />
         </div>
         <Textarea
@@ -153,7 +172,7 @@ defineExpose({ focusInput });
           @update:model-value="value = String($event)"
           @keydown="handleKeydown"
           @pointerdown="allowSoftwareKeyboard"
-          @blur="allowSoftwareKeyboard"
+          @blur="releaseOnBlur"
         />
         <Button
           type="submit"

@@ -619,7 +619,10 @@ Standard keyboard behavior is:
 
 `askText`, `askNumber`, and `askInteger` use the composer as their active answer field; `askInteger` asks for a numeric
 keyboard. `askDate`, `askTime`, and `askDateTime` replace the composer's text field with the browser's date, time, or
-date-and-time control, which submits ISO text, and show the hint beside it. A default answer starts as the composer text,
+date-and-time control, which submits ISO text, and show the hint beside it. These native controls cover the years 0001
+through 9999; a default in year 0000, which they cannot show, is offered as editable ISO text in the text field. When
+Send moves to an interaction whose field is of the other kind, the editing focus and the keyboard's state move to the
+new field. A default answer starts as the composer text,
 which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint restore the
 composer shows the default again, and unsent edits are not kept. `choose` and `showButton` keep the composer enabled
 rather than visually disabling it:

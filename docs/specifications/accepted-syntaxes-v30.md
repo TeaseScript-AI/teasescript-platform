@@ -1787,7 +1787,9 @@ These inputs use structured date and time controls and do not return unparsed fr
 The compact forms `askDate`, `askTime`, and `askDateTime [as speaker] [hint] [, default: value]` are implemented
 ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)). The control
 submits strict ISO text ([§35](#35-date-time-durations-and-timestamps)); a local time that the player's zone skips is a
-valid answer. The transcript shows the answer in the player's presentation.
+valid answer. The transcript shows the answer in the player's presentation. The Player's date and date-and-time
+controls cover the years 0001 through 9999, as the browser's native controls do; a default in year 0000 is shown and
+edited as ISO text instead. The value domain stays 0000 through 9999 for conversions, defaults, and text answers.
 
 ### Default answers
 
