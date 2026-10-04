@@ -236,6 +236,7 @@ test(
           'def code = getString("Code?", 42)',
           'def answer = getString("Settings?", [level: 2])',
           'showButton("Too late", -1)',
+          'show([[1, 2], [3, 4]].join("|"))',
           "",
         ].join("\n"),
       );
@@ -255,6 +256,8 @@ test(
       assert.match(output, /^\/\/ TODO SX_INPUT_PREFILL_VALUE line 13: /mu);
       // A negative button timeout failed in legacy and is rejected by TeaseScript.
       assert.match(output, /^\/\/ TODO SX_BUTTON_TIMEOUT line 14: /mu);
+      // join() of nested lists printed them in Groovy and fails in TeaseScript.
+      assert.match(output, /^\/\/ TODO SX_LIST_JOIN line 15: /mu);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

@@ -5052,10 +5052,12 @@ function lowerObjectMethodCallExpression(
         return useHelper(context, "unique", [target]);
       case "join":
         // Groovy join() has no separator; TeaseScript's default separator is ", ".
+        if (!joinableElements(targetNode, node, context)) return null;
         return listJoin(target, { kind: "literal", value: "" });
     }
   }
   if (name === "join" && argumentsNodes.length === 1) {
+    if (!joinableElements(targetNode, node, context)) return null;
     const separator = lowerExpression(argumentsNodes[0]!, context);
     return separator === null ? null : listJoin(target, separator);
   }
@@ -5065,6 +5067,23 @@ function lowerObjectMethodCallExpression(
     "SX_UNSUPPORTED_LIST_METHOD",
     `Groovy list method ${name}() is not safely mapped yet.`,
   );
+}
+
+/**
+ * Groovy join() printed nested lists and maps as `[a, b]` and `[k:v]`, while TeaseScript join() shows only text,
+ * numbers, booleans, and null (PR #518); a list known to hold composites is reported. Elements of unknown type are
+ * checked when join runs.
+ */
+function joinableElements(listNode: AstNode, node: AstNode, context: LowerContext): boolean {
+  const elements = listElementType(listNode, context);
+  if (elements === UNKNOWN || (elements & (LIST | OBJECT)) === 0) return true;
+  unsupportedExpression(
+    context,
+    node,
+    "SX_LIST_JOIN",
+    "Groovy join() printed the lists or maps in this list as [a, b]; TeaseScript join() shows only text, numbers, booleans, and null. Join the inner values explicitly.",
+  );
+  return false;
 }
 
 /** Accepted list `join` (PR #518), which shows each element as `${...}` does. */
