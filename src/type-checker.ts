@@ -3153,7 +3153,11 @@ class TypeChecker {
     // written type such as `object` hides them.
     const lacking = all.some((member) => {
       const value = resolved(member);
-      return !isKnown(value) || (value.kind === "object" && value.properties?.has(name) !== true);
+      return (
+        value.kind === "unknown" ||
+        value.kind === "open" ||
+        (value.kind === "object" && value.properties?.has(name) !== true)
+      );
     });
     const exact = lacking ? this.#exactValues(expression.object) : undefined;
     if (
@@ -3417,7 +3421,10 @@ class TypeChecker {
               ),
           );
         // The text of a computed collection's choice objects that are not one exact list is checked by their type.
-        if (!this.#checkExactChoiceList(option.expression, written !== null))
+        if (
+          !parts.some((part) => part.kind === "list") ||
+          !this.#checkExactChoiceList(option.expression, written !== null)
+        )
           for (const part of parts)
             if (part.kind === "list" || part.kind === "set")
               for (const element of members(part.element).map(resolved))
@@ -3511,8 +3518,9 @@ class TypeChecker {
     if (rejected) return UNKNOWN_TYPE;
     const literal = unwrap(entry);
     if (literal.kind !== "objectLiteral") {
-      // An exact value's literals decide, also when a written type such as `object` hides what they hold.
-      const exact = this.#exactValues(entry);
+      // An exact value's literals decide where the type may still be an object, also when a written type such as
+      // `object` hides what they hold; a test that narrowed the type to another kind keeps them from reaching here.
+      const exact = mayBeKind(type, "object") ? this.#exactValues(entry) : undefined;
       const literals = exact?.filter(isObjectLiteral);
       if (literals !== undefined && literals.length === exact!.length)
         this.#checkExactChoiceObjects(entry, literals, written);
@@ -3521,7 +3529,8 @@ class TypeChecker {
           if (member.kind === "object" && member.properties !== null)
             this.#checkChoiceText(entry, member.properties);
         // A known list or set is checked as a computed collection; one whose type is hidden may still be an exact list.
-        if (!inList && !isKnown(value)) this.#checkExactChoiceList(entry, written);
+        if (!inList && mayBeKind(type, "list") && !members(type).some(isCollectionOption))
+          this.#checkExactChoiceList(entry, written);
       }
       return value.kind === "object" ? UNKNOWN_TYPE : type;
     }
@@ -5341,6 +5350,23 @@ function exactParts(
 function fails(type: StaticType, accepts: (member: StaticType) => boolean): boolean {
   const known = members(type).filter(isKnown);
   return known.length > 0 && !known.some(accepts);
+}
+
+/**
+ * Whether a value of this type may be of a kind: a member is of it, or is not known yet. `never`, what remains of a
+ * type without its null, is no value at all.
+ */
+function mayBeKind(type: StaticType, kind: "object" | "list"): boolean {
+  return members(type).some((member) => {
+    const value = resolved(member);
+    return value.kind === kind || value.kind === "unknown" || value.kind === "open";
+  });
+}
+
+/** Whether a member of an option's type is a list or set, whose elements give the buttons. */
+function isCollectionOption(member: StaticType): boolean {
+  const value = resolved(member);
+  return value.kind === "list" || value.kind === "set";
 }
 
 function isObjectLiteral(expression: Expression): expression is ObjectLiteral {

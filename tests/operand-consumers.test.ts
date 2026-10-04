@@ -106,6 +106,19 @@ test("a choice object that is not written in the option is checked by its known 
     'function pick(option = { value: 1 }) {\n    let answer = choose option\n}\npick({ text: "A", value: 1 })',
   ])
     assert.deepEqual(errors(source), [], source);
+  // A test that narrows a hidden exact value to another kind keeps its literals from reaching the choice.
+  const hidden = (value: string, test: string) =>
+    `let box: object = { part: ${value} }\nlet part = box.part\nif part is ${test} {\n    let answer = choose part\n}\nsay "done"`;
+  for (const [value, test] of [
+    ["{ value: 1 }", "integer"],
+    ["[{ value: 1 }]", "set"],
+    ["[{ value: 1 }]", "null"],
+  ] as const)
+    assert.deepEqual(says(hidden(value, test)), ["done"], hidden(value, test));
+  assert.deepEqual(
+    errors(hidden("{ value: 1 }", "object")).map(([code]) => code),
+    ["TSV029"],
+  );
 });
 
 test("a property that an exact object never gets is an error where it is read", () => {
