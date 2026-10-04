@@ -23,11 +23,11 @@ Sets contain only these values in the current language version:
 - `integer`;
 - `number`;
 - `null`;
-- `date`, `time`, `datetime`, and `timestamp` (#532).
+- `date`, `time`, `datetime`, and `timestamp` (#532), and `duration` (owner-accepted 2026-10-04, #532).
 
-Lists, objects, sets, dicts, ranges, durations, speakers, and opaque engine
-references are not valid set elements. Other set elements produce a
-deterministic structured runtime error associated with the relevant source span.
+Lists, objects, sets, dicts, ranges, speakers, and opaque engine references
+are not valid set elements. Other set elements produce a deterministic
+structured runtime error associated with the relevant source span.
 Set uniqueness uses `==` equality, which compares kind and value, and retains
 the first insertion order.
 

@@ -1427,8 +1427,8 @@ Runtime behavior:
   when they have the same members in any order; two ranges are equal when they are written with the same bounds and
   the same inclusiveness, so `1..=2 != 1..3` although both produce `1` and `2`. Values of different kinds, such as a
   list and a set, are never equal. List `contains(value)` and `remove(value)` use this equality, so they also find
-  objects and nested lists; `remove(value)` removes the first equal element. Set elements are scalar values and
-  date and time values ([§35](#35-date-time-durations-and-timestamps)).
+  objects and nested lists; `remove(value)` removes the first equal element. Set elements are scalar values,
+  durations, and date and time values ([§35](#35-date-time-durations-and-timestamps)).
 - The operands of `==` and `!=` are read when they are evaluated, left to right, so a change made while evaluating the
   right operand does not affect the left one: `items == [items.removeAt(0)]` is `true` for `items = [1]`.
 - `remove(value)` leaves the list unchanged when the value is absent and emits a warning to the developer log.
@@ -3186,7 +3186,7 @@ There is no construction from a Unix number, because seconds and milliseconds wo
 
 ### Collections and storage
 
-Temporal values can be list and set elements; a set compares kind and value. Typed storage keeps each
+Temporal values and durations can be list and set elements; a set compares kind and value. Typed storage keeps each
 kind distinct from the others and from text: local values without an offset, timestamps as moments in UTC.
 
 ## 36. Scheduling

@@ -156,9 +156,19 @@ test("sort, min, max, and set operations treat calendar durations by their parts
         "say max(2 weeks, 10 days)",
         "say [1 day, 1 month].union([24 h, 1 mo])",
         "say [1 day, 1 month].intersection([1 mo, 0 s])",
+        // A set holds durations once by all their parts, as == compares them.
+        "say set[1 day, 24 h, 1 week, 7 days, 12 months, 1 year].length",
       ].join("\n"),
     ),
-    ["[1 d, 3 d, 7 d]", "[1 mo, 1 y, 1 y 6 mo]", "1 mo", "14 d", "[1 d, 1 mo, 24 h]", "[1 mo]"],
+    [
+      "[1 d, 3 d, 7 d]",
+      "[1 mo, 1 y, 1 y 6 mo]",
+      "1 mo",
+      "14 d",
+      "[1 d, 1 mo, 24 h]",
+      "[1 mo]",
+      "4",
+    ],
   );
   // Durations of different families have no order, also when exact time is mixed with calendar days.
   for (const source of [
