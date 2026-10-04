@@ -16,6 +16,8 @@ export interface PlanFileBoundaries {
   readonly startInstruction: number;
   readonly rootEndInstruction: number;
   readonly endInstruction: number;
+  /** Where the file's labels stand: the only targets of a goto in the file. */
+  readonly labelInstructions: ReadonlySet<number>;
 }
 
 export function analyzeInstructionStream(
@@ -261,6 +263,9 @@ interface ValidatedFunctionRange {
 interface PlanValidationIndex {
   readonly owners: readonly (InstructionExecutionRegion | undefined)[];
   readonly functionsById: ReadonlyMap<number, ValidatedFunctionRange>;
+  readonly files: readonly PlanFileBoundaries[];
+  /** Gotos leave their region, so any of them that lands inside a prepared value bypasses it. */
+  readonly gotoSources: ReadonlySet<number>;
 }
 
 function createPlanValidationIndex(
@@ -295,7 +300,11 @@ function createPlanValidationIndex(
       owners[index] = region;
     }
   }
-  return { owners, functionsById };
+  const gotoSources = new Set<number>();
+  instructions.forEach((instruction, index) => {
+    if (isRecord(instruction) && instruction.kind === "goto") gotoSources.add(index);
+  });
+  return { owners, functionsById, files, gotoSources };
 }
 
 function validateInstructionControlFlowRegions(
@@ -340,6 +349,20 @@ function validateInstructionControlFlowRegions(
           region,
           errors,
         );
+        return;
+      case "goto":
+        if (
+          typeof instruction.target !== "number" ||
+          !index.files[region.file]?.labelInstructions.has(instruction.target)
+        ) {
+          errors.push(
+            planError(
+              "TSC002",
+              "A goto must continue at a label of its own file.",
+              `${instructionPath}.target`,
+            ),
+          );
+        }
         return;
       case "callFunction":
         validateInstructionRegionTarget(
@@ -862,6 +885,7 @@ function preparedSayCanBeBypassed(
 ): boolean {
   for (let target = producerIndex + 1; target <= sayIndex; target += 1) {
     for (const sourceIndex of explicitIncomingSources[target] ?? []) {
+      if (index.gotoSources.has(sourceIndex)) return true;
       if (index.owners[sourceIndex] !== region) continue;
       if (sourceIndex < producerIndex || sourceIndex >= sayIndex) return true;
     }
@@ -961,7 +985,13 @@ function validateCanonicalInteractionResultHandoffs(
     const handoff = instructions[continuation];
     if (!isRecord(handoff)) return;
     if (handoff.kind === "clearTemporary" && handoff.temporaryId === destinationTemporary) return;
-    if (handoff.kind === "exit" || handoff.kind === "returnVoid") return;
+    if (
+      handoff.kind === "exit" ||
+      handoff.kind === "end" ||
+      handoff.kind === "goto" ||
+      handoff.kind === "returnVoid"
+    )
+      return;
 
     if (!canonicalHandoffConsumesTemporary(handoff, destinationTemporary)) {
       errors.push(
@@ -1059,6 +1089,8 @@ function explicitInstructionTargets(instruction: Record<string, unknown>): reado
       return [instruction.continueTarget, instruction.target];
     case "callFunction":
       return [instruction.returnInstruction];
+    case "goto":
+      return [instruction.target];
     default:
       return [];
   }
@@ -1191,10 +1223,7 @@ function validateInstructionRegionTarget(
 ): void {
   if (!validInstructionBoundary(value, instructionCount)) return;
   const target = value;
-  const remainsInRegion =
-    region.kind === "root"
-      ? target >= region.startInstruction && target <= region.endInstruction
-      : target >= region.startInstruction && target < region.endInstruction;
+  const remainsInRegion = target >= region.startInstruction && target < region.endInstruction;
   if (!remainsInRegion) {
     errors.push(
       planError("TSC002", "Control-flow target leaves the instruction's execution region.", path),

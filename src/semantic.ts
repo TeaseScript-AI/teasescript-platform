@@ -126,7 +126,14 @@ const semanticCode = {
   invalidListIndex: "TSV045",
   visibleOverflow: "TSV050",
   invalidLabel: "TSV051",
+  skippedInitialization: "TSV054",
 } as const;
+
+/** Where code runs, for the initialization check: a top-level statement, a function, or a handler and its origin. */
+type FlowContext =
+  | { readonly kind: "root"; readonly statement: number }
+  | { readonly kind: "function"; readonly name: string }
+  | { readonly kind: "handler"; readonly origin: FlowContext };
 
 const OVERFLOW_MESSAGES = {
   zero: "This divides by zero, so it has no result. Divide by a value other than zero.",
@@ -188,7 +195,21 @@ class SemanticValidator {
     readonly block: Block;
     readonly owner: "timer" | "media";
     readonly selfHandle: string | null;
+    readonly origin: FlowContext;
   }[] = [];
+
+  #context: FlowContext = { kind: "root", statement: 0 };
+
+  /** Reads and writes of top-level variables in top-level code, by top-level statement. */
+  readonly #rootAccesses: {
+    readonly name: string;
+    readonly span: SourceSpan;
+    readonly statement: number;
+  }[] = [];
+
+  readonly #gotos: { readonly label: string; readonly context: FlowContext }[] = [];
+
+  readonly #calls: { readonly name: string; readonly context: FlowContext }[] = [];
 
   public constructor(options: SemanticValidationOptions) {
     this.#invalidConfiguredNames = Object.freeze(
@@ -257,22 +278,26 @@ class SemanticValidator {
         this.#labels.add(name);
       }
     }
-    for (const statement of program.statements) {
+    program.statements.forEach((statement, index) => {
       if (statement.kind !== "functionDeclaration") {
+        this.#context = { kind: "root", statement: index };
         runCompileTask(this.#validateStatement(statement, this.#root, 0));
       }
-    }
+    });
     for (const statement of program.statements) {
       if (
         statement.kind === "functionDeclaration" &&
         this.#functions.get(statement.name.name) === statement
       ) {
+        this.#context = { kind: "function", name: statement.name.name };
         this.#validateFunction(statement);
       }
     }
     for (let index = 0; index < this.#pendingHandlers.length; index += 1) {
+      this.#context = { kind: "handler", origin: this.#pendingHandlers[index]!.origin };
       this.#validateHandler(this.#pendingHandlers[index]!);
     }
+    if (this.#gotos.length > 0) this.#checkInitializationAtLabels(program);
     for (const overflow of findVisibleOverflows(program))
       this.#report(semanticCode.visibleOverflow, OVERFLOW_MESSAGES[overflow.cause], overflow.span);
   }
@@ -414,7 +439,12 @@ class SemanticValidator {
       }
     }
     if (timer.handler !== null)
-      this.#pendingHandlers.push({ block: timer.handler, owner: "timer", selfHandle: null });
+      this.#pendingHandlers.push({
+        block: timer.handler,
+        owner: "timer",
+        selfHandle: null,
+        origin: this.#context,
+      });
   }
 
   /** Static checks of a play command; runtime validates the values that are not literals. */
@@ -545,6 +575,7 @@ class SemanticValidator {
         block,
         owner: "media",
         selfHandle: media.async ? selfHandle : null,
+        origin: this.#context,
       });
     }
   }
@@ -959,6 +990,7 @@ class SemanticValidator {
         }
         return;
       case "gotoStatement":
+        this.#gotos.push({ label: statement.label.name, context: this.#context });
         if (!this.#labels.has(statement.label.name)) {
           this.#report(
             semanticCode.invalidLabel,
@@ -1045,6 +1077,7 @@ class SemanticValidator {
   #validateAssignmentTarget(target: AssignmentTarget, scope: SemanticScope): void {
     if (target.kind === "identifier") {
       const binding = scope.resolve(target.name);
+      this.#recordRootAccess(target.name, binding, target.span);
       if (binding === undefined) {
         this.#report(
           semanticCode.unknownAssignment,
@@ -1138,6 +1171,7 @@ class SemanticValidator {
       case "identifier":
         if (expression.name === "speaker" && contextualSpeaker !== null) return;
         const binding = scope.resolve(expression.name);
+        this.#recordRootAccess(expression.name, binding, expression.span);
         if (binding === undefined) {
           if (this.#builtins.has(expression.name)) {
             this.#report(
@@ -1239,6 +1273,7 @@ class SemanticValidator {
           const binding = scope.resolve(name);
           const declaration = this.#functions.get(name);
           if (declaration !== undefined && binding?.kind === "function") {
+            this.#calls.push({ name, context: this.#context });
             this.#validateFunctionCall(expression, declaration);
           } else if (this.#builtins.has(name)) {
             // The type check checks the arguments of the core built-ins it knows.
@@ -1628,6 +1663,100 @@ class SemanticValidator {
     return false;
   }
 
+  #recordRootAccess(name: string, binding: Binding | undefined, span: SourceSpan): void {
+    if (
+      this.#context.kind === "root" &&
+      binding?.kind === "variable" &&
+      this.#root.bindings.get(name) === binding
+    ) {
+      this.#rootAccesses.push({ name, span, statement: this.#context.statement });
+    }
+  }
+
+  /**
+   * A goto can reach a label without running the top-level `let`s between the place it starts and the label. A variable
+   * of the file may be used after a label only when every way to the label has run its `let`: the code before it,
+   * and each goto, which has run what came before the statement it is in, or before the call of its function or the
+   * start of its handler. Uses in functions and handlers are checked when they run.
+   */
+  #checkInitializationAtLabels(program: Program): void {
+    const statements = program.statements;
+    const labelAt = new Map<string, number>();
+    statements.forEach((statement, index) => {
+      if (statement.kind === "labelStatement") labelAt.set(statement.name.name, index);
+    });
+    // `null` stands for "every variable": no way to the place is known, so nothing is missing there.
+    type Known = ReadonlySet<string> | null;
+    const meet = (left: Known, right: Known): Known =>
+      left === null
+        ? right
+        : right === null
+          ? left
+          : new Set([...left].filter((name) => right.has(name)));
+    const before: Known[] = statements.map((_, index) => (index === 0 ? new Set() : null));
+    const after = (index: number): Known => {
+      const known = before[index]!;
+      const statement = statements[index]!;
+      return known !== null && statement.kind === "letStatement"
+        ? new Set([...known, statement.name.name])
+        : known;
+    };
+    const functionStart = new Map<string, Known>();
+    const atContext = (context: FlowContext): Known =>
+      context.kind === "root"
+        ? before[context.statement]!
+        : context.kind === "function"
+          ? (functionStart.get(context.name) ?? null)
+          : atContext(context.origin);
+    for (let changed = true; changed;) {
+      changed = false;
+      // A function starts with what every call of it has run; one never called adds nothing.
+      for (let functionsChanged = true; functionsChanged;) {
+        functionsChanged = false;
+        const starts = new Map<string, Known>();
+        for (const call of this.#calls) {
+          starts.set(
+            call.name,
+            starts.has(call.name)
+              ? meet(starts.get(call.name)!, atContext(call.context))
+              : atContext(call.context),
+          );
+        }
+        for (const [name, known] of starts) {
+          if (!sameKnown(functionStart.get(name) ?? null, known)) {
+            functionStart.set(name, known);
+            functionsChanged = true;
+          }
+        }
+      }
+      for (let index = 1; index < statements.length; index += 1) {
+        let known: Known = continuesAfter(statements[index - 1]!) ? after(index - 1) : null;
+        const statement = statements[index]!;
+        if (statement.kind === "labelStatement") {
+          for (const goto of this.#gotos) {
+            if (goto.label === statement.name.name) known = meet(known, atContext(goto.context));
+          }
+        }
+        if (!sameKnown(before[index]!, known)) {
+          before[index] = known;
+          changed = true;
+        }
+      }
+    }
+    const reported = new Set<string>();
+    for (const access of this.#rootAccesses) {
+      const known = before[access.statement]!;
+      const key = `${access.statement}:${access.name}`;
+      if (known === null || known.has(access.name) || reported.has(key)) continue;
+      reported.add(key);
+      this.#report(
+        semanticCode.skippedInitialization,
+        `A goto can reach this line without running 'let ${access.name}' first, so ${access.name} may have no value here. Move the label that the goto jumps to before 'let ${access.name}', or set ${access.name} on every way here.`,
+        access.span,
+      );
+    }
+  }
+
   #validateSpeakerReference(name: string, span: SourceSpan, scope: SemanticScope): boolean {
     if (scope.resolve(name)?.kind === "speaker") return true;
     this.#report(semanticCode.unknownSpeaker, `Unknown speaker '${name}'.`, span);
@@ -1903,5 +2032,35 @@ function visitExpression(
             ]
           : expressionChildren(current);
     for (let i = children.length - 1; i >= 0; i--) work.push(children[i]!);
+  }
+}
+
+function sameKnown(left: ReadonlySet<string> | null, right: ReadonlySet<string> | null): boolean {
+  if (left === null || right === null) return left === right;
+  return left.size === right.size && [...left].every((name) => right.has(name));
+}
+
+/** Whether execution can continue after a top-level statement; a transfer, or an `if` whose branches all transfer, ends it. */
+function continuesAfter(statement: Statement): boolean {
+  return !endsInTransfer(statement);
+}
+
+function endsInTransfer(statement: Statement | Block): boolean {
+  switch (statement.kind) {
+    case "gotoStatement":
+    case "exitStatement":
+    case "endStatement":
+    case "returnStatement":
+      return true;
+    case "block":
+      return statement.statements.length > 0 && endsInTransfer(statement.statements.at(-1)!);
+    case "ifStatement":
+      return (
+        statement.elseBlock !== null &&
+        endsInTransfer(statement.thenBlock) &&
+        endsInTransfer(statement.elseBlock)
+      );
+    default:
+      return false;
   }
 }

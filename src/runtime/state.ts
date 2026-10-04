@@ -27,7 +27,6 @@ import {
   type InstructionPlan,
   type InteractionChoiceValue,
   type InteractionUiPayload,
-  mainRootEnd,
 } from "../plan/model.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { cloneMessageMarkup } from "../message-markup.js";
@@ -43,7 +42,6 @@ import {
   validTopLevelPreparedSayOutputRelationship,
   validateInteractionResultHandoffState,
   validatePendingActionState,
-  validateTerminalContinuationHandoffState,
 } from "./action-validation.js";
 import {
   createXorShift32State,
@@ -82,7 +80,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 38;
+export const RUNTIME_SNAPSHOT_VERSION = 39;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -117,7 +115,6 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextActionId",
   "lastSettlement",
   "interactionResultHandoff",
-  "terminalContinuationHandoff",
   "preparedSayOutput",
   "settledTimers",
   "nextTimerId",
@@ -249,18 +246,6 @@ export interface RuntimeInteractionResultHandoffSnapshot {
   readonly result: InteractionChoiceValue;
 }
 
-/**
- * Single-use authority for a settled terminal foreground action. Unlike
- * `lastSettlement`, this remains meaningful when later background work
- * settles before the next normal runtime entry completes the root.
- */
-export interface RuntimeTerminalContinuationHandoffSnapshot {
-  readonly actionId: number;
-  readonly actionKind: "delay" | "interaction" | "mediaPlayback" | "storageWrite";
-  readonly owningInstruction: number;
-  readonly continuationInstruction: number;
-}
-
 export interface ChatPacingSettings {
   readonly baseDelayMs: number;
   readonly delayPerWordMs: number;
@@ -302,7 +287,6 @@ export interface RuntimeSnapshot {
   nextActionId: number;
   lastSettlement: RuntimeActionSettlementSnapshot | null;
   interactionResultHandoff: RuntimeInteractionResultHandoffSnapshot | null;
-  terminalContinuationHandoff: RuntimeTerminalContinuationHandoffSnapshot | null;
   preparedSayOutput: RuntimePreparedSayOutputSnapshot | null;
   /** Finished or stopped timers, retained so their handles stay readable. Active timers are background actions. */
   readonly settledTimers: RuntimeTimerSnapshot[];
@@ -375,7 +359,7 @@ export function createFreshRuntimeSnapshot(
 
 /** Creates fresh state for an engine-owned plan that was already fully validated. */
 export function createFreshRuntimeSnapshotWithValidatedPlan(
-  plan: InstructionPlan,
+  _plan: InstructionPlan,
   options: FreshRuntimeOptions = {},
 ): RuntimeSnapshot {
   const optionsCapture = captureExternalData(options);
@@ -488,7 +472,6 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     nextActionId: 1,
     lastSettlement: null,
     interactionResultHandoff: null,
-    terminalContinuationHandoff: null,
     preparedSayOutput: null,
     settledTimers: [],
     nextTimerId: 1,
@@ -500,7 +483,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     settledMedia: [],
     nextMediaId: 1,
     maxCallDepth,
-    status: mainRootEnd(plan) === 0 ? "halted" : "ready",
+    status: "ready",
     failure: null,
   };
 }
@@ -593,10 +576,6 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       snapshot.interactionResultHandoff === null
         ? null
         : cloneInteractionResultHandoff(snapshot.interactionResultHandoff),
-    terminalContinuationHandoff:
-      snapshot.terminalContinuationHandoff === null
-        ? null
-        : cloneTerminalContinuationHandoff(snapshot.terminalContinuationHandoff),
     preparedSayOutput:
       snapshot.preparedSayOutput === null
         ? null
@@ -644,17 +623,6 @@ function cloneInteractionResultHandoff(
     ownerCallFrameId: handoff.ownerCallFrameId,
     destinationTemporary: handoff.destinationTemporary,
     result: cloneInteractionChoiceValue(handoff.result),
-  };
-}
-
-function cloneTerminalContinuationHandoff(
-  handoff: RuntimeTerminalContinuationHandoffSnapshot,
-): RuntimeTerminalContinuationHandoffSnapshot {
-  return {
-    actionId: handoff.actionId,
-    actionKind: handoff.actionKind,
-    owningInstruction: handoff.owningInstruction,
-    continuationInstruction: handoff.continuationInstruction,
   };
 }
 
@@ -1117,13 +1085,11 @@ function validateCapturedRuntimeSnapshotDetails(
     errors.push("Runtime scriptStoragePersistent must be a boolean.");
   }
   validateInteractionResultHandoffState(value, plan, analysis, errors);
-  validateTerminalContinuationHandoffState(value, plan, errors);
   if (!isOneOf(value.status, ["ready", "running", "waiting", "halted", "failed"])) {
     errors.push("Runtime status is invalid.");
   }
   validateFailure(value.failure, value.status, errors);
   validateStatusConsistency(value, plan, errors);
-  validateRootEndTransition(value, plan, errors);
   const validation = Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
   return Object.freeze({ validation, failureKind: validation.valid ? null : failureKind });
 }
@@ -1966,7 +1932,7 @@ function validateCallFrames(
           ? analysis?.functionsById.get(caller.functionId)
           : undefined;
       if (
-        (frameIndex === 0 && callIndex >= mainRootEnd(plan)) ||
+        (frameIndex === 0 && callIndex >= plan.files[0]!.rootEndInstruction) ||
         (frameIndex > 0 &&
           (callerDefinition === undefined ||
             callIndex < callerDefinition.entryInstruction ||
@@ -2075,7 +2041,7 @@ function validateTimerHandlerFrame(
     !nonNegativeSafeInteger(resume) ||
     (plan !== undefined &&
       (frameIndex === 0
-        ? resume > mainRootEnd(plan)
+        ? resume >= plan.files[0]!.rootEndInstruction
         : callerDefinition === undefined ||
           resume < callerDefinition.entryInstruction ||
           resume >= callerDefinition.endInstruction))
@@ -2372,7 +2338,9 @@ interface SnapshotValidationAnalysis {
 
 function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
   const functionsById = new Map<number, InstructionPlan["functions"][number]>();
-  const regionEnds = new Array<number>(plan.instructions.length).fill(mainRootEnd(plan));
+  const regionEnds = new Array<number>(plan.instructions.length).fill(
+    plan.files[0]!.rootEndInstruction,
+  );
   const functionIdsByInstruction = new Array<number | null>(plan.instructions.length).fill(null);
   for (const definition of plan.functions) {
     functionsById.set(definition.id, definition);
@@ -2498,6 +2466,9 @@ function instructionSuccessors(
     case "returnValue":
     case "returnVoid":
     case "exit":
+    // A goto or end leaves this path with no temporaries, so nothing it holds stays live.
+    case "goto":
+    case "end":
       return [];
     case "callFunction":
       return instruction.returnInstruction < regionEnd ? [instruction.returnInstruction] : [];
@@ -2617,54 +2588,11 @@ function validateStatusConsistency(
     if (
       plan !== undefined &&
       calls === 0 &&
-      (!nonNegativeSafeInteger(value.nextInstruction) || value.nextInstruction > mainRootEnd(plan))
+      (!nonNegativeSafeInteger(value.nextInstruction) ||
+        value.nextInstruction >= plan.files[0]!.rootEndInstruction)
     ) {
       errors.push("Root execution position is outside the root instruction range.");
     }
-  }
-}
-
-/**
- * A terminal delay or result-free button may settle at the root-end
- * coordinate while awaiting its ordinary completion entry. The separate
- * handoff remains authoritative even when a background pacing settlement
- * replaces bounded replay data before that entry occurs.
- */
-function validateRootEndTransition(
-  value: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
-  errors: string[],
-): void {
-  if (
-    plan === undefined ||
-    value.status !== "running" ||
-    value.nextInstruction !== mainRootEnd(plan) ||
-    !Array.isArray(value.callFrames) ||
-    value.callFrames.length !== 0
-  )
-    return;
-
-  const common =
-    Array.isArray(value.frames) &&
-    value.frames.length === 1 &&
-    isPlainRecord(value.frames[0]) &&
-    value.frames[0].id === 0 &&
-    Array.isArray(value.callFrames) &&
-    value.callFrames.length === 0 &&
-    Array.isArray(value.loopFrames) &&
-    value.loopFrames.length === 0 &&
-    Array.isArray(value.temporaries) &&
-    value.temporaries.length === 0 &&
-    value.foregroundAction === null &&
-    value.failure === null &&
-    value.contextualSpeaker === null;
-  // Queued expiry blocks run before the script ends, so a block may return to the root end without a handoff.
-  const awaitsQueuedBlock =
-    Array.isArray(value.pendingTimerHandlers) && value.pendingTimerHandlers.length > 0;
-  if (!common || (value.terminalContinuationHandoff === null && !awaitsQueuedBlock)) {
-    errors.push(
-      "Running root-end state is not a canonical settled terminal foreground transition.",
-    );
   }
 }
 
@@ -2733,7 +2661,6 @@ function positiveSafeInteger(value: unknown): value is number {
 
 function isLegalHaltPosition(nextInstruction: unknown, plan: InstructionPlan): boolean {
   if (!nonNegativeSafeInteger(nextInstruction)) return false;
-  if (nextInstruction === mainRootEnd(plan)) return true;
   return nextInstruction > 0 && plan.instructions[nextInstruction - 1]?.kind === "exit";
 }
 

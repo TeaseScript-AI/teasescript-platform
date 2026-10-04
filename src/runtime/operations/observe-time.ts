@@ -31,7 +31,6 @@ import {
   timerHandlerDispatchable,
   timerSpan,
 } from "./timer-lifecycle.js";
-import { terminalContinuationHandoffFor } from "./terminal-continuation.js";
 import { timeOutButton } from "./complete-action.js";
 import { captureExecutableData, copySpan, pendingResult, takeSequence } from "./support.js";
 
@@ -357,8 +356,6 @@ function settleForegroundTimedAction(
       : createPacingSettlement(action, completionEventSequence, snapshot.currentSessionTimeMs);
   snapshot.foregroundAction = null;
   snapshot.lastSettlement = settlement;
-  snapshot.terminalContinuationHandoff =
-    action.kind === "delay" ? terminalContinuationHandoffFor(plan, action) : null;
   snapshot.status = "running";
   if (action.kind === "chatPacingGate" && action.preparedOutput !== null) {
     snapshot.preparedSayOutput = action.preparedOutput;

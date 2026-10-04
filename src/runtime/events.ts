@@ -32,12 +32,6 @@ export interface ExitEvent {
   readonly span: SourceSpan;
 }
 
-export interface CompleteEvent {
-  readonly kind: "complete";
-  readonly sequence: number;
-  readonly span: SourceSpan;
-}
-
 export interface ActionRequestedEvent {
   readonly kind: "actionRequested";
   readonly sequence: number;
@@ -85,7 +79,6 @@ export interface RuntimeFailureEvent {
 export type InterpreterEvent =
   | SayEvent
   | ExitEvent
-  | CompleteEvent
   | ActionRequestedEvent
   | ActionCompletedEvent
   | PlayerTranscriptEvent
