@@ -148,7 +148,7 @@ async function serveRequest(
       sendText(response, 400, "Rejected unsafe request path.\n", method === "HEAD");
       return;
     }
-    // The image folder serves exactly what its catalog lists, which leaves out links.
+    // The package file route serves exactly what the catalog lists, which leaves out links.
     if (
       target.linksAllowed === false &&
       canonicalPath !== resolve(canonicalRoot, relative(target.root, target.path))
