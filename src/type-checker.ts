@@ -142,6 +142,16 @@ export interface TypeCheckResult {
   readonly diagnostics: readonly Diagnostic[];
   /** The runtime checks of values the compiler cannot know, by the source of the instruction that stores them. */
   readonly runtimeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
+  /** Whether the file has an `exit` that execution can reach; a project needs at least one (ADR 0022). */
+  readonly reachesExit: boolean;
+  /** Which statements run, for the checks that follow this flow. */
+  readonly flow: StatementFlow;
+}
+
+/** The statements that never run, and the top-level statements that run and after which execution continues. */
+export interface StatementFlow {
+  readonly unreachable: ReadonlySet<Statement>;
+  readonly continuing: ReadonlySet<Statement>;
 }
 
 /**
@@ -187,6 +197,8 @@ export function checkTypes(program: Program, options: TypeCheckOptions = {}): Ty
       return Object.freeze({
         diagnostics: Object.freeze([...checker.diagnostics]),
         runtimeChecks: checker.runtimeChecks(),
+        reachesExit: checker.reachesExit,
+        flow: Object.freeze({ unreachable: checker.unreachable, continuing: checker.continuing }),
       });
     checker.widenFollowers();
   }
@@ -379,6 +391,17 @@ class TypeChecker {
   /** Whether the statement being checked can run; a `break` after a `return` does not end its loop. */
   #reachable = true;
 
+  /** Whether a reachable `exit` was checked. */
+  reachesExit = false;
+
+  /** The statements that never run, by the flow this check follows. */
+  readonly unreachable = new Set<Statement>();
+
+  /** The top-level statements that run and after which execution continues. */
+  readonly continuing = new Set<Statement>();
+
+  #rootStatements: readonly Statement[] | null = null;
+
   /**
    * List and set literals whose elements mix types, with those types. A literal stored in a place of a declared element
    * type is checked element by element instead; every other one is reported at the end of its statement (rule 1.3).
@@ -467,12 +490,24 @@ class TypeChecker {
       this.#functions.push(fn);
       this.#root.declare(statement.name.name, { kind: "function", fn });
     }
-    runCompileTask(
-      this.#statementsTask(
-        program.statements.filter((statement) => statement.kind !== "functionDeclaration"),
-        this.#root,
-      ),
+    const rootStatements = program.statements.filter(
+      (statement) => statement.kind !== "functionDeclaration",
     );
+    // A file of declarations only runs nothing on its own, so it has no way to its end.
+    this.#rootStatements = rootStatements;
+    const continues = runCompileTask(this.#statementsTask(rootStatements, this.#root));
+    if (rootStatements.length > 0 && continues) {
+      const last = rootStatements.at(-1)!;
+      const call = last.kind === "expressionStatement" ? unwrapGrouping(last.expression) : null;
+      // A call counts as returning, also of a function that always exits.
+      this.#report(
+        "TSV052",
+        call?.kind === "callExpression" && call.callee.kind === "identifier"
+          ? `This path reaches the end of the file after ${call.callee.name}(). Even if ${call.callee.name} ends the session, add exit (or end) here so the ending is explicit.`
+          : "The script can run past the end of this file. Add exit where the session should finish, or end to return to the file that called this one.",
+        last.span,
+      );
+    }
     // Every script variable has its type now, so every function body is checked, also one that waited for one.
     this.#scriptChecked = true;
     for (const fn of this.#functions) runCompileTask(this.#functionResultTask(fn));
@@ -511,8 +546,13 @@ class TypeChecker {
     let continues = true;
     const reachable = this.#reachable;
     for (const statement of statements) {
+      // A goto can reach a label even when the statements before it never continue.
+      if (statement.kind === "labelStatement") continues = true;
       this.#reachable = reachable && continues;
+      if (!this.#reachable) this.unreachable.add(statement);
       if (!(yield* compileChild(this.#statementTask(statement, scope)))) continues = false;
+      else if (this.#reachable && statements === this.#rootStatements)
+        this.continuing.add(statement);
     }
     this.#reachable = reachable;
     return continues;
@@ -797,7 +837,15 @@ class TypeChecker {
         return false;
       }
       case "exitStatement":
+        if (this.#reachable) this.reachesExit = true;
         return false;
+      case "endStatement":
+      case "gotoStatement":
+        return false;
+      case "labelStatement":
+        // A goto from anywhere in the file may arrive here, so nothing narrowed before the label still holds.
+        this.#flow = new Flow();
+        return true;
       case "returnStatement":
         yield* compileChild(this.#returnTask(statement, scope));
         return false;
@@ -5550,4 +5598,9 @@ const TEMPORAL_CONVERSION_NAMES = {
 
 function scalarType(name: ScalarTypeName): StaticType {
   return { kind: "scalar", name };
+}
+
+function unwrapGrouping(expression: Expression): Expression {
+  while (expression.kind === "parenthesizedExpression") expression = expression.expression;
+  return expression;
 }

@@ -18,7 +18,7 @@ import { assertEventSequenceCapacity, copySpan, takeSequence } from "./support.j
 
 /**
  * Whether a queued expiry block may interrupt now. Blocks never nest, and they wait for single-instruction commit
- * windows (a released prepared `say`, an interaction result handoff, or a settled terminal action), for a
+ * windows (a released prepared `say` or an interaction result handoff), for a
  * foreground pacing gate, whose prepared output owns the one Standard chat target, and for a pending storage write.
  */
 export function timerHandlerDispatchable(snapshot: RuntimeSnapshot): boolean {
@@ -49,11 +49,7 @@ function timerHandlerQueuedAndUnblocked(snapshot: RuntimeSnapshot): boolean {
   if (snapshot.status !== "ready" && snapshot.status !== "running" && snapshot.status !== "waiting")
     return false;
   if (snapshot.callFrames.some((frame) => frame.timerInterruption !== null)) return false;
-  return (
-    snapshot.preparedSayOutput === null &&
-    snapshot.interactionResultHandoff === null &&
-    snapshot.terminalContinuationHandoff === null
-  );
+  return snapshot.preparedSayOutput === null && snapshot.interactionResultHandoff === null;
 }
 
 /** Finds the active background action of a handle's timer, if it is still running or paused. */

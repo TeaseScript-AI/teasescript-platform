@@ -23,7 +23,6 @@ import { resolveInteractionCompletion } from "../actions/interaction.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import { settleBackgroundPacingGate } from "./pacing-gate.js";
-import { terminalContinuationHandoffFor } from "./terminal-continuation.js";
 import {
   assertEventSequenceCapacity,
   captureExecutableData,
@@ -246,7 +245,6 @@ function completeStorageWrite(
   });
   current.foregroundAction = null;
   current.lastSettlement = settlement;
-  current.terminalContinuationHandoff = terminalContinuationHandoffFor(plan, action);
   current.status = "running";
   current.nextInstruction = action.continuationInstruction;
   events.push(
@@ -305,7 +303,7 @@ function completeInteraction(
           ),
         })
       : resolved.result;
-  const settlement = commitInteractionSettlement(plan, current, action, {
+  const settlement = commitInteractionSettlement(current, action, {
     settlementKind: "completed",
     transcriptEventSequence: transcriptSequence,
     completionEventSequence: completionSequence,
@@ -344,7 +342,7 @@ export function timeOutButton(
 ): void {
   if (action.timeoutMs === null) throw new Error("Only a button with a timeout can time out.");
   const completionSequence = takeSequence(current, 2);
-  const settlement = commitInteractionSettlement(plan, current, action, {
+  const settlement = commitInteractionSettlement(current, action, {
     settlementKind: "timedOut",
     transcriptEventSequence: null,
     completionEventSequence: completionSequence,
@@ -369,7 +367,6 @@ export function timeOutButton(
  * retains the settlement for replay, and makes the continuation eligible for a later runtime entry.
  */
 function commitInteractionSettlement(
-  plan: InstructionPlan,
   current: RuntimeSnapshot,
   action: RuntimeInteractionActionSnapshot,
   outcome: Pick<
@@ -415,7 +412,6 @@ function commitInteractionSettlement(
   current.foregroundAction = null;
   current.lastSettlement = settlement;
   current.interactionResultHandoff = handoff;
-  current.terminalContinuationHandoff = terminalContinuationHandoffFor(plan, action);
   current.status = "running";
   current.nextInstruction = action.continuationInstruction;
   return settlement;

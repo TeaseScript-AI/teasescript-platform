@@ -38,6 +38,7 @@ import type {
   InteractionUiPayload,
   PreparedInteractionUiPayload,
   PlanSourceLocation,
+  PlanLabel,
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
 import { numberAnswerText } from "../../interaction-answers.js";
@@ -75,6 +76,12 @@ export class InstructionCompiler {
 
   #contextualSpeakerTemporary: number | null = null;
 
+  /** The labels of the file's root region, in source order. */
+  public readonly labels: PlanLabel[] = [];
+
+  /** Gotos whose target is set by {@link resolveGotos} once every label of the file has its instruction. */
+  readonly #gotos: { readonly instruction: number; readonly label: string }[] = [];
+
   /** Functions of earlier files come first, so this file's IDs continue after theirs. */
   readonly #functionIdBase: number;
 
@@ -96,6 +103,17 @@ export class InstructionCompiler {
         { id: this.#functionIdBase + index + 1, declaration },
       ]),
     );
+  }
+
+  public resolveGotos(): void {
+    for (const { instruction, label } of this.#gotos) {
+      const target = this.labels.find((candidate) => candidate.name === label);
+      const goto = this.instructions[instruction];
+      if (target === undefined || goto?.kind !== "goto") {
+        throw new TypeError("Semantically invalid goto reached compilation.");
+      }
+      this.instructions[instruction] = { ...goto, target: target.instruction };
+    }
   }
 
   public compileFunctions(): void {
@@ -362,6 +380,16 @@ export class InstructionCompiler {
       }
       case "exitStatement":
         this.instructions.push({ kind: "exit", span: copySpan(statement.span) });
+        return;
+      case "endStatement":
+        this.instructions.push({ kind: "end", span: copySpan(statement.span) });
+        return;
+      case "labelStatement":
+        this.labels.push({ name: statement.name.name, instruction: this.instructions.length });
+        return;
+      case "gotoStatement":
+        this.#gotos.push({ instruction: this.instructions.length, label: statement.label.name });
+        this.instructions.push({ kind: "goto", target: -1, span: copySpan(statement.span) });
         return;
       case "letStatement": {
         const initializer = unwrapParentheses(statement.initializer);

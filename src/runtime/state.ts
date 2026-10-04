@@ -22,12 +22,10 @@ import type {
   RuntimePreparedSayOutputSnapshot,
 } from "./actions/model.js";
 import {
-  type ExpressionPlan,
   type Instruction,
   type InstructionPlan,
   type InteractionChoiceValue,
   type InteractionUiPayload,
-  mainRootEnd,
 } from "../plan/model.js";
 import { cloneInteractionChoiceValue } from "../choice-values.js";
 import { cloneMessageMarkup } from "../message-markup.js";
@@ -43,7 +41,6 @@ import {
   validTopLevelPreparedSayOutputRelationship,
   validateInteractionResultHandoffState,
   validatePendingActionState,
-  validateTerminalContinuationHandoffState,
 } from "./action-validation.js";
 import {
   createXorShift32State,
@@ -73,7 +70,10 @@ import {
   type RuntimeMediaCueInvocationSnapshot,
   type RuntimeMediaSnapshot,
 } from "./media.js";
-import { expressionPlanChildren } from "../plan/expression-children.js";
+import {
+  instructionKilledTemporaries,
+  requiredInstructionTemporaries,
+} from "../plan/temporary-uses.js";
 import {
   cloneScriptStorage,
   sortScriptStorage,
@@ -82,7 +82,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 38;
+export const RUNTIME_SNAPSHOT_VERSION = 39;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -117,7 +117,6 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "nextActionId",
   "lastSettlement",
   "interactionResultHandoff",
-  "terminalContinuationHandoff",
   "preparedSayOutput",
   "settledTimers",
   "nextTimerId",
@@ -249,18 +248,6 @@ export interface RuntimeInteractionResultHandoffSnapshot {
   readonly result: InteractionChoiceValue;
 }
 
-/**
- * Single-use authority for a settled terminal foreground action. Unlike
- * `lastSettlement`, this remains meaningful when later background work
- * settles before the next normal runtime entry completes the root.
- */
-export interface RuntimeTerminalContinuationHandoffSnapshot {
-  readonly actionId: number;
-  readonly actionKind: "delay" | "interaction" | "mediaPlayback" | "storageWrite";
-  readonly owningInstruction: number;
-  readonly continuationInstruction: number;
-}
-
 export interface ChatPacingSettings {
   readonly baseDelayMs: number;
   readonly delayPerWordMs: number;
@@ -302,7 +289,6 @@ export interface RuntimeSnapshot {
   nextActionId: number;
   lastSettlement: RuntimeActionSettlementSnapshot | null;
   interactionResultHandoff: RuntimeInteractionResultHandoffSnapshot | null;
-  terminalContinuationHandoff: RuntimeTerminalContinuationHandoffSnapshot | null;
   preparedSayOutput: RuntimePreparedSayOutputSnapshot | null;
   /** Finished or stopped timers, retained so their handles stay readable. Active timers are background actions. */
   readonly settledTimers: RuntimeTimerSnapshot[];
@@ -375,7 +361,7 @@ export function createFreshRuntimeSnapshot(
 
 /** Creates fresh state for an engine-owned plan that was already fully validated. */
 export function createFreshRuntimeSnapshotWithValidatedPlan(
-  plan: InstructionPlan,
+  _plan: InstructionPlan,
   options: FreshRuntimeOptions = {},
 ): RuntimeSnapshot {
   const optionsCapture = captureExternalData(options);
@@ -488,7 +474,6 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     nextActionId: 1,
     lastSettlement: null,
     interactionResultHandoff: null,
-    terminalContinuationHandoff: null,
     preparedSayOutput: null,
     settledTimers: [],
     nextTimerId: 1,
@@ -500,7 +485,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     settledMedia: [],
     nextMediaId: 1,
     maxCallDepth,
-    status: mainRootEnd(plan) === 0 ? "halted" : "ready",
+    status: "ready",
     failure: null,
   };
 }
@@ -593,10 +578,6 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
       snapshot.interactionResultHandoff === null
         ? null
         : cloneInteractionResultHandoff(snapshot.interactionResultHandoff),
-    terminalContinuationHandoff:
-      snapshot.terminalContinuationHandoff === null
-        ? null
-        : cloneTerminalContinuationHandoff(snapshot.terminalContinuationHandoff),
     preparedSayOutput:
       snapshot.preparedSayOutput === null
         ? null
@@ -644,17 +625,6 @@ function cloneInteractionResultHandoff(
     ownerCallFrameId: handoff.ownerCallFrameId,
     destinationTemporary: handoff.destinationTemporary,
     result: cloneInteractionChoiceValue(handoff.result),
-  };
-}
-
-function cloneTerminalContinuationHandoff(
-  handoff: RuntimeTerminalContinuationHandoffSnapshot,
-): RuntimeTerminalContinuationHandoffSnapshot {
-  return {
-    actionId: handoff.actionId,
-    actionKind: handoff.actionKind,
-    owningInstruction: handoff.owningInstruction,
-    continuationInstruction: handoff.continuationInstruction,
   };
 }
 
@@ -959,9 +929,10 @@ function validateCapturedRuntimeSnapshotDetails(
     errors.push(`Runtime temporalCaptures is malformed: ${temporalProblem}`);
   const analysis = plan === undefined ? undefined : createSnapshotValidationAnalysis(plan);
   const instructionLimit = plan?.instructions.length;
+  // Every region ends in a transfer, so a position is always an instruction of the plan.
   if (
     !nonNegativeSafeInteger(value.nextInstruction) ||
-    (instructionLimit !== undefined && value.nextInstruction > instructionLimit)
+    (instructionLimit !== undefined && value.nextInstruction >= instructionLimit)
   ) {
     errors.push("Runtime nextInstruction is outside the plan.");
   }
@@ -1117,13 +1088,11 @@ function validateCapturedRuntimeSnapshotDetails(
     errors.push("Runtime scriptStoragePersistent must be a boolean.");
   }
   validateInteractionResultHandoffState(value, plan, analysis, errors);
-  validateTerminalContinuationHandoffState(value, plan, errors);
   if (!isOneOf(value.status, ["ready", "running", "waiting", "halted", "failed"])) {
     errors.push("Runtime status is invalid.");
   }
   validateFailure(value.failure, value.status, errors);
   validateStatusConsistency(value, plan, errors);
-  validateRootEndTransition(value, plan, errors);
   const validation = Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
   return Object.freeze({ validation, failureKind: validation.valid ? null : failureKind });
 }
@@ -1966,7 +1935,7 @@ function validateCallFrames(
           ? analysis?.functionsById.get(caller.functionId)
           : undefined;
       if (
-        (frameIndex === 0 && callIndex >= mainRootEnd(plan)) ||
+        (frameIndex === 0 && callIndex >= plan.files[0]!.rootEndInstruction) ||
         (frameIndex > 0 &&
           (callerDefinition === undefined ||
             callIndex < callerDefinition.entryInstruction ||
@@ -2075,7 +2044,7 @@ function validateTimerHandlerFrame(
     !nonNegativeSafeInteger(resume) ||
     (plan !== undefined &&
       (frameIndex === 0
-        ? resume > mainRootEnd(plan)
+        ? resume >= plan.files[0]!.rootEndInstruction
         : callerDefinition === undefined ||
           resume < callerDefinition.entryInstruction ||
           resume >= callerDefinition.endInstruction))
@@ -2372,7 +2341,9 @@ interface SnapshotValidationAnalysis {
 
 function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
   const functionsById = new Map<number, InstructionPlan["functions"][number]>();
-  const regionEnds = new Array<number>(plan.instructions.length).fill(mainRootEnd(plan));
+  const regionEnds = new Array<number>(plan.instructions.length).fill(
+    plan.files[0]!.rootEndInstruction,
+  );
   const functionIdsByInstruction = new Array<number | null>(plan.instructions.length).fill(null);
   for (const definition of plan.functions) {
     functionsById.set(definition.id, definition);
@@ -2464,7 +2435,10 @@ function computeContinuationLiveness(
       for (const temporaryId of instructionKilledTemporaries(instruction)) {
         liveOut.delete(temporaryId);
       }
-      for (const temporaryId of requiredInstructionTemporaries(instruction, loopFrames)) {
+      for (const temporaryId of requiredInstructionTemporaries(
+        instruction,
+        activeLoopIdOf(loopFrames),
+      )) {
         liveOut.add(temporaryId);
       }
       if (!sameNumberSet(liveIn[index]!, liveOut)) {
@@ -2498,40 +2472,14 @@ function instructionSuccessors(
     case "returnValue":
     case "returnVoid":
     case "exit":
+    // A goto or end leaves this path with no temporaries, so nothing it holds stays live.
+    case "goto":
+    case "end":
       return [];
     case "callFunction":
       return instruction.returnInstruction < regionEnd ? [instruction.returnInstruction] : [];
     default:
       return next === null ? [] : [next];
-  }
-}
-
-function instructionKilledTemporaries(instruction: Instruction): ReadonlySet<number> {
-  switch (instruction.kind) {
-    case "storeTemporary":
-      return new Set([instruction.temporaryId]);
-    case "prepareSayText":
-    case "prepareSaySpeaker":
-    case "prepareSayContextualSpeaker":
-      return new Set([instruction.destinationTemporary]);
-    case "prepareInteractionSpeaker":
-      return new Set([instruction.destinationTemporary]);
-    case "prepareReference":
-      return new Set([instruction.destinationTemporary]);
-    case "clearTemporary":
-      return new Set([instruction.temporaryId]);
-    case "clearTemporaries":
-      return new Set(instruction.temporaryIds);
-    case "callFunction":
-      return new Set([instruction.destinationTemporary]);
-    case "interaction":
-    case "startTimer":
-    case "playMedia":
-      return instruction.destinationTemporary === null
-        ? new Set<number>()
-        : new Set([instruction.destinationTemporary]);
-    default:
-      return new Set<number>();
   }
 }
 
@@ -2617,54 +2565,11 @@ function validateStatusConsistency(
     if (
       plan !== undefined &&
       calls === 0 &&
-      (!nonNegativeSafeInteger(value.nextInstruction) || value.nextInstruction > mainRootEnd(plan))
+      (!nonNegativeSafeInteger(value.nextInstruction) ||
+        value.nextInstruction >= plan.files[0]!.rootEndInstruction)
     ) {
       errors.push("Root execution position is outside the root instruction range.");
     }
-  }
-}
-
-/**
- * A terminal delay or result-free button may settle at the root-end
- * coordinate while awaiting its ordinary completion entry. The separate
- * handoff remains authoritative even when a background pacing settlement
- * replaces bounded replay data before that entry occurs.
- */
-function validateRootEndTransition(
-  value: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
-  errors: string[],
-): void {
-  if (
-    plan === undefined ||
-    value.status !== "running" ||
-    value.nextInstruction !== mainRootEnd(plan) ||
-    !Array.isArray(value.callFrames) ||
-    value.callFrames.length !== 0
-  )
-    return;
-
-  const common =
-    Array.isArray(value.frames) &&
-    value.frames.length === 1 &&
-    isPlainRecord(value.frames[0]) &&
-    value.frames[0].id === 0 &&
-    Array.isArray(value.callFrames) &&
-    value.callFrames.length === 0 &&
-    Array.isArray(value.loopFrames) &&
-    value.loopFrames.length === 0 &&
-    Array.isArray(value.temporaries) &&
-    value.temporaries.length === 0 &&
-    value.foregroundAction === null &&
-    value.failure === null &&
-    value.contextualSpeaker === null;
-  // Queued expiry blocks run before the script ends, so a block may return to the root end without a handoff.
-  const awaitsQueuedBlock =
-    Array.isArray(value.pendingTimerHandlers) && value.pendingTimerHandlers.length > 0;
-  if (!common || (value.terminalContinuationHandoff === null && !awaitsQueuedBlock)) {
-    errors.push(
-      "Running root-end state is not a canonical settled terminal foreground transition.",
-    );
   }
 }
 
@@ -2733,7 +2638,6 @@ function positiveSafeInteger(value: unknown): value is number {
 
 function isLegalHaltPosition(nextInstruction: unknown, plan: InstructionPlan): boolean {
   if (!nonNegativeSafeInteger(nextInstruction)) return false;
-  if (nextInstruction === mainRootEnd(plan)) return true;
   return nextInstruction > 0 && plan.instructions[nextInstruction - 1]?.kind === "exit";
 }
 
@@ -2755,7 +2659,7 @@ function validateCurrentTemporaryRequirements(
   }
   const instruction = plan.instructions[nextInstruction];
   if (instruction === undefined) return;
-  const required = requiredInstructionTemporaries(instruction, loopFrames);
+  const required = requiredInstructionTemporaries(instruction, activeLoopIdOf(loopFrames));
   const present = new Set(
     temporaries
       .filter(isPlainRecord)
@@ -2774,147 +2678,6 @@ function validateCurrentTemporaryRequirements(
   }
   if (instruction.kind === "callFunction" && present.has(instruction.destinationTemporary)) {
     errors.push("Runtime function result destination is already occupied.");
-  }
-}
-
-function requiredInstructionTemporaries(
-  instruction: Instruction,
-  loopFrames: unknown,
-): ReadonlySet<number> {
-  const output = new Set<number>();
-  const collect = (expression: ExpressionPlan): void => {
-    collectExpressionTemporaries(expression, output);
-  };
-  switch (instruction.kind) {
-    case "declareSpeaker":
-      instruction.properties.forEach((property) => collect(property.value));
-      break;
-    case "setDeclaredSpeakerProperty":
-    case "declareBinding":
-      collect(instruction.value);
-      break;
-    case "prepareReference":
-      collect(instruction.expression);
-      break;
-    case "validateAssignmentTarget":
-      collect(instruction.target);
-      break;
-    case "assign":
-      collect(instruction.value);
-      collect(instruction.target);
-      break;
-    case "validateCallReceiver":
-      collect(instruction.receiver);
-      break;
-    case "evaluate":
-      collect(instruction.expression);
-      break;
-    case "jumpIfFalse":
-      collect(instruction.condition);
-      break;
-    case "loopStart": {
-      const active = Array.isArray(loopFrames) ? loopFrames.at(-1) : undefined;
-      if (
-        instruction.loopKind === "while" ||
-        !isPlainRecord(active) ||
-        active.loopId !== instruction.loopId
-      ) {
-        collect(instruction.expression);
-      }
-      break;
-    }
-    case "storeTemporary":
-    case "bindDefaultParameter":
-    case "prepareSayText":
-    case "returnValue":
-      collect(instruction.value);
-      break;
-    case "prepareSayContextualSpeaker":
-      output.add(instruction.speakerTemporary);
-      break;
-    case "callFunction":
-      instruction.arguments.forEach((argument) =>
-        collectExpressionTemporaries(argument.value, output),
-      );
-      break;
-    case "setDefaultSpeaker":
-    case "prepareInteractionSpeaker":
-    case "enterScope":
-    case "leaveScope":
-    case "jump":
-    case "loopControl":
-    case "clearTemporary":
-    case "clearTemporaries":
-    case "bindSuppliedParameter":
-    case "beginFunctionDefaults":
-    case "prepareParameterDefault":
-    case "enterFunctionBody":
-    case "returnVoid":
-    case "exit":
-      break;
-    case "say":
-      if (typeof instruction.textTemporary === "number") output.add(instruction.textTemporary);
-      else collect(instruction.value);
-      if (typeof instruction.speakerTemporary === "number")
-        output.add(instruction.speakerTemporary);
-      if (typeof instruction.pacing === "object") collect(instruction.pacing);
-      break;
-    case "wait":
-      collect(instruction.duration);
-      if (typeof instruction.display === "object") collect(instruction.display);
-      if (instruction.label !== null) collect(instruction.label);
-      break;
-    case "startTimer":
-      collect(instruction.duration);
-      if (typeof instruction.display === "object") collect(instruction.display);
-      if (instruction.label !== null) collect(instruction.label);
-      break;
-    case "pacingBarrier":
-      if (instruction.receiver !== null) collect(instruction.receiver);
-      break;
-    case "showImage":
-      if (instruction.image !== null) collect(instruction.image);
-      break;
-    case "storageWrite":
-      if (instruction.value !== null) collect(instruction.value);
-      collect(instruction.key);
-      break;
-    case "playMedia":
-      collect(instruction.file);
-      if (instruction.repeat.kind === "value") collect(instruction.repeat.value);
-      if (instruction.repeat.kind === "times") collect(instruction.repeat.count);
-      for (const operand of [instruction.startAt, instruction.endAt, instruction.volume]) {
-        if (operand !== null) collect(operand);
-      }
-      for (const cue of instruction.cues) collect(cue.offset);
-      break;
-    case "interaction":
-      if ("preparedUi" in instruction) {
-        output.add(instruction.speakerTemporary);
-        if (instruction.preparedUi.kind === "button") {
-          output.add(instruction.preparedUi.buttonLabelTemporary);
-          if (instruction.preparedUi.backgroundTemporary !== undefined)
-            output.add(instruction.preparedUi.backgroundTemporary);
-        } else if (instruction.preparedUi.kind !== "choice") {
-          if (instruction.preparedUi.hintTemporary !== null)
-            output.add(instruction.preparedUi.hintTemporary);
-          if (instruction.preparedUi.prefillTemporary !== undefined)
-            output.add(instruction.preparedUi.prefillTemporary);
-        } else output.add(instruction.preparedUi.optionsTemporary);
-      }
-      break;
-  }
-  return output;
-}
-
-function collectExpressionTemporaries(expression: ExpressionPlan, output: Set<number>): void {
-  const pending = [expression];
-  while (pending.length) {
-    const current = pending.pop()!;
-    if (current.kind === "temporary" || current.kind === "preparedReference")
-      output.add(current.temporaryId);
-    const children = expressionPlanChildren(current);
-    for (let i = children.length - 1; i >= 0; i--) pending.push(children[i]!);
   }
 }
 
@@ -3213,4 +2976,9 @@ function snapshotExternalDataFailureMessage(kind: ExternalDataFailureKind): stri
     case "nonPlainObject":
       return "Runtime snapshot contains a non-plain object.";
   }
+}
+
+function activeLoopIdOf(loopFrames: unknown): number | null {
+  const active = Array.isArray(loopFrames) ? loopFrames.at(-1) : undefined;
+  return isPlainRecord(active) && nonNegativeSafeInteger(active.loopId) ? active.loopId : null;
 }
