@@ -5196,7 +5196,8 @@ function eliminateSwitchBreaks(statements: AstNode[], rest: AstNode[] = []): Ast
     }
     result.push(statement);
   }
-  return [...result, ...rest];
+  // The statements that follow in the case, or in the cases it falls through to, may hold breaks of their own.
+  return [...result, ...(rest.length === 0 ? [] : eliminateSwitchBreaks(rest))];
 }
 
 function branchStatements(node: unknown): AstNode[] {

@@ -50,3 +50,16 @@ switch (n) {
 	case 3..1: show("one to three"); break
 	case 0: show("zero"); break
 }
+// A case that falls through into a case whose own break sits in an if leaves the switch at that break as well.
+switch (getRandom(2)) {
+	case 0:
+		if (loadBoolean("toys.paddle")) {
+			show("Fetch the paddle")
+			break
+		}
+	default:
+		if (loadBoolean("toys.crop")) {
+			show("Fetch the crop")
+			break
+		}
+}

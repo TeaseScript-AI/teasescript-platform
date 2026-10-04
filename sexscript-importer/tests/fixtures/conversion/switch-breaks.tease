@@ -61,4 +61,19 @@ if n <= 3 and n >= 1 {
 } else if n == 0 {
   say "zero"
 }
+// A case that falls through into a case whose own break sits in an if leaves the switch at that break as well.
+switch randomInteger(0..2) {
+  case 0 {
+    if (load "toys.paddle") == true {
+      say "Fetch the paddle"
+    } else if (load "toys.crop") == true {
+      say "Fetch the crop"
+    }
+  }
+  default {
+    if (load "toys.crop") == true {
+      say "Fetch the crop"
+    }
+  }
+}
 exit
