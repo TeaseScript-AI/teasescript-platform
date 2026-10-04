@@ -15,6 +15,21 @@ const TEST_CARD = [
   [235, 235, 235],
 ];
 
+// A package the smoke serves only as a catalog: paths that model URIs built from the path alone would merge.
+const MODEL_PATHS_CATALOG = {
+  images: [],
+  media: [],
+  sources: [
+    { path: "main.tease", source: 'goto "rooms/cellar.tease"\n' },
+    { path: "rooms/cellar.tease", source: 'say "cellar"\nexit\n' },
+    // Not a package path (TSC009), but the editor still opens it.
+    { path: "rooms\\cellar.tease", source: 'say "backslash"\nexit\n' },
+    { path: "C:/room.tease", source: 'say "upper"\nexit\n' },
+    { path: "c:/room.tease", source: 'say "lower"\nexit\n' },
+  ],
+  problems: [],
+};
+
 await main();
 
 async function main() {
@@ -27,6 +42,15 @@ async function main() {
   // house compiles and starts at its main.tease; broken does not compile.
   const server = createPlaygroundServer({
     packagesRoot: fileURLToPath(new URL("../tests/fixtures/packages/", import.meta.url)),
+  });
+  // The model-paths package exists only as this catalog, so the smoke needs no file named with `\` or `C:` on disk.
+  const [handleRequest] = server.listeners("request");
+  server.removeAllListeners("request");
+  server.on("request", (request, response) => {
+    if (request.url !== "/dev-package/model-paths/catalog.json")
+      return handleRequest(request, response);
+    response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify(MODEL_PATHS_CATALOG));
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -1125,6 +1149,26 @@ async function packageScenario(cdp, origin) {
     8_000,
     "The editor did not open the broken package's files with their diagnostics",
   );
+
+  // Package paths that a model URI built from the path alone would merge: on Windows `\` becomes a folder separator,
+  // and Monaco lowercases a first folder that looks like a drive. The editor must keep every file apart.
+  const userAgent = await value(cdp, "navigator.userAgent");
+  await cdp.call("Emulation.setUserAgentOverride", {
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36",
+    platform: "Win32",
+  });
+  try {
+    await navigate(cdp, `${origin}/editor/?package=model-paths`);
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-monaco-ready="true"]') !== null && document.querySelectorAll('[data-file-path]').length === ${MODEL_PATHS_CATALOG.sources.length} && [...document.querySelectorAll('[data-file-path]')].find((row) => row.getAttribute('data-file-path') === ${JSON.stringify("rooms\\cellar.tease")})?.querySelector('.file-problems')?.textContent.trim() === '1 diagnostics'`,
+      8_000,
+      "The editor did not keep the package files with `\\` and drive-like folders apart",
+    );
+  } finally {
+    await cdp.call("Emulation.setUserAgentOverride", { userAgent });
+  }
 }
 
 /**
