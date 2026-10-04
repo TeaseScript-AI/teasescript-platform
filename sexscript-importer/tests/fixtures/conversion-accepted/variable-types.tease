@@ -28,7 +28,7 @@ whole = toInteger(fraction() + 1)
 save 4 as "x.count"
 let stored: integer = load "x.count"
 // A variable that starts as null keeps the type of its first value.
-let later: number? = null
+let later = null
 later = 1
 later = 2.5
 say "Whole ${whole}, stored ${stored}, later ${later}"

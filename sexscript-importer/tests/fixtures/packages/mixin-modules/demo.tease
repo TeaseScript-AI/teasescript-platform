@@ -46,7 +46,7 @@ function loadGreetingModule {
   // A module variable with the name of an object field stays separate from it.
   roundsInGreeting = 10
 }
-let roundsInGreeting: number? = null
+let roundsInGreeting = null
 function loadLaterModule {
   // Loaded after greeting.groovy, so this greet replaces the earlier one.
 }

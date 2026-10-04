@@ -1485,14 +1485,14 @@ function lowerDeclaration(
 
 /**
  * The type a null-initialized variable later receives when the evidence is unambiguous, such as `string` or
- * `string[]` (the emitted declaration adds `?`).
+ * `string[]` (the emitted declaration adds `?`). Groovy numbers do not tell an integer from a fraction, so a number
+ * variable gets no annotation: the type pass infers it from its first value (#504 decision 1a).
  */
 function nullableValueType(name: string, context: LowerContext): string | null {
   const type = context.types.variables.get(name);
   if (type === undefined) return null;
   const scalar = (value: number): string | null => {
     if (onlyOf(value, STRING | NULL) && value & STRING) return "string";
-    if (onlyOf(value, NUMBER | NULL) && value & NUMBER) return "number";
     if (onlyOf(value, BOOLEAN | NULL) && value & BOOLEAN) return "boolean";
     return null;
   };
