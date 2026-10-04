@@ -181,24 +181,37 @@ export function withValues(type: StaticType, values: readonly ScalarValue[]): St
 }
 
 /**
+ * A value that a value of a restricted type can be. A duration stands for its milliseconds and never equals a number of
+ * the same size.
+ */
+export interface PossibleValue {
+  readonly value: ScalarValue | null;
+  readonly duration: boolean;
+}
+
+/**
  * The values a value of this type can only be, with `null` for a possibly null value, or `undefined` when it may be
  * any value of its type. Only a `choose` with literal button values restricts a type.
  */
-export function possibleValues(type: StaticType): readonly (ScalarValue | null)[] | undefined {
-  const possible: (ScalarValue | null)[] = [];
+export function possibleValues(type: StaticType): readonly PossibleValue[] | undefined {
+  const possible: PossibleValue[] = [];
   for (const member of members(type)) {
-    if (member.kind === "null") possible.push(null);
+    if (member.kind === "null") possible.push({ value: null, duration: false });
     else if (member.kind === "scalar" && member.values !== undefined)
-      for (const value of member.values) possible.push(value);
+      for (const value of member.values)
+        possible.push({ value, duration: member.name === "duration" });
     else return undefined;
   }
   return possible;
 }
 
-/** Whether a value of this type may be equal (`==`) to `value`: false only when its possible values exclude it. */
-export function mayEqual(type: StaticType, value: ScalarValue | null): boolean {
+/** Whether a value of this type may be equal (`==`) to `other`: false only when its possible values exclude it. */
+export function mayEqual(type: StaticType, other: PossibleValue): boolean {
   const possible = possibleValues(type);
-  return possible === undefined || possible.includes(value);
+  return (
+    possible === undefined ||
+    possible.some(({ value, duration }) => value === other.value && duration === other.duration)
+  );
 }
 
 function isSubset(inner: readonly ScalarValue[], outer: readonly ScalarValue[]): boolean {

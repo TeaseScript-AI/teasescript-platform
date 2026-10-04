@@ -583,6 +583,24 @@ test("a choice that returns text and numbers needs a place declared with a union
       "This choose returns text (string) or a whole number (integer). A place keeps one type; to keep both, declare it as 'let copied: string | integer = ...'.",
     ],
   ]);
+  // A parameter without a type, also where a test narrowed it, a value of unknown type, and a property of an `object`
+  // have no written type either; the caller's declared union does not declare the parameter.
+  const values = 'let values: (string | integer)[] = ["old"]\n';
+  for (const source of [
+    `function probe(p) {\n    if p is (string | integer)[] {\n        p.add(choose "new", 2)\n    }\n}\n${values}probe(values)`,
+    `function probe(p) {\n    if p is (string | integer)[][] {\n        p.first.add(choose "new", 2)\n    }\n}`,
+    `function probe(p) {\n    p.add(choose "new", 2)\n}\n${values}probe(values)`,
+    `function probe(p) {\n    p[0] = choose "new", 2\n}`,
+    `function probe(p) {\n    p.answer = choose "new", 2\n}`,
+    `${values}let box: object = { values: values }\nbox.values.add(choose "new", 2)`,
+  ])
+    assert.deepEqual(spans(source), [["TSV044", 'choose "new", 2']], source);
+  assert.deepEqual(
+    spans(
+      `function probe(p: (string | integer)[]) {\n    p.add(choose "new", 2)\n}\n${values}probe(values)`,
+    ),
+    [],
+  );
   for (const options of ['v, "a", 1', '"a", v, 1', '"a", 1, v'])
     assert.deepEqual(
       message(`function pick(v) {\n    let answer = choose ${options}\n}`),
@@ -597,7 +615,7 @@ test("a choice that returns text and numbers needs a place declared with a union
 });
 
 test("comparing a choice result with a value no button returns is a warning", () => {
-  // #511 C5: the possible button values follow the variable until it is assigned again.
+  // #511 C5: the possible button values follow the variable as narrowing does, until it is assigned again.
   const warnings = (source: string) =>
     compileSource(source).diagnostics.map((d) => [d.severity, d.code, d.message]);
   assert.deepEqual(
@@ -641,11 +659,26 @@ test("comparing a choice result with a value no button returns is a warning", ()
       [["warning", "TSV046"]],
       source,
     );
-  // A test leaves only the values that can pass or fail it, durations compare by length, and `choose null` is null.
+  // A test leaves only the values that can pass or fail it, and button values decide a type test as well.
+  const warned = (source: string) =>
+    compileSource(source).diagnostics.map((d) => [
+      d.code,
+      source.slice(d.span.start.offset, d.span.end.offset),
+      d.message,
+    ]);
+  assert.deepEqual(
+    warned("let n = choose 1.0, 1.5\nif n is not integer {\n    let same = n == 1.0\n}"),
+    [["TSV046", "n == 1.0", "'n' is always 1.5 here, so this comparison is always false."]],
+  );
+  assert.deepEqual(warned("let n = choose 1.0, 2.0\nlet whole = n is integer"), [
+    ["TSV046", "n is integer", "'n' is always 1 or 2 here, so this test is always true."],
+  ]);
+  // Durations compare by length, never with numbers, also inside one union, and `choose null` is null.
   for (const source of [
-    "let n = choose 1.0, 1.5\nif n is not integer {\n    let same = n == 1.0\n}",
-    "let n = choose 1.0, 2.0\nlet whole = n is integer",
     "let d = choose 1 s, 2 s\nlet same = d == 3 s",
+    "let d = choose 1 s, 2 s\nlet same = d == 1000",
+    "let n = choose 1000, 2000\nlet same = n == 1 s",
+    "let value: duration | integer = choose 1 s, 2000\nlet same = value == 2 s",
     'let answer = choose null\nlet same = answer == "z"',
   ])
     assert.deepEqual(
@@ -657,8 +690,20 @@ test("comparing a choice result with a value no button returns is a warning", ()
     warnings("let d = choose 1 s, 2 s\nlet same = d == 3 s")[0]?.[2] ?? "",
     /1 s or 2 s/,
   );
+  assert.deepEqual(
+    warned("let value: duration | integer = choose 1 s, 2\nlet same = value == 3 s"),
+    [
+      [
+        "TSV046",
+        "value == 3 s",
+        "'value' is always 1 s or 2 here, so this comparison is always false.",
+      ],
+    ],
+  );
   for (const source of [
     "let d = choose 1 s, 2 s\nlet same = d == 1000 ms",
+    "let value: duration | integer = choose 1 s, 2000\nlet same = value == 1000 ms",
+    "let value: duration | integer = choose 1 s, 2000\nlet same = value == 2000",
     'let answer = choose null\nanswer = "z"\nlet same = answer == "z"',
     "let n = choose 1, 2\nlet negative = -n\nlet same = negative == -1",
     'let n = choose 1.0, 1.5\nlet items = ["zero", "one"]\nif n is integer {\n    say items[n]\n}',

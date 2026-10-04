@@ -67,6 +67,7 @@ import {
   mayEqual,
   plainType,
   possibleValues,
+  type PossibleValue,
   type ScalarValue,
   TypeJoin,
   members,
@@ -169,6 +170,8 @@ interface Variable {
   readonly type: StaticType;
   /** For a variable without a type annotation, its declaration, so a non-whole number can widen its integer type. */
   readonly declaration?: Declaration | undefined;
+  /** Whether a type is written for the variable: a `let` or parameter with a type annotation. */
+  readonly annotated?: boolean;
   /** Whether a function or a timer or media block may assign it, so a call or suspension cancels its narrowing. */
   readonly shared: boolean;
 }
@@ -739,6 +742,7 @@ class TypeChecker {
       type,
       shared: scope === this.#root && this.#effects.shared.has(name),
       declaration: statement.typeAnnotation === null ? statement : undefined,
+      annotated: statement.typeAnnotation !== null,
     };
     scope.declare(name, { kind: "variable", variable });
     this.#assigned(variable, value);
@@ -780,6 +784,8 @@ class TypeChecker {
     let read: StaticType | undefined;
     /** A speaker text property shows its value as text. */
     let shownField: string | null = null;
+    /** A property without a static type, such as one of an `object` or of a value of unknown type. */
+    let untyped = false;
     if (target.kind === "identifier") {
       const entry = scope.resolve(target.name);
       if (entry?.kind === "variable") {
@@ -855,12 +861,11 @@ class TypeChecker {
             );
           return;
         }
+        const before = this.diagnostics.length;
         place = this.#propertyPlace(object, target.object, target.property);
-        if (
-          SPEAKER_TEXT_PROPERTIES.has(name) &&
-          members(object).some((member) => resolved(member).kind === "speaker")
-        )
-          shownField = `the speaker's ${name}`;
+        const speaker = members(object).some((member) => resolved(member).kind === "speaker");
+        if (SPEAKER_TEXT_PROPERTIES.has(name) && speaker) shownField = `the speaker's ${name}`;
+        untyped = place === undefined && this.diagnostics.length === before && !speaker;
         handle = mayBe(object, "timer", "media");
         // A media position, remaining time, or volume write first waits for the previous message's pacing.
         if (MEDIA_PACED_PROPERTIES.has(name) && mayBe(object, "media")) this.#suspend();
@@ -870,7 +875,12 @@ class TypeChecker {
     if (shownField !== null) this.#checkShownText(statement.value, value, shownField);
     // A timer or media property write may run a block at once, such as an expiry at `remaining = 0 s`.
     if (handle) this.#suspend();
-    if (place === undefined) return;
+    if (place === undefined) {
+      // No type is written for such a property either (#511 C2).
+      if (untyped && statement.operator === "=")
+        this.#reportMixedChoice(statement.value, () => ONE_TYPE_FIX);
+      return;
+    }
     // For `+=` and `-=`, the runtime checks the computed result, which is unknown when the operand is.
     this.#recordRuntimeCheck(statement, place.type, runtimePlace(target), value);
     if (statement.operator === "=") {
@@ -1117,6 +1127,8 @@ class TypeChecker {
         : [],
     );
     if (places.length === 1 || places.length < collections.length) {
+      // A value of unknown type has no written element type either (#511 C2).
+      if (places.length === 0) this.#reportMixedChoice(expression, () => ONE_TYPE_FIX);
       for (const place of places.slice(0, 1))
         yield* compileChild(this.#storeTask(place, expression, value));
       return;
@@ -1146,8 +1158,9 @@ class TypeChecker {
   }
 
   /**
-   * Whether no type is written for the elements of a collection: one that a variable without an annotation holds,
-   * possibly through elements, one held in a property, or a computed one.
+   * Whether no type is written for the elements of a collection: one that a variable or parameter without an
+   * annotation holds, possibly through elements, also where a test narrowed it, one held in a property, or a computed
+   * one.
    */
   #inferredCollection(expression: Expression, scope: Scope): boolean {
     let node = unwrap(expression);
@@ -1158,7 +1171,7 @@ class TypeChecker {
       node = unwrap(node.object);
     }
     const entry = node.kind === "identifier" ? scope.resolve(node.name) : undefined;
-    return property || entry?.kind !== "variable" || entry.variable.declaration !== undefined;
+    return property || entry?.kind !== "variable" || entry.variable.annotated !== true;
   }
 
   /**
@@ -1488,7 +1501,13 @@ class TypeChecker {
         parameter.typeAnnotation === null && parameter.defaultValue !== null
           ? parameter
           : undefined;
-      const variable: Variable = { name, type, shared: false, declaration };
+      const variable: Variable = {
+        name,
+        type,
+        shared: false,
+        declaration,
+        annotated: parameter.typeAnnotation !== null,
+      };
       parameters.push(variable);
       scope.declare(name, { kind: "variable", variable });
     }
@@ -1883,17 +1902,14 @@ class TypeChecker {
     ] as const) {
       const possible = possibleValues(type);
       if (possible === undefined) continue;
-      const otherValues = possibleValues(otherType) ?? literalValues(other);
+      const otherValues = possibleValues(otherType) ?? comparedLiteral(other);
       if (otherValues === undefined || otherValues.some((value) => mayEqual(type, value))) continue;
       const label = expressionLabel(side);
       this.diagnostics.push(
         createDiagnostic(
           DiagnosticSeverity.Warning,
           typeCode.constantTest,
-          `${label === null ? "This value" : `'${label}'`} is always ${describeLiterals(
-            possible,
-            members(type).some((member) => isScalar(member, "duration")),
-          )} here, so this comparison is always ${expression.operator === "==" ? "false" : "true"}.`,
+          `${label === null ? "This value" : `'${label}'`} is always ${describeLiterals(possible)} here, so this comparison is always ${expression.operator === "==" ? "false" : "true"}.`,
           expression.span,
         ),
       );
@@ -1913,9 +1929,14 @@ class TypeChecker {
     if (passes && fails) return;
     const label = expressionLabel(node.value);
     const subject = label === null ? "This value" : `'${label}'`;
-    const holds = passes
-      ? `${subject} always holds ${describeValue(value)}`
-      : `${subject} holds ${describeValue(value)}, never ${typeName(test)}`;
+    // Button values say why, as in `'n' is always 1 or 2 here` for a test of whole numbers.
+    const possible = possibleValues(value);
+    const holds =
+      possible !== undefined
+        ? `${subject} is always ${describeLiterals(possible)} here`
+        : passes
+          ? `${subject} always holds ${describeValue(value)}`
+          : `${subject} holds ${describeValue(value)}, never ${typeName(test)}`;
     this.diagnostics.push(
       createDiagnostic(
         DiagnosticSeverity.Warning,
@@ -2163,6 +2184,10 @@ class TypeChecker {
     if (!isKnown(value)) {
       // Only text and lists have these methods, so their arguments are checked on any receiver.
       memberChecks();
+      // A value of unknown type has no written element type either (#511 C2).
+      if (method === "add")
+        for (const argument of expression.arguments)
+          this.#reportMixedChoice(argument.value, () => ONE_TYPE_FIX);
       return UNKNOWN_TYPE;
     }
     if (method === "removeAt" && values.length === 1 && members(value).every(isList))
@@ -4062,17 +4087,24 @@ function literalValue(expression: Expression): ScalarValue | null | undefined {
   return known !== null && typeof known === "object" ? known.milliseconds : known;
 }
 
-function literalValues(expression: Expression): readonly (ScalarValue | null)[] | undefined {
-  const value = literalValue(expression);
-  return value === undefined ? undefined : [value];
+/** The value a compared expression certainly is, such as `"Open"` or `1 s`, or `undefined`. */
+function comparedLiteral(expression: Expression): readonly PossibleValue[] | undefined {
+  const known = staticChoiceValue(expression);
+  if (known === undefined) return undefined;
+  const value = known.value;
+  return [
+    value !== null && typeof value === "object"
+      ? { value: value.milliseconds, duration: true }
+      : { value, duration: false },
+  ];
 }
 
 /** Literal values as an author writes them, as in `"spank" or "lines"`. */
-function describeLiterals(values: readonly (ScalarValue | null)[], durations: boolean): string {
-  const written = values.map((value) =>
+function describeLiterals(values: readonly PossibleValue[]): string {
+  const written = values.map(({ value, duration }) =>
     typeof value === "string"
       ? JSON.stringify(value)
-      : durations && typeof value === "number"
+      : duration && typeof value === "number"
         ? formatDuration(value)
         : String(value),
   );
