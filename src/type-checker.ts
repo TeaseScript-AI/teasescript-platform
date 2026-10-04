@@ -417,6 +417,9 @@ class TypeChecker {
 
   readonly #widened: Widened;
 
+  /** Variables with a widening recorded in this check since they were last widened again (see {@link #rewiden}). */
+  readonly #unappliedWidening = new Set<Declaration>();
+
   /**
    * For each integer place, by its variable and its path there, the integer places that store its value, with where:
    * when it widens, they widen too, without one more check per step of a chain.
@@ -1170,7 +1173,8 @@ class TypeChecker {
               ? `to keep both, declare it as 'let ${place.label}: ${written} = ...'`
               : ONE_TYPE_FIX,
         );
-      // Only an undecided, union, collection, or object type can gain parts that need widening and origins.
+      // Widening again repeats earlier work unless settling can add parts (only an undecided, union, collection, or
+      // object type can) or this check recorded a widening for the variable since it last widened it again.
       const settled = resolved(place.type);
       const mayGainParts =
         settled.kind === "open" ||
@@ -1178,7 +1182,11 @@ class TypeChecker {
         settled.kind === "object" ||
         isCollection(settled);
       if (decides) settle(place.type, value, expression.span);
-      if (decides && mayGainParts && place.widening !== undefined)
+      if (
+        decides &&
+        place.widening !== undefined &&
+        (mayGainParts || this.#unappliedWidening.has(place.widening.root))
+      )
         this.#rewiden(place.widening.root);
       this.#follow(place.widening, value, expression.span);
       return;
@@ -1232,6 +1240,7 @@ class TypeChecker {
     const paths = this.#widened.get(place.root) ?? new Map<string, SourceSpan>();
     paths.set(place.path.join("."), at);
     this.#widened.set(place.root, paths);
+    this.#unappliedWidening.add(place.root);
     this.widenedMore = true;
   }
 
@@ -1273,6 +1282,7 @@ class TypeChecker {
   #rewiden(root: Declaration): void {
     const variable = this.#declared.get(root);
     if (variable === undefined) return;
+    this.#unappliedWidening.delete(root);
     for (const path of this.#widened.get(root)?.keys() ?? [])
       if (path !== "") widenPath(variable.type, path.split("."));
     ownPartOrigins(variable.type, (path) => this.#partOrigin(root, path));
