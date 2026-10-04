@@ -556,6 +556,20 @@ test("a choice that returns text and numbers needs a place declared with a union
     compileSource('let rounds = 5\nrounds = choose "None", 5').diagnostics.map((d) => d.code),
     ["TSV041"],
   );
+  // A property has no declared type, and an option that already holds a union mixes its result as well.
+  const spans = (source: string) =>
+    compileSource(source).diagnostics.map((d) => [
+      d.code,
+      source.slice(d.span.start.offset, d.span.end.offset),
+    ]);
+  assert.deepEqual(spans('let box = { answer: choose "a", 1 }'), [["TSV044", 'choose "a", 1']]);
+  const choices = 'let choices: (string | integer)[] = ["a", 1]\n';
+  assert.deepEqual(spans(`${choices}let answer = choose choices`), [["TSV044", "choose choices"]]);
+  assert.deepEqual(spans(`${choices}let answer: string | integer = choose choices`), []);
+  // A copy of a value of a union type keeps the plain union, not the button values.
+  const answer = 'let answer: string | integer = choose "a", 1\n';
+  assert.deepEqual(spans(`${answer}let copy = answer\ncopy = "z"`), []);
+  assert.deepEqual(spans(`${answer}let copies = [answer]\ncopies.add("z")`), []);
 });
 
 test("comparing a choice result with a value no button returns is a warning", () => {
@@ -589,6 +603,31 @@ test("comparing a choice result with a value no button returns is a warning", ()
     'let pets = ["pet", "toy"]\nlet pick = choose pets\nlet other = pick == "x"',
   ])
     assert.deepEqual(warnings(source), [], source);
+  // The possible values survive copies, returns, and `-`, and a test or a wider variable keeps them where they apply.
+  const answer = 'let answer = choose "a", "b"\n';
+  for (const source of [
+    `${answer}let copy = "init"\ncopy = answer\nlet same = copy == "z"`,
+    'function pick {\n    return choose "a", "b"\n}\nlet answer = pick()\nlet same = answer == "z"',
+    `${answer}let same = answer == null`,
+    "let n = choose 1, 2\nlet negative = -n\nlet same = negative == 1",
+    "let n = choose 1, 2\nlet same = n == 3\nn = 1.5",
+  ])
+    assert.deepEqual(
+      warnings(source).map(([severity, code]) => [severity, code]),
+      [["warning", "TSV046"]],
+      source,
+    );
+  for (const source of [
+    "let n = choose 1, 2\nlet negative = -n\nlet same = negative == -1",
+    'let n = choose 1.0, 1.5\nlet items = ["zero", "one"]\nif n is integer {\n    say items[n]\n}',
+  ])
+    assert.deepEqual(warnings(source), [], source);
+  assert.deepEqual(
+    warnings('let n = choose 1, 2\nlet items = ["a", "b", "c"]\nsay items[n]\nn = 1.5').map(
+      ([, code]) => code,
+    ),
+    ["TSV043"],
+  );
   // The warning does not change what runs.
   const plan = compileSource(
     'let answer = choose "spank", "lines"\nsay "${answer == "Open"}"',

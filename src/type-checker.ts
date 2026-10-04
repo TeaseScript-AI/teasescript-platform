@@ -64,6 +64,7 @@ import {
   isScalar,
   joinTypes,
   mayEqual,
+  plainType,
   possibleValues,
   type ScalarValue,
   TypeJoin,
@@ -606,7 +607,8 @@ class TypeChecker {
           statement.iterable,
           "A for-loop goes through a list, a set, or a range",
         );
-        const loopType = element === undefined ? UNKNOWN_TYPE : copyType(element);
+        // The loop variable is a place: it keeps the plain element type.
+        const loopType = element === undefined ? UNKNOWN_TYPE : copyType(plainType(element));
         this.#followFirst(statement, loopType, statement.iterable.span);
         const variable: Variable = {
           name: statement.variable.name,
@@ -1646,7 +1648,10 @@ class TypeChecker {
         const properties = new Map<string, StaticType>();
         for (const property of expression.properties) {
           yield* compileChild(this.#expressionTask(property.value, scope));
-          properties.set(property.name.name, freshPlaceType(this.#capture(property.value)));
+          const value = this.#capture(property.value);
+          // A property is a place without a declared type, so it cannot keep a mixed `choose` (#511 C2).
+          this.#reportMixedChoice(property.value, value, () => ONE_TYPE_FIX);
+          properties.set(property.name.name, freshPlaceType(value));
         }
         return { kind: "object", properties };
       }
@@ -1668,7 +1673,9 @@ class TypeChecker {
           return yield* compileChild(this.#valueOfConditionTask(expression, scope));
         const operand = yield* compileChild(this.#expressionTask(expression.operand, scope));
         return this.#operation(expression.operator, [operand], expression, (value) =>
-          isNumeric(value) || isScalar(value, "duration") ? resolved(value) : undefined,
+          isNumeric(value) || isScalar(value, "duration")
+            ? negatedValues(resolved(value), expression.operator)
+            : undefined,
         );
       }
       case "binaryExpression":
@@ -1781,8 +1788,9 @@ class TypeChecker {
               ? node.right
               : null;
         if (nullTest === null) break;
-        yield* compileChild(this.#expressionTask(node.left, scope));
-        yield* compileChild(this.#expressionTask(node.right, scope));
+        const left = yield* compileChild(this.#expressionTask(node.left, scope));
+        const right = yield* compileChild(this.#expressionTask(node.right, scope));
+        this.#warnImpossibleComparison(node, left, right);
         const tested = this.#narrowTest(nullTest, scope, NULL_TYPE, start);
         return node.operator === "=="
           ? tested
@@ -2551,8 +2559,9 @@ class TypeChecker {
     // Integers and numbers together are numbers. Values of other different types are a union that only a place
     // declared with a union type may keep (#511 C2).
     // A list or set option that mixes types is reported as that literal already.
+    // An option that already holds values of different types, such as a list of a union type, mixes them too.
     if (
-      joined === undefined &&
+      (joined === undefined || mixesFamilies(joined)) &&
       !expression.options.some((option) => this.#mixedLiterals.has(unwrap(option.expression)))
     )
       this.#mixedChoices.add(expression);
@@ -2572,7 +2581,7 @@ class TypeChecker {
     if (!this.#mixedChoices.has(unwrap(expression))) return;
     this.#report(
       typeCode.mixedTypes,
-      `This choose returns ${describeValue(copyType(type))}. A place keeps one type; ${fix(typeName(copyType(type)))}.`,
+      `This choose returns ${describeValue(plainType(type))}. A place keeps one type; ${fix(typeName(plainType(type)))}.`,
       expression.span,
     );
   }
@@ -3969,6 +3978,28 @@ function restrictedChoice(
   for (const family of families.values())
     parts.push(withValues({ kind: "scalar", name: family.name }, family.values));
   return union(parts);
+}
+
+/**
+ * Whether the values a button may return are of more than one type, such as text and numbers. Other kinds of values are
+ * not button values and are reported as such.
+ */
+function mixesFamilies(type: StaticType): boolean {
+  const families = new Set<string>();
+  for (const member of members(nonNullType(type))) {
+    const value = resolved(member);
+    if (value.kind === "scalar") families.add(value.name === "integer" ? "number" : value.name);
+  }
+  return families.size > 1;
+}
+
+/** A numeric value with `-` before it: the values a `choose` restricted it to change sign too. */
+function negatedValues(type: StaticType, operator: string): StaticType {
+  if (operator !== "-" || type.kind !== "scalar" || type.values === undefined) return type;
+  return withValues(
+    type,
+    type.values.map((value) => (typeof value === "number" ? -value : value)),
+  );
 }
 
 /** For a place whose type cannot be declared, such as a property: a union type has no written form there yet. */

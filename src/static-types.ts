@@ -648,11 +648,41 @@ function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
       for (const member of type.members) copied.push(yield* compileChild(copyTask(member)));
       return { kind: "union", members: copied };
     }
+    default:
+      // A copy of a value keeps the values a `choose` restricted it to; only a place drops them.
+      return type;
+  }
+}
+
+/** The type without the values a `choose` restricted it to: a place keeps the plain type (#511 C5). */
+export function plainType(type: StaticType): StaticType {
+  return runCompileTask(plainTask(type));
+}
+
+function* plainTask(typeToClean: StaticType): CompileTask<StaticType> {
+  const type = resolved(typeToClean);
+  switch (type.kind) {
     case "scalar":
       if (type.values === undefined) return type;
       return type.origins === undefined
         ? scalar(type.name)
         : { kind: "scalar", name: type.name, origins: type.origins };
+    case "list":
+    case "set": {
+      const element = resolved(type.element);
+      const plain = yield* compileChild(plainTask(element));
+      return plain === element ? type : { kind: type.kind, element: plain };
+    }
+    case "union": {
+      const plain: StaticType[] = [];
+      let changed = false;
+      for (const member of type.members) {
+        const cleaned = yield* compileChild(plainTask(member));
+        changed ||= cleaned !== resolved(member);
+        plain.push(cleaned);
+      }
+      return changed ? union(plain) : type;
+    }
     default:
       return type;
   }
@@ -682,10 +712,8 @@ function* placeTask(typeToPlace: StaticType, copy = true): CompileTask<StaticTyp
   if (type.kind === "list" || type.kind === "set")
     return { kind: type.kind, element: yield* compileChild(placeTask(type.element, copy)) };
   // A place keeps the plain type: values a `choose` restricts it to are not a type of their own.
-  const restricted =
-    type.kind === "union" &&
-    type.members.some((member) => member.kind === "scalar" && member.values !== undefined);
-  return copy || type.kind === "scalar" || restricted ? yield* compileChild(copyTask(type)) : type;
+  const plain = yield* compileChild(plainTask(type));
+  return copy || plain !== type ? yield* compileChild(copyTask(plain)) : plain;
 }
 
 /**
@@ -917,6 +945,7 @@ function* memberIntersectionTask(left: StaticType, right: StaticType): CompileTa
   }
   // Two objects of known properties overlap: the value is the object it is.
   if (left.kind === "object" && right.kind === "object") return left;
+  if (left.kind === "scalar" && right.kind === "scalar") return scalarOverlap(left, right);
   return NEVER_TYPE;
 }
 
@@ -947,6 +976,28 @@ function* guardedTask(value: StaticType, test: StaticType): CompileTask<StaticTy
 }
 
 /**
+ * The values two scalar types share when neither includes the other, as when one is restricted to some values. A
+ * number passes `is integer` when it is whole, so `1.0` is shared by a number and an integer (ADR 0021 rule 4.2).
+ */
+function scalarOverlap(
+  left: Extract<StaticType, { kind: "scalar" }>,
+  right: Extract<StaticType, { kind: "scalar" }>,
+): StaticType {
+  if (left.name !== right.name && !(isNumberName(left.name) && isNumberName(right.name)))
+    return NEVER_TYPE;
+  const name = left.name === right.name ? left.name : "integer";
+  let values = left.values ?? right.values;
+  if (left.values !== undefined && right.values !== undefined)
+    values = left.values.filter((value) => right.values!.includes(value));
+  if (values === undefined) return scalar(name);
+  const kept =
+    name === "integer"
+      ? values.filter((value) => typeof value === "number" && Number.isInteger(value))
+      : values;
+  return kept.length === 0 ? NEVER_TYPE : { kind: "scalar", name, values: kept };
+}
+
+/**
  * The type of a value of type `type` that fails the test `is test`. Only members the test provably covers are removed
  * (ADR 0021 rule 5.3): a `number` that fails `is integer` is still a `number`.
  */
@@ -971,12 +1022,18 @@ export function assignedType(declared: StaticType, value: StaticType): StaticTyp
   // A value a `choose` restricted to some literal values keeps that restriction while nothing else is stored.
   const restricted = (part: StaticType): boolean =>
     part.kind === "scalar" && part.values !== undefined;
+  // The variable keeps its own type, such as a number that an assignment widened, with the restricted values.
+  const restrict = (member: StaticType, part: StaticType): StaticType =>
+    part.kind === "scalar" && part.values !== undefined ? withValues(member, part.values) : member;
   if (kept.kind !== "union")
-    return restricted(stored) && isAssignable(kept, stored) ? stored : kept;
-  const parts = members(stored).map((part) => {
-    const accepting = kept.members.filter((member) => isAssignable(member, part));
-    return accepting.length > 0 && restricted(part) ? part : union(accepting);
-  });
+    return restricted(stored) && isAssignable(kept, stored) ? restrict(kept, stored) : kept;
+  const parts = members(stored).map((part) =>
+    union(
+      kept.members
+        .filter((member) => isAssignable(member, part))
+        .map((member) => (restricted(part) ? restrict(member, part) : member)),
+    ),
+  );
   const narrowed = union(parts);
   return narrowed.kind === "never" ? kept : narrowed;
 }
