@@ -174,6 +174,8 @@ export type IrExpression =
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
   /** An elapsed duration literal such as `1 s`. */
   | { kind: "duration"; value: number; unit: "s" | "ms" }
+  /** `showButton label, timeout: t` used as a value: the elapsed duration until the click or the timeout (#531). */
+  | { kind: "button"; label: IrExpression; timeout: IrExpression | null }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }
   | { kind: "binary"; operator: string; left: IrExpression; right: IrExpression }
   /** `local` marks a call to a function defined in the generated package rather than a TeaseScript built-in. */

@@ -677,6 +677,7 @@ export function expressionType(
       // The emitted literal is an integer when it has neither a decimal point nor an exponent.
       return scalar(/^-?\d+$/u.test(String(value.value)) ? "integer" : "number");
     case "duration":
+    case "button":
       return scalar("duration");
     case "template":
       return scalar("string");

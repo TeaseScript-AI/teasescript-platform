@@ -54,12 +54,7 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
       return;
     }
     case "showButton":
-      if (statement.timeout === null)
-        lines.push(`${pad}showButton ${emitExpression(statement.label)}`);
-      else
-        lines.push(
-          `${pad}showButton(${emitExpression(statement.label)}, ${emitExpression(statement.timeout)})`,
-        );
+      lines.push(`${pad}${emitButton(statement.label, statement.timeout)}`);
       return;
     case "showPopup":
       lines.push(`${pad}showPopup ${emitExpression(statement.message)}`);
@@ -255,6 +250,8 @@ export function emitExpression(expression: IrExpression): string {
       // `choose a: x, b: y` extends over following commas, so it is parenthesized unless it is a whole
       // statement value (see emitValue).
       return `(${emitChoice(expression)})`;
+    case "button":
+      return `(${emitButton(expression.label, expression.timeout)})`;
     case "range": {
       const operator = expression.inclusive ? "..=" : "..";
       return `${operand(expression.from, RANGE + 1)}${operator}${operand(expression.to, RANGE + 1)}`;
@@ -364,8 +361,14 @@ function emitChoice(expression: Extract<IrExpression, { kind: "choice" | "listCh
   return `choose ${options.join(", ")}`;
 }
 
-/** A complete statement value, where a compact choice needs no parentheses. */
+/** Compact `showButton` with its optional timeout option (#531). */
+function emitButton(label: IrExpression, timeout: IrExpression | null): string {
+  return `showButton ${emitExpression(label)}${timeout === null ? "" : `, timeout: ${emitExpression(timeout)}`}`;
+}
+
+/** A complete statement value, where a compact choice or button needs no parentheses. */
 function emitValue(expression: IrExpression): string {
+  if (expression.kind === "button") return emitButton(expression.label, expression.timeout);
   return expression.kind === "choice" || expression.kind === "listChoice"
     ? emitChoice(expression)
     : emitExpression(expression);

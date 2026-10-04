@@ -290,6 +290,12 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
       };
     case "duration":
       return expression;
+    case "button":
+      return {
+        ...expression,
+        label: child(expression.label),
+        timeout: expression.timeout === null ? null : child(expression.timeout),
+      };
     case "literal":
       return expression.action === true && typeof expression.value === "string"
         ? { ...expression, value: renamer.functions.get(expression.value) ?? expression.value }

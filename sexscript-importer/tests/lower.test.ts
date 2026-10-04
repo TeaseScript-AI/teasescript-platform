@@ -197,7 +197,7 @@ test("preserves accepted showButton timeout and elapsed-result semantics", () =>
   const timeoutSource = file([statement(call("showButton", constant("Quick"), constant(3)))]);
   const timeoutProgram = lowerParsedFile(timeoutSource);
   assert.deepEqual(timeoutProgram.diagnostics, []);
-  assert.equal(emitTease(timeoutProgram), 'showButton("Quick", 3)\n');
+  assert.equal(emitTease(timeoutProgram), 'showButton "Quick", timeout: 3\n');
 
   const assignedSource = file([
     {
@@ -214,8 +214,8 @@ test("preserves accepted showButton timeout and elapsed-result semantics", () =>
   ]);
   const assignedProgram = lowerParsedFile(assignedSource);
   assert.deepEqual(assignedProgram.diagnostics, []);
-  // Legacy returned the seconds until the click; the accepted result is a duration (V30 §21).
-  assert.equal(emitTease(assignedProgram), 'let elapsed = showButton("Continue") / 1 s\n');
+  // Legacy returned the seconds until the click; the accepted result is a duration (V30 §21, #531).
+  assert.equal(emitTease(assignedProgram), 'let elapsed = (showButton "Continue") / 1 s\n');
 });
 
 test("maps legacy save(key, null) deletion semantics to delete", () => {

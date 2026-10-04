@@ -278,6 +278,15 @@ export function shimPendingCapabilities(program: MigrationProgram): PendingShim 
         return value.defaultValue === undefined
           ? value
           : { ...value, defaultValue: expression(value.defaultValue) };
+      case "button":
+        // The elapsed result of a button with or without a timeout (#531).
+        return call(
+          "showButton timeout",
+          "showButton",
+          value.timeout === null
+            ? [expression(value.label)]
+            : [expression(value.label), expression(value.timeout)],
+        );
       case "literal":
       case "duration":
       case "variable":

@@ -757,6 +757,8 @@ function hasIrCall(expression: IrExpression): boolean {
     case "listChoice":
     case "load":
       return true;
+    case "button":
+      return true;
     case "literal":
     case "duration":
     case "variable":
@@ -1745,8 +1747,6 @@ function returnsValue(expression: AstNode, context: LowerContext): boolean {
   // A package function shadows the API name it shares.
   const api = legacyApiCall(expression, context);
   if (api !== null && VOID_API_CALLS.has(api.name)) return false;
-  // Compact showButton has no result; only the timeout form returns the elapsed time.
-  if (api !== null && api.name === "showButton" && api.arguments.length < 2) return false;
   if (!call.inherited && call.name === "exit" && variableName(expression.object) === "System") {
     return false;
   }
@@ -5855,12 +5855,12 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
             "getBooleans() must have exactly three arguments.",
           );
     case "showButton":
-      // Legacy returned the seconds until the click; TeaseScript returns the elapsed duration (V30 §21).
+      // Legacy returned the seconds until the click; TeaseScript returns the elapsed duration (V30 §21, #531).
       return args.length === 1 || args.length === 2
         ? {
             kind: "binary",
             operator: "/",
-            left: { kind: "call", name: "showButton", positional: args, named: {} },
+            left: { kind: "button", label: args[0]!, timeout: args[1] ?? null },
             right: { kind: "duration", value: 1, unit: "s" },
           }
         : unsupportedExpression(
