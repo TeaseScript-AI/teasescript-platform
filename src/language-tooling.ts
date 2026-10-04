@@ -9,7 +9,12 @@ import type {
   TimerParts,
 } from "./ast.js";
 import { compileProject, compileSource } from "./compiler.js";
-import { mediaHandlerBlocks, mediaOperands, showButtonOptions } from "./expression-children.js";
+import {
+  mediaHandlerBlocks,
+  mediaOperands,
+  showButtonOptions,
+  tagQueryOperands,
+} from "./expression-children.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
 import { compareProjectPaths } from "./project-paths.js";
@@ -884,6 +889,10 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       children.push({ kind: "expression", node: expression.key });
       if (expression.defaultValue !== null)
         children.push({ kind: "expression", node: expression.defaultValue });
+      return;
+    case "tagQueryExpression":
+      for (const operand of tagQueryOperands(expression))
+        children.push({ kind: "expression", node: operand });
       return;
     case "identifier":
     case "booleanLiteral":

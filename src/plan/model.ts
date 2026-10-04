@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 44;
+export const INSTRUCTION_PLAN_VERSION = 45;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -25,6 +25,8 @@ export interface InstructionPlan {
   readonly version: typeof INSTRUCTION_PLAN_VERSION;
   /** `main.tease` first, then the other files in path order; their blocks follow each other in the same order. */
   readonly files: readonly PlanFile[];
+  /** The package images that tag queries search, by path (ADR 0023). */
+  readonly images: readonly PlanImage[];
   readonly temporaryCount: number;
   readonly functions: readonly CompiledFunctionDefinition[];
   readonly instructions: readonly Instruction[];
@@ -52,6 +54,19 @@ export interface PlanFile {
 export interface PlanLabel {
   readonly name: string;
   readonly instruction: number;
+}
+
+/** A package image and its tags, generated from the image's XMP keywords. */
+export interface PlanImage {
+  /** Path relative to the package root, with `/` between folders. */
+  readonly path: string;
+  /** Each tag name once, in name order. */
+  readonly tags: readonly PlanTag[];
+}
+
+export interface PlanTag {
+  readonly name: string;
+  readonly value: number | null;
 }
 
 export interface CompiledFunctionParameter {
@@ -621,6 +636,7 @@ export type ExpressionPlan =
   | TemporaryExpressionPlan
   | PreparedReferenceExpressionPlan
   | StorageLoadExpressionPlan
+  | TagQueryExpressionPlan
   | TypeTestExpressionPlan;
 
 interface ExpressionPlanBase {
@@ -659,6 +675,30 @@ export interface StorageLoadExpressionPlan extends ExpressionPlanBase {
   readonly key: ExpressionPlan;
   readonly default: ExpressionPlan | null;
 }
+
+/**
+ * `showImage tagged …` (one random match) or `findImages(…)` (every match, in catalog order) over the plan's images.
+ * The operands are evaluated once, in order, before any image is matched; each `tagCompare` and `tagList` step reads
+ * the next one. A random pick draws once from the session random generator.
+ */
+export interface TagQueryExpressionPlan extends ExpressionPlanBase {
+  readonly kind: "tagQuery";
+  readonly catalog: "images";
+  readonly select: "random" | "list";
+  readonly operands: readonly ExpressionPlan[];
+  /** The query in postfix order; without steps every image matches. */
+  readonly steps: readonly TagQueryStepPlan[];
+}
+
+export type TagQueryStepPlan =
+  | { readonly kind: "tag"; readonly name: string }
+  | {
+      readonly kind: "tagCompare";
+      readonly name: string;
+      readonly operator: "==" | "!=" | "<" | "<=" | ">" | ">=";
+    }
+  | { readonly kind: "tagList"; readonly option: "all" | "none" | "any" }
+  | { readonly kind: "and" | "or" | "not" };
 
 /**
  * A check that a value the compiler cannot know fits the type of the place that receives it (ADR 0021 rule 1.7). It

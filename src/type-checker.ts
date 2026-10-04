@@ -15,6 +15,8 @@ import type {
   ShowButtonParts,
   SwitchTypeTest,
   Statement,
+  TagQueryExpression,
+  TagQueryStep,
   TimerParts,
   TypeAnnotation,
 } from "./ast.js";
@@ -31,7 +33,9 @@ import {
   isValidInteractionPrefill,
   numberAnswerText,
 } from "./interaction-answers.js";
-import type { TypeCheckPlan } from "./plan/model.js";
+import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
+import { compareTagValue, evaluateTagSteps, passesTagList } from "./tag-query.js";
+import { normalizeTagName } from "./tags.js";
 import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
 import {
   builtinCallProblems,
@@ -136,6 +140,8 @@ import { typePlan } from "./type-plans.js";
 export interface TypeCheckOptions {
   readonly globals?: readonly string[];
   readonly builtins?: readonly string[];
+  /** The package images that tag queries search; none by default. */
+  readonly imageCatalog?: readonly PlanImage[];
 }
 
 export interface TypeCheckResult {
@@ -178,6 +184,7 @@ const typeCode = {
   invalidOperand: "TSV043",
   mixedTypes: "TSV044",
   impossibleCase: "TSV049",
+  emptyTagQuery: "TST002",
 } as const;
 
 /**
@@ -354,6 +361,9 @@ class TypeChecker {
 
   readonly #builtins: ReadonlySet<string>;
 
+  /** The tags of each package image, by name. */
+  readonly #imageTags: readonly ReadonlyMap<string, number | null>[];
+
   readonly #root = new Scope(null);
 
   readonly #functions: FunctionType[] = [];
@@ -459,6 +469,9 @@ class TypeChecker {
 
   public constructor(options: TypeCheckOptions, widened: Widened) {
     this.#widened = widened;
+    this.#imageTags = (options.imageCatalog ?? []).map(
+      (image) => new Map(image.tags.map((tag) => [tag.name, tag.value])),
+    );
     this.#builtins = new Set([
       ...CORE_RUNTIME_BUILTINS,
       ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
@@ -2189,7 +2202,49 @@ class TypeChecker {
       }
       case "typeTestExpression":
         return yield* compileChild(this.#valueOfConditionTask(expression, scope));
+      case "tagQueryExpression":
+        for (const step of expression.steps) {
+          if (step.kind === "tagCompare") {
+            const type = yield* compileChild(this.#expressionTask(step.bound, scope));
+            this.#reportUnless(
+              type,
+              isNumeric,
+              step.bound,
+              "A tag's number is compared with a number",
+            );
+          } else if (step.kind === "tagList") {
+            const type = yield* compileChild(this.#expressionTask(step.value, scope));
+            this.#reportUnless(
+              type,
+              (member) =>
+                (member.kind === "list" || member.kind === "set") &&
+                (!isKnown(member.element) || isScalar(member.element, "string")),
+              step.value,
+              `'${step.option}:' takes a list of tag names`,
+            );
+          }
+        }
+        this.#checkTagQueryCanMatch(expression);
+        return expression.select === "list" ? { kind: "list", element: STRING_TYPE } : STRING_TYPE;
     }
+  }
+
+  /** A query that picks one image and that provably matches none of the package's images is an error (ADR 0023). */
+  #checkTagQueryCanMatch(query: TagQueryExpression): void {
+    if (query.select !== "random") return;
+    if (
+      this.#imageTags.some(
+        (tags) => evaluateTagSteps(query.steps, (step) => staticTagTest(step, tags)) !== false,
+      )
+    )
+      return;
+    this.#report(
+      typeCode.emptyTagQuery,
+      this.#imageTags.length === 0
+        ? "The package has no images to pick from."
+        : "No image in the package has these tags.",
+      query.span,
+    );
   }
 
   /** The value of a test or logical expression used as a value: the flows of both outcomes join afterwards. */
@@ -5629,4 +5684,44 @@ function scalarType(name: ScalarTypeName): StaticType {
 function unwrapGrouping(expression: Expression): Expression {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   return expression;
+}
+
+/**
+ * A tag test, comparison, or tag list for an image with these tags, or `null` when it depends on a value known only at
+ * runtime: a comparison whose bound is not a number literal, or a tag list that is not a list of quoted names.
+ */
+function staticTagTest(
+  step: TagQueryStep,
+  tags: ReadonlyMap<string, number | null>,
+): boolean | null {
+  switch (step.kind) {
+    case "tag":
+      return tags.has(step.name);
+    case "tagCompare": {
+      const value = tags.get(step.name);
+      if (value === null || value === undefined) return false;
+      return step.bound.kind === "numberLiteral"
+        ? compareTagValue(value, step.operator, step.bound.value)
+        : null;
+    }
+    case "tagList": {
+      if (step.value.kind !== "listLiteral") return null;
+      const names: string[] = [];
+      for (const element of step.value.elements) {
+        if (
+          element.kind !== "stringLiteral" ||
+          element.parts.some((part) => part.kind !== "stringText")
+        )
+          return null;
+        const name = normalizeTagName(
+          element.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join(""),
+        );
+        if (name === null) return null;
+        names.push(name);
+      }
+      return passesTagList(step.option, names, tags);
+    }
+    default:
+      return null;
+  }
 }

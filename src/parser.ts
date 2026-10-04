@@ -65,6 +65,8 @@ import type {
   SwitchCase,
   SwitchStatement,
   SwitchTypeTest,
+  TagQueryExpression,
+  TagQueryStep,
   TypeAnnotation,
   TypeName,
   UnaryExpression,
@@ -73,6 +75,7 @@ import type {
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { lex } from "./lexer.js";
 import { readMisplacedHeader, readScriptHeader, type ScriptHeader } from "./script-header.js";
+import { isTagListOption, tagPredicateSteps } from "./tag-query.js";
 import { calendarDurationUnit, elapsedDurationUnit } from "./duration.js";
 import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 import { TokenKind, type Token } from "./token.js";
@@ -134,6 +137,7 @@ const parserDiagnosticCode = {
   symbolicOperator: "TSP037",
   invalidSwitchForm: "TSP038",
   expectedLabelName: "TSP039",
+  invalidTagQuery: "TST001",
 } as const;
 
 const MEDIA_ARGUMENTS = ["file", "async", "repeat", "startAt", "endAt", "volume"] as const;
@@ -964,12 +968,15 @@ class Parser {
       )
     )
       return null;
-    const image = this.#parseExpression();
+    const tagged = this.#checkIdentifier("tagged");
+    const image = tagged ? this.#parseTaggedImage() : this.#parseExpression();
     if (image === null) {
-      this.#reportInsertion(
-        parserDiagnosticCode.expectedExpression,
-        "Expected an image file or null after 'showImage'.",
-      );
+      if (!tagged) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          "Expected an image file or null after 'showImage'.",
+        );
+      }
       this.#synchronizeStatement(true);
       return null;
     }
@@ -977,6 +984,135 @@ class Parser {
       kind: "showImageStatement",
       image,
       span: spanFrom(command.span, image.span),
+    });
+  }
+
+  /**
+   * `showImage tagged "bedroom", "punishment" > 3, none: ["outdoor"]`: comma-separated tag predicates, then `all:`,
+   * `none:`, or `any:` options. A matching image needs all of them (ADR 0023).
+   */
+  #parseTaggedImage(): TagQueryExpression | null {
+    const tagged = this.#advance();
+    if (this.#check(TokenKind.Newline) || this.#check(TokenKind.EndOfFile)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.invalidTagQuery,
+        "Expected a tag after 'tagged', such as showImage tagged \"bedroom\".",
+      );
+      return null;
+    }
+    const filters: TagQueryStep[][] = [];
+    const options = new Set<string>();
+    let end = tagged.span;
+    do {
+      this.#skipNewlines();
+      if (isPropertyName(this.#peek()) && this.#peek(1).kind === TokenKind.Colon) {
+        const name = this.#advance();
+        this.#advance();
+        const value = runParse(this.#parseColonValueTask(true));
+        if (value === null) return null;
+        const filter = this.#tagListFilter(name.lexeme, name.span, value, options, false);
+        if (filter === null) return null;
+        filters.push([filter]);
+        end = value.span;
+        continue;
+      }
+      if (options.size > 0) {
+        this.#reportToken(
+          parserDiagnosticCode.invalidTagQuery,
+          "Write the tags before all:, none:, or any:.",
+          this.#peek(),
+        );
+        return null;
+      }
+      const predicate = runParse(this.#parseRequiredExpressionTask());
+      if (predicate === null) return null;
+      const steps = this.#tagPredicate(predicate);
+      if (steps === null) return null;
+      filters.push(steps);
+      end = predicate.span;
+    } while (this.#match(TokenKind.Comma));
+    return tagQuery("random", filters, spanFrom(tagged.span, end));
+  }
+
+  /**
+   * `findImages(where: …, all: …, none: …, any: …)` after its `(`: the list of matching images (ADR 0023). After a
+   * reported error it is the plain call, so the surrounding expression still parses.
+   */
+  *#finishFindImages(
+    callee: Expression,
+    left: Token,
+  ): ParseTask<TagQueryExpression | CallExpression> {
+    const call = yield* parseChild(this.#finishCall(callee, left));
+    const filters: TagQueryStep[][] = [];
+    const options = new Set<string>();
+    for (const argument of call.arguments) {
+      if (argument.kind === "positionalArgument") {
+        this.#reportSpan(
+          parserDiagnosticCode.invalidTagQuery,
+          "findImages takes named arguments: where:, all:, none:, and any:.",
+          argument.span,
+        );
+        return call;
+      }
+      const name = argument.name.name;
+      if (name === "where") {
+        if (options.has(name)) {
+          this.#reportSpan(
+            parserDiagnosticCode.invalidTagQuery,
+            "The option 'where' appears more than once; combine the tags with and.",
+            argument.name.span,
+          );
+          return call;
+        }
+        options.add(name);
+        const steps = this.#tagPredicate(argument.value);
+        if (steps === null) return call;
+        filters.push(steps);
+        continue;
+      }
+      const filter = this.#tagListFilter(name, argument.name.span, argument.value, options, true);
+      if (filter === null) return call;
+      filters.push([filter]);
+    }
+    return tagQuery("list", filters, call.span);
+  }
+
+  #tagPredicate(predicate: Expression): TagQueryStep[] | null {
+    return tagPredicateSteps(predicate, (message, span) =>
+      this.#reportSpan(parserDiagnosticCode.invalidTagQuery, message, span),
+    );
+  }
+
+  /** An `all:`, `none:`, or `any:` option; each may appear once. */
+  #tagListFilter(
+    name: string,
+    nameSpan: SourceSpan,
+    value: Expression,
+    options: Set<string>,
+    takesWhere: boolean,
+  ): TagQueryStep | null {
+    if (!isTagListOption(name)) {
+      this.#reportSpan(
+        parserDiagnosticCode.invalidTagQuery,
+        `Unknown option '${name}'. ${takesWhere ? "findImages takes where:, " : "tagged takes "}all:, none:, and any:.`,
+        nameSpan,
+      );
+      return null;
+    }
+    if (options.has(name)) {
+      this.#reportSpan(
+        parserDiagnosticCode.invalidTagQuery,
+        `The option '${name}' appears more than once.`,
+        nameSpan,
+      );
+      return null;
+    }
+    options.add(name);
+    return Object.freeze({
+      kind: "tagList",
+      option: name,
+      value,
+      span: spanFrom(nameSpan, value.span),
     });
   }
 
@@ -2487,6 +2623,12 @@ class Parser {
         continue;
       }
       if (this.#match(TokenKind.LeftParenthesis)) {
+        if (expression.kind === "identifier" && expression.name === "findImages") {
+          expression = yield* parseChild(
+            this.#withinDelimiters(this.#finishFindImages(expression, this.#previous())),
+          );
+          continue;
+        }
         expression = yield* parseChild(
           this.#withinDelimiters(this.#finishCall(expression, this.#previous())),
         );
@@ -3559,6 +3701,26 @@ const propertyNameKinds: ReadonlySet<TokenKind> = new Set([
 
 function mediaHandlersSpan(handlers: MediaHandlers): SourceSpan {
   return handlers.kind === "compact" ? handlers.body.span : handlers.span;
+}
+
+/** A query whose candidates must pass every filter, each a complete postfix predicate. */
+function tagQuery(
+  select: TagQueryExpression["select"],
+  filters: readonly (readonly TagQueryStep[])[],
+  span: SourceSpan,
+): TagQueryExpression {
+  const steps: TagQueryStep[] = [];
+  filters.forEach((filter, index) => {
+    for (const step of filter) steps.push(step);
+    if (index > 0) steps.push({ kind: "and" });
+  });
+  return Object.freeze({
+    kind: "tagQueryExpression",
+    catalog: "images",
+    select,
+    steps: Object.freeze(steps),
+    span: copySpan(span),
+  });
 }
 
 function isPropertyName(token: Token): boolean {

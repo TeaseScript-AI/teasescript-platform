@@ -16,9 +16,14 @@ import type {
   AssignmentTargetPlan,
   BinaryExpressionPlan,
   ExpressionPlan,
+  PlanImage,
   PlanSourceLocation,
+  TagQueryExpressionPlan,
+  TagQueryStepPlan,
   TypeCheckPlan,
 } from "../plan/model.js";
+import { compareTagValue, evaluateTagSteps, passesTagList } from "../tag-query.js";
+import { normalizeTagName } from "../tags.js";
 import { escapeMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
 import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
@@ -196,6 +201,8 @@ export class RuntimeExecutionContext {
   public constructor(
     private readonly snapshot: RuntimeSnapshot,
     private readonly capabilities: RuntimeCapabilities,
+    /** The plan's image catalog, which tag queries search. */
+    private readonly images: readonly PlanImage[] = [],
   ) {}
 
   public evaluator(): Evaluator {
@@ -203,7 +210,7 @@ export class RuntimeExecutionContext {
       this.#evaluator.refreshBuiltinRegistration();
       return this.#evaluator;
     }
-    this.#evaluator = new Evaluator(this.snapshot, this.capabilities, this.events);
+    this.#evaluator = new Evaluator(this.snapshot, this.capabilities, this.events, this.images);
     return this.#evaluator;
   }
 }
@@ -217,6 +224,7 @@ export class Evaluator {
     private readonly snapshot: RuntimeSnapshot,
     private readonly capabilities: RuntimeCapabilities,
     private readonly events: InterpreterEvent[],
+    private readonly images: readonly PlanImage[] = [],
   ) {
     this.refreshBuiltinRegistration();
   }
@@ -227,7 +235,7 @@ export class Evaluator {
   }
 
   public forSnapshot(snapshot: RuntimeSnapshot, events: InterpreterEvent[]): Evaluator {
-    return new Evaluator(snapshot, this.capabilities, events);
+    return new Evaluator(snapshot, this.capabilities, events, this.images);
   }
 
   public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
@@ -705,6 +713,17 @@ export class Evaluator {
             continue;
           }
           value = this.#call(expression, frame.value, frame.positional!, frame.named!);
+          break;
+        case "tagQuery":
+          // Every bound and tag list is evaluated once, in written order, before any image is matched.
+          if (frame.stage === 0) frame.stage = 1;
+          else frame.results!.push(result.value);
+          if (frame.index < expression.operands.length) {
+            pending.push(evaluationFrame(expression.operands[frame.index++]!));
+            continue;
+          }
+          value = this.#tagQuery(expression, frame.results!);
+          owned = true;
           break;
         case "storageLoad":
           if (frame.stage === 0) {
@@ -1845,6 +1864,49 @@ export class Evaluator {
     return value;
   }
 
+  /** The images matching a tag query, in catalog order, or one of them drawn from the session random generator. */
+  #tagQuery(
+    query: TagQueryExpressionPlan,
+    operands: readonly SerializableRuntimeValue[],
+  ): SerializableRuntimeValue {
+    const bounds = new Map<TagQueryStepPlan, number>();
+    const lists = new Map<TagQueryStepPlan, readonly string[]>();
+    let next = 0;
+    for (const step of query.steps) {
+      if (step.kind !== "tagCompare" && step.kind !== "tagList") continue;
+      const value = operands[next]!;
+      const span = query.operands[next++]!.span;
+      if (step.kind === "tagCompare") bounds.set(step, this.#tagBound(value, span));
+      else lists.set(step, tagNames(value, step.option, span));
+    }
+    const matches = this.images
+      .filter((image) => {
+        const tags = imageTags(image);
+        return evaluateTagSteps(query.steps, (step) => {
+          if (step.kind === "tag") return tags.has(step.name);
+          if (step.kind === "tagCompare")
+            return compareTagValue(tags.get(step.name), step.operator, bounds.get(step)!);
+          if (step.kind === "tagList") return passesTagList(step.option, lists.get(step)!, tags);
+          return null;
+        });
+      })
+      .map((image) => image.path);
+    if (query.select === "list") return { kind: "list", items: matches };
+    if (matches.length === 0) throw fault("TSR082", "No image has these tags.", query.span);
+    return matches[Math.floor(this.#findRandom(query.span) * matches.length)]!;
+  }
+
+  #tagBound(value: SerializableRuntimeValue, span: SourceSpan): number {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw fault(
+        "TSR080",
+        `A tag's number is compared with a number, but this is ${describeRuntimeValue(value)}.`,
+        span,
+      );
+    }
+    return value;
+  }
+
   #findRandom(span: SourceSpan): number {
     const random =
       this.capabilities.random === undefined
@@ -2520,6 +2582,44 @@ function mayRunCall(expression: ExpressionPlan): boolean {
   return callingExpressions.get(expression)!;
 }
 
+const imageTagMaps = new WeakMap<PlanImage, ReadonlyMap<string, number | null>>();
+
+/** An image's tags by name, built once per validated plan image. */
+function imageTags(image: PlanImage): ReadonlyMap<string, number | null> {
+  let tags = imageTagMaps.get(image);
+  if (tags === undefined) {
+    tags = new Map(image.tags.map((tag) => [tag.name, tag.value]));
+    imageTagMaps.set(image, tags);
+  }
+  return tags;
+}
+
+/** The tag names of an `all:`, `none:`, or `any:` list or set, normalized as authors write them. */
+function tagNames(
+  value: SerializableRuntimeValue,
+  option: string,
+  span: SourceSpan,
+): readonly string[] {
+  if (!isList(value) && !isSet(value)) {
+    throw fault(
+      "TSR081",
+      `'${option}:' takes a list of tag names, but this is ${describeRuntimeValue(value)}.`,
+      span,
+    );
+  }
+  return value.items.map((item) => {
+    const name = typeof item === "string" ? normalizeTagName(item) : null;
+    if (name === null) {
+      throw fault(
+        "TSR081",
+        `'${option}:' takes tag names, which use lowercase letters a–z, digits, and hyphens, but it holds ${typeof item === "string" ? `'${item}'` : describeRuntimeValue(item)}.`,
+        span,
+      );
+    }
+    return name;
+  });
+}
+
 function evaluationFrame(expression: ExpressionPlan, reference = false): EvaluationFrame {
   return {
     expression,
@@ -2527,7 +2627,10 @@ function evaluationFrame(expression: ExpressionPlan, reference = false): Evaluat
     stage: 0,
     index: 0,
     value: null,
-    results: expression.kind === "list" || expression.kind === "object" ? [] : null,
+    results:
+      expression.kind === "list" || expression.kind === "object" || expression.kind === "tagQuery"
+        ? []
+        : null,
     descriptor: null,
     epoch: 0,
     text: "",

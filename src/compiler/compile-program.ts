@@ -6,6 +6,7 @@ import {
   type Instruction,
   type InstructionPlan,
   type PlanFile,
+  type PlanImage,
   type TypeCheckPlan,
 } from "../plan/model.js";
 import { freezeInstructionPlan } from "../plan/freeze.js";
@@ -36,11 +37,13 @@ export function compileStableProgram(
 
 /**
  * Lowers parser-owned AST data of every project file after source parsing and semantic validation. Each file becomes
- * one block of the instruction stream: its root statements, then its functions and handlers.
+ * one block of the instruction stream: its root statements, then its functions and handlers. `images` is the
+ * validated image catalog, in path order.
  */
 export function compileStableProject(
   projectFiles: readonly StableProjectFile[],
   onFile: (fileIndex: number) => void = () => {},
+  images: readonly PlanImage[] = [],
 ): InstructionPlan {
   const instructions: Instruction[] = [];
   const functions: CompiledFunctionDefinition[] = [];
@@ -81,6 +84,10 @@ export function compileStableProject(
     format: INSTRUCTION_PLAN_FORMAT,
     version: INSTRUCTION_PLAN_VERSION,
     files,
+    images: images.map((image) => ({
+      path: image.path,
+      tags: image.tags.map((tag) => ({ name: tag.name, value: tag.value })),
+    })),
     temporaryCount: counters.nextTemporaryId - 1,
     functions,
     instructions,

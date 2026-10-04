@@ -38,6 +38,7 @@ import {
   mediaHandlerBlocks,
   mediaOperands,
   showButtonOptions,
+  tagQueryOperands,
 } from "./expression-children.js";
 import {
   DURATION_UNIT_MILLISECONDS,
@@ -1438,6 +1439,11 @@ class SemanticValidator {
         yield* compileChild(
           this.#validateExpressionTask(expression.value, scope, contextualSpeaker),
         );
+        return;
+      case "tagQueryExpression":
+        for (const operand of tagQueryOperands(expression)) {
+          yield* compileChild(this.#validateExpressionTask(operand, scope, contextualSpeaker));
+        }
         return;
     }
     expression satisfies never;

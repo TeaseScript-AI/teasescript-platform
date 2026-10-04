@@ -228,6 +228,42 @@ export interface LoadExpression {
   readonly span: SourceSpan;
 }
 
+/**
+ * A tag query (ADR 0023): `showImage tagged …` picks one matching image, and `findImages(…)` lists the matches. The
+ * steps are in postfix order; every bound and tag list appears in written order, which is also its evaluation order.
+ * A candidate matches when the steps yield true; without steps, every candidate matches.
+ */
+export interface TagQueryExpression {
+  readonly kind: "tagQueryExpression";
+  readonly catalog: "images";
+  readonly select: "random" | "list";
+  readonly steps: readonly TagQueryStep[];
+  readonly span: SourceSpan;
+}
+
+export type TagQueryStep =
+  /** `"bedroom"`: whether the candidate has the tag. */
+  | { readonly kind: "tag"; readonly name: string; readonly span: SourceSpan }
+  /** `"punishment" > minimum`: compares the tag's number; false when the candidate has no number for it. */
+  | {
+      readonly kind: "tagCompare";
+      readonly name: string;
+      readonly operator: TagComparisonOperator;
+      readonly bound: Expression;
+      readonly span: SourceSpan;
+    }
+  /** `all:`, `none:`, or `any:` with a list of tag names. */
+  | {
+      readonly kind: "tagList";
+      readonly option: TagListOption;
+      readonly value: Expression;
+      readonly span: SourceSpan;
+    }
+  | { readonly kind: "and" | "or" | "not" };
+
+export type TagComparisonOperator = "==" | "!=" | "<" | "<=" | ">" | ">=";
+export type TagListOption = "all" | "none" | "any";
+
 export interface ExitStatement {
   readonly kind: "exitStatement";
   readonly span: SourceSpan;
@@ -447,6 +483,7 @@ export type Expression =
   | TimerExpression
   | PlayMediaExpression
   | LoadExpression
+  | TagQueryExpression
   | TypeTestExpression;
 
 /** `value is T` or `value is not T`: whether the value may be stored in a place of type `T` (ADR 0021). */
