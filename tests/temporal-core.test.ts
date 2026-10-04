@@ -232,6 +232,7 @@ test("zone conversion outside the captured years fails instead of guessing the r
   assert.deepEqual(localFields(AMSTERDAM, utc("2100-01-01T00:00:00")), outside);
   assert.deepEqual(zonedTimestamp(AMSTERDAM, dateTime("1970-01-01T00:59")), outside);
   assert.deepEqual(zonedTimestamp(AMSTERDAM, dateTime("2101-07-01T12:00")), outside);
+  assert.equal(localFields(AMSTERDAM, 0.5).ok, false);
   assert.equal(moment(AMSTERDAM, "1970-01-01T01:00"), 0);
   assert.equal(moment(UTC_ZONE_RULES, "2099-12-31T23:59:59.999"), utc("2099-12-31T23:59:59.999"));
 });
@@ -312,6 +313,8 @@ test("presentation settings from the host are checked before use", () => {
     { ...TWELVE_HOUR, dateTime: "{month}/{day}/{year}\n{hour}:{minute}" },
     { ...TWELVE_HOUR, timeWithSeconds: "{hour}:{minute}" },
     { ...TWELVE_HOUR, hourCycle: "h13" },
+    { ...TWELVE_HOUR, hourCycle: ["h12"] },
+    { ...TWELVE_HOUR, hourCycle: { toString: null, valueOf: null } },
     { ...TWELVE_HOUR, padDay: "yes" },
     { ...TWELVE_HOUR, dayPeriods: ["AM"] },
     { ...TWELVE_HOUR, dayPeriods: ["", "PM"] },

@@ -274,6 +274,8 @@ export function localFields(
   rules: ZoneRules,
   epochMilliseconds: number,
 ): TemporalResult<DateTimeFields> {
+  if (!Number.isSafeInteger(epochMilliseconds))
+    return { ok: false, reason: "a moment is a whole number of milliseconds" };
   if (!withinZoneRules(epochMilliseconds)) return { ok: false, reason: OUTSIDE_ZONE_RULES };
   return {
     ok: true,
@@ -441,7 +443,10 @@ export function presentationSettingsProblem(value: unknown): string | null {
     if (typeof value[key] !== "boolean")
       return `The presentation setting ${key} must be true or false.`;
   }
-  if (!["h11", "h12", "h23", "h24"].includes(String(value.hourCycle)))
+  if (
+    typeof value.hourCycle !== "string" ||
+    !["h11", "h12", "h23", "h24"].includes(value.hourCycle)
+  )
     return 'The hour cycle must be "h11", "h12", "h23", or "h24".';
   const periods = value.dayPeriods;
   if (

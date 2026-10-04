@@ -53,10 +53,12 @@ export function captureZoneRules(timeZone: string): ZoneRules {
   const transitions: [number, number][] = [];
   let previousMoment = ZONE_RULES_START_MILLISECONDS;
   let previousOffset = initialOffsetSeconds;
+  // The last sample is the window's final whole second, so a change on its last day is seen too.
+  const lastSecond = ZONE_RULES_END_MILLISECONDS - MS_PER_SECOND;
   for (
-    let moment = ZONE_RULES_START_MILLISECONDS + SCAN_STEP_MS;
-    moment < ZONE_RULES_END_MILLISECONDS;
-    moment += SCAN_STEP_MS
+    let moment = Math.min(ZONE_RULES_START_MILLISECONDS + SCAN_STEP_MS, lastSecond);
+    previousMoment < lastSecond;
+    moment = Math.min(moment + SCAN_STEP_MS, lastSecond)
   ) {
     const offset = offsetAt(moment);
     if (offset !== previousOffset) {
