@@ -24,9 +24,9 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-04 at importer commit `71e4abc0`, after merging `main` at `b459787c` (#515), with `node src/cli.ts report --run <package scripts>` (default conversion,
-without proposals). Toy's 21 runtime-loaded modules are part of
-its single script `toy.groovy`, so Toy counts as one script whose statements include all module code.
+Measured on 2026-10-04 at importer commit `71e4abc0`, after merging `main` at `b459787c` (#515), with `node src/cli.ts
+report --run <package scripts>` (default conversion, without proposals). Toy's 21 runtime-loaded modules are part of its
+single script `toy.groovy`, so Toy counts as one script whose statements include all module code.
 
 | Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Root errors | Placeholders |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
