@@ -1,0 +1,70 @@
+// Conditional expressions inside larger expressions compute into a temporary first, in Groovy's evaluation order.
+function likes(kink) {
+  return kink == "rope"
+}
+function level {
+  return 3
+}
+let earlier = randomInteger(0..100)
+let earlier2 = level()
+let conditional = 20
+if likes("rope") {
+  conditional = 40
+}
+if earlier >= earlier2 * conditional {
+  say "Tie up"
+}
+let missed = 3
+if missed > 1 {
+  say "Wrong${" again"}!"
+} else {
+  say "Wrong${""}!"
+}
+let conditional2 = 3
+if likes("tape") {
+  conditional2 = 2
+}
+let total = 1 + conditional2
+// An input on the right of && asks only when the left side allows it.
+let conditional3 = missed > 1
+if conditional3 {
+  say "Continue?"
+  conditional3 = (choose yes: "Yes", no: "No") == "yes"
+}
+if conditional3 {
+  say "Continuing"
+}
+// Groovy's & on booleans evaluates both sides, so a right side with effects runs first.
+function asked {
+  say "Asked"
+  return true
+}
+let earlier3 = likes("tape")
+let conditional4 = asked()
+let both = earlier3 and conditional4
+// A list method with a closure becomes a loop before the statement.
+let toys = ["rope", "tape", "gag"]
+let findAllResult = []
+for t in toys {
+  if likes(t) {
+    findAllResult.add(t)
+  }
+}
+say "Liked: ${findAllResult.join(", ")}"
+let anyResult = false
+for t in toys {
+  if t == "gag" {
+    anyResult = true
+    break
+  }
+}
+if anyResult and total > 2 {
+  say "Gagged"
+}
+// isEmpty() on text, a list, or a dict tests the length.
+function empty(items) {
+  return items.length == 0
+}
+if not empty(toys) {
+  say "Total ${total}, both ${both}"
+}

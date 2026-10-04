@@ -1,4 +1,4 @@
-// MIGRATION INCOMPLETE: 2 error diagnostics.
+// MIGRATION INCOMPLETE: 1 error diagnostic.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
 let value = "old"
@@ -6,8 +6,12 @@ function change {
   value = "new"
   return true
 }
-// TODO SX_CONDITIONAL_POSITION line 3: This conditional expression cannot be evaluated first without changing behavior: it is guarded by && / || / ?:, follows side effects, or has side effects that values read earlier in the statement would observe. Rewrite it with an explicit if.
-// | show(value + (change() == true ? "yes" : "no"))
+let earlier = value
+let conditional = "no"
+if change() == true {
+  conditional = "yes"
+}
+say "${earlier}${conditional}"
 function yesText {
   say "Before"
   return "Yes"

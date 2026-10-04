@@ -23,7 +23,6 @@ function fraction {
   return 3.5
 }
 let whole = toInteger(fraction())
-// NOTE SX_PLUS_OPERAND_TYPE line 22: Groovy + operands are not proven numeric; TeaseScript + only adds numbers. Use interpolation if this joins text.
 whole = toInteger(fraction() + 1)
 save 4 as "x.count"
 let stored: integer = load "x.count"

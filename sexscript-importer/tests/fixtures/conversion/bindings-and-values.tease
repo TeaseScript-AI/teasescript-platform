@@ -14,7 +14,6 @@ say "Roll: ${randomInteger(0..3)}, ${randomIntegerValue(1)}"
 function getString {
   return false
 }
-// NOTE SX_CONDITION_TYPE line 4: Condition is not proven boolean; TeaseScript conditions must be boolean, unlike Groovy truthiness. Verify or compare explicitly.
 if getString() {
   say "wrong"
 } else {

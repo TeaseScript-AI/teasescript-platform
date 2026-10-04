@@ -1,4 +1,4 @@
-// MIGRATION INCOMPLETE: 5 error diagnostics.
+// MIGRATION INCOMPLETE: 2 error diagnostics.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
 let flag = false
@@ -6,23 +6,39 @@ function change {
   flag = true
   return ""
 }
-// TODO SX_CONDITIONAL_POSITION line 3: This conditional expression cannot be evaluated first without changing behavior: it is guarded by && / || / ?:, follows side effects, or has side effects that values read earlier in the statement would observe. Rewrite it with an explicit if.
-// | show(change() + (flag ? "yes" : "no"))
-// TODO SX_CONDITIONAL_POSITION line 4: This conditional expression cannot be evaluated first without changing behavior: it is guarded by && / || / ?:, follows side effects, or has side effects that values read earlier in the statement would observe. Rewrite it with an explicit if.
-// | show(false && (flag ? true : false))
-// TODO SX_PROMPT_POSITION line 5: This input's question cannot be shown at the right moment: the input is guarded by && / || / ?:, follows side effects in the same statement, or has arguments with side effects. Split the statement so the input comes first.
-// | if (false && getString("Never ask")) { show("yes") }
+let earlier = change()
+let conditional = "no"
+if flag {
+  conditional = "yes"
+}
+say "${earlier}${conditional}"
+let conditional2 = false
+if conditional2 {
+  if flag {
+    conditional2 = true
+  } else {
+    conditional2 = false
+  }
+}
+say conditional2
+let conditional3 = false
+if conditional3 {
+  say "Never ask"
+  conditional3 = askText != ""
+}
+if conditional3 {
+  say "yes"
+}
 let value = "old"
 let answer = "yes"
 if flag != true {
   answer = value
 }
-let combined: string? = null
+let conditional4 = "C"
 if flag {
-  combined = "AB"
-} else {
-  combined = "AC"
+  conditional4 = "B"
 }
+let combined = "A${conditional4}"
 say "${combined}${answer}"
 let n = 0
 function bump {

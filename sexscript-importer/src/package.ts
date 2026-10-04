@@ -7,6 +7,7 @@ import {
   lowerParsedFile,
   packageFunctionNames,
   packageGlobalTypes,
+  packageFunctionResults,
   packageMapUses,
   packageResultUses,
   packageStableNames,
@@ -83,10 +84,12 @@ export function lowerPackage(
     directoryFiles.set(directory, [...(directoryFiles.get(directory) ?? []), file.sourceName]);
   }
   // Map uses are shared within a composition group, like function names and field types.
-  const mapUses = files.map((_, index) => packageMapUses(groups[index]!));
+  const functionResults = files.map((_, index) => packageFunctionResults(groups[index]!));
+  const mapUses = files.map((_, index) => packageMapUses(groups[index]!, functionResults[index]!));
   const lowered = files.map((file, index) =>
     lowerParsedFile(file, {
       mapUses: mapUses[index]!,
+      functionResults: functionResults[index]!,
       helperRegistry,
       mixinModules,
       packageFunctions: packageFunctionNames(groups[index]!),

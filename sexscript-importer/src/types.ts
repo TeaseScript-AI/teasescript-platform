@@ -31,6 +31,8 @@ export interface TypeEnvironment {
   localFunctions?: ReadonlySet<string>;
   /** Names assigned exactly once (their declaration), whose value no later side effect can change. */
   singleAssignment?: ReadonlySet<string>;
+  /** Union of the values each local function (a closure in a variable) returns. */
+  functionResults?: ReadonlyMap<string, ValueType>;
 }
 
 /** True when every possible value has one of the `allowed` types. */
@@ -177,6 +179,13 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   if (BOOLEAN_OPERATORS.has(operator)) return BOOLEAN;
   if (ARITHMETIC_OPERATORS.has(operator)) return NUMBER;
   if (operator === "=") return inferType(asNode(node.right), environment);
+  if (operator === "&" || operator === "|" || operator === "^") {
+    // Groovy's & | ^ are logical on booleans and bitwise on numbers.
+    const left = inferType(asNode(node.left), environment);
+    const right = inferType(asNode(node.right), environment);
+    if (onlyOf(left, BOOLEAN) && onlyOf(right, BOOLEAN | NULL)) return BOOLEAN;
+    return onlyOf(left, NUMBER) && onlyOf(right, NUMBER) ? NUMBER : UNKNOWN;
+  }
   if (operator !== "+") return UNKNOWN;
   const left = inferType(asNode(node.left), environment);
   const right = inferType(asNode(node.right), environment);
@@ -220,7 +229,8 @@ function methodCallType(node: AstNode, environment: TypeEnvironment): ValueType 
   const name = constantString(node.method);
   if (name === null) return UNKNOWN;
   const receiver = variableName(node.object);
-  if (node.implicitThis === true && environment.localFunctions?.has(name) === true) return UNKNOWN;
+  if (node.implicitThis === true && environment.localFunctions?.has(name) === true)
+    return environment.functionResults?.get(name) ?? UNKNOWN;
   if (node.implicitThis === true || receiver === "main") {
     return SEXSCRIPT_RESULT_TYPES.get(name) ?? UNKNOWN;
   }
@@ -237,24 +247,36 @@ export function inferVariableTypes(
   body: AstNode,
   parameters: readonly string[] = [],
   localFunctionNames: Iterable<string> = [],
+  /** Results of functions defined elsewhere in the package (packageFunctionResults). */
+  knownResults: ReadonlyMap<string, ValueType> = new Map(),
 ): TypeEnvironment {
   const assignments: Array<{ name: string; type: (environment: TypeEnvironment) => ValueType }> =
     [];
   // Incoming parameter values are unknown; later assignments do not describe them.
   const unknownNames = new Set<string>(parameters);
   const localFunctions = new Set<string>(localFunctionNames);
+  // The values each closure kept in a variable returns, which calls of it produce.
+  const returns: Array<{ name: string; values: AstNode[] }> = [];
   walkAst(body, (node) => {
     collectAssignments(node, assignments, unknownNames);
-    if (node.kind === "declaration" && asNode(node.right)?.kind === "closure") {
+    const closure = node.kind === "declaration" ? asNode(node.right) : null;
+    if (closure?.kind === "closure") {
       const name = variableName(node.left);
-      if (name !== null) localFunctions.add(name);
+      if (name !== null) {
+        localFunctions.add(name);
+        returns.push({ name, values: closureReturnValues(closure) });
+      }
     }
   });
 
   const variables = new Map<string, ValueType>();
   for (const { name } of assignments) variables.set(name, 0);
   for (const name of unknownNames) variables.set(name, UNKNOWN);
-  const environment: TypeEnvironment = { variables, localFunctions };
+  // A function defined here gets its result from its own returns; others keep the package's.
+  const functionResults = new Map<string, ValueType>(
+    [...knownResults].filter(([name]) => !returns.some((item) => item.name === name)),
+  );
+  const environment: TypeEnvironment = { variables, localFunctions, functionResults };
   for (let changed = true; changed;) {
     changed = false;
     for (const assignment of assignments) {
@@ -265,8 +287,17 @@ export function inferVariableTypes(
         changed = true;
       }
     }
+    for (const { name, values } of returns) {
+      const current = functionResults.get(name) ?? 0;
+      const next = values.reduce((type, value) => type | inferType(value, environment), current);
+      if (next !== current) {
+        functionResults.set(name, next);
+        changed = true;
+      }
+    }
   }
   for (const [name, type] of variables) if (type === 0) variables.set(name, UNKNOWN);
+  for (const [name, type] of functionResults) if (type === 0) functionResults.set(name, UNKNOWN);
   const assignmentCounts = new Map<string, number>();
   for (const { name } of assignments)
     assignmentCounts.set(name, (assignmentCounts.get(name) ?? 0) + 1);
@@ -279,8 +310,50 @@ export function inferVariableTypes(
     variables,
     localFunctions,
     singleAssignment,
+    functionResults,
     listElements: inferListElements(body, environment),
   };
+}
+
+/**
+ * The values a closure returns: its `return` values (null for a bare `return`) and its last expression, or the last
+ * expressions of a final `if`; a closure that ends otherwise returns null. Nested closures return for themselves.
+ */
+function closureReturnValues(closure: AstNode): AstNode[] {
+  const nullValue: AstNode = { kind: "constant", span: null, value: null };
+  const values: AstNode[] = [];
+  const visit = (node: AstNode): void => {
+    if (node.kind === "closure") return;
+    if (node.kind === "return") values.push(asNode(node.value) ?? nullValue);
+    for (const child of Object.values(node)) {
+      for (const item of Array.isArray(child) ? child : [child]) if (isAstNode(item)) visit(item);
+    }
+  };
+  const last = (statement: AstNode | null): void => {
+    if (statement === null || statement.kind === "empty") {
+      values.push(nullValue);
+    } else if (statement.kind === "block") {
+      const statements = Array.isArray(statement.statements)
+        ? statement.statements.filter(isAstNode)
+        : [];
+      last(statements.at(-1) ?? null);
+    } else if (statement.kind === "expressionStatement") {
+      values.push(asNode(statement.expression) ?? nullValue);
+    } else if (statement.kind === "if") {
+      last(asNode(statement.then));
+      last(asNode(statement.else));
+    } else if (statement.kind !== "return") {
+      values.push(nullValue);
+    }
+  };
+  const body = asNode(closure.body);
+  if (body !== null) {
+    for (const child of Object.values(body)) {
+      for (const item of Array.isArray(child) ? child : [child]) if (isAstNode(item)) visit(item);
+    }
+  }
+  last(body);
+  return values;
 }
 
 /**
