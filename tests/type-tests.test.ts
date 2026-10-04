@@ -329,6 +329,27 @@ test("an assignment narrows the variable to the assigned value's type", () => {
     errors('let given = { flag: true }\nlet loaded = load "k"\nloaded = given\nloaded.flag = 1'),
     [["TSV041", "1"]],
   );
+  // What a test guarantees does not depend on a variable that widens later: a whole number stays whole there.
+  for (const guard of [
+    "if v is integer {\n    x = v\n}",
+    "if p is integer[] {\n    x = p.first\n}",
+  ])
+    assert.deepEqual(
+      errors(`let v = 0\nlet p = [v]\nlet x = 0\n${guard}\nv = 0.5\nlet k: integer = x`),
+      [],
+      guard,
+    );
+  assert.deepEqual(
+    errors("let v = 0\nlet x = 0\nif v is number {\n    x = v\n}\nv = 0.5\nlet k: integer = x"),
+    [["TSV041", "x"]],
+  );
+  // Relaxing the narrowing of an object keeps the object, so a later read is still checked.
+  assert.deepEqual(
+    errors(
+      'let names = ["a", "b"]\nlet p = { xs: [1.5] }\nif p is object {\n    p.xs.add(1.5)\n}\nsay names[p.xs.last]',
+    ),
+    [["TSV043", "p.xs.last"]],
+  );
 });
 
 test("a type test continues after 'is', and a type inside parentheses continues before '|' or '[]'", () => {

@@ -822,14 +822,36 @@ function* memberIntersectionTask(left: StaticType, right: StaticType): CompileTa
   // A value of unknown type, or a place no value decided yet, may hold anything that passes.
   if (left.kind === "unknown" || left.kind === "open") return copyType(right);
   if (right.kind === "unknown" || right.kind === "open") return left;
-  if (includes(right, left)) return left;
+  if (includes(right, left)) return yield* compileChild(guardedTask(left, right));
   if (includes(left, right)) return right;
   if ((left.kind === "list" || left.kind === "set") && right.kind === left.kind) {
     // An empty collection passes a test of any element type, so collections always share at least that one.
     const element = yield* compileChild(intersectionTask(left.element, right.element));
     return { kind: left.kind, element };
   }
+  // Two objects of known properties overlap: the value is the object it is.
+  if (left.kind === "object" && right.kind === "object") return left;
   return NEVER_TYPE;
+}
+
+/**
+ * A value that passed a test, with its numbers deriving from nothing where the test admits only whole numbers: there
+ * the test, not what the value derives from, keeps it whole, so a later widening does not reach it (ADR 0021 rule 1.2).
+ */
+function* guardedTask(value: StaticType, test: StaticType): CompileTask<StaticType> {
+  const kept = resolved(value);
+  const passed = resolved(test);
+  if (passed.kind === "union") {
+    const member = passed.members.find((part) => includes(part, kept));
+    return member === undefined ? value : yield* compileChild(guardedTask(value, member));
+  }
+  if (kept.kind === "scalar")
+    return isScalar(passed, "integer") ? replacedOrigins(kept, undefined) : value;
+  if ((kept.kind === "list" || kept.kind === "set") && passed.kind === kept.kind) {
+    const element = yield* compileChild(guardedTask(kept.element, passed.element));
+    return element === kept.element ? value : { kind: kept.kind, element };
+  }
+  return value;
 }
 
 /**
