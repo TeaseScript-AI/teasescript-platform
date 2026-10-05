@@ -11,7 +11,7 @@ import {
   deserializeCheckpoint,
   serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
-import { run } from "../src/runtime/engine.js";
+import { run, type RuntimeRunOptions } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
@@ -93,22 +93,22 @@ class Session {
     this.run();
   }
 
-  run(): this {
+  run(options: RuntimeRunOptions = {}): this {
     this.#restore();
-    const result = run(this.plan, this.snapshot);
+    const result = run(this.plan, this.snapshot, {}, options);
     this.events.push(...result.events);
     this.snapshot = result.snapshot;
     this.#restore();
     return this;
   }
 
-  at(nowMs: number): this {
+  at(nowMs: number, options: RuntimeRunOptions = {}): this {
     this.#restore();
     const observed = observeTime(this.plan, this.snapshot, nowMs);
     assert.equal(observed.outcome.kind, "observed");
     this.events.push(...observed.events);
     this.snapshot = observed.snapshot;
-    return this.run();
+    return this.run(options);
   }
 
   /**
@@ -1411,7 +1411,7 @@ test("plateaued rounds terminate, a failed catch-up settles nothing further, and
 
   const failing = new Session(
     "let t = timer(duration: 1 ms, async: true, repeat: true) { return }\nt.repeatDuration = 1e-300 ms\nwait 2 ms\nexit",
-  ).at(1);
+  ).at(1, { instructionBudget: 1_000 });
   assert.equal(
     failing.snapshot.failure?.code,
     "TSR037",

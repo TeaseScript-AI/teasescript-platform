@@ -1086,8 +1086,9 @@ choices are unrelated to resource capacity.
 A configured instruction budget must be a positive JavaScript safe integer. Omitting it uses the current product default
 tracked in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md). Exhaustion fails deterministically with structured runtime error
 `TSR037` instead of hanging and leaves the returned snapshot failed rather than resumable through a later `run(...)`.
-Fresh snapshot creation validates the plan, serializable globals, script storage, call-depth limit, and RNG seed before
-returning state.
+The failure points at the innermost loop of the running call when execution runs inside one, and otherwise, as while a
+waiting session catches up timer blocks, at the next instruction. Fresh snapshot creation validates the plan,
+serializable globals, script storage, call-depth limit, and RNG seed before returning state.
 
 Live externally supplied instruction plans, runtime snapshots, globals, script storage, and serializable runtime values are captured
 into stable plain-data graphs before detailed validation, freezing, state construction, execution, event emission, or

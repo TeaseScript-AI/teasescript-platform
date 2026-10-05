@@ -60,6 +60,73 @@ test("resume equivalence preserves structured control flow and lexical scope", (
   );
 });
 
+test("resume equivalence preserves collections changed in place inside a loop", () => {
+  const result = assertRuntimeResumeEquivalent(
+    [
+      "function dynamic(value) {",
+      "    return value",
+      "}",
+      "let grow = [0]",
+      "let marks = set[0]",
+      "let state = { rows: [[0], [0]], picks: [1, 0, 1] }",
+      "let taken = []",
+      "for step in 1..=3 {",
+      "    grow.add(step)",
+      "    grow[0] = step",
+      "    marks.add(step)",
+      "    taken.add(grow)",
+      // The receiver is prepared before the call, and its index changes the root it is prepared from.
+      "    state.rows[state.picks.removeFirst()].add(dynamic(step))",
+      "}",
+      "say grow",
+      "say marks.toList()",
+      "say state",
+      "say taken",
+      "exit",
+    ].join("\n"),
+    { scenarioName: "in-place collection loop corpus" },
+  );
+
+  assert.ok(result.boundaries.some((snapshot) => snapshot.loopFrames.length > 0));
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    [
+      "[3, 1, 2, 3]",
+      "[0, 1, 2, 3]",
+      "{ rows: [[0, 2], [0, 1, 3]], picks: [] }",
+      "[[1, 1], [2, 1, 2], [3, 1, 2, 3]]",
+    ],
+  );
+});
+
+test("a prepared receiver whose index removes its ancestor keeps the value it selected", () => {
+  // The index empties `rows` after `rows[0]` was selected, so the change goes to the selected copy, not to `rows`.
+  for (const change of [
+    "rows[0][rows.removeFirst().length - 1].add(dynamic(7))",
+    "rows[0][rows.removeFirst().length - 1][0] = 7",
+  ]) {
+    const result = assertRuntimeResumeEquivalent(
+      [
+        "function dynamic(value) {",
+        "    return value",
+        "}",
+        "let rows = [[[0]]]",
+        change,
+        "say rows",
+        "exit",
+      ].join("\n"),
+      { scenarioName: change },
+    );
+
+    assert.equal(result.finalSnapshot.failure, null, change);
+    assert.deepEqual(
+      result.events.filter((event) => event.kind === "say").map((event) => event.text),
+      ["[]"],
+      change,
+    );
+  }
+});
+
 test("resume equivalence preserves deterministic random advancement", () => {
   const result = assertRuntimeResumeEquivalent(
     [

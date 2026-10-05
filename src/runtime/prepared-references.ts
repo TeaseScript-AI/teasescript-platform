@@ -68,17 +68,21 @@ const INTERNAL_REFERENCE_SPAN = createSourceSpan(
   INTERNAL_REFERENCE_POSITION,
 );
 
+/** The stored form of a descriptor. It shares the descriptor's captured root, which storing it as a temporary copies. */
 export function serializePreparedReference(
   descriptor: PreparedReferenceDescriptor,
 ): SerializableRuntimeObject {
-  return createCapturedSerializableObject([
-    { name: "marker", value: "preparedReference" },
-    { name: "rootFrameId", value: descriptor.rootFrameId },
-    { name: "rootName", value: descriptor.rootName },
-    { name: "path", value: serializePreparedReferencePath(descriptor.path) },
-    { name: "capturedRoot", value: descriptor.capturedRoot },
-    { name: "detached", value: descriptor.detached },
-  ]);
+  return {
+    kind: "object",
+    properties: [
+      { name: "marker", value: "preparedReference" },
+      { name: "rootFrameId", value: descriptor.rootFrameId },
+      { name: "rootName", value: descriptor.rootName },
+      { name: "path", value: serializePreparedReferencePath(descriptor.path) },
+      { name: "capturedRoot", value: descriptor.capturedRoot },
+      { name: "detached", value: descriptor.detached },
+    ],
+  };
 }
 
 function serializePreparedReferencePath(
