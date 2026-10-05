@@ -6362,10 +6362,20 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
     return lowerCStyleFor(node, collectionNode, loopBody, context);
   }
   // A single statement as the body is a block of one statement.
-  const body =
+  const block =
     loopBody !== null && loopBody.kind !== "block" && loopBody.kind !== "empty"
       ? { kind: "block", span: loopBody.span, statements: [loopBody] }
       : loopBody;
+  // Groovy iterated a map's entries; a dict loop visits its keys, so `entry.key` is the key and `entry.value` a lookup.
+  const entries =
+    block !== null &&
+    variable !== null &&
+    collectionNode !== null &&
+    variableName(collectionNode) !== null &&
+    isDictionary(collectionNode, context)
+      ? withEntryReads(block, variable, collectionNode)
+      : null;
+  const body = entries ?? block;
   // A loop that removes its element from the collection proves it a list (elementRemovals).
   let removes = false;
   if (body !== null) walkAst(body, (child) => (removes ||= context.elementRemovals.has(child)));
@@ -6386,11 +6396,13 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
   }
   // A loop over a dict's keys reads each key while it is present (#536).
   const keysOf =
-    collectionNode?.kind === "methodCall" &&
-    constantString(collectionNode.method) === "keySet" &&
-    nodeArray(asNode(collectionNode.arguments)?.items).length === 0
-      ? asNode(collectionNode.object)
-      : null;
+    entries !== null
+      ? collectionNode
+      : collectionNode?.kind === "methodCall" &&
+          constantString(collectionNode.method) === "keySet" &&
+          nodeArray(asNode(collectionNode.arguments)?.items).length === 0
+        ? asNode(collectionNode.object)
+        : null;
   const dict =
     keysOf !== null && isDictionary(keysOf, context) ? bindingKey(keysOf, context.bindings) : null;
   const loopId = bindingSpanId(node);
@@ -6400,6 +6412,54 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
   const loweredBody = withPresentKeys(facts, body, context, () => lowerBlock(body, context));
   return [{ kind: "for", variable, collection, body: loweredBody, span: node.span }];
 }
+
+/**
+ * A map loop's body that reads the entry only as `entry.key` and `entry.value` (also `getKey()` and `getValue()`),
+ * rewritten to read the key, which a dict loop visits, and `map[key]`; null when the body uses the entry otherwise.
+ */
+function withEntryReads(body: AstNode, variable: string, map: AstNode): AstNode | null {
+  let other = false;
+  const key = (span: SourceSpan | null | undefined): AstNode => ({
+    kind: "variable",
+    span: span ?? null,
+    name: variable,
+    type: "java.lang.Object",
+  });
+  const rewrite = (node: AstNode): AstNode => {
+    const member =
+      node.kind === "property"
+        ? constantString(node.property)
+        : node.kind === "methodCall" && nodeArray(asNode(node.arguments)?.items).length === 0
+          ? ENTRY_GETTERS.get(constantString(node.method) ?? "")
+          : undefined;
+    if (variableName(asNode(node.object)) === variable && (member === "key" || member === "value"))
+      return member === "key"
+        ? key(node.span)
+        : {
+            kind: "binary",
+            span: node.span,
+            operator: "[",
+            left: structuredClone(map),
+            right: key(node.span),
+          };
+    if (variableName(node) === variable) other = true;
+    const result: AstNode = { ...node };
+    for (const [name, child] of Object.entries(node)) {
+      if (name === "span") continue;
+      if (isAstNode(child)) result[name] = rewrite(child);
+      else if (Array.isArray(child))
+        result[name] = child.map((item: unknown) => (isAstNode(item) ? rewrite(item) : item));
+    }
+    return result;
+  };
+  const rewritten = rewrite(body);
+  return other ? null : rewritten;
+}
+
+const ENTRY_GETTERS = new Map([
+  ["getKey", "key"],
+  ["getValue", "value"],
+]);
 
 /**
  * A collection a loop iterates. Groovy iterated a range up to the whole number at or below a fractional upper bound,
