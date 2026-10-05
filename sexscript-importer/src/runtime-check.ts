@@ -74,6 +74,8 @@ export type TeaseProjectRunner = (
   options?: {
     maxSteps?: number;
     images?: ReadonlyArray<{ path: string; keywords: readonly string[] }>;
+    /** The storage the run starts with and leaves its saved values in; empty by default. */
+    storage?: Map<string, RuntimeValue>;
   },
 ) => ProjectRunResult;
 
@@ -187,7 +189,7 @@ export async function loadRepositoryProjectRunner(): Promise<TeaseProjectRunner>
           options.maxSteps ?? 2000,
           new Map(),
           { nowMs: 0 },
-          new Map(),
+          options.storage ?? new Map(),
         );
   };
 }
