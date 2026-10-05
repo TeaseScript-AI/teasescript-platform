@@ -22,7 +22,7 @@ import {
   type TeaseProjectCompiler,
 } from "../src/compile-check.ts";
 import { emitTease } from "../src/emit-tease.ts";
-import type { MigrationProgram } from "../src/ir.ts";
+import type { IrExpression, IrStatement, MigrationProgram } from "../src/ir.ts";
 import { lowerPackage, lowerSelfContainedPackage, type PackageOptions } from "../src/package.ts";
 import { helperStatements } from "../src/helpers.ts";
 import { imageCatalog, pathTag } from "../src/image-tags.ts";
@@ -1117,6 +1117,69 @@ test(
       { status: run.status, failure: run.failure },
       { status: "halted", failure: null },
     );
+  },
+);
+
+// Text with line breaks is written as a block string with the same value (V30 §8), also with interpolations and in a
+// nested block; text the block form would change or hide stays single-line.
+test(
+  "writes text with line breaks as block strings with the same value",
+  { skip: "reason" in runnerResult ? runnerResult.reason : false },
+  () => {
+    if (!("runner" in runnerResult)) return;
+    const values = [
+      'Hello!\n\nThe door "opens".\n',
+      "\nstarts with a break",
+      "line one\n  indented two\n\tthird",
+      'quotes """ and """" inside\n"next"',
+      "back\\slash, tab\t, ${literal}\r\nend",
+      "  every line\n  indented",
+      "trailing space \nnext",
+      "spaces only\n   \nnext",
+      "\n\n",
+      "single line",
+    ];
+    const literal = (value: string): IrExpression => ({ kind: "literal", value });
+    const saves: IrStatement[] = values.map((value, index) => ({
+      kind: "save",
+      key: literal(`k${index}`),
+      value: literal(value),
+      span: null,
+    }));
+    const template: IrExpression = {
+      kind: "template",
+      parts: [{ text: "Dear " }, { value: literal("An\nn") }, { text: ",\n  kneel." }],
+    };
+    const program: MigrationProgram = {
+      sourceName: "blocks.tease",
+      metadata: null,
+      statements: [
+        {
+          kind: "if",
+          condition: { kind: "literal", value: true },
+          then: [...saves, { kind: "save", key: literal("t"), value: template, span: null }],
+          else: [],
+          span: null,
+        },
+        { kind: "exit", span: null },
+      ],
+      diagnostics: [],
+    };
+    const source = emitTease(program);
+    // Five texts and the template become blocks; the interpolated text stays single-line inside its block.
+    assert.equal(source.match(/"""\n/gu)?.length, 6);
+    assert.match(source, /^ {4}Dear \$\{"An\\nn"\},$/mu);
+    assert.match(source, /^ {2}""" as "t"$/mu);
+    const storage = new Map();
+    const run = runnerResult.runner(source, {}, { storage });
+    assert.deepEqual(
+      { status: run.status, failure: run.failure },
+      { status: "halted", failure: null },
+    );
+    assert.deepEqual(Object.fromEntries(storage), {
+      ...Object.fromEntries(values.map((value, index) => [`k${index}`, value])),
+      t: "Dear An\nn,\n  kneel.",
+    });
   },
 );
 

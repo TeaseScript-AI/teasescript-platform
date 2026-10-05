@@ -376,7 +376,8 @@ test("keeps reads of files that any write of the package may change", { skip }, 
   );
   assert.match(
     stored,
-    /^let lines = sexscriptLegacyTextLines\(\(load "file:quiz\.txt", default: "first\\n"\)\)$/mu,
+    // Text with a line break is a block string (V30 §8), except inside an interpolation.
+    /^let lines = sexscriptLegacyTextLines\(\(load "file:quiz\.txt", default: """\n {2}first\n\n"""\)\)$/mu,
   );
 });
 

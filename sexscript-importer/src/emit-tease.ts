@@ -61,7 +61,23 @@ function emitStatements(statements: IrStatement[], lines: string[], depth: numbe
   for (const statement of statements) emitStatement(statement, lines, depth);
 }
 
+/**
+ * The indentation of the statement being written, which a block string's closing delimiter takes (blockString); null
+ * outside statements and inside an interpolation, where text stays single-line.
+ */
+let blockPad: string | null = null;
+
 function emitStatement(statement: IrStatement, lines: string[], depth: number): void {
+  const outer = blockPad;
+  blockPad = "  ".repeat(depth);
+  try {
+    emitStatementAt(statement, lines, depth);
+  } finally {
+    blockPad = outer;
+  }
+}
+
+function emitStatementAt(statement: IrStatement, lines: string[], depth: number): void {
   const pad = "  ".repeat(depth);
   switch (statement.kind) {
     case "say":
@@ -252,13 +268,15 @@ export function emitExpression(expression: IrExpression): string {
   switch (expression.kind) {
     case "literal":
       return typeof expression.value === "string"
-        ? `"${escapeStringText(expression.value)}"`
+        ? (blockString([{ text: expression.value }]) ?? `"${escapeStringText(expression.value)}"`)
         : String(expression.value);
     case "duration":
       return `${expression.value} ${expression.unit}`;
     case "template": {
+      const block = blockString(expression.parts);
+      if (block !== null) return block;
       const parts = expression.parts.map((part) =>
-        "text" in part ? escapeStringText(part.text) : `\${${emitExpression(part.value)}}`,
+        "text" in part ? escapeStringText(part.text) : `\${${interpolated(part.value)}}`,
       );
       return `"${parts.join("")}"`;
     }
@@ -361,6 +379,79 @@ function escapeStringText(text: string): string {
     .replace(/\r/gu, "\\r")
     .replace(/\t/gu, "\\t")
     .replace(/\$\{/gu, "\\${");
+}
+
+/** An interpolated value, written single-line: a string inside `${...}` may not span lines (V30 §8). */
+function interpolated(value: IrExpression): string {
+  const outer = blockPad;
+  blockPad = null;
+  try {
+    return emitExpression(value);
+  } finally {
+    blockPad = outer;
+  }
+}
+
+type TextPart = { text: string } | { value: IrExpression };
+
+/**
+ * Text with line breaks as a block string (V30 §8): `"""` and a line break, each line one level deeper than the
+ * statement, and the closing `"""` on its own line at the statement's indentation, so dedent removes exactly the added
+ * indentation and the value stays the same. Null for text without a line break, outside a statement, and where the
+ * block form would change or hide the value: no line with text, a line of only whitespace, a line that ends in a
+ * space or tab (which editors strip), or text lines that all start with a space or tab (which dedent would remove).
+ */
+function blockString(parts: readonly TextPart[]): string | null {
+  if (blockPad === null || !parts.some((part) => "text" in part && part.text.includes("\n")))
+    return null;
+  const lines: TextPart[][] = [[]];
+  for (const part of parts) {
+    if (!("text" in part)) {
+      lines.at(-1)!.push(part);
+      continue;
+    }
+    part.text.split("\n").forEach((piece, index) => {
+      if (index > 0) lines.push([]);
+      const line = lines.at(-1)!;
+      const last = line.at(-1);
+      if (last !== undefined && "text" in last) line[line.length - 1] = { text: last.text + piece };
+      else if (piece !== "") line.push({ text: piece });
+    });
+  }
+  // An interpolation counts as text that is no space.
+  const shapes = lines.map((line) =>
+    line.map((segment) => ("text" in segment ? segment.text : "x")).join(""),
+  );
+  const filled = shapes.filter((shape) => shape !== "");
+  if (
+    filled.length === 0 ||
+    filled.some((shape) => /^\s+$/u.test(shape) || /[ \t]$/u.test(shape)) ||
+    filled.every((shape) => /^[ \t]/u.test(shape))
+  )
+    return null;
+  const pad = blockPad;
+  const content = lines.map((line, index) =>
+    shapes[index] === ""
+      ? ""
+      : `${pad}  ${line
+          .map((segment) =>
+            "text" in segment
+              ? escapeBlockText(segment.text)
+              : `\${${interpolated(segment.value)}}`,
+          )
+          .join("")}`,
+  );
+  return `"""\n${content.join("\n")}\n${pad}"""`;
+}
+
+/** Literal text inside a block string: the escapes of single-line text, except line breaks and lone quotes. */
+function escapeBlockText(text: string): string {
+  return text
+    .replace(/\\/gu, "\\\\")
+    .replace(/\r/gu, "\\r")
+    .replace(/\t/gu, "\\t")
+    .replace(/\$\{/gu, "\\${")
+    .replace(/"{3,}/gu, (quotes) => quotes.replace(/"/gu, '\\"'));
 }
 
 // TeaseScript precedence from V30 "Expression precedence and associativity", weakest first.
