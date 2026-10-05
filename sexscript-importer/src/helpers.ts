@@ -62,6 +62,7 @@ export function withActionDispatcher(program: MigrationProgram): MigrationProgra
 export type HelperName =
   | "abs"
   | "array"
+  | "askBooleans"
   | "backgroundSounds"
   | "concat"
   | "indexOf"
@@ -122,6 +123,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "max",
   "min",
   "abs",
+  "askBooleans",
 ];
 
 const v = (name: string): IrExpression => ({ kind: "variable", name });
@@ -292,6 +294,65 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             }),
           ]),
           ret(lit(0)),
+        ],
+      ),
+  },
+  // Workaround for askBooleans(), which main does not implement yet (workarounds.ts): one yes/no choice per item, the
+  // preset marked in its button, and a confirmation that can start over.
+  askBooleans: {
+    name: "sexscriptLegacyAskBooleans",
+    build: () =>
+      fn(
+        "sexscriptLegacyAskBooleans",
+        ["message", "texts", "defaults"],
+        [
+          letS("answers", { kind: "list", items: [] }),
+          letS("confirmed", lit(false)),
+          {
+            kind: "while",
+            condition: { kind: "unary", operator: "not", value: v("confirmed") },
+            body: [
+              set(v("answers"), { kind: "list", items: [] }),
+              { kind: "say", value: v("message"), span: null },
+              letS("index", lit(0)),
+              forS("text", v("texts"), [
+                letS("yes", lit("Yes")),
+                letS("no", lit("No (preset)")),
+                ifS(
+                  bin(
+                    "and",
+                    bin("<", v("index"), prop(v("defaults"), "length")),
+                    bin("==", at(v("defaults"), v("index")), lit(true)),
+                  ),
+                  [set(v("yes"), lit("Yes (preset)")), set(v("no"), lit("No"))],
+                ),
+                { kind: "say", value: v("text"), span: null },
+                add(
+                  "answers",
+                  bin(
+                    "==",
+                    { kind: "choice", options: [v("yes"), v("no")], labels: ["yes", "no"] },
+                    lit("yes"),
+                  ),
+                ),
+                set(v("index"), lit(1), "+="),
+              ]),
+              set(
+                v("confirmed"),
+                bin(
+                  "==",
+                  {
+                    kind: "choice",
+                    options: [lit("Confirm"), lit("Change answers")],
+                    labels: ["confirm", "change"],
+                  },
+                  lit("confirm"),
+                ),
+              ),
+            ],
+            span: null,
+          },
+          ret(v("answers")),
         ],
       ),
   },

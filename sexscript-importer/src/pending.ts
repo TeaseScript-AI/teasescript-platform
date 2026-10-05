@@ -3,6 +3,7 @@ import { emitTease } from "./emit-tease.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 import { proposalCapability, type ProposalId } from "./proposals.ts";
 import { isRecord } from "./ast.ts";
+import type { MediaFile } from "./workarounds.ts";
 
 /**
  * Accepted TeaseScript the importer emits although the current compiler does not implement it yet. The
@@ -14,6 +15,7 @@ const PENDING_CALLS = new Map<string, string>([
   ["askBoolean", "askBoolean()"],
   ["askBooleans", "askBooleans()"],
   ["openUrl", "openUrl()"],
+  ["chooseFile", "chooseFile()"],
 ]);
 
 /** Calls that only a proposed language change defines, by the proposal (see proposals.ts). */
@@ -286,11 +288,7 @@ function collectNames(value: unknown, names: Set<string>): void {
   }
 }
 
-/** An image of the package for proposed media tags: its path and the lower-case folder names that tag it. */
-export interface MediaFile {
-  path: string;
-  tags: string[];
-}
+export type { MediaFile } from "./workarounds.ts";
 
 /** Host stand-ins for the pending capabilities of a shimmed program, for smoke runs only; inputs answer in turn. */
 export function pendingHostFunctions(
@@ -324,6 +322,8 @@ export function pendingHostFunctions(
     ["askBoolean", () => next("askBoolean", [true, false])],
     ["askBooleans", (_, named) => named.defaults ?? emptyList],
     ["openUrl", () => null],
+    // As when the player cancels the file chooser.
+    ["chooseFile", () => null],
   ]);
   const result: Record<string, HostFunction> = {};
   for (const [shimName, operation] of shim.operations) {

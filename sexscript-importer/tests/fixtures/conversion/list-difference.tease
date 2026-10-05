@@ -29,4 +29,20 @@ rounds = rounds.difference([2])
 // NOTE SX_LIST_DIFFERENCE line 13: Groovy list - kept repeated elements of the list; difference() keeps each remaining element once (V30 §16).
 rounds = rounds.difference([1, 4])
 say "Rounds left: ${rounds.length}"
+// A loop's element removed from the collection it iterates makes the collection a list, also for a parameter.
+function pickOwned(itemKeys) {
+  for key in itemKeys {
+    // NOTE SX_LIST_DIFFERENCE line 18: Groovy list - kept repeated elements of the list; difference() keeps each remaining element once (V30 §16).
+    if (load key) != true {
+      itemKeys = itemKeys.difference([key])
+    }
+  }
+  // NOTE SX_LENGTH_RECEIVER line 20: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  if itemKeys.length > 0 {
+    return itemKeys.random
+  } else {
+    return null
+  }
+}
+say "Bring the ${pickOwned(["toys.paddle", "toys.crop"])}"
 exit

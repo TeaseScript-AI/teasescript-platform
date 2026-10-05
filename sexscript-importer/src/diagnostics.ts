@@ -26,7 +26,11 @@ export function rootDiagnostics(diagnostics: MigrationDiagnostic[]): MigrationDi
       withoutSpan.push(diagnostic);
       continue;
     }
-    const key = spanKey(diagnostic.span);
+    // Notes at one span all stay: each names a different difference, such as a workaround and its timing.
+    const key =
+      diagnostic.severity === "error"
+        ? spanKey(diagnostic.span)
+        : `${spanKey(diagnostic.span)} ${diagnostic.code}`;
     const current = exact.get(key);
     if (current === undefined || (isWrapper(current) && !isWrapper(diagnostic))) {
       exact.set(key, diagnostic);

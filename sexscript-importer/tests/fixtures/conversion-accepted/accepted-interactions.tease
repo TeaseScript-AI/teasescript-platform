@@ -1,3 +1,6 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
 say "Are you ready?"
 let ready = (choose yes: "Yes", no: "No") == "yes"
 say "Really?"
@@ -52,5 +55,15 @@ let slow = getTimestamp().toSeconds() - popupStart2
 let photo = takePhoto()
 if photo != null {
   showImage photo
+}
+// With the accepted forms selected, getBooleans asks every question in one form and getFile opens the file chooser.
+let kit = askBooleans(message: "Which toys do you have?", texts: ["Paddle", "Crop"], defaults: [true, false])
+if kit[1] == true {
+  say "Bring the crop"
+}
+// NOTE SX_FILE_TITLE line 31: getFile() titled its file chooser with this message; chooseFile() has no title.
+let picture = chooseFile()
+if picture == null {
+  say "No photo"
 }
 exit

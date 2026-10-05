@@ -10,6 +10,7 @@ import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrStatement, MigrationProgram } from "./ir.ts";
 import { lowerPackage } from "./package.ts";
 import type { ProposalId } from "./proposals.ts";
+import type { AcceptedForm } from "./workarounds.ts";
 import {
   pendingHostFunctions,
   shimPendingCapabilities,
@@ -69,7 +70,9 @@ export interface FeasibilityOptions {
   runner?: TeaseProjectRunner;
   /** Proposed language changes to emit in their working syntax; the shim makes them compile and run. */
   proposals?: ReadonlySet<ProposalId>;
-  /** The package's images, for smoke runs of proposed media tags. */
+  /** Accepted forms to emit instead of their workarounds; the shim makes them compile and run. */
+  accepted?: ReadonlySet<AcceptedForm>;
+  /** The package's images, which legacy image counts read at conversion time and proposed media tags at runtime. */
   media?: readonly MediaFile[];
 }
 
@@ -165,7 +168,11 @@ export function analyzeFeasibility(
     main,
     globals,
     paths,
-  } = lowerPackage(files, options.proposals === undefined ? {} : { proposals: options.proposals });
+  } = lowerPackage(files, {
+    ...(options.proposals === undefined ? {} : { proposals: options.proposals }),
+    ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
+    ...(options.media === undefined ? {} : { media: options.media }),
+  });
   const helpers = globals?.helpers ?? null;
   const isScriptBodyAt = (index: number): boolean =>
     files[index]!.root?.kind === "scriptBody" && packagePrograms[index]?.module === undefined;
@@ -497,7 +504,7 @@ function runPackageProject(
       Object.assign(hosts, pendingHostFunctions(shim, answers, media));
     hosts[ENTER] = ([path]: readonly RuntimeValue[]) => (visits.push(String(path)), null);
     hosts[BLOCKED] = ([target]: readonly RuntimeValue[]) => ((blocked = String(target)), null);
-    hosts[START] = () => !started && (started = true);
+    hosts[START] = () => (started ? "" : ((started = true), entry));
     const result = runner(files, hosts);
     const failure = blocked === null ? result.failure : null;
     // The announcing statement moved the generated file's lines down by one.
@@ -543,14 +550,18 @@ function runPackageProject(
       (left, right) =>
         Number(targets.has(left)) - Number(targets.has(right)) || left.localeCompare(right),
     );
+  // One project serves every isolated run: its main.tease transfers to the file the host names once.
+  const isolatedProject = project.map((file) =>
+    file.path === MAIN
+      ? {
+          path: MAIN,
+          source: `let start = ${START}()\nif start != "" {\n  goto script(start)\n}\n${stub(MAIN)}`,
+        }
+      : file,
+  );
   for (const path of unreached) {
     if (report.smokeRuns.some(({ visited }) => visited.includes(path))) continue;
-    const start = `if ${START}() {\n  goto ${JSON.stringify(path)}\n}\n${stub(MAIN)}`;
-    run(
-      project.map((file) => (file.path === MAIN ? { path: MAIN, source: start } : file)),
-      path,
-      true,
-    );
+    run(isolatedProject, path, true);
   }
 }
 

@@ -154,15 +154,23 @@ export async function loadRepositoryRunner(): Promise<TeaseRunner> {
 /** Compiles the files of a project into one plan and runs it from `main.tease`, transfers included. */
 export async function loadRepositoryProjectRunner(): Promise<TeaseProjectRunner> {
   const api = await loadRuntimeApi();
+  // Runs of the same files with the same host functions reuse the last plan.
+  let last: { files: readonly ProjectSource[]; builtins: string; compiled: RuntimeData } | null =
+    null;
   return (files, builtins, options = {}) => {
-    const compiled = api.call("compileProject", files, { builtins: Object.keys(builtins) });
+    const names = Object.keys(builtins).sort().join("\n");
+    const compiled =
+      last !== null && last.files === files && last.builtins === names
+        ? last.compiled
+        : api.call("compileProject", files, { builtins: Object.keys(builtins) });
+    last = { files, builtins: names, compiled };
     return !isRecord(compiled.plan)
       ? NOT_COMPILED
       : smokeRun(
           api,
           compiled.plan,
           builtins,
-          options.maxSteps ?? 5000,
+          options.maxSteps ?? 2000,
           new Map(),
           { nowMs: 0 },
           new Map(),

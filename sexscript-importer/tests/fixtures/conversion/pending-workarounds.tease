@@ -1,0 +1,53 @@
+function sexscriptLegacyAskBooleans(message, texts, defaults) {
+  let answers = []
+  let confirmed = false
+  while not confirmed {
+    answers = []
+    say message
+    let index = 0
+    for text in texts {
+      let yes = "Yes"
+      let no = "No (preset)"
+      if index < defaults.length and defaults[index] == true {
+        yes = "Yes (preset)"
+        no = "No"
+      }
+      say text
+      answers.add((choose yes: yes, no: no) == "yes")
+      index += 1
+    }
+    confirmed = (choose confirm: "Confirm", change: "Change answers") == "confirm"
+  }
+  return answers
+}
+// Accepted TeaseScript that main does not implement yet becomes a workaround in implemented TeaseScript.
+// getBooleans: one yes/no choice per item with the preset marked, then a confirmation that can start over.
+// NOTE SX_ASK_BOOLEANS_WORKAROUND line 3: Workaround for askBooleans(), which main does not implement yet: one yes/no choice per item, the preset marked, and a confirmation that can start over. Switch back to askBooleans(message:, texts:, defaults:) when it is implemented.
+let toys = sexscriptLegacyAskBooleans("Which toys do you have?", ["Paddle", "Crop"], [true, false])
+if toys[0] == true {
+  say "Fetch the paddle"
+}
+// showPopup: the message in the chat and an OK button, also where the legacy script timed the popup.
+// NOTE SX_POPUP_WORKAROUND line 6: Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.
+say "Time for a break"
+showButton "OK"
+// NOTE SX_POPUP_ELAPSED line 7: showPopup() returned the seconds until the player closed the popup; TeaseScript popups return nothing, so the time is measured with getTimestamp().toSeconds(), in whole seconds.
+// NOTE SX_POPUP_WORKAROUND line 7: Workaround for showPopup, which main does not implement yet: the message in the chat and an OK button. Switch back to showPopup when it is implemented.
+let popupStart = getTimestamp().toSeconds()
+say "Kneel until you close this"
+showButton "OK"
+let seconds = getTimestamp().toSeconds() - popupStart
+say "You knelt ${seconds} seconds"
+// useUrl: the link in the chat and a button to continue.
+// NOTE SX_OPEN_URL_WORKAROUND line 10: Workaround for openUrl(), which main does not implement yet: the link in the chat, which the player can open, and a button to continue. Switch back to openUrl() when it is implemented.
+say "Open this link: https://example.com/rules"
+showButton "Continue"
+// getFile: as if the player cancelled the file chooser.
+// NOTE SX_CHOOSE_FILE_WORKAROUND line 12: Workaround for chooseFile(), which main does not implement yet: the script continues as if the player cancelled the file chooser, with null. Switch back to chooseFile() when it is implemented.
+say "Pick a photo of yourself"
+say "(Choosing a file is not available here, so none was chosen.)"
+let photo = null
+if photo == null {
+  say "No photo, then"
+}
+exit

@@ -12,3 +12,11 @@ def rounds = [1, 2, 3, 4]
 rounds -= 2
 rounds = rounds - [1, 4]
 show("Rounds left: ${rounds.size()}")
+// A loop's element removed from the collection it iterates makes the collection a list, also for a parameter.
+def pickOwned = { itemKeys ->
+	for (key in itemKeys) {
+		if (!loadBoolean(key)) itemKeys -= key
+	}
+	return itemKeys.size() > 0 ? itemKeys[getRandom(itemKeys.size())] : null
+}
+show("Bring the ${pickOwned(["toys.paddle", "toys.crop"])}")
