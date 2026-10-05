@@ -2541,6 +2541,8 @@ class Parser {
     // `for key, value in dict`: the second name receives each entry's value.
     let valueVariable: Identifier | null = null;
     if (this.#match(TokenKind.Comma)) {
+      // A line may break after the comma (V30 §1).
+      this.#skipContinuationNewlines();
       if (!this.#checkDeclarationName()) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedIdentifier,

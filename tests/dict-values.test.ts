@@ -258,6 +258,11 @@ test("for key, value takes a dict, a text key, and the dict's value type, which 
     ["TSV041", "1"],
   ]);
   assert.deepEqual(codes("for key, value in [1, 2] {\n}\nexit"), [["TSV043", "[1, 2]"]]);
+  assert.deepEqual(diagnostics("for key, value in 3 {\n}\nexit"), [
+    ["TSV012", "A for-loop with a key and a value goes through a dict.", "3"],
+  ]);
+  // A line may break after the comma.
+  assert.deepEqual(says("for key,\n    value in dict{ a: 1 } {\n    say value\n}\nexit"), ["1"]);
   assert.deepEqual(codes("for key, key in dict{ a: 1 } {\n}\nexit"), [["TSV001", "key"]]);
   // The header error comes first; the unparsed block then recovers as on main.
   assert.equal(codes("for key, in dict{ a: 1 } {\n}\nexit")[0]?.[0], "TSP013");
