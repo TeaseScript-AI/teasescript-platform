@@ -114,6 +114,7 @@ say "You report at ${getTime().formatTime()}."
 // NOTE SX_FILE_PHOTO line 44: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so the title is shown and takePhoto() takes the photo, or gives null as a cancelled chooser did.
 say "Upload the picture?"
 let proof = takePhoto()
+// NOTE SX_FILE_DELETE line 45: delete() removed this file from the player's computer; a package keeps no files, so the reference stored under its path, such as a photo copied there, is cleared.
 delete "sexscript.image.images/proof/photo.jpg"
 // NOTE SX_PHOTO_COPY line 46: Legacy code copied this photo to images/proof/photo.jpg, which a package cannot write; the photo's reference is saved for that path, and showing the path shows the photo.
 save proof as "sexscript.image.images/proof/photo.jpg"

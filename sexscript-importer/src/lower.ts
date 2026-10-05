@@ -4871,6 +4871,52 @@ function lowerCallStatement(
       },
     ];
   }
+  // Deleting another file clears what the package keeps under its path: the reference of a photo copied there
+  // (photoCopy); making a folder does nothing in a package (owner decision).
+  if (
+    call !== null &&
+    (call.name === "delete" || call.name === "mkdir" || call.name === "mkdirs") &&
+    call.arguments.length === 0 &&
+    receiver !== null &&
+    isFileConstructor(receiver)
+  ) {
+    const pathNode = nodeArray(asNode(receiver.arguments)?.items)[0]!;
+    if (call.name !== "delete") {
+      addDiagnostic(
+        context,
+        "SX_FOLDER_CREATE",
+        "warning",
+        `${call.name}() made a folder on the player's computer; a package has no folders to make, so it is dropped.`,
+        span,
+      );
+      return [];
+    }
+    const path = lowerExpression(pathNode, context);
+    if (path === null) return [];
+    addDiagnostic(
+      context,
+      "SX_FILE_DELETE",
+      "warning",
+      "delete() removed this file from the player's computer; a package keeps no files, so the reference stored under its path, such as a photo copied there, is cleared.",
+      span,
+    );
+    return [
+      {
+        kind: "delete",
+        key: templateOrLiteral([
+          { text: SENT_IMAGE_PREFIX },
+          ...(path.kind === "template"
+            ? path.parts
+            : [
+                path.kind === "literal" && typeof path.value === "string"
+                  ? { text: path.value }
+                  : { value: path },
+              ]),
+        ]),
+        span,
+      },
+    ];
+  }
   const recordName = receiver === null ? null : variableName(receiver);
   if (
     call?.name === "clear" &&

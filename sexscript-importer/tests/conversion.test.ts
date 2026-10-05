@@ -1248,7 +1248,7 @@ test(
       const script = readFileSync(path.join(fixture, "scripts", "demo.groovy"), "utf8")
         .replace(
           "\tint rounds = 2",
-          '\tdef neverCalled = { -> new File("debug.txt").delete() }\n\tint rounds = 2',
+          '\tdef neverCalled = { -> new File("debug.txt").lastModified() }\n\tint rounds = 2',
         )
         .replace("\t\tgreet()", "\t\tgreet()\n\t\tlive()");
       writeFileSync(path.join(scripts, "demo.groovy"), script);
@@ -1260,13 +1260,13 @@ test(
       }
       writeFileSync(
         path.join(scripts, "demo", "broken.groovy"),
-        '{ toy ->\n\tnew File("cache.txt").delete()\n\treturn null\n}\n',
+        '{ toy ->\n\tnew File("cache.txt").lastModified()\n\treturn null\n}\n',
       );
       // Two modules with the same code at the same lines: only the one nothing calls gets notes.
       for (const method of ["idle", "live"]) {
         writeFileSync(
           path.join(scripts, "demo", `${method}.groovy`),
-          `{ toy ->\n\ttoy.metaClass.${method} = {\n\t\tnew File("cache.txt").delete()\n\t}\n\treturn null\n}\n`,
+          `{ toy ->\n\ttoy.metaClass.${method} = {\n\t\tnew File("cache.txt").lastModified()\n\t}\n\treturn null\n}\n`,
         );
       }
       const files = await Promise.all(
