@@ -4,16 +4,17 @@ import { isRecord } from "./ast.ts";
 /**
  * Headless branch explorer: plays a compiled TeaseScript project in the real runtime through every branch it can
  * reach within a budget, without the Player. Each pending action is a branch point; its options are the buttons and
- * choice options, typed answers from fixed candidates per field type, permanent buttons, and letting time pass to the
- * next deadline. Media loads succeed with one second per pass, `takePhoto` finds no camera, and `askImage` gets one
- * stored image. When letting time pass is the only thing the player can do, the explorer does it as part of the
- * previous step (at most {@link MAX_AUTO_WAITS} times in a row).
+ * choice options, typed answers ({@link interactionOptions}), thinking before a timed button, permanent buttons, and
+ * letting time pass to the next deadline. Media loads succeed with one second per pass, `takePhoto` finds no camera,
+ * and `askImage` gets one stored image. When letting time pass is the only thing the player can do, the explorer does
+ * it as part of the previous step (at most {@link MAX_AUTO_WAITS} times in a row).
  *
  * Execution is deterministic: a state is reproduced by the seed and its input list from the start ({@link replay}).
  *
  * - Coverage: instructions are executed one by one with `executeInstruction`, so every executed instruction is
- *   recorded; a step that runs longer than {@link STEP_CAP} instructions finishes with `run` and the rest of the
- *   product's instruction budget, which keeps `TSR037` where the Player has it.
+ *   recorded; once {@link TRACE_PATIENCE} instructions in a row were all reached before, the step finishes with `run`
+ *   and the rest of the product's instruction budget, which keeps `TSR037` where the Player has it. Every operation
+ *   copies and checks the whole snapshot, so recording is what limits the speed on large packages.
  * - States are deduplicated by {@link stateKeys}: a hash of the snapshot without what a script cannot observe.
  * - Search order: states whose step reached new instructions first, then states that differ from every explored one
  *   in more than clock, random state, and settled handles (their loop key), then the rest, least repeated first.
@@ -54,7 +55,8 @@ export async function loadEngine(): Promise<Engine> {
 /** One input of a path from the start; `label` fields only explain the input to a reader. */
 export type ExplorerInput =
   | { readonly kind: "option"; readonly index: number; readonly label: string }
-  | { readonly kind: "button"; readonly label: string }
+  /** `afterMs`: the player first thinks that long, for a button whose result is the time it took. */
+  | { readonly kind: "button"; readonly label: string; readonly afterMs?: number }
   | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "image" }
   | { readonly kind: "wait"; readonly untilMs: number }
@@ -68,10 +70,17 @@ const MEDIA_PASS_MS = 1000;
 const EXPLORER_IMAGE = "explorer-image";
 /** The product's instruction budget per `run` (the runtime's default). */
 const INSTRUCTION_BUDGET = 1_000_000;
-/** Instructions one step executes one by one, for coverage, before it finishes with `run`. */
-const STEP_CAP = 5000;
+/**
+ * Instructions a step executes one by one, for coverage, without reaching one for the first time, before it finishes
+ * with `run`: a long loop over known code is not recorded again instruction by instruction.
+ */
+const TRACE_PATIENCE = 200;
+/** How long the player thinks before pressing a timed button without a compared constant nearby. */
+const THINK_MS = 60_000;
 /** Times in a row the explorer lets time pass when nothing else can happen, before it records a state. */
 const MAX_AUTO_WAITS = 100;
+/** Automatic operations of one step in all (waits, camera answers, media loads), before it records a state. */
+const MAX_AUTO_OPERATIONS = 1000;
 /** Said texts kept per step and per text, for trap samples and replay transcripts. */
 const KEPT_TEXTS = 3;
 const TEXT_LENGTH = 120;
@@ -113,14 +122,16 @@ export class Session {
   readonly visited: Uint8Array;
   /** Per conditional instruction: 1 when it continued with the next instruction, 2 when it went to its target. */
   readonly branches: Uint8Array;
-  /** Steps whose instructions were only partly recorded because they ran longer than {@link STEP_CAP}. */
-  truncatedSteps = 0;
+  /** Runs finished with `run`, without recording their instructions, after {@link TRACE_PATIENCE} known ones. */
+  untracedRuns = 0;
   readonly #engine: Engine;
   readonly #plan: Data;
   readonly #instructions: Data[];
   readonly #seed: number;
   /** Per instruction, the constants it compares with; computed at the first ask. */
   #literals: Literals[] | undefined;
+  /** Instructions the current step executed since it last reached one for the first time. */
+  #known = 0;
 
   constructor(engine: Engine, plan: Data, seed: number) {
     this.#engine = engine;
@@ -157,13 +168,25 @@ export class Session {
     if (snapshot.status !== "waiting") return [];
     const options: ExplorerInput[] = [];
     const action = record(snapshot.foregroundAction);
-    if (action.kind === "interaction")
-      options.push(...interactionOptions(record(action.ui), this.#nearbyLiterals(snapshot, action)));
+    const until = this.#nextDeadline(snapshot);
+    if (action.kind === "interaction") {
+      const ui = record(action.ui);
+      const literals = this.#nearbyLiterals(snapshot, action);
+      options.push(...interactionOptions(ui, literals));
+      // A button whose result the script keeps is timed: the player may also think first, as long as nothing else
+      // happens meanwhile.
+      if (ui.kind === "button" && action.expectedResult === "duration" && action.destinationTemporary !== null) {
+        const now = Number(snapshot.observedSessionTimeMs);
+        for (const afterMs of thinkTimes(literals)) {
+          if (until === null || now + afterMs < until)
+            options.push({ kind: "button", label: String(ui.buttonLabel), afterMs });
+        }
+      }
+    }
     for (const button of list(this.#engine.permanentButtonProjection(snapshot))) {
       if (button.busy !== true && typeof button.buttonId === "number")
         options.push({ kind: "press", buttonId: button.buttonId, label: String(button.text) });
     }
-    const until = this.#nextDeadline(snapshot);
     if (until !== null) options.push({ kind: "wait", untilMs: until });
     return options;
   }
@@ -187,11 +210,11 @@ export class Session {
   #input(snapshot: Data, input: ExplorerInput): Data | null {
     const plan = this.#plan;
     const action = record(snapshot.foregroundAction);
-    const completion = (payload: object) =>
+    const completion = (payload: object, from = snapshot) =>
       record(
         this.#engine.completeAction(
           plan,
-          snapshot,
+          from,
           {
             actionId: action.actionId,
             actionKind: "interaction",
@@ -208,10 +231,20 @@ export class Session {
         result = completion({ kind: "selectedOption", optionIndex: input.index });
         accepted = "completed";
         break;
-      case "button":
-        result = completion({ kind: "activate" });
+      case "button": {
+        let from = snapshot;
+        if (input.afterMs !== undefined) {
+          const until = Number(snapshot.observedSessionTimeMs) + input.afterMs;
+          const observed = record(
+            this.#engine.observeTime(plan, snapshot, until, this.#mediaReports(snapshot, until)),
+          );
+          if (record(observed.outcome).kind !== "observed" || !isRecord(observed.snapshot)) return null;
+          from = observed.snapshot;
+        }
+        result = completion({ kind: "activate" }, from);
         accepted = "completed";
         break;
+      }
       case "text":
         result = completion({ kind: "submittedText", submittedText: input.text });
         accepted = "completed";
@@ -240,11 +273,12 @@ export class Session {
     let newInstructions = 0;
     let snapshot = start;
     let waits = 0;
-    for (;;) {
+    this.#known = 0;
+    for (let operations = 0; ; operations += 1) {
       const executed = this.#execute(snapshot, texts);
       snapshot = executed.snapshot;
       newInstructions += executed.newInstructions;
-      if (snapshot.status !== "waiting") break;
+      if (snapshot.status !== "waiting" || operations >= MAX_AUTO_OPERATIONS) break;
       const action = record(snapshot.foregroundAction);
       if (action.kind === "capture") {
         const result = record(
@@ -296,8 +330,8 @@ export class Session {
         snapshot.status === "running" ||
         (snapshot.status === "waiting" && list(snapshot.pendingTimerHandlers).length > 0);
       if (!runnable) return { snapshot, newInstructions };
-      if (steps >= STEP_CAP) {
-        this.truncatedSteps += 1;
+      if (this.#known >= TRACE_PATIENCE) {
+        this.untracedRuns += 1;
         const result = record(
           this.#engine.run(this.#plan, snapshot, {}, { instructionBudget: INSTRUCTION_BUDGET - steps }),
         );
@@ -316,7 +350,8 @@ export class Session {
         if (this.visited[before] === 0) {
           this.visited[before] = 1;
           newInstructions += 1;
-        }
+          this.#known = 0;
+        } else this.#known += 1;
         this.#recordBranch(before, after);
       }
       snapshot = after;
@@ -466,6 +501,12 @@ function comparedLiterals(instruction: Data): Literals {
   };
   walk(instruction);
   return found;
+}
+
+/** Think times before a timed button: just past each compared constant, read as seconds, or {@link THINK_MS}. */
+function thinkTimes(literals: Literals): number[] {
+  const seconds = literals.numbers.filter((value) => value >= 1 && value <= 3600);
+  return seconds.length === 0 ? [THINK_MS] : [...new Set(seconds.map((value) => (Math.floor(value) + 1) * 1000))];
 }
 
 /**
@@ -677,8 +718,11 @@ export interface ExploreResult {
     states: number;
     transitions: number;
     expanded: number;
+    /** Inputs the runtime did not accept, such as an answer to an interaction inside a running timer block. */
     rejectedInputs: number;
-    truncatedSteps: number;
+    /** Inputs whose operation threw: a problem of the explorer, not of the package. */
+    engineErrors: { count: number; first: string | null };
+    untracedRuns: number;
     stoppedBy: "exhausted" | "budget" | "maxStates";
     elapsedMs: number;
   };
@@ -754,6 +798,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   let transitions = 0;
   let expanded = 0;
   let rejectedInputs = 0;
+  const engineErrors: ExploreResult["search"]["engineErrors"] = { count: 0, first: null };
 
   const add = (step: Step, parent: Node | null, input: ExplorerInput | null): number => {
     const keys = stateKeys(step.snapshot);
@@ -815,8 +860,9 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         step = session.apply(snapshot, input);
       } catch (error) {
         // The runtime refused data it was given (RuntimeDataError): a harness problem, not a script failure.
-        process.emitWarning(`Explorer input ${JSON.stringify(input)} failed: ${String(error)}`);
-        step = null;
+        engineErrors.count += 1;
+        engineErrors.first ??= `${JSON.stringify(input)}: ${String(error)}`;
+        continue;
       }
       if (step === null) {
         rejectedInputs += 1;
@@ -839,7 +885,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       transitions,
       expanded,
       rejectedInputs,
-      truncatedSteps: session.truncatedSteps,
+      engineErrors,
+      untracedRuns: session.untracedRuns,
       stoppedBy,
       elapsedMs: Math.round(performance.now() - started),
     },
@@ -1042,7 +1089,11 @@ function firstStatement(instructions: readonly Data[], index: number): number {
  */
 export function findTraps(nodes: readonly Node[], plan: Data): TrapReport[] {
   const groups = new Map<string, Node[]>();
-  for (const node of nodes) groups.set(node.loop, [...(groups.get(node.loop) ?? []), node]);
+  for (const node of nodes) {
+    const members = groups.get(node.loop);
+    if (members === undefined) groups.set(node.loop, [node]);
+    else members.push(node);
+  }
   const successors = new Map<string, Set<string>>();
   for (const [loop, members] of groups) {
     successors.set(
@@ -1057,8 +1108,13 @@ export function findTraps(nodes: readonly Node[], plan: Data): TrapReport[] {
     if (ended || !explored) escaping.add(loop);
   }
   const predecessors = new Map<string, string[]>();
-  for (const [loop, next] of successors)
-    for (const target of next) predecessors.set(target, [...(predecessors.get(target) ?? []), loop]);
+  for (const [loop, next] of successors) {
+    for (const target of next) {
+      const previous = predecessors.get(target);
+      if (previous === undefined) predecessors.set(target, [loop]);
+      else previous.push(loop);
+    }
+  }
   const queue = [...escaping];
   while (queue.length > 0) {
     for (const previous of predecessors.get(queue.pop()!) ?? []) {
@@ -1079,26 +1135,26 @@ export function findTraps(nodes: readonly Node[], plan: Data): TrapReport[] {
     .filter(({ component, index }) =>
       component.every((loop) => [...successors.get(loop)!].every((next) => componentOf.get(next) === index)),
     );
-  // Feeders: trapped groups outside a bottom component, attributed to the first bottom component they reach.
+  // Feeders: trapped groups outside the bottom components, each counted for the first one a backward search from the
+  // bottom components reaches it from.
   const feeders = new Map<number, number>();
-  for (const loop of trapped) {
-    const index = componentOf.get(loop)!;
-    if (bottom.some((entry) => entry.index === index)) continue;
-    const seen = new Set([loop]);
-    const pending = [loop];
-    let target: number | undefined;
-    while (pending.length > 0 && target === undefined) {
-      for (const next of successors.get(pending.pop()!)!) {
-        const component = componentOf.get(next)!;
-        if (bottom.some((entry) => entry.index === component)) target = component;
-        else if (!seen.has(next)) {
-          seen.add(next);
-          pending.push(next);
-        }
-      }
+  const owner = new Map<string, number>();
+  const pending: string[] = [];
+  for (const { component, index } of bottom) {
+    for (const loop of component) {
+      owner.set(loop, index);
+      pending.push(loop);
     }
-    if (target !== undefined)
-      feeders.set(target, (feeders.get(target) ?? 0) + groups.get(loop)!.length);
+  }
+  for (let next = 0; next < pending.length; next += 1) {
+    const loop = pending[next]!;
+    for (const previous of predecessors.get(loop) ?? []) {
+      if (owner.has(previous) || escaping.has(previous)) continue;
+      const index = owner.get(loop)!;
+      owner.set(previous, index);
+      feeders.set(index, (feeders.get(index) ?? 0) + groups.get(previous)!.length);
+      pending.push(previous);
+    }
   }
   const files = instructionFiles(plan);
   const instructions = list(plan.instructions);

@@ -291,6 +291,9 @@ function summary(reports: readonly UnitReport[], out: string): string {
       );
     }
     lines.push(`- Branches reached but left only one way: ${coverage.unvisitedBranches.length}`);
+    const { engineErrors } = (report as Required<UnitReport>).search;
+    if (engineErrors.count > 0)
+      lines.push(`- Explorer errors: ${engineErrors.count}, first: \`${engineErrors.first}\``);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -338,7 +341,7 @@ function describeInput(input: ExplorerInput): string {
     case "option":
       return `choose ${input.index}: ${input.label}`;
     case "button":
-      return `press [${input.label}]`;
+      return `press [${input.label}]${input.afterMs === undefined ? "" : ` after ${input.afterMs / 1000} s`}`;
     case "text":
       return `type ${JSON.stringify(input.text)}`;
     case "image":
