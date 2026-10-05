@@ -95,6 +95,8 @@ interface PlayerState {
   sites: number;
   /** Transcript entries shown so far. */
   entries: number;
+  /** A shown text with legacy HTML markup or an HTML entity, which the Player shows as it is written. */
+  markup: string | null;
 }
 
 export interface RunResult {
@@ -144,6 +146,8 @@ export interface PlayCheckResult {
   };
   readonly missingImages: readonly string[];
   readonly missingMedia: readonly string[];
+  /** Shown texts with legacy HTML markup or entities, up to three. */
+  readonly rawMarkup: readonly string[];
 }
 
 const { values, positionals } = parseArgs({
@@ -223,6 +227,7 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
   const coveredChoices = new Set<string>();
   const missingImages = new Set<string>();
   const missingMedia = new Set<string>();
+  const rawMarkup = new Set<string>();
   const runs: RunResult[] = [];
   let siteCount = 0;
   let fileCount = files.filter((item) => item.endsWith(".tease")).length;
@@ -275,6 +280,7 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
             missingImages.add(state.stageImage);
           for (const media of state.media)
             if (!present.has(media.source)) missingMedia.add(media.source);
+          if (state.markup !== null && rawMarkup.size < 3) rawMarkup.add(state.markup);
         },
         chose: (site, option) => coveredChoices.add(`${site}#${option}`),
       });
@@ -314,6 +320,7 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
   const media = [
     ...(missingImages.size > 0 ? [`${missingImages.size} missing images`] : []),
     ...(missingMedia.size > 0 ? [`${missingMedia.size} missing audio/video`] : []),
+    ...(rawMarkup.size > 0 ? ["raw HTML in its text"] : []),
   ];
   const summary =
     (verdict === "plays"
@@ -337,6 +344,7 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
     },
     missingImages: [...missingImages].sort(),
     missingMedia: [...missingMedia].sort(),
+    rawMarkup: [...rawMarkup],
   };
   await writeFile(path.join(outFolder, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
   return result;
@@ -610,6 +618,15 @@ function readState(page: Page): Promise<PlayerState> {
         (snapshot?.nextEventSequence ?? 0) * 1000 + (session?.transcriptEntries.length ?? 0),
       lastText: (session?.transcriptEntries.at(-1)?.text ?? "").slice(0, 200),
       entries: session?.transcriptEntries.length ?? 0,
+      markup: (() => {
+        const pattern = /<[A-Za-z/][^>]*>|&(?:quot|amp|lt|gt|apos|nbsp|#\d+);?/u;
+        for (const entry of session?.transcriptEntries ?? []) {
+          const match = pattern.exec(entry.text ?? "");
+          if (match !== null)
+            return (entry.text ?? "").slice(Math.max(0, match.index - 20), match.index + 60);
+        }
+        return null;
+      })(),
       scriptFailure: (() => {
         const panel = document.querySelector("[data-script-failure]");
         if (panel === null) return null;
