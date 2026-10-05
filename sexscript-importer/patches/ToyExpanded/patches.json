@@ -223,6 +223,13 @@
       "category": "b",
       "reason": "playEvent tested its first flag with first.asBoolean(), a method call the converter does not lower, so after every successful summon the player was neither told to wait nor ordered to kneel. Test the flag directly, which is the same Groovy truth.",
       "diff": "play-event-first.diff"
+    },
+    {
+      "id": "toy-release-requests",
+      "layer": "source",
+      "category": "b",
+      "reason": "addToy registered the request to remove a worn toy with closures that capture its toyState, which TeaseScript cannot express, so the converter dropped the request and no toy could be asked off. Give requestables an optional arg (null as before for the others) that the menu already passes to the action, pass it to the condition as well, and register the toy's state as arg with closures that take it; the custom request functions ignore the argument as before.",
+      "diff": "toy-release-requests.diff"
     }
   ]
 }
