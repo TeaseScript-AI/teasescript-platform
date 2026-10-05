@@ -9,6 +9,7 @@ import type {
 import { emitTease } from "./emit-tease.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrStatement, MigrationProgram } from "./ir.ts";
+import type { PackageFileReader } from "./java-data.ts";
 import { lowerPackage } from "./package.ts";
 import type { ProposalId } from "./proposals.ts";
 import type { AcceptedForm } from "./workarounds.ts";
@@ -77,6 +78,8 @@ export interface FeasibilityOptions {
   media?: readonly MediaFile[];
   /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
   files?: readonly string[];
+  /** Reads a file of `files`, whose text package text reads snapshot (java-data.ts). */
+  readFile?: PackageFileReader;
   /**
    * The converted package's files as written, after any manual output patches, which `finalPackage` compiles and runs
    * as they are; needs `compiler`.
@@ -196,6 +199,7 @@ export function analyzeFeasibility(
     ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
     ...(options.media === undefined ? {} : { media: options.media }),
     ...(options.files === undefined ? {} : { files: options.files }),
+    ...(options.readFile === undefined ? {} : { readFile: options.readFile }),
   });
   const helpers = globals?.helpers ?? null;
   const isScriptBodyAt = (index: number): boolean =>

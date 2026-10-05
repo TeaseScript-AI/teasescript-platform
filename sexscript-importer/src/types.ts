@@ -93,6 +93,8 @@ const OBJECT_METHOD_RESULT_TYPES = new Map<string, ValueType>([
   ["flatten", LIST],
   ["intersect", LIST],
   ["keySet", LIST],
+  // Groovy readLines() on a file, reader, stream, or text returns a list of lines.
+  ["readLines", LIST],
   ["shuffle", LIST],
   ["sum", NUMBER],
   ["toList", LIST],

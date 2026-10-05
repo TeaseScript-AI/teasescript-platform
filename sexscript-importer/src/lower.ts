@@ -20,6 +20,17 @@ import {
   withActionDispatcher,
   type HelperName,
 } from "./helpers.ts";
+import {
+  javaCallStatement,
+  javaConstructor,
+  javaDataStatements,
+  javaDeclaration,
+  javaFileState,
+  javaMethodCall,
+  type JavaFileState,
+  type JavaRuleHost,
+  type PackageResources,
+} from "./java-data.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { enforceVariableTypes, functionResultTypes, type TeaseType } from "./variable-types.ts";
 import type { ProposalId } from "./proposals.ts";
@@ -111,6 +122,8 @@ export interface LowerOptions {
   mapUses?: MapUses;
   /** Legacy result types of the functions of the script and its modules (packageFunctionResults). */
   functionResults?: ReadonlyMap<string, number>;
+  /** The package's files that package text reads snapshot, and the paths its scripts write (java-data.ts). */
+  javaResources?: PackageResources;
 }
 
 interface LowerContext {
@@ -223,6 +236,8 @@ interface LowerContext {
    * as a mixin module, reads names that other package files define.
    */
   checksUndefinedVariables: boolean;
+  /** Java and data API rules of the body (java-data.ts). */
+  java: JavaFileState;
 }
 
 /** Source comments not yet emitted; shared by every context lowering the same file. */
@@ -935,6 +950,7 @@ export function lowerParsedFile(
     filePathOwners: new Map(),
     photoVariables: new Set(),
     checksUndefinedVariables: options.packageFunctions !== undefined,
+    java: javaFileState(null, options.javaResources ?? null),
   };
   if (file.diagnostics.length > 0 || file.root === null) {
     for (const diagnostic of file.diagnostics) {
@@ -1009,6 +1025,7 @@ export function lowerParsedFile(
       options.mapUses ?? mapUsesOf([{ body, types: context.types, keys: context.bindings }]);
     context.elementRemovals = elementRemovals(body);
     Object.assign(context, fileTests(body));
+    context.java = javaFileState(body, options.javaResources ?? null);
     context.photoVariables = photoVariables(body);
     // A lookup reads the type of the dict's values, as an index reads a list's element type.
     const listElements = new Map(context.types.listElements ?? []);
@@ -1038,7 +1055,11 @@ export function lowerParsedFile(
     [...context.closureFunctions, ...authoredStatements],
     context,
   );
-  const statements = [...helperStatements(context.syntheticHelpers), ...typedStatements];
+  const statements = [
+    ...helperStatements(context.syntheticHelpers),
+    ...javaDataStatements(context.java),
+    ...typedStatements,
+  ];
   if (body?.kind !== "block") {
     addDiagnostic(
       context,
@@ -1132,7 +1153,11 @@ function lowerHelperCompilationUnit(
   return {
     sourceName: file.sourceName,
     metadata: null,
-    statements: [...helperStatements(baseContext.syntheticHelpers), ...typedStatements],
+    statements: [
+      ...helperStatements(baseContext.syntheticHelpers),
+      ...javaDataStatements(baseContext.java),
+      ...typedStatements,
+    ],
     diagnostics: baseContext.diagnostics,
   };
 }
@@ -1401,6 +1426,7 @@ function lowerHelperMethod(
     ...fileTests(body),
     photoVariables: photoVariables(body),
     checksUndefinedVariables: baseContext.checksUndefinedVariables,
+    java: javaFileState(body, null, baseContext.java),
     currentFunction: {
       name,
       locals: functionLocalNames(
@@ -2824,6 +2850,8 @@ function lowerDeclaration(
     ];
   }
   if (right.kind === "closure") return lowerClosureDeclaration(name, right, span, context);
+  const java = javaDeclaration(name, right, span, javaHost(context));
+  if (java !== null) return java;
   if (context.classLoaderVariables.has(name) && isGroovyClassLoaderConstructor(right)) {
     addDiagnostic(
       context,
@@ -3896,6 +3924,10 @@ function lowerCallStatement(
   if (call !== null && !call.inherited && receiver !== null && isDictionary(receiver, context)) {
     const dictionary = dictStatement(receiver, call, span, context);
     if (dictionary !== null) return dictionary;
+  }
+  if (call !== null && !call.inherited) {
+    const java = javaCallStatement(node, call.name, call.arguments, span, javaHost(context));
+    if (java !== null) return java;
   }
   // Deleting the file of a photo the script took: the reference is cleared, and the Player removes a photo that
   // nothing references (V30 §33).
@@ -5868,7 +5900,9 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       return lowerGString(node, context);
     case "array":
       return lowerArrayExpression(node, context);
-    case "constructorCall":
+    case "constructorCall": {
+      const java = javaConstructor(node, javaHost(context));
+      if (java !== undefined) return java;
       if (isCurrentDateConstructor(node)) {
         return { kind: "call", name: "getDateTime", positional: [], named: {} };
       }
@@ -5882,6 +5916,7 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
         "SX_JAVA_CONSTRUCTOR",
         `Java object construction (new ${text(node.type) ?? "?"}) has no TeaseScript equivalent.`,
       );
+    }
     case "closure":
       return lowerClosureValue(node, context);
     case "property":
@@ -7737,6 +7772,8 @@ function lowerObjectMethodCallExpression(
     if (pathNode !== undefined && context.files !== null)
       return fileExists(pathNode, node, context, context.files);
   }
+  const java = javaMethodCall(node, name, argumentsNodes, javaHost(context));
+  if (java !== undefined) return java;
   if (targetNode?.kind === "constructorCall") {
     return unsupportedExpression(
       context,
@@ -12230,6 +12267,17 @@ function urlStatements(
     },
     { kind: "showButton", label: { kind: "literal", value: "Continue" }, timeout: null, span },
   ];
+}
+
+/** The lowering as the Java and data API rules see it (java-data.ts). */
+function javaHost(context: LowerContext): JavaRuleHost {
+  return {
+    lower: (node) => lowerExpression(node, context),
+    diagnostic: (code, severity, message, span) =>
+      addDiagnostic(context, code, severity, message, span),
+    helper: (name, args) => useHelper(context, name, args),
+    state: context.java,
+  };
 }
 
 function useHelper(context: LowerContext, name: HelperName, args: IrExpression[]): IrExpression {

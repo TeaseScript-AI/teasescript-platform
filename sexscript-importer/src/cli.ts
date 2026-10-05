@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseParsedGroovyFile, type ParsedGroovyFile } from "./ast.ts";
@@ -65,6 +66,7 @@ if (command === "inventory") {
     const dataRoot = await legacyDataRoot(args[0]!);
     options.media = await packageMedia(path.join(dataRoot, "images"));
     options.files = await packageFiles(dataRoot);
+    options.readFile = packageFileReader(dataRoot);
   }
   if (finalPackageDir !== null) options.finalPackage = await packageTeaseFiles(finalPackageDir);
   const report = analyzeFeasibility(files, options);
@@ -129,7 +131,13 @@ async function convertPackage(
   const dataRoot = await legacyDataRoot(sourceRoot);
   const media = await packageMedia(path.join(dataRoot, "images"));
   const files = await packageFiles(dataRoot);
-  const lowered = lowerPackage(parsed, { proposals, accepted, media, files });
+  const lowered = lowerPackage(parsed, {
+    proposals,
+    accepted,
+    media,
+    files,
+    readFile: packageFileReader(dataRoot),
+  });
   const programs = lowered.composed;
   // The package starts at main.tease (ADR 0022): its entry script, or a generated menu over the scripts it lists.
   const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;
@@ -223,6 +231,17 @@ async function packageFiles(root: string): Promise<string[]> {
       path.relative(root, path.join(entry.parentPath, entry.name)).split(path.sep).join("/"),
     )
     .sort();
+}
+
+/** Reads a file of the legacy data folder by its relative name; null when it cannot be read. */
+function packageFileReader(root: string): (name: string) => Uint8Array | null {
+  return (name) => {
+    try {
+      return readFileSync(path.join(root, name));
+    } catch {
+      return null;
+    }
+  };
 }
 
 async function packageMedia(root: string): Promise<MediaFile[]> {

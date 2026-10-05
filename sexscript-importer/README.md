@@ -78,6 +78,11 @@ a cancelled `chooseFile()`, and a legacy count of the images in a package folder
 conversion time. `--accepted` (every form) or `--accepted=askBooleans,showPopup,openUrl,chooseFile` emits the accepted
 forms instead, for when `main` implements them; the report then compiles and runs them through host stand-ins.
 
+A package text file that no script of the package writes, such as quiz lines, Properties strings, or INI settings, is
+part of the package as converted: a `File`, stream, or reader over it becomes its path text, and `readLines()`,
+`Properties.load()`, and `Wini.get()` read a generated function that holds the file's text at conversion time, marked
+with a `// NOTE`. A file some script writes, deletes, or hands to code the importer cannot follow stays manual work.
+
 `--proposed` (every proposal) or `--proposed=media-tags` on `convert`, `convert-package`, and `report`
 emits a working syntax for proposed TeaseScript language changes instead of reporting the construct, to measure what
 they would resolve ([`docs/PROPOSED-LANGUAGE-CHANGES.md`](docs/PROPOSED-LANGUAGE-CHANGES.md)). That output is not

@@ -8,6 +8,7 @@ import {
   type SourceSpan,
 } from "./ast.ts";
 import type { IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
+import { packageResources, type PackageFileReader } from "./java-data.ts";
 import {
   buildHelperRegistry,
   describeMixinModule,
@@ -71,6 +72,8 @@ export interface PackageOptions {
   media?: readonly MediaFile[];
   /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
   files?: readonly string[];
+  /** Reads a file of `files`, whose text package text reads snapshot (java-data.ts). */
+  readFile?: PackageFileReader;
   /**
    * A lone file converted on its own, without a package around it: it keeps its name, and a transfer names the
    * converted file of any legacy script name. Otherwise a package's only script becomes its main.tease.
@@ -278,6 +281,10 @@ export function lowerPackage(
   // Map uses are shared within a composition group, like function names and field types.
   const scripts = packageScripts(files, options.standalone === true);
   const functionResults = files.map((_, index) => packageFunctionResults(groups[index]!));
+  const javaResources =
+    options.files === undefined
+      ? undefined
+      : packageResources(files, options.files, options.readFile ?? null);
   const mapUses = files.map((_, index) => packageMapUses(groups[index]!, functionResults[index]!));
   const lowered = files.map((file, index) =>
     lowerParsedFile(file, {
@@ -298,6 +305,7 @@ export function lowerPackage(
       ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
       ...(options.media === undefined ? {} : { media: options.media }),
       ...(options.files === undefined ? {} : { files: options.files }),
+      ...(javaResources === undefined ? {} : { javaResources }),
     }),
   );
   const helperPrograms = lowered.filter(
