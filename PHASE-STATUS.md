@@ -18,8 +18,9 @@ accept syntax, architecture, or implementation details.
 - **Language foundation:** values including elapsed durations and date, time, datetime, and timestamp values,
   variables, assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated
   single-line and block strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion,
-  control flow, deterministic random, rounding, and `min`/`max` built-ins, text operations and list `join`, the
-  `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `sort`/`shuffle` and set operations, top-level
+  control flow, deterministic random, rounding, and `min`/`max` built-ins, text operations and list `join`, `+` on two
+  texts or two lists, the `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `addAll`, `sort`/`shuffle` and
+  set operations, top-level
   user-defined functions, labels and `goto`, and explicit endings with a required `exit` (ADR 0022). Projects of several
   `.tease` files compile into one plan, with globals, global functions, and speakers shared by all files, `goto`,
   `call`, and `end` between files with a `fallback`, glob targets, and computed targets from `script(...)` references.
@@ -41,7 +42,7 @@ accept syntax, architecture, or implementation details.
 - **Camera capture:** `takePhoto()` as a typed capture action with trusted reference admission and non-fatal
   unavailability under [Runtime](docs/RUNTIME.md#camera-capture). With a trusted host capability the Player opens the
   session camera after Start and captures silently; a photo saved through script storage is stored in the browser and
-  shown again in a later run. An optional host-driven viewfinder previews the session camera; no syntax requests it yet.
+  shown again in a later run. Scripts show the camera's live view in a floating window or over the Stage with `showCamera [stage]` and hide it with `hideCamera`.
   `askImage`, recording APIs, and the advanced package media API remain deferred.
 - **Player:** the POC Player is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. It uses
   Vue/Vite, Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the transcript

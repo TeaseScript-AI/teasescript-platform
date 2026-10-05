@@ -162,6 +162,7 @@ export function instructionKilledTemporaries(instruction: Instruction): Readonly
     case "interaction":
     case "startTimer":
     case "playMedia":
+    case "showCamera":
       return instruction.destinationTemporary === null
         ? new Set<number>()
         : new Set([instruction.destinationTemporary]);

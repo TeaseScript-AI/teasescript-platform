@@ -87,7 +87,7 @@ type BindingKind = "variable" | "speaker" | "global" | "function";
 interface Binding {
   readonly kind: BindingKind;
   /** Set while a variable statically holds an async timer or media handle. */
-  handle?: "timer" | "media" | null;
+  handle?: "timer" | "media" | "camera" | null;
   /** The declaration of a function. */
   readonly declaration?: FunctionDeclaration;
   /** Where the project declares a global, a speaker, or a global function, which every file sees. */
@@ -117,6 +117,7 @@ const TIMER_HANDLE_ASSIGNABLE: ReadonlySet<string> = new Set([
 ]);
 const TIMER_HANDLE_METHODS: ReadonlySet<string> = new Set(["pause", "resume", "stop"]);
 const TIMER_DISPLAYS: ReadonlySet<string> = new Set(["visible", "mystery", "hidden"]);
+const CAMERA_PLACEMENTS: ReadonlySet<string> = new Set(["window", "stage"]);
 const MEDIA_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
   "position",
   "elapsed",
@@ -168,6 +169,7 @@ const semanticCode = {
   invalidStartValue: "TSV055",
   fileName: "TSV056",
   invalidFileTarget: "TSV057",
+  invalidCameraHandleMember: "TSV059",
 } as const;
 
 /** Where code runs, for the initialization check: a top-level statement, a function, or a handler and its origin. */
@@ -514,6 +516,8 @@ class SemanticValidator {
           "askDateTime",
           "choose",
           "takePhoto",
+          "showCamera",
+          "hideCamera",
         ].includes(name),
       ),
     );
@@ -940,6 +944,10 @@ class SemanticValidator {
       this.#validateMediaHandleMember(name, use, value, callArguments, compound);
       return;
     }
+    if (handle === "camera") {
+      this.#validateCameraHandleMember(name, use, value, compound);
+      return;
+    }
     if (handle !== "timer") return;
     // Timer compound assignments keep their runtime operand check.
     if (compound) value = undefined;
@@ -972,6 +980,37 @@ class SemanticValidator {
           : `Timer handles have no property '${name.name}'.`,
       name.span,
     );
+  }
+
+  /** A camera view handle has one property, `placement`, which is readable and assignable, and no methods. */
+  #validateCameraHandleMember(
+    name: Identifier,
+    use: "read" | "assign" | "call",
+    value: Expression | undefined,
+    compound: boolean,
+  ): void {
+    if (use === "call" || name.name !== "placement") {
+      this.#report(
+        semanticCode.invalidCameraHandleMember,
+        use === "call"
+          ? `Camera views have no method '${name.name}'; hide them with hideCamera.`
+          : `Camera views have no property '${name.name}'; use placement.`,
+        name.span,
+      );
+      return;
+    }
+    if (use !== "assign" || value === undefined) return;
+    const text = staticVisibleText(value);
+    if (
+      compound ||
+      isDefinitelyNonText(value) ||
+      (text !== undefined && !CAMERA_PLACEMENTS.has(text))
+    )
+      this.#report(
+        semanticCode.invalidCameraHandleMember,
+        'Camera placement must be "window" or "stage".',
+        value.span,
+      );
   }
 
   #validateMediaHandleMember(
@@ -1187,6 +1226,8 @@ class SemanticValidator {
         return;
       }
       case "hideImageStatement":
+      case "showCameraStatement":
+      case "hideCameraStatement":
         return;
       case "saveStatement":
         this.#validateExpression(statement.value, scope, null);
@@ -1585,9 +1626,11 @@ class SemanticValidator {
             semanticCode.unsupportedBlockingContext,
             blockingInteraction.kind === "playMediaExpression"
               ? "Media playback is not supported in function parameter defaults."
-              : isTakePhotoCall(blockingInteraction)
-                ? "Camera capture is not supported in function parameter defaults."
-                : "Blocking interactions are not supported in function parameter defaults.",
+              : blockingInteraction.kind === "showCameraExpression"
+                ? "Camera views are not supported in function parameter defaults."
+                : isTakePhotoCall(blockingInteraction)
+                  ? "Camera capture is not supported in function parameter defaults."
+                  : "Blocking interactions are not supported in function parameter defaults.",
             blockingInteraction.span,
           );
         }
@@ -1776,6 +1819,8 @@ class SemanticValidator {
         return;
       case "playMediaExpression":
         yield* compileChild(this.#validateMediaTask(expression, scope, true, null));
+        return;
+      case "showCameraExpression":
         return;
       case "loadExpression":
         yield* compileChild(this.#validateExpressionTask(expression.key, scope, contextualSpeaker));
@@ -2486,6 +2531,7 @@ class SemanticValidator {
         case "showButtonExpression":
         case "timerExpression":
         case "playMediaExpression":
+        case "showCameraExpression":
           this.#report(
             semanticCode.invalidStartValue,
             `${subject} cannot ask the player, wait, or play media: ${speaker ? "a speaker is set up" : "it is set"} at the start of the session, before the story runs.${speaker ? "" : ` Give it a plain start value, and assign the answer later, as in '${owner.name.name} = ...'.`}`,
@@ -2599,10 +2645,11 @@ function argumentRange(required: number, parameterNames: readonly string[]): str
 }
 
 /** The handle kind statically held by a variable initialized from `expression`. */
-function handleKind(expression: Expression): "timer" | "media" | null {
+function handleKind(expression: Expression): "timer" | "media" | "camera" | null {
   expression = unwrapParentheses(expression);
   if (expression.kind === "timerExpression" && expression.async) return "timer";
   if (expression.kind === "playMediaExpression" && expression.async) return "media";
+  if (expression.kind === "showCameraExpression") return "camera";
   return null;
 }
 
@@ -2677,6 +2724,7 @@ function isDefinitelyNonFileReference(expression: Expression): boolean {
     kind === "showButtonExpression" ||
     kind === "timerExpression" ||
     kind === "playMediaExpression" ||
+    kind === "showCameraExpression" ||
     kind === "unaryExpression"
   );
 }
@@ -2729,7 +2777,11 @@ function findFirstInteraction(
   Expression,
   {
     kind:
-      "interactionExpression" | "showButtonExpression" | "playMediaExpression" | "callExpression";
+      | "interactionExpression"
+      | "showButtonExpression"
+      | "playMediaExpression"
+      | "showCameraExpression"
+      | "callExpression";
   }
 > | null {
   const work = [expression];
@@ -2739,6 +2791,7 @@ function findFirstInteraction(
       current.kind === "interactionExpression" ||
       current.kind === "showButtonExpression" ||
       current.kind === "playMediaExpression" ||
+      current.kind === "showCameraExpression" ||
       (current.kind === "callExpression" && isTakePhotoCall(current))
     )
       return current;
@@ -2774,7 +2827,8 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "durationLiteral" ||
     expression.kind === "showButtonExpression" ||
     expression.kind === "timerExpression" ||
-    expression.kind === "playMediaExpression"
+    expression.kind === "playMediaExpression" ||
+    expression.kind === "showCameraExpression"
   );
 }
 
@@ -2809,7 +2863,8 @@ function isDefinitelyNonString(expression: Expression): boolean {
     expression.kind === "unaryExpression" ||
     expression.kind === "showButtonExpression" ||
     expression.kind === "timerExpression" ||
-    expression.kind === "playMediaExpression"
+    expression.kind === "playMediaExpression" ||
+    expression.kind === "showCameraExpression"
   );
 }
 

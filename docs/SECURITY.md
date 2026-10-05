@@ -82,10 +82,10 @@ or default camera immediately after the user presses Start and before ordinary T
 browser permission request happens there, and keeps the stream open for the entire running session. Direct capture such
 as `takePhoto()` only captures from that open stream: it never opens or reopens the camera, closes it afterwards, or
 otherwise reveals the capture moment, and it has no Player indicator, capture flash, per-photo message, preview, stop
-control, or per-use approval. Separately, an optional viewfinder ([Player UI](ui/PLAYER-UI.md#stage-and-media-presentation))
-may show the user a live local preview of that open stream before a photo; it is off by default, never captures, and
-showing or hiding it neither opens nor closes the camera. Native camera indicators stay on while the stream is open, so they do not reveal
-individual captures. Normal session teardown, unmount, navigation, `end`, and `exit` release the Player-owned camera
+control, or per-use approval. Separately, a script's camera view (`showCamera`, [Player UI](ui/PLAYER-UI.md#stage-and-media-presentation))
+may show the user a live local preview of that open stream, for example before a photo; it is shown only when the script
+asks for it, never captures, and showing or hiding it neither opens nor closes the camera. Native camera indicators stay on while the stream is open, so they do not reveal
+individual captures. Normal session teardown, unmount, navigation, and `exit` release the Player-owned camera
 resources. For platform-brokered acquisition, the Player owns the underlying browser resources for sandbox isolation,
 revocation, and cleanup, but adds no permission prompt, camera or microphone indicator, or stop control of its own;
 native browser, OS, and device privacy indicators are sufficient. Complete revocation of package-created derivatives of

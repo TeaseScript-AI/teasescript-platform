@@ -105,6 +105,8 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "animateOverlay",
   "hideOverlay",
   "hideImage",
+  "showCamera",
+  "hideCamera",
   "showBlur",
   "hideBlur",
   "drawRectangle",

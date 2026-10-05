@@ -35,7 +35,8 @@ test("language diagnostics are the canonical compilation diagnostics", () => {
 
 test("completion exposes accepted compact commands and takePhoto", () => {
   const statement = labels("");
-  for (const expected of ["say", "showButton"]) assert.ok(statement.includes(expected), expected);
+  for (const expected of ["say", "showButton", "showCamera", "hideCamera"])
+    assert.ok(statement.includes(expected), expected);
   const expression = labels("let answer = ");
   for (const expected of [
     "askText",
@@ -47,6 +48,7 @@ test("completion exposes accepted compact commands and takePhoto", () => {
     "choose",
     "showButton",
     "takePhoto",
+    "showCamera",
   ])
     assert.ok(expression.includes(expected), expected);
 });

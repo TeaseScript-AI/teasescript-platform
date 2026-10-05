@@ -38,7 +38,7 @@ const props = withDefaults(
   }>(),
   { title: "", tools: () => [], failure: null },
 );
-// The viewfinder keeps the place the user gave it, and its mirroring, while the Player is mounted.
+// The camera view's window keeps the place the user gave it, and the view its mirroring, while the Player is mounted.
 const floatingPlace = ref<FloatingPlace | null>(null);
 const viewfinderMirrored = ref(true);
 const themeIntent = defineModel<PlayerThemeIntent>("themeIntent", {
@@ -178,11 +178,17 @@ async function toggleFullscreen() {
           </PlayerTopBar>
         </template>
         <template #stage>
-          <Stage ref="stage" :media="stageMedia" @media-aspect="mediaAspect = $event" />
+          <Stage
+            ref="stage"
+            v-model:camera-mirrored="viewfinderMirrored"
+            :media="stageMedia"
+            :camera="player.viewfinderPlacement.value === 'stage' ? player.viewfinder.value : null"
+            @media-aspect="mediaAspect = $event"
+          />
         </template>
         <template #overlay>
           <FloatingViewfinder
-            v-if="player.viewfinder.value"
+            v-if="player.viewfinderPlacement.value === 'window' && player.viewfinder.value"
             v-model:place="floatingPlace"
             v-model:mirrored="viewfinderMirrored"
             :track="player.viewfinder.value"

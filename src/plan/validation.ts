@@ -1023,6 +1023,27 @@ function validateInstruction(
         validateExpression(value.image, `${path}.image`, errors, false, temporaryCount);
       }
       return;
+    case "showCamera":
+      if (
+        !hasExactKeys(value, ["kind", "placement", "destinationTemporary", "span"]) ||
+        !isOneOf(value.placement, ["window", "stage"])
+      ) {
+        errors.push(planError("TSC002", "Show-camera instruction has an invalid shape.", path));
+      }
+      if (value.destinationTemporary !== null) {
+        validateTemporaryId(
+          value.destinationTemporary,
+          `${path}.destinationTemporary`,
+          temporaryCount,
+          errors,
+        );
+      }
+      return;
+    case "hideCamera":
+      if (!hasExactKeys(value, ["kind", "span"])) {
+        errors.push(planError("TSC002", "Hide-camera instruction has an invalid shape.", path));
+      }
+      return;
     case "storageWrite":
       if (!hasExactKeys(value, ["kind", "value", "key", "span"])) {
         errors.push(planError("TSC002", "Storage-write instruction has an invalid shape.", path));
@@ -1859,6 +1880,7 @@ const TYPE_PLAN_NAMES = [
   "speaker",
   "timer",
   "media",
+  "camera",
   "script",
 ];
 
@@ -1975,7 +1997,8 @@ function validateExpressionNode(
           isRecord(value.callee) &&
           value.callee.kind === "property" &&
           Array.isArray(value.arguments) &&
-          ((value.callee.name === "add" && value.arguments.length === 1) ||
+          (((value.callee.name === "add" || value.callee.name === "addAll") &&
+            value.arguments.length === 1) ||
             (value.callee.name === "get" &&
               value.arguments.length === 2 &&
               isRecord(value.arguments[1]) &&
@@ -1986,7 +2009,7 @@ function validateExpressionNode(
         errors.push(
           planError(
             "TSC002",
-            "Only a list or set 'add' call with one argument, or a dict 'get' call with a 'default:', checks a type.",
+            "Only a list or set 'add' or list 'addAll' call with one argument, or a dict 'get' call with a 'default:', checks a type.",
             `${path}.typeCheck`,
           ),
         );

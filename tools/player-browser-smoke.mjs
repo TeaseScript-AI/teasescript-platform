@@ -1378,6 +1378,12 @@ async function viewfinderScenario(cdp, origin) {
   const viewfinders = `document.querySelectorAll('[data-viewfinder]').length`;
   const place = `(() => { const box = document.querySelector('[data-floating-viewfinder]').getBoundingClientRect(); return [box.left, box.top, box.width].map(Math.round).join(); })()`;
   const sidebarVisible = `document.querySelector('#player-shell').dataset.sidebarVisible`;
+  const stageAspect = `Number(getComputedStyle(document.querySelector('#player-shell')).getPropertyValue('--media-aspect'))`;
+  const clickButton = (cdp, label) =>
+    evaluate(
+      cdp,
+      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === ${JSON.stringify(label)}).click()`,
+    );
 
   await setViewport(cdp, 1440, 900);
   await cdp.call("Browser.setPermission", {
@@ -1413,14 +1419,77 @@ async function viewfinderScenario(cdp, origin) {
     await waitFor(cdp, `${sidebarVisible} === ${JSON.stringify(expected)}`);
     assertEqual(await value(cdp, place), shown, "Toggling the sidebar moved the viewfinder");
   }
-  // The script takes the photo from the same open camera; the viewfinder goes, and the photo is not mirrored.
+  // The player's mirroring choice follows the view from the window to the Stage.
+  await click(cdp, "[data-floating-viewfinder] [data-viewfinder-mirror]");
+  assertEqual(
+    await value(cdp, `getComputedStyle(${video}).transform`),
+    "none",
+    "The flip button did not flip",
+  );
+  // The script takes the photo from the same open camera; the view stays, and the photo is not mirrored.
   await takePhoto();
   await waitFor(cdp, `document.body.innerText.includes("There you are. I'll keep that one.")`);
-  assertEqual(await value(cdp, viewfinders), 0, "The viewfinder stayed after the photo");
   await waitFor(cdp, `${capturedImages} === 1`);
   assertTestCard(
     await value(cdp, quadrantColors(decodedPhoto)),
     "The photo after the viewfinder does not show the camera's frame",
+  );
+  assertEqual(await value(cdp, viewfinders), 1, "The photo hid the camera view");
+  // `view.placement = "stage"` moves the view over the Stage, where the photo stays underneath and the Stage takes the
+  // camera's aspect.
+  await clickButton(cdp, "Put me on your Stage");
+  await waitFor(cdp, `!!document.querySelector('[data-stage-camera] [data-viewfinder] video')`);
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-floating-viewfinder]')`),
+    false,
+    "The window stayed after the view moved over the Stage",
+  );
+  assertEqual(
+    await value(cdp, `document.querySelector('.stage-media')?.src.startsWith('blob:') ?? false`),
+    true,
+    "The camera view replaced the Stage image instead of covering it",
+  );
+  await waitFor(
+    cdp,
+    `Math.abs(${stageAspect} - ${video}.videoWidth / ${video}.videoHeight) < 0.01`,
+    8_000,
+    "The Stage did not take the camera's aspect",
+  );
+  assertEqual(
+    await value(cdp, `getComputedStyle(${video}).transform`),
+    "none",
+    "The Stage view lost the window's mirroring choice",
+  );
+  // Centred on the Stage like the image underneath, also where a narrow Stage cannot take the camera's aspect.
+  await setViewport(cdp, 390, 844);
+  await waitFor(
+    cdp,
+    `(() => { const camera = document.querySelector('[data-stage-camera] [data-viewfinder]').getBoundingClientRect(); const frame = document.querySelector('.stage-media-frame').getBoundingClientRect(); return camera.height < frame.height - 1 && Math.abs(camera.top + camera.height / 2 - (frame.top + frame.height / 2)) < 1; })()`,
+    8_000,
+    "The camera view over a narrow Stage is not centred",
+  );
+  await setViewport(cdp, 1440, 900);
+  // Back in the window, the view keeps the place it had.
+  await clickButton(cdp, "Back to the window");
+  await waitFor(cdp, `document.body.innerText.includes("Back in your little window.")`);
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-floating-viewfinder] [data-viewfinder] video')`,
+  );
+  assertEqual(
+    await value(cdp, place),
+    shown,
+    "The window lost its place on the way back from the Stage",
+  );
+  // hideCamera hides the view; the Stage image was there all along.
+  // The script keeps running after hideCamera, so only hiding, not the end of the session, can remove the view.
+  await clickButton(cdp, "Yes, Mistress");
+  await waitFor(cdp, `document.body.innerText.includes("Good. That's enough looking for now.")`);
+  assertEqual(await value(cdp, viewfinders), 0, "hideCamera left a camera view");
+  assertEqual(
+    await value(cdp, `!!document.querySelector('.stage-media')`),
+    true,
+    "The Stage image went with the camera view",
   );
 
   // Without a camera there is no viewfinder, and the script continues without a photo.

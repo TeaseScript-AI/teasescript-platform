@@ -214,6 +214,10 @@ export function languageCompletions(
   if (statementStart) {
     items.push(command("showButton", "Compact foreground button interaction"));
     items.push(command("say", "Emit chat text with optional speaker, skip policy, and pacing"));
+    items.push(
+      command("showCamera", "Show the camera view in a window, or over the Stage with 'stage'"),
+    );
+    items.push(command("hideCamera", "Hide every camera view"));
   }
 
   if (isExpressionCompletionContext(last, lineTokens)) {
@@ -225,6 +229,7 @@ export function languageCompletions(
     items.push(command("askTime", "Compact time input expression"));
     items.push(command("askDateTime", "Compact date and time input expression"));
     items.push(command("choose", "Compact choice expression"));
+    items.push(command("showCamera", "Show the camera view and give its handle"));
     items.push(
       Object.freeze({
         label: "takePhoto",
@@ -811,6 +816,8 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
         children.push({ kind: "expression", node: statement.target.expression });
       return;
     case "hideImageStatement":
+    case "showCameraStatement":
+    case "hideCameraStatement":
     case "speakerSetterStatement":
     case "waitStatement":
     case "exitStatement":
@@ -928,6 +935,7 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
     case "nullLiteral":
     case "numberLiteral":
     case "durationLiteral":
+    case "showCameraExpression":
       return;
   }
   expression satisfies never;

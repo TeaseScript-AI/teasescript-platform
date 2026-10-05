@@ -371,9 +371,18 @@ let shares: integer = 10 / 5          // compile error: a quotient is a number
 let shares: integer = floor(10 / 5)   // valid
 ```
 
-Arithmetic applies to numbers, and to durations as described in [§35](#35-date-time-durations-and-timestamps). It never
-converts text or booleans: `"a" + "b"` is a compile error, and text is joined with interpolation, as in
-`"${first}${second}"`.
+Arithmetic applies to numbers, and to durations as described in [§35](#35-date-time-durations-and-timestamps). `+` also
+joins two values of the same kind: two texts give one text, and two lists give a new list ([§16](#16-lists)); `+=` joins
+the same way. Nothing converts: text and another value, or a list and a single value, is a compile error that points to
+interpolation or to `add`, and a runtime error when the compiler cannot see the kinds:
+
+```text
+let name = "Mistress " + title     // text + text
+let menu = ["Back"] + options      // a new list, the left elements first
+name += "!"
+let line = "Score: " + 5           // compile error: write "Score: ${5}"
+let more = menu + "Exit"           // compile error: use menu.add("Exit"), or menu + ["Exit"]
+```
 
 A calculation whose result is too large to represent, or that divides by zero, has no result. When the compiler can
 see every operand of that step, as in `1e308 * 10` or `1e300 s * 1e10`, it is a compile error that names the step,
@@ -1330,6 +1339,7 @@ List methods:
 
 ```text
 items.add("sword")
+items.addAll(other)
 items.remove("key")
 items.removeAt(1)
 items.removeFirst()
@@ -1514,8 +1524,9 @@ Runtime behavior:
 - `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
   raises the same runtime error as indexing.
 - `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`.
-- `add(value)`, `remove(value)`, `clear()`, `sort()`, and `shuffle()` return `null`. Set `remove(value)` of an absent
-  value is a no-op: the set stays unchanged and execution continues without an error or warning.
+- `add(value)`, `addAll(other)`, `remove(value)`, `clear()`, `sort()`, and `shuffle()` return `null`. Set
+  `remove(value)` of an absent value is a no-op: the set stays unchanged and execution continues without an error or
+  warning.
 - Mutating methods change the existing list.
 - `sort()` orders a list in place, ascending and stable. Its elements must all be numbers (integers and numbers
   together), all text, all durations of one family, or all dates, all times, all datetimes, or all timestamps
@@ -1539,6 +1550,16 @@ let yours = ["cuffs", "collar", "rope"]
 mine.intersection(yours)  // ["collar", "cuffs"]
 mine.union(yours)         // ["collar", "gag", "cuffs", "rope"]
 mine.difference(yours)    // ["gag"]
+```
+
+- `a + b` on two lists returns a new list of copies of `a`'s elements followed by `b`'s, keeping duplicates (unlike
+  `union`), and leaves both unchanged; its element types join as for `union`, and `items += more` stores it in `items`.
+  `items.addAll(other)` appends copies of the elements of the list `other` to `items` itself, each as `add` would. To
+  join a set, use `union`, or copy it into a list with `toList()` first:
+
+```text
+let menu = ["Back"] + options     // a new list; options is unchanged
+queue.addAll(nextRound)           // queue itself grows
 ```
 
 - Recoverable index and empty-selection errors follow the runtime recovery rules described later in this document.
@@ -2232,10 +2253,47 @@ A count is a whole number of at least one and a duration is exact and greater th
 `repeat: 3` is an error; write `3 times` or a duration. Blocking media may use a count or a duration but not
 indefinite repetition.
 
-On the ordinary story path, `showImage`, `hideImage`, `playAudio`, `playVideo`, and statement-level media handle
-operations such as `music.pause()` or `music.position = 2 min` wait until the previous message's pacing has completed or
-been skipped, like a following `say`. `wait` and `timer` keep overlapping message pacing
-([§27](#27-timers)). Timer and cue blocks keep the canonical interrupt pacing and add no media wait.
+On the ordinary story path, `showImage`, `hideImage`, `showCamera`, `hideCamera`, `playAudio`, `playVideo`, and
+statement-level media handle operations such as `music.pause()` or `music.position = 2 min`, and camera placement
+writes, wait until the previous message's pacing has completed or been skipped, like a following `say`. `wait` and
+`timer` keep overlapping message pacing ([§27](#27-timers)). Timer and cue blocks keep the canonical interrupt pacing
+and add no media wait.
+
+### Camera view
+
+**Status:** Accepted (Owner decisions on [#602](https://github.com/TeaseScript-AI/teasescript-platform/issues/602),
+2026-10-05) and implemented.
+
+```text
+showCamera                     // the camera's live view in the Player's floating window
+showCamera stage               // the camera's live view over the Stage image, which stays underneath
+let view = showCamera          // keeps a handle
+view.placement = "stage"       // moves the view, like a timer's t.display = "mystery"
+if view.placement == "window" { ... }
+hideCamera                     // hides every camera view
+```
+
+`showCamera [stage]` shows the camera's view: without a word in the Player's floating window, which the player may move
+and resize, and with `stage` over the Stage image. `stage` is recognized only directly after `showCamera`. Used as a
+value, `showCamera` evaluates to an opaque camera view handle, which may be ignored. The camera has one view:
+`showCamera` while it is shown moves it instead of opening a second, and after `hideCamera` shows it again, so an
+earlier handle refers to it again. `hideCamera` takes no arguments and hides every camera view; `exit` hides them too.
+Both use command syntax only.
+
+- The handle's one property is `placement`, `"window"` or `"stage"`, readable and assignable. Another value fails with
+  `TSR050`, or with `TSV059` when the compiler knows it; other properties and methods are `TSV059`. Assigning the
+  placement of a hidden view changes nothing and reports developer warning `TSW010`; reading it keeps working.
+- The view over the Stage covers the Stage image without replacing it: `showImage` and `hideImage` change the image
+  underneath, and the view stays until `hideCamera`. It also lies over a playing Stage video.
+- A camera view only shows the camera; it never takes a photo. `takePhoto()`
+  ([§33](#33-browser-api-file-folder-camera-and-url-references)) captures from the same camera and changes nothing on
+  screen.
+- Whether the Player has a camera is not part of the script: without one, `showCamera` shows nothing and the script
+  continues. Whether a camera view is shown, and its placement, are part of the session state and come back after a
+  checkpoint is restored.
+- Camera views and their handles cannot be saved, used as a parameter default, or given to a global or speaker at the
+  start of the session.
+- Later camera roles may open more views, each with its own handle; `hideCamera` keeps hiding all of them.
 
 ### Media handles
 
@@ -4219,6 +4277,8 @@ moveOverlay
 animateOverlay
 hideOverlay
 hideImage
+showCamera
+hideCamera
 showBlur
 hideBlur
 drawRectangle
@@ -4503,7 +4563,7 @@ Resolved in this revision:
 - visible measurements use account-preferred unit systems, automatic readable scaling, an account decimal preference defaulting to two places, and per-call `format(unit: ..., decimals: ...)` overrides;
 - `relativeTo: "background" | "viewport"`, background `fit: "contain" | "cover" | "stretch"`, and `"contain"` as the default are accepted;
 - overlays use `hideOverlay`, asynchronous `moveOverlay` and `animateOverlay`, optional blocking behavior, and keyframe hold durations;
-- `showImage <file>` and `hideImage` control the persistent Stage image; `playAudio` and `playVideo` are blocking by default, `async` returns a handle, and cues use `at`, `beforeEnd`, and `finish` ([§22](#22-stage-image-audio-and-video));
+- `showImage <file>` and `hideImage` control the persistent Stage image; `showCamera [stage]` and `hideCamera` show and hide the camera's view; `playAudio` and `playVideo` are blocking by default, `async` returns a handle, and cues use `at`, `beforeEnd`, and `finish` ([§22](#22-stage-image-audio-and-video));
 - blur uses `showBlur` and `hideBlur` as a separate non-destructive visual layer;
 - drawing uses dedicated shape/text functions and removable references;
 - initial layered-scene transitions are `"none"`, `"fade"`, and `"crossfade"` (accepted future direction; not implemented; see [§22](#22-stage-image-audio-and-video));
