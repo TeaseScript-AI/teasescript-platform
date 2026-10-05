@@ -17,6 +17,7 @@ interface CaptureView {
   readonly question: string;
   readonly track: unknown;
   readonly photo: string | null;
+  readonly countdown: number | null;
 }
 interface Capture {
   readonly view: Readonly<Ref<CaptureView | null>>;
@@ -91,7 +92,13 @@ function harness(
     opens = [],
     sessionCameraOpen = false,
     offered = true,
-  }: { opens?: boolean[]; sessionCameraOpen?: boolean; offered?: boolean } = {},
+    countdownStep = async () => {},
+  }: {
+    opens?: boolean[];
+    sessionCameraOpen?: boolean;
+    offered?: boolean;
+    countdownStep?: () => Promise<void>;
+  } = {},
 ) {
   const media = new CapturedMediaStore(null, { create: () => "blob:photo", revoke() {} }, "test");
   const sessionCamera = new FakeCamera(media);
@@ -116,6 +123,7 @@ function harness(
       offered,
       observe: () => session.value,
       publish: (next: PlayerRuntimeSession) => (session.value = next),
+      countdownStep,
     }),
   )!;
   return { media, camera, sessionCamera, session, generation, cameraRevision, capture, scope };
@@ -194,6 +202,8 @@ test("a photo that arrives after its request was answered is dropped", async () 
   let release!: () => void;
   camera.hold = new Promise((resolve) => (release = resolve));
   const shot = capture.shutter();
+  // The countdown runs first; the photo is being taken once it ends.
+  while (capture.view.value?.phase === "countdown") await settled();
   assert.equal(capture.view.value?.phase, "taking");
   const file = media.add("image", new Blob([PNG], { type: "image/png" }), { width: 4, height: 3 });
   session.value = answerPlayerRuntimeImage(session.value!, file.reference, media)!.session;
@@ -262,4 +272,50 @@ test("unmounting the Player ends the capture: its photo is dropped and the camer
   scope.stop();
   assert.equal(camera.released, 1);
   assert.equal(media.holds(camera.taken[0]!, "image"), false);
+});
+
+test("the shutter counts down from five over the live camera before it takes the photo", async () => {
+  const counts: (number | null)[] = [];
+  let capture!: Capture;
+  const harnessed = harness(SELFIE, {
+    countdownStep: async () => {
+      counts.push(capture.view.value?.countdown ?? null);
+      assert.ok(capture.view.value?.track, "the live camera stays during the countdown");
+    },
+  });
+  capture = harnessed.capture;
+  await settled();
+  await capture.shutter();
+  assert.deepEqual(counts, [5, 4, 3, 2, 1]);
+  assert.equal(capture.view.value?.phase, "review");
+  assert.equal(capture.view.value?.countdown, null);
+  assert.equal(harnessed.camera.taken.length, 1);
+});
+
+test("a request answered during the countdown takes no photo", async () => {
+  let capture!: Capture;
+  let answer!: () => void;
+  const harnessed = harness(SELFIE, {
+    countdownStep: async () => {
+      if (capture.view.value?.countdown === 3) answer();
+      await settled();
+    },
+  });
+  capture = harnessed.capture;
+  answer = () => {
+    const file = harnessed.media.add("image", new Blob([PNG], { type: "image/png" }), {
+      width: 4,
+      height: 3,
+    });
+    harnessed.session.value = answerPlayerRuntimeImage(
+      harnessed.session.value!,
+      file.reference,
+      harnessed.media,
+    )!.session;
+  };
+  await settled();
+  await capture.shutter();
+  assert.equal(capture.view.value, null);
+  assert.equal(harnessed.camera.taken.length, 0);
+  assert.equal(harnessed.camera.released, 1);
 });

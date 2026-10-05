@@ -66,6 +66,16 @@ function focusOut(event: FocusEvent) {
       data-image-capture-photo
     />
     <div v-else-if="!view.track" class="image-capture-cover" />
+    <!-- The countdown before the photo, as large as the viewfinder allows; each number replaces the last. -->
+    <span
+      v-if="view.countdown !== null"
+      :key="view.countdown"
+      class="image-capture-countdown"
+      data-image-capture-countdown
+      role="status"
+    >
+      {{ view.countdown }}
+    </span>
     <!-- The free area above the question: why there is no picture, centred, and scrolling in a small viewfinder. -->
     <div class="image-capture-message">
       <p v-if="status" class="image-capture-status" role="status">{{ status }}</p>
@@ -73,14 +83,17 @@ function focusOut(event: FocusEvent) {
     <p :id="questionId" class="image-capture-question">{{ view.question }}</p>
     <!-- In a floating window, pressing a control does not start moving the window. -->
     <div class="image-capture-controls" @pointerdown.stop>
-      <div v-if="view.phase === 'live' || view.phase === 'taking'" class="image-capture-shutter">
+      <div
+        v-if="view.phase === 'live' || view.phase === 'countdown' || view.phase === 'taking'"
+        class="image-capture-shutter"
+      >
         <Button
           variant="ghost"
           size="icon-lg"
           aria-label="Take photo"
           title="Take photo"
           data-image-capture-shutter
-          :disabled="view.phase === 'taking'"
+          :disabled="view.phase !== 'live'"
           @click="emit('shutter')"
         >
           <Camera aria-hidden="true" />
@@ -187,6 +200,42 @@ function focusOut(event: FocusEvent) {
   box-shadow: 0 1px 3px var(--media-shadow);
   backdrop-filter: blur(3px);
   overflow: hidden;
+}
+.image-capture-countdown {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: min(85cqh, 70cqw);
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--media-text);
+  text-shadow:
+    0 0 0.08em var(--media-surface),
+    0 0.02em 0.06em var(--media-shadow);
+  pointer-events: none;
+  animation: image-capture-count 1s ease-out both;
+}
+@keyframes image-capture-count {
+  from {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+  20% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .image-capture-countdown {
+    animation: none;
+    opacity: 0.8;
+  }
 }
 /* A small viewfinder keeps the picture readable: the question shrinks, the controls stay. */
 @container image-capture (max-height: 200px) {

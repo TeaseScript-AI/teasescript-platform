@@ -9,9 +9,14 @@ import type { SessionCamera } from "../../session-camera.js";
 
 /**
  * Where taking a photo for an `askImage` request stands: the camera opening, the live view the player frames the photo
- * in, the photo being taken, the photo the player may use or take again, or a camera that cannot be used.
+ * in, the countdown before the photo, the photo being taken, the photo the player may use or take again, or a camera
+ * that cannot be used.
  */
-export type ImageCapturePhase = "opening" | "live" | "taking" | "review" | "unavailable";
+export type ImageCapturePhase =
+  "opening" | "live" | "countdown" | "taking" | "review" | "unavailable";
+
+/** The seconds counted down from the shutter to the photo. */
+const COUNTDOWN_SECONDS = 5;
 
 /** What the capture view on the Stage shows. */
 export interface ImageCaptureView {
@@ -22,6 +27,8 @@ export interface ImageCaptureView {
   readonly track: MediaStreamTrack | null;
   /** The photo taken, while the player decides whether to use it. */
   readonly photo: string | null;
+  /** The seconds left before the photo is taken, during the countdown. */
+  readonly countdown: number | null;
 }
 
 interface Capture {
@@ -34,6 +41,7 @@ interface Capture {
   readonly reference: string | null;
   /** Whether the capture uses the camera it opened itself rather than the session camera. */
   readonly own: boolean;
+  readonly countdown: number | null;
 }
 
 export interface ImageCaptureHost {
@@ -54,6 +62,8 @@ export interface ImageCaptureHost {
   /** Observes the current time, publishes the result, and returns the published session. */
   observe(): PlayerRuntimeSession | null;
   publish(session: PlayerRuntimeSession): void;
+  /** Waits one step of the countdown; a second by default. */
+  countdownStep?: () => Promise<void>;
 }
 
 /**
@@ -85,7 +95,10 @@ export function useImageCapture(host: ImageCaptureHost) {
   }
 
   /** Continues `target` with `change` while it is still the capture of the request it answers. */
-  function update(target: Capture, change: Partial<Pick<Capture, "phase" | "reference" | "own">>) {
+  function update(
+    target: Capture,
+    change: Partial<Pick<Capture, "phase" | "reference" | "own" | "countdown">>,
+  ) {
     if (capture.value !== target) {
       // Only a photo taken for a capture that is gone needs dropping.
       if (change.reference) host.media.discard(change.reference);
@@ -120,6 +133,7 @@ export function useImageCapture(host: ImageCaptureHost) {
       phase: "opening",
       reference: null,
       own: false,
+      countdown: null,
     };
     set(target);
     void openCamera(target);
@@ -133,11 +147,20 @@ export function useImageCapture(host: ImageCaptureHost) {
     if (next) void openCamera(next);
   }
 
-  /** Takes the photo the player framed. */
+  const countdownStep =
+    host.countdownStep ?? (() => new Promise<void>((resolve) => setTimeout(resolve, 1_000)));
+
+  /** Counts down, then takes the photo the player framed; a capture that ends meanwhile takes none. */
   async function shutter(): Promise<void> {
-    const target = capture.value;
+    let target = capture.value;
     if (target?.phase !== "live") return;
-    const taking = update(target, { phase: "taking" });
+    for (let count = COUNTDOWN_SECONDS; count > 0; count--) {
+      const counting = update(target, { phase: "countdown", countdown: count });
+      if (!counting) return;
+      await countdownStep();
+      target = counting;
+    }
+    const taking = update(target, { phase: "taking", countdown: null });
     if (!taking) return;
     const answer = await cameraOf(taking).answer();
     update(
@@ -186,8 +209,8 @@ export function useImageCapture(host: ImageCaptureHost) {
   // A camera that ends while the player frames the photo, as when it is unplugged, offers "Try again".
   watch(host.cameraRevision, () => {
     const target = capture.value;
-    if (target?.phase === "live" && !cameraOf(target).available)
-      update(target, { phase: "unavailable" });
+    if ((target?.phase === "live" || target?.phase === "countdown") && !cameraOf(target).available)
+      update(target, { phase: "unavailable", countdown: null });
   });
 
   // When the Player unmounts, the capture ends: its photo is dropped and a camera it opened turns off.
@@ -203,10 +226,14 @@ export function useImageCapture(host: ImageCaptureHost) {
       question: target.question,
       // The live picture stays under the photo under review, so the view keeps its size.
       track:
-        target.phase === "live" || target.phase === "taking" || target.phase === "review"
+        target.phase === "live" ||
+        target.phase === "countdown" ||
+        target.phase === "taking" ||
+        target.phase === "review"
           ? cameraOf(target).previewTrack
           : null,
       photo: photo?.state === "ready" ? photo.url : null,
+      countdown: target.countdown,
     };
   });
 

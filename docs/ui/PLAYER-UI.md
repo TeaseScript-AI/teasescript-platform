@@ -691,7 +691,9 @@ stored as session media and recorded in the transcript as the player message `Im
 An `askImage(...)` that allows the camera turns the camera on by itself as it asks, where the browser can capture. Its
 viewfinder opens over the Stage, or in the camera window when the script shows one, and draws on the picture the
 request's message as its question and a round **Take photo** shutter, both at the bottom so the top stays clear. The
-photo taken covers the live picture, unmirrored as it will be used, with **Retake** and **Use this**; only **Use this**
+shutter starts a five-second countdown: a number from 5 to 1 as large as the viewfinder allows, each appearing large and
+settling over the live picture, without the motion when the player prefers reduced motion; a request that ends during
+the countdown takes no photo. The photo taken covers the live picture, unmirrored as it will be used, with **Retake** and **Use this**; only **Use this**
 answers the request, and **Retake** drops the photo and returns to the live camera. The paperclip stays available
 throughout. Once the player works in the viewfinder, each step moves keyboard focus to its main control; opening by
 itself, it takes no focus. None of these controls enter the transcript. The session camera is used when it is open;
