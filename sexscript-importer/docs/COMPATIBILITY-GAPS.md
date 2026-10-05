@@ -472,7 +472,7 @@ form instead once `main` implements it:
 
 | Accepted form | Workaround | What it loses |
 | --- | --- | --- |
-| `askBooleans(message:, texts:, defaults:)` | the message, one yes/no `choose` per item with the preset marked in its button, then "Confirm" or "Change answers", which starts over (`SX_ASK_BOOLEANS_WORKAROUND`) | one form with every option; changing a single answer |
+| `askBooleans(message:, texts:, defaults:)` | the message once, then a `choose` of every item marked ☑ or ☐, starting from the defaults, where a click switches the item and shows the menu again, and "Done" returns the answers (`SX_ASK_BOOLEANS_WORKAROUND`) | one form with checkboxes; a click per change |
 | `showPopup` | the message in the chat and an OK button (`SX_POPUP_WORKAROUND`) | the popup presentation |
 | `openUrl(url)` | "Open this link: …" in the chat, where message markup makes an `http(s)` address a link, and a Continue button (`SX_OPEN_URL_WORKAROUND`) | opening the page itself |
 | layered scene (`showBackgroundImage`, `showOverlayImage`) for an image composed in memory and shown with `setImage(bytes, n)` | the base image the function read (`SX_IMAGE_COMPOSITION`); `--accepted=layeredScene` places the base as background and each drawn image as an overlay at percentages of the canvas (`SX_LAYERED_SCENE`, or `SX_LAYERED_SCENE_PARTIAL` for source rectangles, text, shapes, pixel edits, and transformations) | the composition |

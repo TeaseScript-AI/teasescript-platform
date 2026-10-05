@@ -1,5 +1,5 @@
 // Accepted TeaseScript that main does not implement yet becomes a workaround in implemented TeaseScript.
-// getBooleans: one yes/no choice per item with the preset marked, then a confirmation that can start over.
+// getBooleans: a menu of the items with their state marked, which a click switches until "Done".
 def toys = getBooleans("Which toys do you have?", ["Paddle", "Crop"], [true, false])
 if (toys[0] == true) show("Fetch the paddle")
 // showPopup: the message in the chat and an OK button, also where the legacy script timed the popup.

@@ -12702,7 +12702,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         context,
         "SX_ASK_BOOLEANS_WORKAROUND",
         "warning",
-        "Workaround for askBooleans(), which main does not implement yet: one yes/no choice per item, the preset marked, and a confirmation that can start over. Switch back to askBooleans(message:, texts:, defaults:) when it is implemented.",
+        "Workaround for askBooleans(), which main does not implement yet: a menu of the items with their state marked, which a click switches until \"Done\". Switch back to askBooleans(message:, texts:, defaults:) when it is implemented.",
         node.span,
       );
       return useHelper(context, "askBooleans", args);

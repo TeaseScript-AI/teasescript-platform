@@ -77,8 +77,8 @@ between two events exceeds the product's instruction budget, which fails in the 
 With a single directory argument, the sibling `images/` folder holds the package's images.
 
 Accepted TeaseScript that `main` does not implement yet becomes a workaround in implemented TeaseScript, marked with a
-`// NOTE` at every site, so that converted packages play natively: `askBooleans` a yes/no choice per item and a
-confirmation, `showPopup` the message and an OK button, `openUrl` the link in the chat and a button, and an image
+`// NOTE` at every site, so that converted packages play natively: `askBooleans` a menu of the items with their state
+marked, which a click switches until "Done", `showPopup` the message and an OK button, `openUrl` the link in the chat and a button, and an image
 composition its base image. `--accepted` (every form) or `--accepted=askBooleans,showPopup,openUrl,chooseFile,layeredScene`
 emits the accepted forms instead, for when `main` implements them; the report then compiles and runs them through host
 stand-ins.

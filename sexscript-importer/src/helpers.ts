@@ -466,60 +466,73 @@ function removeDeviceButton(device: IrExpression): IrStatement[] {
   ];
 }
 
-/** A yes/no answer per text, confirmed at the end: legacy getBooleans() and the profile's owned items. */
+/**
+ * A yes/no answer per text, from a menu of all texts with their state marked: choosing a text switches it, and "Done"
+ * returns the answers. They start as the defaults, false where none is given. Legacy getBooleans() and the profile's
+ * owned items.
+ */
 function askBooleansHelper(name: string, speaker?: string): IrStatement {
   const asSpeaker = speaker === undefined ? {} : { speaker };
+  const count = prop(v("texts"), "length");
   return fn(
     name,
     ["message", "texts", "defaults"],
     [
-      letS("answers", { kind: "list", items: [] }),
-      letS("confirmed", lit(false)),
+      letS("selected", { kind: "list", items: [] }),
+      letS("index", lit(0)),
+      forS("text", v("texts"), [
+        add(
+          "selected",
+          bin(
+            "and",
+            bin("<", v("index"), prop(v("defaults"), "length")),
+            bin("==", at(v("defaults"), v("index")), lit(true)),
+          ),
+        ),
+        set(v("index"), lit(1), "+="),
+      ]),
+      { kind: "say", value: v("message"), ...asSpeaker, span: null },
       {
         kind: "while",
-        condition: { kind: "unary", operator: "not", value: v("confirmed") },
+        condition: lit(true),
         body: [
-          set(v("answers"), { kind: "list", items: [] }),
-          { kind: "say", value: v("message"), ...asSpeaker, span: null },
-          letS("index", lit(0)),
+          letS("buttons", { kind: "list", items: [] }),
+          set(v("index"), lit(0)),
           forS("text", v("texts"), [
-            letS("yes", lit("Yes")),
-            letS("no", lit("No (preset)")),
-            ifS(
-              bin(
-                "and",
-                bin("<", v("index"), prop(v("defaults"), "length")),
-                bin("==", at(v("defaults"), v("index")), lit(true)),
-              ),
-              [set(v("yes"), lit("Yes (preset)")), set(v("no"), lit("No"))],
-            ),
-            { kind: "say", value: v("text"), ...asSpeaker, span: null },
-            add(
-              "answers",
-              bin(
-                "==",
-                { kind: "choice", options: [v("yes"), v("no")], labels: ["yes", "no"] },
-                lit("yes"),
-              ),
-            ),
+            letS("mark", lit("☐")),
+            ifS(at(v("selected"), v("index")), [set(v("mark"), lit("☑"))]),
+            add("buttons", {
+              kind: "object",
+              properties: [
+                { name: "value", value: v("index") },
+                {
+                  name: "text",
+                  value: { kind: "template", parts: [{ value: v("mark") }, { text: " " }, { value: v("text") }] },
+                },
+              ],
+            }),
             set(v("index"), lit(1), "+="),
           ]),
-          set(
-            v("confirmed"),
-            bin(
-              "==",
-              {
-                kind: "choice",
-                options: [lit("Confirm"), lit("Change answers")],
-                labels: ["confirm", "change"],
-              },
-              lit("confirm"),
-            ),
-          ),
+          add("buttons", {
+            kind: "object",
+            properties: [
+              { name: "value", value: count },
+              { name: "text", value: lit("Done") },
+            ],
+          }),
+          letS("picked", {
+            kind: "listChoice",
+            options: [{ kind: "list", list: v("buttons"), records: true }],
+          }),
+          ifS(bin("==", v("picked"), count), [ret(v("selected"))]),
+          set(at(v("selected"), v("picked")), {
+            kind: "unary",
+            operator: "not",
+            value: at(v("selected"), v("picked")),
+          }),
         ],
         span: null,
       },
-      ret(v("answers")),
     ],
   );
 }
@@ -607,8 +620,8 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
-  // Workaround for askBooleans(), which main does not implement yet (workarounds.ts): one yes/no choice per item, the
-  // preset marked in its button, and a confirmation that can start over.
+  // Workaround for askBooleans(), which main does not implement yet (workarounds.ts): a menu of the items with their
+  // state marked, which a click switches until "Done".
   askBooleans: {
     name: "sexscriptLegacyAskBooleans",
     build: () => askBooleansHelper("sexscriptLegacyAskBooleans"),
