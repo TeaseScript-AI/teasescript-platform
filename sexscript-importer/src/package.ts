@@ -397,6 +397,8 @@ function entryMenu(
   const targets = new Set<string>();
   // The literal transfers of each script, by its path.
   const transfers = new Map<string, Set<string>>();
+  // The scripts with a computed transfer (`goto script(...)`), which may reach any script of their folder.
+  const computed = new Set<string>();
   let source = "";
   const collect = (statements: readonly IrStatement[]): void => {
     for (const statement of statements) {
@@ -407,6 +409,7 @@ function entryMenu(
           (transfers.get(source) ?? new Set()).add(statement.target.path.toLowerCase()),
         );
       }
+      if (statement.kind === "goto" && statement.target.kind !== "file") computed.add(source);
       if (statement.kind === "function") collect(statement.body);
       if (statement.kind === "if") {
         collect(statement.then);
@@ -427,55 +430,75 @@ function entryMenu(
   const base = (path: string): string =>
     path.replace(/_[a-z]{2}(?:_[a-z]{2})?\.tease$/iu, ".tease");
   const depthOf = (path: string): number => path.split("/").length - 1;
-  // A script that another script of its own level or above chains to is no entry; sub-scripts one folder down that
-  // return to their main script do not count.
-  const chainedFrom = (path: string, depth: number): boolean =>
-    [...transfers].some(
-      ([from, to]) =>
-        from !== path.toLowerCase() &&
-        depthOf(from) <= depth &&
-        (to.has(path.toLowerCase()) || to.has(base(path).toLowerCase())),
-    );
   const targeted = (path: string): boolean =>
     targets.has(path.toLowerCase()) || targets.has(base(path).toLowerCase());
   // The entries (owner decision 2026-10-05): the scripts of the top folder that call setInfos, as the legacy player
-  // listed them, apart from internal scripts and scripts another script chains to; without one there, those one folder
-  // down, beside folders such as system/.
-  const listedAt = (depth: number): string[] =>
-    [...scripts.pathOf]
-      .filter(
-        ([index, path]) =>
-          depthOf(path) === depth && !internal.has(index) && programs[index]?.metadata != null,
-      )
-      .map(([, path]) => path)
-      .sort(versionOrder);
+  // listed them, apart from internal scripts and scripts that another script chains to; without one there, those one
+  // folder down, beside folders such as system/. Where every script of a level is chained to, as scripts that chain to
+  // each other in a circle, the hub of the circle starts (entryScripts).
+  const paths = [...scripts.pathOf.values()];
+  const folderOf = (path: string): string => path.slice(0, path.lastIndexOf("/") + 1).toLowerCase();
+  const edges = new Map(
+    paths.map((path) => {
+      const to = transfers.get(path.toLowerCase()) ?? new Set<string>();
+      const anyBelow = computed.has(path.toLowerCase());
+      // A chain to a script also reached its localized variants, which the legacy player chose by language.
+      return [
+        path,
+        paths.filter(
+          (other) =>
+            other !== path &&
+            (to.has(other.toLowerCase()) ||
+              to.has(base(other).toLowerCase()) ||
+              (anyBelow && other.toLowerCase().startsWith(folderOf(path)))),
+        ),
+      ] as const;
+    }),
+  );
+  const listed = new Set(
+    [...scripts.pathOf].flatMap(([index, path]) =>
+      !internal.has(index) && programs[index]?.metadata != null ? [path] : [],
+    ),
+  );
+  // A main script's sub-scripts sit in the folder of its name, `jewell/` for `jewell.groovy`, and their chains back to it
+  // do not make it a chained script.
+  const ownFolder = (path: string): string => `${path.replace(/\.tease$/iu, "").toLowerCase()}/`;
+  const chainedFromOutside = (path: string): boolean =>
+    [...transfers].some(
+      ([from, to]) =>
+        from !== path.toLowerCase() &&
+        !from.startsWith(ownFolder(path)) &&
+        (to.has(path.toLowerCase()) ||
+          // A chain to the main script also reached its localized variant, unless it returns from the main's own folder.
+          (to.has(base(path).toLowerCase()) &&
+            from !== base(path).toLowerCase() &&
+            !from.startsWith(ownFolder(base(path))))),
+    );
   const named = (depth: number): string[] =>
-    listedAt(depth).filter((path) => !chainedFrom(path, depth));
-  // Where the scripts of a level all chain to each other, the hub that chains to the most of them starts.
-  const hub = (depth: number): string[] => {
-    const outgoing = (path: string): number => transfers.get(path.toLowerCase())?.size ?? 0;
-    const candidates = listedAt(depth);
-    const most = Math.max(0, ...candidates.map(outgoing));
-    return most === 0 ? [] : candidates.filter((path) => outgoing(path) === most).slice(0, 1);
-  };
+    [...listed]
+      .filter((path) => depthOf(path) === depth && !chainedFromOutside(path))
+      .sort(versionOrder);
+  const starts = entryScripts(paths, edges, listed);
+  const hubs = (depth: number): string[] =>
+    starts.filter((path) => depthOf(path) === depth).sort(versionOrder);
   const entries =
     named(0).length > 0
       ? named(0)
       : named(1).length > 0
         ? named(1)
-        : hub(0).length > 0
-          ? hub(0)
-          : hub(1);
+        : hubs(0).length > 0
+          ? hubs(0)
+          : hubs(1);
   // Without such a script, the scripts of the top folder that nothing chains to.
-  const listed = scripts.rootScripts.filter((index) => !internal.has(index));
-  const offered = listed
+  const rootListed = scripts.rootScripts.filter((index) => !internal.has(index));
+  const offered = rootListed
     .map((index) => scripts.pathOf.get(index)!)
     .filter((path) => !targeted(path))
     .sort(versionOrder);
   const rooted =
     offered.length > 0
       ? offered
-      : (listed.length > 0 ? listed : scripts.rootScripts).map((index) =>
+      : (rootListed.length > 0 ? rootListed : scripts.rootScripts).map((index) =>
           scripts.pathOf.get(index)!,
         );
   // A package whose scripts are all in folders, such as System/, offers the scripts nothing chains to, or every script.
@@ -565,6 +588,94 @@ function entryMenu(
     ],
     diagnostics: [{ code: "SX_ENTRY_MENU", severity: "warning", message, span: null }],
   };
+}
+
+/**
+ * The scripts a package starts at: in each group of scripts that chain to each other in a circle (a strongly connected
+ * component) that no script outside it chains to, the listed script the others return to most (the hub), or the
+ * group's one listed script.
+ */
+function entryScripts(
+  paths: readonly string[],
+  edges: ReadonlyMap<string, readonly string[]>,
+  listed: ReadonlySet<string>,
+): string[] {
+  // Tarjan's algorithm, iterative over the transfer graph.
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const component = new Map<string, number>();
+  let counter = 0;
+  let components = 0;
+  const connect = (start: string): void => {
+    const work: Array<{ node: string; next: number }> = [{ node: start, next: 0 }];
+    index.set(start, counter);
+    low.set(start, counter);
+    counter += 1;
+    stack.push(start);
+    onStack.add(start);
+    while (work.length > 0) {
+      const frame = work.at(-1)!;
+      const targets = edges.get(frame.node) ?? [];
+      if (frame.next < targets.length) {
+        const target = targets[frame.next]!;
+        frame.next += 1;
+        if (!index.has(target)) {
+          index.set(target, counter);
+          low.set(target, counter);
+          counter += 1;
+          stack.push(target);
+          onStack.add(target);
+          work.push({ node: target, next: 0 });
+        } else if (onStack.has(target)) {
+          low.set(frame.node, Math.min(low.get(frame.node)!, index.get(target)!));
+        }
+        continue;
+      }
+      work.pop();
+      const parent = work.at(-1);
+      if (parent !== undefined)
+        low.set(parent.node, Math.min(low.get(parent.node)!, low.get(frame.node)!));
+      if (low.get(frame.node) === index.get(frame.node)) {
+        for (let member = stack.pop(); member !== undefined; member = stack.pop()) {
+          onStack.delete(member);
+          component.set(member, components);
+          if (member === frame.node) break;
+        }
+        components += 1;
+      }
+    }
+  };
+  for (const path of paths) if (!index.has(path)) connect(path);
+  const reached = new Set<number>();
+  for (const [from, targets] of edges)
+    for (const target of targets)
+      if (component.get(from) !== component.get(target)) reached.add(component.get(target)!);
+  const result: string[] = [];
+  for (let group = 0; group < components; group += 1) {
+    if (reached.has(group)) continue;
+    const members = paths.filter((path) => component.get(path) === group && listed.has(path));
+    if (members.length <= 1) {
+      result.push(...members);
+      continue;
+    }
+    // The hub is the script the others return to most; then the one that chains to most, the shallowest, and the first.
+    const inGroup = paths.filter((path) => component.get(path) === group);
+    const incoming = (path: string): number =>
+      inGroup.filter((other) => (edges.get(other) ?? []).includes(path)).length;
+    const outgoing = (path: string): number => edges.get(path)?.length ?? 0;
+    result.push(
+      members.toSorted(
+        (left, right) =>
+          incoming(right) - incoming(left) ||
+          outgoing(right) - outgoing(left) ||
+          left.split("/").length - right.split("/").length ||
+          versionOrder(left, right),
+      )[0]!,
+    );
+  }
+  return result;
 }
 
 /** Script paths in name order, with other versions of a script (`name__sha256_<hash>`) after the scripts. */
