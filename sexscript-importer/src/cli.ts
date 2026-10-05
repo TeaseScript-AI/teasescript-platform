@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseParsedGroovyFile, type ParsedGroovyFile } from "./ast.ts";
 import { loadRepositoryProjectCompiler, type TeaseProjectCompiler } from "./compile-check.ts";
@@ -201,16 +201,56 @@ async function packageFiles(root: string): Promise<string[]> {
 async function packageMedia(root: string): Promise<MediaFile[]> {
   const imageExtensions = new Set([".gif", ".jpeg", ".jpg", ".png", ".webp"]);
   const files = await readdir(root, { recursive: true, withFileTypes: true }).catch(() => []);
-  return files
-    .filter(
-      (entry) => entry.isFile() && imageExtensions.has(path.extname(entry.name).toLowerCase()),
-    )
-    .map((entry) => {
-      const relative = path.relative(root, path.join(entry.parentPath, entry.name));
-      const folders = relative.split(path.sep).slice(0, -1);
-      return { path: relative, tags: folders.map((folder) => folder.toLowerCase()) };
-    })
-    .sort((left, right) => left.path.localeCompare(right.path));
+  const media = await Promise.all(
+    files
+      .filter(
+        (entry) => entry.isFile() && imageExtensions.has(path.extname(entry.name).toLowerCase()),
+      )
+      .map(async (entry): Promise<MediaFile> => {
+        const absolute = path.join(entry.parentPath, entry.name);
+        const relative = path.relative(root, absolute);
+        const folders = relative.split(path.sep).slice(0, -1);
+        const size = imageSize(await readHead(absolute));
+        return {
+          path: relative,
+          tags: folders.map((folder) => folder.toLowerCase()),
+          ...(size === null ? {} : size),
+        };
+      }),
+  );
+  return media.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+/** The first bytes of a file, enough for an image header. */
+async function readHead(file: string): Promise<Buffer> {
+  const handle = await open(file, "r");
+  try {
+    const buffer = Buffer.alloc(65536);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
+/** The pixel size of a PNG, GIF, or JPEG image from its header; null for another format or a damaged header. */
+function imageSize(head: Buffer): { width: number; height: number } | null {
+  if (head.length >= 24 && head.readUInt32BE(0) === 0x89504e47)
+    return { width: head.readUInt32BE(16), height: head.readUInt32BE(20) };
+  if (head.length >= 10 && head.toString("latin1", 0, 3) === "GIF")
+    return { width: head.readUInt16LE(6), height: head.readUInt16LE(8) };
+  if (head.length >= 4 && head[0] === 0xff && head[1] === 0xd8) {
+    let offset = 2;
+    while (offset + 9 < head.length && head[offset] === 0xff) {
+      const marker = head[offset + 1]!;
+      const length = head.readUInt16BE(offset + 2);
+      // A start-of-frame marker (C0 to CF without C4, C8, and CC) holds the height, then the width.
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker))
+        return { width: head.readUInt16BE(offset + 7), height: head.readUInt16BE(offset + 5) };
+      offset += 2 + length;
+    }
+  }
+  return null;
 }
 
 /**

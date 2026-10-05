@@ -279,6 +279,54 @@ test("names media files as the package holds them", { skip: parserUnavailable },
   }
 });
 
+// With --accepted=layeredScene, a straight-line image composition becomes the accepted layered scene: the base image as
+// the background and each drawn image as an overlay at percentages of the canvas.
+test(
+  "expresses an image composition as the accepted layered scene when that form is selected",
+  { skip: parserUnavailable },
+  async () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-scene-"));
+    try {
+      const sourcePath = path.join(directory, "scene.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          "def compose = { ->",
+          '  def room = javax.imageio.ImageIO.read(new File("images/room.jpg"))',
+          '  def lady = javax.imageio.ImageIO.read(new File("images/lady.png"))',
+          "  def frame = new java.awt.image.BufferedImage(room.getWidth(), room.getHeight(), 6)",
+          "  def graphics = frame.createGraphics()",
+          "  graphics.drawImage(room, 0, 0, null)",
+          "  graphics.drawImage(lady, 200, 100, 100, 200, null)",
+          "  def bytes = new java.io.ByteArrayOutputStream()",
+          '  javax.imageio.ImageIO.write(frame, "png", bytes)',
+          "  setImage(bytes.toByteArray(), 0)",
+          "}",
+          "compose()",
+          "",
+        ].join("\n"),
+      );
+      const media = [
+        { path: "room.jpg", tags: [], width: 800, height: 400 },
+        { path: "lady.png", tags: [], width: 100, height: 200 },
+      ];
+      const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], {
+        media,
+        accepted: new Set(["layeredScene"]),
+      });
+      const source = emitTease(program!);
+      assert.match(source, /showBackgroundImage\(image: "room\.jpg"\)/u);
+      assert.match(
+        source,
+        /showOverlayImage\(image: "lady\.png", x: 25, y: 25, width: 12\.5, height: 50, anchor: "topLeft", relativeTo: "background"\)/u,
+      );
+      assert.match(source, /NOTE SX_LAYERED_SCENE line 1/u);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 /** A fixture as the main.tease of a project, with a file that just ends for each file it transfers to. */
 function withTransferTargets(source: string): Array<{ path: string; source: string }> {
   const targets = [...source.matchAll(/^\s*goto "([^"]+)"/gmu)].map((match) => match[1]!);

@@ -9,6 +9,7 @@ export const ACCEPTED_FORMS = [
   "openUrl",
   "chooseFile",
   "permanentButton",
+  "layeredScene",
 ] as const;
 
 export type AcceptedForm = (typeof ACCEPTED_FORMS)[number];
@@ -33,4 +34,7 @@ export function parseAcceptedForms(value: string): Set<AcceptedForm> {
 export interface MediaFile {
   path: string;
   tags: string[];
+  /** The image's size in pixels, when it was read at conversion time. */
+  width?: number;
+  height?: number;
 }

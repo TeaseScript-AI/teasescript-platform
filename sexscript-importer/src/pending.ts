@@ -17,6 +17,8 @@ const PENDING_CALLS = new Map<string, string>([
   ["openUrl", "openUrl()"],
   ["chooseFile", "chooseFile()"],
   ["removePermanentButton", "showPermanentButton"],
+  ["showBackgroundImage", "layered scene"],
+  ["showOverlayImage", "layered scene"],
 ]);
 
 /** Calls that only a proposed language change defines, by the proposal (see proposals.ts). */
@@ -332,6 +334,8 @@ export function pendingHostFunctions(
     ["showPopup", () => null],
     ["showPermanentButton", () => "button"],
     ["removePermanentButton", () => null],
+    ["showBackgroundImage", () => null],
+    ["showOverlayImage", () => null],
     ["askBoolean", () => next("askBoolean", [true, false])],
     ["askBooleans", (_, named) => named.defaults ?? emptyList],
     ["openUrl", () => null],

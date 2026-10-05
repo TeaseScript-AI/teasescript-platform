@@ -4136,7 +4136,7 @@ function lowerCallStatement(
           context,
           "SX_SHOW_CLEAR",
           "info",
-          "Dropped show(null) or show(\"\") with empty text, which only cleared the legacy text area.",
+          'Dropped show(null) or show("") with empty text, which only cleared the legacy text area.',
           span,
         );
         return [];
@@ -11867,6 +11867,10 @@ function composedImage(body: AstNode, context: LowerContext): IrStatement[] | nu
   if (!showsBytes || other || base === null) return null;
   const image = imagePathBelowImages(base, context);
   if (image === null) return null;
+  if (context.accepted.has("layeredScene")) {
+    const scene = layeredScene(body, image, context);
+    if (scene !== null) return scene;
+  }
   addDiagnostic(
     context,
     "SX_IMAGE_COMPOSITION",
@@ -11875,6 +11879,193 @@ function composedImage(body: AstNode, context: LowerContext): IrStatement[] | nu
     body.span,
   );
   return [{ kind: "showImage", file: mediaFile(image, "images", body, context), span: body.span }];
+}
+
+/** Java drawing calls that the layered scene does not cover: text, shapes, pixel edits, and transformations. */
+const UNCOVERED_DRAWING = new Set([
+  "drawString",
+  "fillRect",
+  "clearRect",
+  "setRGB",
+  "rotate",
+  "scale",
+  "translate",
+  "drawLine",
+  "drawRect",
+  "fillOval",
+  "drawOval",
+]);
+
+/**
+ * The accepted layered scene (V30 "Future layered scene") for a straight-line image composition: the base image as
+ * the background, and each drawn image as an overlay at the percentages of the canvas its pixels gave, the canvas
+ * size known from literal numbers or from the base image's size at conversion time. Null when a drawing runs in a
+ * loop or the canvas size is unknown, where the base image stays.
+ */
+function layeredScene(
+  body: AstNode,
+  base: IrExpression,
+  context: LowerContext,
+): IrStatement[] | null {
+  const images = new Map<string, AstNode>();
+  const draws: AstNode[] = [];
+  let canvas: AstNode[] | null = null;
+  let loops = false;
+  let uncovered = false;
+  const visit = (node: AstNode, inLoop: boolean): void => {
+    const loop = inLoop || node.kind === "for" || node.kind === "while";
+    if (node.kind === "declaration" || (node.kind === "binary" && node.operator === "=")) {
+      const name = variableName(node.left);
+      const value = asNode(node.right);
+      const call = value?.kind === "methodCall" ? value : null;
+      const method = call === null ? "" : (constantString(call.method) ?? "");
+      if (name !== null && call !== null && (method === "getImage" || method === "read")) {
+        const argument = nodeArray(asNode(call.arguments)?.items)[0];
+        const path =
+          argument !== undefined && isFileConstructor(argument)
+            ? nodeArray(asNode(argument.arguments)?.items)[0]
+            : argument;
+        if (path !== undefined) images.set(name, path);
+      }
+      if (value?.kind === "constructorCall" && String(value.type).endsWith("BufferedImage"))
+        canvas = nodeArray(asNode(value.arguments)?.items).slice(0, 2);
+    }
+    if (node.kind === "methodCall") {
+      const method = constantString(node.method) ?? "";
+      if (method === "drawImage") {
+        draws.push(node);
+        if (loop) loops = true;
+      }
+      if (UNCOVERED_DRAWING.has(method)) uncovered = true;
+    }
+    for (const child of Object.values(node))
+      for (const item of Array.isArray(child) ? child : [child])
+        if (isAstNode(item) && item.kind !== "closure") visit(item, loop);
+  };
+  visit(body, false);
+  const sizeOf = (path: AstNode | undefined): { width: number; height: number } | null => {
+    const literal = path === undefined ? null : constantString(path);
+    if (literal === null || context.media === null) return null;
+    const relative = literal.replace(/^images\//iu, "").toLowerCase();
+    const file = context.media.find(
+      (item) => item.path.replaceAll("\\", "/").toLowerCase() === relative,
+    );
+    return file?.width !== undefined && file.height !== undefined
+      ? { width: file.width, height: file.height }
+      : null;
+  };
+  // A number of the composition: a literal, arithmetic, or an image's getWidth()/getHeight().
+  const number = (node: AstNode | undefined): number | null => {
+    if (node === undefined) return null;
+    if (node.kind === "constant" && typeof node.value === "number") return node.value;
+    if (node.kind === "cast") return number(asNode(node.expression) ?? undefined);
+    if (node.kind === "binary" && ["+", "-", "*", "/"].includes(String(node.operator))) {
+      const left = number(asNode(node.left) ?? undefined);
+      const right = number(asNode(node.right) ?? undefined);
+      if (left === null || right === null) return null;
+      return node.operator === "+"
+        ? left + right
+        : node.operator === "-"
+          ? left - right
+          : node.operator === "*"
+            ? left * right
+            : left / right;
+    }
+    if (node.kind === "methodCall") {
+      const method = constantString(node.method);
+      const size = sizeOf(images.get(variableName(node.object) ?? ""));
+      if (method === "getWidth" && size !== null) return size.width;
+      if (method === "getHeight" && size !== null) return size.height;
+    }
+    return null;
+  };
+  const [canvasWidth, canvasHeight] = (canvas ?? []).map((side) => number(side));
+  if (loops || draws.length === 0 || canvasWidth == null || canvasHeight == null) return null;
+  const percent = (node: AstNode | undefined, side: number): IrExpression | null => {
+    const value = number(node);
+    return value === null
+      ? null
+      : { kind: "literal", value: Math.round((value / side) * 10000) / 100 };
+  };
+  const overlays: IrStatement[] = [];
+  for (const draw of draws) {
+    const args = nodeArray(asNode(draw.arguments)?.items);
+    const imagePath = images.get(variableName(args[0]) ?? "");
+    const file = imagePath === undefined ? null : imagePathBelowImages(imagePath, context);
+    if (file === null) return null;
+    // drawImage(image, x, y, observer), (image, x, y, width, height, observer), or a source rectangle.
+    const [x, y] = [percent(args[1], canvasWidth), percent(args[2], canvasHeight)];
+    const sized = args.length >= 6 && args.length < 10;
+    const cropped = args.length >= 10;
+    if (cropped) uncovered = true;
+    const width = cropped
+      ? percent(
+          { kind: "binary", span: null, operator: "-", left: args[3]!, right: args[1]! },
+          canvasWidth,
+        )
+      : sized
+        ? percent(args[3], canvasWidth)
+        : (() => {
+            const size = sizeOf(imagePath);
+            return size === null
+              ? null
+              : percent({ kind: "constant", span: null, value: size.width }, canvasWidth);
+          })();
+    const height = cropped
+      ? percent(
+          { kind: "binary", span: null, operator: "-", left: args[4]!, right: args[2]! },
+          canvasHeight,
+        )
+      : sized
+        ? percent(args[4], canvasHeight)
+        : (() => {
+            const size = sizeOf(imagePath);
+            return size === null
+              ? null
+              : percent({ kind: "constant", span: null, value: size.height }, canvasHeight);
+          })();
+    if (x === null || y === null) return null;
+    overlays.push({
+      kind: "expression",
+      expression: {
+        kind: "call",
+        name: "showOverlayImage",
+        positional: [],
+        named: {
+          image: mediaFile(file, "images", draw, context),
+          x,
+          y,
+          ...(width === null ? {} : { width }),
+          ...(height === null ? {} : { height }),
+          anchor: { kind: "literal", value: "topLeft" },
+          relativeTo: { kind: "literal", value: "background" },
+        },
+      },
+      span: draw.span,
+    });
+  }
+  addDiagnostic(
+    context,
+    uncovered ? "SX_LAYERED_SCENE_PARTIAL" : "SX_LAYERED_SCENE",
+    "warning",
+    uncovered
+      ? "The legacy function composed an image in memory; the layered scene places the base image and the drawn images, but not what it does not cover here: a part of an image (a source rectangle), text, shapes, pixel edits, or transformations."
+      : "The legacy function composed an image in memory from other images; the layered scene places them, with pixel positions as percentages of the canvas.",
+    body.span,
+  );
+  return [
+    {
+      kind: "expression",
+      expression: {
+        kind: "call",
+        name: "showBackgroundImage",
+        positional: [],
+        named: { image: mediaFile(base, "images", body, context) },
+      },
+      span: body.span,
+    },
+    ...overlays,
+  ];
 }
 
 /** A path the legacy script read below `images/`, as a path of the package's images; null for another path. */
