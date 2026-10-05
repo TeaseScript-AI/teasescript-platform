@@ -40,6 +40,8 @@ import type {
   TimerParts,
   TimerDisplay,
   HideImageStatement,
+  HideCameraStatement,
+  CameraPlacement,
   MediaCue,
   MediaHandlers,
   MediaKind,
@@ -92,11 +94,13 @@ export interface ParseResult {
 }
 
 // Commands that #parseStatement dispatches by name. A line that starts with one starts a statement; only `showButton`
-// also has an expression form, used after `=`, an operator, or an opening delimiter.
+// and `showCamera` also have an expression form, used after `=`, an operator, or an opening delimiter.
 const statementOnlyCommands: ReadonlySet<string> = new Set([
   "showButton",
   "showImage",
   "hideImage",
+  "showCamera",
+  "hideCamera",
   "save",
   "delete",
   "switch",
@@ -259,6 +263,13 @@ class Parser {
     }
     if (this.#checkIdentifier("hideImage")) {
       return this.#parseHideImageStatement();
+    }
+    if (this.#checkIdentifier("showCamera")) {
+      const parts = this.#parseShowCameraParts();
+      return parts === null ? null : Object.freeze({ kind: "showCameraStatement", ...parts });
+    }
+    if (this.#checkIdentifier("hideCamera")) {
+      return this.#parseHideCameraStatement();
     }
     if (this.#checkIdentifier("save")) {
       return this.#parseSaveStatement();
@@ -1394,6 +1405,31 @@ class Parser {
       defaultValue,
       span: spanFrom(command.span, (defaultValue ?? key).span),
     });
+  }
+
+  /** `showCamera [stage]`: the contextual word `stage` directly after the command places the view over the Stage. */
+  #parseShowCameraParts(): { placement: CameraPlacement; span: SourceSpan } | null {
+    const command = this.#advance();
+    if (
+      this.#rejectAdjacentParenthesis(
+        command,
+        "showCamera uses command syntax; write 'showCamera' or 'showCamera stage'.",
+      )
+    )
+      return null;
+    if (!this.#checkIdentifier("stage"))
+      return { placement: "window", span: copySpan(command.span) };
+    const word = this.#advance();
+    return { placement: "stage", span: spanFrom(command.span, word.span) };
+  }
+
+  #parseHideCameraStatement(): HideCameraStatement | null {
+    const command = this.#advance();
+    if (
+      this.#rejectAdjacentParenthesis(command, "hideCamera takes no arguments; write 'hideCamera'.")
+    )
+      return null;
+    return Object.freeze({ kind: "hideCameraStatement", span: copySpan(command.span) });
   }
 
   #parseHideImageStatement(): HideImageStatement | null {
@@ -3006,6 +3042,10 @@ class Parser {
     if (this.#checkIdentifier("timer")) {
       const parts = yield* parseChild(this.#parseTimerParts());
       return parts === null ? null : Object.freeze({ kind: "timerExpression", ...parts });
+    }
+    if (this.#checkIdentifier("showCamera")) {
+      const parts = this.#parseShowCameraParts();
+      return parts === null ? null : Object.freeze({ kind: "showCameraExpression", ...parts });
     }
     if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
       const parts = yield* parseChild(this.#parseMediaParts());

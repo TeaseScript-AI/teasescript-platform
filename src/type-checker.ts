@@ -856,14 +856,18 @@ class TypeChecker {
         this.#suspend();
         return true;
       case "hideImageStatement":
+      case "showCameraStatement":
+      case "hideCameraStatement":
         this.#suspend();
         return true;
       case "saveStatement": {
         const value = yield* compileChild(this.#expressionTask(statement.value, scope));
-        if (containsType(value, (part) => ["speaker", "timer", "media"].includes(part.kind)))
+        if (
+          containsType(value, (part) => ["speaker", "timer", "media", "camera"].includes(part.kind))
+        )
           this.#report(
             typeCode.invalidOperand,
-            `Speakers and timer or media handles cannot be saved, but this is ${describeValue(value)}.`,
+            `Speakers, camera views, and timer or media handles cannot be saved, but this is ${describeValue(value)}.`,
             statement.value.span,
           );
         yield* compileChild(this.#storageKeyTask(statement.key, scope));
@@ -1387,9 +1391,11 @@ class TypeChecker {
         // A speaker shows its text property; any other receiver keeps the value as it is.
         untyped =
           place === undefined && this.diagnostics.length === before && speakers.includes(false);
-        handle = mayBe(object, "timer", "media");
-        // A media position, remaining time, or volume write first waits for the previous message's pacing.
+        handle = mayBe(object, "timer", "media", "camera");
+        // A media position, remaining time, or volume write, and a camera view's placement, first wait for the
+        // previous message's pacing.
         if (MEDIA_PACED_PROPERTIES.has(name) && mayBe(object, "media")) this.#suspend();
+        if (name === "placement" && mayBe(object, "camera")) this.#suspend();
       }
     }
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
@@ -2469,6 +2475,9 @@ class TypeChecker {
         return expression.async ? { kind: "timer" } : UNKNOWN_TYPE;
       case "playMediaExpression":
         return yield* compileChild(this.#mediaTask(expression, scope, null));
+      case "showCameraExpression":
+        this.#suspend();
+        return { kind: "camera" };
       case "loadExpression": {
         yield* compileChild(this.#storageKeyTask(expression.key, scope));
         if (expression.defaultValue === null) return UNKNOWN_TYPE;
@@ -3368,7 +3377,7 @@ class TypeChecker {
             ? method === "add"
               ? "Dicts have no method 'add'; store a value by its key, as in dict[key] = value."
               : `Dicts have no method '${method}'; use contains, remove, clear, or get.`
-            : failing.kind === "timer" || failing.kind === "media"
+            : failing.kind === "timer" || failing.kind === "media" || failing.kind === "camera"
               ? handleMemberMessage(failing.kind, method, "call")
               : `${capitalize(describeValue(failing))} has no method '${method}'.`,
         callee.property.span,
@@ -3696,7 +3705,7 @@ class TypeChecker {
         ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'; use length, first, last, or random.`
         : value.kind === "dict"
           ? `Dicts have no property '${name}'; use length, keys, or values, or read a value by its key, as in ${expressionLabel(expression.object) ?? "dict"}[${JSON.stringify(name)}].`
-          : value.kind === "timer" || value.kind === "media"
+          : value.kind === "timer" || value.kind === "media" || value.kind === "camera"
             ? handleMemberMessage(value.kind, name, "read")
             : `${capitalize(describeValue(value))} has no property '${name}'.`,
       expression.property.span,
@@ -4887,6 +4896,7 @@ function programEffects(program: Program): ProgramEffects {
           expression.kind === "showButtonExpression" ||
           expression.kind === "timerExpression" ||
           expression.kind === "playMediaExpression" ||
+          expression.kind === "showCameraExpression" ||
           (expression.kind === "callExpression" && !isPureBuiltinCall(expression)))
       )
         loop.suspends = true;
@@ -5479,12 +5489,13 @@ function findDecidedSlot(type: StaticType): SourceSpan | null {
 
 // Types of new places --------------------------------------------------------------------------------------------------
 
-/** The value type of a timer or media handle property, or `undefined` when it cannot be read or assigned. */
+/** The value type of a timer, media, or camera view handle property, or `undefined` when it cannot be read or assigned. */
 function handlePropertyType(
-  handle: "timer" | "media",
+  handle: "timer" | "media" | "camera",
   name: string,
   use: "read" | "assign",
 ): StaticType | undefined {
+  if (handle === "camera") return name === "placement" ? STRING_TYPE : undefined;
   if (handle === "timer") {
     switch (name) {
       case "remaining":
@@ -5544,6 +5555,7 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
       return value.properties?.get(name) ?? UNKNOWN_TYPE;
     case "timer":
     case "media":
+    case "camera":
       return handlePropertyType(value.kind, name, "read");
     case "scalar":
       if (isScalar(value, "string")) return name === "length" ? INTEGER_TYPE : undefined;
@@ -5564,6 +5576,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
   const value = resolved(type);
   if (value.kind === "timer" || value.kind === "media")
     return ["pause", "resume", "stop"].includes(method) ? NULL_TYPE : undefined;
+  if (value.kind === "camera") return undefined;
   if (value.kind === "speaker" || value.kind === "unknown" || value.kind === "open")
     return UNKNOWN_TYPE;
   // Text operations (V30 §8).
@@ -5682,7 +5695,7 @@ function temporalMethodType(kind: ScalarTypeName, method: string): StaticType | 
 const MEDIA_PACED_PROPERTIES: ReadonlySet<string> = new Set(["position", "remaining", "volume"]);
 
 /** Whether a value of this type may be one of the given handles, including a value of unknown type. */
-function mayBe(type: StaticType, ...kinds: ("timer" | "media")[]): boolean {
+function mayBe(type: StaticType, ...kinds: ("timer" | "media" | "camera")[]): boolean {
   return members(type).some((member) => {
     const value = resolved(member);
     return (
@@ -5700,7 +5713,7 @@ function assignableProperty(
   name: string,
 ):
   { readonly type: StaticType | null } | { readonly problem: string; readonly receiver?: boolean } {
-  if (member.kind === "timer" || member.kind === "media") {
+  if (member.kind === "timer" || member.kind === "media" || member.kind === "camera") {
     const type = handlePropertyType(member.kind, name, "assign");
     return type === undefined
       ? { problem: handleMemberMessage(member.kind, name, "assign") }
@@ -5817,6 +5830,7 @@ const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
   "range",
   "timer",
   "media",
+  "camera",
   "speaker",
 ]);
 
@@ -6078,12 +6092,16 @@ function mixDescription(first: StaticType, other: StaticType): string {
   return `${describeValue(first)} and ${describeValue(other)}`;
 }
 
-/** The message for a timer or media handle member that does not exist or cannot be assigned. */
+/** The message for a timer, media, or camera view handle member that does not exist or cannot be assigned. */
 function handleMemberMessage(
-  handle: "timer" | "media",
+  handle: "timer" | "media" | "camera",
   name: string,
   use: "read" | "assign" | "call",
 ): string {
+  if (handle === "camera")
+    return use === "call"
+      ? `Camera views have no method '${name}'; hide them with hideCamera.`
+      : `Camera views have no property '${name}'; use placement.`;
   const kind = handle === "timer" ? "Timer" : "Media";
   if (use === "call")
     return `${kind} handles have no method '${name}'; use pause(), resume(), or stop().`;

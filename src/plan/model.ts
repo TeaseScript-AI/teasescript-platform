@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 52;
+export const INSTRUCTION_PLAN_VERSION = 53;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -145,6 +145,8 @@ export type Instruction =
   | StartTimerInstruction
   | PacingBarrierInstruction
   | ShowImageInstruction
+  | ShowCameraInstruction
+  | HideCameraInstruction
   | StorageWriteInstruction
   | PlayMediaInstruction
   | InteractionInstruction
@@ -423,7 +425,7 @@ export interface StartTimerInstruction extends InstructionBase {
 
 /**
  * Waits for the previous message's pacing before main-story media presentation. With a `receiver`, it waits only
- * when that side-effect-free expression evaluates to a media handle.
+ * when that side-effect-free expression evaluates to a media handle or a camera view.
  */
 export interface PacingBarrierInstruction extends InstructionBase {
   readonly kind: "pacingBarrier";
@@ -434,6 +436,21 @@ export interface PacingBarrierInstruction extends InstructionBase {
 export interface ShowImageInstruction extends InstructionBase {
   readonly kind: "showImage";
   readonly image: ExpressionPlan | null;
+}
+
+/**
+ * `showCamera [stage]`: shows the default camera's view at `placement`, or moves the view already shown there. Its
+ * handle goes to `destinationTemporary` when the command is used as a value.
+ */
+export interface ShowCameraInstruction extends InstructionBase {
+  readonly kind: "showCamera";
+  readonly placement: "window" | "stage";
+  readonly destinationTemporary: number | null;
+}
+
+/** `hideCamera`: hides every camera view. */
+export interface HideCameraInstruction extends InstructionBase {
+  readonly kind: "hideCamera";
 }
 
 /** `save <value> as <key>`, or `delete <key>` when `value` is `null`; evaluates the value, then the key. */
@@ -817,6 +834,7 @@ export type TypePlanName =
   | "speaker"
   | "timer"
   | "media"
+  | "camera"
   | "script";
 
 export interface TypePropertyPlan {

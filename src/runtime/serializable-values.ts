@@ -93,6 +93,11 @@ export interface SerializableMediaHandle {
   readonly mediaId: number;
 }
 
+/** An opaque script handle for the default camera's view, the snapshot's `cameraView`. */
+export interface SerializableCameraViewHandle {
+  readonly kind: "cameraView";
+}
+
 /**
  * A reference to a file of the project, at its top or at a label, as `script(path, label:)` makes it. It names the file by
  * path, so it keeps its meaning across sessions and plans; whether that file and label exist is checked where a transfer
@@ -120,6 +125,7 @@ export type SerializableRuntimeValue =
   | SerializableRuntimeTemporal
   | SerializableTimerHandle
   | SerializableMediaHandle
+  | SerializableCameraViewHandle
   | SerializableSpeakerReference
   | SerializableScriptReference;
 
@@ -296,6 +302,7 @@ export function containsRuntimeIdentity(value: SerializableRuntimeValue): boolea
     switch (current.kind) {
       case "timerHandle":
       case "mediaHandle":
+      case "cameraView":
       case "speakerReference":
         return true;
       case "list":
@@ -328,6 +335,7 @@ function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRun
     case "timestamp":
     case "timerHandle":
     case "mediaHandle":
+    case "cameraView":
     case "script":
       return { ...value };
     case "set":
@@ -586,6 +594,8 @@ function leafKey(value: SerializableRuntimeValue): string | undefined {
       return `h${value.timerId};`;
     case "mediaHandle":
       return `m${value.mediaId};`;
+    case "cameraView":
+      return "c;";
     case "script":
       return `x${textKey(value.path)}${value.label === null ? "z" : textKey(value.label)}`;
     default:
@@ -719,6 +729,8 @@ function equalsOrDefer(
       return right.kind === "timerHandle" && right.timerId === left.timerId;
     case "mediaHandle":
       return right.kind === "mediaHandle" && right.mediaId === left.mediaId;
+    case "cameraView":
+      return right.kind === "cameraView";
     case "speakerReference":
       return right.kind === "speakerReference" && right.speakerId === left.speakerId;
     case "script":
@@ -903,6 +915,11 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         (current.timerId as number) < 1
       )
         return `${path()} contains a malformed timer handle.`;
+      continue;
+    }
+    if (current.kind === "cameraView") {
+      if (!hasOnlyKeys(current, ["kind"]))
+        return `${path()} contains a malformed camera view handle.`;
       continue;
     }
     if (current.kind === "mediaHandle") {

@@ -15,6 +15,8 @@ export type Statement =
   | TimerStatement
   | ShowImageStatement
   | HideImageStatement
+  | ShowCameraStatement
+  | HideCameraStatement
   | PlayMediaStatement
   | SaveStatement
   | DeleteStatement
@@ -148,6 +150,29 @@ export interface ShowImageStatement {
 /** `hideImage`: clears the persistent Stage image. */
 export interface HideImageStatement {
   readonly kind: "hideImageStatement";
+  readonly span: SourceSpan;
+}
+
+/** Where a camera view is shown: the Player's floating window, or over the Stage image, which stays underneath. */
+export type CameraPlacement = "window" | "stage";
+
+/** `showCamera [stage]` whose camera view handle is ignored. */
+export interface ShowCameraStatement {
+  readonly kind: "showCameraStatement";
+  readonly placement: CameraPlacement;
+  readonly span: SourceSpan;
+}
+
+/** `showCamera [stage]` used as a value; it evaluates to the camera view's handle. */
+export interface ShowCameraExpression {
+  readonly kind: "showCameraExpression";
+  readonly placement: CameraPlacement;
+  readonly span: SourceSpan;
+}
+
+/** `hideCamera`: hides every camera view. */
+export interface HideCameraStatement {
+  readonly kind: "hideCameraStatement";
   readonly span: SourceSpan;
 }
 
@@ -546,6 +571,7 @@ export type Expression =
   | ShowButtonExpression
   | TimerExpression
   | PlayMediaExpression
+  | ShowCameraExpression
   | LoadExpression
   | TagQueryExpression
   | TypeTestExpression;

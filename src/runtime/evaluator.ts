@@ -106,6 +106,7 @@ import {
   type SerializableRuntimeValue,
   type SerializableTimerHandle,
   type SerializableMediaHandle,
+  type SerializableCameraViewHandle,
   type SerializableScriptReference,
 } from "./serializable-values.js";
 import {
@@ -128,6 +129,7 @@ import {
   isTemporal,
   isTimerHandle,
   isMediaHandle,
+  isCameraView,
 } from "./value-predicates.js";
 import {
   assertValueType,
@@ -868,9 +870,13 @@ export class Evaluator {
         this.#assignMediaProperty(object, target.name, value, target.span);
         return;
       }
+      if (isCameraView(object)) {
+        this.#assignCameraProperty(target.name, value, target.span);
+        return;
+      }
       throw fault(
         "TSR003",
-        "Only objects, speakers, timer handles, and media handles have assignable properties.",
+        "Only objects, speakers, timer and media handles, and camera views have assignable properties.",
         target.span,
       );
     }
@@ -923,11 +929,12 @@ export class Evaluator {
         !isObject(object) &&
         !isSpeakerReference(object) &&
         !isTimerHandle(object) &&
-        !isMediaHandle(object)
+        !isMediaHandle(object) &&
+        !isCameraView(object)
       ) {
         throw fault(
           "TSR003",
-          "Only objects, speakers, timer handles, and media handles have assignable properties.",
+          "Only objects, speakers, timer and media handles, and camera views have assignable properties.",
           target.span,
         );
       }
@@ -950,6 +957,12 @@ export class Evaluator {
     method: string,
     span: SourceSpan,
   ): void {
+    if (isCameraView(receiver))
+      throw fault(
+        "TSR016",
+        `Camera views have no method '${method}'; hide them with hideCamera.`,
+        span,
+      );
     if (isTimerHandle(receiver) || isMediaHandle(receiver)) {
       if (!["pause", "resume", "stop"].includes(method)) {
         throw fault(
@@ -1172,9 +1185,13 @@ export class Evaluator {
    * `<timer, paused, 7 s left>`, `<media "music.mp3", playing at 12 s>`, or a settled `<timer, finished>`.
    */
   #handleNotation(
-    handle: SerializableTimerHandle | SerializableMediaHandle,
+    handle: SerializableTimerHandle | SerializableMediaHandle | SerializableCameraViewHandle,
     span: SourceSpan,
   ): string {
+    if (isCameraView(handle)) {
+      const view = this.#cameraView();
+      return view.shown ? `<camera ${view.placement}>` : "<camera, hidden>";
+    }
     const now = this.snapshot.currentSessionTimeMs;
     const time = (value: SerializableRuntimeValue | undefined): string =>
       value !== undefined && isDuration(value) ? formatDuration(value.milliseconds) : "";
@@ -1862,6 +1879,31 @@ export class Evaluator {
     }
   }
 
+  /** The default camera's view, which snapshot validation guarantees once a camera view handle exists. */
+  #cameraView(): NonNullable<RuntimeSnapshot["cameraView"]> {
+    const view = this.snapshot.cameraView;
+    if (view === null) throw new TypeError("A camera view handle outlived its camera view.");
+    return view;
+  }
+
+  /** `view.placement = "window" | "stage"` moves a shown camera view; a hidden one stays hidden and only warns. */
+  #assignCameraProperty(name: string, value: SerializableRuntimeValue, span: SourceSpan): void {
+    if (name !== "placement")
+      throw fault(
+        "TSR003",
+        `Camera view property '${name}' cannot be assigned; assign placement.`,
+        span,
+      );
+    if (value !== "window" && value !== "stage")
+      throw fault("TSR050", 'Camera placement must be "window" or "stage".', span);
+    const view = this.#cameraView();
+    if (!view.shown) {
+      this.#warn("TSW010", "This camera view is hidden; showCamera shows it again.", span);
+      return;
+    }
+    view.placement = value;
+  }
+
   #mediaWarning(warning: MediaWarning | null, span: SourceSpan): void {
     if (warning !== null) this.#warn(warning.code, warning.message, span);
   }
@@ -2314,6 +2356,11 @@ export class Evaluator {
           span,
         );
       return property;
+    }
+    if (isCameraView(value)) {
+      if (name !== "placement")
+        throw fault("TSR017", `Camera views have no property '${name}'; use placement.`, span);
+      return this.#cameraView().placement;
     }
     if (isMediaHandle(value)) {
       const property = mediaProperty(

@@ -38,7 +38,8 @@ export type StaticType =
   | { readonly kind: "list" | "set" | "dict"; readonly element: StaticType }
   | { readonly kind: "object"; readonly properties: PropertyTable | null }
   | { readonly kind: "union"; readonly members: readonly StaticType[] }
-  | { readonly kind: "range" | "timer" | "media" | "speaker" }
+  /** `camera` is the handle of a camera view (`let view = showCamera`); scripts cannot name it as a type. */
+  | { readonly kind: "range" | "timer" | "media" | "camera" | "speaker" }
   | OpenType;
 
 /** A list, set, or dict type. */
@@ -1404,6 +1405,8 @@ export function describeValue(type: StaticType): string {
       return "a timer handle";
     case "media":
       return "a media handle";
+    case "camera":
+      return "a camera view";
     default:
       return `a ${value.kind}`;
   }

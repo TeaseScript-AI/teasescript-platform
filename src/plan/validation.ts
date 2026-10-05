@@ -1023,6 +1023,27 @@ function validateInstruction(
         validateExpression(value.image, `${path}.image`, errors, false, temporaryCount);
       }
       return;
+    case "showCamera":
+      if (
+        !hasExactKeys(value, ["kind", "placement", "destinationTemporary", "span"]) ||
+        !isOneOf(value.placement, ["window", "stage"])
+      ) {
+        errors.push(planError("TSC002", "Show-camera instruction has an invalid shape.", path));
+      }
+      if (value.destinationTemporary !== null) {
+        validateTemporaryId(
+          value.destinationTemporary,
+          `${path}.destinationTemporary`,
+          temporaryCount,
+          errors,
+        );
+      }
+      return;
+    case "hideCamera":
+      if (!hasExactKeys(value, ["kind", "span"])) {
+        errors.push(planError("TSC002", "Hide-camera instruction has an invalid shape.", path));
+      }
+      return;
     case "storageWrite":
       if (!hasExactKeys(value, ["kind", "value", "key", "span"])) {
         errors.push(planError("TSC002", "Storage-write instruction has an invalid shape.", path));
@@ -1859,6 +1880,7 @@ const TYPE_PLAN_NAMES = [
   "speaker",
   "timer",
   "media",
+  "camera",
   "script",
 ];
 
