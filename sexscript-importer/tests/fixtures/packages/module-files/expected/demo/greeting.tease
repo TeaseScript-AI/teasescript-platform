@@ -1,0 +1,5 @@
+global function loadGreetingModule {
+  // A module variable with the name of an object field stays separate from it.
+  roundsInGreeting = 10
+}
+global roundsInGreeting = 0

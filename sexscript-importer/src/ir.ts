@@ -52,6 +52,8 @@ export interface MixinModuleInfo {
 
 interface IrBase {
   span: SourceSpan | null;
+  /** The source name of the mixin module a composed statement comes from, which writes it to its own file. */
+  origin?: string;
 }
 
 export interface IrFunctionParameter {

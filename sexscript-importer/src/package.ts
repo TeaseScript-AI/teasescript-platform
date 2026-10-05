@@ -30,6 +30,7 @@ import {
 import { helperDefinitionOrder, SYSTEM_SPEAKER, withActionDispatcher } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { legacyProfilePrompt } from "./profile.ts";
+import { expressionType, functionResultTypes, type TeaseType } from "./variable-types.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 
 const ACCEPTED_EXTERNAL_CALLS = new Set([
@@ -622,6 +623,19 @@ export function lowerPackage(
     ),
   );
 
+  // In a package, a mixin module directory that one script loads keeps its modules as their own files (owner decision
+  // 2026-10-05); one that several scripts load is composed into each.
+  const loaders = new Map<string, number>();
+  lowered.forEach((program, index) => {
+    if (files[index]?.root?.kind !== "scriptBody" || program.module !== undefined) return;
+    for (const directory of program.loadsModuleDirectories ?? [])
+      loaders.set(directory, (loaders.get(directory) ?? 0) + 1);
+  });
+  const separateModules = new Set(
+    options.standalone === true || scripts === null
+      ? []
+      : [...loaders].flatMap(([directory, count]) => (count === 1 ? [directory] : [])),
+  );
   // What a function nothing references cannot convert becomes a note, in the file and in the composed script.
   const uncalled: MigrationDiagnostic[][] = files.map(() => []);
   const texts = packageTexts(files);
@@ -632,6 +646,7 @@ export function lowerPackage(
         withLoadedModules(
           program,
           lowered.filter((module, other) => module.module !== undefined && visible(index, other)),
+          separateModules,
         ),
         functionCatalog,
         classFunctions,
@@ -665,7 +680,10 @@ export function lowerPackage(
     files[index]?.root?.kind === "scriptBody" && program.module === undefined ? [index] : [],
   );
   const accepted = options.accepted ?? new Set();
-  const withClasses = noted.map((program, index) => classOutputs.get(index) ?? program);
+  const moduleFiles = withModuleFiles(noted, files);
+  const withClasses = noted.map(
+    (program, index) => moduleFiles.get(index) ?? classOutputs.get(index) ?? program,
+  );
   if (scripts === null || options.standalone === true) {
     // Files converted on their own keep everything they need; a lone script of a package also asks the profile.
     const entryIndex = scriptIndexes.length === 1 ? scriptIndexes[0]! : null;
@@ -687,9 +705,9 @@ export function lowerPackage(
       ? null
       : entryMenu(scripts, withClasses, internalScripts(files, options.internalScripts));
   const mainProgram = withProfile(generated ?? withClasses[legacyMain!]!, withClasses, accepted);
-  const outputIndexes = [...scriptIndexes, ...classOutputs.keys()].filter(
-    (index) => index !== legacyMain,
-  );
+  const outputIndexes = [
+    ...new Set([...scriptIndexes, ...classOutputs.keys(), ...moduleFiles.keys()]),
+  ].filter((index) => index !== legacyMain);
   const shared = withMainHelpers(
     outputIndexes.map((index) => withClasses[index]!),
     mainProgram,
@@ -724,7 +742,9 @@ export function lowerPackage(
     paths: files.map(
       (file, index) =>
         scripts.pathOf.get(index) ??
-        (classOutputs.has(index) ? packagePath(file.sourceName, scripts.root) : null),
+        (classOutputs.has(index) || (moduleFiles.has(index) && !scripts.pathOf.has(index))
+          ? packagePath(file.sourceName, scripts.root)
+          : null),
     ),
   };
 }
@@ -804,6 +824,138 @@ function withMainHelpers(
     programs: programs.map(without),
     main: { ...main, statements: [...own.slice(0, at), ...shared, ...own.slice(at)] },
   };
+}
+
+/**
+ * Mixin modules that one script loads, each as its own file (owner decision 2026-10-05): the statements the script's
+ * composition marked with a module (withLoadedModules) go to that module's file, and the script keeps the rest. A
+ * module's functions are `global function`s, since the script calls them, and so is everything they use of their own
+ * file and of the script (withGlobalReach). The result maps the index of the script, and of each module, to its file.
+ */
+function withModuleFiles(
+  programs: readonly MigrationProgram[],
+  files: readonly ParsedGroovyFile[],
+): Map<number, MigrationProgram> {
+  const result = new Map<number, MigrationProgram>();
+  const indexOfSource = new Map(files.map((file, index) => [file.sourceName, index]));
+  programs.forEach((program, script) => {
+    if (program.module !== undefined) return;
+    const origins = [...new Set(program.statements.flatMap((statement) => statement.origin ?? []))];
+    if (origins.length === 0) return;
+    const strip = ({ origin: _origin, ...statement }: IrStatement): IrStatement => statement;
+    const own = program.statements.filter((statement) => statement.origin === undefined);
+    const modules = origins.map((origin) => {
+      const index = indexOfSource.get(origin)!;
+      const module = programs[index]!;
+      return {
+        index,
+        program: {
+          sourceName: module.sourceName,
+          metadata: null,
+          statements: program.statements
+            .filter((statement) => statement.origin === origin)
+            .map(strip),
+          diagnostics: module.diagnostics,
+        } satisfies MigrationProgram,
+      };
+    });
+    const reached = withGlobalReach([
+      { ...program, statements: own },
+      ...modules.map(({ program: module }) => module),
+    ]);
+    result.set(script, reached[0]!);
+    modules.forEach(({ index }, position) => result.set(index, reached[position + 1]!));
+  });
+  return result;
+}
+
+/**
+ * The files with every function of the second and later files (the modules) a `global function`, and with what those
+ * reach a global in turn (V30 §11): a function or value they use, of their own file or of the first file (the script
+ * that loads them). A value whose start is not literal is declared with its type's empty value, which the file then
+ * assigns where it declared it (ADR 0022 §6.4).
+ */
+function withGlobalReach(programs: readonly MigrationProgram[]): MigrationProgram[] {
+  const definitions = programs.map(
+    (program) =>
+      new Map(
+        program.statements.flatMap((statement): Array<[string, IrStatement]> =>
+          statement.kind === "function" || statement.kind === "let"
+            ? [[statement.name, statement]]
+            : [],
+        ),
+      ),
+  );
+  const global = programs.map(() => new Set<string>());
+  const queue: Array<{ file: number; statement: FunctionStatement }> = [];
+  const mark = (file: number, name: string): void => {
+    if (global[file]!.has(name)) return;
+    global[file]!.add(name);
+    const statement = definitions[file]!.get(name);
+    if (statement?.kind === "function") queue.push({ file, statement });
+  };
+  programs.forEach((program, file) => {
+    if (file === 0) return;
+    for (const statement of program.statements)
+      if (statement.kind === "function") mark(file, statement.name);
+  });
+  while (queue.length > 0) {
+    const { file, statement } = queue.shift()!;
+    const used = freeNames(statement);
+    for (const name of [...used.variables, ...used.calls]) {
+      const owner = definitions[file]!.has(name)
+        ? file
+        : definitions[0]!.has(name)
+          ? 0
+          : definitions.findIndex((names) => names.has(name));
+      if (owner >= 0) mark(owner, name);
+    }
+  }
+  const results = functionResultTypes(programs.flatMap((program) => program.statements));
+  return programs.map((program, file) => ({
+    ...program,
+    statements: program.statements.flatMap((statement): IrStatement[] => {
+      if (statement.kind === "function" && global[file]!.has(statement.name))
+        return [{ ...statement, global: true }];
+      if (statement.kind !== "let" || !global[file]!.has(statement.name)) return [statement];
+      if (isLiteralValue(statement.value)) return [{ ...statement, global: true }];
+      const inferred = expressionType(
+        statement.value,
+        () => ({ kind: "unknown" }),
+        (name) => results.get(name),
+      );
+      return [
+        { ...statement, value: startValue(statement.type, inferred), global: true },
+        {
+          kind: "assign",
+          target: { kind: "variable", name: statement.name },
+          operator: "=",
+          value: statement.value,
+          span: statement.span,
+        },
+      ];
+    }),
+  }));
+}
+
+/** The value a global of this annotation or inferred type starts with before its file assigns it. */
+function startValue(type: string | undefined, inferred: TeaseType): IrExpression {
+  if (type === undefined) {
+    // An empty list takes its element type from the first one assigned (ADR 0021 rule 1.3).
+    if (inferred.kind === "list") return { kind: "list", items: [] };
+    if (inferred.kind === "scalar" && inferred.name === "string")
+      return { kind: "literal", value: "" };
+    if (inferred.kind === "scalar" && inferred.name === "boolean")
+      return { kind: "literal", value: false };
+    if (inferred.kind === "scalar" && (inferred.name === "integer" || inferred.name === "number"))
+      return { kind: "literal", value: 0 };
+    return { kind: "literal", value: null };
+  }
+  if (type.endsWith("?")) return { kind: "literal", value: null };
+  if (type.endsWith("[]")) return { kind: "list", items: [] };
+  if (type === "string") return { kind: "literal", value: "" };
+  if (type === "boolean") return { kind: "literal", value: false };
+  return { kind: "literal", value: 0 };
 }
 
 /**
@@ -1097,6 +1249,8 @@ function compositionGroups(
 function withLoadedModules(
   program: MigrationProgram,
   modulePrograms: readonly MigrationProgram[],
+  /** Module directories whose statements are marked with their module (`origin`), to go to the module's own file. */
+  separate: ReadonlySet<string> = new Set(),
 ): MigrationProgram {
   const directories = new Set(program.loadsModuleDirectories ?? []);
   if (directories.size === 0) return program;
@@ -1150,17 +1304,19 @@ function withLoadedModules(
     const renamed = renameConflictingIdentifiers({ ...module, statements }, taken, false);
     for (const name of rootNames(renamed.statements)) taken.add(name);
     // A module function's own diagnostics name the module, as its diagnostics in the script do.
+    const origin = separate.has(info.directory) ? { origin: module.sourceName } : {};
     moduleStatements.push(
       ...renamed.statements.map((statement) =>
         statement.kind === "function" && statement.ownDiagnostics !== undefined
           ? {
               ...statement,
+              ...origin,
               ownDiagnostics: statement.ownDiagnostics.map((diagnostic) => ({
                 ...diagnostic,
                 sourceName: diagnostic.sourceName ?? module.sourceName,
               })),
             }
-          : statement,
+          : { ...statement, ...origin },
       ),
     );
     diagnostics.push(

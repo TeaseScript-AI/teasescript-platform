@@ -53,12 +53,13 @@ node src/cli.ts inventory /path/to/legacy/scripts > inventory.json
 `convert-package` writes text `.tease` files only; it never copies legacy media, JARs, or archives. The converted
 package keeps the legacy architecture (owner decision 2026-10-05): each `scripts/X.groovy` becomes `X.tease` and
 `scripts/X/sub.groovy` becomes `X/sub.tease`, and functions copied between scripts stay in each file. The package starts
-at a generated `main.tease` (ADR 0022) that asks the legacy profile and goes to the main script, the top-level script of
-`scripts/`; a package with several top-level scripts gets a menu over them, and a legacy `main.groovy` is `main.tease`
-itself. The importer's generated helpers are `global function`s in `main.tease`. The methods of a package-local helper
+at a generated `main.tease` (ADR 0022) that asks the legacy profile and goes to the package's entry: the script of
+`scripts/` that calls `setInfos` and that no other script chains to (or, without one there, such a script one folder
+down); several entries get a menu labelled by their titles, and a legacy `main.groovy` is `main.tease` itself. The importer's generated helpers are `global function`s in `main.tease`. The methods of a package-local helper
 class (such as `Domme3Class`) that other files call are `global function`s in the class's own file; a method that cannot
 be global is copied into each script that calls it, so the result depends on neither Groovy nor the old runtime. Mixin
-modules that a script loads at runtime stay composed into that script. With `--compile`, the generated files compile as
+modules that one script loads at runtime are their own files with `global function`s, and what those use of the script
+is global too; modules that several scripts load stay composed into each. With `--compile`, the generated files compile as
 one project, so transfers and global functions resolve across files. `report` and `inventory`
 accept `.groovy` files, directories, or parser JSON; inputs of one invocation form one package.
 
