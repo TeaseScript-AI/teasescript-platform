@@ -10,8 +10,9 @@
  * `serve-catalog.ts`) in headless Chromium, one browser at a time. A run presses buttons, picks choices, and types
  * answers until the session halts, fails, hangs, or the step budget ends. Playwright's fake clock skips waits, timers,
  * and chat pacing, and media play at 16 times speed. A prompt that comes back three times in a row may wait for an
- * answer that takes time, so the runner then lets 30 seconds pass before answering, and 120 seconds the next time,
- * noted in the run's path as `[waited 30 s]`; this stands in for development time controls (#615). Each run picks, at
+ * answer that takes time, so the runner then lets 30 seconds pass before answering, then 120 and 300 seconds after
+ * three more repeats each, noted in the run's path as `[waited 30 s]`; this stands in for development time controls
+ * (#615). Each run picks, at
  * every choice, the option tried least often in
  * earlier runs, so later runs take other branches; a package stops after a run that reached nothing new, or after a
  * run that hung or used up its steps, which other paths rarely change. A package whose `.tease` files are unchanged
@@ -50,6 +51,8 @@ const IMAGE_EXTENSIONS = new Set([
 const MEDIA_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".mp4", ".webm"]);
 /** A run that takes longer in real time ends as `budget`: a very long session, or one that stopped responding. */
 const RUN_TIMEOUT_MS = 240_000;
+/** The fake-clock waits before answering a prompt that keeps coming back, one per three repeats. */
+const WAIT_STEPS_S = [30, 120, 300];
 /** A package's runs end after this much real time, so one long package cannot hold up a batch. */
 const PACKAGE_TIMEOUT_MS = 600_000;
 
@@ -472,10 +475,10 @@ async function playOnce(
           : { key, count: 1, waits: 0 };
       if (
         repeated.count >= 3 &&
-        repeated.waits < 2 &&
+        repeated.waits < WAIT_STEPS_S.length &&
         (state.options.length > 0 || state.composer !== null)
       ) {
-        const seconds = repeated.waits === 0 ? 30 : 120;
+        const seconds = WAIT_STEPS_S[repeated.waits]!;
         await page.clock.fastForward(seconds * 1_000);
         taken.push(`[waited ${seconds} s]`);
         repeated = { key, count: 0, waits: repeated.waits + 1 };
