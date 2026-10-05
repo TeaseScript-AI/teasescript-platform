@@ -367,6 +367,42 @@ test("a write that may break a narrowed collection, and an impossible test outco
     );
 });
 
+test("code that a test rules out is checked with the tested variable holding no value", () => {
+  // After `let x: integer? = null`, `x` is null, so the branch of `x != null` never runs; it is still checked
+  // (rule 1.8), but `x` holds nothing there, so a store of `x` is no mismatch. Also for the forms that negate a test,
+  // combine it, or repeat it.
+  for (const condition of [
+    "if x != null {",
+    "if x is not null {",
+    "if not (x == null) {",
+    "if x != null and o == 0 {",
+    "while x != null {",
+  ])
+    assert.deepEqual(
+      errors(
+        `let x: integer? = null\nlet o = 0\n${condition}\n    o = x\n    x = null\n}\nsay "\${o}"\nexit`,
+      ),
+      [],
+      condition,
+    );
+  for (const condition of ["x == null", "x == null or o == 0"])
+    assert.deepEqual(
+      errors(
+        `let x: integer? = null\nlet o = 0\nif ${condition} {\n    o = 1\n} else {\n    o = x\n}\nexit`,
+      ),
+      [],
+      condition,
+    );
+  // Other mismatches in such code, and mismatches where the outcome is reached, are still reported.
+  assert.deepEqual(
+    errors('let x: integer? = null\nlet o = 0\nif x != null {\n    o = "text"\n}\nexit'),
+    [["TSV041", '"text"']],
+  );
+  assert.deepEqual(errors('let x: integer? = 5\nlet o = "s"\nif x != null {\n    o = x\n}\nexit'), [
+    ["TSV041", "x"],
+  ]);
+});
+
 test("a type test inside parentheses or brackets continues before '|', and 'is' explains a set value", () => {
   for (const [before, after] of [
     ["let passed = (", ')\nsay "${passed}"'],

@@ -465,6 +465,27 @@ test("a value the compiler cannot know, such as an untyped parameter, decides no
   );
 });
 
+test("a global that is still null at the top of main.tease may be tested before another file sets it", () => {
+  // The start value makes `plain` null when main.tease begins, so the tested branch cannot run there; a later read,
+  // after a call that may set it, takes the value.
+  for (const declaration of ["global plain = null", "global plain: integer? = null"])
+    assert.deepEqual(
+      said(
+        runToEnd(
+          compiledPlan([
+            {
+              path: "main.tease",
+              source: `${declaration}\nlet p = 0\nif plain != null {\n  p = plain\n}\ncall "set.tease"\nif plain != null {\n  p = plain\n}\nsay "\${p}"\nexit`,
+            },
+            { path: "set.tease", source: "plain = 5\nend" },
+          ]),
+        ).events,
+      ),
+      ["5"],
+      declaration,
+    );
+});
+
 test("a global function is callable from every file and sees only globals, its parameters, and its locals", () => {
   const plan = compiledPlan([
     {

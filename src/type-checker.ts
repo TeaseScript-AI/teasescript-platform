@@ -447,6 +447,23 @@ interface Branches {
   readonly type: StaticType;
   readonly whenTrue: Changes | null;
   readonly whenFalse: Changes | null;
+  /**
+   * For an outcome that no value produces, the tested variable as `never` there, so that the code that cannot run is
+   * still checked (rule 1.8) without what the test rules out, such as `x` being null inside `if x != null`.
+   */
+  readonly unreachedTrue?: Changes;
+  readonly unreachedFalse?: Changes;
+}
+
+/** The outcomes of a condition's opposite, as of `not`, `!=`, or `is not`. */
+function negatedBranches(branches: Branches): Branches {
+  return {
+    type: BOOLEAN_TYPE,
+    whenTrue: branches.whenFalse,
+    whenFalse: branches.whenTrue,
+    ...(branches.unreachedFalse === undefined ? {} : { unreachedTrue: branches.unreachedFalse }),
+    ...(branches.unreachedTrue === undefined ? {} : { unreachedFalse: branches.unreachedTrue }),
+  };
 }
 
 /**
@@ -1096,13 +1113,13 @@ class TypeChecker {
       case "ifStatement": {
         const condition = yield* compileChild(this.#conditionTask(statement.condition, scope));
         const start = this.#flow.mark();
-        this.#flow.apply(condition.whenTrue);
+        this.#flow.apply(condition.whenTrue ?? condition.unreachedTrue ?? null);
         const thenContinues = yield* compileChild(
           this.#pathTask(statement.thenBlock, scope, condition.whenTrue !== null),
         );
         const thenEnd = this.#flow.mark();
         this.#flow.restore(start);
-        this.#flow.apply(condition.whenFalse);
+        this.#flow.apply(condition.whenFalse ?? condition.unreachedFalse ?? null);
         const elseContinues =
           statement.elseBlock === null ||
           (yield* compileChild(
@@ -1233,7 +1250,7 @@ class TypeChecker {
         this.#widen(statement.body);
         const condition = yield* compileChild(this.#conditionTask(statement.condition, scope));
         const start = this.#flow.mark();
-        this.#flow.apply(condition.whenTrue);
+        this.#flow.apply(condition.whenTrue ?? condition.unreachedTrue ?? null);
         this.#loops.push({ start, breaks: [], continued: false });
         yield* compileChild(this.#pathTask(statement.body, scope, condition.whenTrue !== null));
         const { breaks } = this.#loops.pop()!;
@@ -3087,7 +3104,7 @@ class TypeChecker {
         if (node.operator !== "not") break;
         const operand = yield* compileChild(this.#branchTask(node.operand, scope));
         this.#requireBoolean(operand.type, node.operand, "'not' needs true or false (boolean)");
-        return { type: BOOLEAN_TYPE, whenTrue: operand.whenFalse, whenFalse: operand.whenTrue };
+        return negatedBranches(operand);
       }
       case "binaryExpression": {
         if (node.operator === "and" || node.operator === "or") {
@@ -3104,17 +3121,31 @@ class TypeChecker {
             reached && right.whenTrue !== null ? this.#flow.since(start, right.whenTrue) : null;
           const rightFalse =
             reached && right.whenFalse !== null ? this.#flow.since(start, right.whenFalse) : null;
+          // The outcome that only the right operand gives is not reached when either operand rules it out.
+          const unreached = (
+            leftOutcome: Changes | undefined,
+            rightOutcome: Changes | undefined,
+          ): Changes | undefined =>
+            !reached
+              ? leftOutcome
+              : rightOutcome === undefined
+                ? undefined
+                : this.#flow.since(start, rightOutcome);
+          const unreachedTrue = unreached(left.unreachedTrue, right.unreachedTrue);
+          const unreachedFalse = unreached(left.unreachedFalse, right.unreachedFalse);
           this.#flow.undo(start);
           return node.operator === "and"
             ? {
                 type: BOOLEAN_TYPE,
                 whenTrue: rightTrue,
                 whenFalse: this.#flow.join([left.whenFalse, rightFalse]),
+                ...(rightTrue === null && unreachedTrue !== undefined ? { unreachedTrue } : {}),
               }
             : {
                 type: BOOLEAN_TYPE,
                 whenTrue: this.#flow.join([left.whenTrue, rightTrue]),
                 whenFalse: rightFalse,
+                ...(rightFalse === null && unreachedFalse !== undefined ? { unreachedFalse } : {}),
               };
         }
         if (node.operator !== "==" && node.operator !== "!=") break;
@@ -3129,18 +3160,14 @@ class TypeChecker {
         const right = yield* compileChild(this.#expressionTask(node.right, scope));
         this.#warnImpossibleComparison(node, left, right);
         const tested = this.#narrowTest(nullTest, scope, NULL_TYPE, start);
-        return node.operator === "=="
-          ? tested
-          : { type: BOOLEAN_TYPE, whenTrue: tested.whenFalse, whenFalse: tested.whenTrue };
+        return node.operator === "==" ? tested : negatedBranches(tested);
       }
       case "typeTestExpression": {
         const value = yield* compileChild(this.#expressionTask(node.value, scope));
         const test = this.#annotationType(node.type);
         this.#warnConstantTest(node, value, test);
         const tested = this.#narrowTest(node.value, scope, test, start);
-        return node.negated
-          ? { type: BOOLEAN_TYPE, whenTrue: tested.whenFalse, whenFalse: tested.whenTrue }
-          : tested;
+        return node.negated ? negatedBranches(tested) : tested;
       }
       default:
         break;
@@ -3162,16 +3189,14 @@ class TypeChecker {
     const passed = narrowTo(current, test);
     const failed = excludeType(current, test);
     // An outcome that no value of the variable can produce is not reached, such as the end of exhaustive tests.
+    const passes = this.#flow.since(start, new Map([[entry.variable, passed]]));
+    const fails = this.#flow.since(start, new Map([[entry.variable, failed]]));
     return {
       type: BOOLEAN_TYPE,
-      whenTrue:
-        passed.kind === "never"
-          ? null
-          : this.#flow.since(start, new Map([[entry.variable, passed]])),
-      whenFalse:
-        failed.kind === "never"
-          ? null
-          : this.#flow.since(start, new Map([[entry.variable, failed]])),
+      whenTrue: passed.kind === "never" ? null : passes,
+      whenFalse: failed.kind === "never" ? null : fails,
+      ...(passed.kind === "never" ? { unreachedTrue: passes } : {}),
+      ...(failed.kind === "never" ? { unreachedFalse: fails } : {}),
     };
   }
 
