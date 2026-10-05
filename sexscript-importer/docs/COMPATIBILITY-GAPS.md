@@ -470,6 +470,13 @@ form instead once `main` implements it:
 | layered scene (`showBackgroundImage`, `showOverlayImage`) for an image composed in memory and shown with `setImage(bytes, n)` | the base image the function read (`SX_IMAGE_COMPOSITION`); `--accepted=layeredScene` places the base as background and each drawn image as an overlay at percentages of the canvas (`SX_LAYERED_SCENE`, or `SX_LAYERED_SCENE_PARTIAL` for source rectangles, text, shapes, pixel edits, and transformations) | the composition |
 | none: listing a package images folder | the counts of the package's images at conversion time, a number or a `dict` of the matching folders (`SX_IMAGE_COUNT_WORKAROUND`) | images added later; entries other than image files |
 
+In the 211 merged corpus2 units (2026-10-05), 41 functions that only compose an image fall back to their base image,
+and 46 `setImage(bytes)` sites stay TODOs because their function also shows text, waits, saves, or changes outer
+variables. None of them maps cleanly to the layered scene: all 211 composing closures in the sources size their canvas
+from a loaded image's `getWidth()` and `getHeight()`, so overlay percentages are unknown at conversion time; 27 draw in
+loops, and only 6 read a literal base path. A clean mapping needs overlay positions relative to the background's own
+pixel size, or an image-size query.
+
 `askBoolean` with custom labels already converts to a two-option `choose` compared with its first label. Legacy
 `getFile(title)` was used for a photo of the player, so it shows the title and takes the photo with `takePhoto()`
 (`SX_FILE_PHOTO`, owner decision 2026-10-05); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
