@@ -1267,6 +1267,25 @@ test("reports a read of a variable that nothing in the package assigns, a legacy
   );
 });
 
+test("reports an update of a variable that nothing in the package assigns, a legacy bug", () => {
+  const program = lowerParsedFile(
+    file([
+      statement({
+        kind: "binary",
+        span,
+        operator: "+=",
+        left: variable("mistakes"),
+        right: constant(1),
+      }),
+    ]),
+    { packageFunctions: new Set() },
+  );
+  assert.deepEqual(
+    rootDiagnostics(program.diagnostics).map(({ code }) => code),
+    ["SX_UNDEFINED_VARIABLE"],
+  );
+});
+
 test("turns a lookup with a text key into a dict lookup (#536)", () => {
   const declaration = (name: string, right: AstNode): AstNode =>
     statement({

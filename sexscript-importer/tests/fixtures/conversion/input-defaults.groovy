@@ -7,4 +7,8 @@ def weight = getFloat("Your weight in kg?", 70.5)
 def code = getString("Your code?", level)
 def toys = ["plug", "clamps"]
 def wanted = getString("Which toys?", toys)
-show("${name}: level ${newLevel}, ${weight} kg, code ${code}, toys ${wanted}")
+// An integer input's default that may hold a fraction asks without it then; Groovy found no method for a fraction.
+def total = 0
+total += level / 2
+def counted = getInteger("How many did you do?", total)
+show("${name}: level ${newLevel}, ${weight} kg, code ${code}, toys ${wanted}, ${counted} done")

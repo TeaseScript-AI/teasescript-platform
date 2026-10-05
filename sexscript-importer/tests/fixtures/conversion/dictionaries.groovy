@@ -70,3 +70,7 @@ session.aborted = false
 session.clear()
 session.mood = "tense"
 show("Mood " + session.mood + ", aborted " + session.aborted)
+// Records of a list in which only some give a field a value: Groovy read each record's own field.
+def exercises = [[kind: "counted", text: "Push-ups"], [kind: "posture", text: null]]
+def exercise = exercises[getRandom(2)]
+if (exercise.kind == "counted") show("Do " + exercise.text + " (" + exercise.text.length() + " letters)")

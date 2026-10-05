@@ -121,4 +121,11 @@ session = { mood: null, aborted: null }
 // NOTE SX_SHARED_MAP_WRITE line 71: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 session.mood = "tense"
 say "Mood ${session.mood}, aborted ${session.aborted}"
+// Records of a list in which only some give a field a value: Groovy read each record's own field.
+let exercises: object[] = [{ kind: "counted", text: "Push-ups" }, { kind: "posture", text: null }]
+let exercise = exercises[randomInteger(0..2)]
+// NOTE SX_LENGTH_RECEIVER line 76: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+if exercise.kind == "counted" {
+  say "Do ${exercise.text} (${exercise.text.length} letters)"
+}
 exit

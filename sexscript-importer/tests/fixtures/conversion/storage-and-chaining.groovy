@@ -15,4 +15,17 @@ greeting = load("training.greeting")
 show("Hello " + greeting)
 // Groovy ordered a missing storage value, null, below every value.
 if (loadInteger("training.level") < 3) show("Still a beginner")
+// A read from the legacy online service, too.
+def record = receiveInteger("training.record")
+if (record >= 10) show("A new record")
+// A variable of a block keeps its own null tests: the first streak is never compared with null.
+if (getBoolean("Keep the streak?")) {
+  def streak = 0
+  streak = loadInteger("training.streak")
+  show("Streak ${streak + 1}")
+} else {
+  def streak = 0
+  streak = loadInteger("training.streak")
+  if (streak == null) show("No streak")
+}
 return null

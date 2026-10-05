@@ -211,6 +211,8 @@ interface LowerContext {
   parameterBindings: ReadonlySet<string>;
   /** The values each binding is assigned (assignedValues). */
   assignedValues: ReadonlyMap<string, readonly AstNode[]>;
+  /** The values each binding is updated to by `+=`, `-=`, `*=`, and `/=` (compoundValues). */
+  compoundValues: ReadonlyMap<string, readonly AstNode[]>;
   /** How the maps are used, by binding: dicts (#536), object fields, value and key types. */
   mapUses: MapUses;
   /** Binding keys of variables that closures declare (bindingKeys). */
@@ -879,6 +881,20 @@ function assignedValues(body: AstNode, keys: BindingKeys): Map<string, AstNode[]
   return values;
 }
 
+/** The value each compound update gives its variable, as the binary expression it computes (`x += y` is `x + y`). */
+function compoundValues(body: AstNode, keys: BindingKeys): Map<string, AstNode[]> {
+  const values = new Map<string, AstNode[]>();
+  walkAst(body, (node) => {
+    const operator = node.kind === "binary" ? text(node.operator) : null;
+    if (operator === null || !["+=", "-=", "*=", "/="].includes(operator)) return;
+    const key = bindingKey(node.left, keys);
+    if (key === null) return;
+    const value: AstNode = { ...node, operator: operator[0] };
+    values.set(key, [...(values.get(key) ?? []), value]);
+  });
+  return values;
+}
+
 /** The binding a variable reference names (see `bindingKeys`); null for any other expression. */
 function bindingKey(node: unknown, keys: BindingKeys): string | null {
   const name = variableName(node);
@@ -949,6 +965,7 @@ export function lowerParsedFile(
     aliasedLists: new Set(),
     parameterBindings: new Set(),
     assignedValues: new Map(),
+    compoundValues: new Map(),
     mapUses: mapUsesOf([]),
     bindings: new Map(),
     integerVariables: new Set(),
@@ -1034,6 +1051,7 @@ export function lowerParsedFile(
     context.aliasedLists = aliasedListVariables(body, context.types);
     context.parameterBindings = parameterBindings(body, file.sourceName);
     context.assignedValues = assignedValues(body, context.bindings);
+    context.compoundValues = compoundValues(body, context.bindings);
     context.constantInitializers = declarationInitializers(body, context.types);
     context.integerVariables = integerVariables(body, context.bindings);
     context.mapUses =
@@ -1683,6 +1701,7 @@ function lowerHelperMethod(
       authoredRecords.map((parameter) => parameter.name),
     ),
     assignedValues: assignedValues(body, new Map()),
+    compoundValues: compoundValues(body, new Map()),
     mapUses: baseContext.mapUses,
     bindings: new Map(),
     integerVariables: new Set(),
@@ -3966,6 +3985,8 @@ function lowerAssignment(
   const java = javaAssignment(node, span, javaHost(context));
   if (java !== null) return java;
   const operator = text(node.operator);
+  if (operator !== "=" && operator !== "<<" && neverAssigned(node.left, context))
+    return [undefinedUpdate(node, context)];
   // `list = list << value` appends; assigning the list to itself adds nothing.
   const appended = asNode(node.right);
   if (
@@ -4249,6 +4270,7 @@ function lowerPostfix(
   const targetNode = asNode(node.value);
   const name = variableName(node.value);
   if (operator !== "++" && operator !== "--") return [unsupportedPostfix(node, context)];
+  if (name !== null && neverAssigned(node.value, context)) return [undefinedUpdate(node, context)];
   if (name !== null) {
     return [
       {
@@ -4301,6 +4323,35 @@ function lowerPostfix(
       span,
     },
   ];
+}
+
+/**
+ * Whether a variable that an update such as `+=` or `++` reads first is never declared, assigned, or a parameter in
+ * this script or its package: Groovy looked it up as a property of the script and failed.
+ */
+function neverAssigned(target: unknown, context: LowerContext): boolean {
+  const name = variableName(target);
+  const key = bindingKey(target, context.bindings);
+  return (
+    name !== null &&
+    key !== null &&
+    context.checksUndefinedVariables &&
+    !context.assignedValues.has(key) &&
+    !context.parameterBindings.has(key) &&
+    !context.generatedNames.has(name) &&
+    !context.packageFunctions.has(name) &&
+    !isLegacyGetterProperty(name)
+  );
+}
+
+function undefinedUpdate(node: AstNode, context: LowerContext): IrStatement {
+  const name = variableName(node.left) ?? variableName(node.value) ?? "This variable";
+  return unsupportedStatement(
+    context,
+    node,
+    "SX_UNDEFINED_VARIABLE",
+    `${name} is never assigned in this script or its package; SexScript failed with a missing property whenever this update ran.`,
+  );
 }
 
 function unsupportedPostfix(node: AstNode, context: LowerContext): IrStatement {
@@ -5752,8 +5803,10 @@ function mayIndexPastEnd(node: AstNode, context: LowerContext, seen = new Set<st
  * with one or with null.
  */
 function mayReadNull(node: AstNode, context: LowerContext): boolean {
-  if (node.kind === "methodCall")
-    return DIRECT_STORAGE_LOADS.has(legacyApiCall(node, context)?.name ?? "");
+  if (node.kind === "methodCall") {
+    const name = legacyApiCall(node, context)?.name ?? "";
+    return DIRECT_STORAGE_LOADS.has(name) || ONLINE_LOADS.has(name);
+  }
   if (node.kind !== "variable") return false;
   const key = bindingKey(node, context.bindings);
   const first = key === null ? undefined : context.assignedValues.get(key)?.[0];
@@ -5806,7 +5859,9 @@ function mayBeFractional(node: AstNode, context: LowerContext, seen = new Set<st
       const values = context.assignedValues.get(key);
       if (values === undefined || values.length === 0) return true;
       seen.add(key);
-      return values.some((value) => mayBeFractional(value, context, seen));
+      return [...values, ...(context.compoundValues.get(key) ?? [])].some((value) =>
+        mayBeFractional(value, context, seen),
+      );
     }
     default:
       return true;
@@ -11423,7 +11478,8 @@ function notePrefill(
         (text !== undefined && typeof text !== "string") ||
         (defaultNode.kind === "gstring" && gstringHasText(defaultNode)) ||
         onlyOf(type, NUMBER | BOOLEAN | NULL)
-      : onlyOf(type, NUMBER);
+      : // An integer input's default may not hold a fraction (V30 §20).
+        onlyOf(type, NUMBER) && (name !== "getInteger" || !mayBeFractional(defaultNode, context));
   if (valid) return true;
   addDiagnostic(
     context,

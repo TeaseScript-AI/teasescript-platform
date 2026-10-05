@@ -315,6 +315,8 @@ export function enforceVariableTypes(
           // An empty list needs its element type written.
           if (placeholder?.kind === "list" && written !== null && next.type === undefined)
             next = { ...next, type: written };
+          if (next.type === undefined && recordsWithOptionalFields(statement.value))
+            next = { ...next, type: "object[]" };
           const rewritten = withIntegerIndexes(next, indexes);
           if (textIntegers.has(statement)) result.textIntegers.push(rewritten);
           const declared = binding.union === undefined ? undefined : nonNull(binding.union);
@@ -504,6 +506,7 @@ function analyse(
   // The `return` value types of the function being walked; null for a bare `return` or falling off the end.
   let returns: TeaseType[] | null = null;
   const nullTested = nullTestedNames(statements);
+  const localNullTested = blockNullTests(statements);
   for (const item of bindings.values()) item.inferred = undefined;
   const root = new Scope(null);
   const functions: Array<Extract<IrStatement, { kind: "function" }>> = [];
@@ -569,7 +572,13 @@ function analyse(
     // null, so the read keeps the variable's value then.
     if (
       nonNull(value).kind === "unknown" &&
-      !(value.kind === "optional" && nullTested.has(target.name))
+      !(
+        value.kind === "optional" &&
+        (
+          (target.declaration === null ? undefined : localNullTested.get(target.declaration)) ??
+          nullTested
+        ).has(target.name)
+      )
     ) {
       const type = bindingType(target);
       if (
@@ -960,6 +969,38 @@ function withoutGuards(items: IrStatement[], guards: ReadonlySet<IrStatement>): 
   });
 }
 
+/**
+ * For each variable declared inside a block, the names that the rest of its block compares with null: a variable of
+ * the same name in another block or function is another variable. Variables of the script's top level, which functions
+ * share, use the whole program's names.
+ */
+function blockNullTests(statements: readonly IrStatement[]): Map<IrStatement, Set<string>> {
+  const result = new Map<IrStatement, Set<string>>();
+  const bodies = (item: IrStatement): IrStatement[][] => {
+    switch (item.kind) {
+      case "function":
+      case "while":
+      case "repeat":
+      case "for":
+        return [item.body];
+      case "if":
+        return [item.then, item.else];
+      case "switch":
+        return [...item.cases.map((entry) => entry.body), item.default];
+      default:
+        return [];
+    }
+  };
+  const visit = (items: readonly IrStatement[], root: boolean): void => {
+    items.forEach((item, index) => {
+      if (item.kind === "let" && !root) result.set(item, nullTestedNames(items.slice(index)));
+      for (const body of bodies(item)) visit(body, false);
+    });
+  };
+  visit(statements, true);
+  return result;
+}
+
 /** Names of the variables the program compares with null (`x == null`, `x != null`). */
 function nullTestedNames(value: unknown, names = new Set<string>()): Set<string> {
   if (Array.isArray(value)) {
@@ -1004,6 +1045,26 @@ function bindingType(binding: Binding): TeaseType | undefined {
   if (binding.widened) type = widen(type);
   if (binding.optional && type.kind !== "optional") type = { kind: "optional", value: type };
   return type;
+}
+
+/**
+ * A list of records in which a field holds null in some records and a value in others, such as a description that one
+ * kind of record leaves out. Groovy read each record's own field; a list of such records is declared `object[]`, whose
+ * fields the runtime checks where they are used, since the field's static type would be optional in every record.
+ */
+function recordsWithOptionalFields(value: IrExpression): boolean {
+  if (value.kind !== "list" || value.items.length < 2) return false;
+  const records = value.items;
+  if (!records.every((item) => item.kind === "object" && item.dict !== true)) return false;
+  const nulls = new Set<string>();
+  const values = new Set<string>();
+  for (const record of records)
+    if (record.kind === "object")
+      for (const property of record.properties)
+        (property.value.kind === "literal" && property.value.value === null ? nulls : values).add(
+          property.name,
+        );
+  return [...nulls].some((name) => values.has(name));
 }
 
 function widen(type: TeaseType): TeaseType {
