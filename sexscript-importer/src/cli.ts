@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseParsedGroovyFile, type ParsedGroovyFile } from "./ast.ts";
@@ -63,6 +64,7 @@ if (command === "inventory") {
     const dataRoot = await legacyDataRoot(args[0]!);
     options.media = await packageMedia(path.join(dataRoot, "images"));
     options.files = await packageFiles(dataRoot);
+    options.readFile = packageFileReader(dataRoot);
     const internal = await internalScripts(args[0]!);
     if (internal !== null) options.internalScripts = internal;
   }
@@ -132,6 +134,7 @@ async function convertPackage(
     accepted,
     media,
     files,
+    readFile: packageFileReader(dataRoot),
     ...(internal === null ? {} : { internalScripts: internal }),
   });
   const programs = lowered.composed;
@@ -262,6 +265,17 @@ async function packageFiles(root: string): Promise<string[]> {
       path.relative(root, path.join(entry.parentPath, entry.name)).split(path.sep).join("/"),
     )
     .sort();
+}
+
+/** Reads a file of the legacy data folder by its relative name; null when it cannot be read. */
+function packageFileReader(root: string): (name: string) => Uint8Array | null {
+  return (name) => {
+    try {
+      return readFileSync(path.join(root, name));
+    } catch {
+      return null;
+    }
+  };
 }
 
 async function packageMedia(root: string): Promise<MediaFile[]> {

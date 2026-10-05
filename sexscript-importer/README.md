@@ -86,6 +86,16 @@ folder path, `images/Domme3/Pack 2/x.jpg` → `images-domme3-pack-2`, and the co
 (`SX_IMAGE_TAGS`). The report's gate and smoke runs give the compiler these tags. A count filtered by file name stays
 counted at conversion time (`SX_IMAGE_COUNT_WORKAROUND`).
 
+A package text file that no script of the package writes, such as quiz lines, Properties strings, or INI settings, is
+part of the package as converted: a `File`, stream, or reader over it becomes its path text, and `readLines()`,
+`Properties.load()`, and `Wini.get()` read a generated function that holds the file's text at conversion time, marked
+with a `// NOTE`. A file some script writes, deletes, or hands to code the importer cannot follow stays manual work.
+
+Java library calls convert where their receiver and arguments are proven and TeaseScript has the same behavior
+(`src/java-time.ts`, `src/java-text.ts`): a Calendar or Date becomes a `datetime`, a Random object the session's random
+numbers, a StringBuilder text, and URL encoding, Math functions, Groovy number checks, and similar operations generated
+`sexscriptLegacy*` helpers. A remaining difference, such as the last digits of a Math helper, gets a `// NOTE`.
+
 Generated files follow these conventions:
 
 - legacy comments and paragraph breaks are kept; `setInfos()` metadata becomes the `---` file header (V30 §41), with

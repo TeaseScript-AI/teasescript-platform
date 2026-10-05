@@ -1,4 +1,10 @@
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
+import {
+  JAVA_HELPER_ORDER,
+  JAVA_HELPERS,
+  javaHelperDependencies,
+  type JavaHelperName,
+} from "./java-helpers.ts";
 
 /** Generated function that calls the function an action ID (a converted closure value) stands for. */
 export const ACTION_DISPATCHER = "sexscriptLegacyCall";
@@ -92,7 +98,8 @@ export type HelperName =
   | "random"
   | "shuffled"
   | "stopBackgroundSounds"
-  | "unique";
+  | "unique"
+  | JavaHelperName;
 
 export function helperCall(name: HelperName, args: IrExpression[]): IrExpression {
   return { kind: "call", name: HELPERS[name].name, positional: args, named: {} };
@@ -113,6 +120,8 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
   if (needed.has("switchButton")) needed.add("switchButtonId");
   if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
   if (needed.has("stopBackgroundSounds")) needed.add("backgroundSounds");
+  for (const name of needed)
+    for (const dependency of javaHelperDependencies(name)) needed.add(dependency);
   return HELPER_ORDER.filter((name) => needed.has(name)).map((name) => HELPERS[name].build());
 }
 
@@ -155,6 +164,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "sendImage",
   "switchButtonId",
   "switchButton",
+  ...JAVA_HELPER_ORDER,
 ];
 
 const v = (name: string): IrExpression => ({ kind: "variable", name });
@@ -1005,4 +1015,5 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
+  ...JAVA_HELPERS,
 };

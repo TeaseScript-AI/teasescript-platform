@@ -8,6 +8,7 @@ import {
   type SourceSpan,
 } from "./ast.ts";
 import type { IrExpression, IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
+import { packageResources, type PackageFileReader } from "./java-data.ts";
 import {
   buildHelperRegistry,
   describeMixinModule,
@@ -45,6 +46,8 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "getDateTime",
   "getTime",
   "getTimestamp",
+  "max",
+  "min",
   "openUrl",
   "random",
   "randomInteger",
@@ -69,6 +72,8 @@ export interface PackageOptions {
   media?: readonly MediaFile[];
   /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
   files?: readonly string[];
+  /** Reads a file of `files`, whose text package text reads snapshot (java-data.ts). */
+  readFile?: PackageFileReader;
   /**
    * Scripts of the package that are no entries of their own, by their paths from the legacy scripts folder, such as an
    * expansion or a story chapter of an assembled unit: the generated entry menu does not offer them.
@@ -466,6 +471,10 @@ export function lowerPackage(
   // Map uses are shared within a composition group, like function names and field types.
   const scripts = packageScripts(files, options.standalone === true);
   const functionResults = files.map((_, index) => packageFunctionResults(groups[index]!));
+  const javaResources =
+    options.files === undefined
+      ? undefined
+      : packageResources(files, options.files, options.readFile ?? null);
   const mapUses = files.map((_, index) => packageMapUses(groups[index]!, functionResults[index]!));
   const lowered = files.map((file, index) =>
     lowerParsedFile(file, {
@@ -486,6 +495,7 @@ export function lowerPackage(
       ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
       ...(options.media === undefined ? {} : { media: options.media }),
       ...(options.files === undefined ? {} : { files: options.files }),
+      ...(javaResources === undefined ? {} : { javaResources }),
     }),
   );
   const helperPrograms = lowered.filter(

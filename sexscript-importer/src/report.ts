@@ -10,6 +10,7 @@ import { emitTease } from "./emit-tease.ts";
 import { imageCatalog } from "./image-tags.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrStatement, MigrationProgram } from "./ir.ts";
+import type { PackageFileReader } from "./java-data.ts";
 import { lowerPackage } from "./package.ts";
 import type { AcceptedForm } from "./workarounds.ts";
 import {
@@ -78,6 +79,8 @@ export interface FeasibilityOptions {
   media?: readonly MediaFile[];
   /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
   files?: readonly string[];
+  /** Reads a file of `files`, whose text package text reads snapshot (java-data.ts). */
+  readFile?: PackageFileReader;
   /** Scripts that are no entries of their own, which the generated entry menu does not offer (PackageOptions). */
   internalScripts?: readonly string[];
   /**
@@ -211,6 +214,7 @@ export function analyzeFeasibility(
     ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
     ...(options.media === undefined ? {} : { media: options.media }),
     ...(options.files === undefined ? {} : { files: options.files }),
+    ...(options.readFile === undefined ? {} : { readFile: options.readFile }),
     ...(options.internalScripts === undefined ? {} : { internalScripts: options.internalScripts }),
   });
   const helpers = globals?.helpers ?? null;
