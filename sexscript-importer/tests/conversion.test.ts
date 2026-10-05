@@ -560,7 +560,13 @@ test(
   { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
   async () => {
     if (!("compiler" in projectResult)) return;
-    for (const name of ["script-chain", "single-entry", "shared-helpers", "lone-script"]) {
+    for (const name of [
+      "script-chain",
+      "single-entry",
+      "shared-helpers",
+      "lone-script",
+      "branches",
+    ]) {
       const directory = fileURLToPath(new URL(`./fixtures/packages/${name}/`, import.meta.url));
       const scripts = path.join(directory, "scripts");
       const sources = readdirSync(scripts, { recursive: true, encoding: "utf8" })

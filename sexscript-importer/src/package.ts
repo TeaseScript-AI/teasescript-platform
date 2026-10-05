@@ -1,4 +1,12 @@
-import { isRecord, type ParsedGroovyFile, type SourceSpan } from "./ast.ts";
+import {
+  constantString,
+  isAstNode,
+  isRecord,
+  walkAst,
+  type AstNode,
+  type ParsedGroovyFile,
+  type SourceSpan,
+} from "./ast.ts";
 import type { IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
 import {
   buildHelperRegistry,
@@ -256,6 +264,7 @@ export function lowerPackage(
   const helperRegistry = buildHelperRegistry(files);
   const mixinModules = files.flatMap((file) => describeMixinModule(file) ?? []);
   const stableNames = packageStableNames(files);
+  const storageLiterals = packageStorageLiterals(files);
   // Function names and object field types are shared only by a script and the mixin modules it loads.
   const groups = compositionGroups(files);
   const stopsBackgroundSounds = packageStopsBackgroundSounds(files);
@@ -277,6 +286,7 @@ export function lowerPackage(
       mixinModules,
       packageFunctions: packageFunctionNames(groups[index]!),
       stableNames,
+      storageLiterals,
       globalTypes: packageGlobalTypes(groups[index]!),
       stopsBackgroundSounds,
       resultUses,
@@ -357,6 +367,61 @@ export function lowerPackage(
           },
     paths: files.map((_, index) => scripts?.pathOf.get(index) ?? null),
   };
+}
+
+/**
+ * The literal values the package stores under each storage key that only ever receives literals: a key with any
+ * computed value, or one that a save with a computed key could name (its fixed beginning matches), is left out, and
+ * so is a key the package never stores.
+ */
+function packageStorageLiterals(
+  files: readonly ParsedGroovyFile[],
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const literals = new Map<string, Set<string>>();
+  const computed = new Set<string>();
+  const computedPrefixes: string[] = [];
+  for (const file of files) {
+    walkAst(file.root, (node) => {
+      if (node.kind !== "methodCall" || node.implicitThis !== true) return;
+      const name = constantString(node.method);
+      if (name !== "save" && name !== "send") return;
+      const argumentList = isAstNode(node.arguments) ? node.arguments.items : undefined;
+      const [keyNode, valueNode]: Array<AstNode | undefined> = Array.isArray(argumentList)
+        ? argumentList.filter(isAstNode)
+        : [];
+      if (keyNode === undefined || valueNode === undefined) return;
+      const key = constantString(keyNode);
+      if (key === null) {
+        const prefix = keyPrefix(keyNode);
+        computedPrefixes.push(prefix);
+        return;
+      }
+      const value = constantString(valueNode);
+      if (value === null) computed.add(key);
+      else literals.set(key, (literals.get(key) ?? new Set()).add(value));
+    });
+  }
+  return new Map(
+    [...literals].filter(
+      ([key]) => !computed.has(key) && !computedPrefixes.some((prefix) => key.startsWith(prefix)),
+    ),
+  );
+}
+
+/** The fixed beginning of a computed storage key: the text before its first computed part. */
+function keyPrefix(node: AstNode): string {
+  const literal = constantString(node);
+  if (literal !== null) return literal;
+  if (node.kind === "gstring") {
+    const first: unknown = Array.isArray(node.strings) ? node.strings[0] : undefined;
+    return typeof first === "string" ? first : "";
+  }
+  if (node.kind === "binary" && node.operator === "+" && isAstNode(node.left)) {
+    const left = constantString(node.left);
+    if (left !== null && isAstNode(node.right)) return left + keyPrefix(node.right);
+    return keyPrefix(node.left);
+  }
+  return "";
 }
 
 /**

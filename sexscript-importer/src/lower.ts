@@ -73,6 +73,11 @@ export interface LowerOptions {
   mixinModules?: readonly MixinModuleInfo[];
   /** Names assigned exactly once in the whole package, which no side effect can change afterwards. */
   stableNames?: ReadonlySet<string>;
+  /**
+   * The literal values the package stores under each storage key, for keys that only ever receive literals
+   * (packageStorageLiterals); a branch for any other value of such a key never runs.
+   */
+  storageLiterals?: ReadonlyMap<string, ReadonlySet<string>>;
   /** Value types of package globals defined in other files, such as anonymous-object fields. */
   globalTypes?: ReadonlyMap<string, number>;
   /**
@@ -142,6 +147,9 @@ interface LowerContext {
   renderedDiagnostics: Set<MigrationDiagnostic>;
   packageFunctions: ReadonlySet<string>;
   stableNames: ReadonlySet<string>;
+  storageLiterals: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Set while lowering a branch that never runs because no code stores the value it tests. */
+  unreachable: boolean;
   mixinModules: readonly MixinModuleInfo[];
   /** Module directories whose loader this script replaced with direct module calls. */
   loadsModuleDirectories: Set<string>;
@@ -889,6 +897,8 @@ export function lowerParsedFile(
     renderedDiagnostics: new Set(),
     packageFunctions: options.packageFunctions ?? new Set(),
     stableNames: options.stableNames ?? new Set(),
+    storageLiterals: options.storageLiterals ?? new Map(),
+    unreachable: false,
     mixinModules: options.mixinModules ?? [],
     loadsModuleDirectories: new Set(),
     currentFunction: null,
@@ -1356,6 +1366,8 @@ function lowerHelperMethod(
     renderedDiagnostics: baseContext.renderedDiagnostics,
     packageFunctions: baseContext.packageFunctions,
     stableNames: baseContext.stableNames,
+    storageLiterals: baseContext.storageLiterals,
+    unreachable: false,
     mixinModules: baseContext.mixinModules,
     loadsModuleDirectories: baseContext.loadsModuleDirectories,
     stopsBackgroundSounds: baseContext.stopsBackgroundSounds,
@@ -5272,7 +5284,13 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
         ),
       ];
     }
+    // A case for a value the switched storage key never holds never runs.
+    const known = valueNode === null ? null : storedValues(valueNode, context);
+    const caseValue = constantString(matchNode ?? undefined);
+    const outer = context.unreachable;
+    context.unreachable ||= known !== null && caseValue !== null && !known.has(caseValue);
     const loweredBody = lowerStatementList(eliminateSwitchBreaks(sourceStatements), null, context);
+    context.unreachable = outer;
     cases.push({ span: caseNode.span, matches: [match], body: loweredBody });
     matchNodes.push(matchNode!);
   }
@@ -5615,6 +5633,30 @@ function lowerReturnStatement(node: AstNode, context: LowerContext): IrStatement
   if (script.kind === "literal" && typeof script.value === "string") {
     const path = scriptPath(script.value, context);
     if (path !== null) return [{ kind: "goto", target: { kind: "file", path }, span: node.span }];
+    const legacyName = script.value
+      .replaceAll("\\", "/")
+      .replace(/\.groovy$/iu, "")
+      .toLowerCase();
+    if (legacyName === "welcome" || legacyName === "exit" || legacyName.startsWith("system/")) {
+      addDiagnostic(
+        context,
+        "SX_DESKTOP_SCRIPT",
+        "warning",
+        `Legacy chained to "${script.value}", a script of the legacy desktop player (its menu, settings, or restart), which a package does not contain; the session ends here.`,
+        node.span,
+      );
+      return [ends];
+    }
+    if (context.unreachable) {
+      addDiagnostic(
+        context,
+        "SX_UNREACHABLE_BRANCH",
+        "warning",
+        `This branch never runs: the value it tests is never stored by the package. Its chain to "${script.value}", which the package lacks, becomes exit.`,
+        node.span,
+      );
+      return [ends];
+    }
     addDiagnostic(
       context,
       "SX_MISSING_SCRIPT",
@@ -11659,6 +11701,26 @@ function mediaFile(
     }
   }
   return { kind: "literal", value: midi(written) };
+}
+
+/**
+ * The values a switched value can hold when they are all known: a storage read, or a variable assigned only from
+ * one, of a key the package only ever stores literals under. Null otherwise.
+ */
+function storedValues(node: AstNode, context: LowerContext): ReadonlySet<string> | null {
+  const read = (value: AstNode | null): ReadonlySet<string> | null => {
+    const call = value === null ? null : legacyApiCall(value, context);
+    if (call === null || !DIRECT_STORAGE_LOADS.has(call.name) || call.arguments.length !== 1)
+      return null;
+    const key = constantString(call.arguments[0]);
+    return key === null ? null : (context.storageLiterals.get(key) ?? null);
+  };
+  const direct = read(node);
+  if (direct !== null) return direct;
+  const name = variableName(node);
+  if (name === null || context.types.singleAssignment?.has(name) !== true) return null;
+  const initializer = context.constantInitializers.get(name) ?? null;
+  return read(initializer);
 }
 
 /** Audio files the legacy useFile() opened in the system's player. */

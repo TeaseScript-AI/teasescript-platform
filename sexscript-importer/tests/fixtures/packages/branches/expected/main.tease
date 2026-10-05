@@ -1,0 +1,15 @@
+// The route key only ever holds "rooms", so the garden branch never runs; its missing script becomes exit.
+save "rooms" as "game.route"
+let route = load "game.route"
+switch route {
+  case "rooms" {
+    goto "rooms.tease"
+  }
+  case "garden" {
+    // NOTE SX_UNREACHABLE_BRANCH line 6: This branch never runs: the value it tests is never stored by the package. Its chain to "garden.groovy", which the package lacks, becomes exit.
+    exit
+  }
+}
+// The legacy desktop player's own menu is no script of the package.
+// NOTE SX_DESKTOP_SCRIPT line 9: Legacy chained to "system/welcome", a script of the legacy desktop player (its menu, settings, or restart), which a package does not contain; the session ends here.
+exit
