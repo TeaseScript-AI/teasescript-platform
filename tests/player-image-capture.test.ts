@@ -319,3 +319,18 @@ test("a request answered during the countdown takes no photo", async () => {
   assert.equal(harnessed.camera.taken.length, 0);
   assert.equal(harnessed.camera.released, 1);
 });
+
+test("unmounting the Player during the countdown counts no further and takes no photo", async () => {
+  const counts: (number | null)[] = [];
+  const harnessed = harness(SELFIE, {
+    countdownStep: async () => {
+      counts.push(harnessed.capture.view.value?.countdown ?? null);
+      if (counts.length === 3) harnessed.scope.stop();
+    },
+  });
+  await settled();
+  await harnessed.capture.shutter();
+  assert.deepEqual(counts, [5, 4, 3]);
+  assert.equal(harnessed.camera.taken.length, 0);
+  assert.equal(harnessed.camera.released, 1);
+});
