@@ -29,6 +29,7 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { isRecord } from "../src/ast.ts";
 import { packageContentHash, parsePlayCheck } from "./catalog.ts";
 
 const PLAYWRIGHT_CORE =
@@ -144,6 +145,8 @@ export interface PlayCheckResult {
   readonly base: string;
   /** Of the package's `.tease` files; a result for other contents is stale. */
   readonly contentHash: string;
+  /** The importer commit that converted the played files, from the unit's `.conversion.json` or the root's summary. */
+  readonly converter: string | null;
   readonly verdict: "plays" | "stops" | "no-start";
   readonly summary: string;
   readonly runs: readonly RunResult[];
@@ -343,6 +346,7 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
     checkedAt: new Date().toISOString(),
     base: values.base,
     contentHash: packageContentHash(sources),
+    converter: await converterOf(folder),
     verdict,
     summary,
     runs,
@@ -722,6 +726,24 @@ function readState(page: Page): Promise<PlayerState> {
           .length ?? 0,
     };
   });
+}
+
+/** The importer commit of a converted unit: its own `converter`, else the root summary's `importerCommit`. */
+async function converterOf(folder: string): Promise<string | null> {
+  for (const [file, field] of [
+    [path.join(folder, ".conversion.json"), "converter"],
+    [path.join(folder, "..", ".conversion-summary.json"), "importerCommit"],
+  ] as const) {
+    const value = await readFile(file, "utf8").then(
+      (text) => {
+        const record: unknown = JSON.parse(text);
+        return isRecord(record) && typeof record[field] === "string" ? record[field] : null;
+      },
+      () => null,
+    );
+    if (value !== null) return value;
+  }
+  return null;
 }
 
 /** The regular, non-hidden files below `folder`, by `/`-separated relative path. */
