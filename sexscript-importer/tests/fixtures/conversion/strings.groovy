@@ -7,3 +7,12 @@ show("Path C:\\temp\tTab")
 def rulesTitle = "<h1>Rules</h1>\n\n"
 def announce = { message -> show(rulesTitle + message) }
 announce("You may <b>not</b> touch")
+// A text shown character by character, as a typewriter effect, goes through its characters without markup markers.
+def reveal = { message ->
+  def appeared = ""
+  for (c in message) {
+    appeared += c
+    show(appeared)
+  }
+}
+reveal("You may <b>not</b> touch")

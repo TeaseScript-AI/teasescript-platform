@@ -1,3 +1,22 @@
+function sexscriptLegacyItems(value) {
+  if value is string {
+    return value.split("")
+  }
+  return value
+}
+function sexscriptLegacyPlainText(value) {
+  let text = "${value}".replace("**", "").replace("~~", "").replace("[u]", "").replace("[/u]", "").replace("[/color]", "")
+  let start = text.indexOf("[color=")
+  while start >= 0 {
+    let endValue = text.indexOf("]")
+    if endValue < start {
+      return text.replace("*", "")
+    }
+    text = "${text.substring(0, start)}${text.substring(endValue + 1)}"
+    start = text.indexOf("[color=")
+  }
+  return text.replace("*", "")
+}
 let name = "Anna"
 let count = 3
 say "Hello ${name}, you have ${count + 1} tasks."
@@ -9,4 +28,13 @@ function announce(message) {
   say "${rulesTitle}${message}"
 }
 announce("You may **not** touch")
+// A text shown character by character, as a typewriter effect, goes through its characters without markup markers.
+function reveal(message) {
+  let appeared = ""
+  for c in sexscriptLegacyItems(sexscriptLegacyPlainText(message)) {
+    appeared = "${appeared}${c}"
+    say appeared
+  }
+}
+reveal("You may **not** touch")
 exit

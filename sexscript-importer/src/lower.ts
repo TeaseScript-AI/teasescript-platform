@@ -5631,7 +5631,16 @@ function lowerEachStatement(
   }
   const variable = parameterSpecified ? closureParameters[0]!.name : "it";
 
-  const collection = lowerIterated(receiverNode, context);
+  const iterated = lowerIterated(receiverNode, context);
+  const collection =
+    iterated === null
+      ? null
+      : plainCharacters(
+          iterated,
+          body,
+          closure.parameterSpecified === true ? (closureParameters[0]?.name ?? "it") : "it",
+          context,
+        );
   if (collection === null) {
     return [
       unsupportedStatement(
@@ -5985,8 +5994,11 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
   // A loop that removes its element from the collection proves it a list (elementRemovals).
   let removes = false;
   if (body !== null) walkAst(body, (child) => (removes ||= context.elementRemovals.has(child)));
+  const iterated = collectionNode === null ? null : lowerIterated(collectionNode, context, removes);
   const collection =
-    collectionNode === null ? null : lowerIterated(collectionNode, context, removes);
+    iterated === null || body === null || variable === null
+      ? iterated
+      : plainCharacters(iterated, body, variable, context);
   if (variable === null || collection === null || body?.kind !== "block") {
     return [
       unsupportedStatement(
@@ -6058,6 +6070,51 @@ function lowerIterated(
     ...collection,
     to: { kind: "call", name: "floor", positional: [collection.to], named: {} },
   };
+}
+
+/**
+ * The characters of a text that a loop shows one by one, as a typewriter effect does: the text holds message markup
+ * (markup.ts) that would show as markers until its span closes, so the loop goes through the text without them. Other
+ * collections stay as they are.
+ */
+function plainCharacters(
+  collection: IrExpression,
+  body: AstNode,
+  variable: string,
+  context: LowerContext,
+): IrExpression {
+  // The loop shows the text so far: it adds each character to a text it shows.
+  let shows = false;
+  let adds = false;
+  walkAst(body, (child) => {
+    shows ||= child.kind === "methodCall" && legacyApiCall(child, context)?.name === "show";
+    if (child.kind !== "binary" || (child.operator !== "+=" && child.operator !== "=")) return;
+    walkAst(asNode(child.right), (part) => (adds ||= variableName(part) === variable));
+  });
+  if (!shows || !adds) return collection;
+  const characters =
+    collection.kind === "methodCall" &&
+    collection.name === "split" &&
+    collection.arguments.length === 1 &&
+    collection.arguments[0]!.kind === "literal" &&
+    collection.arguments[0]!.value === "";
+  const items = collection.kind === "call" && collection.name === "sexscriptLegacyItems";
+  if (!characters && !items) return collection;
+  addDiagnostic(
+    context,
+    "SX_TYPEWRITER_MARKUP",
+    "info",
+    "This loop shows a text character by character; message markup in the text would show as markers until its span closes, so the loop goes through the text without markup.",
+    body.span,
+  );
+  if (collection.kind === "methodCall")
+    return { ...collection, target: useHelper(context, "plainText", [collection.target]) };
+  if (collection.kind === "call")
+    return {
+      ...collection,
+      positional: [useHelper(context, "plainText", [collection.positional[0]!])],
+    };
+  return collection;
 }
 
 /**
