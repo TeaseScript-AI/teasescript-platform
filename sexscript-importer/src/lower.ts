@@ -13052,9 +13052,13 @@ function isFileConstructor(node: AstNode): boolean {
   );
 }
 
+/** Members that go through the files of a folder with a closure. */
+const FOLDER_WALKS = new Set(["eachFile", "eachFileRecurse", "eachDir", "eachFileMatch"]);
+
 /**
- * The `new File(path)` values whose only use is `.exists()` or `.listFiles()`: directly as its receiver, or kept in a
- * variable that nothing reads otherwise (LowerContext.fileValues, fileVariables).
+ * The `new File(path)` values whose only use is `.exists()`, `.listFiles()`, or a walk through the folder's files
+ * (FOLDER_WALKS): directly as its receiver, or kept in a variable that nothing reads otherwise
+ * (LowerContext.fileValues, fileVariables).
  */
 function fileTests(body: AstNode): {
   fileValues: Set<AstNode>;
@@ -13078,7 +13082,8 @@ function fileTests(body: AstNode): {
     const method = node.kind === "methodCall" ? constantString(node.method) : null;
     if (
       method === "exists" ||
-      (method === "listFiles" && nodeArray(asNode(node.arguments)?.items).length === 0)
+      (method === "listFiles" && nodeArray(asNode(node.arguments)?.items).length === 0) ||
+      (method !== null && FOLDER_WALKS.has(method))
     ) {
       const receiver = asNode(node.object);
       if (receiver !== null) existsReceivers.add(receiver);

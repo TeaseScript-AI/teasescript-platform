@@ -1,6 +1,3 @@
-// MIGRATION INCOMPLETE: 1 error diagnostic.
-// Review diagnostics before treating this file as behaviorally equivalent.
-
 speaker system {
   title: "System"
 }
@@ -32,9 +29,8 @@ if not downloadFile("http://example.org/update.txt?token=abc", "tasks.txt") {
   say "The tasks stay as they were"
 }
 // Managing the installed scripts is not possible from a package; a system notice says so, and the session ends.
-// TODO SX_JAVA_CONSTRUCTOR line 12: Java object construction (new File) has no TeaseScript equivalent.
-// | def dir = new File(getDataFolder() + "scripts/")
-let dir = null
+// NOTE SX_DATA_FOLDER line 12: getDataFolder() was the legacy player's data folder on the player's computer; package paths start at the package root, so it is empty text here.
+let dir = "scripts/"
 // NOTE SX_SCRIPT_MANAGER line 13: eachFile() went through the installed scripts of the legacy player to manage them, which a package cannot do; a system notice says so, and the session ends.
 say as system "Managing the installed scripts is not available here: scripts cannot be listed, changed, or removed from a package."
 exit
