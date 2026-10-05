@@ -1,6 +1,12 @@
 // MIGRATION INCOMPLETE: 1 error diagnostic.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
+function sexscriptLegacyAskText(prefill) {
+  if prefill == null or "${prefill}".trim() == "" {
+    return askText
+  }
+  return askText default: "${prefill}"
+}
 function sexscriptLegacySendImage(reference) {
   let codeValue = "image-${randomInteger(0..1000000000)}"
   save reference as "sexscript.image.${codeValue}"
@@ -73,4 +79,10 @@ selfie = null
 playVideo async "videos/intro.mp4"
 // NOTE SX_USE_FILE_VIDEO line 24: useFile() opened this video in the system's player; it plays in the session here, without waiting. The package holds it as an MP4 converted at import, since browsers do not play this format.
 playVideo async "clips/scene.mp4"
+// A prefill that may be blank opens the input without a default then, as the legacy empty field did.
+let draft = ""
+// NOTE SX_INPUT_PREFILL line 27: getString() pre-filled its field with this value, also when it was blank or null; a TeaseScript default must be non-blank text, so a helper asks without the default then.
+say "Your name?"
+let answer = sexscriptLegacyAskText(draft)
+say "Hello ${answer}"
 exit

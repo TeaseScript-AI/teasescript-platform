@@ -10572,7 +10572,15 @@ function lowerSingleInput(
     }
     textPrefill = templateOrLiteral(parts);
   } else {
-    if (prefill !== null) notePrefill(name, defaultNode!, node, context);
+    // A prefill that may be blank or null opens the input without a default then, as the legacy empty field did.
+    if (prefill !== null && !notePrefill(name, defaultNode!, node, context)) {
+      if (!pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
+      return useHelper(
+        context,
+        name === "getString" ? "askText" : name === "getInteger" ? "askInteger" : "askNumber",
+        [prefill],
+      );
+    }
     if (prefill !== null && name === "getString" && !onlyOf(defaultType, STRING)) {
       textPrefill =
         prefill.kind === "literal"
@@ -10590,15 +10598,16 @@ function lowerSingleInput(
 
 /**
  * A default TeaseScript rejects when the input opens: `null` for numbers, and blank text for text input (V30 §20).
- * Legacy showed "null" or an empty field instead, so a default that may be either gets a note. A text default that is
- * not text becomes text, which is never blank.
+ * Legacy showed "null" or an empty field instead, so a default that may be either goes through a helper that asks
+ * without it then, with a note; false for such a default. A text default that is not text becomes text, which is
+ * never blank.
  */
 function notePrefill(
   name: string,
   defaultNode: AstNode,
   node: AstNode,
   context: LowerContext,
-): void {
+): boolean {
   const type = inferType(defaultNode, context.types);
   const text = constantValue(defaultNode);
   const valid =
@@ -10608,16 +10617,17 @@ function notePrefill(
         (defaultNode.kind === "gstring" && gstringHasText(defaultNode)) ||
         onlyOf(type, NUMBER | BOOLEAN | NULL)
       : onlyOf(type, NUMBER);
-  if (valid) return;
+  if (valid) return true;
   addDiagnostic(
     context,
     "SX_INPUT_PREFILL",
     "warning",
     name === "getString"
-      ? `${name}() pre-filled its field with this value even when it was blank; a TeaseScript default must be non-blank text, or the input fails when it opens.`
-      : `${name}() pre-filled its field with this value even when it was null; a TeaseScript default must be ${name === "getInteger" ? "a whole number" : "a number"}, or the input fails when it opens.`,
+      ? `${name}() pre-filled its field with this value, also when it was blank or null; a TeaseScript default must be non-blank text, so a helper asks without the default then.`
+      : `${name}() pre-filled its field with this value, also when it was null; a TeaseScript default must be ${name === "getInteger" ? "a whole number" : "a number"}, so a helper asks without the default when it is not.`,
     node.span,
   );
+  return false;
 }
 
 /** Whether a GString has literal text other than whitespace, so it is never blank. */

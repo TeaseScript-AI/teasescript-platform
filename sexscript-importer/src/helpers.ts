@@ -68,6 +68,9 @@ export type HelperName =
   | "pathTag"
   | "items"
   | "itemAt"
+  | "askText"
+  | "askInteger"
+  | "askNumber"
   | "sendImage"
   | "switchButton"
   | "switchButtonId"
@@ -141,6 +144,9 @@ const HELPER_ORDER: readonly HelperName[] = [
   "pathTag",
   "items",
   "itemAt",
+  "askText",
+  "askInteger",
+  "askNumber",
   "tokenize",
   "sendImage",
   "switchButtonId",
@@ -528,6 +534,69 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ],
           ),
           ret(v("tag")),
+        ],
+      ),
+  },
+  // Legacy input with a prefill that may be blank or null, which a TeaseScript default rejects: no default then.
+  askText: {
+    name: "sexscriptLegacyAskText",
+    build: () =>
+      fn(
+        "sexscriptLegacyAskText",
+        ["prefill"],
+        [
+          ifS(
+            bin(
+              "or",
+              bin("==", v("prefill"), lit(null)),
+              bin(
+                "==",
+                { kind: "methodCall", target: template(v("prefill")), name: "trim", arguments: [] },
+                lit(""),
+              ),
+            ),
+            [ret({ kind: "input", input: "askText" })],
+          ),
+          ret({ kind: "input", input: "askText", defaultValue: template(v("prefill")) }),
+        ],
+      ),
+  },
+  askInteger: {
+    name: "sexscriptLegacyAskInteger",
+    build: () =>
+      fn(
+        "sexscriptLegacyAskInteger",
+        ["prefill"],
+        [
+          ifS({ kind: "typeTest", value: v("prefill"), type: "number" }, [
+            ifS(bin("==", bin("%", v("prefill"), lit(1)), lit(0)), [
+              ret({
+                kind: "input",
+                input: "askInteger",
+                defaultValue: {
+                  kind: "call",
+                  name: "floor",
+                  positional: [v("prefill")],
+                  named: {},
+                },
+              }),
+            ]),
+          ]),
+          ret({ kind: "input", input: "askInteger" }),
+        ],
+      ),
+  },
+  askNumber: {
+    name: "sexscriptLegacyAskNumber",
+    build: () =>
+      fn(
+        "sexscriptLegacyAskNumber",
+        ["prefill"],
+        [
+          ifS({ kind: "typeTest", value: v("prefill"), type: "number" }, [
+            ret({ kind: "input", input: "askNumber", defaultValue: v("prefill") }),
+          ]),
+          ret({ kind: "input", input: "askNumber" }),
         ],
       ),
   },
