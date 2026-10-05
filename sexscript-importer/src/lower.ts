@@ -4130,13 +4130,13 @@ function lowerCallStatement(
       extractMetadata(args, context, node.span);
       return [];
     case "show":
-      if (args.length === 0 || isNullConstant(args[0])) {
-        // show(null) cleared the legacy text area; a TeaseScript transcript keeps its history.
+      if (args.length === 0 || isNullConstant(args[0]) || constantString(args[0])?.trim() === "") {
+        // show(null) and show("") cleared the legacy text area; a TeaseScript transcript keeps its history.
         addDiagnostic(
           context,
           "SX_SHOW_CLEAR",
           "info",
-          "Dropped show(null), which only cleared the legacy text area.",
+          "Dropped show(null) or show(\"\") with empty text, which only cleared the legacy text area.",
           span,
         );
         return [];
@@ -4219,7 +4219,9 @@ function lowerCallStatement(
             "setImage byte-array overload is not automatically migrated.",
           ),
         ];
-      if (isNullConstant(args[0])) return [{ kind: "hideImage", span }];
+      // setImage(null), and an empty or blank path, cleared the picture.
+      if (isNullConstant(args[0]) || constantString(args[0])?.trim() === "")
+        return [{ kind: "hideImage", span }];
       return oneArgumentStatement(args, context, node, (file) => ({
         kind: "showImage",
         file: mediaFile(file, "images", node, context),
