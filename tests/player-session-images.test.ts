@@ -16,6 +16,7 @@ import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 
 interface ImageHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
+  readonly notices: Readonly<Ref<readonly { readonly key: string }[]>>;
   readonly images: {
     store(
       file: File,
@@ -177,4 +178,20 @@ test("an image that never answered can be dropped, and the runtime admits only s
   const result = answerPlayerRuntimeImage(host.session.value!, reference, host.images.admission);
   assert.equal(result?.outcome.kind, "invalidPayload");
   assert.equal(playerRuntimeForeground(result!.session)?.kind, "ask-image");
+});
+
+test("an image request that allows only the camera is reported as a Player notice while it waits", async (context) => {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() => usePlayerSession({}));
+  assert.ok(host);
+  context.after(() => scope.stop());
+  const keys = () => host.notices.value.map((notice) => notice.key);
+  host.prepare(() => createPlayerRuntimeSession("let pick = askImage(allowFile: false)\nexit"));
+  await host.activate();
+  await until(() => keys().includes("image-needs-camera"), "the notice was not published");
+  // A new session without such a request withdraws it.
+  host.prepare(() => createPlayerRuntimeSession('let pick = askImage("Add an image")\nexit'));
+  await host.activate();
+  await until(() => !keys().includes("image-needs-camera"), "the notice was not withdrawn");
 });
