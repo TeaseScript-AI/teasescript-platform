@@ -53,6 +53,7 @@ test(
             status: "finished",
             date: "2013-05-01",
             files: ["scripts/walk__old.groovy"],
+            note: "replaced by 1.1",
           },
         ],
       });
@@ -124,7 +125,7 @@ test(
       );
       assert.ok(
         page.includes(
-          '<details class="earlier"><summary>Earlier versions (1)</summary><ul><li>Night Walk 1.0 &middot; finished &middot; 2013-05-01<br>Groovy: <a href="source/Night%20Walk/earlier/1/scripts/walk__old.groovy">scripts/walk__old.groovy</a></li></ul></details>',
+          '<details class="earlier"><summary>Earlier versions (1)</summary><ul><li>Night Walk 1.0 &middot; finished &middot; 2013-05-01 &middot; replaced by 1.1<br>Groovy: <a href="source/Night%20Walk/earlier/1/scripts/walk__old.groovy">scripts/walk__old.groovy</a></li></ul></details>',
         ),
       );
       assert.ok(

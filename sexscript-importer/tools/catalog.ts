@@ -67,6 +67,8 @@ export interface EarlierVersion {
   readonly title: string;
   readonly status: string | null;
   readonly date: string | null;
+  /** Why the version is kept apart, when the unit says. */
+  readonly note: string | null;
   /** The version's original Groovy files: where they are, and the path they are shown under. */
   readonly files: ReadonlyArray<{ readonly source: string; readonly name: string }>;
 }
@@ -695,6 +697,7 @@ export function earlierVersions(unit: unknown, legacyFolder: string): EarlierVer
     title: typeof version.title === "string" ? version.title : `Version ${index + 1}`,
     status: typeof version.status === "string" ? version.status : null,
     date: typeof version.date === "string" ? version.date : null,
+    note: typeof version.note === "string" && version.note !== "" ? version.note : null,
     files: (Array.isArray(version.files) ? version.files : [])
       .map((file) => (typeof file === "string" ? file : isRecord(file) ? file.path : null))
       .filter((file): file is string => typeof file === "string" && file !== "")
@@ -917,7 +920,7 @@ function renderRow(entry: CatalogEntry, playerOrigin: string): string {
 function renderEarlier(entry: CatalogEntry): string {
   if (entry.earlier.length === 0) return "";
   const items = entry.earlier.map((version, index) => {
-    const facts = [version.status, version.date].filter((fact) => fact !== null);
+    const facts = [version.status, version.date, version.note].filter((fact) => fact !== null);
     const links = version.files.map(
       (file) =>
         `<a href="${escapeHtml(
