@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "remove-all-toys-entry-key",
+      "layer": "source",
+      "category": "e",
+      "reason": "In this older toys module, backgroundRemoveAllToys filters the toy map with a key/value closure but then uses the whole Map.Entry (it) as the state name, so the release event name became \"…-key={…}\" and set() got an entry instead of the state key. The selected state is the key (the filter tests stateIs(s)); the newer toys.groovy also addresses it.key. Use it.key.",
+      "diff": "remove-all-toys-entry-key.diff"
+    }
+  ]
+}
