@@ -466,10 +466,41 @@ form instead once `main` implements it:
 | `askBooleans(message:, texts:, defaults:)` | the message, one yes/no `choose` per item with the preset marked in its button, then "Confirm" or "Change answers", which starts over (`SX_ASK_BOOLEANS_WORKAROUND`) | one form with every option; changing a single answer |
 | `showPopup` | the message in the chat and an OK button (`SX_POPUP_WORKAROUND`) | the popup presentation |
 | `openUrl(url)` | "Open this link: …" in the chat, where message markup makes an `http(s)` address a link, and a Continue button (`SX_OPEN_URL_WORKAROUND`) | opening the page itself |
-| `chooseFile()` for legacy `getFile(title)` | the title, a line that no file can be chosen, and null, as when the player cancels (`SX_CHOOSE_FILE_WORKAROUND`) | choosing a file |
+| `showPermanentButton` (V30 §28, #610 in progress) for a device switch command (`"SwitchBox.exe 7 ein".execute()`) | "Power switch: ON" or "OFF" in the chat, by the command's last word (`SX_SWITCH_WORKAROUND`); `--accepted=permanentButton` shows a permanent button and removes the previous one | a lasting on-screen switch state |
+| layered scene (`showBackgroundImage`, `showOverlayImage`) for an image composed in memory and shown with `setImage(bytes, n)` | the base image the function read (`SX_IMAGE_COMPOSITION`); `--accepted=layeredScene` places the base as background and each drawn image as an overlay at percentages of the canvas (`SX_LAYERED_SCENE`, or `SX_LAYERED_SCENE_PARTIAL` for source rectangles, text, shapes, pixel edits, and transformations) | the composition |
 | none: listing a package images folder | the counts of the package's images at conversion time, a number or a `dict` of the matching folders (`SX_IMAGE_COUNT_WORKAROUND`) | images added later; entries other than image files |
 
-`askBoolean` with custom labels already converts to a two-option `choose` compared with its first label.
+`askBoolean` with custom labels already converts to a two-option `choose` compared with its first label. Legacy
+`getFile(title)` was used for a photo of the player, so it shows the title and takes the photo with `takePhoto()`
+(`SX_FILE_PHOTO`, owner decision 2026-10-05); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
+
+### Universal conversions decided by the owner (2026-10-05)
+
+- The legacy online service: `send(key, value)` and `receive*(key)` keep values in the package's storage, and
+  `isConnected()` is true (`SX_ONLINE_STORAGE`); `sendImage(reference)` saves the photo reference under a generated code
+  that it returns, and `receiveImage(code)` loads it.
+- Files: `new File(path).exists()` reads the package's files at conversion time, a literal path as `true` or `false` and
+  a computed one as a lookup in the package files below its fixed beginning; a program (`.exe`) never exists, and
+  `getDataFolder()` is the package root (`SX_FILE_EXISTS`, `SX_DATA_FOLDER`). Deleting the file of a photo the script
+  took clears the reference (`SX_PHOTO_DELETE`). `useFile(path)` plays an audio file (`SX_USE_FILE_AUDIO`); any other
+  file, such as a device control program, stays reported as a program a package cannot start (`SX_EXTERNAL_PROGRAM`).
+- Media paths: a literal image or sound path names the file the package holds when the legacy player found it ignoring
+  letter case, around spaces, or below a repeated folder name (`SX_MEDIA_PATH`); several files that match apart from
+  case get a note (`SX_MEDIA_PATH_CASE`). A MIDI file becomes an MP3 rendered at conversion (fluidsynth with a General
+  MIDI soundfont, then ffmpeg).
+- Java text: `String.format` with `%s`, `%d`, `%f`, a `0` flag, a width, and a precision becomes interpolation,
+  `padStart`, and a fixed-decimals helper (`SX_FORMAT`); `tokenize()` becomes a helper that splits at any delimiter
+  character without empty parts.
+- Control flow: `for (;;)` becomes `while true`; `++x` and `--x` inside an expression change the variable before the
+  statement; a declaration whose value cannot convert keeps its variable with a neutral value of its type.
+- Branches: a switch case for a value that no code of the package stores under the switched key never runs; its chain to
+  a missing script becomes `exit` (`SX_UNREACHABLE_BRANCH`). A chain to a script of the legacy desktop player
+  (`system/...`, `welcome`, `exit`) ends the session (`SX_DESKTOP_SCRIPT`).
+- The legacy player profile: the distribution's intro saved the player's name and gender, and its options the toys and
+  clothes the player owns; a package that reads such keys and never saves them asks the missing ones once at the start
+  of `main.tease`, with the distribution's questions, and saves them under the legacy keys (`SX_LEGACY_PROFILE`).
+- `show("")` only cleared the legacy text area and is dropped; an empty or blank image path clears the image.
+- Lists join with TeaseScript `+`, `+=`, and `addAll` (#609); the concatenation helper remains only for ranges.
 
 ## Remaining gaps by workaround class
 
