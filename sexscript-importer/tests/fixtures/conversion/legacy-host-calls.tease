@@ -13,16 +13,14 @@ function sexscriptLegacyShowSwitch(command) {
     if sexscriptLegacySwitchButton != null {
       removePermanentButton(sexscriptLegacySwitchButton)
     }
-    sexscriptLegacySwitchButton = showPermanentButton "Power: ON" {
-      persist: true
+    sexscriptLegacySwitchButton = showPermanentButton "Power: ON", persist: true {
     }
   }
   if ["off", "aus"].contains(last) {
     if sexscriptLegacySwitchButton != null {
       removePermanentButton(sexscriptLegacySwitchButton)
     }
-    sexscriptLegacySwitchButton = showPermanentButton "Power: OFF" {
-      persist: true
+    sexscriptLegacySwitchButton = showPermanentButton "Power: OFF", persist: true {
     }
   }
 }
@@ -43,7 +41,7 @@ let code = sexscriptLegacySendImage(photo)
 save code as "game.photo"
 // NOTE SX_ONLINE_STORAGE line 8: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
 // NOTE SX_ONLINE_STORAGE line 8: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
-let back = load "sexscript.image.${load "game.photo"}"
+let back = load "sexscript.image.${load("game.photo")}"
 if back != null {
   showImage back
 }
@@ -110,7 +108,7 @@ delete "sexscript.image.images/proof/photo.jpg"
 // NOTE SX_PHOTO_COPY line 46: Legacy code copied this photo to images/proof/photo.jpg, which a package cannot write; the photo's reference is saved for that path, and showing the path shows the photo.
 save proof as "sexscript.image.images/proof/photo.jpg"
 // NOTE SX_PHOTO_COPY line 47: A script copied the player's photo to images/proof/photo.jpg; showing the path shows that photo.
-showImage (load "sexscript.image.images/proof/photo.jpg", default: "proof/photo.jpg")
+showImage load("sexscript.image.images/proof/photo.jpg", default: "proof/photo.jpg")
 // getImage() and getFile() without a message take the photo without a title.
 let bare = takePhoto()
 if bare != null {

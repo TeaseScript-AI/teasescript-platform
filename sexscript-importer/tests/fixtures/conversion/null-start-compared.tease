@@ -34,7 +34,7 @@ function sexscriptLegacyAskProfile {
   let profileToysDefaults: boolean[] = []
   let profileToysIndex = 0
   for profileToysKey in ["toys.crop", "toys.paddle"] {
-    if (load profileToysKey) == null {
+    if load(profileToysKey) == null {
       profileToysKeys.add(profileToysKey)
       profileToysNames.add(["crop / cane", "paddle"][profileToysIndex])
       profileToysDefaults.add(false)

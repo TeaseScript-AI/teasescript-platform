@@ -34,7 +34,7 @@ function sexscriptLegacyAskProfile {
   let profileToysDefaults: boolean[] = []
   let profileToysIndex = 0
   for profileToysKey in ["toys.crop", "toys.paddle"] {
-    if (load profileToysKey) == null {
+    if load(profileToysKey) == null {
       profileToysKeys.add(profileToysKey)
       profileToysNames.add(["crop / cane", "paddle"][profileToysIndex])
       profileToysDefaults.add(false)
@@ -136,14 +136,14 @@ if n <= 3 and n >= 1 {
 // A case that falls through into a case whose own break sits in an if leaves the switch at that break as well.
 switch randomInteger(0..2) {
   case 0 {
-    if (load "toys.paddle") == true {
+    if load("toys.paddle") == true {
       say "Fetch the paddle"
-    } else if (load "toys.crop") == true {
+    } else if load("toys.crop") == true {
       say "Fetch the crop"
     }
   }
   default {
-    if (load "toys.crop") == true {
+    if load("toys.crop") == true {
       say "Fetch the crop"
     }
   }

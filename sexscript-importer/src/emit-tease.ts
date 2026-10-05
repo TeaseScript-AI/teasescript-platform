@@ -107,8 +107,7 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
       return;
     case "permanentButton":
       lines.push(
-        `${pad}${emitExpression(statement.target)} = showPermanentButton ${emitExpression(statement.label)} {`,
-        ...(statement.persist ? [`${pad}  persist: true`] : []),
+        `${pad}${emitExpression(statement.target)} = showPermanentButton ${emitExpression(statement.label)}${statement.persist ? ", persist: true" : ""} {`,
       );
       emitStatements(statement.body ?? [], lines, depth + 1);
       lines.push(`${pad}}`);
@@ -133,8 +132,12 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
       return;
     }
     case "save": {
-      // An interaction with its own speaker clause is grouped: `save (askText as system) as "key"` (V30 §23).
-      const value = emitExpression(statement.value);
+      // An ask keeps its compact form, grouped with its own speaker clause: `save (askText as system) as "key"`
+      // (V30 §23).
+      const value =
+        statement.value.kind === "input"
+          ? compactInput(statement.value)
+          : emitExpression(statement.value);
       const grouped =
         statement.value.kind === "input" && statement.value.speaker !== undefined
           ? `(${value})`
@@ -361,18 +364,17 @@ export function emitExpression(expression: IrExpression): string {
       return `${operand(expression.target, POSTFIX)}.${expression.name}(${args.join(", ")})`;
     }
     case "load":
-      // A read with a default is parenthesized unless it is a whole statement value (see emitValue).
-      return expression.defaultValue === undefined
-        ? `load ${operand(expression.key, POSTFIX)}`
-        : `(${emitLoadDefault(expression)})`;
+      // Inside a larger expression a read takes its bounded form, `load("k") == null` (V30 §25); a whole statement
+      // value keeps the compact one (see emitValue).
+      return `load(${emitExpression(expression.key)}${expression.defaultValue === undefined ? "" : `, default: ${emitExpression(expression.defaultValue)}`})`;
     case "input": {
+      // Inside a larger expression an ask takes its parenthesized form, `askInteger(default: 0) + 1` (V30 §20); a
+      // whole statement value keeps the compact one (see emitValue).
       const asked =
         expression.speaker === undefined
           ? expression.input
-          : `${expression.input} as ${expression.speaker}`;
-      return expression.defaultValue === undefined
-        ? asked
-        : `${asked} default: ${emitExpression(expression.defaultValue)}`;
+          : `${expression.input} as ${expression.speaker} `;
+      return `${asked}(${expression.defaultValue === undefined ? "" : `default: ${emitExpression(expression.defaultValue)}`})`;
     }
     case "choice":
     case "listChoice":
@@ -614,14 +616,6 @@ function precedence(expression: IrExpression): number {
     case "property":
     case "methodCall":
       return POSTFIX;
-    // `load` and a prefilled input extend to the end of their operands, so they are parenthesized as operands.
-    case "load":
-      return expression.defaultValue === undefined ? 0 : PRIMARY;
-    case "input":
-      // `save (askText as system) as "key"`: an interaction with its own speaker clause is grouped (V30 §23).
-      return expression.defaultValue === undefined && expression.speaker === undefined
-        ? PRIMARY
-        : 0;
     default:
       return PRIMARY;
   }
@@ -655,14 +649,26 @@ function emitButton(label: IrExpression, timeout: IrExpression | null): string {
   return `showButton ${emitExpression(label)}${timeout === null ? "" : `, timeout: ${emitExpression(timeout)}`}`;
 }
 
-/** A complete statement value, where a compact choice or button needs no parentheses. */
+/** A complete statement value, where a compact choice, button, read, or ask needs no parentheses. */
 function emitValue(expression: IrExpression): string {
   if (expression.kind === "button") return emitButton(expression.label, expression.timeout);
-  if (expression.kind === "load" && expression.defaultValue !== undefined)
-    return emitLoadDefault(expression);
+  if (expression.kind === "load")
+    return expression.defaultValue === undefined
+      ? `load ${operand(expression.key, POSTFIX)}`
+      : emitLoadDefault(expression);
+  if (expression.kind === "input") return compactInput(expression);
   return expression.kind === "choice" || expression.kind === "listChoice"
     ? emitChoice(expression)
     : emitExpression(expression);
+}
+
+/** `askText`, `askInteger default: 3`, `askText as system` (V30 §20). */
+function compactInput(expression: Extract<IrExpression, { kind: "input" }>): string {
+  const asked =
+    expression.speaker === undefined ? expression.input : `${expression.input} as ${expression.speaker}`;
+  return expression.defaultValue === undefined
+    ? asked
+    : `${asked} default: ${emitExpression(expression.defaultValue)}`;
 }
 
 /** `load key, default: value` (#541). */

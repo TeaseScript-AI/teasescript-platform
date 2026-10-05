@@ -3,16 +3,14 @@ function sexscriptLegacyShowDevice(device, state) {
   if sexscriptLegacyDeviceButtons.contains(device) {
     removePermanentButton(sexscriptLegacyDeviceButtons[device])
   }
-  sexscriptLegacyDeviceButtons[device] = showPermanentButton "${device}: ${state}" {
-    persist: true
+  sexscriptLegacyDeviceButtons[device] = showPermanentButton "${device}: ${state}", persist: true {
   }
 }
 function sexscriptLegacyOpenTray {
   if sexscriptLegacyDeviceButtons.contains("CD tray") {
     removePermanentButton(sexscriptLegacyDeviceButtons["CD tray"])
   }
-  sexscriptLegacyDeviceButtons["CD tray"] = showPermanentButton "CD tray: OPEN" {
-    persist: true
+  sexscriptLegacyDeviceButtons["CD tray"] = showPermanentButton "CD tray: OPEN", persist: true {
     removePermanentButton(sexscriptLegacyDeviceButtons["CD tray"])
   }
 }
@@ -23,16 +21,14 @@ function sexscriptLegacyShowSwitch(command) {
     if sexscriptLegacySwitchButton != null {
       removePermanentButton(sexscriptLegacySwitchButton)
     }
-    sexscriptLegacySwitchButton = showPermanentButton "Power: ON" {
-      persist: true
+    sexscriptLegacySwitchButton = showPermanentButton "Power: ON", persist: true {
     }
   }
   if ["off", "aus"].contains(last) {
     if sexscriptLegacySwitchButton != null {
       removePermanentButton(sexscriptLegacySwitchButton)
     }
-    sexscriptLegacySwitchButton = showPermanentButton "Power: OFF" {
-      persist: true
+    sexscriptLegacySwitchButton = showPermanentButton "Power: OFF", persist: true {
     }
   }
 }
@@ -62,7 +58,7 @@ sexscriptLegacyOpenTray()
 say "Put the key in the tray"
 let switchbox_on = 0
 let switchbox_off = 0
-switchbox_onText = "usbcontrol.exe ${load "training.switchbox"} on"
+switchbox_onText = "usbcontrol.exe ${load("training.switchbox")} on"
 // NOTE SX_SWITCH_BUTTON line 18: The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.
 sexscriptLegacyShowSwitch(switchbox_onText)
 switchbox_off = 1

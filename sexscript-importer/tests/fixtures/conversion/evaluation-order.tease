@@ -24,7 +24,7 @@ say conditional2
 let conditional3 = false
 if conditional3 {
   say "Never ask"
-  conditional3 = askText != ""
+  conditional3 = askText() != ""
 }
 if conditional3 {
   say "yes"
