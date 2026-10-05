@@ -329,7 +329,7 @@ export async function reportUnit(options: UnitOptions): Promise<UnitResult | "ok
 
 /**
  * The unit folder to convert: the corpus unit itself, or with source patches a staged copy whose media are hard links
- * and whose patched files are copies of their own.
+ * and whose other files, and any file a diff names, are copies of their own, so patching never reaches the corpus.
  */
 async function patchedUnit(
   corpusRoot: string,
@@ -344,14 +344,23 @@ async function patchedUnit(
   await mkdir(path.dirname(staged), { recursive: true });
   const copied = await run("cp", ["-al", original, staged]);
   if (copied.exitCode !== 0) throw new Error(`cannot stage ${original}: ${copied.stderr.trim()}`);
+  const mediaRoots = await Promise.all(
+    MEDIA_FOLDERS.map((media) => mediaRoot(corpusRoot, id, media)),
+  );
+  const own = new Set(
+    (await files(original))
+      .filter((file) => !mediaRoots.some((root) => file.startsWith(`${root}${path.sep}`)))
+      .map((file) => toPosix(path.relative(original, file))),
+  );
   for (const patch of diffs) {
     const diff = await readFile(path.join(patches.folder, patch.diff), "utf8");
-    for (const file of sourcePatchPaths(diff, patch.diff)) {
-      const target = path.join(staged, file);
-      if ((await stat(target).catch(() => null)) === null) continue;
-      await rm(target);
-      await copyFile(path.join(original, file), target);
-    }
+    for (const file of sourcePatchPaths(diff, patch.diff)) own.add(file);
+  }
+  for (const file of own) {
+    const target = path.join(staged, file);
+    if ((await stat(target).catch(() => null)) === null) continue;
+    await rm(target);
+    await copyFile(path.join(original, file), target);
   }
   await applySourcePatches(staged, patches);
   return staged;

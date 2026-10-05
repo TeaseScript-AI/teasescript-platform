@@ -103,13 +103,20 @@ export async function readUnitPatches(
 /** The unit files a diff changes, by their paths from the unit folder. */
 export function sourcePatchPaths(diff: string, where: string): string[] {
   const paths = new Set<string>();
-  for (const line of diff.split(/\r?\n/u)) {
-    const header = /^(?:---|\+\+\+) ([^\t]+)/u.exec(line);
-    if (header === null || header[1] === "/dev/null") continue;
-    const parts = header[1]!.trim().split("/").slice(1);
-    if (parts.length === 0 || parts.some((part) => part === "" || part === "." || part === ".."))
-      throw new PatchError(`${where} names a path outside the unit: ${header[1]}`);
-    paths.add(parts.join("/"));
+  const lines = diff.split(/\r?\n/u);
+  // A file header is a `---` line followed by a `+++` line; inside a hunk, such a pair would be a removed `-- `
+  // line followed by an added `++ ` line.
+  for (let index = 0; index + 1 < lines.length; index += 1) {
+    if (!lines[index]!.startsWith("--- ") || !lines[index + 1]!.startsWith("+++ ")) continue;
+    for (const header of [lines[index]!, lines[index + 1]!]) {
+      const name = header.slice(4).split("\t")[0]!.trim();
+      if (name === "/dev/null") continue;
+      const parts = name.split("/").slice(1);
+      if (parts.length === 0 || parts.some((part) => part === "" || part === "." || part === ".."))
+        throw new PatchError(`${where} names a path outside the unit: ${name}`);
+      paths.add(parts.join("/"));
+    }
+    index += 1;
   }
   if (paths.size === 0) throw new PatchError(`${where} is not a unified diff`);
   return [...paths].sort();
