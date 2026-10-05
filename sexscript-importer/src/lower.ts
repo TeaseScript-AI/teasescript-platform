@@ -6245,9 +6245,15 @@ function lowerReturnStatement(node: AstNode, context: LowerContext): IrStatement
   if (context.scriptPaths !== null) {
     const next = freshName("nextScript", context);
     const paths = [...context.scriptPaths].sort(([left], [right]) => left.localeCompare(right));
+    // A null name reads "null", which names no script, so the chain ends as for an empty name.
     const key: IrExpression = {
       kind: "methodCall",
-      target: { kind: "methodCall", target: script, name: "lowercase", arguments: [] },
+      target: {
+        kind: "methodCall",
+        target: { kind: "template", parts: [{ value: script }] },
+        name: "lowercase",
+        arguments: [],
+      },
       name: "replace",
       arguments: [
         { kind: "literal", value: ".groovy" },
