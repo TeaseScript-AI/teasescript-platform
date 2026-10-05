@@ -7,6 +7,27 @@ function sexscriptLegacyMenuOptions(texts, first) {
   }
   return options
 }
+function sexscriptLegacyTruth(value) {
+  if value is boolean {
+    return value
+  }
+  if value is number {
+    return value != 0
+  }
+  if value is string {
+    return value != ""
+  }
+  if value is list or value is set {
+    return value.length > 0
+  }
+  if value is dict {
+    return value.length > 0
+  }
+  if value is object {
+    return value != {}
+  }
+  return value != null
+}
 function sexscriptLegacyLog(value) {
   if value <= 0 {
     let noResult: number dict = dict{}
@@ -209,4 +230,15 @@ function weeks(punishment) {
 let squared = sexscriptLegacyPow(3, 2)
 let named = "Ann" != ""
 say "Weeks ${weeks(45)}, ${squared}, ${named}"
+// An Elvis fallback for a value of unknown type starts the variable with the fallback, so it never holds null.
+function describe(given) {
+  let elvisValue = given
+  let mood = "calm"
+  if elvisValue != null and sexscriptLegacyTruth(elvisValue) {
+    mood = elvisValue
+  }
+  // NOTE SX_LENGTH_RECEIVER line 41: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+  say "Mood ${mood.length}"
+}
+describe(null)
 exit

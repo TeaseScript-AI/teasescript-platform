@@ -3180,6 +3180,73 @@ function lowerConditionalAssignment(
     if (value === null || fallback === null) return [];
     // `x = x ?: d` needs no self-assignment before the check.
     const reassignsSelf = !declaration && variableName(value) === variableName(target);
+    // With a plain fallback, the variable starts with it and takes the value only where that is true, tested through a
+    // temporary, so the variable never holds the value's null: `let elvisValue = v`, `x = d`, then
+    // `if elvisValue != null and ... { x = elvisValue }`.
+    // Only a value of unknown type needs it: its truth goes through a helper, which proves the variable non-null nowhere.
+    const plainTruth = truthiness(
+      { kind: "variable", name: variableName(target)! },
+      inferType(value, context.types),
+      true,
+      target,
+      context,
+    );
+    if (!reassignsSelf && isSimpleValue(fallback) && plainTruth?.kind === "call") {
+      const temporary = freshName("elvisValue", context);
+      const valueType = inferType(value, context.types);
+      const variables = new Map(context.types.variables);
+      variables.set(temporary, valueType);
+      context.types = { ...context.types, variables };
+      const temporaryNode = syntheticVariable(temporary, span);
+      const kept = lowerStatement(syntheticAssignment(true, temporaryNode, value, span), context);
+      const start = lowerStatement(assign(fallback), context);
+      const temporaryValue: IrExpression = { kind: "variable", name: temporary };
+      const truthy = truthiness(temporaryValue, valueType, true, temporaryNode, context);
+      if (truthy === null) {
+        const legacySource = span === null ? [] : legacySourceLines(context, span);
+        return [{ kind: "unsupported", legacySource, span }];
+      }
+      const testsNull =
+        truthy.kind === "binary" &&
+        truthy.operator === "and" &&
+        truthy.left.kind === "binary" &&
+        truthy.left.operator === "!=" &&
+        truthy.left.right.kind === "literal" &&
+        truthy.left.right.value === null;
+      const present: IrExpression =
+        (valueType & NULL) === 0 || testsNull
+          ? truthy
+          : {
+              kind: "binary",
+              operator: "and",
+              left: {
+                kind: "binary",
+                operator: "!=",
+                left: temporaryValue,
+                right: { kind: "literal", value: null },
+              },
+              right: truthy,
+            };
+      return [
+        ...kept,
+        ...start,
+        {
+          kind: "if",
+          condition: present,
+          then: [
+            {
+              kind: "assign",
+              target: { kind: "variable", name: variableName(target)! },
+              operator: "=",
+              value: temporaryValue,
+              span,
+            },
+          ],
+          else: [],
+          span,
+        },
+      ];
+    }
     const stored = lowerStatement(assign(value), context);
     const fill = lowerStatement(update(fallback), context);
     // The check sees the value just stored, whose type can include null even when the variable's

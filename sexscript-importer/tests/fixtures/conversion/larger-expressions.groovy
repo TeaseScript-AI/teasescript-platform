@@ -35,3 +35,9 @@ def weeks = { int punishment -> punishment.intdiv(20) }
 def squared = 3 ** 2
 def named = "Ann".asBoolean()
 show("Weeks " + weeks(45) + ", " + squared + ", " + named)
+// An Elvis fallback for a value of unknown type starts the variable with the fallback, so it never holds null.
+def describe = { given ->
+	def mood = given ?: "calm"
+	show("Mood " + mood.length())
+}
+describe(null)
