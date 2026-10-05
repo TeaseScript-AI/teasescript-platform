@@ -43,6 +43,7 @@ import {
   functionResultTypes,
   mapChildren,
   mapOwnExpressions,
+  withReturnTypes,
   type TeaseType,
 } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
@@ -1347,7 +1348,11 @@ export function lowerParsedFile(
       : { loadsModuleDirectories: [...context.loadsModuleDirectories].sort() }),
   };
   if (options.renameIdentifiers === false) return program;
-  return renameConflictingIdentifiers(withActionDispatcher(program));
+  const dispatched = withActionDispatcher(program);
+  return renameConflictingIdentifiers({
+    ...dispatched,
+    statements: withReturnTypes(dispatched.statements),
+  });
 }
 
 /**

@@ -30,7 +30,12 @@ import {
 import { helperDefinitionOrder, SYSTEM_SPEAKER, withActionDispatcher } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { legacyProfilePrompt } from "./profile.ts";
-import { expressionType, functionResultTypes, type TeaseType } from "./variable-types.ts";
+import {
+  expressionType,
+  functionResultTypes,
+  withReturnTypes,
+  type TeaseType,
+} from "./variable-types.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 
 const ACCEPTED_EXTERNAL_CALLS = new Set([
@@ -1461,11 +1466,13 @@ function composeProgram(
   }
   helperStatements.unshift(...fields);
 
-  const composed = withActionDispatcher({
+  const dispatched = withActionDispatcher({
     ...program,
     statements: [...helperStatements, ...program.statements],
     ...(actions.size === 0 ? {} : { actions: [...actions] }),
   });
+  // A function whose returns mix types, such as the dispatcher, declares its result type.
+  const composed = { ...dispatched, statements: withReturnTypes(dispatched.statements) };
   diagnostics.push(...packageDependencyDiagnostics(composed.statements, globalFunctions));
   return renameConflictingIdentifiers({
     ...composed,

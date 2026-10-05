@@ -129,17 +129,80 @@ interface Conflict {
 
 /** The result types of the functions among `statements`, from their `return` values. */
 export function functionResultTypes(statements: IrStatement[]): Map<string, TeaseType> {
+  return functionReturns(statements).results;
+}
+
+/** The result types of the functions among `statements`, and the types their `return`s give. */
+function functionReturns(statements: IrStatement[]): {
+  results: Map<string, TeaseType>;
+  returned: Map<string, TeaseType[]>;
+} {
   const bindings = new Map<BindingKey, Binding>();
   let results = new Map<string, TeaseType>();
+  let returned = new Map<string, TeaseType[]>();
   for (let round = 0; round < 50; round += 1) {
     const analysis = analyse(statements, bindings, results);
     const changed = [...analysis.results].some(
       ([name, type]) => typeName(type) !== typeName(results.get(name) ?? UNKNOWN),
     );
     results = analysis.results;
+    returned = analysis.returned;
     if (!analysis.changed && !changed) break;
   }
-  return results;
+  return { results, returned };
+}
+
+/** Whether a function body returns null with a `return null`, outside nested functions. */
+function returnsNull(body: readonly IrStatement[]): boolean {
+  let found = false;
+  const visit = (statements: readonly IrStatement[]): void => {
+    for (const statement of statements) {
+      if (found) return;
+      if (statement.kind === "return") {
+        if (statement.value?.kind === "literal" && statement.value.value === null) found = true;
+      } else if (statement.kind === "if") {
+        visit(statement.then);
+        visit(statement.else);
+      } else if (
+        statement.kind === "while" ||
+        statement.kind === "repeat" ||
+        statement.kind === "for"
+      ) {
+        visit(statement.body);
+      } else if (statement.kind === "switch") {
+        for (const item of statement.cases) visit(item.body);
+        visit(statement.default);
+      }
+    }
+  };
+  visit(body);
+  return found;
+}
+
+/**
+ * The functions among `statements` with the result type they need written: TeaseScript infers no union and needs an
+ * optional result type for a function that can return null besides a value (V30 §17), so a function whose returns
+ * mix types, or a value and null, declares it.
+ */
+export function withReturnTypes(statements: IrStatement[]): IrStatement[] {
+  const { returned } = functionReturns(statements);
+  return statements.map((statement) => {
+    if (statement.kind !== "function" || statement.returnType !== undefined) return statement;
+    const types = returned.get(statement.name) ?? [];
+    const values = types.filter((type) => type.kind !== "null");
+    if (values.length === 0 || values.some((type) => nonNull(type).kind === "unknown"))
+      return statement;
+    let shared: TeaseType | null = nonNull(values[0]!);
+    for (const type of values.slice(1)) shared = shared === null ? null : unionOf(shared, type);
+    if (shared === null) return statement;
+    const optional =
+      values.length < types.length || values.some((type) => type.kind === "optional");
+    // One type of value needs no annotation, also where the function can end without one; a `return null` beside it
+    // does (V30 §17).
+    if (shared.kind !== "union" && !(optional && returnsNull(statement.body))) return statement;
+    const written = annotation(optional ? { kind: "optional", value: shared } : shared);
+    return written === null ? statement : { ...statement, returnType: written };
+  });
 }
 
 interface Rounds {
@@ -502,6 +565,8 @@ interface Analysis {
   conflicts: Conflict[];
   /** Result types of the program's functions as of this round, from their `return` values. */
   results: Map<string, TeaseType>;
+  /** The types each function's `return`s give, also null where it can end without a value. */
+  returned: Map<string, TeaseType[]>;
   truncations: Set<IrStatement>;
   /** Integer declarations initialized from storage, declared `: integer` so the stored value is checked. */
   integerLoads: Set<IrStatement>;
@@ -529,6 +594,7 @@ function analyse(
     changed: false,
     conflicts: [],
     results: new Map(),
+    returned: new Map(),
     truncations: new Set(),
     integerLoads: new Set(),
     textIntegers: new Set(),
@@ -969,6 +1035,7 @@ function analyse(
     )
       returns.push(NULL);
     analysis.results.set(item.name, resultType(returns));
+    analysis.returned.set(item.name, returns);
     returns = null;
   }
   return analysis;

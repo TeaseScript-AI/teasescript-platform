@@ -171,7 +171,7 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
           : `${parameter.name} = ${emitExpression(parameter.defaultValue)}`,
       );
       lines.push(
-        `${pad}${statement.global === true ? "global " : ""}function ${statement.name}${parameters.length === 0 ? "" : `(${parameters.join(", ")})`} {`,
+        `${pad}${statement.global === true ? "global " : ""}function ${statement.name}${parameters.length === 0 ? "" : `(${parameters.join(", ")})`}${statement.returnType === undefined ? "" : `: ${statement.returnType}`} {`,
       );
       emitStatements(statement.body, lines, depth + 1);
       lines.push(`${pad}}`);

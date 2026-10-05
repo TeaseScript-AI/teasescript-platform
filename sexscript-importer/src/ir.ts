@@ -113,6 +113,8 @@ export type IrStatement =
       ownDiagnostics?: MigrationDiagnostic[];
       /** A `global function`, callable from every file of the package (#570). */
       global?: true;
+      /** The declared result type, where returns mix types or a value and null (V30 §17). */
+      returnType?: string;
     })
   | (IrBase & { kind: "return"; value: IrExpression | null })
   /**
