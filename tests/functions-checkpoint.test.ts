@@ -3,12 +3,17 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import type { Instruction, InstructionPlan } from "../src/plan/model.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
   CHECKPOINT_VERSION,
   createCheckpoint,
+  deserializeCheckpoint,
   restoreCheckpoint,
+  serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { executeInstruction, run, type RuntimeBuiltinFunction } from "../src/runtime/engine.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
+import { RuntimeDataError } from "../src/runtime/operations/support.js";
 import type {
   SerializableRuntimeObject,
   SerializableRuntimeValue,
@@ -91,6 +96,132 @@ test("restores inside function loops, after continue, and before early return", 
     events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
     ["loop:2", "loop:3", "3"],
   );
+});
+
+/** The loops of the context that a call frame suspended. */
+function callerLoops(snapshot: RuntimeSnapshot, frameIndex: number) {
+  const owner = frameIndex === 0 ? null : snapshot.callFrames[frameIndex - 1]!.id;
+  return snapshot.loopFrames
+    .slice(0, snapshot.callFrames[frameIndex]!.loopBaseDepth)
+    .filter((loop) => loop.callFrameId === owner);
+}
+
+test("restores calls suspended in nested loops whose outer loop header called a function", () => {
+  const size = "function size(n) {\n  return n\n}";
+  const pause = "function pause {\n  wait 1\n}";
+  const nested = [
+    size,
+    pause,
+    "repeat size(1) {",
+    "  repeat 1 {",
+    "    pause()",
+    "  }",
+    "}",
+    "exit",
+  ];
+  // The outer count is cleared once its loop starts; resuming continues the outer loop rather than starting it again.
+  const compiled = plan(nested.join("\n"));
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
+  assert.equal(waiting.status, "waiting");
+  assert.equal(callerLoops(waiting, 0).length, 2);
+  assert.deepEqual(validateRuntimeSnapshot(waiting, compiled).errors, []);
+  assert.equal(observeTime(compiled, waiting, 1_000).outcome.kind, "observed");
+  assert.deepEqual(restoreCheckpoint(createCheckpoint(compiled, waiting)).snapshot, waiting);
+
+  for (const source of [
+    nested,
+    // Loop control around the suspended calls, and a while loop whose condition calls a function on every pass.
+    [
+      size,
+      "function pauseFor(seconds = 1) {\n  wait seconds\n  return seconds\n}",
+      "function ready(value) {\n  return value < 2\n}",
+      "let log = []",
+      "let count = 0",
+      "repeat size(2) {",
+      "  for item in [1, 2, 3] {",
+      "    if item == 2 {\n      continue\n    }",
+      "    log.add(pauseFor())",
+      "    if item == 3 {\n      break\n    }",
+      "  }",
+      "  while ready(count) {",
+      "    count += 1",
+      "    log.add(pauseFor())",
+      "  }",
+      "}",
+      'say "${log.length}"',
+      "exit",
+    ],
+    // Nested loops of a called function, interrupted by a repeating timer's block while they wait.
+    [
+      size,
+      pause,
+      "let ticks = 0",
+      "let t = timer(duration: 1500 ms, async: true, repeat: true) {\n  ticks += 1\n  wait 1\n}",
+      "function rounds(n) {",
+      "  repeat size(n) {",
+      "    repeat size(1) {",
+      "      pause()",
+      "    }",
+      "  }",
+      "  return n",
+      "}",
+      'say "${rounds(2)}"',
+      "t.stop()",
+      "exit",
+    ],
+  ]) {
+    const { boundaries } = assertRuntimeResumeEquivalent(source.join("\n"));
+    assert.ok(
+      boundaries.some((snapshot) =>
+        snapshot.callFrames.some((_, index) => callerLoops(snapshot, index).length === 2),
+      ),
+    );
+  }
+});
+
+test("resumes a nested-loop call after which a break falls through to the outer loop", () => {
+  const compiled = mutablePlan(
+    plan(
+      [
+        "function size {\n  return 1\n}",
+        "function pause {\n  wait 1\n}",
+        "repeat size() {",
+        "  repeat 1 {",
+        "    pause()",
+        "    break",
+        "  }",
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+  );
+  // Without the inner loop's unreachable closing `continue`, the break leads straight to the outer one's.
+  const breakIndex = compiled.instructions.findIndex(
+    (instruction: Instruction) =>
+      instruction.kind === "loopControl" && instruction.action === "break",
+  );
+  const removed = breakIndex + 1;
+  assert.equal(compiled.instructions[removed].action, "continue");
+  compiled.instructions.splice(removed, 1);
+  const shift = (value: unknown): void => {
+    if (typeof value !== "object" || value === null) return;
+    for (const [key, nested] of Object.entries(value)) {
+      if (typeof nested === "number" && INSTRUCTION_ADDRESS_FIELDS.has(key) && nested > removed) {
+        // EVIDENCE: the fixture owns this JSON plan copy and moves every address past the removed instruction.
+        (value as Record<string, number>)[key] = nested - 1;
+      } else shift(nested);
+    }
+  };
+  shift(compiled);
+  assert.equal(compiled.instructions[breakIndex].target, breakIndex + 1);
+  assert.equal(validateInstructionPlan(compiled).valid, true);
+
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
+  assert.equal(callerLoops(waiting, 0).length, 2);
+  assert.deepEqual(validateRuntimeSnapshot(waiting, compiled).errors, []);
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, waiting)));
+  const observed = observeTime(restored.plan, restored.snapshot, 1_000).snapshot;
+  assert.equal(run(restored.plan, observed).snapshot.status, "halted");
 });
 
 test("restores direct and mutual recursion at every instruction boundary", () => {
@@ -621,6 +752,33 @@ test("rejects missing temporaries in every suspended caller continuation", () =>
   }
 });
 
+test("rejects a nested-loop continuation without a temporary it still reads", () => {
+  const compiled = plan(
+    [
+      "function one {\n  return 1\n}",
+      "function pause {\n  wait 1\n  return 2\n}",
+      "function size(n) {\n  return n\n}",
+      "repeat size(2) {",
+      "  for item in [1, 2] {",
+      '    say "${one()} ${pause()}"',
+      "  }",
+      "}",
+      "exit",
+    ].join("\n"),
+  );
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
+  assert.equal(callerLoops(waiting, 0).length, 2);
+  // The caller holds the result of `one()` until `pause()` returns.
+  const checkpoint = mutableCheckpoint(createCheckpoint(compiled, waiting));
+  assert.ok(checkpoint.snapshot.callFrames[0].callerTemporaries.length > 0);
+  checkpoint.snapshot.callFrames[0].callerTemporaries = [];
+  assertCheckpointRejected(checkpoint, "TSK002");
+  assert.throws(
+    () => observeTime(compiled, checkpoint.snapshot, 1_000),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
+  );
+});
+
 test("rejects missing suspended results at multiple recursion depths", () => {
   const compiled = plan(
     [
@@ -829,6 +987,19 @@ type MutableCheckpoint = ReturnType<typeof mutableCheckpoint>;
 function mutableCheckpoint(checkpoint: ReturnType<typeof createCheckpoint>): any {
   return JSON.parse(JSON.stringify(checkpoint));
 }
+
+/** Plan fields that hold an instruction address. */
+const INSTRUCTION_ADDRESS_FIELDS = new Set([
+  "target",
+  "continueTarget",
+  "returnInstruction",
+  "startInstruction",
+  "entryInstruction",
+  "rootEndInstruction",
+  "endInstruction",
+  "bodyEntryInstruction",
+  "implicitReturnInstruction",
+]);
 
 // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: plan fixtures mutate readonly and invalid instruction fields across the plan validation matrix.
 function mutablePlan(compiled: InstructionPlan): any {
