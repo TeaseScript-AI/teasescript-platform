@@ -1508,7 +1508,16 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
             ...(kind === "temporal" ? ["temporalKind"] : []),
           ]
         : kind === "image"
-          ? ["kind", "hint", "accessibleName", "allowCamera", "allowFile", "types", "mime"]
+          ? [
+              "kind",
+              "question",
+              "hint",
+              "accessibleName",
+              "allowCamera",
+              "allowFile",
+              "types",
+              "mime",
+            ]
           : ["kind", "options", "accessibleName"];
   if (
     !hasExactKeys(value, expectedUiKeys) ||
@@ -1566,6 +1575,7 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
   }
   if (kind === "image")
     return (
+      (value.question === null || count(value.question)) &&
       (value.hint === null || count(value.hint)) &&
       validImageRequestFields(value, count) &&
       !measurementExhausted
@@ -1636,6 +1646,7 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
     );
   if (expected.kind === "image")
     return (
+      actual.question === expected.question &&
       actual.hint === expected.hint &&
       actual.allowCamera === expected.allowCamera &&
       actual.allowFile === expected.allowFile &&
@@ -1649,10 +1660,11 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
 function imageRequestFields(
   ui: Record<string, unknown>,
 ): Parameters<typeof imageRequestValue>[0] | null {
-  const { hint, allowCamera, allowFile } = ui;
+  const { question, hint, allowCamera, allowFile } = ui;
   const types = textList(ui.types);
   const mime = textList(ui.mime);
   if (
+    (question !== null && typeof question !== "string") ||
     (hint !== null && typeof hint !== "string") ||
     typeof allowCamera !== "boolean" ||
     typeof allowFile !== "boolean" ||
@@ -1660,7 +1672,7 @@ function imageRequestFields(
     mime === undefined
   )
     return null;
-  return { hint, allowCamera, allowFile, types, mime };
+  return { question, hint, allowCamera, allowFile, types, mime };
 }
 
 function textList(value: unknown): readonly string[] | null | undefined {

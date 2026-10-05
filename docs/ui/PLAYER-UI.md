@@ -678,10 +678,10 @@ which the player submits unchanged or edits first; a cleared composer stays empt
 composer shows the default again, and unsent edits are not kept.
 
 `askImage(...)` that allows files shows a paperclip before the composer's input, named "Attach an image", with the
-request's message as the input's hint. The paperclip opens the browser's native file picker for one image, with the
-request's `types` and `mime` as its `accept` hint. A file dragged over the composer marks it as a drop target ("Drop
-the image here") and answers when dropped; dragged text or links are not taken. Outside such a request there is no
-paperclip and no drop target. The Player identifies a file's image type from its first bytes (PNG, JPEG, GIF, WebP,
+request's `hint:` as the input's hint, or "Add an image…" without one. The paperclip opens the browser's native file
+picker for one image, with the request's `types` and `mime` as its `accept` hint. A file dragged over the composer
+marks it as a drop target ("Drop the image here") and answers when dropped; dragged text or links are not taken.
+Outside such a request there is no paperclip and no drop target. The Player identifies a file's image type from its first bytes (PNG, JPEG, GIF, WebP,
 AVIF, or BMP), requires the extension and the type to match `types` and `mime` when given, and has the browser decode
 it; a file that fails, more than one file, or typed text shows the composer notice and the request keeps waiting, as
 does a cancelled picker. A file chosen in a picker opened for a request that is no longer presented, for example
@@ -690,8 +690,8 @@ stored as session media and recorded in the transcript as the player message `Im
 
 An `askImage(...)` that allows the camera turns the camera on by itself as it asks, where the browser can capture. Its
 viewfinder opens over the Stage, or in the camera window when the script shows one, and draws on the picture the
-request's message as its question and a **Take photo** shutter in the material of the viewfinder's mirror button,
-both at the bottom so the top stays clear. The
+request's question, also said in the chat, or else "Take a photo", and a **Take photo** shutter in the material of the
+viewfinder's mirror button, both at the bottom so the top stays clear. The
 shutter starts a five-second countdown: a number from 5 to 1 as large as the viewfinder allows, each appearing large and
 settling over the live picture, without the motion when the player prefers reduced motion; a request that ends during
 the countdown takes no photo. The photo taken covers the live picture, unmirrored as it will be used, with **Retake** and **Use this**; only **Use this**

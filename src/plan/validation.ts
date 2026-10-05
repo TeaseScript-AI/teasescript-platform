@@ -1343,7 +1343,16 @@ function validateStaticInteractionUi(
             ...(kind === "temporal" ? ["temporalKind"] : []),
           ]
         : kind === "image"
-          ? ["kind", "hint", "accessibleName", "allowCamera", "allowFile", "types", "mime"]
+          ? [
+              "kind",
+              "question",
+              "hint",
+              "accessibleName",
+              "allowCamera",
+              "allowFile",
+              "types",
+              "mime",
+            ]
           : ["kind", "options", "accessibleName"];
   if (
     !hasExactKeys(ui, uiKeys) ||
@@ -1425,6 +1434,7 @@ function validateStaticInteractionUi(
       );
   }
   if (kind === "image") {
+    if (ui.question !== null) countString(ui.question, `${path}.question`);
     if (ui.hint !== null) countString(ui.hint, `${path}.hint`);
     if (!validImageRequestFields(ui, (text) => countString(text, path)))
       errors.push(planError("TSC002", "Image request is invalid.", path));

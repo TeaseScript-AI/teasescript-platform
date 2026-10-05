@@ -1058,13 +1058,15 @@ function imageInteractionUi(
   span: SourceSpan,
 ): Extract<InteractionUiPayload, { kind: "image" }> {
   if (!isObject(value)) throw fault("TSR052", "The prepared image request is malformed.", span);
+  let question: string | null = null;
   let hint: string | null = null;
   let allowCamera = true;
   let allowFile = true;
   let types: readonly string[] | null = null;
   let mime: readonly string[] | null = null;
   for (const { name, value: argument } of value.properties) {
-    if (name === "message") hint = fieldText(argument, span, temporalContext);
+    if (name === "message") question = fieldText(argument, span, temporalContext);
+    else if (name === "hint") hint = fieldText(argument, span, temporalContext);
     else if (name === "allowCamera" || name === "allowFile") {
       if (typeof argument !== "boolean")
         throw fault(
@@ -1081,7 +1083,7 @@ function imageInteractionUi(
     } else throw fault("TSR052", "The prepared image request is malformed.", span);
   }
   if (!allowCamera && !allowFile) throw fault("TSR052", IMAGE_NO_SOURCE_MESSAGE, span);
-  return { kind: "image", hint, allowCamera, allowFile, types, mime, accessibleName };
+  return { kind: "image", question, hint, allowCamera, allowFile, types, mime, accessibleName };
 }
 
 function imageFilterTexts(
@@ -1194,6 +1196,7 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   if (ui.accessibleName.kind === "text") strings.push(ui.accessibleName.text);
   if (ui.kind === "button") strings.push(ui.buttonLabel);
   else if (ui.kind === "image") {
+    if (ui.question !== null) strings.push(ui.question);
     if (ui.hint !== null) strings.push(ui.hint);
     // Item by item: a long computed filter must reach the limit below, not the native argument limit of a spread.
     for (const text of ui.types ?? []) strings.push(text);

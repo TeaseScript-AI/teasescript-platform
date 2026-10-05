@@ -12,7 +12,6 @@ import {
 } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import type { SerializableRuntimeValue } from "../src/runtime/serializable-values.js";
-import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { pressPermanentButton } from "../src/runtime/operations/press-permanent-button.js";
@@ -64,18 +63,27 @@ function binding(snapshot: RuntimeSnapshot, name: string) {
   return snapshot.frames[0]?.bindings.find((candidate) => candidate.name === name)?.value;
 }
 
-const kinds = (events: readonly InterpreterEvent[]) => events.map((event) => event.kind);
-
 test("askImage waits for the player's image, and its reference reaches the Stage and storage", () => {
   const { plan, snapshot, events } = started(
-    'say "Show me your outfit."\nlet picture: string = askImage("Add an image")\nshowImage picture\nsave picture as "outfit"\nexit',
+    'let picture: string = askImage("Show me your outfit.", hint: "Add an image")\nshowImage picture\nsave picture as "outfit"\nexit',
   );
   assert.equal(snapshot.status, "waiting");
-  assert.ok(kinds(events).includes("actionRequested"));
+  // The question is said before the request opens; the hint only labels it.
+  assert.deepEqual(
+    events.flatMap((event) =>
+      event.kind === "say"
+        ? [`say ${event.text}`]
+        : event.kind === "actionRequested" && event.action.kind === "interaction"
+          ? ["request"]
+          : [],
+    ),
+    ["say Show me your outfit.", "request"],
+  );
   const request = pendingImage(snapshot);
   assert.equal(request.expectedResult, "string");
   assert.deepEqual(request.ui, {
     kind: "image",
+    question: "Show me your outfit.",
     hint: "Add an image",
     allowCamera: true,
     allowFile: true,
@@ -101,27 +109,35 @@ test("askImage takes its message by name and its source and file options in any 
   );
   assert.deepEqual(pendingImage(snapshot).ui, {
     kind: "image",
-    hint: "Upload an image",
+    question: "Upload an image",
+    hint: null,
     allowCamera: false,
     allowFile: true,
     types: [".jpg", ".PNG"],
     mime: ["image/jpeg", "image/png"],
     accessibleName: { kind: "localizedDefault", key: "answer" },
   });
-  const bare = started("let pick = askImage()\nexit").snapshot;
-  assert.equal(pendingImage(bare).ui.hint, null);
+  const bare = started("let pick = askImage()\nexit");
+  assert.equal(pendingImage(bare.snapshot).ui.question, null);
+  assert.equal(pendingImage(bare.snapshot).ui.hint, null);
+  // Without a question nothing is said.
+  assert.equal(
+    bare.events.some((event) => event.kind === "say"),
+    false,
+  );
 });
 
 test("askImage evaluates computed arguments once, in source order, before it asks", () => {
   const { plan, snapshot } = started(
-    'let order: string[] = []\nfunction flag(value: boolean): boolean {\n  order.add("file")\n  return value\n}\nfunction text(value: string): string {\n  order.add("message")\n  return value\n}\nfunction kinds(value: string[]): string[] {\n  order.add("types")\n  return value\n}\nlet pick = askImage(allowFile: flag(true), message: text("Photo ${1 + 1}"), types: kinds([".png"]))\nlet after = order\nexit',
+    'let order: string[] = []\nfunction flag(value: boolean): boolean {\n  order.add("file")\n  return value\n}\nfunction text(value: string): string {\n  order.add("message")\n  return value\n}\nfunction kinds(value: string[]): string[] {\n  order.add("types")\n  return value\n}\nlet pick = askImage(allowFile: flag(true), message: text("Photo ${1 + 1}"), types: kinds([".png"]), hint: "Pick")\nlet after = order\nexit',
   );
   assert.deepEqual(binding(snapshot, "order"), {
     kind: "list",
     items: ["file", "message", "types"],
   });
   const request = pendingImage(snapshot);
-  assert.equal(request.ui.hint, "Photo 2");
+  assert.equal(request.ui.question, "Photo 2");
+  assert.equal(request.ui.hint, "Pick");
   assert.deepEqual(request.ui.types, [".png"]);
   const finished = runUntilExit(plan, answered(plan, snapshot).snapshot).snapshot;
   assert.equal(binding(finished, "pick"), IMAGE);
@@ -181,7 +197,7 @@ test("an invalid answer, an unvouched image, or typed text leaves the request wa
 
 test("a pending image request survives a JSON checkpoint and completes like the original", () => {
   const { plan, snapshot } = started(
-    'let pick = askImage(message: "Add an image", types: [".png"])\nshowImage pick\nlet done = "yes"\nexit',
+    'let pick = askImage(message: "Show me", hint: "Add an image", types: [".png"])\nshowImage pick\nlet done = "yes"\nexit',
   );
   const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, snapshot)));
   assert.deepEqual(restored.snapshot, snapshot);
@@ -189,6 +205,13 @@ test("a pending image request survives a JSON checkpoint and completes like the 
   const original = answered(plan, snapshot);
   const resumed = answered(restored.plan, restored.snapshot);
   assert.deepEqual(resumed.events, original.events);
+  // The question was said before the request opened and is not said again.
+  assert.equal(
+    [...original.events, ...run(plan, original.snapshot).events].some(
+      (event) => event.kind === "say" && event.text === "Show me",
+    ),
+    false,
+  );
   const originalRun = run(plan, original.snapshot);
   const resumedRun = run(restored.plan, resumed.snapshot);
   assert.deepEqual(resumedRun.snapshot, originalRun.snapshot);
@@ -259,6 +282,10 @@ test("askImage is a reserved call whose arguments the compiler checks", () => {
   assert.deepEqual(diagnostics('let pick = askImage("a", "b")'), ["TSV020"]);
   assert.deepEqual(diagnostics('let pick = askImage("a", message: "b")'), ["TSV020"]);
   assert.deepEqual(diagnostics("let pick = askImage(camera: true)"), ["TSV022"]);
+  // The question and the hint are text fields.
+  assert.deepEqual(diagnostics('let pick = askImage(["a"])'), ["TSV040"]);
+  assert.deepEqual(diagnostics('let pick = askImage("a", hint: ["b"])'), ["TSV040"]);
+  assert.deepEqual(diagnostics('let pick = askImage("a", hint: "b", hint: "c")'), ["TSV023"]);
   assert.deepEqual(diagnostics('let pick = askImage(invalidMessage: "No")'), ["TSV022"]);
   assert.deepEqual(diagnostics("let pick = askImage(allowFile: 1)"), ["TSV043"]);
   assert.deepEqual(diagnostics('let pick = askImage(types: ["png"])'), ["TSV043"]);
