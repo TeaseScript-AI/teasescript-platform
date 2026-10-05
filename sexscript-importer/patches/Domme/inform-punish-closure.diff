@@ -1,0 +1,44 @@
+--- a/scripts/Domme/inform.groovy
++++ b/scripts/Domme/inform.groovy
+@@ -9,6 +9,19 @@
+ if(loadBoolean("intro.female")) gender = "girl"
+ def endReached = false
+ 
++def punish = { i
++			->
++			def p = 0
++			if(load("domme.punish")==null)
++			p=0
++			else
++			p = loadInteger("domme.punish")
++			(1..i).each {
++			p++
++			}
++			save("domme.punish",p)
++}
++
+ def percentChance = { percent ->
+    switch(getRandom(100)){
+       case 0..percent:
+--- a/scripts/Domme/inform__sha256_ec25b188aa1f.groovy
++++ b/scripts/Domme/inform__sha256_ec25b188aa1f.groovy
+@@ -9,6 +9,19 @@
+ if(loadBoolean("intro.female")) gender = "girl"
+ def endReached = false
+ 
++def punish = { i
++			->
++			def p = 0
++			if(load("domme.punish")==null)
++			p=0
++			else
++			p = loadInteger("domme.punish")
++			(1..i).each {
++			p++
++			}
++			save("domme.punish",p)
++}
++
+ def percentChance = { percent ->
+    switch(getRandom(100)){
+       case 0..percent:

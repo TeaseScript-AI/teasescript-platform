@@ -1,0 +1,46 @@
+{
+  "patches": [
+    {
+      "id": "helper-host-argument",
+      "layer": "source",
+      "category": "e",
+      "reason": "Domme3Class's static helpers take the script host first (percentChance(main, percent), spank(main, message, spanks, time)), and every other call passes this; one percentChance and six spank calls in ask omit it, so Groovy found no matching method. Pass this.",
+      "diff": "helper-host-argument.diff"
+    },
+    {
+      "id": "added-days-comparison",
+      "layer": "source",
+      "category": "e",
+      "reason": "After the fewer-days and more-days branches, the honest-answer branch tests (addedDays = added), an assignment where the comparison addedDays == added was meant. It behaved the same in legacy, since the other cases were already excluded; compare.",
+      "diff": "added-days-comparison.diff"
+    },
+    {
+      "id": "fun-spank-quotes",
+      "layer": "source",
+      "category": "e",
+      "reason": "The school-attire assignment saves the spanking reason as the undefined name fun instead of the string \"fun\", which ask saves and spanking tests (loadString(\"domme3.spank\") == \"fun\"); Groovy failed there.",
+      "diff": "fun-spank-quotes.diff"
+    },
+    {
+      "id": "kink-host-random",
+      "layer": "source",
+      "category": "e",
+      "reason": "In the static Domme3Class.kink, the puppy wait calls getRandom(40) unqualified; the class has no such method and the line before calls main.getRandom(2). Call main.getRandom(40).",
+      "diff": "kink-host-random.diff"
+    },
+    {
+      "id": "show-case-typo",
+      "layer": "source",
+      "category": "e",
+      "reason": "One punishment message calls Show(...) with a capital S, which is not a SexScript function; every other line uses show.",
+      "diff": "show-case-typo.diff"
+    },
+    {
+      "id": "settings-reset-day",
+      "layer": "source",
+      "category": "e",
+      "reason": "Resetting all settings saves domme3.lastday as DAY, which settings never defines (Domme3.groovy and introfirst define it locally), so the reset failed in Groovy. Define DAY in settings exactly as those scripts do.",
+      "diff": "settings-reset-day.diff"
+    }
+  ]
+}

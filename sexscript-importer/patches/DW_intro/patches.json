@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "show-button-case",
+      "layer": "source",
+      "category": "e",
+      "reason": "The wrap-up task's confirmation calls showbutton(...) in lower case, which is not a SexScript function, so Groovy failed after showing the code; every other confirmation uses showButton.",
+      "diff": "show-button-case.diff"
+    }
+  ]
+}

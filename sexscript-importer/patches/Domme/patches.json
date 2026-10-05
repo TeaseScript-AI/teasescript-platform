@@ -1,0 +1,39 @@
+{
+  "patches": [
+    {
+      "id": "sleep-punish-point",
+      "layer": "source",
+      "category": "e",
+      "reason": "\"You earned yourself a punish point.\" calls punish() without the count; Groovy passes null, and punish's 1..i loop fails on 1..null. Every other caller passes the points it announces; pass 1.",
+      "diff": "sleep-punish-point.diff"
+    },
+    {
+      "id": "inform-punish-closure",
+      "layer": "source",
+      "category": "e",
+      "reason": "inform awards \"5 punish points only for thinking about quitting\" with punish(5), but unlike its sibling scripts it never defines punish, and script-local closures are not shared, so Groovy failed there. Add the same punish closure the sibling scripts define (sleep.groovy's null-safe form), in both retained versions.",
+      "diff": "inform-punish-closure.diff"
+    },
+    {
+      "id": "show-case-typo",
+      "layer": "source",
+      "category": "e",
+      "reason": "One punishment message calls Show(...) with a capital S, which is not a SexScript function; every other line uses show.",
+      "diff": "show-case-typo.diff"
+    },
+    {
+      "id": "eat-ben-wa-chance",
+      "layer": "source",
+      "category": "e",
+      "reason": "eat's ben-wa-balls feedback raises or lowers chanceBenWaBalls and saves it as domme.chanceBenWaBalls, but only chores declares and loads that variable, so Groovy failed on the first ++/--. Load it at the top of eat exactly as chores does.",
+      "diff": "eat-ben-wa-chance.diff"
+    },
+    {
+      "id": "sminder-pasted-tail",
+      "layer": "source",
+      "category": "e",
+      "reason": "SMinder ends its own story with return \"Domme\", return null and \"End of the Script\"; after that, two pasted copies of a Milovana tease (33003) redeclare endReached, block and newBlock at script level, which Groovy rejects (\"The current scope already contains a variable\"), so the script never compiled. Wrap the unreachable tail in a block comment; it contains no */ of its own.",
+      "diff": "sminder-pasted-tail.diff"
+    }
+  ]
+}
