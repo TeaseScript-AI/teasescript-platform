@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { parse } from "../src/parser.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
@@ -261,8 +262,29 @@ test("for key, value takes a dict, a text key, and the dict's value type, which 
   assert.deepEqual(diagnostics("for key, value in 3 {\n}\nexit"), [
     ["TSV012", "A for-loop with a key and a value goes through a dict.", "3"],
   ]);
-  // A line may break after the comma.
+  // A line may break after the comma, also with a blank line.
   assert.deepEqual(says("for key,\n    value in dict{ a: 1 } {\n    say value\n}\nexit"), ["1"]);
+  assert.deepEqual(says("for key,\n\n    value in dict{ a: 1 } {\n    say value\n}\nexit"), ["1"]);
+  // Without a value name, the next line's closing brace or statement stays for recovery.
+  for (const source of [
+    'if true {\n    for key,\n}\nsay "after"\nexit',
+    'if true {\n    for key,\n\n}\nsay "after"\nexit',
+    'for key,\nsay "after"\nexit',
+  ]) {
+    const parsed = parse(source);
+    assert.deepEqual(
+      parsed.diagnostics.map((diagnostic) => diagnostic.code),
+      ["TSP013"],
+      source,
+    );
+    assert.deepEqual(
+      parsed.program.statements.map((statement) => statement.kind),
+      source.startsWith("if")
+        ? ["ifStatement", "sayStatement", "exitStatement"]
+        : ["sayStatement", "exitStatement"],
+      source,
+    );
+  }
   assert.deepEqual(codes("for key, key in dict{ a: 1 } {\n}\nexit"), [["TSV001", "key"]]);
   // The header error comes first; the unparsed block then recovers as on main.
   assert.equal(codes("for key, in dict{ a: 1 } {\n}\nexit")[0]?.[0], "TSP013");
