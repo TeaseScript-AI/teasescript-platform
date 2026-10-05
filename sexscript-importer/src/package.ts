@@ -204,10 +204,17 @@ function menuLabels(
 ): Map<string, string> {
   const indexOf = new Map([...scripts.pathOf].map(([index, path]) => [path, index]));
   const base = (path: string): string => path.replace(/^.*\//u, "").replace(/\.tease$/u, "");
+  // The language setInfos gave, else a name's language suffix (`intro_de`); named where the entries differ in it.
+  const languageOf = (path: string): string | undefined => {
+    const given = programs[indexOf.get(path) ?? -1]?.metadata?.language?.trim().toLowerCase();
+    if (given !== undefined && LANGUAGES[given.slice(0, 2)] !== undefined) return given.slice(0, 2);
+    return /_([a-z]{2})$/u.exec(base(path))?.[1];
+  };
+  const languages = new Set(paths.map((path) => languageOf(path) ?? "en"));
   const labels = new Map(
     paths.map((path) => {
       const title = programs[indexOf.get(path) ?? -1]?.metadata?.title?.trim() ?? "";
-      const language = /_([a-z]{2})$/u.exec(base(path))?.[1];
+      const language = languages.size > 1 ? languageOf(path) : undefined;
       const readable = base(path)
         .replace(/_([a-z]{2})$/u, (suffix, code: string) =>
           LANGUAGES[code] === undefined ? suffix : "",
@@ -315,7 +322,7 @@ export interface LoweredPackage {
 interface PackageScripts {
   /** The legacy name of each script (its path without `.groovy`, in lower case) to its TeaseScript path. */
   paths: Map<string, string>;
-  /** The main script, which main.tease goes to (or is, as `main.groovy`); null with several top-level scripts. */
+  /** A legacy `main.groovy` in the top folder, which is the package's main.tease itself; null without one. */
   entry: number | null;
   /** The scripts in the package root, which the legacy player listed. */
   rootScripts: number[];
@@ -325,10 +332,7 @@ interface PackageScripts {
   root: string;
 }
 
-/**
- * The scripts of a package, with their paths from the legacy scripts folder. A single top-level script is the main
- * script, as is one named `main.groovy` among several.
- */
+/** The scripts of a package, with their paths from the legacy scripts folder. */
 function packageScripts(
   files: readonly ParsedGroovyFile[],
   standalone: boolean,
@@ -353,10 +357,9 @@ function packageScripts(
   const root = scriptsAt < 0 ? common : common.slice(0, scriptsAt + 1);
   const relative = (index: number): string => segments.get(index)!.slice(root.length).join("/");
   const rootScripts = scripts.filter((index) => !relative(index).includes("/"));
+  // A legacy `main.groovy` in the top folder is the package's main.tease itself.
   const entry =
-    rootScripts.length === 1
-      ? rootScripts[0]!
-      : (rootScripts.find((index) => relative(index).toLowerCase() === "main.groovy") ?? null);
+    rootScripts.find((index) => relative(index).toLowerCase() === "main.groovy") ?? null;
   // Each script keeps its name; only a legacy `main.groovy` is the package's main.tease itself.
   const pathOf = new Map(
     scripts.map((index) => [index, relative(index).replace(/\.groovy$/iu, ".tease")]),
@@ -413,22 +416,27 @@ function entryMenu(
     path.replace(/_[a-z]{2}(?:_[a-z]{2})?\.tease$/iu, ".tease");
   const targeted = (path: string): boolean =>
     targets.has(path.toLowerCase()) || targets.has(base(path).toLowerCase());
+  // The entries (owner decision 2026-10-05): the scripts of the top folder that call setInfos, as the legacy player
+  // listed them, apart from internal scripts and scripts another script chains to; without one there, those one folder
+  // down, beside folders such as system/.
+  const named = (depth: number): string[] =>
+    [...scripts.pathOf]
+      .filter(
+        ([index, path]) =>
+          path.split("/").length - 1 === depth &&
+          !internal.has(index) &&
+          programs[index]?.metadata != null &&
+          !targeted(path),
+      )
+      .map(([, path]) => path)
+      .sort(versionOrder);
+  const entries = named(0).length > 0 ? named(0) : named(1);
+  // Without such a script, the scripts of the top folder that nothing chains to.
   const listed = scripts.rootScripts.filter((index) => !internal.has(index));
-  // Other versions of a script, which the corpus merge kept beside it as `name__sha256_<hash>`, come after the scripts.
   const offered = listed
     .map((index) => scripts.pathOf.get(index)!)
     .filter((path) => !targeted(path))
-    .sort((first, second) =>
-      isOtherVersion(first) === isOtherVersion(second)
-        ? first < second
-          ? -1
-          : first > second
-            ? 1
-            : 0
-        : isOtherVersion(first)
-          ? 1
-          : -1,
-    );
+    .sort(versionOrder);
   const rooted =
     offered.length > 0
       ? offered
@@ -440,11 +448,13 @@ function entryMenu(
     .flatMap(([index, path]) => (internal.has(index) ? [] : [path]))
     .sort();
   const choices =
-    rooted.length > 0
-      ? rooted
-      : everyScript.some((path) => !targeted(path))
-        ? everyScript.filter((path) => !targeted(path))
-        : everyScript;
+    entries.length > 0
+      ? entries
+      : rooted.length > 0
+        ? rooted
+        : everyScript.some((path) => !targeted(path))
+          ? everyScript.filter((path) => !targeted(path))
+          : everyScript;
   const variants = [...scripts.pathOf.values()]
     .filter((path) => base(path) !== path && targeted(path) && !targets.has(path.toLowerCase()))
     .sort();
@@ -502,6 +512,14 @@ function entryMenu(
             span: null,
           },
         ];
+  // One entry needs no menu and no note: main.tease goes there.
+  if (choices.length === 1 && variants.length === 0)
+    return {
+      sourceName: `${scripts.root}/main.tease`,
+      metadata: null,
+      statements: chain,
+      diagnostics: [],
+    };
   return {
     sourceName: `${scripts.root}/main.tease`,
     metadata: null,
@@ -512,6 +530,12 @@ function entryMenu(
     ],
     diagnostics: [{ code: "SX_ENTRY_MENU", severity: "warning", message, span: null }],
   };
+}
+
+/** Script paths in name order, with other versions of a script (`name__sha256_<hash>`) after the scripts. */
+function versionOrder(first: string, second: string): number {
+  if (isOtherVersion(first) !== isOtherVersion(second)) return isOtherVersion(first) ? 1 : -1;
+  return first < second ? -1 : first > second ? 1 : 0;
 }
 
 export function lowerPackage(
@@ -657,26 +681,11 @@ export function lowerPackage(
   }
   // main.tease (ADR 0022 §1): a legacy `main.groovy`, or a generated file that asks the legacy profile and goes to the
   // package's main script, or offers its scripts where it has several.
-  const entry = scripts.entry;
-  const legacyMain =
-    entry !== null && scripts.pathOf.get(entry)!.toLowerCase() === "main.tease" ? entry : null;
+  const legacyMain = scripts.entry;
   const generated: MigrationProgram | null =
     legacyMain !== null
       ? null
-      : entry !== null
-        ? {
-            sourceName: `${scripts.root}/main.tease`,
-            metadata: null,
-            statements: [
-              {
-                kind: "goto",
-                target: { kind: "file", path: scripts.pathOf.get(entry)! },
-                span: null,
-              },
-            ],
-            diagnostics: [],
-          }
-        : entryMenu(scripts, withClasses, internalScripts(files, options.internalScripts));
+      : entryMenu(scripts, withClasses, internalScripts(files, options.internalScripts));
   const mainProgram = withProfile(generated ?? withClasses[legacyMain!]!, withClasses, accepted);
   const outputIndexes = [...scriptIndexes, ...classOutputs.keys()].filter(
     (index) => index !== legacyMain,

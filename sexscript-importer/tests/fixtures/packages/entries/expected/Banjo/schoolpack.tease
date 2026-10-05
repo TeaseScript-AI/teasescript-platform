@@ -1,0 +1,10 @@
+---
+title: "School Pack"
+author: "Banjo"
+description: "Lessons"
+keywords: "school"
+---
+// Legacy setInfos(): API version 9, status "v2.3", color 0x000000, language "EN"
+
+say "Lesson one"
+exit

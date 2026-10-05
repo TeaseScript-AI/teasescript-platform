@@ -833,6 +833,7 @@ test(
       "other-versions",
       "folder-scripts",
       "global-locals",
+      "entries",
     ]) {
       const directory = fileURLToPath(new URL(`./fixtures/packages/${name}/`, import.meta.url));
       const scripts = path.join(directory, "scripts");
@@ -877,7 +878,7 @@ test(
         // An assembled unit's internal script, such as an add-on, is no entry: the package starts at the story.
         const unit = lowerPackage(files, { internalScripts: ["Story/addon.groovy"] });
         assert.ok(unit.main !== null && "menu" in unit.main);
-        assert.match(emitTease(unit.main.menu), /\ngoto "Story\/start\.tease"\n$/u);
+        assert.equal(emitTease(unit.main.menu), 'goto "Story/start.tease"\n');
       }
       if (name === "helper-class") {
         // The scripts call the class's static closures as functions, in both scripts.
