@@ -2913,7 +2913,8 @@ longer than that can never end; the compiler rejects one it can see, such as `wa
 error.
 
 ## 28. Permanent buttons
-**Status:** Accepted (inactive while the handler runs: Owner decision on #610, 2026-10-05)
+**Status:** Accepted (inactive while the handler runs: Owner decision on #610; `persist:` on the command: Owner
+decision on #627; both 2026-10-05)
 
 A permanent button remains available while the script continues and returns an identifier, which may be ignored. Its
 block is inherently the click action, so no `onClick` wrapper is used:
@@ -2932,11 +2933,11 @@ let buttonId = showPermanentButton "Stop" {
 }
 ```
 
-Persistent button; `persist: true` is recognized only as the first line of the block:
+Persistent button; `persist:` configures the button, so it follows the text on the command and takes the literal `true`
+or `false` (the default):
 
 ```text
-let buttonId = showPermanentButton "Fail" {
-    persist: true
+let buttonId = showPermanentButton "Fail", persist: true {
     goto retry
 }
 ```

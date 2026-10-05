@@ -1079,8 +1079,8 @@ class Parser {
   }
 
   /**
-   * `showPermanentButton <text> { ... }`: the text is followed by the required block with the click action, whose first
-   * line may be `persist: true`.
+   * `showPermanentButton <text>[, persist: true|false] { ... }`: the text and its options are followed by the required
+   * block with the click action.
    */
   *#parseShowPermanentButtonParts(): ParseTask<ShowPermanentButtonParts | null> {
     const command = this.#advance();
@@ -1096,7 +1096,10 @@ class Parser {
     }
     const enclosing = this.#blockEndsCompactInteraction;
     this.#blockEndsCompactInteraction = true;
+    const textStart = this.#current;
     const text = yield* parseChild(this.#parseOr());
+    const textEnd = this.#current;
+    const options = text === null ? null : yield* parseChild(this.#parsePermanentButtonOptions());
     this.#blockEndsCompactInteraction = enclosing;
     if (text === null) {
       this.#reportInsertion(
@@ -1114,36 +1117,86 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const block = yield* parseChild(this.#asStatements(this.#parsePermanentButtonBlock()));
-    if (block === null) return null;
+    const handler = yield* parseChild(
+      this.#asStatements(this.#parsePermanentButtonBlock(this.#sourceText(textStart, textEnd))),
+    );
+    if (handler === null || options === null) return null;
     return {
       text,
-      persist: block.persist,
-      handler: block.handler,
+      persist: options.persist,
+      handler,
       commandSpan: copySpan(command.span),
-      span: spanFrom(command.span, block.handler.span),
+      span: spanFrom(command.span, handler.span),
     };
   }
 
-  /** The click action of a permanent button; only its first line may be `persist: true`. */
-  *#parsePermanentButtonBlock(): ParseTask<{ persist: boolean; handler: Block } | null> {
+  /** The named options after the button text, each after a comma; `null` reports an already diagnosed failure. */
+  *#parsePermanentButtonOptions(): ParseTask<{ persist: boolean } | null> {
+    let persist = false;
+    let valid = true;
+    const seen = new Set<string>();
+    for (
+      let offset = this.#offsetAfterComma();
+      offset !== null &&
+      this.#peek(offset).kind === TokenKind.Identifier &&
+      this.#peek(offset + 1).kind === TokenKind.Colon;
+      offset = this.#offsetAfterComma()
+    ) {
+      for (let skipped = 0; skipped < offset; skipped += 1) this.#advance();
+      const name = this.#advance();
+      this.#advance();
+      const value = this.#check(TokenKind.LeftBrace)
+        ? null
+        : yield* parseChild(this.#parseColonValueTask(false));
+      if (value === null) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedExpression,
+          `Expected true or false after '${name.lexeme}:'.`,
+        );
+        valid = false;
+      } else if (seen.has(name.lexeme)) {
+        this.#reportSpan(
+          parserDiagnosticCode.invalidMediaForm,
+          `Duplicate showPermanentButton option '${name.lexeme}'.`,
+          name.span,
+        );
+        valid = false;
+      } else if (name.lexeme !== "persist") {
+        this.#reportSpan(
+          parserDiagnosticCode.invalidMediaForm,
+          `Unknown showPermanentButton option '${name.lexeme}'; the only option is 'persist'.`,
+          name.span,
+        );
+        valid = false;
+      } else if (value.kind !== "booleanLiteral") {
+        this.#reportSpan(
+          parserDiagnosticCode.invalidMediaForm,
+          "showPermanentButton option 'persist' must be the literal true or false.",
+          value.span,
+        );
+        valid = false;
+      } else {
+        persist = value.value;
+      }
+      seen.add(name.lexeme);
+    }
+    return valid ? { persist } : null;
+  }
+
+  /**
+   * The click action of a permanent button. A first line `persist: ...`, the earlier spelling of the option, is reported
+   * with the command that replaces it.
+   */
+  *#parsePermanentButtonBlock(text: string): ParseTask<Block | null> {
     const leftBrace = this.#advance();
     this.#skipNewlines();
-    let persist = false;
     if (this.#checkIdentifier("persist") && this.#peek(1).kind === TokenKind.Colon) {
-      this.#advance();
-      this.#advance();
-      if (this.#check(TokenKind.KeywordTrue)) {
-        this.#advance();
-        persist = true;
-      } else {
-        this.#reportToken(
-          parserDiagnosticCode.expectedExpression,
-          "A button block's 'persist:' takes the literal true; leave the line out for a button that its file entry owns.",
-          this.#peek(),
-        );
-        this.#synchronizeStatement(true);
-      }
+      this.#reportToken(
+        parserDiagnosticCode.invalidMediaForm,
+        `Write 'persist:' on the command instead of in the block: 'showPermanentButton ${text}, persist: true {'.`,
+        this.#peek(),
+      );
+      this.#synchronizeStatement(true);
       this.#finishStatement(true);
       this.#skipNewlines();
     }
@@ -1168,10 +1221,19 @@ class Parser {
       return null;
     }
     const span = spanFrom(leftBrace.span, this.#previous().span);
-    return {
-      persist,
-      handler: Object.freeze({ kind: "block", statements: Object.freeze(statements), span }),
-    };
+    return Object.freeze({ kind: "block", statements: Object.freeze(statements), span });
+  }
+
+  /** The source of the tokens from `start` up to `end`, with one space where the source separates two of them. */
+  #sourceText(start: number, end: number): string {
+    let text = "";
+    for (let index = start; index < end; index += 1) {
+      const token = this.tokens[index]!;
+      if (index > start && token.span.start.offset > this.tokens[index - 1]!.span.end.offset)
+        text += " ";
+      text += token.lexeme;
+    }
+    return text;
   }
 
   /** `showImage <file>` uses command syntax; the V30 parenthesized layered-image form is not supported. */

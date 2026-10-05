@@ -178,8 +178,8 @@ export interface HideCameraStatement {
 }
 
 /**
- * Shared data of `showPermanentButton <text> { [persist: true] ... }`. The block is the click action; `persist: true`,
- * only as its first line, keeps the button when the file entry that showed it is left.
+ * Shared data of `showPermanentButton <text>[, persist: true] { ... }`. The block is the click action; `persist: true`
+ * keeps the button when the file entry that showed it is left.
  */
 export interface ShowPermanentButtonParts {
   readonly text: Expression;
