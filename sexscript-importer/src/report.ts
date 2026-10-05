@@ -119,7 +119,7 @@ export interface FinalPackageCheck {
 export interface PackageRunResult {
   /** `main.tease`, or the file an isolated run started at. */
   entry: string;
-  /** A run started at a script that no earlier run reached, with empty storage instead of the package's state. */
+  /** A run started at a script that no earlier run reached, with the storage the run from `main.tease` left. */
   isolated: boolean;
   /** `blocked`: the run reached a file that has no runnable conversion. */
   status: ProjectRunResult["status"] | "blocked";
@@ -574,6 +574,8 @@ function runPackageProject(
       probeLines.delete(path);
     }
   }
+  // Isolated runs start with the storage the run from main.tease left, as a player who played it first.
+  const entryStorage = new Map<string, RuntimeValue>();
   const run = (files: readonly TeaseProjectFile[], entry: string, isolated: boolean): void => {
     const answers = new Map<string, number>();
     const visits: string[] = [];
@@ -584,7 +586,10 @@ function runPackageProject(
     hosts[ENTER] = ([path]: readonly RuntimeValue[]) => (visits.push(String(path)), null);
     hosts[BLOCKED] = ([target]: readonly RuntimeValue[]) => ((blocked = String(target)), null);
     hosts[START] = () => (started ? "" : ((started = true), entry));
-    const result = runner(files, hosts, images === undefined ? {} : { images });
+    const result = runner(files, hosts, {
+      ...(images === undefined ? {} : { images }),
+      storage: isolated ? new Map(entryStorage) : entryStorage,
+    });
     const failure = blocked === null ? result.failure : null;
     // The announcing statement moved the generated file's lines after it down.
     const probe = failure?.path === null ? undefined : probeLines.get(failure?.path ?? "");

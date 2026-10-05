@@ -38,6 +38,7 @@ import { renameConflictingIdentifiers } from "./naming.ts";
 import { enforceVariableTypes, functionResultTypes, type TeaseType } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
 import { legacyHtmlToMarkup, type TextPart } from "./markup.ts";
+import { javaReplacementText, parseRegexSubset } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
@@ -51,6 +52,7 @@ import {
   onlyOf,
   STRING,
   type TypeEnvironment,
+  type ValueType,
   type VariableBindings,
   UNKNOWN,
 } from "./types.ts";
@@ -73,7 +75,13 @@ interface ClosureInfo {
 }
 
 export interface HelperFunctionInfo {
+  /**
+   * The arguments up to the last parameter without a default; a default before it stays out of the function, since
+   * TeaseScript defaults come last, so a call that leaves such a parameter out needs migration.
+   */
   minArgs: number;
+  /** The parameters without a default, which Groovy required. */
+  requiredArgs: number;
   maxArgs: number;
   stripsMain: boolean;
 }
@@ -93,6 +101,8 @@ export interface LowerOptions {
    * (packageStorageLiterals); a branch for any other value of such a key never runs.
    */
   storageLiterals?: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Image paths below `images/` that some script of the package copies a photo to (packageCopiedImages). */
+  copiedImages?: ReadonlySet<string>;
   /** Value types of package globals defined in other files, such as anonymous-object fields. */
   globalTypes?: ReadonlyMap<string, number>;
   /**
@@ -163,6 +173,7 @@ interface LowerContext {
   packageFunctions: ReadonlySet<string>;
   stableNames: ReadonlySet<string>;
   storageLiterals: ReadonlyMap<string, ReadonlySet<string>>;
+  copiedImages: ReadonlySet<string>;
   /** Set while lowering a branch that never runs because no code stores the value it tests. */
   unreachable: boolean;
   mixinModules: readonly MixinModuleInfo[];
@@ -285,7 +296,10 @@ export function buildHelperRegistry(files: readonly ParsedGroovyFile[]): HelperR
     for (const helperClass of nodeArray(root.classes)) {
       const className = text(helperClass.name);
       if (helperClass.kind !== "class" || className === null) continue;
-      registry.set(className, collectHelperFunctionInfo(nodeArray(helperClass.methods)));
+      registry.set(
+        className,
+        collectHelperFunctionInfo(nodeArray(withScriptObject(helperClass).methods)),
+      );
     }
   }
   return registry;
@@ -916,6 +930,7 @@ export function lowerParsedFile(
     packageFunctions: options.packageFunctions ?? new Set(),
     stableNames: options.stableNames ?? new Set(),
     storageLiterals: options.storageLiterals ?? new Map(),
+    copiedImages: options.copiedImages ?? new Set(),
     unreachable: false,
     mixinModules: options.mixinModules ?? [],
     loadsModuleDirectories: new Set(),
@@ -1052,7 +1067,14 @@ export function lowerParsedFile(
       ? [...lowered, { kind: "exit" as const, span: null }]
       : lowered;
   const typedStatements = withLegacyMarkup(
-    withEnforcedTypes([...context.closureFunctions, ...authoredStatements], context),
+    withEnforcedTypes(
+      [
+        ...(mixin === null ? bindingDeclarations(body, context) : []),
+        ...context.closureFunctions,
+        ...authoredStatements,
+      ],
+      context,
+    ),
     context,
   );
   const statements = [
@@ -1152,14 +1174,15 @@ function lowerHelperCompilationUnit(
       diagnostics: baseContext.diagnostics,
     };
   }
-  const helperClass = classes[0]!;
+  const helperClass = withScriptObject(classes[0]!);
+  // Static fields are package variables that the class's functions share; an instance field has no such meaning.
   const fields = nodeArray(helperClass.fields);
-  if (fields.length > 0) {
+  if (fields.some((field) => field.static !== true)) {
     addDiagnostic(
       baseContext,
       "SX_HELPER_SHARED_STATE",
       "error",
-      "Auxiliary Groovy helper classes with fields may carry shared or static state and require explicit migration.",
+      "Auxiliary Groovy helper classes with instance fields carry per-object state and require explicit migration.",
       helperClass.span,
     );
     return {
@@ -1169,6 +1192,35 @@ function lowerHelperCompilationUnit(
       diagnostics: baseContext.diagnostics,
     };
   }
+  const fieldStatements: IrStatement[] = fields.flatMap((field): IrStatement[] => {
+    const name = text(field.name);
+    if (name === null) return [];
+    const initial = asNode(field.initialExpression);
+    const value = initial === null ? null : lowerExpression(initial, baseContext);
+    // A field declared `int` or `long` truncates every number stored in it, as a script variable of that type does.
+    const integer = INTEGER_TYPES.has(text(field.type)?.replace(/^java\.lang\./u, "") ?? "");
+    return [
+      {
+        kind: "let",
+        name,
+        value: value ?? { kind: "literal", value: null },
+        span: field.span ?? null,
+        ...(integer ? { integer: true as const } : {}),
+      },
+    ];
+  });
+  const fieldTypes = new Map(
+    fields.flatMap((field): Array<[string, ValueType]> => {
+      const name = text(field.name);
+      const initial = asNode(field.initialExpression);
+      if (name === null) return [];
+      const type =
+        initial === null || isNullConstant(initial)
+          ? UNKNOWN
+          : inferType(initial, baseContext.types);
+      return [[name, type]];
+    }),
+  );
   const methods = nodeArray(helperClass.methods);
   const helperFunctions = collectHelperFunctionInfo(methods);
   const statements: IrStatement[] = [];
@@ -1176,13 +1228,13 @@ function lowerHelperCompilationUnit(
     const leadingComments = takeCommentsBefore(baseContext, method.span).map(
       (comment) => comment.text,
     );
-    const lowered = lowerHelperMethod(method, baseContext, helperFunctions);
+    const lowered = lowerHelperMethod(method, baseContext, helperFunctions, fieldTypes);
     if (lowered === null) continue;
     if (lowered.kind === "function" && leadingComments.length > 0)
       lowered.leadingComments = leadingComments;
     statements.push(lowered);
   }
-  const typedStatements = withEnforcedTypes(statements, baseContext);
+  const typedStatements = withEnforcedTypes([...fieldStatements, ...statements], baseContext);
   return {
     sourceName: file.sourceName,
     metadata: null,
@@ -1192,7 +1244,163 @@ function lowerHelperCompilationUnit(
       ...typedStatements,
     ],
     diagnostics: baseContext.diagnostics,
+    ...(baseContext.actions.size === 0 ? {} : { actions: [...baseContext.actions] }),
   };
+}
+
+/** A method's own variable types with the class's static fields, which its own variables shadow. */
+function withFieldTypes(
+  types: TypeEnvironment,
+  fields: ReadonlyMap<string, ValueType>,
+): TypeEnvironment {
+  if (fields.size === 0) return types;
+  return { ...types, variables: new Map([...fields, ...types.variables]) };
+}
+
+const scriptObjectClasses = new WeakMap<AstNode, AstNode>();
+
+/**
+ * A helper class handed the script object (`Helper.run(this, ...)`) calls the SexScript API on its parameter, or on a
+ * static field that keeps the parameter: that parameter becomes `main`, which helper methods strip as the legacy
+ * host, the field's calls become `main.` calls, and the field and its assignment go. The class node is copied.
+ */
+function withScriptObject(helperClass: AstNode): AstNode {
+  const known = scriptObjectClasses.get(helperClass);
+  if (known !== undefined) return known;
+  const copy: AstNode = structuredClone(helperClass);
+  const closureMethods = withClosureMethods(copy);
+  const methods = nodeArray(copy.methods);
+  const fieldNames = new Set(nodeArray(copy.fields).flatMap((field) => text(field.name) ?? []));
+  const aliases = new Set<string>();
+  const assignments = new Set<AstNode>();
+  const renamed: Array<Record<string, unknown>> = [];
+  for (const method of methods) {
+    const parameters: unknown = method.parameters;
+    const parameter: unknown = Array.isArray(parameters) ? parameters[0] : undefined;
+    const name = isRecord(parameter) && typeof parameter.name === "string" ? parameter.name : null;
+    if (!isRecord(parameter) || name === null || name === "main") continue;
+    const own = new Set([name]);
+    walkAst(method.body, (node) => {
+      if (node.kind !== "expressionStatement") return;
+      const assignment = asNode(node.expression);
+      const field =
+        assignment?.kind === "binary" && assignment.operator === "="
+          ? variableName(assignment.left)
+          : null;
+      if (field !== null && fieldNames.has(field) && variableName(assignment!.right) === name) {
+        own.add(field);
+        assignments.add(node);
+      }
+    });
+    let api = false;
+    for (const other of methods)
+      walkAst(other.body, (node) => {
+        if (node.kind === "methodCall" && own.has(variableName(node.object) ?? ""))
+          api ||= SEXSCRIPT_API_METHODS.has(constantString(node.method) ?? "");
+      });
+    if (!api) continue;
+    renamed.push(parameter);
+    for (const alias of own) aliases.add(alias);
+  }
+  if (aliases.size === 0) {
+    const result = closureMethods ? copy : helperClass;
+    scriptObjectClasses.set(helperClass, result);
+    return result;
+  }
+  for (const parameter of renamed) parameter.name = "main";
+  const strip = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (let index = value.length - 1; index >= 0; index -= 1) {
+        const item: unknown = value[index];
+        if (isAstNode(item) && assignments.has(item)) value.splice(index, 1);
+        else strip(item);
+      }
+      return;
+    }
+    if (!isAstNode(value)) return;
+    if (value.kind === "variable" && aliases.has(variableName(value) ?? "")) value.name = "main";
+    for (const child of Object.values(value)) strip(child);
+  };
+  for (const method of methods) strip(method.body);
+  copy.fields = nodeArray(copy.fields).filter((field) => !aliases.has(text(field.name) ?? ""));
+  scriptObjectClasses.set(helperClass, copy);
+  return copy;
+}
+
+/**
+ * A static field that holds a closure literal, is never assigned again, and is only ever called works as a method of
+ * the class: `def static showWait = { main, msg -> ... }` called as `Helper.showWait(this, "Wait")`. Such fields become
+ * methods of the class node, in source order; whether the copied class changed.
+ */
+function withClosureMethods(helperClass: AstNode): boolean {
+  const fields = nodeArray(helperClass.fields);
+  const bodies = [
+    ...nodeArray(helperClass.methods).map((method) => method.body),
+    ...fields.map((field) => field.initialExpression),
+  ];
+  // Names that are assigned or used as a value anywhere in the class; a call names its method without a variable.
+  const used = new Set<string>();
+  for (const body of bodies)
+    walkAst(body, (node) => {
+      const name =
+        node.kind === "variable"
+          ? variableName(node)
+          : node.kind === "binary" &&
+              node.operator === "=" &&
+              asNode(node.left)?.kind === "property"
+            ? constantString(asNode(node.left)!.property)
+            : null;
+      if (name !== null) used.add(name);
+    });
+  const converted = new Set<AstNode>();
+  const methods: AstNode[] = [];
+  for (const field of fields) {
+    const name = text(field.name);
+    const closure = asNode(field.initialExpression);
+    if (field.static !== true || name === null || used.has(name) || closure?.kind !== "closure")
+      continue;
+    const body = asNode(closure.body);
+    if (body?.kind !== "block") continue;
+    let implicit = false;
+    if (closure.parameterSpecified !== true)
+      walkAst(body, (node) => {
+        implicit ||= variableName(node) === "it";
+      });
+    // Parameters are plain records, not nodes.
+    const records =
+      closure.parameterSpecified === true && Array.isArray(closure.parameters)
+        ? closure.parameters.filter(isRecord)
+        : [];
+    const parameters = implicit
+      ? [
+          {
+            name: "it",
+            hasInitialExpression: true,
+            initialExpression: { kind: "constant", value: null },
+          },
+        ]
+      : records.map((record) => ({
+          name: record.name,
+          hasInitialExpression: isAstNode(record.default),
+          initialExpression: isAstNode(record.default) ? record.default : null,
+        }));
+    converted.add(field);
+    methods.push({
+      kind: "method",
+      span: field.span,
+      name,
+      modifiers: field.modifiers,
+      parameters,
+      body,
+    });
+  }
+  if (converted.size === 0) return false;
+  const line = (node: AstNode): number => node.span?.line ?? 0;
+  helperClass.fields = fields.filter((field) => !converted.has(field));
+  helperClass.methods = [...nodeArray(helperClass.methods), ...methods].sort(
+    (first, second) => line(first) - line(second),
+  );
+  return true;
 }
 
 /** What the generated helpers return, computed once. */
@@ -1380,8 +1588,9 @@ function collectHelperFunctionInfo(methods: AstNode[]): Map<string, HelperFuncti
     const parameters = groovyParameters(method.parameters) ?? [];
     const stripsMain = parameters[0]?.name === "main";
     const authored = stripsMain ? parameters.slice(1) : parameters;
-    const minArgs = authored.filter((parameter) => parameter.defaultValue === null).length;
-    result.set(name, { minArgs, maxArgs: authored.length, stripsMain });
+    const requiredArgs = authored.filter((parameter) => parameter.defaultValue === null).length;
+    const minArgs = authored.findLastIndex((parameter) => parameter.defaultValue === null) + 1;
+    result.set(name, { minArgs, requiredArgs, maxArgs: authored.length, stripsMain });
   }
   return result;
 }
@@ -1390,6 +1599,8 @@ function lowerHelperMethod(
   method: AstNode,
   baseContext: LowerContext,
   helperFunctions: Map<string, HelperFunctionInfo>,
+  /** The types of the class's static fields, which its methods read as package variables. */
+  fieldTypes: ReadonlyMap<string, ValueType> = new Map(),
 ): IrStatement | null {
   const name = text(method.name);
   if (method.kind !== "method" || name === null) {
@@ -1430,10 +1641,13 @@ function lowerHelperMethod(
     diagnostics: baseContext.diagnostics,
     metadata: baseContext.metadata,
     functions: collectClosureInfo(body),
-    types: inferVariableTypes(
-      body,
-      authoredRecords.map((parameter) => parameter.name),
-      helperFunctions.keys(),
+    types: withFieldTypes(
+      inferVariableTypes(
+        body,
+        authoredRecords.map((parameter) => parameter.name),
+        helperFunctions.keys(),
+      ),
+      fieldTypes,
     ),
     prelude: [],
     statementRoot: null,
@@ -1453,6 +1667,7 @@ function lowerHelperMethod(
     packageFunctions: baseContext.packageFunctions,
     stableNames: baseContext.stableNames,
     storageLiterals: baseContext.storageLiterals,
+    copiedImages: baseContext.copiedImages,
     unreachable: false,
     mixinModules: baseContext.mixinModules,
     loadsModuleDirectories: baseContext.loadsModuleDirectories,
@@ -1498,9 +1713,13 @@ function lowerHelperMethod(
     generatedNames: new Set(),
   };
   const parameters: IrFunctionParameter[] = [];
-  for (const parameter of authoredRecords) {
+  const lastRequired = authoredRecords.findLastIndex(
+    (parameter) => parameter.defaultValue === null,
+  );
+  for (const [position, parameter] of authoredRecords.entries()) {
     const parameterName = parameter.name;
-    const initial = parameter.defaultValue;
+    // A default before a required parameter only applied to calls that left the parameter out (see minArgs).
+    const initial = position < lastRequired ? null : parameter.defaultValue;
     const defaultValue = initial === null ? null : lowerExpression(initial, context);
     if (initial !== null && defaultValue === null) {
       addDiagnostic(
@@ -3591,6 +3810,16 @@ function visibleLocals(
   return search(body, new Set(parameters));
 }
 
+/** A call that leaves out a parameter whose default precedes a parameter without one (see HelperFunctionInfo). */
+function defaultOrderCall(context: LowerContext, node: AstNode): null {
+  return unsupportedExpression(
+    context,
+    node,
+    "SX_PARAMETER_DEFAULT_ORDER",
+    "This call leaves out a parameter that has a default before a parameter without one; Groovy then filled the required parameters first, which TeaseScript parameters cannot express. Pass every argument up to the last required parameter.",
+  );
+}
+
 function defaultBeforeRequired(
   parameters: ReadonlyArray<{ defaultValue: AstNode | null }>,
 ): boolean {
@@ -3737,6 +3966,37 @@ function lowerAssignment(
   const java = javaAssignment(node, span, javaHost(context));
   if (java !== null) return java;
   const operator = text(node.operator);
+  // `list = list << value` appends; assigning the list to itself adds nothing.
+  const appended = asNode(node.right);
+  if (
+    operator === "=" &&
+    appended?.kind === "binary" &&
+    appended.operator === "<<" &&
+    variableName(node.left) !== null &&
+    variableName(appended.left) === variableName(node.left)
+  )
+    return lowerAssignment(appended, span, context);
+  // A photo copied to a package image path keeps its reference under that path, where showing the path shows it.
+  const copy = photoCopy(node);
+  if (operator === "<<" && copy !== null) {
+    const source = lowerExpression(copy.source, context);
+    if (source === null) return [];
+    addDiagnostic(
+      context,
+      "SX_PHOTO_COPY",
+      "warning",
+      `Legacy code copied this photo to images/${copy.path}, which a package cannot write; the photo's reference is saved for that path, and showing the path shows the photo.`,
+      node.span,
+    );
+    return [
+      {
+        kind: "save",
+        key: { kind: "literal", value: `${SENT_IMAGE_PREFIX}images/${copy.path}` },
+        value: source,
+        span,
+      },
+    ];
+  }
   if (operator === "<<") {
     // Groovy `list << value` appends one element.
     const listNode = asNode(node.left);
@@ -4002,20 +4262,37 @@ function lowerPostfix(
   }
   // `counts[i]++` and `player.score++` on plain references; an index counted from the end needs the list's length.
   const index = targetNode?.kind === "binary" ? asNode(targetNode.right) : null;
+  // A computed index of a plain list or map, `seen[n - 1]++` or `counts[score(card)]++`, is computed once.
+  const receiver =
+    targetNode?.kind === "binary" && targetNode.operator === "[" ? asNode(targetNode.left) : null;
+  const computed =
+    receiver !== null &&
+    index !== null &&
+    isRepeatableExpression(receiver) &&
+    !isRepeatableExpression(index);
   if (
     targetNode === null ||
-    !isRepeatableIndex(targetNode) ||
+    (!isRepeatableIndex(targetNode) && !computed) ||
     (index !== null && negativeConstantIndex(index) !== null)
   )
     return [unsupportedPostfix(node, context)];
   context.writeTargets.add(targetNode);
-  const target = lowerExpression(targetNode, context);
+  let target = lowerExpression(targetNode, context);
   context.writeTargets.delete(targetNode);
   if (target === null) return [];
+  const before: IrStatement[] = [];
+  if (computed && !isPure(index, context)) {
+    // An index with effects, such as a call, runs once, before the update.
+    if (target.kind !== "index") return [unsupportedPostfix(node, context)];
+    const name = freshName("index", context);
+    before.push({ kind: "let", name, value: target.index, span });
+    target = { ...target, index: { kind: "variable", name } };
+  }
   if (targetNode.kind === "binary") noteSharedListWrite(asNode(targetNode.left), node, context);
   if (targetNode.kind === "property" || (target.kind === "index" && target.dict === true))
     noteSharedMapWrite(node.span, context);
   return [
+    ...before,
     {
       kind: "assign",
       target,
@@ -4207,6 +4484,52 @@ function lowerCallStatement(
       ];
     }
   }
+  // Deleting a package image a photo was copied to forgets the photo (SX_PHOTO_COPY).
+  const copyDeleted = asNode(node.object);
+  const copyDeletePath =
+    call?.name === "delete" &&
+    call.arguments.length === 0 &&
+    copyDeleted !== null &&
+    isFileConstructor(copyDeleted)
+      ? constantString(nodeArray(asNode(copyDeleted.arguments)?.items)[0])
+      : null;
+  if (
+    copyDeletePath !== null &&
+    /^images\//iu.test(copyDeletePath) &&
+    context.copiedImages.has(copyDeletePath.slice(7))
+  ) {
+    return [
+      {
+        kind: "delete",
+        key: { kind: "literal", value: `${SENT_IMAGE_PREFIX}${copyDeletePath}` },
+        span,
+      },
+    ];
+  }
+  // Java `TimeUnit.SECONDS.sleep(n)` blocks the script thread like a hidden wait.
+  const unit = asNode(node.object);
+  const unitName = unit?.kind === "property" ? constantString(unit.property) : null;
+  if (
+    call !== null &&
+    call.name === "sleep" &&
+    call.arguments.length === 1 &&
+    unitName !== null &&
+    ["MILLISECONDS", "SECONDS", "MINUTES"].includes(unitName) &&
+    /(?:^|\.)TimeUnit$/u.test(
+      variableName(asNode(unit!.object)) ?? text(asNode(unit!.object)?.type) ?? "",
+    )
+  ) {
+    return oneArgumentStatement(call.arguments, context, node, (duration) => ({
+      kind: "wait",
+      duration:
+        unitName === "MINUTES"
+          ? { kind: "binary", operator: "*", left: duration, right: { kind: "literal", value: 60 } }
+          : duration,
+      visible: false,
+      unit: unitName === "MILLISECONDS" ? "ms" : "s",
+      span,
+    }));
+  }
   if (call === null || !call.inherited) {
     const expression = lowerExpression(node, context);
     return expression === null
@@ -4387,6 +4710,28 @@ function lowerCallStatement(
       // setImage(null), and an empty or blank path, cleared the picture.
       if (isNullConstant(args[0]) || constantString(args[0])?.trim() === "")
         return [{ kind: "hideImage", span }];
+      // A path a photo was copied to shows the photo (SX_PHOTO_COPY), or else the package's file of that name.
+      const copied = constantString(args[0]);
+      if (copied !== null && context.copiedImages.has(copied)) {
+        addDiagnostic(
+          context,
+          "SX_PHOTO_COPY",
+          "warning",
+          `A script copied the player's photo to images/${copied}; showing the path shows that photo.`,
+          node.span,
+        );
+        return [
+          {
+            kind: "showImage",
+            file: {
+              kind: "load",
+              key: { kind: "literal", value: `${SENT_IMAGE_PREFIX}images/${copied}` },
+              defaultValue: { kind: "literal", value: copied },
+            },
+            span,
+          },
+        ];
+      }
       return oneArgumentStatement(args, context, node, (file) => ({
         kind: "showImage",
         file: mediaFile(file, "images", node, context),
@@ -6054,9 +6399,71 @@ function lowerReturnStatement(node: AstNode, context: LowerContext): IrStatement
     context,
     "SX_DYNAMIC_SCRIPT",
     "warning",
-    'Legacy chained to the script this value names, and ended the chain when the value was null or empty or named no file; its ".groovy" becomes ".tease" here, and script() fails at runtime for a name that is no file of the package.',
+    context.scriptPaths !== null
+      ? "Legacy chained to the script this value names, and ended the chain when the value was null or empty or named no file; the name is looked up among the package's scripts, and a name of no script ends the chain here too."
+      : 'Legacy chained to the script this value names, and ended the chain when the value was null or empty or named no file; its ".groovy" becomes ".tease" here, and script() fails at runtime for a name that is no file of the package.',
     node.span,
   );
+  // In a package, the name is looked up among its scripts, by the legacy name in lower case without ".groovy", and a
+  // name of no script ends the chain, as the legacy player did.
+  if (context.scriptPaths !== null) {
+    const next = freshName("nextScript", context);
+    const paths = [...context.scriptPaths].sort(([left], [right]) => left.localeCompare(right));
+    // A null name reads "null", which names no script, so the chain ends as for an empty name.
+    const key: IrExpression = {
+      kind: "methodCall",
+      target: {
+        kind: "methodCall",
+        target: { kind: "template", parts: [{ value: script }] },
+        name: "lowercase",
+        arguments: [],
+      },
+      name: "replace",
+      arguments: [
+        { kind: "literal", value: ".groovy" },
+        { kind: "literal", value: "" },
+      ],
+    };
+    return [
+      {
+        kind: "let",
+        name: next,
+        value: {
+          kind: "methodCall",
+          target: {
+            kind: "object",
+            dict: true,
+            properties: paths.map(([name, path]) => ({
+              name,
+              key: { kind: "literal", value: name },
+              value: { kind: "literal", value: path },
+            })),
+          },
+          name: "get",
+          arguments: [key, { kind: "literal", value: "" }],
+          dict: true,
+        },
+        span: node.span,
+      },
+      {
+        kind: "if",
+        condition: {
+          kind: "binary",
+          operator: "==",
+          left: { kind: "variable", name: next },
+          right: { kind: "literal", value: "" },
+        },
+        then: [ends],
+        else: [],
+        span: node.span,
+      },
+      {
+        kind: "goto",
+        target: { kind: "script", path: { kind: "variable", name: next } },
+        span: node.span,
+      },
+    ];
+  }
   // A legacy script name such as "rooms/hall.groovy" names the converted file "rooms/hall.tease".
   const path: IrExpression = {
     kind: "methodCall",
@@ -7434,6 +7841,25 @@ function truthiness(
   });
   if (onlyOf(type, BOOLEAN | NULL)) return compare("==", { kind: "literal", value: true });
   if (type === NULL) return notNull;
+  // A variable that holds a flag or a number, `menu = true` and later `menu = 0`: Groovy treated 0 as false.
+  if (
+    repeatable &&
+    (type & BOOLEAN) !== 0 &&
+    (type & NUMBER) !== 0 &&
+    onlyOf(type, BOOLEAN | NUMBER | NULL)
+  )
+    return {
+      kind: "binary",
+      operator: "or",
+      left: and(
+        { kind: "typeTest", value, type: "boolean" },
+        compare("==", { kind: "literal", value: true }),
+      ),
+      right: and(
+        { kind: "typeTest", value, type: "number" },
+        compare("!=", { kind: "literal", value: 0 }),
+      ),
+    };
   if (isDictionary(node, context)) {
     // A dict is false when it is empty, as a Groovy map was.
     return {
@@ -7760,11 +8186,11 @@ function isLogicalOperation(node: AstNode, context: LowerContext): boolean {
   const left = asNode(node.left);
   const right = asNode(node.right);
   if (left === null || right === null) return false;
+  const leftType = inferType(left, context.types);
   const rightType = inferType(right, context.types);
-  return (
-    onlyOf(inferType(left, context.types), BOOLEAN) &&
-    (onlyOf(rightType, BOOLEAN | NULL) || rightType === UNKNOWN)
-  );
+  // A side of unknown type, such as a stored flag, is tested as a condition; a proven number is bitwise.
+  const flag = (type: number): boolean => onlyOf(type, BOOLEAN | NULL) || type === UNKNOWN;
+  return flag(leftType) && flag(rightType) && (leftType !== UNKNOWN || rightType !== UNKNOWN);
 }
 
 /** `x in list` tests membership; `x in a..b` tests the range bounds. */
@@ -7990,6 +8416,21 @@ function lowerObjectMethodCallExpression(
     );
     return { kind: "literal", value: "en" };
   }
+  if (
+    name === "getProperty" &&
+    variableName(targetNode) === "System" &&
+    argumentsNodes.length === 1 &&
+    constantString(argumentsNodes[0]) === "user.language"
+  ) {
+    addDiagnostic(
+      context,
+      "SX_LOCALE_WORKAROUND",
+      "warning",
+      'Workaround: TeaseScript has no query for the player\'s language yet (the localization question in COMPATIBILITY-GAPS.md), so the conversion assumes English, "en", where Groovy read the system language.',
+      node.span,
+    );
+    return { kind: "literal", value: "en" };
+  }
   if (name === "execute" && argumentsNodes.length === 0 && targetNode !== null) {
     const switched = switchCommand(targetNode, node, context);
     if (switched !== undefined) return switched;
@@ -8019,6 +8460,11 @@ function lowerObjectMethodCallExpression(
       }
       argumentNodes = argumentNodes.slice(1);
     }
+    if (
+      argumentNodes.length >= helperInfo.requiredArgs &&
+      argumentNodes.length < helperInfo.minArgs
+    )
+      return defaultOrderCall(context, node);
     if (argumentNodes.length < helperInfo.minArgs || argumentNodes.length > helperInfo.maxArgs) {
       return unsupportedExpression(
         context,
@@ -8563,13 +9009,45 @@ function textOperation(
       operation = name;
       break;
     case "replaceAll": {
-      // Java replaceAll() takes a regular expression and a replacement pattern; only plain text is covered.
+      // Java replaceAll() takes a regular expression and a replacement pattern; the regular expressions that text
+      // operations express (regex-subset.ts) convert, with a replacement of plain text or a computed text.
       const pattern = literalText(argumentsNodes[0]);
-      const replacement = literalText(argumentsNodes[1]);
-      if (argumentsNodes.length !== 2 || pattern === null || replacement === null) return undefined;
-      if (/[\\^$.|?*+()[\]{}]/u.test(pattern) || /[\\$]/u.test(replacement)) return undefined;
-      operation = "replace";
-      break;
+      const subset = pattern === null ? null : parseRegexSubset(pattern);
+      if (argumentsNodes.length !== 2 || subset === null) return undefined;
+      const replacementText = literalText(argumentsNodes[1]);
+      const plain = replacementText === null ? null : javaReplacementText(replacementText);
+      if (replacementText !== null && plain === null) return undefined;
+      const target = lowerExpression(targetNode, context);
+      const computed = plain === null ? lowerExpression(argumentsNodes[1]!, context) : null;
+      if (target === null || (plain === null && computed === null)) return null;
+      const replacement: IrExpression =
+        plain !== null
+          ? { kind: "literal", value: plain }
+          : onlyOf(inferType(argumentsNodes[1]!, context.types), STRING)
+            ? computed!
+            : { kind: "template", parts: [{ value: computed! }] };
+      if (subset.kind === "literal")
+        return member("replace", [{ kind: "literal", value: subset.text }, replacement], target);
+      if (subset.kind === "alternatives")
+        return subset.texts.reduce<IrExpression>(
+          (text, search) =>
+            member("replace", [{ kind: "literal", value: search }, replacement], text),
+          target,
+        );
+      addDiagnostic(
+        context,
+        "SX_REGEX_CHARACTERS",
+        "info",
+        "Java replaced the characters this character class matched; a helper replaces them character by character.",
+        node.span,
+      );
+      return useHelper(context, "replaceChars", [
+        target,
+        { kind: "literal", value: subset.chars },
+        { kind: "literal", value: subset.negated },
+        replacement,
+        { kind: "literal", value: subset.runs },
+      ]);
     }
     case "split": {
       // Java split() takes a regular expression and drops trailing empty parts.
@@ -9547,6 +10025,17 @@ function dateFormat(
   argumentsNodes: AstNode[],
   context: LowerContext,
 ): IrExpression | null {
+  // Java `new SimpleDateFormat(pattern).format(new Date())` formats the current moment like Groovy's
+  // `new Date().format(pattern)`.
+  const javaFormat =
+    targetNode.kind === "constructorCall" &&
+    /(?:^|\.)SimpleDateFormat$/u.test(text(targetNode.type) ?? "") &&
+    argumentsNodes.length === 1 &&
+    isCurrentDateConstructor(argumentsNodes[0]!)
+      ? nodeArray(asNode(targetNode.arguments)?.items)
+      : null;
+  if (javaFormat !== null && javaFormat.length === 1)
+    return dateFormat(node, argumentsNodes[0]!, javaFormat, context);
   const pattern = argumentsNodes.length === 1 ? constantString(argumentsNodes[0]) : null;
   if (!isCurrentDateConstructor(targetNode)) {
     return unsupportedExpression(
@@ -10248,6 +10737,11 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       }
       argumentNodes = argumentNodes.slice(1);
     }
+    if (
+      argumentNodes.length >= helperInfo.requiredArgs &&
+      argumentNodes.length < helperInfo.minArgs
+    )
+      return defaultOrderCall(context, node);
     if (argumentNodes.length < helperInfo.minArgs || argumentNodes.length > helperInfo.maxArgs) {
       return unsupportedExpression(
         context,
@@ -10538,7 +11032,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       return { kind: "literal", value: null };
     }
     case "getFile": {
-      if (args.length !== 1)
+      // Without a title, Groovy passed null, and the chooser had no title.
+      if (args.length > 1)
         return unsupportedExpression(
           context,
           node,
@@ -10563,7 +11058,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         "getFile() let the player pick any file with this title; scripts use it for a photo of the player, so the title is shown and takePhoto() takes the photo, or gives null as a cancelled chooser did.",
         node.span,
       );
-      if (!pushPrompt(context, node, call.arguments[0]!, args[0]!)) return null;
+      if (args.length === 1 && !pushPrompt(context, node, call.arguments[0]!, args[0]!))
+        return null;
       return { kind: "call", name: "takePhoto", positional: [], named: {} };
     }
     case "getDataFolder":
@@ -10622,14 +11118,16 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     case "getImage":
       // Legacy took a webcam picture without asking and returned its path, or null when it failed; without a webcam
       // it opened a file chooser titled with the message. takePhoto() returns a photo reference or null (V30 §33).
-      if (args.length !== 1) {
+      // Without a message, Groovy passed null: the webcam picture without a chooser title.
+      if (args.length > 1) {
         return unsupportedExpression(
           context,
           node,
           "SX_CALL_ARITY",
-          "getImage() must have one argument.",
+          "getImage() must have at most one argument.",
         );
       }
+      if (args.length === 0) return { kind: "call", name: "takePhoto", positional: [], named: {} };
       if (!isPure(call.arguments[0]!, context)) {
         return unsupportedExpression(
           context,
@@ -10960,7 +11458,16 @@ function runtimeListSelectedValue(
     loop = lowered;
     list = { kind: "variable", name };
   } else {
-    if (!isKnownListExpression(listNode, context)) return undefined;
+    // Groovy needed a list here too, so a value that may be one is used as the list.
+    if ((inferType(listNode, context.types) & LIST) === 0) return undefined;
+    if (!isKnownListExpression(listNode, context))
+      addDiagnostic(
+        context,
+        "SX_CHOICE_LIST",
+        "info",
+        "These options are not proven to be a list; Groovy needed a list here too, so the value is offered as one.",
+        node.span,
+      );
     const lowered = lowerExpression(listNode, context);
     if (lowered === null) return null;
     list = lowered;
@@ -11978,6 +12485,32 @@ export function packageFilePath(path: string): string {
     .toLowerCase();
 }
 
+/**
+ * `new File("images/x.jpg") << new File(photo).getBytes()` (or `photo.getBytes()`): the target's path below `images/`
+ * and the photo; null for another statement.
+ */
+export function photoCopy(node: AstNode): { path: string; source: AstNode } | null {
+  if (node.kind !== "binary" || node.operator !== "<<") return null;
+  const target = asNode(node.left);
+  const bytes = asNode(node.right);
+  const path =
+    target !== null && isFileConstructor(target)
+      ? constantString(nodeArray(asNode(target.arguments)?.items)[0])
+      : null;
+  if (path === null || !/^images\//iu.test(path)) return null;
+  if (
+    bytes?.kind !== "methodCall" ||
+    !["getBytes", "bytes"].includes(constantString(bytes.method) ?? "")
+  )
+    return null;
+  const file = asNode(bytes.object);
+  const source =
+    file !== null && isFileConstructor(file)
+      ? (nodeArray(asNode(file.arguments)?.items)[0] ?? null)
+      : file;
+  return source === null ? null : { path: path.slice("images/".length), source };
+}
+
 function isFileConstructor(node: AstNode): boolean {
   return (
     node.kind === "constructorCall" &&
@@ -12229,6 +12762,69 @@ function formatText(
 }
 
 /** The empty value of a type, the start of a variable whose own initializer could not convert; null otherwise. */
+/**
+ * Variables a closure assigns that nothing declares: Groovy kept them in the script's binding, shared by every
+ * closure, so they are declared at the top of the script, starting with their type's empty value.
+ */
+function bindingDeclarations(body: AstNode | null, context: LowerContext): IrStatement[] {
+  if (body === null || context.functionDepth > 0) return [];
+  const declared = new Set<string>();
+  const assigned = new Map<string, AstNode>();
+  const visit = (node: AstNode, insideClosure: boolean): void => {
+    if (node.kind === "declaration") {
+      const name = variableName(node.left);
+      if (name !== null) declared.add(name);
+    }
+    if (node.kind === "closure")
+      for (const parameter of Array.isArray(node.parameters) ? node.parameters : [])
+        if (isRecord(parameter) && typeof parameter.name === "string") declared.add(parameter.name);
+    if (node.kind === "for") {
+      const name = text(node.variable);
+      if (name !== null) declared.add(name);
+    }
+    if (!insideClosure && node.kind === "binary" && node.operator === "=") {
+      // A top-level assignment declares the variable there.
+      const name = variableName(node.left);
+      if (name !== null) declared.add(name);
+    }
+    if (insideClosure && node.kind === "binary" && node.operator === "=") {
+      const name = variableName(node.left);
+      if (name !== null && !assigned.has(name)) assigned.set(name, node);
+    }
+    for (const child of nodeChildren(node)) visit(child, insideClosure || node.kind === "closure");
+  };
+  visit(body, false);
+  const names = [...assigned.keys()].filter(
+    (name) =>
+      !declared.has(name) &&
+      !context.functions.has(name) &&
+      !context.packageFunctions.has(name) &&
+      !isLegacyGetterProperty(name),
+  );
+  if (names.length === 0) return [];
+  const message = `Groovy kept ${names.join(", ")}, which functions assign without a declaration, in the script's binding that every function shares; ${names.length === 1 ? "it is" : "they are"} declared at the top of the script with an empty value.`;
+  context.diagnostics.push({
+    code: "SX_BINDING_VARIABLE",
+    severity: "warning",
+    message,
+    span: null,
+  });
+  return [
+    {
+      kind: "comment",
+      text: `// NOTE SX_BINDING_VARIABLE: ${message}`,
+      trailing: false,
+      span: null,
+    },
+    ...names.map((name): IrStatement => ({
+      kind: "let",
+      name,
+      value: neutralValue(context.types.variables.get(name) ?? UNKNOWN),
+      span: null,
+    })),
+  ];
+}
+
 function neutralValue(type: number): IrExpression {
   if (onlyOf(type, NUMBER | NULL) && (type & NUMBER) !== 0) return { kind: "literal", value: 0 };
   if (onlyOf(type, STRING | NULL) && (type & STRING) !== 0) return { kind: "literal", value: "" };

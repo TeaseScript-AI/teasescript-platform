@@ -24,6 +24,7 @@ import {
   packageResultUses,
   packageStableNames,
   packageStopsBackgroundSounds,
+  photoCopy,
 } from "./lower.ts";
 import { helperDefinitionOrder, withActionDispatcher } from "./helpers.ts";
 import { promoteGlobalFunctions, type GlobalPromotion } from "./globals.ts";
@@ -318,7 +319,10 @@ function packageScripts(
   // directory (`TheProgram/002TherapistA` when every script is in `TheProgram/`), so the name also resolves with the
   // common directory's own folders in front.
   const paths = new Map<string, string>();
-  for (let depth = 0; depth <= root.length; depth += 1) {
+  // Only folders below the legacy scripts folder are part of a script name.
+  const scriptsFolder = root.lastIndexOf("scripts");
+  const deepest = scriptsFolder < 0 ? root.length : root.length - scriptsFolder - 1;
+  for (let depth = 0; depth <= deepest; depth += 1) {
     const prefix = root.slice(root.length - depth).join("/");
     for (const index of scripts) {
       const name = `${prefix === "" ? "" : `${prefix}/`}${relative(index)}`
@@ -445,6 +449,16 @@ export function lowerPackage(
   const mixinModules = files.flatMap((file) => describeMixinModule(file) ?? []);
   const stableNames = packageStableNames(files);
   const storageLiterals = packageStorageLiterals(files);
+  const copiedImages = new Set(
+    files.flatMap((file) => {
+      const paths: string[] = [];
+      walkAst(file.root, (node) => {
+        const copy = photoCopy(node);
+        if (copy !== null) paths.push(copy.path);
+      });
+      return paths;
+    }),
+  );
   // Function names and object field types are shared only by a script and the mixin modules it loads.
   const groups = compositionGroups(files);
   const stopsBackgroundSounds = packageStopsBackgroundSounds(files);
@@ -471,6 +485,7 @@ export function lowerPackage(
       packageFunctions: packageFunctionNames(groups[index]!),
       stableNames,
       storageLiterals,
+      copiedImages,
       globalTypes: packageGlobalTypes(groups[index]!),
       stopsBackgroundSounds,
       resultUses,
@@ -784,6 +799,10 @@ function rootNames(statements: readonly IrStatement[]): string[] {
 interface HelperFunctionEntry {
   statement: Extract<IrStatement, { kind: "function" }>;
   diagnostics: MigrationDiagnostic[];
+  /** The static fields of the function's helper class, which come along with it. */
+  fields: IrStatement[];
+  /** The action IDs and dispatcher marker the function's program uses (withActionDispatcher). */
+  actions: readonly string[];
 }
 
 function buildFunctionCatalog(
@@ -791,6 +810,7 @@ function buildFunctionCatalog(
 ): Map<string, HelperFunctionEntry | null> {
   const catalog = new Map<string, HelperFunctionEntry | null>();
   for (const program of programs) {
+    const fields = program.statements.filter((statement) => statement.kind === "let");
     for (const statement of program.statements) {
       if (statement.kind !== "function") continue;
       if (catalog.has(statement.name)) {
@@ -803,6 +823,8 @@ function buildFunctionCatalog(
         diagnostics: program.diagnostics.filter((diagnostic) =>
           inside(diagnostic.span, statement.span),
         ),
+        fields,
+        actions: program.actions ?? [],
       });
     }
   }
@@ -841,15 +863,21 @@ function composeProgram(
   }
 
   const helperStatements: IrStatement[] = [];
+  const fields = new Set<IrStatement>();
+  const actions = new Set(program.actions ?? []);
   for (const [name, entry] of catalog) {
     if (!required.has(name) || entry === null) continue;
     helperStatements.push(entry.statement);
     diagnostics.push(...entry.diagnostics);
+    for (const field of entry.fields) fields.add(field);
+    for (const action of entry.actions) actions.add(action);
   }
+  helperStatements.unshift(...fields);
 
   const composed = withActionDispatcher({
     ...program,
     statements: [...helperStatements, ...program.statements],
+    ...(actions.size === 0 ? {} : { actions: [...actions] }),
   });
   diagnostics.push(...packageDependencyDiagnostics(composed.statements));
   return renameConflictingIdentifiers({

@@ -719,6 +719,7 @@ test(
       "lone-script",
       "branches",
       "nested-story",
+      "helper-class",
     ]) {
       const directory = fileURLToPath(new URL(`./fixtures/packages/${name}/`, import.meta.url));
       const scripts = path.join(directory, "scripts");
@@ -731,12 +732,20 @@ test(
       const lowered = lowerPackage(files);
       const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;
       // Paths start at the scripts' common folder, as convert-package writes them.
-      const outputs = lowered.composed.map((program, index): [string, MigrationProgram] => [
-        index === entry
-          ? "main.tease"
-          : (lowered.paths[index] ?? sources[index]!.replace(/\.groovy$/u, ".tease")),
-        program,
-      ]);
+      // A helper class writes no file of its own, as in convert-package.
+      const outputs = lowered.composed.flatMap(
+        (program, index): Array<[string, MigrationProgram]> =>
+          files[index]!.root?.kind === "scriptBody"
+            ? [
+                [
+                  index === entry
+                    ? "main.tease"
+                    : (lowered.paths[index] ?? sources[index]!.replace(/\.groovy$/u, ".tease")),
+                  program,
+                ],
+              ]
+            : [],
+      );
       if (lowered.main !== null && "menu" in lowered.main)
         outputs.push(["main.tease", lowered.main.menu]);
       const helpers = lowered.globals?.helpers ?? null;
@@ -771,6 +780,17 @@ test(
         const unit = lowerPackage(files, { internalScripts: ["Story/addon.groovy"] });
         assert.ok(unit.main !== null && "menu" in unit.main);
         assert.match(emitTease(unit.main.menu), /\ngoto "start\.tease"\n$/u);
+      }
+      if (name === "helper-class") {
+        // The scripts call the class's static closures as functions, in both scripts.
+        const report = analyzeFeasibility(files, {
+          compiler: projectResult.compiler,
+          runner: projectResult.runner,
+        });
+        assert.deepEqual(
+          report.smokeRuns.map(({ entry: start, status, visited }) => ({ start, status, visited })),
+          [{ start: "main.tease", status: "halted", visited: ["main.tease", "next.tease"] }],
+        );
       }
       if (name === "shared-helpers") {
         // The scripts call the shared functions, which read the shared table and the global each script assigns.

@@ -1,8 +1,9 @@
 say "Chapter two."
 // The next script comes from storage.
 let after = load "chapter.after"
-// NOTE SX_DYNAMIC_SCRIPT line 4: Legacy chained to the script this value names, and ended the chain when the value was null or empty or named no file; its ".groovy" becomes ".tease" here, and script() fails at runtime for a name that is no file of the package.
-if after == null or after == "" {
+// NOTE SX_DYNAMIC_SCRIPT line 4: Legacy chained to the script this value names, and ended the chain when the value was null or empty or named no file; the name is looked up among the package's scripts, and a name of no script ends the chain here too.
+let nextScript = dict{ "chapters/first": "chapters/first.tease", "chapters/first_de": "chapters/first_de.tease", "chapters/last": "chapters/last.tease", "chapters/second": "chapters/second.tease", extra: "extra.tease", intro: "intro.tease", intro_de: "intro_de.tease" }.get("${after}".lowercase().replace(".groovy", ""), default: "")
+if nextScript == "" {
   exit
 }
-goto script(after.replace(".groovy", ".tease"))
+goto script(nextScript)

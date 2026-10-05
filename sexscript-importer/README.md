@@ -61,9 +61,10 @@ accept `.groovy` files, directories, or parser JSON; inputs of one invocation fo
 
 `report` compiles the package as one project (`compileProject`); a file is compiler-clean when the project reports no
 error for it. `report --run` also smoke-runs the project in the real runtime, which follows the transfers between files
-itself: from `main.tease`, then each runnable script no run reached in isolation (with empty storage, so a failure there
-can come from missing setup). A file that is not compiler-clean becomes a stub in the run's project, and a run that
-reaches it ends as `blocked`. Answers are deterministic: buttons are pressed, each visit of a choice takes the next
+itself: from `main.tease`, then each runnable script no run reached in isolation, starting with the storage the run
+from `main.tease` left (setup that only a script no run reached saves can still be missing). A file runs where the
+project compiles it, also with unconverted statements kept as TODO comments; a file that does not compile becomes a
+stub in the run's project, and a run that reaches it ends as `blocked`. Answers are deterministic: buttons are pressed, each visit of a choice takes the next
 option, text and number inputs cycle through fixed values, `takePhoto()` returns null as in a Player without a camera,
 and time and media advance in simulation; the wall clock starts at 2026-10-02 12:00 UTC and follows that time. Accepted
 forms selected with `--accepted` use host stand-ins with the same answer rotation. A run proves one path executes;

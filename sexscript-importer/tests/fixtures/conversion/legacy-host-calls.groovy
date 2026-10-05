@@ -36,3 +36,15 @@ def checkPhoto = { snapfile ->
   return false
 }
 if (checkPhoto(getImage("Smile"))) show("Nice photo")
+// The system language, which TeaseScript cannot query yet, reads as English.
+if (System.getProperty("user.language") == "de") show("Hallo") else show("Hello")
+// Java SimpleDateFormat of the current moment shows the local time.
+show("You report at " + new java.text.SimpleDateFormat("HH:mm").format(new java.util.Date()) + ".")
+// A photo copied to a package image path is shown wherever the script shows that path.
+def proof = getFile("Upload the picture?")
+new File("images/proof/photo.jpg").delete()
+new File("images/proof/photo.jpg") << new File(proof).getBytes()
+setImage("proof/photo.jpg")
+// getImage() and getFile() without a message take the photo without a title.
+def bare = getImage()
+if (bare != null) setImage(bare)

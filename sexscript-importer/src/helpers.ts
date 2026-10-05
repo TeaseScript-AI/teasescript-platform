@@ -76,6 +76,7 @@ export type HelperName =
   | "itemAt"
   | "askText"
   | "compare"
+  | "replaceChars"
   | "askInteger"
   | "askNumber"
   | "sendImage"
@@ -156,6 +157,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "itemAt",
   "askText",
   "compare",
+  "replaceChars",
   "askInteger",
   "askNumber",
   "tokenize",
@@ -546,6 +548,50 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ],
           ),
           ret(v("tag")),
+        ],
+      ),
+  },
+  // Java replaceAll() with one character class: each character in `chars` (or, with `keep`, each other character)
+  // becomes the replacement, a run of them at once with `runs`.
+  replaceChars: {
+    name: "sexscriptLegacyReplaceChars",
+    build: () =>
+      fn(
+        "sexscriptLegacyReplaceChars",
+        ["text", "chars", "keep", "replacement", "runs"],
+        [
+          letS("result", lit("")),
+          letS("inRun", lit(false)),
+          forS(
+            "character",
+            { kind: "methodCall", target: v("text"), name: "split", arguments: [lit("")] },
+            [
+              ifS(
+                bin(
+                  "==",
+                  {
+                    kind: "methodCall",
+                    target: v("chars"),
+                    name: "contains",
+                    arguments: [v("character")],
+                  },
+                  v("keep"),
+                ),
+                [
+                  set(v("result"), template(v("result"), v("character"))),
+                  set(v("inRun"), lit(false)),
+                ],
+                [
+                  ifS(
+                    { kind: "unary", operator: "not", value: bin("and", v("runs"), v("inRun")) },
+                    [set(v("result"), template(v("result"), v("replacement")))],
+                  ),
+                  set(v("inRun"), lit(true)),
+                ],
+              ),
+            ],
+          ),
+          ret(v("result")),
         ],
       ),
   },
