@@ -118,8 +118,8 @@ node tools/catalog.ts [--player https://host:port] --play-checks external/play-c
 
 `convert-corpus` takes one corpus folder per package, each with `scripts/`, `images/`, and `sounds/`. It runs
 `convert-package` on each folder whose `scripts/` holds Groovy, then `report --run --package`, whose JSON it keeps as
-`.report.json`; its `finalPackage` compiles the package's `.tease` files as written and runs them natively from
-`main.tease`. Legacy scripts name media relative to `images/` and `sounds/`, and package paths start at the package
+`.report.json`; its `finalPackage` reads the package as the Player does (the playground server's package scan, with
+the images and their tags), compiles the `.tease` files as written, and runs them natively from `main.tease`. Legacy scripts name media relative to `images/` and `sounds/`, and package paths start at the package
 root, so both trees are hard-linked into the package root. Media are never copied, so the corpus and the output must
 share one filesystem. A resource pack (a folder without scripts) is linked into each script package whose source names
 one of its top media folders, narrowed to the packages that name its subfolder when any do. Each package folder records
@@ -127,9 +127,10 @@ the conversion in `.conversion.json` (the converter commit, the SHA-256 of each 
 applied) and `.conversion.log`; `.conversion-summary.json` in the root records the importer commit and the date.
 
 Each unit is converted in `<converted-root>/.staging/<unit>/` and replaces its published folder only when every step
-succeeded. When a patch does not apply or the converter or the driver fails, the previous output stays, the driver
-exits with status 1, and `.failures/<unit>.json` records the step and the message until a later conversion succeeds.
-TODOs, compiler errors, and smoke-run outcomes are results, not failures.
+succeeded. When a patch does not apply, or the converter, the report, or the driver fails, the previous output stays,
+the driver exits with status 1, and `.failures/<unit>.json` records the step and the message until a later conversion
+succeeds. TODOs, compiler errors, and smoke-run outcomes are results, not failures. A replacement interrupted between
+its two moves leaves the previous output in the staging folder, and the next run restores it.
 
 ### Manual unit patches
 
@@ -172,7 +173,7 @@ Script-specific fixes stay out of the converter (owner decision 2026-10-05). The
 
 - Output edits are for additions that have no legacy form. Each names the SHA-256 of its file as the converter
   generated it from the patched sources (`sha256sum` of the file after a conversion without the output patch) and how
-  often each `find` occurs; edits apply in order after the media are linked. A changed or missing file, or another
+  often each `find` occurs; edits apply in order before the media are linked, so they reach only generated files. A changed or missing file, or another
   count, fails the unit for review. An anchor needs code: generated `// NOTE` and `// TODO` lines move as the converter
   changes. A patch that removes a TODO needs its diagnostic actually resolved.
 - Every patch needs an `id` and a `reason`; `category` is free text, such as the inspection category.

@@ -1,9 +1,22 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { loadRepositoryProjectCompiler } from "../src/compile-check.ts";
+import {
+  loadRepositoryPackageScanner,
+  loadRepositoryProjectCompiler,
+} from "../src/compile-check.ts";
 import { convertUnit, type UnitOptions, type UnitResult } from "../tools/convert-corpus.ts";
 import { PatchError, readUnitPatches, sha256 } from "../tools/unit-patches.ts";
 
@@ -24,18 +37,31 @@ const SOURCE_PATCH = {
   diff: "greeting.diff",
 };
 
-const unbuilt = await loadRepositoryProjectCompiler().then(
+const XMP_HALL =
+  '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">' +
+  '<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:subject><rdf:Bag>' +
+  "<rdf:li>hall</rdf:li></rdf:Bag></dc:subject></rdf:Description></rdf:RDF></x:xmpmeta>\n";
+
+// A conversion succeeds only with its report, which needs the repository build.
+const unbuilt = await Promise.all([
+  loadRepositoryProjectCompiler(),
+  loadRepositoryPackageScanner(),
+]).then(
   () => false as const,
   (error: unknown) => (error instanceof Error ? error.message : String(error)),
 );
 
-/** A corpus with the unit `Walk` (one script and one image), an empty converted root, and its patch folder. */
+/**
+ * A corpus with the unit `Walk` (one script and one image tagged `hall` in its sidecar), an empty converted root, and
+ * its patch folder.
+ */
 async function fixture(): Promise<{ work: string; options: UnitOptions }> {
   const work = await mkdtemp(path.join(tmpdir(), "sexscript-patches-"));
   const scripts = path.join(work, "corpus/Walk/scripts");
   await mkdir(path.join(scripts, "images"), { recursive: true });
   await writeFile(path.join(scripts, "start.groovy"), SOURCE);
   await writeFile(path.join(scripts, "images/door.jpg"), "image bytes");
+  await writeFile(path.join(scripts, "images/door.jpg.xmp"), XMP_HALL);
   await mkdir(path.join(work, "patches/Walk"), { recursive: true });
   await writeFile(path.join(work, "patches/Walk/greeting.diff"), DIFF);
   return {
@@ -93,13 +119,18 @@ test(
         reason: "The ending says goodbye.",
         file: "main.tease",
         baseHash: sha256(generated),
-        edits: [{ find: 'say "Bye"\nexit', replace: 'say "Goodbye"\nexit', count: 1 }],
+        edits: [
+          {
+            find: 'say "Bye"\nexit',
+            replace: 'showImage tagged "hall"\nsay "Goodbye"\nexit',
+            count: 1,
+          },
+        ],
       };
       await writePatches(work, [SOURCE_PATCH, outputPatch]);
-      const { record, report } = converted(await convertUnit(options));
-      assert.equal(report, "ok");
+      const { record } = converted(await convertUnit(options));
       const final = await readFile(main, "utf8");
-      assert.equal(final, generated.replace('say "Bye"', 'say "Goodbye"'));
+      assert.equal(final, generated.replace('say "Bye"', 'showImage tagged "hall"\nsay "Goodbye"'));
       // The corpus keeps its own script; the staged copy that was patched is gone.
       assert.equal(
         await readFile(path.join(options.corpusRoot, "Walk/scripts/start.groovy"), "utf8"),
@@ -122,7 +153,7 @@ test(
         { id: "farewell", layer: "output", sha256: sha256(JSON.stringify(outputPatch)) },
       ]);
 
-      // The report reads the patched sources and checks the files as written.
+      // The report reads the patched sources and checks the files as written, with the package's tagged images.
       const written: unknown = JSON.parse(
         await readFile(path.join(options.outputRoot, "Walk/.report.json"), "utf8"),
       );
@@ -130,6 +161,8 @@ test(
       assert.equal("migrationCleanFileCount" in written && written.migrationCleanFileCount, 1);
       assert.deepEqual(written.finalPackage, {
         files: [{ path: "main.tease", sha256: sha256(final) }],
+        imageCount: 1,
+        problems: [],
         compiles: true,
         failingFiles: [],
         errorsByMessage: {},
@@ -141,83 +174,114 @@ test(
   },
 );
 
-test("a stale patch stops its unit, which keeps its previous output", async () => {
-  const { work, options } = await fixture();
-  try {
-    await writePatches(work, [SOURCE_PATCH]);
-    converted(await convertUnit(options));
-    const published = path.join(options.outputRoot, "Walk");
-    const before = await snapshot(published);
-    const failure = path.join(options.outputRoot, ".failures/Walk.json");
+test(
+  "a stale patch stops its unit, which keeps its previous output",
+  { skip: unbuilt },
+  async () => {
+    const { work, options } = await fixture();
+    try {
+      await writePatches(work, [SOURCE_PATCH]);
+      converted(await convertUnit(options));
+      const published = path.join(options.outputRoot, "Walk");
+      const before = await snapshot(published);
+      const failure = path.join(options.outputRoot, ".failures/Walk.json");
 
-    // The legacy script changed below the diff.
-    await writeFile(
-      path.join(options.corpusRoot, "Walk/scripts/start.groovy"),
-      SOURCE.replace("Helo", "Hi"),
-    );
-    const staleDiff = await convertUnit(options);
-    assert.equal(staleDiff.converted, false);
-    assert.equal(!staleDiff.converted && staleDiff.failure.stage, "source patch");
-    assert.match(!staleDiff.converted ? staleDiff.failure.message : "", /does not apply/u);
-    assert.deepEqual(await snapshot(published), before);
-    assert.equal(JSON.parse(await readFile(failure, "utf8")).stage, "source patch");
-    await noStaging(options.outputRoot);
+      // The legacy script changed below the diff.
+      await writeFile(
+        path.join(options.corpusRoot, "Walk/scripts/start.groovy"),
+        SOURCE.replace("Helo", "Hi"),
+      );
+      const staleDiff = await convertUnit(options);
+      assert.equal(staleDiff.converted, false);
+      assert.equal(!staleDiff.converted && staleDiff.failure.stage, "source patch");
+      assert.match(!staleDiff.converted ? staleDiff.failure.message : "", /does not apply/u);
+      assert.deepEqual(await snapshot(published), before);
+      assert.equal(JSON.parse(await readFile(failure, "utf8")).stage, "source patch");
+      await noStaging(options.outputRoot);
 
-    // The converter changed the file an output patch was written for.
-    await writeFile(path.join(options.corpusRoot, "Walk/scripts/start.groovy"), SOURCE);
-    await writePatches(work, [
-      SOURCE_PATCH,
-      {
-        id: "farewell",
-        layer: "output",
-        reason: "The ending says goodbye.",
-        file: "main.tease",
-        baseHash: sha256("an older main.tease"),
-        edits: [{ find: 'say "Bye"', replace: 'say "Goodbye"', count: 1 }],
-      },
-    ]);
-    const staleOutput = await convertUnit(options);
-    assert.equal(!staleOutput.converted && staleOutput.failure.stage, "output patch");
-    assert.match(!staleOutput.converted ? staleOutput.failure.message : "", /another version/u);
-    assert.deepEqual(await snapshot(published), before);
+      // The converter changed the file an output patch was written for.
+      await writeFile(path.join(options.corpusRoot, "Walk/scripts/start.groovy"), SOURCE);
+      await writePatches(work, [
+        SOURCE_PATCH,
+        {
+          id: "farewell",
+          layer: "output",
+          reason: "The ending says goodbye.",
+          file: "main.tease",
+          baseHash: sha256("an older main.tease"),
+          edits: [{ find: 'say "Bye"', replace: 'say "Goodbye"', count: 1 }],
+        },
+      ]);
+      const staleOutput = await convertUnit(options);
+      assert.equal(!staleOutput.converted && staleOutput.failure.stage, "output patch");
+      assert.match(!staleOutput.converted ? staleOutput.failure.message : "", /another version/u);
+      assert.deepEqual(await snapshot(published), before);
 
-    // A conversion that succeeds again clears the failure.
-    await writePatches(work, [SOURCE_PATCH]);
-    converted(await convertUnit(options));
-    assert.equal(await stat(failure).catch(() => null), null);
-  } finally {
-    await rm(work, { recursive: true, force: true });
-  }
-});
+      // A conversion that succeeds again clears the failure.
+      await writePatches(work, [SOURCE_PATCH]);
+      converted(await convertUnit(options));
+      assert.equal(await stat(failure).catch(() => null), null);
+    } finally {
+      await rm(work, { recursive: true, force: true });
+    }
+  },
+);
 
-test("a failure after the unit was converted and linked leaves no partial replacement", async () => {
-  const { work, options } = await fixture();
-  try {
-    await writePatches(work, [SOURCE_PATCH]);
-    converted(await convertUnit(options));
-    const published = path.join(options.outputRoot, "Walk");
-    const before = await snapshot(published);
-    await writePatches(work, [
-      SOURCE_PATCH,
-      {
-        id: "farewell",
-        layer: "output",
-        reason: "The ending says goodbye.",
-        file: "main.tease",
-        baseHash: sha256(await readFile(path.join(published, "main.tease"), "utf8")),
-        edits: [{ find: 'say "Bye"', replace: 'say "Goodbye"', count: 2 }],
-      },
-    ]);
-    // Output patches apply once the staged unit is converted and its media are linked.
-    const result = await convertUnit(options);
-    assert.equal(!result.converted && result.failure.stage, "output patch");
-    assert.match(!result.converted ? result.failure.message : "", /expects 2 .* found 1/u);
-    assert.deepEqual(await snapshot(published), before);
-    await noStaging(options.outputRoot);
-  } finally {
-    await rm(work, { recursive: true, force: true });
-  }
-});
+test(
+  "a failure at the last step before the replacement leaves no partial replacement",
+  { skip: unbuilt || (process.getuid?.() === 0 ? "root ignores folder permissions" : false) },
+  async () => {
+    const { work, options } = await fixture();
+    try {
+      await writePatches(work, [SOURCE_PATCH]);
+      converted(await convertUnit(options));
+      const published = path.join(options.outputRoot, "Walk");
+      const before = await snapshot(published);
+      await writePatches(work, []);
+      // The unit is converted, linked, and reported in the staging folder, but the published folder cannot move.
+      await mkdir(path.join(options.outputRoot, ".staging"), { recursive: true });
+      await mkdir(path.join(options.outputRoot, ".failures"), { recursive: true });
+      await chmod(options.outputRoot, 0o555);
+      let result: UnitResult;
+      try {
+        result = await convertUnit(options);
+      } finally {
+        await chmod(options.outputRoot, 0o755);
+      }
+      assert.equal(!result.converted && result.failure.stage, "replacement");
+      assert.deepEqual(await snapshot(published), before);
+      await noStaging(options.outputRoot);
+
+      // An output patch whose anchor count differs fails before anything moves, too.
+      await writePatches(work, [
+        SOURCE_PATCH,
+        {
+          id: "farewell",
+          layer: "output",
+          reason: "The ending says goodbye.",
+          file: "main.tease",
+          baseHash: sha256(await readFile(path.join(published, "main.tease"), "utf8")),
+          edits: [{ find: 'say "Bye"', replace: 'say "Goodbye"', count: 2 }],
+        },
+      ]);
+      const counted = await convertUnit(options);
+      assert.equal(!counted.converted && counted.failure.stage, "output patch");
+      assert.match(!counted.converted ? counted.failure.message : "", /expects 2 .* found 1/u);
+      assert.deepEqual(await snapshot(published), before);
+
+      // A replacement interrupted between its two moves left the previous output in the staging folder; the next
+      // conversion restores it, even when that conversion fails.
+      await mkdir(path.join(options.outputRoot, ".staging/Walk"), { recursive: true });
+      await rename(published, path.join(options.outputRoot, ".staging/Walk/previous"));
+      const recovered = await convertUnit(options);
+      assert.equal(recovered.converted, false);
+      assert.deepEqual(await snapshot(published), before);
+      await noStaging(options.outputRoot);
+    } finally {
+      await rm(work, { recursive: true, force: true });
+    }
+  },
+);
 
 test("patch manifests are checked before anything is applied", async () => {
   const { work, options } = await fixture();
