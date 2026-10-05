@@ -50,4 +50,11 @@ while true {
   }
 }
 say "Capped ${capped}, lives ${lives}"
+// A for-in loop whose body is a single statement without braces.
+let cards = [2, 3, 4]
+let score = 0
+for card in cards {
+  score += card
+}
+say "Score: ${score}"
 exit

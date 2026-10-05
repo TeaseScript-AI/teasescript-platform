@@ -25,3 +25,9 @@ for (;;) {
 	if (lives < 2) break
 }
 show("Capped ${capped}, lives ${lives}")
+// A for-in loop whose body is a single statement without braces.
+def cards = [2, 3, 4]
+def score = 0
+for (def card : cards)
+    score += card
+show("Score: " + score)

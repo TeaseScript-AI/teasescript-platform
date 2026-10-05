@@ -5110,10 +5110,15 @@ function negate(condition: IrExpression): IrExpression {
 function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
   const variable = text(node.variable);
   const collectionNode = asNode(node.collection);
-  const body = asNode(node.body);
+  const loopBody = asNode(node.body);
   if (variable === "forLoopDummyParameter" && collectionNode?.kind === "list") {
-    return lowerCStyleFor(node, collectionNode, body, context);
+    return lowerCStyleFor(node, collectionNode, loopBody, context);
   }
+  // A single statement as the body is a block of one statement.
+  const body =
+    loopBody !== null && loopBody.kind !== "block" && loopBody.kind !== "empty"
+      ? { kind: "block", span: loopBody.span, statements: [loopBody] }
+      : loopBody;
   const collection = collectionNode === null ? null : lowerExpression(collectionNode, context);
   if (variable === null || collection === null || body?.kind !== "block") {
     return [
