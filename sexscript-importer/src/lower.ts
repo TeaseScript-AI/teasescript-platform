@@ -480,7 +480,13 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
       const right = node.kind === "declaration" ? asNode(node.right) : null;
       const key = right === null ? null : bindingKey(asNode(node.left), keys);
       const name = variableName(node.left);
-      const type = name === null ? UNKNOWN : (types.variables.get(name) ?? UNKNOWN);
+      // A function's local has its own type, apart from other variables of the same name.
+      const type =
+        name === null
+          ? UNKNOWN
+          : ((key === null ? undefined : types.bindingTypes?.get(key)) ??
+            types.variables.get(name) ??
+            UNKNOWN);
       if (
         key !== null &&
         (isEmptyGroovyExpression(right!) || isNullConstant(right!)) &&
