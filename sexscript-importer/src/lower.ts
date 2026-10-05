@@ -7981,14 +7981,8 @@ function truthiness(
       right: { kind: "literal", value: 0 },
     });
   }
-  addDiagnostic(
-    context,
-    "SX_CONDITION_TYPE",
-    "warning",
-    "Condition is not proven boolean; TeaseScript conditions must be boolean, unlike Groovy truthiness. Verify or compare explicitly.",
-    node.span,
-  );
-  return value;
+  // A value of unproven type is tested as Groovy did, by its value at runtime.
+  return useHelper(context, "truth", [value]);
 }
 
 /** Typed legacy loads whose missing-key null maps to the type's false value in a condition. */

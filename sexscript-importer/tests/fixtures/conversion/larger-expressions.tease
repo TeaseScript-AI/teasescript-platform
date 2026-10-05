@@ -53,7 +53,6 @@ let conditional4 = asked()
 let both = earlier3 and conditional4
 // A stored flag of unknown type and a comparison are both tested as conditions.
 let helpmode = load "help"
-// NOTE SX_CONDITION_TYPE line 15: Condition is not proven boolean; TeaseScript conditions must be boolean, unlike Groovy truthiness. Verify or compare explicitly.
 if helpmode == true or missed < 0 {
   say "Help"
 }

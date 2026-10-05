@@ -74,6 +74,7 @@ export type HelperName =
   | "pathTag"
   | "items"
   | "itemAt"
+  | "truth"
   | "askText"
   | "compare"
   | "replaceChars"
@@ -155,6 +156,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "pathTag",
   "items",
   "itemAt",
+  "truth",
   "askText",
   "compare",
   "replaceChars",
@@ -689,6 +691,35 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ret(at(v("list"), v("position"))),
         ],
       ),
+  },
+  // Groovy truth: false for null, false, zero, empty text, and an empty list, set, dict, or map.
+  truth: {
+    name: "sexscriptLegacyTruth",
+    build: () => {
+      const is = (type: string): IrExpression => ({ kind: "typeTest", value: v("value"), type });
+      const filled = prop(v("value"), "length");
+      return fn(
+        "sexscriptLegacyTruth",
+        ["value"],
+        [
+          ifS(is("boolean"), [ret(v("value"))]),
+          ifS(is("number"), [ret(bin("!=", v("value"), lit(0)))]),
+          ifS(is("string"), [ret(bin("!=", v("value"), lit("")))]),
+          ifS(bin("or", is("list"), is("set")), [ret(bin(">", filled, lit(0)))]),
+          ifS(is("dict"), [
+            ret(
+              bin(
+                ">",
+                { kind: "property", target: v("value"), name: "length", dict: true },
+                lit(0),
+              ),
+            ),
+          ]),
+          ifS(is("object"), [ret(bin("!=", v("value"), { kind: "object", properties: [] }))]),
+          ret(bin("!=", v("value"), lit(null))),
+        ],
+      );
+    },
   },
   // The items a Groovy loop visited: the characters of text, the elements of anything else.
   items: {

@@ -245,7 +245,9 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
     // Groovy's & | ^ are logical on booleans and bitwise on numbers.
     const left = inferType(asNode(node.left), environment);
     const right = inferType(asNode(node.right), environment);
-    if (onlyOf(left, BOOLEAN) && onlyOf(right, BOOLEAN | NULL)) return BOOLEAN;
+    // A side of unknown type with a flag on the other side is tested as a condition (isLogicalOperation).
+    const flag = (type: number): boolean => onlyOf(type, BOOLEAN | NULL) || type === UNKNOWN;
+    if (flag(left) && flag(right) && (left !== UNKNOWN || right !== UNKNOWN)) return BOOLEAN;
     return onlyOf(left, NUMBER) && onlyOf(right, NUMBER) ? NUMBER : UNKNOWN;
   }
   if (operator !== "+") return UNKNOWN;

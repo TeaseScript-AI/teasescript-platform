@@ -822,7 +822,13 @@ test("lowers single-statement if, else, and else-if bodies", () => {
     {
       kind: "if",
       span,
-      condition: variable("first"),
+      condition: {
+        kind: "binary",
+        span,
+        operator: "==",
+        left: variable("first"),
+        right: constant(1),
+      },
       then: statement({
         kind: "binary",
         span,
@@ -833,7 +839,13 @@ test("lowers single-statement if, else, and else-if bodies", () => {
       else: {
         kind: "if",
         span,
-        condition: variable("second"),
+        condition: {
+          kind: "binary",
+          span,
+          operator: "==",
+          left: variable("second"),
+          right: constant(2),
+        },
         then: { kind: "return", span, value: constant(null) },
         else: statement({
           kind: "binary",
@@ -854,10 +866,9 @@ test("lowers single-statement if, else, and else-if bodies", () => {
   assert.equal(
     emitTease(program),
     [
-      "// NOTE SX_CONDITION_TYPE line 1: Condition is not proven boolean; TeaseScript conditions must be boolean, unlike Groovy truthiness. Verify or compare explicitly.",
-      "if first {",
+      "if first == 1 {",
       "  value = 1",
-      "} else if second {",
+      "} else if second == 2 {",
       "  exit",
       "} else {",
       "  value = 2",

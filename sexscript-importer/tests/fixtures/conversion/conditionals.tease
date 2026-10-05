@@ -1,3 +1,24 @@
+function sexscriptLegacyTruth(value) {
+  if value is boolean {
+    return value
+  }
+  if value is number {
+    return value != 0
+  }
+  if value is string {
+    return value != ""
+  }
+  if value is list or value is set {
+    return value.length > 0
+  }
+  if value is dict {
+    return value.length > 0
+  }
+  if value is object {
+    return value != {}
+  }
+  return value != null
+}
 let rounds = randomInteger(0..10)
 let mood = "playful"
 if rounds > 5 {
@@ -19,4 +40,12 @@ if labelValue == null or labelValue == "" {
   labelValue = "pet"
 }
 say "Mood ${mood}, bonus ${bonus}, ${labelValue}"
+// A value of unproven type, such as a parameter, is true as Groovy found it: not null, false, zero, or empty.
+function finish(message) {
+  if sexscriptLegacyTruth(message) {
+    say message
+  }
+}
+finish("Done")
+finish("")
 exit
