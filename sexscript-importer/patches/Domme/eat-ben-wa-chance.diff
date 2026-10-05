@@ -1,10 +1,11 @@
 --- a/scripts/Domme/eat.groovy
 +++ b/scripts/Domme/eat.groovy
-@@ -2,6 +2,11 @@
+@@ -2,6 +2,12 @@
  if(loadBoolean("intro.female")) gender = "girl"
  
  def knk = load("domme.kinky")
-+int chanceBenWaBalls = loadInteger("domme.chanceBenWaBalls")
++Integer chanceBenWaBalls = loadInteger("domme.chanceBenWaBalls")
++if(chanceBenWaBalls == null) chanceBenWaBalls = 8
 +if(chanceBenWaBalls<8){
 +	chanceBenWaBalls = 8
 +	save("domme.chanceBenWaBalls",chanceBenWaBalls)

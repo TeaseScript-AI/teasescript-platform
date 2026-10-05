@@ -69,6 +69,8 @@ implemented):
 | `Calendar.getInstance().get(Calendar.DAY_OF_YEAR)` | `(getDate() - toDate("${getDate().year}-01-01")).days + 1` (#532) |
 | `new Date().format("yyyy-MM-dd")`, `new Date().format("HH:mm")` | `getDate().toISO()`; `getTime().formatTime()`, with a note (#532) |
 | `list + other`, `list << x`, `list.push(x)`, `list += other` | a generated concatenation helper and `add()` |
+| `list - other`, `list -= other` | a generated helper that keeps every element `other` does not hold, repeated ones too, as Groovy did (`difference()` keeps each once); a right side not proven a list or one value is decided at runtime |
+| `x instanceof Number` (`String`, `Boolean`, `List`, `Map`) | `x is number` (`string`, `boolean`, `list`, `dict` or `object`) (#530) |
 | a map used as a lookup table: `[(KEY): v]`, `map[key]`, `containsKey`, `keySet`, `values`, `size`, `put`, `remove`, `clear`, `each { k, v -> }` | a `dict` (#536): `dict{ [KEY]: v }`, `map[key]`, `contains`, `keys`, `values`, `length`, `map[key] = v`, a guarded `remove`, `clear`, `for k in map` |
 | a map with fixed names that gains fields later, and its `clear()` | an object literal that declares every used field (null when added later); `clear()` reassigns it with null fields, so a map that `clear()` empties starts every field as null and sets its values right after, since a property keeps the type of its first value (ADR 0021 rule 1.4) |
 | `list.remove(index)`, `list.remove(value)` | `list.removeAt(index)`, also as a value; `list.remove(value)` with structural equality (#517) |
@@ -87,7 +89,8 @@ implemented):
 | a script-level `return "name"`, the next script of the legacy chain | `goto "path.tease"`, with the path from the package root (ADR 0022); a name the package has no script for ended the legacy chain quietly, so it becomes `exit` with a note (`SX_MISSING_SCRIPT`, 8 sites) |
 | `return name` with a computed name | `goto script(name)` (#570), after `exit` when the name is null or empty (`SX_DYNAMIC_SCRIPT`, DisciplineClinic's `returnPoint`) |
 | `return null`, `return`, or the end of a script | `exit`: every file ends with a transfer or `exit` (ADR 0022 §4); parameters and return points passed through storage stay `save` and `load` |
-| the scripts the legacy player listed | a generated `main.tease` that asks the legacy profile and goes to the main script, the top-level script of `scripts/` (Domme3, DisciplineClinic); a menu that goes to each top-level script no other script chains to where there are several (`SX_ENTRY_MENU`); a legacy `main.groovy` is `main.tease` itself. Every other file keeps its legacy folder and name (owner decision 2026-10-05) |
+| the scripts the legacy player listed | a generated `main.tease` that asks the legacy profile and goes to the entry: the script of `scripts/` that calls `setInfos`, is no internal script, and that no other script chains to, or without one there such a script one folder down (teachertrouble's `Banjo/teachertrouble`); a menu labelled by setInfos title and language where there are several (`SX_ENTRY_MENU`); a legacy `main.groovy` is `main.tease` itself. Every other file keeps its legacy folder and name (owner decisions 2026-10-05) |
+| mixin modules a script loads at runtime (`Eval.me` of each file of a folder, Toy's `toy/*.groovy`) | each module its own file, its injected methods and loader `global function`s, with what they use of the loading script global too (its fields as `global`s, assigned where the script declared them); a module folder that several scripts load is composed into each |
 | a function several scripts define, as authors copied it between scripts | a function in each file, as in the legacy package (owner decision 2026-10-05) |
 | the methods of a package-local helper class, such as `Domme3Class` | `global function`s in the class's own file (`Domme3/Domme3Class.tease`), with its static fields of literal values as `global`s, where other files call them; a method that reads other state or dispatches closure values is copied into each script that calls it |
 | the importer's own generated helpers (`sexscriptLegacy*`) and the system speaker | one `global function` each in `main.tease`, with the state they share across files, such as the switch button's ID, as a `global`; the background-sound helpers stay in each file, since the legacy player stopped a script's sounds when it ended |
@@ -439,8 +442,7 @@ Reported for manual work and intentionally not reproduced: reflection and `Groov
 package helpers, `java.io.File` access and directory listing other than a recognized module loader,
 `System.getProperty`, OS processes (Toy's speech output), `openCdTrays`, `useEmailAddress`, `useFile`, the old online
 `send`/`receive` service, and `try`/`catch` around desktop APIs. The webcam `getImage` converts to `takePhoto()`,
-native since #475, and the file picker `getFile` to the workaround for `chooseFile()` (see Accepted but not
-implemented). `Locale.getDefault()` serves the localization question above.
+native since #475, and the file picker `getFile` to `askImage()` (#608), since scripts used it for a photo. `Locale.getDefault()` serves the localization question above.
 Scripts also contain plain legacy bugs the importer reports instead of repairing: calls to undefined functions, reads
 of variables that nothing assigns (10 sites, such as `save("domme3.spank", fun)`; SexScript failed with a missing
 property when they ran), helper calls with missing arguments, and closures referenced without `()` (which Groovy
@@ -482,8 +484,9 @@ loops, and only 6 read a literal base path. A clean mapping needs overlay positi
 pixel size, or an image-size query.
 
 `askBoolean` with custom labels already converts to a two-option `choose` compared with its first label. Legacy
-`getFile(title)` was used for a photo of the player, so it shows the title and takes the photo with `takePhoto()`
-(`SX_FILE_PHOTO`, owner decision 2026-10-05); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
+`getFile(title)` was used for a photo of the player, so it becomes `askImage(title)` (#608), which the player answers
+with an image file or the camera (`SX_FILE_PHOTO`, owner decision 2026-10-05; a cancelled chooser gave null, which
+askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 
 ### Universal conversions decided by the owner (2026-10-05)
 
@@ -559,6 +562,7 @@ the merge of `main` at `242ada7a`; the column "Before" gives the count at the `d
 | Closures that capture local state | Toy 10 | Toy 10 | explicit state parameters: feasible for 2 local helpers that call sibling local closures (`suck`, `suckBeat`); the other 8 are stored in registries, returned, or evaluate persona expressions |
 | Method pointers; calls of closures kept in data (`it.cond()`, `e.event.func(...)`) | Toy 3 and 4 | Toy 3 and 5 | action IDs with a dispatcher |
 | Persona data files with Groovy expression strings | Toy | Toy | data converted at import time |
+| Behaviour kept as data with code strings evaluated at runtime (`Eval.me`, expression strings in plan or config records, Toy's 9 session plans with 26 expression strings in `images/toy/domme.groovy`, run by `sessionPlay`) | Toy | Toy | owner decision 2026-10-05: native TeaseScript, in per-unit patches and in converter rules where the pattern is general: each behaviour an ordinary function, its conditions plain `if`s, and the choice among them a small selection list or `switch` (Toy: a function per session, and session choice as a list of conditions with weights). Eval is not emulated with a lookup table of expression texts |
 | `instanceof`; `asBoolean()`; `Math.floorDiv` | Toy 1 each | Toy 1 each | `is` (#530); Groovy truth; `floor(a / b)` |
 
 **Workaround possible, but a hack.** Works with current TeaseScript but differs from the intended behavior; the

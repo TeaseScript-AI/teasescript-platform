@@ -1,0 +1,22 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -306,7 +306,7 @@
+ 	}
+ 	
+ 	final hasSessionToy = { String name ->
+-		if (!sessionToys.containsKey(name)) return false
++		if (!sessionToys.containsKey(name)) return 0
+ 		else return sessionToys[name];
+ 	}
+ 
+--- a/scripts/toy/bondage.groovy
++++ b/scripts/toy/bondage.groovy
+@@ -13,7 +13,7 @@
+ 		def ordertxt = [];
+ 
+ 		if (toys[restraint] && stateIs(toys[restraint].state)) return true;
+-		if (hasSessionToy(restraint)==false) {
++		if (!sessionToys.containsKey(restraint)) {
+ 			if (restraint in [HANDCUFFS, ANKLECUFFS, CLAMPS, CLOTHESPINS])
+ 				ordertxt = [(amount==1? "your ${restraintName},":"$amount ${restraintName},")];
+ 			else ordertxt = [(amount==1? "a ${restraintName},":"$amount ${restraintName}s,")];

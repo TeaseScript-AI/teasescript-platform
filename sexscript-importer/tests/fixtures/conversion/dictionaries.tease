@@ -158,4 +158,11 @@ for toyValue in needed {
   }
 }
 say "Missing: ${missing}"
+// A stored map that may be missing is false when null or empty, as Groovy's null or empty map was.
+let remembered = load "toy.remembered"
+let slot = "first"
+// NOTE SX_DICT_MISSING_KEY line 97: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
+if remembered != null and remembered.length > 0 {
+  say "Remembered ${remembered[slot]}"
+}
 exit

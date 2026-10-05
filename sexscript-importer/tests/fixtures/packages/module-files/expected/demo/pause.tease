@@ -1,0 +1,15 @@
+// NOTE SX_BINDING_VARIABLE: Groovy kept lastPause, which functions assign without a declaration, in the script's binding that every function shares; it is declared at the top of the script with an empty value.
+global lastPause = 0
+global function loadPauseModule {
+  // A variable that the module's methods assign without a declaration lives in the module's binding.
+  // Returning nothing on every path keeps the module's result fixed.
+  if not enabled {
+    return null
+  }
+  say "Pausing enabled"
+}
+global function pause {
+  lastPause = sexscriptLegacyRandom(rounds - 2) + 1
+  wait lastPause * boost
+  sexscriptLegacyStopBackgroundSounds()
+}

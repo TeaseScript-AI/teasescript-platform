@@ -27,14 +27,26 @@ import {
   photoCopy,
   withGuardedInputs,
 } from "./lower.ts";
-import { helperDefinitionOrder, SYSTEM_SPEAKER, withActionDispatcher } from "./helpers.ts";
+import {
+  helperDefinitionOrder,
+  SYSTEM_SPEAKER,
+  withActionDispatcher,
+  withDispatcherResultTypes,
+} from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { legacyProfilePrompt } from "./profile.ts";
+import {
+  expressionType,
+  functionResultTypes,
+  withReturnTypes,
+  type TeaseType,
+} from "./variable-types.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 
 const ACCEPTED_EXTERNAL_CALLS = new Set([
   "askBoolean",
   "askBooleans",
+  "askImage",
   "askInteger",
   "askNumber",
   "askText",
@@ -204,10 +216,17 @@ function menuLabels(
 ): Map<string, string> {
   const indexOf = new Map([...scripts.pathOf].map(([index, path]) => [path, index]));
   const base = (path: string): string => path.replace(/^.*\//u, "").replace(/\.tease$/u, "");
+  // The language setInfos gave, else a name's language suffix (`intro_de`); named where the entries differ in it.
+  const languageOf = (path: string): string | undefined => {
+    const given = programs[indexOf.get(path) ?? -1]?.metadata?.language?.trim().toLowerCase();
+    if (given !== undefined && LANGUAGES[given.slice(0, 2)] !== undefined) return given.slice(0, 2);
+    return /_([a-z]{2})$/u.exec(base(path))?.[1];
+  };
+  const languages = new Set(paths.map((path) => languageOf(path) ?? "en"));
   const labels = new Map(
     paths.map((path) => {
       const title = programs[indexOf.get(path) ?? -1]?.metadata?.title?.trim() ?? "";
-      const language = /_([a-z]{2})$/u.exec(base(path))?.[1];
+      const language = languages.size > 1 ? languageOf(path) : undefined;
       const readable = base(path)
         .replace(/_([a-z]{2})$/u, (suffix, code: string) =>
           LANGUAGES[code] === undefined ? suffix : "",
@@ -315,7 +334,7 @@ export interface LoweredPackage {
 interface PackageScripts {
   /** The legacy name of each script (its path without `.groovy`, in lower case) to its TeaseScript path. */
   paths: Map<string, string>;
-  /** The main script, which main.tease goes to (or is, as `main.groovy`); null with several top-level scripts. */
+  /** A legacy `main.groovy` in the top folder, which is the package's main.tease itself; null without one. */
   entry: number | null;
   /** The scripts in the package root, which the legacy player listed. */
   rootScripts: number[];
@@ -325,10 +344,7 @@ interface PackageScripts {
   root: string;
 }
 
-/**
- * The scripts of a package, with their paths from the legacy scripts folder. A single top-level script is the main
- * script, as is one named `main.groovy` among several.
- */
+/** The scripts of a package, with their paths from the legacy scripts folder. */
 function packageScripts(
   files: readonly ParsedGroovyFile[],
   standalone: boolean,
@@ -353,10 +369,9 @@ function packageScripts(
   const root = scriptsAt < 0 ? common : common.slice(0, scriptsAt + 1);
   const relative = (index: number): string => segments.get(index)!.slice(root.length).join("/");
   const rootScripts = scripts.filter((index) => !relative(index).includes("/"));
+  // A legacy `main.groovy` in the top folder is the package's main.tease itself.
   const entry =
-    rootScripts.length === 1
-      ? rootScripts[0]!
-      : (rootScripts.find((index) => relative(index).toLowerCase() === "main.groovy") ?? null);
+    rootScripts.find((index) => relative(index).toLowerCase() === "main.groovy") ?? null;
   // Each script keeps its name; only a legacy `main.groovy` is the package's main.tease itself.
   const pathOf = new Map(
     scripts.map((index) => [index, relative(index).replace(/\.groovy$/iu, ".tease")]),
@@ -391,10 +406,21 @@ function entryMenu(
   internal: ReadonlySet<number>,
 ): MigrationProgram {
   const targets = new Set<string>();
+  // The literal transfers of each script, by its path.
+  const transfers = new Map<string, Set<string>>();
+  // The scripts with a computed transfer (`goto script(...)`), which may reach any script of their folder.
+  const computed = new Set<string>();
+  let source = "";
   const collect = (statements: readonly IrStatement[]): void => {
     for (const statement of statements) {
-      if (statement.kind === "goto" && statement.target.kind === "file")
+      if (statement.kind === "goto" && statement.target.kind === "file") {
         targets.add(statement.target.path.toLowerCase());
+        transfers.set(
+          source,
+          (transfers.get(source) ?? new Set()).add(statement.target.path.toLowerCase()),
+        );
+      }
+      if (statement.kind === "goto" && statement.target.kind !== "file") computed.add(source);
       if (statement.kind === "function") collect(statement.body);
       if (statement.kind === "if") {
         collect(statement.then);
@@ -408,31 +434,82 @@ function entryMenu(
       }
     }
   };
-  for (const program of programs) collect(program.statements);
+  programs.forEach((program, index) => {
+    source = (scripts.pathOf.get(index) ?? "").toLowerCase();
+    collect(program.statements);
+  });
   const base = (path: string): string =>
     path.replace(/_[a-z]{2}(?:_[a-z]{2})?\.tease$/iu, ".tease");
+  const depthOf = (path: string): number => path.split("/").length - 1;
   const targeted = (path: string): boolean =>
     targets.has(path.toLowerCase()) || targets.has(base(path).toLowerCase());
-  const listed = scripts.rootScripts.filter((index) => !internal.has(index));
-  // Other versions of a script, which the corpus merge kept beside it as `name__sha256_<hash>`, come after the scripts.
-  const offered = listed
+  // The entries (owner decision 2026-10-05): the scripts of the top folder that call setInfos, as the legacy player
+  // listed them, apart from internal scripts and scripts that another script chains to; without one there, those one
+  // folder down, beside folders such as system/. Where every script of a level is chained to, as scripts that chain to
+  // each other in a circle, the hub of the circle starts (entryScripts).
+  const paths = [...scripts.pathOf.values()];
+  const folderOf = (path: string): string => path.slice(0, path.lastIndexOf("/") + 1).toLowerCase();
+  const edges = new Map(
+    paths.map((path) => {
+      const to = transfers.get(path.toLowerCase()) ?? new Set<string>();
+      const anyBelow = computed.has(path.toLowerCase());
+      // A chain to a script also reached its localized variants, which the legacy player chose by language.
+      return [
+        path,
+        paths.filter(
+          (other) =>
+            other !== path &&
+            (to.has(other.toLowerCase()) ||
+              to.has(base(other).toLowerCase()) ||
+              (anyBelow && other.toLowerCase().startsWith(folderOf(path)))),
+        ),
+      ] as const;
+    }),
+  );
+  const listed = new Set(
+    [...scripts.pathOf].flatMap(([index, path]) =>
+      !internal.has(index) && programs[index]?.metadata != null ? [path] : [],
+    ),
+  );
+  // A main script's sub-scripts sit in the folder of its name, `jewell/` for `jewell.groovy`, and their chains back to it
+  // do not make it a chained script.
+  const ownFolder = (path: string): string => `${path.replace(/\.tease$/iu, "").toLowerCase()}/`;
+  const chainedFromOutside = (path: string): boolean =>
+    [...transfers].some(
+      ([from, to]) =>
+        from !== path.toLowerCase() &&
+        !from.startsWith(ownFolder(path)) &&
+        (to.has(path.toLowerCase()) ||
+          // A chain to the main script also reached its localized variant, unless it returns from the main's own folder.
+          (to.has(base(path).toLowerCase()) &&
+            from !== base(path).toLowerCase() &&
+            !from.startsWith(ownFolder(base(path))))),
+    );
+  const named = (depth: number): string[] =>
+    [...listed]
+      .filter((path) => depthOf(path) === depth && !chainedFromOutside(path))
+      .sort(versionOrder);
+  const starts = entryScripts(paths, edges, listed);
+  const hubs = (depth: number): string[] =>
+    starts.filter((path) => depthOf(path) === depth).sort(versionOrder);
+  const entries =
+    named(0).length > 0
+      ? named(0)
+      : named(1).length > 0
+        ? named(1)
+        : hubs(0).length > 0
+          ? hubs(0)
+          : hubs(1);
+  // Without such a script, the scripts of the top folder that nothing chains to.
+  const rootListed = scripts.rootScripts.filter((index) => !internal.has(index));
+  const offered = rootListed
     .map((index) => scripts.pathOf.get(index)!)
     .filter((path) => !targeted(path))
-    .sort((first, second) =>
-      isOtherVersion(first) === isOtherVersion(second)
-        ? first < second
-          ? -1
-          : first > second
-            ? 1
-            : 0
-        : isOtherVersion(first)
-          ? 1
-          : -1,
-    );
+    .sort(versionOrder);
   const rooted =
     offered.length > 0
       ? offered
-      : (listed.length > 0 ? listed : scripts.rootScripts).map((index) =>
+      : (rootListed.length > 0 ? rootListed : scripts.rootScripts).map((index) =>
           scripts.pathOf.get(index)!,
         );
   // A package whose scripts are all in folders, such as System/, offers the scripts nothing chains to, or every script.
@@ -440,11 +517,13 @@ function entryMenu(
     .flatMap(([index, path]) => (internal.has(index) ? [] : [path]))
     .sort();
   const choices =
-    rooted.length > 0
-      ? rooted
-      : everyScript.some((path) => !targeted(path))
-        ? everyScript.filter((path) => !targeted(path))
-        : everyScript;
+    entries.length > 0
+      ? entries
+      : rooted.length > 0
+        ? rooted
+        : everyScript.some((path) => !targeted(path))
+          ? everyScript.filter((path) => !targeted(path))
+          : everyScript;
   const variants = [...scripts.pathOf.values()]
     .filter((path) => base(path) !== path && targeted(path) && !targets.has(path.toLowerCase()))
     .sort();
@@ -502,6 +581,14 @@ function entryMenu(
             span: null,
           },
         ];
+  // One entry needs no menu and no note: main.tease goes there.
+  if (choices.length === 1 && variants.length === 0)
+    return {
+      sourceName: `${scripts.root}/main.tease`,
+      metadata: null,
+      statements: chain,
+      diagnostics: [],
+    };
   return {
     sourceName: `${scripts.root}/main.tease`,
     metadata: null,
@@ -512,6 +599,100 @@ function entryMenu(
     ],
     diagnostics: [{ code: "SX_ENTRY_MENU", severity: "warning", message, span: null }],
   };
+}
+
+/**
+ * The scripts a package starts at: in each group of scripts that chain to each other in a circle (a strongly connected
+ * component) that no script outside it chains to, the listed script the others return to most (the hub), or the
+ * group's one listed script.
+ */
+function entryScripts(
+  paths: readonly string[],
+  edges: ReadonlyMap<string, readonly string[]>,
+  listed: ReadonlySet<string>,
+): string[] {
+  // Tarjan's algorithm, iterative over the transfer graph.
+  const index = new Map<string, number>();
+  const low = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const component = new Map<string, number>();
+  let counter = 0;
+  let components = 0;
+  const connect = (start: string): void => {
+    const work: Array<{ node: string; next: number }> = [{ node: start, next: 0 }];
+    index.set(start, counter);
+    low.set(start, counter);
+    counter += 1;
+    stack.push(start);
+    onStack.add(start);
+    while (work.length > 0) {
+      const frame = work.at(-1)!;
+      const targets = edges.get(frame.node) ?? [];
+      if (frame.next < targets.length) {
+        const target = targets[frame.next]!;
+        frame.next += 1;
+        if (!index.has(target)) {
+          index.set(target, counter);
+          low.set(target, counter);
+          counter += 1;
+          stack.push(target);
+          onStack.add(target);
+          work.push({ node: target, next: 0 });
+        } else if (onStack.has(target)) {
+          low.set(frame.node, Math.min(low.get(frame.node)!, index.get(target)!));
+        }
+        continue;
+      }
+      work.pop();
+      const parent = work.at(-1);
+      if (parent !== undefined)
+        low.set(parent.node, Math.min(low.get(parent.node)!, low.get(frame.node)!));
+      if (low.get(frame.node) === index.get(frame.node)) {
+        for (let member = stack.pop(); member !== undefined; member = stack.pop()) {
+          onStack.delete(member);
+          component.set(member, components);
+          if (member === frame.node) break;
+        }
+        components += 1;
+      }
+    }
+  };
+  for (const path of paths) if (!index.has(path)) connect(path);
+  const reached = new Set<number>();
+  for (const [from, targets] of edges)
+    for (const target of targets)
+      if (component.get(from) !== component.get(target)) reached.add(component.get(target)!);
+  const result: string[] = [];
+  for (let group = 0; group < components; group += 1) {
+    if (reached.has(group)) continue;
+    const members = paths.filter((path) => component.get(path) === group && listed.has(path));
+    if (members.length <= 1) {
+      result.push(...members);
+      continue;
+    }
+    // The hub is the script the others return to most; then the one that chains to most, the shallowest, and the first.
+    const inGroup = paths.filter((path) => component.get(path) === group);
+    const incoming = (path: string): number =>
+      inGroup.filter((other) => (edges.get(other) ?? []).includes(path)).length;
+    const outgoing = (path: string): number => edges.get(path)?.length ?? 0;
+    result.push(
+      members.toSorted(
+        (left, right) =>
+          incoming(right) - incoming(left) ||
+          outgoing(right) - outgoing(left) ||
+          left.split("/").length - right.split("/").length ||
+          versionOrder(left, right),
+      )[0]!,
+    );
+  }
+  return result;
+}
+
+/** Script paths in name order, with other versions of a script (`name__sha256_<hash>`) after the scripts. */
+function versionOrder(first: string, second: string): number {
+  if (isOtherVersion(first) !== isOtherVersion(second)) return isOtherVersion(first) ? 1 : -1;
+  return first < second ? -1 : first > second ? 1 : 0;
 }
 
 export function lowerPackage(
@@ -598,16 +779,45 @@ export function lowerPackage(
     ),
   );
 
+  // In a package, a mixin module directory that one script loads keeps its modules as their own files (owner decision
+  // 2026-10-05); one that several scripts load is composed into each.
+  const loaders = new Map<string, number>();
+  lowered.forEach((program, index) => {
+    if (files[index]?.root?.kind !== "scriptBody" || program.module !== undefined) return;
+    for (const directory of program.loadsModuleDirectories ?? [])
+      loaders.set(directory, (loaders.get(directory) ?? 0) + 1);
+  });
+  const separateModules = new Set(
+    options.standalone === true || scripts === null
+      ? []
+      : [...loaders].flatMap(([directory, count]) => (count === 1 ? [directory] : [])),
+  );
   // What a function nothing references cannot convert becomes a note, in the file and in the composed script.
   const uncalled: MigrationDiagnostic[][] = files.map(() => []);
   const texts = packageTexts(files);
+  // A module that becomes its own file declares its functions' result types there too, knowing what the functions of
+  // the package's scripts return; a name that several scripts define tells nothing.
+  const scriptFunctions = lowered.flatMap((program, index) =>
+    files[index]?.root?.kind === "scriptBody" && program.module === undefined
+      ? program.statements.filter((statement) => statement.kind === "function")
+      : [],
+  );
+  const scriptResults = functionResultTypes(
+    scriptFunctions.filter(
+      (statement) =>
+        scriptFunctions.filter((other) => other.name === statement.name).length === 1,
+    ),
+  );
   const composed = lowered.map((program, index) => {
-    if (files[index]?.root?.kind !== "scriptBody" || program.module !== undefined) return program;
+    if (program.module !== undefined)
+      return { ...program, statements: withReturnTypes(program.statements, scriptResults) };
+    if (files[index]?.root?.kind !== "scriptBody") return program;
     const script = withLaunchMarkers(
       composeProgram(
         withLoadedModules(
           program,
           lowered.filter((module, other) => module.module !== undefined && visible(index, other)),
+          separateModules,
         ),
         functionCatalog,
         classFunctions,
@@ -641,12 +851,17 @@ export function lowerPackage(
     files[index]?.root?.kind === "scriptBody" && program.module === undefined ? [index] : [],
   );
   const accepted = options.accepted ?? new Set();
-  const withClasses = noted.map((program, index) => classOutputs.get(index) ?? program);
+  const moduleFiles = withModuleFiles(noted, files);
+  const withClasses = noted.map(
+    (program, index) => moduleFiles.get(index) ?? classOutputs.get(index) ?? program,
+  );
   if (scripts === null || options.standalone === true) {
     // Files converted on their own keep everything they need; a lone script of a package also asks the profile.
     const entryIndex = scriptIndexes.length === 1 ? scriptIndexes[0]! : null;
-    const programs = withClasses.map((program, index) =>
-      index === entryIndex ? withProfile(program, withClasses, accepted) : program,
+    const programs = withNullableParameters(
+      withClasses.map((program, index) =>
+        index === entryIndex ? withProfile(program, withClasses, accepted) : program,
+      ),
     );
     return {
       lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
@@ -657,30 +872,15 @@ export function lowerPackage(
   }
   // main.tease (ADR 0022 §1): a legacy `main.groovy`, or a generated file that asks the legacy profile and goes to the
   // package's main script, or offers its scripts where it has several.
-  const entry = scripts.entry;
-  const legacyMain =
-    entry !== null && scripts.pathOf.get(entry)!.toLowerCase() === "main.tease" ? entry : null;
+  const legacyMain = scripts.entry;
   const generated: MigrationProgram | null =
     legacyMain !== null
       ? null
-      : entry !== null
-        ? {
-            sourceName: `${scripts.root}/main.tease`,
-            metadata: null,
-            statements: [
-              {
-                kind: "goto",
-                target: { kind: "file", path: scripts.pathOf.get(entry)! },
-                span: null,
-              },
-            ],
-            diagnostics: [],
-          }
-        : entryMenu(scripts, withClasses, internalScripts(files, options.internalScripts));
+      : entryMenu(scripts, withClasses, internalScripts(files, options.internalScripts));
   const mainProgram = withProfile(generated ?? withClasses[legacyMain!]!, withClasses, accepted);
-  const outputIndexes = [...scriptIndexes, ...classOutputs.keys()].filter(
-    (index) => index !== legacyMain,
-  );
+  const outputIndexes = [
+    ...new Set([...scriptIndexes, ...classOutputs.keys(), ...moduleFiles.keys()]),
+  ].filter((index) => index !== legacyMain);
   const shared = withMainHelpers(
     outputIndexes.map((index) => withClasses[index]!),
     mainProgram,
@@ -702,12 +902,16 @@ export function lowerPackage(
       new Set([...project].filter((name) => !own.has(name))),
     );
   };
-  const main = apart(shared.main, true);
-  const programs = withClasses.map((program, index) => {
-    if (index === legacyMain) return main;
+  const apartMain = apart(shared.main, true);
+  const apartPrograms = withClasses.map((program, index) => {
+    if (index === legacyMain) return apartMain;
     const position = outputIndexes.indexOf(index);
     return position < 0 ? program : apart(shared.programs[position]!, false);
   });
+  // Calls in any file may pass null for a parameter whose default gives it a type.
+  const nullable = withNullableParameters([apartMain, ...apartPrograms]);
+  const main = nullable[0]!;
+  const programs = nullable.slice(1);
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
     composed: programs,
@@ -715,7 +919,9 @@ export function lowerPackage(
     paths: files.map(
       (file, index) =>
         scripts.pathOf.get(index) ??
-        (classOutputs.has(index) ? packagePath(file.sourceName, scripts.root) : null),
+        (classOutputs.has(index) || (moduleFiles.has(index) && !scripts.pathOf.has(index))
+          ? packagePath(file.sourceName, scripts.root)
+          : null),
     ),
   };
 }
@@ -795,6 +1001,190 @@ function withMainHelpers(
     programs: programs.map(without),
     main: { ...main, statements: [...own.slice(0, at), ...shared, ...own.slice(at)] },
   };
+}
+
+/**
+ * Mixin modules that one script loads, each as its own file (owner decision 2026-10-05): the statements the script's
+ * composition marked with a module (withLoadedModules) go to that module's file, and the script keeps the rest. A
+ * module's functions are `global function`s, since the script calls them, and so is everything they use of their own
+ * file and of the script (withGlobalReach). The result maps the index of the script, and of each module, to its file.
+ */
+function withModuleFiles(
+  programs: readonly MigrationProgram[],
+  files: readonly ParsedGroovyFile[],
+): Map<number, MigrationProgram> {
+  const result = new Map<number, MigrationProgram>();
+  const indexOfSource = new Map(files.map((file, index) => [file.sourceName, index]));
+  programs.forEach((program, script) => {
+    if (program.module !== undefined) return;
+    const origins = [...new Set(program.statements.flatMap((statement) => statement.origin ?? []))];
+    if (origins.length === 0) return;
+    const strip = ({ origin: _origin, ...statement }: IrStatement): IrStatement => statement;
+    const own = program.statements.filter((statement) => statement.origin === undefined);
+    const modules = origins.map((origin) => {
+      const index = indexOfSource.get(origin)!;
+      const module = programs[index]!;
+      return {
+        index,
+        program: {
+          sourceName: module.sourceName,
+          metadata: null,
+          statements: program.statements
+            .filter((statement) => statement.origin === origin)
+            .map(strip),
+          diagnostics: module.diagnostics,
+        } satisfies MigrationProgram,
+      };
+    });
+    const reached = withGlobalReach([
+      { ...program, statements: own },
+      ...modules.map(({ program: module }) => module),
+    ]);
+    result.set(script, reached[0]!);
+    modules.forEach(({ index }, position) => result.set(index, reached[position + 1]!));
+  });
+  return result;
+}
+
+/**
+ * The files with every function of the second and later files (the modules) a `global function`, and with what those
+ * reach a global in turn (V30 §11): a function or value they use, of their own file or of the first file (the script
+ * that loads them). A value whose start is not literal is declared with its type's empty value, which the file then
+ * assigns where it declared it (ADR 0022 §6.4).
+ */
+function withGlobalReach(programs: readonly MigrationProgram[]): MigrationProgram[] {
+  const definitions = programs.map(
+    (program) =>
+      new Map(
+        program.statements.flatMap((statement): Array<[string, IrStatement]> =>
+          statement.kind === "function" || statement.kind === "let"
+            ? [[statement.name, statement]]
+            : [],
+        ),
+      ),
+  );
+  const global = programs.map(() => new Set<string>());
+  const queue: Array<{ file: number; statement: FunctionStatement }> = [];
+  const mark = (file: number, name: string): void => {
+    if (global[file]!.has(name)) return;
+    global[file]!.add(name);
+    const statement = definitions[file]!.get(name);
+    if (statement?.kind === "function") queue.push({ file, statement });
+  };
+  // A module file holds declarations only: its functions and its values are all global.
+  programs.forEach((program, file) => {
+    if (file === 0) return;
+    for (const statement of program.statements)
+      if (statement.kind === "function" || statement.kind === "let") mark(file, statement.name);
+  });
+  while (queue.length > 0) {
+    const { file, statement } = queue.shift()!;
+    const used = freeNames(statement);
+    for (const name of [...used.variables, ...used.calls]) {
+      const owner = definitions[file]!.has(name)
+        ? file
+        : definitions[0]!.has(name)
+          ? 0
+          : definitions.findIndex((names) => names.has(name));
+      if (owner >= 0) mark(owner, name);
+    }
+  }
+  const results = functionResultTypes(programs.flatMap((program) => program.statements));
+  return programs.map((program, file) => ({
+    ...program,
+    statements: program.statements.flatMap((statement): IrStatement[] => {
+      if (statement.kind === "function" && global[file]!.has(statement.name))
+        return [{ ...statement, global: true }];
+      if (statement.kind !== "let" || !global[file]!.has(statement.name)) return [statement];
+      if (isLiteralValue(statement.value)) return [{ ...statement, global: true }];
+      const inferred = expressionType(
+        statement.value,
+        () => ({ kind: "unknown" }),
+        (name) => results.get(name),
+      );
+      return [
+        { ...statement, value: startValue(statement.type, inferred), global: true },
+        {
+          kind: "assign",
+          target: { kind: "variable", name: statement.name },
+          operator: "=",
+          value: statement.value,
+          span: statement.span,
+        },
+      ];
+    }),
+  }));
+}
+
+/** The value a global of this annotation or inferred type starts with before its file assigns it. */
+function startValue(type: string | undefined, inferred: TeaseType): IrExpression {
+  if (type === undefined) {
+    // An empty list takes its element type from the first one assigned (ADR 0021 rule 1.3).
+    if (inferred.kind === "list") return { kind: "list", items: [] };
+    if (inferred.kind === "scalar" && inferred.name === "string")
+      return { kind: "literal", value: "" };
+    if (inferred.kind === "scalar" && inferred.name === "boolean")
+      return { kind: "literal", value: false };
+    if (inferred.kind === "scalar" && (inferred.name === "integer" || inferred.name === "number"))
+      return { kind: "literal", value: 0 };
+    return { kind: "literal", value: null };
+  }
+  if (type.endsWith("?")) return { kind: "literal", value: null };
+  if (type.endsWith("[]")) return { kind: "list", items: [] };
+  if (type === "string") return { kind: "literal", value: "" };
+  if (type === "boolean") return { kind: "literal", value: false };
+  return { kind: "literal", value: 0 };
+}
+
+/**
+ * The programs with an optional type on each parameter that a call of the package passes null where its default gives
+ * it a type, `pre = false` called as `postChastity(null)`: TeaseScript types the parameter by its default, while Groovy
+ * took the null (V30 §17).
+ */
+export function withNullableParameters(programs: readonly MigrationProgram[]): MigrationProgram[] {
+  const nulls = new Map<string, Set<number>>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!isRecord(value)) return;
+    if (value.kind === "call" && typeof value.name === "string" && Array.isArray(value.positional))
+      value.positional.forEach((argument: unknown, position) => {
+        if (isRecord(argument) && argument.kind === "literal" && argument.value === null)
+          nulls.set(String(value.name), (nulls.get(String(value.name)) ?? new Set()).add(position));
+      });
+    for (const child of Object.values(value)) visit(child);
+  };
+  for (const program of programs) visit(program.statements);
+  const scalar = (value: IrExpression | null): string | null =>
+    value?.kind !== "literal"
+      ? null
+      : typeof value.value === "boolean"
+        ? "boolean"
+        : typeof value.value === "string"
+          ? "string"
+          : typeof value.value === "number"
+            ? Number.isInteger(value.value)
+              ? "integer"
+              : "number"
+            : null;
+  return programs.map((program) => ({
+    ...program,
+    statements: program.statements.map((statement) => {
+      const positions = statement.kind === "function" ? nulls.get(statement.name) : undefined;
+      if (statement.kind !== "function" || positions === undefined) return statement;
+      return {
+        ...statement,
+        parameters: statement.parameters.map((parameter, position) => {
+          const type = positions.has(position) ? scalar(parameter.defaultValue) : null;
+          return type === null || parameter.type !== undefined
+            ? parameter
+            : { ...parameter, type: `${type}?` };
+        }),
+      };
+    }),
+  }));
 }
 
 /**
@@ -934,8 +1324,11 @@ function isLiteralValue(value: IrExpression): boolean {
     case "list":
       return value.items.every(isLiteralValue);
     case "object":
+      // A dict's keys may be written as text too.
       return value.properties.every(
-        (property) => property.key === undefined && isLiteralValue(property.value),
+        (property) =>
+          (property.key === undefined || property.key.kind === "literal") &&
+          isLiteralValue(property.value),
       );
     default:
       return false;
@@ -1088,6 +1481,8 @@ function compositionGroups(
 function withLoadedModules(
   program: MigrationProgram,
   modulePrograms: readonly MigrationProgram[],
+  /** Module directories whose statements are marked with their module (`origin`), to go to the module's own file. */
+  separate: ReadonlySet<string> = new Set(),
 ): MigrationProgram {
   const directories = new Set(program.loadsModuleDirectories ?? []);
   if (directories.size === 0) return program;
@@ -1141,17 +1536,19 @@ function withLoadedModules(
     const renamed = renameConflictingIdentifiers({ ...module, statements }, taken, false);
     for (const name of rootNames(renamed.statements)) taken.add(name);
     // A module function's own diagnostics name the module, as its diagnostics in the script do.
+    const origin = separate.has(info.directory) ? { origin: module.sourceName } : {};
     moduleStatements.push(
       ...renamed.statements.map((statement) =>
         statement.kind === "function" && statement.ownDiagnostics !== undefined
           ? {
               ...statement,
+              ...origin,
               ownDiagnostics: statement.ownDiagnostics.map((diagnostic) => ({
                 ...diagnostic,
                 sourceName: diagnostic.sourceName ?? module.sourceName,
               })),
             }
-          : statement,
+          : { ...statement, ...origin },
       ),
     );
     diagnostics.push(
@@ -1295,11 +1692,20 @@ function composeProgram(
   }
   helperStatements.unshift(...fields);
 
-  const composed = withActionDispatcher({
-    ...program,
-    statements: [...helperStatements, ...program.statements],
-    ...(actions.size === 0 ? {} : { actions: [...actions] }),
-  });
+  const statements = [...helperStatements, ...program.statements];
+  const results = functionResultTypes(statements);
+  const voidActions = new Set(
+    [...actions].filter((action) => results.get(action)?.kind === "null"),
+  );
+  const dispatched = withActionDispatcher(
+    { ...program, statements, ...(actions.size === 0 ? {} : { actions: [...actions] }) },
+    voidActions,
+  );
+  // A function whose returns mix types, such as the dispatcher, declares its result type.
+  const composed = {
+    ...dispatched,
+    statements: withDispatcherResultTypes(withReturnTypes(dispatched.statements)),
+  };
   diagnostics.push(...packageDependencyDiagnostics(composed.statements, globalFunctions));
   return renameConflictingIdentifiers({
     ...composed,

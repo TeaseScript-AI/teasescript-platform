@@ -91,3 +91,7 @@ for (toy in needed) {
 	if (!loadBoolean("toys." + toy.key)) missing += toy.value + " "
 }
 show("Missing: " + missing)
+// A stored map that may be missing is false when null or empty, as Groovy's null or empty map was.
+def remembered = load("toy.remembered")
+def slot = "first"
+if (remembered) show("Remembered " + remembered[slot])

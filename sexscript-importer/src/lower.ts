@@ -20,6 +20,7 @@ import {
   SECRET_PARAMETER_PARTS,
   SYSTEM_SPEAKER,
   withActionDispatcher,
+  withDispatcherResultTypes,
   type HelperName,
 } from "./helpers.ts";
 import {
@@ -43,6 +44,7 @@ import {
   functionResultTypes,
   mapChildren,
   mapOwnExpressions,
+  withReturnTypes,
   type TeaseType,
 } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
@@ -228,6 +230,8 @@ interface LowerContext {
   bindings: BindingKeys;
   /** Bindings declared with a Groovy integer type (`int`, `long`, ...), which store whole numbers. */
   integerVariables: ReadonlySet<string>;
+  /** Variables holding a Java array of whole numbers (`new Integer[n]`), whose element stores truncate. */
+  integerArrays: ReadonlySet<string>;
   /** Bindings declared with the Groovy type String, which converted every value stored in them to text. */
   textVariables: ReadonlySet<string>;
   /** Loop variables that hold the package path of an image of a listed folder (imageFolderWalk). */
@@ -1183,6 +1187,7 @@ export function lowerParsedFile(
     mapUses: mapUsesOf([]),
     bindings: new Map(),
     integerVariables: new Set(),
+    integerArrays: new Set(),
     textVariables: new Set(),
     imagePaths: new Set(),
     constantInitializers: new Map(),
@@ -1270,6 +1275,7 @@ export function lowerParsedFile(
     context.compoundValues = compoundValues(body, context.bindings);
     context.constantInitializers = declarationInitializers(body, context.types);
     context.integerVariables = integerVariables(body, context.bindings);
+    context.integerArrays = integerArrays(body, context.bindings);
     context.textVariables = textVariables(body, context.bindings);
     context.mapUses =
       options.mapUses ?? mapUsesOf([{ body, types: context.types, keys: context.bindings }]);
@@ -1303,14 +1309,23 @@ export function lowerParsedFile(
       : lowered;
   let stripsTags = false;
   if (body !== null) walkAst(body, (node) => (stripsTags ||= regexWorkaround(node) === "tags"));
+  // A module's `object.name`, without its receiver, is the script object's member, not a binding variable. A name of
+  // the loading script's object, such as a field, is that object's member too (Groovy read the field where the
+  // module's binding had no value).
+  const members =
+    mixin === null
+      ? undefined
+      : new Set([...mixin.receiverMembers, ...(options.globalTypes?.keys() ?? [])]);
   const typedStatements = withLegacyMarkup(
     withEnforcedTypes(
-      [
-        // A module's `object.name`, without its receiver, is the script object's member, not a binding variable.
-        ...bindingDeclarations(body, context, mixin?.receiverMembers),
-        ...context.closureFunctions,
-        ...authoredStatements,
-      ],
+      withDirectClosureCalls(
+        [
+          ...bindingDeclarations(body, context, members),
+          ...context.closureFunctions,
+          ...withScriptBindings(authoredStatements, body, context, members),
+        ],
+        context,
+      ),
       context,
     ),
     context,
@@ -1343,7 +1358,15 @@ export function lowerParsedFile(
       : { loadsModuleDirectories: [...context.loadsModuleDirectories].sort() }),
   };
   if (options.renameIdentifiers === false) return program;
-  return renameConflictingIdentifiers(withActionDispatcher(program));
+  const results = functionResultTypes(program.statements);
+  const dispatched = withActionDispatcher(
+    program,
+    new Set((program.actions ?? []).filter((action) => results.get(action)?.kind === "null")),
+  );
+  return renameConflictingIdentifiers({
+    ...dispatched,
+    statements: withDispatcherResultTypes(withReturnTypes(dispatched.statements)),
+  });
 }
 
 /**
@@ -1948,6 +1971,7 @@ function lowerHelperMethod(
     mapUses: baseContext.mapUses,
     bindings: new Map(),
     integerVariables: new Set(),
+    integerArrays: new Set(),
     textVariables: new Set(),
     imagePaths: new Set(),
     constantInitializers: new Map(),
@@ -3158,6 +3182,78 @@ function lowerConditionalAssignment(
     if (value === null || fallback === null) return [];
     // `x = x ?: d` needs no self-assignment before the check.
     const reassignsSelf = !declaration && variableName(value) === variableName(target);
+    // With a plain fallback, the variable starts with it and takes the value only where that is true, tested through a
+    // temporary, so the variable never holds the value's null: `let elvisValue = v`, `x = d`, then
+    // `if elvisValue != null and ... { x = elvisValue }`. A value that may be null needs it, since the variable keeps
+    // the fallback's type, and so does one of unknown type, whose truth goes through a helper that proves the variable
+    // non-null nowhere.
+    const plainTruth = truthiness(
+      { kind: "variable", name: variableName(target)! },
+      inferType(value, context.types),
+      true,
+      target,
+      context,
+    );
+    if (
+      !reassignsSelf &&
+      isSimpleValue(fallback) &&
+      (plainTruth?.kind === "call" || (inferType(value, context.types) & NULL) !== 0)
+    ) {
+      const temporary = freshName("elvisValue", context);
+      const valueType = inferType(value, context.types);
+      const variables = new Map(context.types.variables);
+      variables.set(temporary, valueType);
+      context.types = { ...context.types, variables };
+      const temporaryNode = syntheticVariable(temporary, span);
+      const kept = lowerStatement(syntheticAssignment(true, temporaryNode, value, span), context);
+      const start = lowerStatement(assign(fallback), context);
+      const temporaryValue: IrExpression = { kind: "variable", name: temporary };
+      const truthy = truthiness(temporaryValue, valueType, true, temporaryNode, context);
+      if (truthy === null) {
+        const legacySource = span === null ? [] : legacySourceLines(context, span);
+        return [{ kind: "unsupported", legacySource, span }];
+      }
+      const testsNull =
+        truthy.kind === "binary" &&
+        truthy.operator === "and" &&
+        truthy.left.kind === "binary" &&
+        truthy.left.operator === "!=" &&
+        truthy.left.right.kind === "literal" &&
+        truthy.left.right.value === null;
+      const present: IrExpression =
+        (valueType & NULL) === 0 || testsNull
+          ? truthy
+          : {
+              kind: "binary",
+              operator: "and",
+              left: {
+                kind: "binary",
+                operator: "!=",
+                left: temporaryValue,
+                right: { kind: "literal", value: null },
+              },
+              right: truthy,
+            };
+      return [
+        ...kept,
+        ...start,
+        {
+          kind: "if",
+          condition: present,
+          then: [
+            {
+              kind: "assign",
+              target: { kind: "variable", name: variableName(target)! },
+              operator: "=",
+              value: temporaryValue,
+              span,
+            },
+          ],
+          else: [],
+          span,
+        },
+      ];
+    }
     const stored = lowerStatement(assign(value), context);
     const fill = lowerStatement(update(fallback), context);
     // The check sees the value just stored, whose type can include null even when the variable's
@@ -3200,8 +3296,12 @@ function lowerConditionalAssignment(
       ),
     ];
   }
+  // Both branches assign the variable, so it starts with its type's empty value where both give one plain type.
+  const type = inferType(conditional, context.types);
+  const start =
+    type === BOOLEAN ? false : type === NUMBER ? 0 : type === STRING ? "" : null;
   return [
-    ...lowerStatement(assign(syntheticConstant(null, span)), context),
+    ...lowerStatement(assign(syntheticConstant(start, span)), context),
     ...lowerStatement(syntheticIf(condition, update(whenTrue), update(whenFalse), span), context),
   ];
 }
@@ -3240,6 +3340,35 @@ function substituteNode(value: AstNode, target: AstNode, replacement: AstNode): 
 }
 
 /** Constant values that are safe and readable as an unconditional initial value. */
+/** Whether a value is literal data: constants, and lists and maps of them, which mean the same wherever evaluated. */
+function isLiteralData(node: AstNode): boolean {
+  if (node.kind === "constant") return true;
+  if (node.kind === "unaryMinus") return asNode(node.value)?.kind === "constant";
+  if (node.kind === "list") return nodeArray(node.items).every(isLiteralData);
+  if (node.kind === "map")
+    return nodeArray(node.entries).every((entry) => {
+      const key = asNode(entry.key);
+      const value = asNode(entry.value);
+      return key?.kind === "constant" && value !== null && isLiteralData(value);
+    });
+  return false;
+}
+
+/**
+ * The empty value of the kind a computed value plainly has, a list for `[...] - [...]` and text for text, so the
+ * variable that waits for it does not start as null; null where the kind is not plain.
+ */
+function emptyValueLike(node: AstNode): AstNode | null {
+  const base =
+    node.kind === "binary" && ["+", "-"].includes(text(node.operator) ?? "")
+      ? asNode(node.left)
+      : node;
+  if (base?.kind === "list") return { kind: "list", span: null, items: [] };
+  if (base?.kind === "gstring" || (base?.kind === "constant" && typeof base.value === "string"))
+    return { kind: "constant", span: null, value: "" };
+  return null;
+}
+
 function isSimpleValue(node: AstNode): boolean {
   if (node.kind === "constant") return true;
   if (node.kind === "unaryMinus") return asNode(node.value)?.kind === "constant";
@@ -3461,7 +3590,7 @@ function syntheticNot(value: AstNode): AstNode {
   return { kind: "not", span: value.span, value };
 }
 
-function syntheticConstant(value: boolean | null, span: SourceSpan | null): AstNode {
+function syntheticConstant(value: boolean | number | string | null, span: SourceSpan | null): AstNode {
   return { kind: "constant", span, value };
 }
 
@@ -4417,6 +4546,106 @@ function lowerClosureValue(
   return { kind: "literal", value: name, action: true };
 }
 
+/**
+ * Calls of a function's local closure variable that nothing assigns again call the closure's function directly, not
+ * through the package dispatcher, when they pass it a number of arguments it takes. The variable goes where nothing
+ * else reads it, and so does the action where nothing else names it.
+ */
+function withDirectClosureCalls(statements: IrStatement[], context: LowerContext): IrStatement[] {
+  const functions = new Map(
+    statements.flatMap((statement): Array<[string, Extract<IrStatement, { kind: "function" }>]> =>
+      statement.kind === "function" ? [[statement.name, statement]] : [],
+    ),
+  );
+  const replacedActions = new Set<string>();
+  const rewritten = statements.map((statement): IrStatement => {
+    if (statement.kind !== "function") return statement;
+    const declarations = new Map<string, number>();
+    const actions = new Map<string, string>();
+    const assigned = new Set<string>();
+    const scan = (value: unknown): void => {
+      if (Array.isArray(value)) value.forEach(scan);
+      if (!isRecord(value)) return;
+      if (value.kind === "let" && typeof value.name === "string") {
+        declarations.set(value.name, (declarations.get(value.name) ?? 0) + 1);
+        const initial = value.value;
+        if (
+          isRecord(initial) &&
+          initial.kind === "literal" &&
+          initial.action === true &&
+          typeof initial.value === "string"
+        )
+          actions.set(value.name, initial.value);
+      }
+      if (value.kind === "for" && typeof value.variable === "string") assigned.add(value.variable);
+      if (value.kind === "assign" && isRecord(value.target) && value.target.kind === "variable")
+        assigned.add(String(value.target.name));
+      Object.values(value).forEach(scan);
+    };
+    scan(statement.body);
+    const direct = new Map(
+      [...actions].filter(
+        ([name, action]) =>
+          declarations.get(name) === 1 && !assigned.has(name) && functions.has(action),
+      ),
+    );
+    if (direct.size === 0) return statement;
+    const deep = (value: IrExpression): IrExpression => {
+      const mapped = mapChildren(value, deep);
+      if (
+        mapped.kind !== "call" ||
+        mapped.name !== ACTION_DISPATCHER ||
+        mapped.positional[0]?.kind !== "variable" ||
+        mapped.positional[1]?.kind !== "list"
+      )
+        return mapped;
+      const action = direct.get(mapped.positional[0].name);
+      const target = action === undefined ? undefined : functions.get(action);
+      const args = mapped.positional[1].items;
+      if (
+        action === undefined ||
+        target === undefined ||
+        args.length > target.parameters.length ||
+        args.length < target.parameters.filter((parameter) => parameter.defaultValue === null).length
+      )
+        return mapped;
+      replacedActions.add(action);
+      return { kind: "call", name: action, positional: args, named: {}, local: true };
+    };
+    const convert = (items: IrStatement[]): IrStatement[] =>
+      items.map((item) => mapOwnExpressions(withNestedStatements(item, convert), deep));
+    const body = convert(statement.body);
+    const read = new Set<string>();
+    const reads = (value: unknown): void => {
+      if (Array.isArray(value)) value.forEach(reads);
+      if (!isRecord(value)) return;
+      if (value.kind === "variable" && typeof value.name === "string") read.add(value.name);
+      Object.values(value).forEach(reads);
+    };
+    reads(body);
+    const unused = (item: IrStatement): boolean =>
+      item.kind === "let" && direct.has(item.name) && !read.has(item.name);
+    const prune = (items: IrStatement[]): IrStatement[] =>
+      items.filter((item) => !unused(item)).map((item) => withNestedStatements(item, prune));
+    return { ...statement, body: prune(body) };
+  });
+  if (replacedActions.size === 0) return rewritten;
+  const named = new Set<string>();
+  let dispatched = false;
+  const names = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(names);
+    if (!isRecord(value)) return;
+    if (value.kind === "literal" && value.action === true && typeof value.value === "string")
+      named.add(value.value);
+    if (value.kind === "call" && value.name === ACTION_DISPATCHER) dispatched = true;
+    Object.values(value).forEach(names);
+  };
+  names(rewritten);
+  for (const action of replacedActions) if (!named.has(action)) context.actions.delete(action);
+  if (!dispatched) context.actions.delete(ACTION_DISPATCHER_MARKER);
+  return rewritten;
+}
+
 /** The function a closure body only forwards to, passing its own parameters unchanged. */
 function forwardedFunction(
   body: AstNode,
@@ -4716,8 +4945,17 @@ function lowerAssignment(
     operator === "=" &&
     context.integerVariables.has(bindingKey(targetNode, context.bindings) ?? "") &&
     mayBeText(right, context);
-  const stored =
-    operator === "=" && context.textVariables.has(bindingKey(targetNode, context.bindings) ?? "")
+  // A Java Integer[] truncated a number stored in it, as an int variable does.
+  const array =
+    targetNode.kind === "binary" && targetNode.operator === "[" ? asNode(targetNode.left) : null;
+  const truncates =
+    operator === "=" &&
+    array !== null &&
+    context.integerArrays.has(bindingKey(array, context.bindings) ?? "") &&
+    mayBeFractional(right, context);
+  const stored = truncates
+    ? ({ kind: "call", name: "toInteger", positional: [value], named: {} } satisfies IrExpression)
+    : operator === "=" && context.textVariables.has(bindingKey(targetNode, context.bindings) ?? "")
       ? asStoredText(value, right, context)
       : value;
   return [
@@ -4931,6 +5169,44 @@ function lowerCallStatement(
   if (call !== null && !call.inherited && receiver !== null && isDictionary(receiver, context)) {
     const dictionary = dictStatement(receiver, call, span, context);
     if (dictionary !== null) return dictionary;
+  }
+  // Groovy remove() of a key or value the map or list may not hold did nothing; TeaseScript reports a missing one, so
+  // a receiver that is not proven a list tests it first, as it does for a dict.
+  const removed = call?.arguments.length === 1 ? call.arguments[0]! : null;
+  if (
+    call !== null &&
+    !call.inherited &&
+    call.name === "remove" &&
+    receiver !== null &&
+    removed !== null &&
+    variableName(receiver) !== null &&
+    isRepeatableExpression(removed) &&
+    !isKnownListExpression(receiver, context) &&
+    !onlyOf(inferType(removed, context.types), NUMBER)
+  ) {
+    const collection = lowerExpression(receiver, context);
+    const value = lowerExpression(removed, context);
+    if (collection === null || value === null) return [];
+    return [
+      {
+        kind: "if",
+        condition: { kind: "methodCall", target: collection, name: "contains", arguments: [value] },
+        then: [
+          {
+            kind: "expression",
+            expression: {
+              kind: "methodCall",
+              target: collection,
+              name: "remove",
+              arguments: [value],
+            },
+            span,
+          },
+        ],
+        else: [],
+        span,
+      },
+    ];
   }
   if (call !== null && !call.inherited) {
     const java = javaCallStatement(node, call.name, call.arguments, span, javaHost(context));
@@ -5586,10 +5862,23 @@ function lowerCollectionAssignment(
   // A loop body that reads the target sees its old value only through a separate result variable.
   // The loop reads the receiver and runs the closure after the result starts; when either may read the
   // destination, a separate variable collects the result, which the destination gets last.
+  // A sum that may be of no element, null in Groovy, adds up in a separate whole number, so the additions need no
+  // null test.
+  const nullableSum =
+    call.name === "sum" &&
+    !(
+      (receiver.kind === "list" && nodeArray(receiver.items).length > 0) ||
+      (receiver.kind === "range" &&
+        constantValue(asNode(receiver.from) ?? undefined) !== undefined &&
+        constantValue(asNode(receiver.to) ?? undefined) !== undefined)
+    );
   const readsTarget =
+    nullableSum ||
     mayReadDestination(receiver, destination, context) ||
     (argument !== null && mayReadDestination(argument.closure, destination, context));
-  const accumulator = readsTarget ? freshName(`${call.name}Result`, context) : target;
+  const accumulator = readsTarget
+    ? freshName(nullableSum ? "sumTotal" : `${call.name}Result`, context)
+    : target;
   const targetVariable: IrExpression = { kind: "variable", name: accumulator };
   const item: IrExpression = { kind: "variable", name: variable };
   const prefix = result === null ? [] : lowerStatementList(result.statements, null, context);
@@ -5667,7 +5956,15 @@ function lowerCollectionAssignment(
               left: { kind: "property", target: collection, name: "length" },
               right: { kind: "literal", value: 0 },
             },
-            then: [assign({ kind: "literal", value: null })],
+            then: [
+              {
+                kind: "assign",
+                target: { kind: "variable", name: target },
+                operator: "=",
+                value: { kind: "literal", value: null },
+                span,
+              },
+            ],
             else: [],
             span,
           },
@@ -5684,7 +5981,7 @@ function lowerCollectionAssignment(
         value: accumulated,
         span,
       };
-  return [start, loop, ...empty, store];
+  return [start, loop, store, ...empty];
 }
 
 /** A generated variable name that no variable of the file and no earlier generated name uses. */
@@ -6659,6 +6956,9 @@ function mayBeFractional(node: AstNode, context: LowerContext, seen = new Set<st
       const operator = text(node.operator) ?? "";
       const left = asNode(node.left);
       const right = asNode(node.right);
+      // An element of a Java array of whole numbers is whole.
+      if (operator === "[" && left !== null)
+        return !context.integerArrays.has(bindingKey(left, context.bindings) ?? "");
       if (!["+", "-", "*", "%"].includes(operator) || left === null || right === null) return true;
       return mayBeFractional(left, context, seen) || mayBeFractional(right, context, seen);
     }
@@ -6860,7 +7160,13 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
         ),
       ];
     const matchNode = asNode(caseNode.expression);
-    const match = matchNode === null ? null : lowerExpression(matchNode, context);
+    // A closure case is a condition on the switched value (closureCaseTest), tested in the if chain.
+    const match =
+      matchNode === null
+        ? null
+        : closureCaseTest(matchNode) !== null
+          ? ({ kind: "literal", value: null } satisfies IrExpression)
+          : lowerExpression(matchNode, context);
     if (match === null) {
       return [
         unsupportedStatement(
@@ -6924,7 +7230,8 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
       onlyOf(inferType(matchNodes[index]!, context.types), LIST);
     return listCase ? { ...switchCase, matches: match.items } : switchCase;
   });
-  if (isAcceptedSwitch(valueCases)) {
+  const closureCases = matchNodes.map((matchNode) => closureCaseTest(matchNode));
+  if (closureCases.every((test) => test === null) && isAcceptedSwitch(valueCases)) {
     return [
       { kind: "switch", value, cases: valueCases, default: defaultStatements, span: node.span },
     ];
@@ -6959,6 +7266,7 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
     }
     const boundsRepeatable = match.kind === "range" && [match.from, match.to].every(isPlainValue);
     const known =
+      closureCases[index] !== null ||
       match.kind === "list" ||
       boundsRepeatable ||
       (match.kind !== "range" &&
@@ -6989,18 +7297,40 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
   const subject: IrExpression = repeatable
     ? value
     : { kind: "variable", name: `switchValue${context.switchValues}` };
+  if (subject.kind === "variable" && !repeatable) context.generatedNames.add(subject.name);
   let chain: IrStatement[] = defaultStatements;
   for (let index = cases.length - 1; index >= 0; index -= 1) {
     const switchCase = cases[index]!;
-    chain = [
-      {
-        kind: "if",
-        condition: caseMatches(subject, switchCase.matches[0]!, listCases[index]!),
-        then: switchCase.body,
-        else: chain,
-        span: switchCase.span,
-      },
-    ];
+    const test = closureCases[index];
+    // Groovy called a closure case with the switched value and took the truth of its result.
+    const condition =
+      test === null || test === undefined
+        ? caseMatches(subject, switchCase.matches[0]!, listCases[index]!)
+        : lowerCondition(
+            replaceVariable(
+              test.expression,
+              test.parameter,
+              repeatable && valueNode !== null
+                ? valueNode
+                : {
+                    kind: "variable",
+                    span: null,
+                    name: subject.kind === "variable" ? subject.name : "switchValue",
+                    type: "java.lang.Object",
+                  },
+            ),
+            context,
+          );
+    if (condition === null)
+      return [
+        unsupportedStatement(
+          context,
+          matchNodes[index]!,
+          "SX_SWITCH_CASE_MATCH",
+          "This closure case's condition could not be converted; rewrite the case as an explicit condition.",
+        ),
+      ];
+    chain = [{ kind: "if", condition, then: switchCase.body, else: chain, span: switchCase.span }];
   }
   return repeatable
     ? chain
@@ -7013,6 +7343,39 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
         },
         ...chain,
       ];
+}
+
+/** A closure case's one expression and its parameter (`case { it < 2 }`), or null for any other case. */
+function closureCaseTest(node: AstNode | null): { expression: AstNode; parameter: string } | null {
+  if (node?.kind !== "closure") return null;
+  const parameters = groovyParameters(node.parameters);
+  if (parameters === null || parameters.length > 1) return null;
+  const parameter = node.parameterSpecified === true ? parameters[0]?.name : "it";
+  const statements = nodeArray(asNode(node.body)?.statements);
+  const only = statements.length === 1 ? statements[0]! : null;
+  const expression =
+    only?.kind === "expressionStatement"
+      ? asNode(only.expression)
+      : only?.kind === "return"
+        ? asNode(only.value)
+        : null;
+  return parameter === undefined || expression === null ? null : { expression, parameter };
+}
+
+/** A copy of an expression with each read of a variable replaced by another expression. */
+function replaceVariable(node: AstNode, name: string, replacement: AstNode): AstNode {
+  if (node.kind === "variable" && variableName(node) === name) return replacement;
+  if (node.kind === "closure") return node;
+  const result: AstNode = { ...node };
+  for (const [key, child] of Object.entries(node)) {
+    if (key === "span") continue;
+    if (isAstNode(child)) result[key] = replaceVariable(child, name, replacement);
+    else if (Array.isArray(child))
+      result[key] = child.map((item: unknown) =>
+        isAstNode(item) ? replaceVariable(item, name, replacement) : item,
+      );
+  }
+  return result;
 }
 
 /**
@@ -7917,6 +8280,46 @@ function isTeaseObjectPropertyName(value: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
 }
 
+/** The TeaseScript types of Java classes that `instanceof` tests (#530): a Groovy map is a dict or an object. */
+const INSTANCE_TYPES: ReadonlyMap<string, readonly string[]> = new Map([
+  ...[
+    "Number",
+    "Integer",
+    "Long",
+    "Double",
+    "Float",
+    "Short",
+    "Byte",
+    "BigDecimal",
+    "BigInteger",
+  ].map((name): [string, string[]] => [name, ["number"]]),
+  ...["String", "GString", "CharSequence"].map((name): [string, string[]] => [name, ["string"]]),
+  ...["Boolean"].map((name): [string, string[]] => [name, ["boolean"]]),
+  ...["List", "ArrayList", "Collection", "Object[]"].map((name): [string, string[]] => [
+    name,
+    ["list"],
+  ]),
+  ...["Map", "HashMap", "LinkedHashMap", "TreeMap"].map((name): [string, string[]] => [
+    name,
+    ["dict", "object"],
+  ]),
+]);
+
+/** Groovy `x instanceof Number` as a type test, `x is number`; undefined for another class. */
+function instanceTest(node: AstNode, context: LowerContext): IrExpression | null | undefined {
+  const right = asNode(node.right);
+  const leftNode = asNode(node.left);
+  const name = (text(right?.type) ?? "").replace(/^java\.(?:lang|util|math)\./u, "");
+  const types = right?.kind === "classExpression" ? INSTANCE_TYPES.get(name) : undefined;
+  if (types === undefined || leftNode === null) return undefined;
+  if (types.length > 1 && !isRepeatableExpression(leftNode)) return undefined;
+  const value = lowerExpression(leftNode, context);
+  if (value === null) return null;
+  return types
+    .map((type): IrExpression => ({ kind: "typeTest", value, type }))
+    .reduce((left, right): IrExpression => ({ kind: "binary", operator: "or", left, right }));
+}
+
 /**
  * Groovy `text * n` and `list * n`: the text, or the list's elements, `n` times over, with a fractional count cut to
  * whole times as Groovy did. Undefined for other operands.
@@ -7952,6 +8355,10 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   if (operator === "*") {
     const repeated = repetition(node, context);
     if (repeated !== undefined) return repeated;
+  }
+  if (operator === "instanceof") {
+    const test = instanceTest(node, context);
+    if (test !== undefined) return test;
   }
   if (operator === "==" || operator === "!=") {
     // A listing of a missing folder was null; the images of a folder (imageFolderListing) are an empty list then.
@@ -8821,13 +9228,14 @@ function truthiness(
       ),
     };
   if (isDictionary(node, context)) {
-    // A dict is false when it is empty, as a Groovy map was.
-    return {
+    // A dict is false when it is empty, as a Groovy map was, and also when it may be null, as a missing stored map.
+    const filled: IrExpression = {
       kind: "binary",
       operator: ">",
       left: { kind: "property", target: value, name: "length", dict: true },
       right: { kind: "literal", value: 0 },
     };
+    return repeatable && (type & NULL) !== 0 ? and(notNull, filled) : filled;
   }
   if ((type & OBJECT) !== 0 && onlyOf(type, OBJECT | NULL)) {
     // Groovy treats an empty map as false; objects compare structurally (#517), so `{}` is the empty map.
@@ -9003,30 +9411,18 @@ function lowerListDifference(
   if (leftNode === null || rightNode === null) return null;
   const rightType = inferType(rightNode, context.types);
   const removesList = !element && isListType(rightType);
-  if (!element && !removesList && !onlyOf(rightType, NUMBER | STRING | BOOLEAN | NULL)) {
-    return unsupportedExpression(
-      context,
-      node,
-      "SX_LIST_DIFFERENCE",
-      "Groovy list - removed one value or every element of a list; the right side is not proven to be either. Use difference() with a list.",
-    );
-  }
+  const removesElement = element || onlyOf(rightType, NUMBER | STRING | BOOLEAN | NULL);
   const left = lowerExpression(leftNode, context);
   const right = lowerExpression(rightNode, context);
   if (left === null || right === null) return null;
-  addDiagnostic(
-    context,
-    "SX_LIST_DIFFERENCE",
-    "warning",
-    "Groovy list - kept repeated elements of the list; difference() keeps each remaining element once (V30 §16).",
-    node.span,
-  );
-  return {
-    kind: "methodCall",
-    target: left,
-    name: "difference",
-    arguments: [removesList ? right : { kind: "list", items: [right] }],
-  };
+  // Groovy `list - other` kept every element that `other` (a list, or else one value) does not hold, repeated ones too;
+  // a value not proven to be one or the other is decided at runtime.
+  const removed: IrExpression = removesList
+    ? right
+    : removesElement
+      ? { kind: "list", items: [right] }
+      : useHelper(context, "listPart", [right]);
+  return useHelper(context, "listMinus", [left, removed]);
 }
 
 /** A null list operand fails in Groovy and TeaseScript alike, so "list or null" counts as a list. */
@@ -9414,6 +9810,9 @@ function lowerObjectMethodCallExpression(
   context: LowerContext,
 ): IrExpression | null {
   const targetNode = asNode(node.object);
+  // Groovy asBoolean() is the Groovy truth of its receiver.
+  if (name === "asBoolean" && argumentsNodes.length === 0 && targetNode !== null)
+    return lowerCondition(targetNode, context);
   if (
     name === "getLanguage" &&
     argumentsNodes.length === 0 &&
@@ -11094,6 +11493,20 @@ function integerVariables(body: AstNode, keys: BindingKeys): Set<string> {
   return names;
 }
 
+/** Variables assigned a Java array of whole numbers, `new Integer[n]` or `new int[n]`. */
+function integerArrays(body: AstNode, keys: BindingKeys): Set<string> {
+  const names = new Set<string>();
+  walkAst(body, (node) => {
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    const value = assigns ? asNode(node.right) : null;
+    const key = assigns ? bindingKey(asNode(node.left), keys) : null;
+    const element = (text(value?.elementType) ?? "").replace(/^java\.lang\./u, "");
+    if (key !== null && value?.kind === "array" && INTEGER_TYPES.has(element)) names.add(key);
+  });
+  return names;
+}
+
 /** The initializer of each variable assigned once, by its declaration. */
 function declarationInitializers(body: AstNode, types: TypeEnvironment): Map<string, AstNode> {
   const initializers = new Map<string, AstNode>();
@@ -12321,17 +12734,16 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         );
         return { kind: "call", name: "chooseFile", positional: [], named: {} };
       }
-      // The corpus asks for files to get a photo of the player (owner decision 2026-10-05); chooseFile() is #604.
+      // The corpus asks for files to get a photo of the player (owner decision 2026-10-05): askImage() asks for an
+      // image with the same message, which the player answers with a file or the camera (#608).
       addDiagnostic(
         context,
         "SX_FILE_PHOTO",
         "warning",
-        "getFile() let the player pick any file with this title; scripts use it for a photo of the player, so the title is shown and takePhoto() takes the photo, or gives null as a cancelled chooser did.",
+        "getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.",
         node.span,
       );
-      if (args.length === 1 && !pushPrompt(context, node, call.arguments[0]!, args[0]!))
-        return null;
-      return { kind: "call", name: "takePhoto", positional: [], named: {} };
+      return { kind: "call", name: "askImage", positional: args, named: {} };
     }
     case "getDataFolder":
       if (args.length !== 0)
@@ -13299,11 +13711,14 @@ function desugarMixinModule(
     const right = asNode(expression?.right);
     if (name !== null && right?.kind === "closure") {
       globals.push(statement);
+    } else if (name !== null && right !== null && isLiteralData(right)) {
+      // A module constant of literal data, such as `final LUNCH = "lunch"`, starts with its value.
+      globals.push(statement);
     } else if (name !== null && right !== null) {
       globals.push(
         declaration(
           name,
-          {
+          emptyValueLike(right) ?? {
             kind: "unsupportedExpression",
             span: null,
             groovyType: "org.codehaus.groovy.ast.expr.EmptyExpression",
@@ -14525,6 +14940,102 @@ function bindingDeclarations(
       span: null,
     })),
   ];
+}
+
+/**
+ * Declares the variables the script body assigns outside closures without declaring them: Groovy kept them in the
+ * script's binding. The first of the script's statements that uses one declares it when it assigns it; otherwise a
+ * declaration with its type's empty value comes just before that statement. Functions do not count as uses, since
+ * they read the variable only when called.
+ */
+function withScriptBindings(
+  statements: IrStatement[],
+  body: AstNode | null,
+  context: LowerContext,
+  members: ReadonlySet<string> = new Set(),
+): IrStatement[] {
+  if (body === null || context.functionDepth > 0) return statements;
+  const declared = new Set<string>();
+  const assigned = new Set<string>();
+  const collect = (node: AstNode): void => {
+    if (node.kind === "closure") return;
+    if (node.kind === "declaration") {
+      const name = variableName(node.left);
+      if (name !== null) declared.add(name);
+    } else if (node.kind === "for") {
+      const name = text(node.variable);
+      if (name !== null) declared.add(name);
+    } else if (node.kind === "binary" && node.operator === "=") {
+      const name = variableName(node.left);
+      if (name !== null) assigned.add(name);
+    }
+    for (const child of nodeChildren(node)) collect(child);
+  };
+  collect(body);
+  const names = [...assigned].filter(
+    (name) =>
+      !declared.has(name) &&
+      !members.has(name) &&
+      !context.functions.has(name) &&
+      !context.packageFunctions.has(name) &&
+      !isLegacyGetterProperty(name),
+  );
+  if (names.length === 0) return statements;
+  const mentions = (value: unknown, name: string): boolean => {
+    if (Array.isArray(value)) return value.some((item) => mentions(item, name));
+    if (!isRecord(value)) return false;
+    if (value.kind === "variable" && value.name === name) return true;
+    return Object.values(value).some((child) => mentions(child, name));
+  };
+  // A name the conversion already declares, such as a destructured variable, keeps its declaration.
+  const lets = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(visit);
+    else if (isRecord(value)) {
+      if (value.kind === "let" && typeof value.name === "string") lets.add(value.name);
+      Object.values(value).forEach(visit);
+    }
+  };
+  visit(statements);
+  const before = new Map<number, string[]>();
+  const replaced = new Map<number, IrStatement>();
+  for (const name of names) {
+    if (lets.has(name)) continue;
+    const index = statements.findIndex(
+      (statement) => statement.kind !== "function" && mentions(statement, name),
+    );
+    if (index < 0) continue;
+    const first = replaced.get(index) ?? statements[index]!;
+    if (
+      first.kind === "assign" &&
+      first.operator === "=" &&
+      first.target.kind === "variable" &&
+      first.target.name === name &&
+      !mentions(first.value, name)
+    ) {
+      replaced.set(index, { kind: "let", name, value: first.value, span: first.span });
+      continue;
+    }
+    before.set(index, [...(before.get(index) ?? []), name]);
+  }
+  return statements.flatMap((statement, index) => {
+    const empty = before.get(index) ?? [];
+    if (empty.length === 0) return [replaced.get(index) ?? statement];
+    const message = `Groovy kept ${empty.join(", ")}, which the script assigns without a declaration, in the script's binding; ${empty.length === 1 ? "it is" : "they are"} declared here with an empty value.`;
+    context.diagnostics.push({ code: "SX_BINDING_VARIABLE", severity: "warning", message, span: null });
+    return [
+      { kind: "comment", text: `// NOTE SX_BINDING_VARIABLE: ${message}`, trailing: false, span: null },
+      ...empty.map(
+        (name): IrStatement => ({
+          kind: "let",
+          name,
+          value: neutralValue(context.types.variables.get(name) ?? UNKNOWN),
+          span: null,
+        }),
+      ),
+      replaced.get(index) ?? statement,
+    ];
+  });
 }
 
 function neutralValue(type: number): IrExpression {

@@ -29,20 +29,6 @@
       "diff": "repeat-offense-credit-typo.diff"
     },
     {
-      "id": "ginger-button-typo",
-      "layer": "source",
-      "category": "e",
-      "reason": "The ginger-finger button reads tile, which is never assigned; every other button around it uses title.",
-      "diff": "ginger-button-typo.diff"
-    },
-    {
-      "id": "corner-position-names",
-      "layer": "source",
-      "category": "e",
-      "reason": "cornerPosition (never called) was copied from spankPosition and still tests positionName and clears positionSelection, which are locals of spankPosition; its own variables are cornerPosName and cornerPosSelection. Rename them in the three retained versions.",
-      "diff": "corner-position-names.diff"
-    },
-    {
       "id": "claire-clothespins-case",
       "layer": "source",
       "category": "e",
@@ -62,6 +48,55 @@
       "category": "e",
       "reason": "aveRating.round(2) discards its result, so it never changed the rating; the rating is shown through String.format(\"%5.2f\"), which rounds it. Comment out the no-op.",
       "diff": "discarded-rating-round.diff"
+    },
+    {
+      "id": "scene-rating-record",
+      "layer": "source",
+      "category": "e",
+      "reason": "calculateSceneRating returns a Groovy tuple of a number, a count and three flags ([aveRating, numRatings, hasLimits, recentScene, hasToys]) that the callers read back by position; return a map with those names and read the fields by name, so each value keeps its own type (the sceneScore, numRatings and button-label errors came from the mixed list). The testing-only debug button lists the five values as the list did.",
+      "diff": "scene-rating-record.diff"
+    },
+    {
+      "id": "random-mistress-index",
+      "layer": "source",
+      "category": "e",
+      "reason": "selectRandomSession collects the indexes of eligible disciplinarians (availableMistressList.add(x)) but then assigns the drawn index itself to mistress, so setMistressSession matched no name and the random session ran for disciplinarian \"2\"; look the name up in mistressArray, at all four draws.",
+      "diff": "random-mistress-index.diff"
+    },
+    {
+      "id": "harmony-hold-text-argument",
+      "layer": "source",
+      "category": "e",
+      "reason": "fullHold(totalTime, chanceTongue=true, text=\"\") is called twice with the line \"Grind it in there, really push it deep\" as its second argument, which Groovy took as a truthy chanceTongue, showing a random line instead; pass the default true and the line as the text it was meant to be.",
+      "diff": "harmony-hold-text-argument.diff"
+    },
+    {
+      "id": "madison-whipped-flag",
+      "layer": "source",
+      "category": "e",
+      "reason": "Madison's first scene sets whipped = true() after the optional whipping; true() is not callable, so Groovy failed whenever the 50% whipping happened. Set the flag.",
+      "diff": "madison-whipped-flag.diff"
+    },
+    {
+      "id": "enable-menu-choices",
+      "layer": "source",
+      "category": "b",
+      "reason": "The disciplinarian on/off menu reuses the text variable dialog for its option list ([\"Back\"]+mistressArray); give the list its own variable.",
+      "diff": "enable-menu-choices.diff"
+    },
+    {
+      "id": "offense-level-integer",
+      "layer": "source",
+      "category": "b",
+      "reason": "offenseArray holds [name, level] pairs, so a level read back by position is a name-or-number to the converter; the three reads that set offenseLevel and systemOffenseLevel take it as int, which it always is.",
+      "diff": "offense-level-integer.diff"
+    },
+    {
+      "id": "loyalty-wheel-default",
+      "layer": "source",
+      "category": "b",
+      "reason": "pointsBonus is declared without a value and always set by the wheel loop before it is added to the points; declare it as 0 so it is a number from the start.",
+      "diff": "loyalty-wheel-default.diff"
     }
   ]
 }

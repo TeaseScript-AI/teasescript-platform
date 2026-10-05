@@ -65,4 +65,19 @@ if pickMistress == mistresses.length {
 } else {
   say "Mistress ${mistresses[pickMistress]}"
 }
+// Records added to a list with a field that is null in some of them: Groovy read each record's own field.
+let resets: object[] = []
+resets.add({ lbl: "Full reset", ID: 2 })
+resets.add({ lbl: "Back", ID: null })
+say "Reset?"
+let menuTexts2 = []
+for it in resets {
+  menuTexts2.add(it.lbl)
+}
+let reset = resets[(choose sexscriptLegacyMenuOptions(menuTexts2, 0))].ID
+say "Reset ${reset}"
+// Records put in front of a list by concatenation count too.
+let choices: object[] = [{ lbl: "Stroked", act: "stroked" }]
+choices = [{ lbl: "Nothing", act: null }] + choices
+say "Choices ${choices.length}"
 exit

@@ -9,14 +9,3 @@
  			"the good pressure, have this ready.")
  	else
  		show("Well, lets start with a few strokes.")
---- a/scripts/whitequeen__sha256_28d8333b8ef4.groovy
-+++ b/scripts/whitequeen__sha256_28d8333b8ef4.groovy
-@@ -214,7 +214,7 @@
- 	wait(10)
- 	setImage(imPrefix+"10.jpg")
- 	if(loadBoolean("intro.female"))
--		show("Well, lets start with a few moves that you like and with ".
-+		show("Well, lets start with a few moves that you like and with "+
- 			"the good pressure, have this ready.")
- 	else
- 		show("Well, lets start with a few strokes.")

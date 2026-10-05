@@ -48,4 +48,26 @@ function finish(message) {
 }
 finish("Done")
 finish("")
+// A closure case is a condition on the switched value, which Groovy evaluated once.
+let switchValue1 = randomInteger(0..4)
+if switchValue1 < 2 {
+  say "Stop!"
+} else if switchValue1 == 2 {
+  say "Again"
+} else {
+  say "Go on"
+}
+// instanceof tests a value's type, which a Groovy map passes as a dict or an object.
+say "A number?"
+// NOTE SX_UNION_TYPE line 24: Groovy let 'given' hold values of several types; TeaseScript declares it 'string | integer' (ADR 0021 §3), so a use that needs one of these types must test it first, as in: if given is string { ... }
+let given: string | integer = "five"
+if (choose yes: "Yes", no: "No") == "yes" {
+  given = 5
+}
+if given is number {
+  say "A number"
+}
+if given is string {
+  say "A text"
+}
 exit

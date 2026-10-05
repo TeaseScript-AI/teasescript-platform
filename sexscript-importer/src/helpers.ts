@@ -1,3 +1,4 @@
+import { isRecord } from "./ast.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 import {
   JAVA_HELPER_ORDER,
@@ -16,7 +17,11 @@ export const ACTION_DISPATCHER_MARKER = "#dispatch";
  * supplied arguments, up to the parameters the function declares, so omitted optional parameters keep their
  * defaults. Unlike Groovy, extra arguments are ignored and unknown actions return null.
  */
-export function withActionDispatcher(program: MigrationProgram): MigrationProgram {
+export function withActionDispatcher(
+  program: MigrationProgram,
+  /** Actions whose functions return no value, which the dispatcher calls and then leaves with a bare `return`. */
+  voidActions: ReadonlySet<string> = new Set(),
+): MigrationProgram {
   const actions = program.actions ?? [];
   if (!actions.includes(ACTION_DISPATCHER_MARKER)) return program;
   const signatures = new Map<string, { required: number; total: number }>();
@@ -27,14 +32,22 @@ export function withActionDispatcher(program: MigrationProgram): MigrationProgra
     ).length;
     signatures.set(statement.name, { required, total: statement.parameters.length });
   }
-  const callWith = (action: string, count: number): IrStatement =>
-    ret({
+  // A function that returns no value gives null; a bare `return` gives it without fixing the result type (V30 §17).
+  const callWith = (action: string, count: number): IrStatement[] => {
+    const call: IrExpression = {
       kind: "call",
       name: action,
       positional: Array.from({ length: count }, (_, index) => at(v("args"), lit(index))),
       named: {},
       local: true,
-    });
+    };
+    return voidActions.has(action)
+      ? [
+          { kind: "expression", expression: call, span: null },
+          { kind: "return", value: null, span: null },
+        ]
+      : [ret(call)];
+  };
   const branches = actions
     .filter((action) => action !== ACTION_DISPATCHER_MARKER)
     .toSorted()
@@ -44,14 +57,13 @@ export function withActionDispatcher(program: MigrationProgram): MigrationProgra
       const id: IrExpression = { kind: "literal", value: action, action: true };
       const calls: IrStatement[] = [];
       for (let count = total; count > required; count -= 1) {
-        calls.push(
-          ifS(bin(">=", prop(v("args"), "length"), lit(count)), [callWith(action, count)]),
-        );
+        calls.push(ifS(bin(">=", prop(v("args"), "length"), lit(count)), callWith(action, count)));
       }
-      calls.push(callWith(action, required));
+      calls.push(...callWith(action, required));
       return ifS(bin("==", v("action"), id), calls);
     });
-  const dispatcher = fn(ACTION_DISPATCHER, ["action", "args"], [...branches, ret(lit(null))]);
+  // An unknown action returns null by reaching the end, which keeps the result type the actions' own (V30 §17).
+  const dispatcher = fn(ACTION_DISPATCHER, ["action", "args"], branches);
   const note: IrStatement = {
     kind: "comment",
     text: "// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.",
@@ -59,6 +71,93 @@ export function withActionDispatcher(program: MigrationProgram): MigrationProgra
     span: null,
   };
   return { ...program, statements: [note, dispatcher, ...program.statements] };
+}
+
+/**
+ * Variables that start with a literal and are later set to a dispatcher result take the dispatcher's declared result
+ * type, such as `boolean | number | null`, when it holds the literal: the variable types were settled before the
+ * dispatcher existed, and Groovy let the variable hold whatever the called closure returned.
+ */
+export function withDispatcherResultTypes(statements: IrStatement[]): IrStatement[] {
+  const dispatcher = statements.find(
+    (statement) => statement.kind === "function" && statement.name === ACTION_DISPATCHER,
+  );
+  const resultType = dispatcher?.kind === "function" ? dispatcher.returnType : undefined;
+  if (resultType === undefined) return statements;
+  const members = new Set(
+    (resultType.endsWith("?") ? `${resultType.slice(0, -1)} | null` : resultType)
+      .replaceAll(/[()]/gu, "")
+      .split("|")
+      .map((member) => member.trim()),
+  );
+  const holds = (value: IrExpression): boolean => {
+    if (value.kind !== "literal") return false;
+    if (value.value === null) return members.has("null");
+    if (typeof value.value === "boolean") return members.has("boolean");
+    if (typeof value.value === "string") return members.has("string");
+    return members.has("number") || (members.has("integer") && Number.isInteger(value.value));
+  };
+  // The names a body sets to a dispatcher result, outside the functions it defines.
+  const dispatched = (body: readonly IrStatement[]): Set<string> => {
+    const names = new Set<string>();
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) value.forEach(visit);
+      if (!isRecord(value) || value.kind === "function") return;
+      const { target, value: assigned } = value;
+      if (
+        value.kind === "assign" &&
+        value.operator === "=" &&
+        isRecord(target) &&
+        target.kind === "variable" &&
+        typeof target.name === "string" &&
+        isRecord(assigned) &&
+        assigned.kind === "call" &&
+        assigned.name === ACTION_DISPATCHER
+      )
+        names.add(target.name);
+      Object.values(value).forEach(visit);
+    };
+    visit(body);
+    return names;
+  };
+  const typed = (body: IrStatement[], names: ReadonlySet<string>): IrStatement[] =>
+    body.map((statement): IrStatement => {
+      if (statement.kind === "function") {
+        const own = dispatched(statement.body);
+        return own.size === 0 ? statement : { ...statement, body: typed(statement.body, own) };
+      }
+      if (
+        statement.kind === "let" &&
+        statement.type === undefined &&
+        names.has(statement.name) &&
+        holds(statement.value)
+      )
+        return { ...statement, type: resultType };
+      return withNestedBodies(statement, (inner) => typed(inner, names));
+    });
+  return typed(statements, dispatched(statements));
+}
+
+function withNestedBodies(
+  statement: IrStatement,
+  map: (body: IrStatement[]) => IrStatement[],
+): IrStatement {
+  switch (statement.kind) {
+    case "if":
+      return { ...statement, then: map(statement.then), else: map(statement.else) };
+    case "while":
+    case "repeat":
+    case "for":
+      return { ...statement, body: map(statement.body) };
+    case "switch":
+      return {
+        ...statement,
+        cases: statement.cases.map((item) => ({ ...item, body: map(item.body) })),
+        default: map(statement.default),
+      };
+    default:
+      return statement;
+  }
 }
 
 /**
@@ -88,6 +187,7 @@ export type HelperName =
   | "endsWithDigits"
   | "plainText"
   | "listPart"
+  | "listMinus"
   | "repeatList"
   | "compare"
   | "replaceChars"
@@ -193,6 +293,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "endsWithDigits",
   "plainText",
   "listPart",
+  "listMinus",
   "repeatList",
   "compare",
   "replaceChars",
@@ -1068,6 +1169,51 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         [
           ifS({ kind: "typeTest", value: v("value"), type: "list" }, [ret(v("value"))]),
           ret({ kind: "list", items: [v("value")] }),
+        ],
+      ),
+  },
+  // Groovy `list - other`: the elements that `removed` does not hold, repeated ones too, in order.
+  listMinus: {
+    name: "sexscriptLegacyListMinus",
+    build: () =>
+      fn(
+        "sexscriptLegacyListMinus",
+        ["items", "removed"],
+        [
+          { kind: "let", name: "kept", value: { kind: "list", items: [] }, span: null },
+          {
+            kind: "for",
+            variable: "item",
+            collection: v("items"),
+            body: [
+              ifS(
+                {
+                  kind: "unary",
+                  operator: "not",
+                  value: {
+                    kind: "methodCall",
+                    target: v("removed"),
+                    name: "contains",
+                    arguments: [v("item")],
+                  },
+                },
+                [
+                  {
+                    kind: "expression",
+                    expression: {
+                      kind: "methodCall",
+                      target: v("kept"),
+                      name: "add",
+                      arguments: [v("item")],
+                    },
+                    span: null,
+                  },
+                ],
+              ),
+            ],
+            span: null,
+          },
+          ret(v("kept")),
         ],
       ),
   },

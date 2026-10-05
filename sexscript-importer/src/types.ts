@@ -332,7 +332,44 @@ function methodCallType(node: AstNode, environment: TypeEnvironment): ValueType 
     if (onlyOf(type, LIST | NULL) && (type & LIST) !== 0) return LIST;
   }
   if (name === "get" && node.arguments !== undefined && isCalendarFieldRead(node)) return NUMBER;
+  // Groovy sum() adds the elements, or the closure's results: a sum of lists is a list, and of texts a text.
+  if (name === "sum") {
+    const element = summedType(node, environment);
+    if (onlyOf(element, LIST) && element !== 0) return LIST;
+    if (onlyOf(element, STRING) && element !== 0) return STRING;
+  }
   return OBJECT_METHOD_RESULT_TYPES.get(name) ?? UNKNOWN;
+}
+
+/** The type of the values a sum() adds: its closure's result, or the result of the collect() it sums. */
+function summedType(node: AstNode, environment: TypeEnvironment): ValueType {
+  const closureOf = (call: AstNode | null): AstNode | null => {
+    const items: unknown = asNode(call?.arguments)?.items;
+    const last = Array.isArray(items) ? items.filter(isAstNode).at(-1) : undefined;
+    return last?.kind === "closure" ? last : null;
+  };
+  const target = asNode(node.object);
+  const closure =
+    closureOf(node) ??
+    (target?.kind === "methodCall" && constantString(target.method) === "collect"
+      ? closureOf(target)
+      : null);
+  if (closure !== null) {
+    const statements = asNode(closure.body)?.statements;
+    const last = Array.isArray(statements) ? statements.filter(isAstNode).at(-1) : undefined;
+    const value =
+      last?.kind === "expressionStatement" || last?.kind === "return"
+        ? asNode(last.expression ?? last.value)
+        : null;
+    return value === null ? UNKNOWN : inferType(value, environment);
+  }
+  if (target?.kind === "list") {
+    const items: unknown = target.items;
+    return Array.isArray(items)
+      ? items.filter(isAstNode).reduce((type, item) => type | inferType(item, environment), 0)
+      : UNKNOWN;
+  }
+  return UNKNOWN;
 }
 
 /**
@@ -933,6 +970,12 @@ function declaredType(type: unknown): ValueType | null {
   const name = type.replace(/<.*>$/u, "").replace(/^java\.(?:util|lang)\./u, "");
   if (name.endsWith("[]") || name === "List" || name === "ArrayList" || name === "LinkedList")
     return LIST;
+  // A primitive parameter holds its value; a boxed one may also be null.
+  if (["int", "long", "short", "byte", "double", "float"].includes(name)) return NUMBER;
+  if (["Integer", "Long", "Short", "Byte", "Double", "Float", "BigDecimal", "Number"].includes(name))
+    return NUMBER | NULL;
+  if (name === "boolean") return BOOLEAN;
+  if (name === "Boolean") return BOOLEAN | NULL;
   return name === "String" ? STRING : null;
 }
 

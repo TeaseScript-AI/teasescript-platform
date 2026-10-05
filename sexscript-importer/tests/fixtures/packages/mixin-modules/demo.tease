@@ -2,11 +2,12 @@
 function sexscriptLegacyCall(action, args) {
   if action == "pauseCycle" {
     if args.length >= 2 {
-      return pauseCycle(args[0], args[1])
+      pauseCycle(args[0], args[1])
+      return
     }
-    return pauseCycle(args[0])
+    pauseCycle(args[0])
+    return
   }
-  return null
 }
 let sexscriptBackgroundSounds = []
 function sexscriptLegacyPlayBackgroundSound(file, passes) {
@@ -41,9 +42,8 @@ function sexscriptLegacyRandom(limit) {
 }
 function loadGreetingModule {
   // A module variable with the name of an object field stays separate from it.
-  roundsInGreeting = 10
 }
-let roundsInGreeting = 0
+let roundsInGreeting = 10
 function loadLaterModule {
   // Loaded after greeting.groovy, so this greet replaces the earlier one.
 }

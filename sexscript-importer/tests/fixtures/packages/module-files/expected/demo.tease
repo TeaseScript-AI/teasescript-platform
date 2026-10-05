@@ -1,0 +1,51 @@
+// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
+function sexscriptLegacyCall(action, args) {
+  if action == "pauseCycle" {
+    if args.length >= 2 {
+      pauseCycle(args[0], args[1])
+      return
+    }
+    pauseCycle(args[0])
+    return
+  }
+}
+global sexscriptBackgroundSounds = []
+function sexscriptLegacyPlayBackgroundSound(file, passes) {
+  if file == null {
+    sexscriptLegacyStopBackgroundSounds()
+    return
+  }
+  if passes < 1 {
+    return
+  }
+  let sound = playAudio(file: file, async: true, repeat: passes times)
+  sexscriptBackgroundSounds.add(sound)
+}
+global function sexscriptLegacyStopBackgroundSounds {
+  for sound in sexscriptBackgroundSounds {
+    sound.stop()
+  }
+  sexscriptBackgroundSounds = []
+}
+// NOTE SX_DATA_FOLDER line 2: getDataFolder() was the legacy player's data folder on the player's computer; package paths start at the package root, so it is empty text here.
+let DATAFOLDER = ""
+function loadModules {
+  // NOTE SX_MODULE_LOADER line 3: Replaced runtime loading of scripts/demo/*.groovy (directory listing and Groovy evaluation) with direct calls to its 3 modules in file-name order, the order Windows lists them.
+  loadGreetingModule()
+  loadLaterModule()
+  return loadPauseModule()
+}
+global rounds = 2
+global enabled = false
+// A field that only a module uses is the object's field there too.
+global boost = 1.5
+function pauseCycle(delay, cycleValue = 60) {
+  wait delay / cycleValue
+}
+loadModules()
+setupLaterModule()
+greet()
+let cycle = "pauseCycle"
+sexscriptLegacyCall(cycle, [120])
+say "Rounds: ${rounds}"
+exit

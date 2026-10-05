@@ -868,6 +868,8 @@ test("lowers single-statement if, else, and else-if bodies", () => {
   assert.equal(
     emitTease(program),
     [
+      "// NOTE SX_BINDING_VARIABLE: Groovy kept value, which the script assigns without a declaration, in the script's binding; it is declared here with an empty value.",
+      "let value = 0",
       "if first == 1 {",
       "  value = 1",
       "} else if second == 2 {",

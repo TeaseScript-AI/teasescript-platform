@@ -52,11 +52,15 @@ export interface MixinModuleInfo {
 
 interface IrBase {
   span: SourceSpan | null;
+  /** The source name of the mixin module a composed statement comes from, which writes it to its own file. */
+  origin?: string;
 }
 
 export interface IrFunctionParameter {
   name: string;
   defaultValue: IrExpression | null;
+  /** The declared type, where a call passes null for a parameter whose default gives it a type (V30 §17). */
+  type?: string;
 }
 
 export type IrStatement =
@@ -111,6 +115,8 @@ export type IrStatement =
       ownDiagnostics?: MigrationDiagnostic[];
       /** A `global function`, callable from every file of the package (#570). */
       global?: true;
+      /** The declared result type, where returns mix types or a value and null (V30 §17). */
+      returnType?: string;
     })
   | (IrBase & { kind: "return"; value: IrExpression | null })
   /**

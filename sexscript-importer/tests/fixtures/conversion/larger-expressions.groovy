@@ -30,3 +30,14 @@ rounds.times { if (it == 1) return; show("Round ${it}") }
 def order = [3, 1, 2]
 order = order.sort()
 show("Picked ${picked}, first ${order[0]}")
+// A typed closure parameter is a number, so intdiv() divides it; ** is a power; asBoolean() is Groovy truth.
+def weeks = { int punishment -> punishment.intdiv(20) }
+def squared = 3 ** 2
+def named = "Ann".asBoolean()
+show("Weeks " + weeks(45) + ", " + squared + ", " + named)
+// An Elvis fallback for a value of unknown type starts the variable with the fallback, so it never holds null.
+def describe = { given ->
+	def mood = given ?: "calm"
+	show("Mood " + mood.length())
+}
+describe(null)

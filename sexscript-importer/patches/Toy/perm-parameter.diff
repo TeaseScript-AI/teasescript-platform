@@ -1,27 +1,5 @@
---- a/scripts/toy__sha256_0d24d6c78bca.groovy
-+++ b/scripts/toy__sha256_0d24d6c78bca.groovy
-@@ -149,7 +149,7 @@
- 	boolean has(String i) { (loadBoolean("toys.$i") == true) || (loadBoolean("toy.toys.$i") == true) || DEFAULTTOYS.contains(i) }
- 	boolean likes(String i) { loadBoolean("fetish.$i") == true }
- 	boolean can(String i) { loadBoolean("toy.permission.$i") == true }
--	boolean perm(String i) { can(it) }
-+	boolean perm(String i) { can(i) }
- 	boolean getPermission(String i) { getProp("permission.$i", loadB) }
- 	void setPermission(String i, boolean v) { setProp("permission.$i", v) }
- 	void givePermission(String i) { setPermission(i, true) }
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -146,7 +146,7 @@
- 	boolean has(String i) { (loadBoolean("toys.$i") == true) || (loadBoolean("toy.toys.$i") == true) || DEFAULTTOYS.contains(i) }
- 	boolean likes(String i) { loadBoolean("fetish.$i") == true }
- 	boolean can(String i) { loadBoolean("toy.permission.$i") == true }
--	boolean perm(String i) { can(it) }
-+	boolean perm(String i) { can(i) }
- 	boolean getPermission(String i) { getProp("permission.$i", loadB) }
- 	void setPermission(String i, boolean v) { setProp("permission.$i", v) }
- 	void givePermission(String i) { setPermission(i, true) }
---- a/scripts/toy__sha256_bf0bc1679772.groovy
-+++ b/scripts/toy__sha256_bf0bc1679772.groovy
 @@ -127,7 +127,7 @@
  	boolean has(String i) { loadBoolean("toys.$i") == true }
  	boolean likes(String i) { loadBoolean("fetish.$i") == true }

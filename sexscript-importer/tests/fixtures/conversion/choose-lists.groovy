@@ -30,3 +30,14 @@ for (round in 1..2) {
 def mistresses = ["Vera", "Anna"]
 def pickMistress = getSelectedValue("Who will see you?", mistresses + ["Back"])
 if (pickMistress == mistresses.size()) show("Back") else show("Mistress " + mistresses[pickMistress])
+// Records added to a list with a field that is null in some of them: Groovy read each record's own field.
+def resets = []
+resets.add([lbl: "Full reset", ID: 2])
+resets.add([lbl: "Back", ID: null])
+show("Reset?")
+def reset = resets[getSelectedValue(null, resets.collect { it.lbl })].ID
+show("Reset " + reset)
+// Records put in front of a list by concatenation count too.
+def choices = [[lbl: "Stroked", act: "stroked"]]
+choices = [[lbl: "Nothing", act: null]] + choices
+show("Choices " + choices.size())

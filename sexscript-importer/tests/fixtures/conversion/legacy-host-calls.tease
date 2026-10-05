@@ -35,9 +35,8 @@ if true {
 // NOTE SX_ONLINE_STORAGE line 3: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
 let best = load "game.highscore"
 // A sent image keeps its photo reference under the code sendImage() gives.
-// NOTE SX_FILE_PHOTO line 5: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so the title is shown and takePhoto() takes the photo, or gives null as a cancelled chooser did.
-say "Take a picture of yourself and choose it"
-let photo = takePhoto()
+// NOTE SX_FILE_PHOTO line 5: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
+let photo = askImage("Take a picture of yourself and choose it")
 // NOTE SX_ONLINE_STORAGE line 6: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
 let code = sexscriptLegacySendImage(photo)
 // NOTE SX_ONLINE_STORAGE line 7: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
@@ -104,9 +103,8 @@ if "en" == "de" {
 // NOTE SX_DATE_FORMAT line 42: Java formatted the current time with the pattern "HH:mm"; formatTime() shows the player's local form instead (#532).
 say "You report at ${getTime().formatTime()}."
 // A photo copied to a package image path is shown wherever the script shows that path.
-// NOTE SX_FILE_PHOTO line 44: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so the title is shown and takePhoto() takes the photo, or gives null as a cancelled chooser did.
-say "Upload the picture?"
-let proof = takePhoto()
+// NOTE SX_FILE_PHOTO line 44: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
+let proof = askImage("Upload the picture?")
 // NOTE SX_FILE_DELETE line 45: delete() removed this file from the player's computer; a package keeps no files, so the reference stored under its path, such as a photo copied there, is cleared.
 delete "sexscript.image.images/proof/photo.jpg"
 // NOTE SX_PHOTO_COPY line 46: Legacy code copied this photo to images/proof/photo.jpg, which a package cannot write; the photo's reference is saved for that path, and showing the path shows the photo.
