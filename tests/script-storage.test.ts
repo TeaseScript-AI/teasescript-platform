@@ -24,9 +24,17 @@ import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js"
 
 const keyMessage = "Storage key must be a string.";
 const loadKeyMessage =
-  "Storage key must be a string. To compare the loaded value, write '(load \"k\") == null'.";
+  "Storage key must be a string. To compare the loaded value, write 'load(\"k\") == null'.";
 const unstorableMessage =
   "save cannot store a timer handle, media handle, or speaker reference; they exist only in the current session.";
+
+/** The compact and the bounded spelling of `load`, which behave the same. */
+const loadSpellings = [
+  (key: string, fallback?: string) =>
+    fallback === undefined ? `load ${key}` : `load ${key}, default: ${fallback}`,
+  (key: string, fallback?: string) =>
+    fallback === undefined ? `load(${key})` : `load(${key}, default: ${fallback})`,
+] as const;
 
 function binding(snapshot: RuntimeSnapshot, name: string): SerializableRuntimeValue {
   const found = snapshot.frames[0]?.bindings.find((item) => item.name === name);
@@ -397,89 +405,101 @@ test("a final save runs on into exit after acknowledgement even with background 
 });
 
 test("absent loads return null or the default without storing it", () => {
-  const result = assertRuntimeResumeEquivalent(
-    'let missing = load "k"\nlet backup = load "k", default: 7\nlet stillMissing = load "k"\nexit',
-  );
-  assert.equal(binding(result.finalSnapshot, "missing"), null);
-  assert.equal(binding(result.finalSnapshot, "backup"), 7);
-  assert.equal(binding(result.finalSnapshot, "stillMissing"), null);
-  assert.deepEqual(result.finalSnapshot.scriptStorage, []);
+  for (const load of loadSpellings) {
+    const result = assertRuntimeResumeEquivalent(
+      `let missing = ${load('"k"')}\nlet backup = ${load('"k"', "7")}\nlet stillMissing = ${load('"k"')}\nexit`,
+    );
+    assert.equal(binding(result.finalSnapshot, "missing"), null);
+    assert.equal(binding(result.finalSnapshot, "backup"), 7);
+    assert.equal(binding(result.finalSnapshot, "stillMissing"), null);
+    assert.deepEqual(result.finalSnapshot.scriptStorage, []);
+  }
 });
 
 test("present loads skip side effects and blocking interactions in defaults", () => {
-  const result = assertRuntimeResumeEquivalent(
-    [
-      'save "Ada" as "name"',
-      "let calls = 0",
-      'function backup { calls = calls + 1\nreturn "backup" }',
-      'let fromFunction = load "name", default: backup()',
-      'let fromPrompt = load "name", default: askText "Your name?"',
-      "exit",
-    ].join("\n"),
-  );
-  assert.equal(binding(result.finalSnapshot, "calls"), 0);
-  assert.equal(binding(result.finalSnapshot, "fromFunction"), "Ada");
-  assert.equal(binding(result.finalSnapshot, "fromPrompt"), "Ada");
-  assert.deepEqual(
-    result.events.filter((event) => event.kind === "actionRequested"),
-    [],
-  );
+  for (const load of loadSpellings) {
+    const result = assertRuntimeResumeEquivalent(
+      [
+        'save "Ada" as "name"',
+        "let calls = 0",
+        'function backup { calls = calls + 1\nreturn "backup" }',
+        `let fromFunction = ${load('"name"', "backup()")}`,
+        `let fromPrompt = ${load('"name"', 'askText "Your name?"')}`,
+        `let fromRandom = ${load('"name"', '["a", "b"].random')}`,
+        "exit",
+      ].join("\n"),
+    );
+    assert.equal(binding(result.finalSnapshot, "calls"), 0);
+    assert.equal(binding(result.finalSnapshot, "fromFunction"), "Ada");
+    assert.equal(binding(result.finalSnapshot, "fromPrompt"), "Ada");
+    assert.equal(binding(result.finalSnapshot, "fromRandom"), "Ada");
+    // The unused random default draws nothing.
+    assert.deepEqual(result.finalSnapshot.rng, result.boundaries[0]!.rng);
+    assert.deepEqual(
+      result.events.filter((event) => event.kind === "actionRequested"),
+      [],
+    );
+  }
 });
 
 test("an absent load resumes its blocking function default at every instruction boundary", () => {
-  const result = assertRuntimeResumeEquivalent(
-    [
-      "let calls = 0",
-      'function backup { calls = calls + 1\nwait 1 ms\nreturn "Ada" }',
-      'let name = load "name", default: backup()',
-      'let missing = load "name"',
-      "exit",
-    ].join("\n"),
-  );
-  assert.ok(result.boundaries.some((snapshot) => snapshot.status === "waiting"));
-  assert.equal(binding(result.finalSnapshot, "calls"), 1);
-  assert.equal(binding(result.finalSnapshot, "name"), "Ada");
-  assert.equal(binding(result.finalSnapshot, "missing"), null);
-  assert.deepEqual(result.finalSnapshot.scriptStorage, []);
+  for (const load of loadSpellings) {
+    const result = assertRuntimeResumeEquivalent(
+      [
+        "let calls = 0",
+        'function backup { calls = calls + 1\nwait 1 ms\nreturn "Ada" }',
+        `let name = ${load('"name"', "backup()")}`,
+        `let missing = ${load('"name"')}`,
+        "exit",
+      ].join("\n"),
+    );
+    assert.ok(result.boundaries.some((snapshot) => snapshot.status === "waiting"));
+    assert.equal(binding(result.finalSnapshot, "calls"), 1);
+    assert.equal(binding(result.finalSnapshot, "name"), "Ada");
+    assert.equal(binding(result.finalSnapshot, "missing"), null);
+    assert.deepEqual(result.finalSnapshot.scriptStorage, []);
+  }
 });
 
 test("an absent load suspends for askText and resumes after a JSON checkpoint round trip", () => {
-  const compiled = plan(
-    'let name = load "name", default: askText "Your name?"\nlet stillMissing = load "name"\nsave name as "name"\nexit',
-  );
-  const pending = run(compiled, createFreshRuntimeSnapshot(compiled));
-  assert.equal(pending.snapshot.status, "waiting");
-  const action = pending.snapshot.foregroundAction;
-  assert.equal(action?.kind, "interaction");
-  assert.ok(action?.kind === "interaction");
-  assert.equal(action.interactionKind, "text");
-  assert.deepEqual(pending.snapshot.scriptStorage, []);
-  const restored = deserializeCheckpoint(
-    serializeCheckpoint(createCheckpoint(compiled, pending.snapshot)),
-  );
-  assert.deepEqual(restored.snapshot, pending.snapshot);
+  for (const load of loadSpellings) {
+    const compiled = plan(
+      `let name = ${load('"name"', 'askText "Your name?"')}\nlet stillMissing = ${load('"name"')}\nsave name as "name"\nexit`,
+    );
+    const pending = run(compiled, createFreshRuntimeSnapshot(compiled));
+    assert.equal(pending.snapshot.status, "waiting");
+    const action = pending.snapshot.foregroundAction;
+    assert.equal(action?.kind, "interaction");
+    assert.ok(action?.kind === "interaction");
+    assert.equal(action.interactionKind, "text");
+    assert.deepEqual(pending.snapshot.scriptStorage, []);
+    const restored = deserializeCheckpoint(
+      serializeCheckpoint(createCheckpoint(compiled, pending.snapshot)),
+    );
+    assert.deepEqual(restored.snapshot, pending.snapshot);
 
-  const completion = {
-    actionId: action.actionId,
-    actionKind: "interaction",
-    interactionKind: "text",
-    payload: { kind: "submittedText", submittedText: "Ada" },
-  } as const;
-  const directCompletion = completeAction(compiled, pending.snapshot, completion);
-  const restoredCompletion = completeAction(restored.plan, restored.snapshot, completion);
-  assert.equal(directCompletion.outcome.kind, "completed");
-  assert.equal(restoredCompletion.outcome.kind, "completed");
-  const direct = run(compiled, directCompletion.snapshot);
-  const resumed = run(restored.plan, restoredCompletion.snapshot);
-  assert.equal(resumed.snapshot.status, "halted");
-  assert.deepEqual(resumed.snapshot, direct.snapshot);
-  assert.deepEqual(
-    [...pending.events, ...restoredCompletion.events, ...resumed.events],
-    [...pending.events, ...directCompletion.events, ...direct.events],
-  );
-  assert.equal(binding(resumed.snapshot, "name"), "Ada");
-  assert.equal(binding(resumed.snapshot, "stillMissing"), null);
-  assert.deepEqual(resumed.snapshot.scriptStorage, [{ key: "name", value: "Ada" }]);
+    const completion = {
+      actionId: action.actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: { kind: "submittedText", submittedText: "Ada" },
+    } as const;
+    const directCompletion = completeAction(compiled, pending.snapshot, completion);
+    const restoredCompletion = completeAction(restored.plan, restored.snapshot, completion);
+    assert.equal(directCompletion.outcome.kind, "completed");
+    assert.equal(restoredCompletion.outcome.kind, "completed");
+    const direct = run(compiled, directCompletion.snapshot);
+    const resumed = run(restored.plan, restoredCompletion.snapshot);
+    assert.equal(resumed.snapshot.status, "halted");
+    assert.deepEqual(resumed.snapshot, direct.snapshot);
+    assert.deepEqual(
+      [...pending.events, ...restoredCompletion.events, ...resumed.events],
+      [...pending.events, ...directCompletion.events, ...direct.events],
+    );
+    assert.equal(binding(resumed.snapshot, "name"), "Ada");
+    assert.equal(binding(resumed.snapshot, "stillMissing"), null);
+    assert.deepEqual(resumed.snapshot.scriptStorage, [{ key: "name", value: "Ada" }]);
+  }
 });
 
 test("same-session loads see saves and copy nested collections in both directions", () => {
@@ -490,7 +510,7 @@ test("same-session loads see saves and copy nested collections in both direction
       "original[0].items.add(2)",
       'let loaded = load "k"',
       "loaded[0].items.add(3)",
-      'let reloaded = load "k"',
+      'let reloaded = load("k")',
       "exit",
     ].join("\n"),
   );
@@ -534,7 +554,7 @@ test("storage operands evaluate in source order and present loads skip their def
       'save mark("value") as mark("key")',
       'let present = load mark("key"), default: mark("unused")',
       'delete mark("key")',
-      'let absent = load mark("missing"), default: mark("default")',
+      'let absent = load(mark("missing"), default: mark("default"))',
       "exit",
     ].join("\n"),
   );
@@ -546,15 +566,89 @@ test("storage operands evaluate in source order and present loads skip their def
   assert.equal(binding(result.finalSnapshot, "absent"), "default");
 });
 
-test("parentheses compare the loaded value; an unparenthesized comparison gets TSV038 and its hint", () => {
-  const result = assertRuntimeResumeEquivalent('let absent = (load "k") == null\nexit');
+test("a bounded or grouped load compares the loaded value; a compact comparison gets TSV038 and its hint", () => {
+  const result = assertRuntimeResumeEquivalent(
+    'let absent = load("k") == null\nlet grouped = (load "k") == null\nexit',
+  );
   assert.equal(binding(result.finalSnapshot, "absent"), true);
+  assert.equal(binding(result.finalSnapshot, "grouped"), true);
   const invalid = compileSource('let absent = load "k" == null');
   assert.equal(invalid.plan, null);
   assert.deepEqual(
     invalid.diagnostics.map(({ code, message }) => [code, message]),
     [["TSV038", loadKeyMessage]],
   );
+});
+
+test("a bounded load ends at its ')', also with a space before '(' and options on several lines", () => {
+  const result = assertRuntimeResumeEquivalent(
+    [
+      'save 2 as "n"',
+      'save [10, 20] as "list"',
+      'save { name: "Ada" } as "record"',
+      'function key(prefix) { return "${prefix}st" }',
+      'let sum = load ("n", default: 0) + 1',
+      'let fallbackSum = load("missing", default: 3) * 2',
+      'let second = load(key("li"))[1]',
+      'let name = load("record").name',
+      'let nested = load("missing", default: load("list"))[0]',
+      "let multiline = load(",
+      '    "missing",',
+      '    default: load("n")',
+      ")",
+      'let record = { value: load("missing"), default: 1 }',
+      'let text = "${load("record", default: "none").name}"',
+      "exit",
+    ].join("\n"),
+  );
+  const bound = (name: string) => binding(result.finalSnapshot, name);
+  assert.equal(bound("sum"), 3);
+  assert.equal(bound("fallbackSum"), 6);
+  assert.equal(bound("second"), 20);
+  assert.equal(bound("name"), "Ada");
+  assert.equal(bound("nested"), 10);
+  assert.equal(bound("multiline"), 2);
+  // The `default` after `)` is a property of the record, not a fallback.
+  assert.deepEqual(bound("record"), {
+    kind: "object",
+    properties: [
+      { name: "value", value: null },
+      { name: "default", value: 1 },
+    ],
+  });
+  assert.equal(bound("text"), "Ada");
+});
+
+test("a bounded load takes one key and the option 'default:', and names what is wrong", () => {
+  const diagnostics = (source: string) =>
+    compileSource(`${source}\nlet = 1\nexit`).diagnostics.map(
+      (item) => `${item.code} ${item.span.start.line}:${item.span.start.column} ${item.message}`,
+    );
+  // Each case ends with the error of the next statement, which shows that parsing recovered.
+  const next = "TSP013 1:4 Expected a variable identifier after 'let'.";
+  for (const [source, error] of [
+    [
+      "let v = load()",
+      "TSP036 0:8 Expected a storage key in 'load(...)', such as 'load(\"name\")'.",
+    ],
+    [
+      "let v = load(default: 1)",
+      "TSP036 0:8 Expected a storage key in 'load(...)', such as 'load(\"name\")'.",
+    ],
+    [
+      'let v = load("k", "j")',
+      "TSP040 0:18 load(...) takes one unnamed value; name the others, such as 'default:'.",
+    ],
+    [
+      'let v = load("k", fallback: 1)',
+      "TSP040 0:18 Unknown load option 'fallback'; use 'default:'.",
+    ],
+    ['let v = load("k", default: 1, default: 2)', "TSP040 0:30 Duplicate load option 'default'."],
+    // The earlier grouped-key fallback is now a bounded load followed by a stray option.
+    ['let v = load ("k"), default: 1', "TSP002 0:18 Expected a newline after the statement."],
+  ] as const) {
+    assert.deepEqual(diagnostics(source), [error, next], source);
+  }
 });
 
 test("statically non-string storage keys get TSV038 after unwrapping parentheses", () => {
@@ -733,7 +827,7 @@ test("loaded values are checked against the variable's type, including missing k
     "TSR058",
     "'missing' holds a number, so it cannot take null.",
   ]);
-  assert.deepEqual(failure('let backup: number = load "missing", default: identity("backup")'), [
+  assert.deepEqual(failure('let backup: number = load("missing", default: identity("backup"))'), [
     "TSR058",
     "'backup' holds a number, so it cannot take text (string).",
   ]);
@@ -746,7 +840,9 @@ test("loaded values are checked against the variable's type, including missing k
     "'indirect' holds a number, so it cannot take text (string).",
   ]);
 
-  const optional = plan('let missing: number? = load "missing"\nlet text: string = load "k"\nexit');
+  const optional = plan(
+    'let missing: number? = load("missing")\nlet text: string = load "k"\nexit',
+  );
   const result = run(optional, createFreshRuntimeSnapshot(optional, { scriptStorage: storage }));
   assert.equal(result.snapshot.status, "halted");
   assert.equal(binding(result.snapshot, "missing"), null);
@@ -760,7 +856,7 @@ test("compact interactions end at the save 'as', and a grouped load key leaves t
       'save askText as "bare"',
       'save askText "Your name?" as "name"',
       'save load "nick", default: askText "Nickname?" as "nick"',
-      'let pick = load (choose first: "a", second: "b"), default: "fallback"',
+      'let pick = load((choose first: "a", second: "b"), default: "fallback")',
       "exit",
     ].join("\n"),
   );
@@ -926,7 +1022,7 @@ test("a ', default:' belongs to the nearest load or ask before it", () => {
     assert.ok(labelled.key.kind === "interactionExpression", source);
     assert.equal(labelled.key.options.length, 3, source);
   }
-  const choiceKey = initializer('let v = load (choose a: "x", b: "y"), default: "z"');
+  const choiceKey = initializer('let v = load((choose a: "x", b: "y"), default: "z")');
   assert.ok(choiceKey.kind === "loadExpression" && choiceKey.defaultValue !== null);
 });
 
@@ -952,12 +1048,13 @@ test("compact interactions parse in every storage operand position", () => {
     [(value) => `save ${value} as "k"`, false],
     [(value) => `save [${value}] as "k"`, false],
     [(value) => `let v = load ${value}`, true],
+    [(value) => `let v = load(${value})`, true],
     // A `, default:` after an ungrouped interaction would belong to the interaction, so these keys are grouped.
-    [(value) => `let v = load (${value}), default: "d"`, true],
+    [(value) => `let v = load((${value}), default: "d")`, true],
     [(value) => `let v = load "k", default: ${value}`, false],
     [(value) => `save load "k", default: ${value} as "k"`, false],
     [(value) => `save load ${value} as "k"`, true],
-    [(value) => `save load (${value}), default: "d" as "k"`, true],
+    [(value) => `save load((${value}), default: "d") as "k"`, true],
   ];
   for (const value of values) {
     for (const [position, key] of positions) {

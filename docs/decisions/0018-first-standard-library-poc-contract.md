@@ -214,8 +214,16 @@ text that reads back as the same number, such as `2.5e-7`, with `-0` shown as `0
 that number.
 
 Inside an object literal or call arguments, `default:` binds to the nearest compact ask:
-`{ answer: askText "Name?", default: "Ada" }` prefills the field. Write `{ answer: (askText "Name?"), default: "Ada" }`
-for an object property named `default`.
+`{ answer: askText "Name?", default: "Ada" }` prefills the field. Write `{ answer: askText("Name?"), default: "Ada" }`
+or `{ answer: (askText "Name?"), default: "Ada" }` for an object property named `default`.
+
+### Parenthesized basic asks
+
+Owner decision (2026-10-05, #627): `askText`, `askNumber`, `askInteger`, `askDate`, `askTime`, and `askDateTime` also
+take their compact arguments inside parentheses, as V30 §20 writes them. Both forms give the same interaction:
+`askText()` is `askText`, and `askText as mistress ("Type here", default: "Ada")` is
+`askText as mistress "Type here", default: "Ada"`. The speaker clause stays before the parentheses, and the `)` ends the
+ask inside a larger expression. The parentheses accept only the optional text and `default:`.
 
 ### `choose`
 
@@ -728,7 +736,8 @@ This ADR accepts these scoped post-V30 changes:
 - express the V30 `showButton` timeout and elapsed-time return through the compact `timeout:` option and value form.
 
 The broader parenthesized V30 input APIs, including the parenthesized `showButton` forms, are not rejected merely
-because the first POC implements compact forms first. Their advanced options and compatibility mapping remain later
+because the first POC implements compact forms first. Apart from the
+[parenthesized basic asks](#parenthesized-basic-asks), their advanced options and compatibility mapping remain later
 work.
 
 ## Follow-up implementation boundaries
@@ -750,7 +759,7 @@ The implementation issues must inspect the then-current plan/snapshot versions a
 This ADR intentionally defers:
 
 - detailed result objects containing elapsed time or metadata, and the option name that selects such a return type;
-- advanced parenthesized call forms and richer input/choice options;
+- parenthesized call forms other than the basic asks, and richer input/choice options;
 - custom input hints for compact `choose`;
 - any concrete platform guard that a real boundary requires; its mechanism and selected boundary must be justified under ADR 0019 before tests verify it;
 - the exact advanced accessibility-override field;

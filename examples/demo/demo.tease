@@ -14,7 +14,7 @@ speaker session {
 speaker mistressVera
 
 // Script storage keeps the visit count in this browser; a visit counts as soon as the session starts.
-let visits = (load "demo.visits", default: 0) + 1
+let visits = load("demo.visits", default: 0) + 1
 save visits as "demo.visits"
 
 showImage "images/playroom.svg"

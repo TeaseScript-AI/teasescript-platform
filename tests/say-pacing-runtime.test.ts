@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
   createCheckpoint,
@@ -17,7 +18,7 @@ import {
 } from "../src/runtime/state.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runUntilExit } from "./helpers/run-until-exit.js";
-import { functionFrames } from "./helpers/runtime-equivalence.js";
+import { assertRuntimeResumeEquivalent, functionFrames } from "./helpers/runtime-equivalence.js";
 
 test("say lowers smart, exact, and instant pacing with explicit skip policy", () => {
   const compiled = plan('say skippable "a"\nsay unskippable "b", 1.5\nsay "c", instant\nexit');
@@ -677,6 +678,102 @@ test("unsupported and overflowing runtime pacing leave message evaluation uncomm
     overflowResult.events.map((event) => event.kind),
     ["runtimeFailure"],
   );
+});
+
+test("collection changes and random draws of a rejected say roll back, directly and after restore", () => {
+  // Each say draws or removes before its pacing is rejected; the binding keeps its unchanged collection.
+  const cases = [
+    [
+      "let items = [1, 2]\nlet pacing = -1\nsay items.removeFirst(), pacing\nexit",
+      { kind: "list", items: [1, 2] },
+    ],
+    [
+      'let items = dict { a: 1, b: 2 }\nlet pacing = -1\nsay items.remove("a"), pacing\nexit',
+      {
+        kind: "dict",
+        entries: [
+          { key: "a", value: 1 },
+          { key: "b", value: 2 },
+        ],
+      },
+    ],
+    ["let pacing = -1\nsay random(), pacing\nexit", null],
+  ] as const;
+  for (const [source, items] of cases) {
+    const { events, finalSnapshot } = assertRuntimeResumeEquivalent(source, {
+      ending: "failed",
+      seed: 77,
+    });
+    assert.equal(finalSnapshot.failure?.code, "TSR050", source);
+    assert.deepEqual(
+      events.map((event) => event.kind),
+      ["runtimeFailure"],
+      source,
+    );
+    assert.equal(finalSnapshot.rng.state, 77, source);
+    if (items !== null) {
+      const binding = finalSnapshot.frames[0]?.bindings.find(({ name }) => name === "items");
+      assert.deepEqual(binding?.value, items, source);
+    }
+  }
+});
+
+test("say output that evaluates no expression stages atomically, directly and after restore", () => {
+  const resumedFromCheckpoint = (compiled: InstructionPlan, snapshot: RuntimeSnapshot) => {
+    const restored = deserializeCheckpoint(
+      serializeCheckpoint(createCheckpoint(compiled, snapshot)),
+    );
+    return run(restored.plan, restored.snapshot);
+  };
+
+  // A speaker without a display name warns before the overflowing smart pacing deadline rejects the say.
+  const rejected = plan('speaker vera { }\nsay as vera "first"\nexit');
+  let beforeSay = createFreshRuntimeSnapshot(rejected, {
+    initialSessionTimeMs: Number.MAX_SAFE_INTEGER,
+  });
+  while (rejected.instructions[beforeSay.nextInstruction]?.kind !== "say") {
+    beforeSay = executeInstruction(rejected, beforeSay).snapshot;
+  }
+  const rejectedResult = run(rejected, beforeSay);
+  assert.equal(rejectedResult.snapshot.failure?.code, "TSR050");
+  assert.deepEqual(rejectedResult.snapshot.warnedSpeakerIds, []);
+  assert.deepEqual(rejectedResult.snapshot.backgroundActions, []);
+  assert.deepEqual(
+    rejectedResult.events.map((event) => event.kind),
+    ["runtimeFailure"],
+  );
+  assert.deepEqual(resumedFromCheckpoint(rejected, beforeSay), rejectedResult);
+
+  // Smart output opens a gate, the next smart output is prepared behind it and released when it completes, and
+  // instant output supersedes the released output's gate.
+  const flow = plan(
+    'speaker vera { }\nsay as vera "first"\nsay as vera "second"\nsay "third", instant\nexit',
+  );
+  const waiting = run(flow, createFreshRuntimeSnapshot(flow));
+  assert.deepEqual(resumedFromCheckpoint(flow, createFreshRuntimeSnapshot(flow)), waiting);
+  assert.deepEqual(
+    waiting.events.map((event) => event.kind),
+    ["developerWarning", "say", "actionRequested"],
+  );
+  const gate = waiting.snapshot.foregroundAction;
+  assert.equal(gate?.kind, "chatPacingGate");
+  assert.equal(gate?.preparedOutput?.text, "second");
+  const released = observeTime(flow, waiting.snapshot, gate!.deadlineMs).snapshot;
+  const finished = run(flow, released);
+  assert.deepEqual(resumedFromCheckpoint(flow, released), finished);
+  assert.equal(finished.snapshot.status, "halted");
+  assert.deepEqual(
+    finished.events.flatMap((event) =>
+      event.kind === "say"
+        ? [event.text]
+        : event.kind === "actionCompleted"
+          ? [event.settlement.settlementKind]
+          : [],
+    ),
+    ["second", "supersededByInstantOutput", "third"],
+  );
+  assert.deepEqual(finished.snapshot.warnedSpeakerIds, [waiting.snapshot.speakers[0]!.id]);
+  assert.deepEqual(finished.snapshot.backgroundActions, []);
 });
 
 test("typed skip resolves an active background pacing gate without disturbing a foreground wait", () => {

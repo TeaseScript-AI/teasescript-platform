@@ -2771,8 +2771,9 @@ const INDEXED_FRAME_MIN_BINDINGS = 16;
 
 /**
  * Name indexes of large frames, keyed by the frame's bindings array. A frame's bindings are only ever appended and
- * their names never change, so an index extends itself when its frame has grown. A captured or staged snapshot has
- * new arrays and builds its own index. The index is derived data: it finds the same first binding as a scan.
+ * their names never change, so an index extends itself when its frame has grown. A captured or deeply staged
+ * snapshot has new arrays and builds its own index. The index is derived data: it finds the same first binding as a
+ * scan.
  */
 const frameBindingIndexes = new WeakMap<
   readonly RuntimeBindingSnapshot[],
