@@ -160,31 +160,35 @@ export async function loadRepositoryRunner(): Promise<TeaseRunner> {
 /** Compiles the files of a project into one plan and runs it from `main.tease`, transfers included. */
 export async function loadRepositoryProjectRunner(): Promise<TeaseProjectRunner> {
   const api = await loadRuntimeApi();
-  // Runs of the same files with the same host functions reuse the last plan.
+  // Runs of the same files with the same host functions reuse the last plan; only the plan is kept, not the
+  // compilation's parser trees, which a run does not need.
   let last: {
     files: readonly ProjectSource[];
     builtins: string;
     images: unknown;
-    compiled: RuntimeData;
+    plan: RuntimeData | null;
   } | null = null;
   return (files, builtins, options = {}) => {
     const names = Object.keys(builtins).sort().join("\n");
-    const compiled =
+    const reused =
       last !== null &&
       last.files === files &&
       last.builtins === names &&
-      last.images === options.images
-        ? last.compiled
-        : api.call("compileProject", files, {
-            builtins: Object.keys(builtins),
-            ...(options.images === undefined ? {} : { images: options.images }),
-          });
-    last = { files, builtins: names, images: options.images, compiled };
-    return !isRecord(compiled.plan)
+      last.images === options.images;
+    let plan = reused ? last!.plan : null;
+    if (!reused) {
+      const compiled = api.call("compileProject", files, {
+        builtins: Object.keys(builtins),
+        ...(options.images === undefined ? {} : { images: options.images }),
+      });
+      plan = isRecord(compiled.plan) ? compiled.plan : null;
+    }
+    last = { files, builtins: names, images: options.images, plan };
+    return plan === null
       ? NOT_COMPILED
       : smokeRun(
           api,
-          compiled.plan,
+          plan,
           builtins,
           options.maxSteps ?? 2000,
           new Map(),

@@ -30,7 +30,12 @@ import {
 import { helperDefinitionOrder, SYSTEM_SPEAKER, withActionDispatcher } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { legacyProfilePrompt } from "./profile.ts";
-import { expressionType, functionResultTypes, type TeaseType } from "./variable-types.ts";
+import {
+  expressionType,
+  functionResultTypes,
+  withReturnTypes,
+  type TeaseType,
+} from "./variable-types.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 
 const ACCEPTED_EXTERNAL_CALLS = new Set([
@@ -832,8 +837,10 @@ export function lowerPackage(
   if (scripts === null || options.standalone === true) {
     // Files converted on their own keep everything they need; a lone script of a package also asks the profile.
     const entryIndex = scriptIndexes.length === 1 ? scriptIndexes[0]! : null;
-    const programs = withClasses.map((program, index) =>
-      index === entryIndex ? withProfile(program, withClasses, accepted) : program,
+    const programs = withNullableParameters(
+      withClasses.map((program, index) =>
+        index === entryIndex ? withProfile(program, withClasses, accepted) : program,
+      ),
     );
     return {
       lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
@@ -874,12 +881,16 @@ export function lowerPackage(
       new Set([...project].filter((name) => !own.has(name))),
     );
   };
-  const main = apart(shared.main, true);
-  const programs = withClasses.map((program, index) => {
-    if (index === legacyMain) return main;
+  const apartMain = apart(shared.main, true);
+  const apartPrograms = withClasses.map((program, index) => {
+    if (index === legacyMain) return apartMain;
     const position = outputIndexes.indexOf(index);
     return position < 0 ? program : apart(shared.programs[position]!, false);
   });
+  // Calls in any file may pass null for a parameter whose default gives it a type.
+  const nullable = withNullableParameters([apartMain, ...apartPrograms]);
+  const main = nullable[0]!;
+  const programs = nullable.slice(1);
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
     composed: programs,
@@ -1039,10 +1050,11 @@ function withGlobalReach(programs: readonly MigrationProgram[]): MigrationProgra
     const statement = definitions[file]!.get(name);
     if (statement?.kind === "function") queue.push({ file, statement });
   };
+  // A module file holds declarations only: its functions and its values are all global.
   programs.forEach((program, file) => {
     if (file === 0) return;
     for (const statement of program.statements)
-      if (statement.kind === "function") mark(file, statement.name);
+      if (statement.kind === "function" || statement.kind === "let") mark(file, statement.name);
   });
   while (queue.length > 0) {
     const { file, statement } = queue.shift()!;
@@ -1101,6 +1113,57 @@ function startValue(type: string | undefined, inferred: TeaseType): IrExpression
   if (type === "string") return { kind: "literal", value: "" };
   if (type === "boolean") return { kind: "literal", value: false };
   return { kind: "literal", value: 0 };
+}
+
+/**
+ * The programs with an optional type on each parameter that a call of the package passes null where its default gives
+ * it a type, `pre = false` called as `postChastity(null)`: TeaseScript types the parameter by its default, while Groovy
+ * took the null (V30 §17).
+ */
+export function withNullableParameters(programs: readonly MigrationProgram[]): MigrationProgram[] {
+  const nulls = new Map<string, Set<number>>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!isRecord(value)) return;
+    if (value.kind === "call" && typeof value.name === "string" && Array.isArray(value.positional))
+      value.positional.forEach((argument: unknown, position) => {
+        if (isRecord(argument) && argument.kind === "literal" && argument.value === null)
+          nulls.set(String(value.name), (nulls.get(String(value.name)) ?? new Set()).add(position));
+      });
+    for (const child of Object.values(value)) visit(child);
+  };
+  for (const program of programs) visit(program.statements);
+  const scalar = (value: IrExpression | null): string | null =>
+    value?.kind !== "literal"
+      ? null
+      : typeof value.value === "boolean"
+        ? "boolean"
+        : typeof value.value === "string"
+          ? "string"
+          : typeof value.value === "number"
+            ? Number.isInteger(value.value)
+              ? "integer"
+              : "number"
+            : null;
+  return programs.map((program) => ({
+    ...program,
+    statements: program.statements.map((statement) => {
+      const positions = statement.kind === "function" ? nulls.get(statement.name) : undefined;
+      if (statement.kind !== "function" || positions === undefined) return statement;
+      return {
+        ...statement,
+        parameters: statement.parameters.map((parameter, position) => {
+          const type = positions.has(position) ? scalar(parameter.defaultValue) : null;
+          return type === null || parameter.type !== undefined
+            ? parameter
+            : { ...parameter, type: `${type}?` };
+        }),
+      };
+    }),
+  }));
 }
 
 /**
@@ -1605,11 +1668,13 @@ function composeProgram(
   }
   helperStatements.unshift(...fields);
 
-  const composed = withActionDispatcher({
+  const dispatched = withActionDispatcher({
     ...program,
     statements: [...helperStatements, ...program.statements],
     ...(actions.size === 0 ? {} : { actions: [...actions] }),
   });
+  // A function whose returns mix types, such as the dispatcher, declares its result type.
+  const composed = { ...dispatched, statements: withReturnTypes(dispatched.statements) };
   diagnostics.push(...packageDependencyDiagnostics(composed.statements, globalFunctions));
   return renameConflictingIdentifiers({
     ...composed,

@@ -30,3 +30,8 @@ rounds.times { if (it == 1) return; show("Round ${it}") }
 def order = [3, 1, 2]
 order = order.sort()
 show("Picked ${picked}, first ${order[0]}")
+// A typed closure parameter is a number, so intdiv() divides it; ** is a power; asBoolean() is Groovy truth.
+def weeks = { int punishment -> punishment.intdiv(20) }
+def squared = 3 ** 2
+def named = "Ann".asBoolean()
+show("Weeks " + weeks(45) + ", " + squared + ", " + named)

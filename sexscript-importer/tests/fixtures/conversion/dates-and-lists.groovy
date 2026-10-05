@@ -29,3 +29,7 @@ show("Picked " + pickAll(["paddle", "cane"]) + " " + pickAll("belt"))
 def chant = ["toy"] * 2 + ["pet"]
 def laughs = 2.5
 show(chant.join(" ") + " " + "ha" * laughs)
+// The sum of a list that may be empty adds up in a whole number, and is null without elements, as Groovy's was.
+def dayCount = getInteger("How many days?", 0)
+def total = (0..<dayCount).collect { day -> day * 2 }.sum()
+show("Total " + total)

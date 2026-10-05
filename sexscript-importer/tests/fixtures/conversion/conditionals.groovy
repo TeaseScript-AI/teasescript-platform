@@ -9,3 +9,18 @@ show("Mood " + mood + ", bonus " + bonus + ", " + label)
 def finish = { message -> if (message) show(message) }
 finish("Done")
 finish("")
+// A closure case is a condition on the switched value, which Groovy evaluated once.
+switch (getRandom(4)) {
+	case { it < 2 }:
+		show("Stop!")
+		break
+	case 2:
+		show("Again")
+		break
+	default:
+		show("Go on")
+}
+// instanceof tests a value's type, which a Groovy map passes as a dict or an object.
+def given = getBoolean("A number?") ? 5 : "five"
+if (given instanceof Number) show("A number")
+if (given instanceof String) show("A text")

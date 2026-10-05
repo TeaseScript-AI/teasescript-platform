@@ -45,3 +45,6 @@ def rooms = { -> return ["Hall", "Garden"] }
 def roomList = rooms()
 def room = getSelectedValue("Where to?", roomList)
 show("Going to " + roomList[room])
+// A call that passes null for a parameter whose default gives it a type: the parameter takes null too.
+def afterLock = { pre = false -> show(pre ? "Before" : "After") }
+afterLock(null)

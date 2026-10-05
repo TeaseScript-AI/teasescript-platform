@@ -58,3 +58,9 @@ if (startDelay == null) {
 }
 String roundCount = 3
 show("Delay " + delayText + ", " + roundCount + " rounds")
+// A function whose returns mix types declares its result type, which TeaseScript does not infer.
+def chanceOrFlag = { n ->
+	if (n > 1) return 0.5
+	return false
+}
+show("C " + chanceOrFlag(2))

@@ -129,17 +129,80 @@ interface Conflict {
 
 /** The result types of the functions among `statements`, from their `return` values. */
 export function functionResultTypes(statements: IrStatement[]): Map<string, TeaseType> {
+  return functionReturns(statements).results;
+}
+
+/** The result types of the functions among `statements`, and the types their `return`s give. */
+function functionReturns(statements: IrStatement[]): {
+  results: Map<string, TeaseType>;
+  returned: Map<string, TeaseType[]>;
+} {
   const bindings = new Map<BindingKey, Binding>();
   let results = new Map<string, TeaseType>();
+  let returned = new Map<string, TeaseType[]>();
   for (let round = 0; round < 50; round += 1) {
     const analysis = analyse(statements, bindings, results);
     const changed = [...analysis.results].some(
       ([name, type]) => typeName(type) !== typeName(results.get(name) ?? UNKNOWN),
     );
     results = analysis.results;
+    returned = analysis.returned;
     if (!analysis.changed && !changed) break;
   }
-  return results;
+  return { results, returned };
+}
+
+/** Whether a function body returns null with a `return null`, outside nested functions. */
+function returnsNull(body: readonly IrStatement[]): boolean {
+  let found = false;
+  const visit = (statements: readonly IrStatement[]): void => {
+    for (const statement of statements) {
+      if (found) return;
+      if (statement.kind === "return") {
+        if (statement.value?.kind === "literal" && statement.value.value === null) found = true;
+      } else if (statement.kind === "if") {
+        visit(statement.then);
+        visit(statement.else);
+      } else if (
+        statement.kind === "while" ||
+        statement.kind === "repeat" ||
+        statement.kind === "for"
+      ) {
+        visit(statement.body);
+      } else if (statement.kind === "switch") {
+        for (const item of statement.cases) visit(item.body);
+        visit(statement.default);
+      }
+    }
+  };
+  visit(body);
+  return found;
+}
+
+/**
+ * The functions among `statements` with the result type they need written: TeaseScript infers no union and needs an
+ * optional result type for a function that can return null besides a value (V30 §17), so a function whose returns
+ * mix types, or a value and null, declares it.
+ */
+export function withReturnTypes(statements: IrStatement[]): IrStatement[] {
+  const { returned } = functionReturns(statements);
+  return statements.map((statement) => {
+    if (statement.kind !== "function" || statement.returnType !== undefined) return statement;
+    const types = returned.get(statement.name) ?? [];
+    const values = types.filter((type) => type.kind !== "null");
+    if (values.length === 0 || values.some((type) => nonNull(type).kind === "unknown"))
+      return statement;
+    let shared: TeaseType | null = nonNull(values[0]!);
+    for (const type of values.slice(1)) shared = shared === null ? null : unionOf(shared, type);
+    if (shared === null) return statement;
+    const optional =
+      values.length < types.length || values.some((type) => type.kind === "optional");
+    // One type of value needs no annotation, also where the function can end without one; a `return null` beside it
+    // does (V30 §17).
+    if (shared.kind !== "union" && !(optional && returnsNull(statement.body))) return statement;
+    const written = annotation(optional ? { kind: "optional", value: shared } : shared);
+    return written === null ? statement : { ...statement, returnType: written };
+  });
 }
 
 interface Rounds {
@@ -205,6 +268,7 @@ export function enforceVariableTypes(
   knownResults: ReadonlyMap<string, TeaseType> = new Map(),
 ): VariableTypeResult {
   const accepted = runRounds(statements, knownResults);
+  const addedRecords = recordAdds(statements);
   const {
     bindings,
     appends,
@@ -325,7 +389,10 @@ export function enforceVariableTypes(
           // An empty list needs its element type written.
           if (placeholder?.kind === "list" && written !== null && next.type === undefined)
             next = { ...next, type: written };
-          if (next.type === undefined && recordsWithOptionalFields(statement.value))
+          if (
+            next.type === undefined &&
+            recordsWithOptionalFields(statement.value, addedRecords.get(statement.name))
+          )
             next = { ...next, type: "object[]" };
           const rewritten = withIntegerIndexes(next, indexes);
           if (textIntegers.has(statement)) result.textIntegers.push(rewritten);
@@ -502,6 +569,8 @@ interface Analysis {
   conflicts: Conflict[];
   /** Result types of the program's functions as of this round, from their `return` values. */
   results: Map<string, TeaseType>;
+  /** The types each function's `return`s give, also null where it can end without a value. */
+  returned: Map<string, TeaseType[]>;
   truncations: Set<IrStatement>;
   /** Integer declarations initialized from storage, declared `: integer` so the stored value is checked. */
   integerLoads: Set<IrStatement>;
@@ -529,6 +598,7 @@ function analyse(
     changed: false,
     conflicts: [],
     results: new Map(),
+    returned: new Map(),
     truncations: new Set(),
     integerLoads: new Set(),
     textIntegers: new Set(),
@@ -969,6 +1039,7 @@ function analyse(
     )
       returns.push(NULL);
     analysis.results.set(item.name, resultType(returns));
+    analysis.returned.set(item.name, returns);
     returns = null;
   }
   return analysis;
@@ -1090,14 +1161,50 @@ function bindingType(binding: Binding): TeaseType | undefined {
   return type;
 }
 
+/** The record literals each list variable gets with `add`, by the variable's name. */
+function recordAdds(statements: readonly IrStatement[]): Map<string, IrExpression[]> {
+  const result = new Map<string, IrExpression[]>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!isRecord(value)) return;
+    const target = value.target;
+    const args = value.arguments;
+    const record = Array.isArray(args) && args.length === 1 ? args[0] : undefined;
+    if (
+      value.kind === "methodCall" &&
+      value.name === "add" &&
+      isRecord(target) &&
+      target.kind === "variable" &&
+      typeof target.name === "string" &&
+      isObjectLiteral(record)
+    )
+      result.set(target.name, [...(result.get(target.name) ?? []), record]);
+    for (const child of Object.values(value)) visit(child);
+  };
+  visit(statements);
+  return result;
+}
+
+function isObjectLiteral(value: unknown): value is Extract<IrExpression, { kind: "object" }> {
+  return isRecord(value) && value.kind === "object" && Array.isArray(value.properties);
+}
+
 /**
  * A list of records in which a field holds null in some records and a value in others, such as a description that one
  * kind of record leaves out. Groovy read each record's own field; a list of such records is declared `object[]`, whose
  * fields the runtime checks where they are used, since the field's static type would be optional in every record.
  */
-function recordsWithOptionalFields(value: IrExpression): boolean {
-  if (value.kind !== "list" || value.items.length < 2) return false;
-  const records = value.items;
+function recordsWithOptionalFields(
+  value: IrExpression,
+  /** The records later added to the list, `opts.add([lbl: "Back", ID: null])`. */
+  added: readonly IrExpression[] = [],
+): boolean {
+  if (value.kind !== "list") return false;
+  const records = [...value.items, ...added];
+  if (records.length < 2) return false;
   if (!records.every((item) => item.kind === "object" && item.dict !== true)) return false;
   const nulls = new Set<string>();
   const values = new Set<string>();

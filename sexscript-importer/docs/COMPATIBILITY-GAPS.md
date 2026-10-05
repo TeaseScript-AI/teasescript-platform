@@ -69,6 +69,8 @@ implemented):
 | `Calendar.getInstance().get(Calendar.DAY_OF_YEAR)` | `(getDate() - toDate("${getDate().year}-01-01")).days + 1` (#532) |
 | `new Date().format("yyyy-MM-dd")`, `new Date().format("HH:mm")` | `getDate().toISO()`; `getTime().formatTime()`, with a note (#532) |
 | `list + other`, `list << x`, `list.push(x)`, `list += other` | a generated concatenation helper and `add()` |
+| `list - other`, `list -= other` | a generated helper that keeps every element `other` does not hold, repeated ones too, as Groovy did (`difference()` keeps each once); a right side not proven a list or one value is decided at runtime |
+| `x instanceof Number` (`String`, `Boolean`, `List`, `Map`) | `x is number` (`string`, `boolean`, `list`, `dict` or `object`) (#530) |
 | a map used as a lookup table: `[(KEY): v]`, `map[key]`, `containsKey`, `keySet`, `values`, `size`, `put`, `remove`, `clear`, `each { k, v -> }` | a `dict` (#536): `dict{ [KEY]: v }`, `map[key]`, `contains`, `keys`, `values`, `length`, `map[key] = v`, a guarded `remove`, `clear`, `for k in map` |
 | a map with fixed names that gains fields later, and its `clear()` | an object literal that declares every used field (null when added later); `clear()` reassigns it with null fields, so a map that `clear()` empties starts every field as null and sets its values right after, since a property keeps the type of its first value (ADR 0021 rule 1.4) |
 | `list.remove(index)`, `list.remove(value)` | `list.removeAt(index)`, also as a value; `list.remove(value)` with structural equality (#517) |

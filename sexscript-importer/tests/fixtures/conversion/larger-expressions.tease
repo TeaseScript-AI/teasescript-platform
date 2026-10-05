@@ -7,6 +7,104 @@ function sexscriptLegacyMenuOptions(texts, first) {
   }
   return options
 }
+function sexscriptLegacyLog(value) {
+  if value <= 0 {
+    let noResult: number dict = dict{}
+    return noResult["Math.log() of zero or a negative number"]
+  }
+  let exponent = 0
+  let mantissa: number = value
+  while mantissa > 4294967296 {
+    mantissa = mantissa / 4294967296
+    exponent += 32
+  }
+  while mantissa < 2.3283064365386963e-10 {
+    mantissa = mantissa * 4294967296
+    exponent -= 32
+  }
+  while mantissa > 1.4142135623730951 {
+    mantissa = mantissa / 2
+    exponent += 1
+  }
+  while mantissa < 0.7071067811865476 {
+    mantissa = mantissa * 2
+    exponent -= 1
+  }
+  let ratio = (mantissa - 1) / (mantissa + 1)
+  let square: number = ratio * ratio
+  let term: number = ratio
+  let sum: number = 0
+  let divisor = 1
+  while divisor < 40 {
+    sum += term / divisor
+    term = term * square
+    divisor += 2
+  }
+  return exponent * 0.6931471805599453 + 2 * sum
+}
+function sexscriptLegacyExp(value) {
+  let halves = round(value / 0.6931471805599453)
+  let rest = value - halves * 0.6931471805599453
+  let term: number = 1
+  let sum: number = 1
+  let count = 1
+  while count < 25 {
+    term = term * rest / count
+    sum += term
+    count += 1
+  }
+  while halves > 0 {
+    sum = sum * 2
+    halves -= 1
+  }
+  while halves < 0 {
+    sum = sum / 2
+    halves += 1
+  }
+  return sum
+}
+function sexscriptLegacyPow(base, exponent) {
+  if exponent == 0 {
+    return 1
+  }
+  if exponent % 1 == 0 {
+    let count = exponent
+    if count < 0 {
+      count = -count
+    }
+    let factor: number = base
+    let result: number = 1
+    while count > 0 {
+      if count % 2 == 1 {
+        result = result * factor
+      }
+      count = floor(count / 2)
+      if count > 0 {
+        factor = factor * factor
+      }
+    }
+    if exponent < 0 {
+      if result == 0 {
+        let noResult: number dict = dict{}
+        return noResult["Math.pow() of zero to a negative power"]
+      }
+      return 1 / result
+    }
+    return result
+  }
+  if base < 0 {
+    let noResult: number dict = dict{}
+    return noResult["Math.pow() of a negative number to a fractional power"]
+  }
+  if base == 0 {
+    if exponent < 0 {
+      let noResult: number dict = dict{}
+      return noResult["Math.pow() of zero to a negative power"]
+    }
+    return 0
+  }
+  return sexscriptLegacyExp(exponent * sexscriptLegacyLog(base))
+}
 // Conditional expressions inside larger expressions compute into a temporary first, in Groovy's evaluation order.
 function likes(kink) {
   return kink == "rope"
@@ -103,4 +201,12 @@ for it in 0..rounds {
 let order = [3, 1, 2]
 order.sort()
 say "Picked ${picked}, first ${order[0]}"
+// A typed closure parameter is a number, so intdiv() divides it; ** is a power; asBoolean() is Groovy truth.
+function weeks(punishment) {
+  return toInteger(punishment / 20)
+}
+// NOTE SX_MATH_PRECISION line 35: Java computed this with its own floating-point library; the generated helper computes it with ordinary arithmetic, which can differ in the last digits (more for very large angles of cos and sin), and stops the script where Java gave NaN or Infinity, which are no TeaseScript numbers.
+let squared = sexscriptLegacyPow(3, 2)
+let named = "Ann" != ""
+say "Weeks ${weeks(45)}, ${squared}, ${named}"
 exit

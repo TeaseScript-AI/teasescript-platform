@@ -9,7 +9,9 @@ function pick(a, b) {
 }
 let deck = pick(["ace", "king", "queen"], ["king", "ten"])
 deck.add("jack")
-deck.remove("king")
+if deck.contains("king") {
+  deck.remove("king")
+}
 deck.sort()
 let drawn = deck.removeFirst()
 // NOTE SX_LEFT_SHIFT_RECEIVER line 8: Groovy << appended to a list, but this receiver is not proven to be one; on text, a number, or a map, << meant something else there (a text buffer, a bit shift, adding entries), and add() stops the script.
