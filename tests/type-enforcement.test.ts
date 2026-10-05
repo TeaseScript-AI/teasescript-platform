@@ -669,6 +669,31 @@ test("a variable that starts as null takes the type of its first non-null value 
   assert.deepEqual(codes('let best = null\nfunction keep {\n    best = 5\n}\nbest = "x"\nexit'), [
     ["TSV041", "5"],
   ]);
+  // A read before that value in checking order, here of an element in a function body, sees the decided type too.
+  assert.deepEqual(
+    sayTexts(
+      'let marks = [null]\nfunction doubled {\n    let mark = marks[0]\n    if mark != null {\n        return mark * 2\n    }\n    return 0\n}\nsay "${doubled()}"\nmarks[0] = 4\nsay "${doubled()}"\nexit',
+    ),
+    ["0", "8"],
+  );
+  // The same store decides it, so a later store of another type is reported as without the read.
+  const conflicting = (read: string) =>
+    mismatches(`let box = { best: null }\n${read}\nbox.best = 5\nbox.best = "a"\nexit`);
+  assert.deepEqual(conflicting("let seen = box.best"), [
+    [
+      "TSV041",
+      "'box.best' holds a whole number (integer) or null since line 3, so it cannot be set to text (string). Use a separate property for a value of another type.",
+      '"a"',
+    ],
+  ]);
+  assert.deepEqual(conflicting("let seen = 0"), conflicting("let seen = box.best"));
+  // A store of a place that is still undecided itself decides by that place, along a whole chain at once.
+  assert.deepEqual(
+    codes(
+      'let o = { a: null, b: null, c: null }\nlet first = o.a\no.a = o.b\no.b = o.c\no.c = 5\no.a = "x"\nexit',
+    ),
+    [["TSV041", '"x"']],
+  );
 });
 
 test("an empty list or set takes its element type from the first element, and null elements make it optional", () => {
@@ -1114,21 +1139,28 @@ test("a function result, a body, or a copy never changes the types another place
       [],
       empty,
     );
-  // A converted collection is a new one: in either order, each decides its element type on its own, and a first null
-  // stays a first null in both. One already decided keeps its type.
+  // A converted collection is a new one with its source's type, because it holds what the source held when it was
+  // converted: in either order, a value of another type fits neither (ADR 0021 rule 1.2). Their values stay apart,
+  // and a first null stays a first null in both. One already decided keeps its type.
   for (const [empty, convert, decided, nullFirst] of [
-    ["[]", "toSet", "[1]", '[null, "x"]'],
-    ["set[]", "toList", "set[1]", '[null, "x", null]'],
+    ["[]", "toSet", "[1]", "[null, 2]"],
+    ["set[]", "toList", "set[1]", "[null, 2, null]"],
   ]) {
     for (const stores of ['a.add(1)\nb.add("x")', 'b.add("x")\na.add(1)'])
       assert.deepEqual(
-        sayTexts(`let a = ${empty}\nlet b = a.${convert}()\n${stores}\nsay a\nsay b\nexit`),
-        ["[1]", '["x"]'],
+        mismatches(`let a = ${empty}\nlet b = a.${convert}()\n${stores}\nexit`).map(
+          ([code, message, text]) => [code, message.includes("'b' started as a copy of 'a'"), text],
+        ),
+        [["TSV041", true, '"x"']],
         stores,
       );
     assert.deepEqual(
+      sayTexts(`let a = ${empty}\nlet b = a.${convert}()\na.add(1)\nb.add(2)\nsay a\nsay b\nexit`),
+      ["[1]", "[2]"],
+    );
+    assert.deepEqual(
       sayTexts(
-        `let a = ${empty}\na.add(null)\nlet b = a.${convert}()\na.add(1)\nb.add("x")\nb.add(null)\nsay b\nexit`,
+        `let a = ${empty}\na.add(null)\nlet b = a.${convert}()\na.add(1)\nb.add(2)\nb.add(null)\nsay b\nexit`,
       ),
       [nullFirst],
     );
@@ -1136,6 +1168,11 @@ test("a function result, a body, or a copy never changes the types another place
       ["TSV041", '"x"'],
     ]);
   }
+  // A timer block checked after the conversion may fill the source before the conversion runs.
+  assert.deepEqual(
+    codes('let a = []\ntimer async 1 { a.add(1) }\nwait 2\nlet b = a.toSet()\nb.add("x")\nexit'),
+    [["TSV041", '"x"']],
+  );
   // A return is the value as it was evaluated: a later statement of the body changes only the place it was read from.
   for (const [setup, read, write] of [
     ["let given = {}", "given", "given.flag = 1"],
@@ -1177,8 +1214,8 @@ test("arguments are checked as they were evaluated, against the parameters of th
       ["true"],
       call,
     );
-  // A converted collection is the elements as they were evaluated, also as a part of a literal argument; elements
-  // added before the conversion must fit.
+  // A converted collection has its source's element type, also as a part of a literal argument: elements added before
+  // the conversion or by a later argument must fit (ADR 0021 rule 1.2).
   for (const [empty, convert, typed, texts] of [
     ["[]", "toSet", "string set", 'set["s"]'],
     ["set[]", "toList", "string[]", '["s"]'],
@@ -1189,7 +1226,7 @@ test("arguments are checked as they were evaluated, against the parameters of th
       [`f(${converted}, fill())`, `f(${converted})`],
       [`g({ items: ${converted}, tick: fill() })`, `g({ items: ${converted}, tick: 0 })`],
     ]) {
-      assert.deepEqual(sayTexts(`${functions}say "\${${call}}"\nexit`), ["0"], call);
+      assert.deepEqual(codes(`${functions}say "\${${call}}"\nexit`), [["TSV041", converted]], call);
       assert.deepEqual(
         codes(`${functions}a.add(1)\nlet count = ${earlier}\nexit`),
         [["TSV041", converted]],

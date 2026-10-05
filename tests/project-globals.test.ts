@@ -344,6 +344,73 @@ test("globals follow the let type rules with one type environment for all files"
   );
 });
 
+test("a global or property that starts as null takes its type from a store in any file, also where read before it", () => {
+  // Another file stores the property after main.tease read it in checking order: main.tease sees `integer?`, null
+  // before that file ran and the number after it.
+  const main =
+    'global params = { tcum: null, theme: null }\nlet v2 = params.tcum\nlet o2 = 0\nif v2 != null {\n  o2 = v2\n}\nsay "${o2}"\nif o2 == 0 {\n  goto "other.tease"\n}\nexit';
+  assert.deepEqual(
+    said(
+      runToEnd(
+        compiledPlan([
+          { path: "main.tease", source: main },
+          { path: "other.tease", source: 'params.tcum = 5\ngoto "main.tease"' },
+        ]),
+      ).events,
+    ),
+    ["0", "5"],
+  );
+  // Stores in a global function, a timer block, and a file a glob picks decide properties, also nested ones.
+  const { events } = assertRuntimeResumeEquivalent([
+    {
+      path: "main.tease",
+      source: [
+        "global params = { level: null, mode: null, opts: { pace: null } }",
+        'say "${params.level} ${params.mode} ${params.opts.pace}"',
+        "raise()",
+        "arm()",
+        'call "mods/*.tease"',
+        "let level = params.level",
+        "let mode = params.mode",
+        "let pace = params.opts.pace",
+        "if level != null and mode != null and pace != null {",
+        '  say "${level + 1} ${mode.length} ${pace * 2}"',
+        "}",
+        "exit",
+      ].join("\n"),
+    },
+    {
+      path: "lib.tease",
+      source:
+        "global function raise {\n  params.level = 2\n}\nglobal function arm {\n  timer async 1 { params.opts.pace = 1.5 }\n  wait 2\n}",
+    },
+    { path: "mods/fast.tease", source: 'params.mode = "fast"\nend' },
+  ]);
+  assert.deepEqual(said(events), ["null null null", "3 4 3"]);
+  // A store of another type is checked against that type everywhere: in the file that read first, and at a later
+  // store, which names the first one as without the earlier read.
+  const called = (store: string): ProjectSourceFile[] => [
+    {
+      path: "main.tease",
+      source:
+        'global best = null\nlet o = 0\ncall "set.tease"\nif best != null {\n  o = best\n}\nsay "${o}"\nexit',
+    },
+    { path: "set.tease", source: `${store}\nend` },
+  ];
+  assert.deepEqual(said(runToEnd(compiledPlan(called("best = 5"))).events), ["5"]);
+  assert.deepEqual(diagnostics(called('best = "a"')), [["main.tease", "TSV041", 5]]);
+  const conflicting = (read: string): string[] =>
+    messages([
+      { path: "main.tease", source: `global params = { level: null }\n${read}\nexit` },
+      { path: "a.tease", source: "params.level = 5\nexit" },
+      { path: "b.tease", source: 'params.level = "high"\nexit' },
+    ]);
+  assert.deepEqual(conflicting("let level = params.level"), [
+    "'params.level' holds a whole number (integer) or null since line 1 of a.tease, so it cannot be set to text (string). Use a separate property for a value of another type.",
+  ]);
+  assert.deepEqual(conflicting("let level = 0"), conflicting("let level = params.level"));
+});
+
 test("a global function is callable from every file and sees only globals, its parameters, and its locals", () => {
   const plan = compiledPlan([
     {
