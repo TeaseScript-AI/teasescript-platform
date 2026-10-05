@@ -83,6 +83,7 @@ export type HelperName =
   | "openTray"
   | "askOnce"
   | "deviceId"
+  | "maskUrl"
   | "askText"
   | "compare"
   | "replaceChars"
@@ -109,6 +110,9 @@ export type HelperName =
   | "stopBackgroundSounds"
   | "unique"
   | JavaHelperName;
+
+/** Parts of query parameter names whose values a notice hides (helper `maskUrl`, maskedUrl in lower.ts). */
+export const SECRET_PARAMETER_PARTS = ["key", "token", "pass", "secret", "auth"];
 
 /** The speaker of the questions and notices the importer adds (helper `systemSpeaker`). */
 export const SYSTEM_SPEAKER = "system";
@@ -180,6 +184,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "openTray",
   "askOnce",
   "deviceId",
+  "maskUrl",
   "askText",
   "compare",
   "replaceChars",
@@ -864,6 +869,51 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ret({ kind: "load", key: lit("system.deviceId") }),
         ],
       ),
+  },
+  // A URL for a notice, with the values of query parameters named like a key, token, or password hidden.
+  maskUrl: {
+    name: "sexscriptLegacyMaskUrl",
+    build: () => {
+      const method = (
+        target: IrExpression,
+        name: string,
+        ...args: IrExpression[]
+      ): IrExpression => ({ kind: "methodCall", target, name, arguments: args });
+      const secret = SECRET_PARAMETER_PARTS.map((part) =>
+        method(v("name"), "contains", lit(part)),
+      ).reduce((left, right) => bin("or", left, right));
+      return fn(
+        "sexscriptLegacyMaskUrl",
+        ["url"],
+        [
+          letS("parts", method(template(v("url")), "split", lit("?"))),
+          ifS(bin("<", prop(v("parts"), "length"), lit(2)), [ret(template(v("url")))]),
+          letS("masked", { kind: "list", items: [] }),
+          forS("pair", method(at(v("parts"), lit(1)), "split", lit("&")), [
+            letS("field", at(method(v("pair"), "split", lit("=")), lit(0))),
+            letS("name", method(v("field"), "lowercase")),
+            ifS(
+              secret,
+              [
+                {
+                  kind: "expression",
+                  expression: method(v("masked"), "add", template(v("field"), "=…")),
+                  span: null,
+                },
+              ],
+              [
+                {
+                  kind: "expression",
+                  expression: method(v("masked"), "add", v("pair")),
+                  span: null,
+                },
+              ],
+            ),
+          ]),
+          ret(template(at(v("parts"), lit(0)), "?", method(v("masked"), "join", lit("&")))),
+        ],
+      );
+    },
   },
   // A value stored in a Groovy String variable: its text, and null stays null.
   text: {

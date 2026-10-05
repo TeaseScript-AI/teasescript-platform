@@ -17,6 +17,7 @@ import {
   helperCall,
   allHelperStatements,
   helperStatements,
+  SECRET_PARAMETER_PARTS,
   SYSTEM_SPEAKER,
   withActionDispatcher,
   type HelperName,
@@ -8551,6 +8552,10 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
   }
   const folder = playerFolder(targetNode, property, node, context);
   if (folder !== undefined) return folder;
+  if (property === "text") {
+    const request = onlineRequest(targetNode, node, context);
+    if (request !== undefined) return request;
+  }
   const java = javaProperty(node, property, javaHost(context));
   if (java !== undefined) return java;
   // Groovy on the legacy Java read a list's private `size` field, and an array's `length`; no other legacy value had
@@ -8657,6 +8662,14 @@ function lowerObjectMethodCallExpression(
   ) {
     const folder = playerFolder(targetNode, name, node, context);
     if (folder !== undefined) return folder;
+  }
+  if (
+    (name === "getText" || name === "readLines" || name === "openStream") &&
+    argumentsNodes.length === 0 &&
+    targetNode !== null
+  ) {
+    const request = onlineRequest(targetNode, node, context);
+    if (request !== undefined) return request;
   }
   if (name === "collect" && targetNode !== null && isNetworkInterfaces(targetNode)) {
     addDiagnostic(
@@ -13073,6 +13086,67 @@ function playerFolder(
     { kind: "literal", value: "system.playerFolder" },
     { kind: "literal", value: "Which folder holds your SexScripts player?" },
   ]);
+}
+
+/**
+ * A read of a web address, `address.toURL().text` or `new URL(address).text`, which an online service answered: a
+ * package has no such service (owner decision), so a system notice before the statement shows the request the
+ * original made, with secret query values hidden, and the read is null, as when the request failed. Undefined for any
+ * other receiver.
+ */
+function onlineRequest(
+  receiver: AstNode,
+  node: AstNode,
+  context: LowerContext,
+): IrExpression | null | undefined {
+  const address =
+    receiver.kind === "methodCall" &&
+    constantString(receiver.method) === "toURL" &&
+    nodeArray(asNode(receiver.arguments)?.items).length === 0
+      ? asNode(receiver.object)
+      : receiver.kind === "constructorCall" &&
+          (receiver.type === "URL" || receiver.type === "java.net.URL") &&
+          nodeArray(asNode(receiver.arguments)?.items).length === 1
+        ? nodeArray(asNode(receiver.arguments)?.items)[0]!
+        : null;
+  if (address === null) return undefined;
+  const url = lowerExpression(address, context);
+  if (url === null) return null;
+  addDiagnostic(
+    context,
+    "SX_ONLINE_REQUEST",
+    "warning",
+    "The legacy script read this web address from an online service, which a package cannot reach; a system notice shows the request, with secret values hidden, and the read is null, as when the request failed.",
+    node.span,
+  );
+  const shown =
+    url.kind === "literal" && typeof url.value === "string"
+      ? { text: maskedUrl(url.value) }
+      : { value: useHelper(context, "maskUrl", [url]) };
+  context.prelude.push(
+    systemSay(
+      templateOrLiteral([
+        { text: "Online feature not available here. The original would have requested: GET " },
+        shown,
+      ]),
+      node.span,
+      context,
+    ),
+  );
+  return { kind: "literal", value: null };
+}
+
+/** A URL with the values of query parameters named like a key, token, or password hidden (helper `maskUrl`). */
+export function maskedUrl(url: string): string {
+  const [base, query] = url.split("?");
+  if (query === undefined) return url;
+  const pairs = query.split("&").map((pair) => {
+    const field = pair.split("=")[0]!;
+    return SECRET_PARAMETER_PARTS.some((part) => field.toLowerCase().includes(part))
+      ? `${field}=…`
+      : pair;
+  });
+  return `${base}?${pairs.join("&")}`;
 }
 
 /** `NetworkInterface.networkInterfaces` or `NetworkInterface.getNetworkInterfaces()`. */
