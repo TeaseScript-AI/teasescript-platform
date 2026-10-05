@@ -1,0 +1,34 @@
+function sexscriptLegacyRandom(limit) {
+  if limit == null {
+    return randomInteger(0..100)
+  }
+  let bound = limit - limit % 1
+  if bound > 0 {
+    return randomInteger(0..bound)
+  }
+  if bound < 0 {
+    return -randomInteger(0..-bound)
+  }
+  return 0
+}
+// A closure named like a SexScript method calls that method inside its own body, where the variable is not defined yet.
+function getRandom(low, high) {
+  // NOTE SX_PLUS_OPERAND_TYPE line 2: Groovy + operands are not proven numeric; TeaseScript + only adds numbers. Use interpolation if this joins text.
+  return low + sexscriptLegacyRandom(high - low)
+}
+say "Roll ${getRandom(3, 6)}"
+// A closure of one parameter called without an argument gets null.
+function greet(who) {
+  if who == null {
+    say "Hello"
+  } else {
+    say "Hello ${who}"
+  }
+}
+greet(null)
+// A local closure named sleep is called instead of Groovy sleep(milliseconds).
+function sleep {
+  say "You fall asleep."
+}
+sleep()
+exit
