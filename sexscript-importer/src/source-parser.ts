@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { isRecord, parseParsedGroovyFile, type ParsedGroovyFile } from "./ast.ts";
@@ -18,6 +18,25 @@ export async function parseGroovySource(
   sourcePath: string,
   runner: GroovyParserRunner = runCachedGroovyParser,
 ): Promise<ParsedGroovyFile> {
+  const content = await readFile(sourcePath).catch(() => null);
+  // The legacy player dropped a byte order mark at the start of a script (ScriptContainer.readFromFile), so the parser
+  // reads a copy without it, and the result names the original file.
+  if (content !== null && content[0] === 0xef && content[1] === 0xbb && content[2] === 0xbf) {
+    const directory = await mkdtemp(path.join(tmpdir(), "sexscript-bom-"));
+    const copy = path.join(directory, path.basename(sourcePath));
+    try {
+      await writeFile(copy, content.subarray(3));
+      const parsed = await parseGroovySource(copy, runner);
+      const from = JSON.stringify(copy).slice(1, -1);
+      const to = JSON.stringify(sourcePath).slice(1, -1);
+      return parseParsedGroovyFile(
+        JSON.parse(JSON.stringify(parsed).replaceAll(from, to)),
+        sourcePath,
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
   const scriptBody = await runner("script-body", sourcePath);
   if (scriptBody.diagnostics.length === 0) return scriptBody;
 
