@@ -26,6 +26,7 @@
  * Playwright CLI install).
  */
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { parseArgs } from "node:util";
@@ -75,6 +76,10 @@ interface Page {
     fastForward(ms: number): Promise<void>;
   };
   on(event: "pageerror", listener: (error: Error) => void): void;
+  waitForEvent(
+    event: "filechooser",
+    options: { timeout: number },
+  ): Promise<{ setFiles(files: string): Promise<void> }>;
 }
 interface Browser {
   newContext(options: {
@@ -193,6 +198,15 @@ const ids = (await readdir(root, { withFileTypes: true }))
 const { chromium } = createRequire(import.meta.url)(PLAYWRIGHT_CORE) as {
   chromium: { launch(): Promise<Browser> };
 };
+// The picture an askImage prompt gets: a one-pixel PNG.
+const answerImage = path.join(tmpdir(), "play-check-answer.png");
+await writeFile(
+  answerImage,
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  ),
+);
 const browser = await chromium.launch();
 try {
   for (const [index, id] of ids.entries()) {
@@ -533,6 +547,15 @@ async function playOnce(
         track.chose(state.site, option);
         taken.push(`${state.site} → ${state.options[option] ?? option}`);
         await page.click(`[data-foreground-controls] button >> nth=${option}`, { timeout: 5_000 });
+        step += 1;
+      } else if (kind === "image") {
+        // askImage: the composer's attach button opens a file picker, which gets the answer picture.
+        const [chooser] = await Promise.all([
+          page.waitForEvent("filechooser", { timeout: 5_000 }),
+          page.click("[data-composer-attach]", { timeout: 5_000 }),
+        ]);
+        await chooser.setFiles(answerImage);
+        taken.push(`${state.site} → [picture]`);
         step += 1;
       } else if (state.composer !== null) {
         const answers =
