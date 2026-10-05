@@ -6,6 +6,7 @@ import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, restoreCheckpoint } from "../src/runtime/checkpoint.js";
 import { run, stepToEvent } from "../src/runtime/engine.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSnapshot } from "../src/runtime/state.js";
 import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -171,12 +172,75 @@ test("chance at both ends of the percentage range is certain", () => {
   }
 });
 
-test("instruction budget stops an infinite while loop", () => {
-  // The exit is never taken; a script needs a reachable one.
-  const compiled = plan("let stop = false\nwhile true {\n  if stop { exit }\n}\n");
-  const result = run(compiled, createFreshRuntimeSnapshot(compiled), {}, { instructionBudget: 20 });
+test("the default instruction budget finishes a long setup loop and still stops an endless loop", () => {
+  // Legacy teases such as guessthenumber fill a 10,000-entry table before their first message (#613).
+  const setup = runSource(
+    [
+      "let table = []",
+      "let i = 0",
+      "while i < 10000 {",
+      "    table.add(i % 7 == 0)",
+      "    i += 1",
+      "}",
+      'say "ready"',
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(sayTexts(setup), ["ready"]);
 
-  assert.equal(result.snapshot.failure?.code, "TSR037");
+  // The exit is never taken; a script needs a reachable one.
+  const endless = runValidSource("let stop = false\nwhile true {\n  if stop { exit }\n}");
+  assert.deepEqual(
+    [endless.snapshot.status, endless.snapshot.failure?.code, endless.snapshot.failure?.message],
+    [
+      "failed",
+      "TSR037",
+      "This loop ran 1,000,000 steps without waiting. Add a wait, or check the loop's condition.",
+    ],
+  );
+});
+
+test("instruction budget stops an infinite while loop and blames only a loop of the running call", () => {
+  const failure = (source: string, instructionBudget: number, nowMs?: number) => {
+    const compiled = plan(source);
+    let snapshot = run(
+      compiled,
+      createFreshRuntimeSnapshot(compiled),
+      {},
+      { instructionBudget },
+    ).snapshot;
+    if (nowMs !== undefined) {
+      const observed = observeTime(compiled, snapshot, nowMs).snapshot;
+      snapshot = run(compiled, observed, {}, { instructionBudget }).snapshot;
+    }
+    return [snapshot.failure?.code, snapshot.failure?.message, snapshot.failure?.span.start.line];
+  };
+  const blamesLoop = (steps: string) =>
+    `This loop ran ${steps} steps without waiting. Add a wait, or check the loop's condition.`;
+  const blamesScript = (steps: string) =>
+    `The script ran ${steps} steps without waiting. Add a wait, or check for code that repeats without end.`;
+
+  // The exit is never taken; a script needs a reachable one. Lines are zero-based.
+  assert.deepEqual(failure("let stop = false\nwhile true {\n  if stop { exit }\n}", 20), [
+    "TSR037",
+    blamesLoop("20"),
+    1,
+  ]);
+  // The recursion runs in another call than the loop, so the failure is at its next instruction.
+  assert.deepEqual(
+    failure(
+      "function recurse { return recurse() }\nlet stop = false\nwhile true {\n  recurse()\n  if stop { exit }\n}",
+      50,
+    ),
+    ["TSR037", blamesScript("50"), 0],
+  );
+  // Timer blocks that catch up while the loop waits are not the loop's steps.
+  const [code, message] = failure(
+    "let t = timer(duration: 1 ms, async: true, repeat: true) { return }\nt.repeatDuration = 1e-300 ms\nlet stop = false\nwhile true {\n  wait 2 ms\n  if stop { exit }\n}",
+    1_000,
+    1,
+  );
+  assert.deepEqual([code, message], ["TSR037", blamesScript("1,000")]);
 });
 
 test("runtime instruction budgets use the positive safe-integer domain", () => {
