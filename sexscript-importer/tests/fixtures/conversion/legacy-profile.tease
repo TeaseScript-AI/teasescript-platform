@@ -1,9 +1,12 @@
-function sexscriptLegacyAskBooleans(message, texts, defaults) {
+speaker system {
+  title: "System"
+}
+function sexscriptLegacyAskBooleansSystem(message, texts, defaults) {
   let answers = []
   let confirmed = false
   while not confirmed {
     answers = []
-    say message
+    say as system message
     let index = 0
     for text in texts {
       let yes = "Yes"
@@ -12,7 +15,7 @@ function sexscriptLegacyAskBooleans(message, texts, defaults) {
         yes = "Yes (preset)"
         no = "No"
       }
-      say text
+      say as system text
       answers.add((choose yes: yes, no: no) == "yes")
       index += 1
     }
@@ -22,16 +25,16 @@ function sexscriptLegacyAskBooleans(message, texts, defaults) {
 }
 function sexscriptLegacyAskProfile {
   if (load "intro.name") == null {
-    say "What is your name, here ?"
-    save askText default: "Slave" as "intro.name"
+    say as system "What is your name, here ?"
+    save (askText as system default: "Slave") as "intro.name"
   }
   if (load "intro.female") == null {
-    say "Are you a woman ?"
+    say as system "Are you a woman ?"
     save (choose yes: "Yes", no: "No") == "yes" as "intro.female"
   }
   if (load "intro.likemale") == null {
     if (load "intro.likefemale") == true {
-      say "Are you also attracted to men ?"
+      say as system "Are you also attracted to men ?"
       save (choose yes: "Yes", no: "No") == "yes" as "intro.likemale"
     } else {
       save true as "intro.likemale"
@@ -50,7 +53,7 @@ function sexscriptLegacyAskProfile {
     profileToysIndex += 1
   }
   if profileToysKeys.length > 0 {
-    let profileToysAnswers = sexscriptLegacyAskBooleans("What do you have in your toy chest ?", profileToysNames, profileToysDefaults)
+    let profileToysAnswers = sexscriptLegacyAskBooleansSystem("What do you have in your toy chest ?", profileToysNames, profileToysDefaults)
     profileToysIndex = 0
     for profileToysKey in profileToysKeys {
       save profileToysAnswers[profileToysIndex] as profileToysKey

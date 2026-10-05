@@ -60,8 +60,23 @@ export interface IrFunctionParameter {
 }
 
 export type IrStatement =
-  /** `instant` shows the text without reading time (`say text, instant`). */
-  | (IrBase & { kind: "say"; value: IrExpression; instant?: true })
+  /**
+   * `instant` shows the text without reading time (`say text, instant`); `speaker` says it `as` that speaker, and
+   * `prose` shows it as prose rather than a speech bubble (V30 §17).
+   */
+  | (IrBase & {
+      kind: "say";
+      value: IrExpression;
+      instant?: true;
+      speaker?: string;
+      prose?: true;
+    })
+  /** A speaker declaration, global in the package (V30 §37). */
+  | (IrBase & {
+      kind: "speaker";
+      name: string;
+      properties: Array<{ name: string; value: IrExpression }>;
+    })
   | (IrBase & { kind: "wait"; duration: IrExpression; visible: boolean; unit: "s" | "ms" })
   | (IrBase & { kind: "showButton"; label: IrExpression; timeout: IrExpression | null })
   | (IrBase & { kind: "showPopup"; message: IrExpression })
@@ -235,7 +250,13 @@ export type IrExpression =
    * Compact single-field input whose prompt, if any, was emitted as a preceding `say`. `defaultValue` prefills the
    * field, written `askText default: value` (V30 §20).
    */
-  | { kind: "input"; input: "askText" | "askNumber" | "askInteger"; defaultValue?: IrExpression }
+  | {
+      kind: "input";
+      input: "askText" | "askNumber" | "askInteger";
+      defaultValue?: IrExpression;
+      /** Asks `as` this speaker. */
+      speaker?: string;
+    }
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
   /** A duration literal: exact (`1 s`, `1 min`, `1 h`) or calendar (`1 day`, `1 week`, `1 month`, `1 year`). */
   | {

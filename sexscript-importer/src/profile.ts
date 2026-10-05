@@ -1,5 +1,5 @@
 import { isRecord } from "./ast.ts";
-import { helperCall, helperStatements } from "./helpers.ts";
+import { helperCall, helperStatements, SYSTEM_SPEAKER, type HelperName } from "./helpers.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 import type { AcceptedForm } from "./workarounds.ts";
 
@@ -123,7 +123,13 @@ const yesNo = (): IrExpression => ({
   left: { kind: "choice", options: [lit("Yes"), lit("No")], labels: ["yes", "no"] },
   right: lit("yes"),
 });
-const say = (text: string): IrStatement => ({ kind: "say", value: lit(text), span: null });
+// The desktop player asked these, not the tease, so they come from the system speaker (owner decision).
+const say = (text: string): IrStatement => ({
+  kind: "say",
+  value: lit(text),
+  speaker: SYSTEM_SPEAKER,
+  span: null,
+});
 const save = (key: IrExpression, value: IrExpression): IrStatement => ({
   kind: "save",
   key,
@@ -158,7 +164,12 @@ export function legacyProfilePrompt(
     body.push(
       ifMissing("intro.name", [
         say("What is your name, here ?"),
-        save(lit("intro.name"), { kind: "input", input: "askText", defaultValue: lit("Slave") }),
+        save(lit("intro.name"), {
+          kind: "input",
+          input: "askText",
+          defaultValue: lit("Slave"),
+          speaker: SYSTEM_SPEAKER,
+        }),
       ]),
     );
   for (const [key, question] of INTRO_QUESTIONS) {
@@ -193,15 +204,22 @@ export function legacyProfilePrompt(
     needsBooleans = true;
     body.push(...ownedItems(keys, group, names, question, accepted));
   }
-  const helpers =
-    needsBooleans &&
-    !accepted.has("askBooleans") &&
-    !main.statements.some(
+  const defined = (name: string): boolean =>
+    main.statements.some(
       (statement) =>
-        statement.kind === "function" && statement.name === "sexscriptLegacyAskBooleans",
-    )
-      ? helperStatements(new Set(["askBooleans"]))
-      : [];
+        (statement.kind === "function" || statement.kind === "speaker") && statement.name === name,
+    );
+  // Helpers the entry already defines, such as the system speaker, stay single.
+  const helpers = helperStatements(
+    new Set<HelperName>(
+      needsBooleans && !accepted.has("askBooleans")
+        ? ["systemSpeaker", "askBooleansSystem"]
+        : ["systemSpeaker"],
+    ),
+  ).filter(
+    (statement) =>
+      !(statement.kind === "function" || statement.kind === "speaker") || !defined(statement.name),
+  );
   return [
     ...helpers,
     { kind: "function", name: PROFILE_HELPER, parameters: [], body, span: null },
@@ -322,7 +340,7 @@ function ownedItems(
                 positional: [],
                 named: { message: lit(question), texts: v(missingNames), defaults: v(defaults) },
               }
-            : helperCall("askBooleans", [lit(question), v(missingNames), v(defaults)]),
+            : helperCall("askBooleansSystem", [lit(question), v(missingNames), v(defaults)]),
           span: null,
         },
         { kind: "assign", target: v(position), operator: "=", value: lit(0), span: null },

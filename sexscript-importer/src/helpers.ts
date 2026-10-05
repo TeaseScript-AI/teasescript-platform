@@ -76,6 +76,8 @@ export type HelperName =
   | "itemAt"
   | "truth"
   | "text"
+  | "systemSpeaker"
+  | "askBooleansSystem"
   | "askText"
   | "compare"
   | "replaceChars"
@@ -103,6 +105,9 @@ export type HelperName =
   | "unique"
   | JavaHelperName;
 
+/** The speaker of the questions and notices the importer adds (helper `systemSpeaker`). */
+export const SYSTEM_SPEAKER = "system";
+
 export function helperCall(name: HelperName, args: IrExpression[]): IrExpression {
   return { kind: "call", name: HELPERS[name].name, positional: args, named: {} };
 }
@@ -112,7 +117,8 @@ export function helperCall(name: HelperName, args: IrExpression[]): IrExpression
  * that needs a helper generates the same definition.
  */
 export function helperDefinitionOrder(statement: IrStatement): number {
-  if (statement.kind !== "function" && statement.kind !== "let") return -1;
+  if (statement.kind !== "function" && statement.kind !== "let" && statement.kind !== "speaker")
+    return -1;
   return HELPER_ORDER.findIndex((name) => HELPERS[name].name === statement.name);
 }
 
@@ -120,6 +126,7 @@ export function helperDefinitionOrder(statement: IrStatement): number {
 export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] {
   const needed = new Set(names);
   if (needed.has("switchButton")) needed.add("switchButtonId");
+  if (needed.has("askBooleansSystem")) needed.add("systemSpeaker");
   if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
   if (needed.has("stopBackgroundSounds")) needed.add("backgroundSounds");
   for (const name of needed)
@@ -133,6 +140,7 @@ export function allHelperStatements(): IrStatement[] {
 }
 
 const HELPER_ORDER: readonly HelperName[] = [
+  "systemSpeaker",
   "backgroundSounds",
   "playBackgroundSound",
   "stopBackgroundSounds",
@@ -159,6 +167,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "itemAt",
   "truth",
   "text",
+  "askBooleansSystem",
   "askText",
   "compare",
   "replaceChars",
@@ -299,6 +308,64 @@ const randomBelow = (max: IrExpression): IrExpression => ({
   named: {},
 });
 
+/** A yes/no answer per text, confirmed at the end: legacy getBooleans() and the profile's owned items. */
+function askBooleansHelper(name: string, speaker?: string): IrStatement {
+  const asSpeaker = speaker === undefined ? {} : { speaker };
+  return fn(
+    name,
+    ["message", "texts", "defaults"],
+    [
+      letS("answers", { kind: "list", items: [] }),
+      letS("confirmed", lit(false)),
+      {
+        kind: "while",
+        condition: { kind: "unary", operator: "not", value: v("confirmed") },
+        body: [
+          set(v("answers"), { kind: "list", items: [] }),
+          { kind: "say", value: v("message"), ...asSpeaker, span: null },
+          letS("index", lit(0)),
+          forS("text", v("texts"), [
+            letS("yes", lit("Yes")),
+            letS("no", lit("No (preset)")),
+            ifS(
+              bin(
+                "and",
+                bin("<", v("index"), prop(v("defaults"), "length")),
+                bin("==", at(v("defaults"), v("index")), lit(true)),
+              ),
+              [set(v("yes"), lit("Yes (preset)")), set(v("no"), lit("No"))],
+            ),
+            { kind: "say", value: v("text"), ...asSpeaker, span: null },
+            add(
+              "answers",
+              bin(
+                "==",
+                { kind: "choice", options: [v("yes"), v("no")], labels: ["yes", "no"] },
+                lit("yes"),
+              ),
+            ),
+            set(v("index"), lit(1), "+="),
+          ]),
+          set(
+            v("confirmed"),
+            bin(
+              "==",
+              {
+                kind: "choice",
+                options: [lit("Confirm"), lit("Change answers")],
+                labels: ["confirm", "change"],
+              },
+              lit("confirm"),
+            ),
+          ),
+        ],
+        span: null,
+      },
+      ret(v("answers")),
+    ],
+  );
+}
+
 const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = {
   // Legacy background sounds overlapped and playBackgroundSound(null) stopped them all; TeaseScript stops async
   // media through its handle, so the handles are collected.
@@ -386,60 +453,12 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
   // preset marked in its button, and a confirmation that can start over.
   askBooleans: {
     name: "sexscriptLegacyAskBooleans",
-    build: () =>
-      fn(
-        "sexscriptLegacyAskBooleans",
-        ["message", "texts", "defaults"],
-        [
-          letS("answers", { kind: "list", items: [] }),
-          letS("confirmed", lit(false)),
-          {
-            kind: "while",
-            condition: { kind: "unary", operator: "not", value: v("confirmed") },
-            body: [
-              set(v("answers"), { kind: "list", items: [] }),
-              { kind: "say", value: v("message"), span: null },
-              letS("index", lit(0)),
-              forS("text", v("texts"), [
-                letS("yes", lit("Yes")),
-                letS("no", lit("No (preset)")),
-                ifS(
-                  bin(
-                    "and",
-                    bin("<", v("index"), prop(v("defaults"), "length")),
-                    bin("==", at(v("defaults"), v("index")), lit(true)),
-                  ),
-                  [set(v("yes"), lit("Yes (preset)")), set(v("no"), lit("No"))],
-                ),
-                { kind: "say", value: v("text"), span: null },
-                add(
-                  "answers",
-                  bin(
-                    "==",
-                    { kind: "choice", options: [v("yes"), v("no")], labels: ["yes", "no"] },
-                    lit("yes"),
-                  ),
-                ),
-                set(v("index"), lit(1), "+="),
-              ]),
-              set(
-                v("confirmed"),
-                bin(
-                  "==",
-                  {
-                    kind: "choice",
-                    options: [lit("Confirm"), lit("Change answers")],
-                    labels: ["confirm", "change"],
-                  },
-                  lit("confirm"),
-                ),
-              ),
-            ],
-            span: null,
-          },
-          ret(v("answers")),
-        ],
-      ),
+    build: () => askBooleansHelper("sexscriptLegacyAskBooleans"),
+  },
+  // The same questions asked as the system speaker, for the legacy player's profile.
+  askBooleansSystem: {
+    name: "sexscriptLegacyAskBooleansSystem",
+    build: () => askBooleansHelper("sexscriptLegacyAskBooleansSystem", SYSTEM_SPEAKER),
   },
   // Java %.Nf: the number rounded to `digits` decimals, written with exactly that many.
   fixed: {
@@ -696,6 +715,16 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ret(at(v("list"), v("position"))),
         ],
       ),
+  },
+  // The speaker of the questions and notices the importer adds, which the legacy author never wrote (owner decision).
+  systemSpeaker: {
+    name: SYSTEM_SPEAKER,
+    build: () => ({
+      kind: "speaker",
+      name: SYSTEM_SPEAKER,
+      properties: [{ name: "title", value: lit("System") }],
+      span: null,
+    }),
   },
   // A value stored in a Groovy String variable: its text, and null stays null.
   text: {
