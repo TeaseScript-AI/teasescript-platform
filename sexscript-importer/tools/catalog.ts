@@ -138,7 +138,8 @@ export interface PlayCheck {
 
 /** Where the status beyond the compiler comes from; see the module comment. */
 export interface StatusSources {
-  readonly playChecks?: string;
+  /** Folders of `play-check.ts` results; for each package the latest check of its current files counts. */
+  readonly playChecks?: readonly string[];
   readonly verified?: string;
   readonly approved?: ReadonlySet<string>;
 }
@@ -161,7 +162,7 @@ async function main(rawArgs: string[]): Promise<void> {
     allowPositionals: true,
     options: {
       player: { type: "string", default: "" },
-      "play-checks": { type: "string" },
+      "play-checks": { type: "string", multiple: true },
       verified: { type: "string" },
       approved: { type: "string" },
     },
@@ -182,7 +183,7 @@ async function main(rawArgs: string[]): Promise<void> {
   const entries = await readCatalogEntries(root, await loadRepositoryCatalogTools(), {
     ...(values["play-checks"] === undefined
       ? {}
-      : { playChecks: path.resolve(values["play-checks"]) }),
+      : { playChecks: values["play-checks"].map((folder) => path.resolve(folder)) }),
     ...(values.verified === undefined ? {} : { verified: path.resolve(values.verified) }),
     approved,
   });
@@ -341,15 +342,22 @@ async function readEntry(
               .join("/"),
           )
           .sort();
-  const play =
-    statusSources.playChecks === undefined
-      ? null
-      : await readFile(path.join(statusSources.playChecks, id, "result.json"), "utf8").then(
+  const hash = packageContentHash(scan.sources);
+  const checks = (
+    await Promise.all(
+      (statusSources.playChecks ?? []).map((checksFolder) =>
+        readFile(path.join(checksFolder, id, "result.json"), "utf8").then(
           (text) => parsePlayCheck(JSON.parse(text)),
           () => null,
-        );
-  const current =
-    play !== null && play.contentHash === packageContentHash(scan.sources) ? play : null;
+        ),
+      ),
+    )
+  )
+    .filter((check) => check !== null)
+    .sort((left, right) => right.checkedAt.localeCompare(left.checkedAt));
+  // The latest check of the current files, else the latest check of any files (a newer conversion of a verified copy).
+  const current = checks.find((check) => check.contentHash === hash) ?? null;
+  const play = current ?? checks[0] ?? null;
   const verifiedRecord = isVerified ? await readJson(".verified.json") : null;
   const compileStatus = packageStatus(
     sources.some((file) => file.path === MAIN),
@@ -367,9 +375,7 @@ async function readEntry(
   else if (isVerified) {
     // A Player check of a newer conversion is of other contents than the frozen copy.
     const regression =
-      play !== null &&
-      play.contentHash !== packageContentHash(scan.sources) &&
-      play.verdict !== "plays"
+      play !== null && play.contentHash !== hash && play.verdict !== "plays"
         ? ` A newer conversion does not play: ${playStatus(play, compileStatus).detail}`
         : "";
     status = {
@@ -543,11 +549,13 @@ function playStatus(play: PlayCheck, compileStatus: Status): Status {
       ? `stops at ${at[1]} (${at[2]})`
       : stop.kind === "early-end"
         ? "ends at the start"
-        : stop.kind === "hang"
-          ? "hangs"
-          : stop.kind === "budget"
-            ? "no end in the step budget"
-            : `stops (${stop.kind})`;
+        : stop.kind === "empty"
+          ? "shows nothing"
+          : stop.kind === "hang"
+            ? "hangs"
+            : stop.kind === "budget"
+              ? "no end in the step budget"
+              : `stops (${stop.kind})`;
   return { kind: "stops", label, detail: `${stop.detail}. ${coverage}${media}` };
 }
 

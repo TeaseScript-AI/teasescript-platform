@@ -45,6 +45,10 @@ const IMAGE_EXTENSIONS = new Set([
   ".tiff",
 ]);
 const MEDIA_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".mp4", ".webm"]);
+/** A run that takes longer in real time ends as `budget`: a very long session, or one that stopped responding. */
+const RUN_TIMEOUT_MS = 240_000;
+/** A package's runs end after this much real time, so one long package cannot hold up a batch. */
+const PACKAGE_TIMEOUT_MS = 600_000;
 
 /** The parts of Playwright the runner uses. */
 interface Page {
@@ -54,7 +58,7 @@ interface Page {
   fill(selector: string, value: string, options?: { timeout: number }): Promise<void>;
   press(selector: string, key: string, options?: { timeout: number }): Promise<void>;
   evaluate<T>(fn: () => T): Promise<T>;
-  screenshot(options: { path: string }): Promise<void>;
+  screenshot(options: { path: string; timeout?: number }): Promise<void>;
   addInitScript(fn: () => void): Promise<void>;
   clock: {
     install(): Promise<void>;
@@ -89,13 +93,23 @@ interface PlayerState {
   lastText: string;
   scriptFailure: string | null;
   sites: number;
+  /** Transcript entries shown so far. */
+  entries: number;
 }
 
 export interface RunResult {
   readonly run: number;
   readonly stop: {
     readonly kind:
-      "ended" | "early-end" | "error" | "hang" | "budget" | "no-start" | "unsupported" | "harness";
+      | "ended"
+      | "empty"
+      | "early-end"
+      | "error"
+      | "hang"
+      | "budget"
+      | "no-start"
+      | "unsupported"
+      | "harness";
     readonly detail: string;
     /** Where the stop happened: the failing file and line, or the interaction that hung. */
     readonly file: string | null;
@@ -164,7 +178,11 @@ const { chromium } = createRequire(import.meta.url)(PLAYWRIGHT_CORE) as {
 const browser = await chromium.launch();
 try {
   for (const [index, id] of ids.entries()) {
-    const result = await checkPackage(browser, id);
+    // One package's harness failure is reported and the batch goes on.
+    const result = await checkPackage(browser, id).catch((error: unknown) => {
+      process.stderr.write(`${id}: the check failed: ${String(error)}\n`);
+      return null;
+    });
     process.stderr.write(
       result === null
         ? `${index + 1}/${ids.length} ${id}: unchanged since its last check\n`
@@ -208,6 +226,7 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
   const runs: RunResult[] = [];
   let siteCount = 0;
   let fileCount = files.filter((item) => item.endsWith(".tease")).length;
+  const started = Date.now();
   for (let run = 0; run < Number(values.runs); run += 1) {
     const before = coveredFiles.size + coveredSites.size + coveredChoices.size;
     const context = await browser.newContext({
@@ -215,9 +234,38 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
       viewport: { width: 1280, height: 900 },
     });
     let result: RunResult;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const page = await context.newPage();
-      result = await playOnce(page, id, run, outFolder, {
+      const timedOut = new Promise<RunResult>((resolve) => {
+        timer = setTimeout(() => {
+          const screenshot = `run-${run + 1}.png`;
+          void page
+            .screenshot({ path: path.join(outFolder, screenshot), timeout: 5_000 })
+            .then(
+              () => screenshot,
+              () => null,
+            )
+            .then((taken) =>
+              resolve({
+                run,
+                stop: {
+                  kind: "budget",
+                  detail: `still running after ${RUN_TIMEOUT_MS / 60_000} minutes of real time`,
+                  file: null,
+                  line: null,
+                  code: null,
+                },
+                steps: 0,
+                files: [],
+                path: [],
+                lastText: "",
+                screenshot: taken,
+              }),
+            );
+        }, RUN_TIMEOUT_MS);
+      });
+      const playing = playOnce(page, id, run, outFolder, {
         tries,
         seen: (state) => {
           siteCount = Math.max(siteCount, state.sites);
@@ -230,6 +278,9 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
         },
         chose: (site, option) => coveredChoices.add(`${site}#${option}`),
       });
+      // Closing the context ends a run that timed out; its rejection then has no reader.
+      playing.catch(() => undefined);
+      result = await Promise.race([playing, timedOut]);
     } catch (error) {
       result = {
         run,
@@ -247,10 +298,13 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
         screenshot: null,
       };
     } finally {
-      await context.close();
+      clearTimeout(timer);
+      // A context the browser already dropped cannot be closed again; that must not end the batch.
+      await context.close().catch(() => undefined);
     }
     runs.push(result);
-    if (["no-start", "hang", "budget", "harness"].includes(result.stop.kind)) break;
+    if (Date.now() - started > PACKAGE_TIMEOUT_MS) break;
+    if (["no-start", "empty", "hang", "budget", "harness"].includes(result.stop.kind)) break;
     if (run > 0 && coveredFiles.size + coveredSites.size + coveredChoices.size === before) break;
   }
   fileCount = Math.max(fileCount, coveredFiles.size);
@@ -350,8 +404,8 @@ async function playOnce(
     track.seen(state);
     if (state.file !== null) files.add(state.file);
     if (state.status === "halted") {
-      if (state.progress === 0 && state.lastText === "" && state.stageImage === null)
-        return finish("error", "the session ended without showing anything", step);
+      if (step === 0 && state.entries === 0 && state.stageImage === null)
+        return finish("empty", "the session ended without showing anything", step);
       // For example a script that needs legacy settings, such as owned toys, that a fresh player does not have.
       if (step === 0 && state.sites > 0)
         return finish("early-end", `ended before its first interaction: "${state.lastText}"`, step);
@@ -555,6 +609,7 @@ function readState(page: Page): Promise<PlayerState> {
       progress:
         (snapshot?.nextEventSequence ?? 0) * 1000 + (session?.transcriptEntries.length ?? 0),
       lastText: (session?.transcriptEntries.at(-1)?.text ?? "").slice(0, 200),
+      entries: session?.transcriptEntries.length ?? 0,
       scriptFailure: (() => {
         const panel = document.querySelector("[data-script-failure]");
         if (panel === null) return null;

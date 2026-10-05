@@ -67,7 +67,7 @@ test(
       // EVIDENCE: the test is skipped unless the tools loaded, so toolsResult holds them here.
       const tools = (toolsResult as { tools: CatalogTools }).tools;
       const entries = await readCatalogEntries(path.join(work, "converted"), tools, {
-        playChecks: path.join(work, "checks"),
+        playChecks: [path.join(work, "checks")],
         verified: path.join(work, "verified"),
         approved: approvedPackages("| Package | Date |\n| --- | --- |\n| `popup` | 2026-10-05 |\n"),
       });
