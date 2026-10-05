@@ -455,7 +455,10 @@ File transfers (`goto "file.tease"`, `goto script(...)`), `global function` and 
 #570), and `takePhoto()` (#475, camera in the runtime and the Player) are native on `main` now, as are `dict` (#555),
 date and time (#532), `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger` (#548),
 rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526),
-`load "key", default:` (#545), and permanent buttons (#612).
+`load "key", default:` (#545), permanent buttons (#612), and image tags with `findImages` (#572): a legacy count of
+an images folder becomes a query for one generated tag of the folder's full path, which an XMP sidecar gives each image
+(`SX_IMAGE_TAGS`, owner decision 2026-10-05); only a count filtered by file name stays counted at conversion time
+(`SX_IMAGE_COUNT_WORKAROUND`).
 
 What remains accepted but unimplemented becomes a workaround in implemented TeaseScript, with a `// NOTE` naming it at
 every site (owner decision 2026-10-05), so converted packages play natively; `--accepted=<forms>` emits the accepted
@@ -467,7 +470,6 @@ form instead once `main` implements it:
 | `showPopup` | the message in the chat and an OK button (`SX_POPUP_WORKAROUND`) | the popup presentation |
 | `openUrl(url)` | "Open this link: …" in the chat, where message markup makes an `http(s)` address a link, and a Continue button (`SX_OPEN_URL_WORKAROUND`) | opening the page itself |
 | layered scene (`showBackgroundImage`, `showOverlayImage`) for an image composed in memory and shown with `setImage(bytes, n)` | the base image the function read (`SX_IMAGE_COMPOSITION`); `--accepted=layeredScene` places the base as background and each drawn image as an overlay at percentages of the canvas (`SX_LAYERED_SCENE`, or `SX_LAYERED_SCENE_PARTIAL` for source rectangles, text, shapes, pixel edits, and transformations) | the composition |
-| none: listing a package images folder | the counts of the package's images at conversion time, a number or a `dict` of the matching folders (`SX_IMAGE_COUNT_WORKAROUND`) | images added later; entries other than image files |
 
 In the 211 merged corpus2 units (2026-10-05), 41 functions that only compose an image fall back to their base image,
 and 46 `setImage(bytes)` sites stay TODOs because their function also shows text, waits, saves, or changes outer

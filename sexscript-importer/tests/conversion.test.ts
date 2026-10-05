@@ -24,6 +24,8 @@ import {
 import { emitTease } from "../src/emit-tease.ts";
 import type { MigrationProgram } from "../src/ir.ts";
 import { lowerPackage, lowerSelfContainedPackage, type PackageOptions } from "../src/package.ts";
+import { helperStatements } from "../src/helpers.ts";
+import { imageCatalog, pathTag } from "../src/image-tags.ts";
 import { pendingHostFunctions, shimPendingCapabilities } from "../src/pending.ts";
 import { ACCEPTED_FORMS } from "../src/workarounds.ts";
 import { analyzeFeasibility } from "../src/report.ts";
@@ -137,10 +139,10 @@ function registerFixtures(
   }
 }
 
-// The player cannot list package folders, so a legacy image count becomes the counts of the package's images at
-// conversion time: a number for a fixed folder, and a dict of the matching folders for a computed one.
+// A legacy image count becomes a tag query: each package image carries a generated tag for its full folder path, so
+// the images with the listed folder's tag are exactly its images. A name filter keeps the conversion-time count.
 test(
-  "counts package images at conversion time where the legacy script listed an images folder",
+  "counts a listed images folder by the tag of its path",
   { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
   async () => {
     if (!("compiler" in projectResult)) return;
@@ -151,33 +153,39 @@ test(
         sourcePath,
         [
           "def pack = 2",
-          'def count = new File("images/Mistress/Pack${pack}/").listFiles().size()',
-          'def photos = new File("images/Mistress/Pack1/").listFiles().findAll { it.name ==~ /(?i).*\\.jpg/ }.size()',
-          'show("Pack ${pack}: ${count} images, ${photos} photos")',
+          'def count = new File("images/Mistress/Pack ${pack}/").listFiles().size()',
+          'def fixed = new File("images/Mistress/Pack 1/").listFiles().size()',
+          'def photos = new File("images/Mistress/Pack 1/").listFiles().findAll { it.name ==~ /(?i).*\\.jpg/ }.size()',
+          "def one = [1]",
+          // Each count is right only if the tags match: a wrong one reads outside the list.
+          'show("Pack ${pack}: ${one[count - 1]} ${one[fixed - 2]} ${one[photos - 1]}")',
           "",
         ].join("\n"),
       );
       const media = [
-        "Mistress/Pack1/a.jpg",
-        "Mistress/Pack1/b.png",
-        "Mistress/Pack2/c.JPG",
+        "Mistress/Pack 1/a.jpg",
+        "Mistress/Pack 1/b.png",
+        "Mistress/Pack 2/c.JPG",
         "Other/d.jpg",
-      ].map((file) => ({
-        path: file,
-        tags: file
-          .split("/")
-          .slice(0, -1)
-          .map((tag) => tag.toLowerCase()),
-      }));
+      ].map((file) => ({ path: file }));
       const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { media });
       const source = emitTease(program!);
       assert.match(
         source,
-        /^let count = dict\{ "mistress\/pack1": 2, "mistress\/pack2": 1 \}\.get\("Mistress\/Pack\$\{pack\}"\.lowercase\(\), default: 0\)$/mu,
+        /^let count = findImages\(all: \[sexscriptLegacyPathTag\("images\/Mistress\/Pack \$\{pack\}"\)\]\)\.length$/mu,
+      );
+      assert.match(
+        source,
+        /^let fixed = findImages\(all: \["images-mistress-pack-1"\]\)\.length$/mu,
       );
       assert.match(source, /^let photos = 1$/mu);
+      assert.match(source, /NOTE SX_IMAGE_TAGS/u);
       assert.match(source, /NOTE SX_IMAGE_COUNT_WORKAROUND/u);
-      const result = projectResult.runner([{ path: "main.tease", source }], {});
+      const result = projectResult.runner(
+        [{ path: "main.tease", source }],
+        {},
+        { images: imageCatalog(media) },
+      );
       assert.deepEqual(
         { status: result.status, failure: result.failure },
         { status: "halted", failure: null },
@@ -185,6 +193,48 @@ test(
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  },
+);
+
+// The pathTag helper gives a computed folder at runtime the tag that the sidecars carry from conversion.
+test(
+  "the runtime path tag of a folder equals its conversion-time tag",
+  { skip: "reason" in projectResult ? projectResult.reason : false },
+  () => {
+    if (!("runner" in projectResult)) return;
+    const folders = ["images/Domme3/Pack 2/", "Images\\Bébé  Ünd/x_y", "--a--b--", "images"];
+    const literal = (text: string) => JSON.stringify(text);
+    const source = [
+      emitTease({
+        sourceName: "tags.groovy",
+        metadata: null,
+        statements: helperStatements(new Set(["pathTag"])),
+        diagnostics: [],
+      }).trimEnd(),
+      `let folders = [${folders.map(literal).join(", ")}]`,
+      `let tags = [${folders.map((folder) => literal(pathTag(folder))).join(", ")}]`,
+      "let none = []",
+      "let index = 0",
+      "for folder in folders {",
+      "  if sexscriptLegacyPathTag(folder) != tags[index] {",
+      "    say none[0]",
+      "  }",
+      "  index += 1",
+      "}",
+      "exit",
+      "",
+    ].join("\n");
+    const result = projectResult.runner([{ path: "main.tease", source }], {});
+    assert.deepEqual(
+      { status: result.status, failure: result.failure },
+      { status: "halted", failure: null },
+    );
+    assert.deepEqual(folders.map(pathTag), [
+      "images-domme3-pack-2",
+      "images-b-b-nd-x-y",
+      "a-b",
+      "images",
+    ]);
   },
 );
 

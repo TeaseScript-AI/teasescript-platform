@@ -1,7 +1,6 @@
 import type { HostFunction, RuntimeValue } from "./runtime-check.ts";
 import { emitTease } from "./emit-tease.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
-import { proposalCapability, type ProposalId } from "./proposals.ts";
 import { isRecord } from "./ast.ts";
 import type { MediaFile } from "./workarounds.ts";
 
@@ -20,9 +19,6 @@ const PENDING_CALLS = new Map<string, string>([
   ["showOverlayImage", "layered scene"],
 ]);
 
-/** Calls that only a proposed language change defines, by the proposal (see proposals.ts). */
-const PROPOSED_CALLS = new Map<string, ProposalId>([["countImages", "media-tags"]]);
-
 const SHIM_PREFIX = "sxPending";
 
 /**
@@ -31,7 +27,6 @@ const SHIM_PREFIX = "sxPending";
  */
 const TYPED_RESULTS = new Map<string, "toInteger" | "toString" | "toBoolean">([
   ["askBoolean", "toBoolean"],
-  ["media-tags.countImages", "toInteger"],
 ]);
 
 export interface PendingShim {
@@ -71,7 +66,7 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
     named: Record<string, IrExpression> = {},
   ): IrExpression => {
     capabilities.add(capability);
-    // Operation names such as `media-tags.countImages` become identifier-safe shim names.
+    // Operation names become identifier-safe shim names.
     const words = name.split(/[^A-Za-z0-9]+/u).filter((word) => word !== "");
     const shim = shimName(
       `${SHIM_PREFIX}${words.map((word) => `${word[0]!.toUpperCase()}${word.slice(1)}`).join("")}`,
@@ -92,17 +87,6 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
           ? { ...value, key: expression(value.key) }
           : { ...value, key: expression(value.key), defaultValue: expression(value.defaultValue) };
       case "call": {
-        const proposal = PROPOSED_CALLS.get(value.name);
-        if (proposal !== undefined && value.local !== true) {
-          return call(
-            proposalCapability(proposal),
-            `${proposal}.${value.name}`,
-            value.positional.map(expression),
-            Object.fromEntries(
-              Object.entries(value.named).map(([name, child]) => [name, expression(child)]),
-            ),
-          );
-        }
         const capability = PENDING_CALLS.get(value.name);
         const positional = value.positional.map(expression);
         const named = Object.fromEntries(
@@ -299,7 +283,6 @@ export function pendingHostFunctions(
   shim: PendingShim,
   /** How often each input was answered, shared by the files of one run so that answers rotate across them. */
   answers: Map<string, number> = new Map(),
-  media: readonly MediaFile[] = [],
 ): Record<string, HostFunction> {
   const next = <T>(operation: string, choices: readonly T[]): T => {
     const visit = answers.get(operation) ?? 0;
@@ -307,21 +290,7 @@ export function pendingHostFunctions(
     return choices[visit % choices.length]!;
   };
   const emptyList = { kind: "list", items: [] };
-  const listItems = (value: RuntimeValue | undefined): unknown[] | null => {
-    const object: unknown = value;
-    return isRecord(object) && Array.isArray(object.items) ? object.items : null;
-  };
   const implementations = new Map<string, HostFunction>([
-    // Proposed media tags (M1): images counted by the folders they are in, compared without regard to case.
-    [
-      "media-tags.countImages",
-      (_, named) => {
-        const wanted = listItems(named.tags);
-        if (wanted === null) throw new Error("countImages() needs a list of tags.");
-        const tags = wanted.map((tag) => String(tag).toLowerCase());
-        return media.filter((file) => tags.every((tag) => file.tags.includes(tag))).length;
-      },
-    ],
     ["showPopup", () => null],
     ["showBackgroundImage", () => null],
     ["showOverlayImage", () => null],

@@ -28,7 +28,6 @@ import { helperDefinitionOrder, withActionDispatcher } from "./helpers.ts";
 import { promoteGlobalFunctions, type GlobalPromotion } from "./globals.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { legacyProfilePrompt } from "./profile.ts";
-import type { ProposalId } from "./proposals.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 
 const ACCEPTED_EXTERNAL_CALLS = new Set([
@@ -39,8 +38,7 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "askText",
   "ceil",
   "chance",
-  // Proposed media-tags capability; emitted only when the proposal is selected.
-  "countImages",
+  "findImages",
   "floor",
   "getDate",
   "getDateTime",
@@ -64,8 +62,6 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
 ]);
 
 export interface PackageOptions {
-  /** Proposed language changes to emit in their working syntax (see proposals.ts). */
-  proposals?: ReadonlySet<ProposalId>;
   /** Accepted forms to emit instead of their workarounds (see workarounds.ts). */
   accepted?: ReadonlySet<AcceptedForm>;
   /** The package's images, which legacy image counts read at conversion time. */
@@ -295,7 +291,6 @@ export function lowerPackage(
       directoryFiles,
       ...(scripts === null ? {} : { scriptPaths: scripts.paths }),
       renameIdentifiers: false,
-      ...(options.proposals === undefined ? {} : { proposals: options.proposals }),
       ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
       ...(options.media === undefined ? {} : { media: options.media }),
       ...(options.files === undefined ? {} : { files: options.files }),

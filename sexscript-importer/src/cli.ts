@@ -8,10 +8,10 @@ import {
   type TeaseProjectCompiler,
 } from "./compile-check.ts";
 import { emitTease } from "./emit-tease.ts";
+import { imageFolderTag, imageSidecar } from "./image-tags.ts";
 import { inventoryFiles } from "./inventory.ts";
 import { lowerParsedFile } from "./lower.ts";
 import { lowerPackage } from "./package.ts";
-import { parseProposals, type ProposalId } from "./proposals.ts";
 import { parseAcceptedForms, type AcceptedForm } from "./workarounds.ts";
 import type { MediaFile } from "./pending.ts";
 import { analyzeFeasibility, type FeasibilityOptions, type FinalPackageInput } from "./report.ts";
@@ -28,12 +28,6 @@ const rawArgs =
     : givenArgs.filter((_, index) => index !== packageFlag && index !== packageFlag + 1);
 const runRequested = rawArgs.includes("--run");
 const compileRequested = runRequested || rawArgs.includes("--compile");
-// `--proposed` emits every proposed language change in its working syntax, `--proposed=a,b` the listed ones.
-const proposedArgument = rawArgs.find(
-  (arg) => arg === "--proposed" || arg.startsWith("--proposed="),
-);
-const proposals: ReadonlySet<ProposalId> =
-  proposedArgument === undefined ? new Set() : parseProposals(proposedArgument.slice(11));
 // `--accepted` emits every accepted form instead of its workaround, `--accepted=a,b` the listed ones.
 const acceptedArgument = rawArgs.find(
   (arg) => arg === "--accepted" || arg.startsWith("--accepted="),
@@ -41,8 +35,7 @@ const acceptedArgument = rawArgs.find(
 const accepted: ReadonlySet<AcceptedForm> =
   acceptedArgument === undefined ? new Set() : parseAcceptedForms(acceptedArgument.slice(11));
 const args = rawArgs.filter(
-  (arg) =>
-    arg !== "--compile" && arg !== "--run" && arg !== proposedArgument && arg !== acceptedArgument,
+  (arg) => arg !== "--compile" && arg !== "--run" && arg !== acceptedArgument,
 );
 
 if (command === "inventory") {
@@ -58,11 +51,11 @@ if (command === "inventory") {
     (finalPackageDir !== null && !compileRequested)
   ) {
     fail(
-      "Usage: node src/cli.ts report [--compile | --run] [--package <converted-dir>] [--proposed[=ids]] [--accepted[=ids]] <ast.json|script.groovy|source-dir> [...]",
+      "Usage: node src/cli.ts report [--compile | --run] [--package <converted-dir>] [--accepted[=ids]] <ast.json|script.groovy|source-dir> [...]",
     );
   }
   const files = await readReportInputs(args);
-  const options: FeasibilityOptions = { proposals, accepted };
+  const options: FeasibilityOptions = { accepted };
   if (compileRequested) options.compiler = await loadRepositoryProjectCompiler();
   if (runRequested) options.runner = await loadRepositoryProjectRunner();
   // A scripts folder's data folder holds the media that image counts read and the files that file tests read.
@@ -76,20 +69,18 @@ if (command === "inventory") {
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } else if (command === "convert") {
   if (args.length !== 1)
-    fail(
-      "Usage: node src/cli.ts convert [--proposed[=ids]] [--accepted[=ids]] <script.groovy|ast.json>",
-    );
+    fail("Usage: node src/cli.ts convert [--accepted[=ids]] <script.groovy|ast.json>");
   const input = args[0]!;
   const parsed = input.toLowerCase().endsWith(".groovy")
     ? await parseGroovySource(input)
     : await readParsedFile(input);
-  const program = lowerParsedFile(parsed, { proposals, accepted });
+  const program = lowerParsedFile(parsed, { accepted });
   process.stdout.write(emitTease(program));
   reportDiagnostics(program);
 } else if (command === "convert-package") {
   if (args.length !== 2) {
     fail(
-      "Usage: node src/cli.ts convert-package [--compile] [--proposed[=ids]] [--accepted[=ids]] <source-dir> <output-dir>",
+      "Usage: node src/cli.ts convert-package [--compile] [--accepted[=ids]] <source-dir> <output-dir>",
     );
   }
   const compiler = compileRequested ? await loadRepositoryProjectCompiler() : undefined;
@@ -134,7 +125,7 @@ async function convertPackage(
   const dataRoot = await legacyDataRoot(sourceRoot);
   const media = await packageMedia(path.join(dataRoot, "images"));
   const files = await packageFiles(dataRoot);
-  const lowered = lowerPackage(parsed, { proposals, accepted, media, files });
+  const lowered = lowerPackage(parsed, { accepted, media, files });
   const programs = lowered.composed;
   // The package starts at main.tease (ADR 0022): its entry script, or a generated menu over the scripts it lists.
   const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;
@@ -169,6 +160,17 @@ async function convertPackage(
     written += 1;
     errors += reportDiagnostics(program);
     project.push({ path: relative.replaceAll("\\", "/"), source, outputPath });
+  }
+  // Tag queries find a legacy folder's images by the tag of its path, which a generated sidecar gives each image (#572).
+  if (
+    programs.some((program) => program.diagnostics.some(({ code }) => code === "SX_IMAGE_TAGS"))
+  ) {
+    for (const image of media) {
+      const sidecar = path.join(outputRoot, `${image.path}.xmp`);
+      await mkdir(path.dirname(sidecar), { recursive: true });
+      await writeFile(sidecar, imageSidecar([imageFolderTag(image.path)]), "utf8");
+    }
+    process.stderr.write(`Tagged ${media.length} image(s) with their folders in sidecars.\n`);
   }
   process.stderr.write(`Converted ${written} SexScript source file(s) into ${outputRoot}.\n`);
   if (compiler !== undefined) {
@@ -246,13 +248,8 @@ async function packageMedia(root: string): Promise<MediaFile[]> {
       .map(async (entry): Promise<MediaFile> => {
         const absolute = path.join(entry.parentPath, entry.name);
         const relative = path.relative(root, absolute);
-        const folders = relative.split(path.sep).slice(0, -1);
         const size = imageSize(await readHead(absolute));
-        return {
-          path: relative,
-          tags: folders.map((folder) => folder.toLowerCase()),
-          ...(size === null ? {} : size),
-        };
+        return { path: relative, ...(size === null ? {} : size) };
       }),
   );
   return media.sort((left, right) => left.path.localeCompare(right.path));

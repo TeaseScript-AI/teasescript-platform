@@ -73,16 +73,17 @@ With a single directory argument, the sibling `images/` folder holds the package
 
 Accepted TeaseScript that `main` does not implement yet becomes a workaround in implemented TeaseScript, marked with a
 `// NOTE` at every site, so that converted packages play natively: `askBooleans` a yes/no choice per item and a
-confirmation, `showPopup` the message and an OK button, `openUrl` the link in the chat and a button, legacy `getFile`
-a cancelled `chooseFile()`, and a legacy count of the images in a package folder the counts of the package's images at
-conversion time. `--accepted` (every form) or `--accepted=askBooleans,showPopup,openUrl,chooseFile` emits the accepted
-forms instead, for when `main` implements them; the report then compiles and runs them through host stand-ins.
+confirmation, `showPopup` the message and an OK button, `openUrl` the link in the chat and a button, and an image
+composition its base image. `--accepted` (every form) or `--accepted=askBooleans,showPopup,openUrl,chooseFile,layeredScene`
+emits the accepted forms instead, for when `main` implements them; the report then compiles and runs them through host
+stand-ins.
 
-`--proposed` (every proposal) or `--proposed=media-tags` on `convert`, `convert-package`, and `report`
-emits a working syntax for proposed TeaseScript language changes instead of reporting the construct, to measure what
-they would resolve ([`docs/PROPOSED-LANGUAGE-CHANGES.md`](docs/PROPOSED-LANGUAGE-CHANGES.md)). That output is not
-accepted TeaseScript: the report compiles and runs it through stand-ins in current TeaseScript, counted as `proposed
-...` capabilities, and proposed media tags count the images in the package's sibling `images/` folder.
+A legacy count of the images in a package folder becomes a tag query (#572): when a package lists an images folder,
+`convert-package` gives each of its images a generated XMP sidecar (`x.jpg.xmp`) with one tag for its full legacy
+folder path, `images/Domme3/Pack 2/x.jpg` → `images-domme3-pack-2`, and the count becomes
+`findImages(all: ["images-domme3-pack-2"]).length`, or the `sexscriptLegacyPathTag` helper's tag of a computed folder
+(`SX_IMAGE_TAGS`). The report's gate and smoke runs give the compiler these tags. A count filtered by file name stays
+counted at conversion time (`SX_IMAGE_COUNT_WORKAROUND`).
 
 Generated files follow these conventions:
 

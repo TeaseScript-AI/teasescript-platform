@@ -65,6 +65,7 @@ export type HelperName =
   | "askBooleans"
   | "fixed"
   | "packagePath"
+  | "pathTag"
   | "sendImage"
   | "switchButton"
   | "switchButtonId"
@@ -135,6 +136,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "askBooleans",
   "fixed",
   "packagePath",
+  "pathTag",
   "tokenize",
   "sendImage",
   "switchButtonId",
@@ -480,6 +482,48 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ),
           ifS(bin("!=", v("current"), lit("")), [add("tokens", v("current"))]),
           ret(v("tokens")),
+        ],
+      ),
+  },
+  // The image tag of a legacy folder path (pathTag in image-tags.ts): lower case, every run of other characters than
+  // ASCII letters and digits as one hyphen, none at either end.
+  pathTag: {
+    name: "sexscriptLegacyPathTag",
+    build: () =>
+      fn(
+        "sexscriptLegacyPathTag",
+        ["path"],
+        [
+          letS("tag", lit("")),
+          letS("gap", lit(false)),
+          forS(
+            "character",
+            {
+              kind: "methodCall",
+              target: { kind: "methodCall", target: v("path"), name: "lowercase", arguments: [] },
+              name: "split",
+              arguments: [lit("")],
+            },
+            [
+              ifS(
+                {
+                  kind: "methodCall",
+                  target: lit("abcdefghijklmnopqrstuvwxyz0123456789"),
+                  name: "contains",
+                  arguments: [v("character")],
+                },
+                [
+                  ifS(bin("and", v("gap"), bin("!=", v("tag"), lit(""))), [
+                    set(v("tag"), template(v("tag"), "-")),
+                  ]),
+                  set(v("tag"), template(v("tag"), v("character"))),
+                  set(v("gap"), lit(false)),
+                ],
+                [set(v("gap"), lit(true))],
+              ),
+            ],
+          ),
+          ret(v("tag")),
         ],
       ),
   },

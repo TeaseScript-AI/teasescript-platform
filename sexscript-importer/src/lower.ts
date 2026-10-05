@@ -22,7 +22,7 @@ import {
 } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { enforceVariableTypes, functionResultTypes, type TeaseType } from "./variable-types.ts";
-import type { ProposalId } from "./proposals.ts";
+import { pathTag } from "./image-tags.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
@@ -99,8 +99,6 @@ export interface LowerOptions {
    * the composed program once.
    */
   renameIdentifiers?: boolean;
-  /** Proposed language changes to emit in their working syntax instead of reporting the construct. */
-  proposals?: ReadonlySet<ProposalId>;
   /** Accepted forms to emit instead of their workarounds in implemented TeaseScript (workarounds.ts). */
   accepted?: ReadonlySet<AcceptedForm>;
   /** The package's images, which a legacy image count reads at conversion time. */
@@ -197,7 +195,6 @@ interface LowerContext {
   knownKeys: string[];
   /** Assignment targets being lowered, which are written rather than read. */
   writeTargets: Set<AstNode>;
-  proposals: ReadonlySet<ProposalId>;
   accepted: ReadonlySet<AcceptedForm>;
   /**
    * `items -= item` and `items = items - item` inside `for (item in items)`: the loop's element leaves the collection it
@@ -924,7 +921,6 @@ export function lowerParsedFile(
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
-    proposals: options.proposals ?? new Set(),
     accepted: options.accepted ?? new Set(),
     elementRemovals: new Set(),
     media: options.media ?? null,
@@ -1392,7 +1388,6 @@ function lowerHelperMethod(
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
-    proposals: baseContext.proposals,
     accepted: baseContext.accepted,
     elementRemovals: elementRemovals(body),
     media: baseContext.media,
@@ -7746,11 +7741,8 @@ function lowerObjectMethodCallExpression(
     );
   }
 
-  if (context.proposals.has("media-tags")) {
-    const proposed = proposedImageCount(node, name, argumentsNodes, context);
-    if (proposed !== undefined) return proposed;
-  } else if (context.media !== null) {
-    const counted = conversionTimeImageCount(node, name, argumentsNodes, context, context.media);
+  if (context.media !== null) {
+    const counted = imageCount(node, name, argumentsNodes, context, context.media);
     if (counted !== undefined) return counted;
   }
   if (targetNode !== null && isDictionary(targetNode, context)) {
@@ -9381,44 +9373,12 @@ function imageListing(
 }
 
 /**
- * The proposed tag count (media-tags, M1) of a legacy image count (imageListing): every folder below `images/` is a
- * tag of the images it holds (matched without regard to case), so `images/Domme3/Domme${pack}/` counts images tagged
- * `Domme3` and `Domme<pack>`. Tags cannot filter by file name, so a name filter is dropped with a note.
+ * A legacy image count (imageListing) as a tag query (#572): the converted package gives each image one tag for its
+ * full legacy folder path in a generated sidecar (image-tags.ts), so the images tagged with the listed folder's tag are
+ * exactly its images. A computed folder gets its tag from the pathTag helper at runtime. The legacy listing also counted
+ * subfolders and other files; the query counts images only. A name filter keeps the conversion-time count.
  */
-function proposedImageCount(
-  node: AstNode,
-  name: string,
-  argumentsNodes: AstNode[],
-  context: LowerContext,
-): IrExpression | null | undefined {
-  const listing = imageListing(node, name, argumentsNodes, context);
-  if (listing === null || listing === undefined) return listing;
-  addDiagnostic(
-    context,
-    "SX_IMAGE_COUNT",
-    "warning",
-    listing.nameFilter === null
-      ? "The legacy count listed every entry directly in the folder; the proposed tag count counts the images tagged with the folder names, including images in subfolders."
-      : "The legacy count included only files directly in the folder whose names matched a pattern; the proposed tag count counts every image tagged with the folder names, including images in subfolders.",
-    node.span,
-  );
-  return {
-    kind: "call",
-    name: "countImages",
-    positional: [],
-    named: {
-      tags: { kind: "list", items: listing.segments.map((parts) => templateOrLiteral(parts)) },
-    },
-  };
-}
-
-/**
- * A legacy image count (imageListing) as the number of images of the package, counted when it is converted, since the
- * player cannot list package folders: a number for a fixed folder, and for a folder that depends on values, a dict of
- * the matching folders' counts read with the folder's lower-case path. A name filter whose pattern is literal text
- * applies at conversion time.
- */
-function conversionTimeImageCount(
+function imageCount(
   node: AstNode,
   name: string,
   argumentsNodes: AstNode[],
@@ -9427,6 +9387,47 @@ function conversionTimeImageCount(
 ): IrExpression | null | undefined {
   const listing = imageListing(node, name, argumentsNodes, context);
   if (listing === null || listing === undefined) return listing;
+  if (listing.nameFilter !== null) return conversionTimeImageCount(listing, node, context, media);
+  const folder = templateOrLiteral(
+    [[{ text: "images" }], ...listing.segments].flatMap((parts, index) =>
+      index === 0 ? parts : [{ text: "/" }, ...parts],
+    ),
+  );
+  const tag =
+    folder.kind === "literal" && typeof folder.value === "string"
+      ? { kind: "literal" as const, value: pathTag(folder.value) }
+      : useHelper(context, "pathTag", [folder]);
+  addDiagnostic(
+    context,
+    "SX_IMAGE_TAGS",
+    "warning",
+    "The legacy script counted the files of an images folder; each package image carries a generated tag for its folder, so this counts the folder's images by that tag, without subfolders and other files.",
+    node.span,
+  );
+  return {
+    kind: "property",
+    target: {
+      kind: "call",
+      name: "findImages",
+      positional: [],
+      named: { all: { kind: "list", items: [tag] } },
+    },
+    name: "length",
+  };
+}
+
+/**
+ * A legacy image count (imageListing) with a name filter as the number of the package's images whose names match,
+ * counted when it is converted, since tags do not filter by file name: a number for a fixed folder, and for a folder
+ * that depends on values, a dict of the matching folders' counts read with the folder's lower-case path. Only a
+ * pattern of literal text applies.
+ */
+function conversionTimeImageCount(
+  listing: NonNullable<ReturnType<typeof imageListing>>,
+  node: AstNode,
+  context: LowerContext,
+  media: readonly MediaFile[],
+): IrExpression | undefined {
   const pattern =
     listing.nameFilter === null ? null : namePattern(asNode(listing.nameFilter.right));
   if (listing.nameFilter !== null && pattern === null) return undefined;
@@ -9450,7 +9451,7 @@ function conversionTimeImageCount(
     context,
     "SX_IMAGE_COUNT_WORKAROUND",
     "warning",
-    "Workaround for counting package images, which TeaseScript cannot list: the images of each folder were counted at conversion time, so images added to the package later are not counted, and only image files count. Tag the images (findImages, V30 §41) or update the counts when the package changes.",
+    "Workaround for counting the package images whose names match a pattern, which tags cannot express: the matching images of each folder were counted at conversion time, so images added to the package later are not counted, and only image files count.",
     node.span,
   );
   const fixed = listing.segments.every((parts) => parts.every((part) => "text" in part));

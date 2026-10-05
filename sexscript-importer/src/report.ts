@@ -7,10 +7,10 @@ import type {
   TeaseProjectImage,
 } from "./compile-check.ts";
 import { emitTease } from "./emit-tease.ts";
+import { imageCatalog } from "./image-tags.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrStatement, MigrationProgram } from "./ir.ts";
 import { lowerPackage } from "./package.ts";
-import type { ProposalId } from "./proposals.ts";
 import type { AcceptedForm } from "./workarounds.ts";
 import {
   pendingHostFunctions,
@@ -69,11 +69,12 @@ export interface FeasibilityOptions {
   compiler?: TeaseProjectCompiler;
   /** Real TeaseScript runtime used for smoke runs of the package project; needs `compiler`. */
   runner?: TeaseProjectRunner;
-  /** Proposed language changes to emit in their working syntax; the shim makes them compile and run. */
-  proposals?: ReadonlySet<ProposalId>;
   /** Accepted forms to emit instead of their workarounds; the shim makes them compile and run. */
   accepted?: ReadonlySet<AcceptedForm>;
-  /** The package's images, which legacy image counts read at conversion time and proposed media tags at runtime. */
+  /**
+   * The package's images, which legacy image counts read at conversion time, and which the gate and the smoke runs give
+   * the compiler with the folder tags their generated sidecars carry.
+   */
   media?: readonly MediaFile[];
   /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
   files?: readonly string[];
@@ -204,7 +205,6 @@ export function analyzeFeasibility(
     globals,
     paths,
   } = lowerPackage(files, {
-    ...(options.proposals === undefined ? {} : { proposals: options.proposals }),
     ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
     ...(options.media === undefined ? {} : { media: options.media }),
     ...(options.files === undefined ? {} : { files: options.files }),
@@ -234,14 +234,18 @@ export function analyzeFeasibility(
   ].map((entry) => ({ ...entry, shim: shimPendingCapabilities(entry.program) }));
   const shimOf = new Map(projectFiles.map((entry) => [entry.path, entry.shim]));
   const placeholders = [...new Set(projectFiles.flatMap((entry) => entry.shim.builtins))].sort();
+  const images = options.media === undefined ? undefined : imageCatalog(options.media);
   const shimmed =
     options.compiler?.(
       projectFiles.map(({ path, shim }) => ({ path, source: shim.source })),
       placeholders,
+      images,
     ) ?? null;
   const generated =
     options.compiler?.(
       projectFiles.map(({ path, program }) => ({ path, source: emitTease(program) })),
+      [],
+      images,
     ) ?? null;
   const shimmedDiagnostics = diagnosticsByPath(shimmed);
   const generatedDiagnostics = diagnosticsByPath(generated);
@@ -398,14 +402,7 @@ export function analyzeFeasibility(
     report.blockingPendingCapabilityFileCounts,
   );
   if (options.runner !== undefined && options.compiler !== undefined) {
-    runPackageProject(
-      report,
-      projectFiles,
-      runnable,
-      options.compiler,
-      options.runner,
-      options.media,
-    );
+    runPackageProject(report, projectFiles, runnable, options.compiler, options.runner, images);
     const reached = new Set(report.smokeRuns.flatMap(({ visited }) => visited));
     for (const [index, path] of projectPathOf) {
       const fileReport = report.files[index]!;
@@ -521,7 +518,7 @@ function runPackageProject(
   runnable: ReadonlySet<string>,
   compiler: TeaseProjectCompiler,
   runner: TeaseProjectRunner,
-  media: readonly MediaFile[] | undefined,
+  images: readonly TeaseProjectImage[] | undefined,
 ): void {
   if (!entries.some(({ path }) => path === MAIN)) return;
   const builtins = [
@@ -546,6 +543,7 @@ function runPackageProject(
     const result = compiler(
       [...sources].map(([path, source]) => ({ path, source })),
       builtins,
+      images,
     );
     if (result.compiled) break;
     const failing = new Set(
@@ -565,12 +563,11 @@ function runPackageProject(
     let blocked: string | null = null;
     let started = false;
     const hosts: Record<string, HostFunction> = {};
-    for (const { shim } of entries)
-      Object.assign(hosts, pendingHostFunctions(shim, answers, media));
+    for (const { shim } of entries) Object.assign(hosts, pendingHostFunctions(shim, answers));
     hosts[ENTER] = ([path]: readonly RuntimeValue[]) => (visits.push(String(path)), null);
     hosts[BLOCKED] = ([target]: readonly RuntimeValue[]) => ((blocked = String(target)), null);
     hosts[START] = () => (started ? "" : ((started = true), entry));
-    const result = runner(files, hosts);
+    const result = runner(files, hosts, images === undefined ? {} : { images });
     const failure = blocked === null ? result.failure : null;
     // The announcing statement moved the generated file's lines down by one.
     const probe = failure?.path === null ? undefined : probeLines.get(failure?.path ?? "");
