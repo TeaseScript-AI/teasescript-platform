@@ -1,12 +1,6 @@
 speaker system {
   title: "System"
 }
-function sexscriptLegacyAskText(prefill) {
-  if prefill == null or "${prefill}".trim() == "" {
-    return askText
-  }
-  return askText default: "${prefill}"
-}
 function sexscriptLegacySendImage(reference) {
   let codeValue = "image-${randomInteger(0..1000000000)}"
   save reference as "sexscript.image.${codeValue}"
@@ -81,9 +75,8 @@ playVideo async "videos/intro.mp4"
 playVideo async "clips/scene.mp4"
 // A prefill that may be blank opens the input without a default then, as the legacy empty field did.
 let draft = ""
-// NOTE SX_INPUT_PREFILL line 27: getString() pre-filled its field with this value, also when it was blank or null; a TeaseScript default must be non-blank text, so a helper asks without the default then.
 say "Your name?"
-let answer = sexscriptLegacyAskText(draft)
+let answer = askText default: draft
 say "Hello ${answer}"
 // A photo check that read the file size to detect a broken webcam picture counts a taken photo as valid.
 function checkPhoto(snapfile) {

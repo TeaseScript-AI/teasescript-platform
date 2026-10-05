@@ -89,7 +89,6 @@ export type HelperName =
   | "plainText"
   | "listPart"
   | "repeatList"
-  | "askText"
   | "compare"
   | "replaceChars"
   | "askInteger"
@@ -195,7 +194,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "plainText",
   "listPart",
   "repeatList",
-  "askText",
   "compare",
   "replaceChars",
   "askInteger",
@@ -693,30 +691,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ifS(bin("<", v("left"), v("right")), [ret(lit(-1))]),
           ifS(bin(">", v("left"), v("right")), [ret(lit(1))]),
           ret(lit(0)),
-        ],
-      ),
-  },
-  // Legacy input with a prefill that may be blank or null, which a TeaseScript default rejects: no default then.
-  askText: {
-    name: "sexscriptLegacyAskText",
-    build: () =>
-      fn(
-        "sexscriptLegacyAskText",
-        ["prefill"],
-        [
-          ifS(
-            bin(
-              "or",
-              bin("==", v("prefill"), lit(null)),
-              bin(
-                "==",
-                { kind: "methodCall", target: template(v("prefill")), name: "trim", arguments: [] },
-                lit(""),
-              ),
-            ),
-            [ret({ kind: "input", input: "askText" })],
-          ),
-          ret({ kind: "input", input: "askText", defaultValue: template(v("prefill")) }),
         ],
       ),
   },
