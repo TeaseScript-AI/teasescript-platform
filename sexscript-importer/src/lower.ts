@@ -11286,7 +11286,16 @@ function runtimeListSelectedValue(
     loop = lowered;
     list = { kind: "variable", name };
   } else {
-    if (!isKnownListExpression(listNode, context)) return undefined;
+    // Groovy needed a list here too, so a value that may be one is used as the list.
+    if ((inferType(listNode, context.types) & LIST) === 0) return undefined;
+    if (!isKnownListExpression(listNode, context))
+      addDiagnostic(
+        context,
+        "SX_CHOICE_LIST",
+        "info",
+        "These options are not proven to be a list; Groovy needed a list here too, so the value is offered as one.",
+        node.span,
+      );
     const lowered = lowerExpression(listNode, context);
     if (lowered === null) return null;
     list = lowered;

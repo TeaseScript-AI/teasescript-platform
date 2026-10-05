@@ -40,3 +40,8 @@ if (positions[pick] == "otk") show("Over my knee")
 // Java replaceAll() with a regular expression that text operations express.
 def serial = "ab12-x|[y]"
 show(serial.replaceAll("[^0-9]", "") + " " + serial.replaceAll("\\[|\\]", "") + " " + serial.replaceAll("\\|", "/"))
+// Menu options from a value not proven to be a list are offered as one, as Groovy required.
+def rooms = { -> return ["Hall", "Garden"] }
+def roomList = rooms()
+def room = getSelectedValue("Where to?", roomList)
+show("Going to " + roomList[room])
