@@ -20,7 +20,7 @@ interface ImageHost {
   readonly notices: Readonly<Ref<readonly { readonly key: string; readonly message: string }[]>>;
   dismissNotice(key: string): void;
   resolveAsset(path: string): string | null;
-  stageImageFailed(src: string): void;
+  stageImageFailure(src: string | null): void;
   readonly images: {
     store(
       file: File,
@@ -274,7 +274,7 @@ test("media the script refers to but the Player cannot use is a warning, once pe
   // A captured image is no package file, so neither showing it nor a failure to load it is reported.
   answer(host, await chosen(host, "photo.png"));
   await nextTick();
-  host.stageImageFailed(host.resolveAsset(host.session.value!.snapshot.stageImage!)!);
+  host.stageImageFailure(host.resolveAsset(host.session.value!.snapshot.stageImage!)!);
   // The same missing image shown again in this session is not reported again.
   answer(host, await chosen(host, "other.png"));
   await nextTick();
@@ -297,10 +297,10 @@ test("a package image the Stage cannot load is reported while the Stage shows it
   host.prepare(() => createPlayerRuntimeSession(script));
   await host.activate();
   // A late failure of an image the Stage no longer shows is not reported.
-  host.stageImageFailed("/files/images/replaced.png");
+  host.stageImageFailure("/files/images/replaced.png");
   assert.equal(host.notices.value.length, 0);
-  host.stageImageFailed("/files/images/corrupt.png");
-  host.stageImageFailed("/files/images/corrupt.png");
+  host.stageImageFailure("/files/images/corrupt.png");
+  host.stageImageFailure("/files/images/corrupt.png");
   assert.deepEqual(
     host.notices.value.map((notice) => [notice.key, notice.message]),
     [["unusable-media:images/corrupt.png", "Image could not be loaded: images/corrupt.png"]],
@@ -314,4 +314,11 @@ test("a package image the Stage cannot load is reported while the Stage shows it
     host.notices.value.map((notice) => notice.message),
     ["Image could not be loaded: images/corrupt.png"],
   );
+  // Once the Stage shows another source, such as a development override, the failure no longer describes it.
+  host.dismissNotice("unusable-media:images/corrupt.png");
+  host.stageImageFailure(null);
+  host.prepare(() => createPlayerRuntimeSession(script));
+  await host.activate();
+  await nextTick();
+  assert.equal(host.notices.value.length, 0);
 });

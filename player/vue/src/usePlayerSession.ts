@@ -218,17 +218,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const stageImage = computed(() =>
     session.value === null ? null : playerRuntimeMedia(session.value.snapshot).stage.image,
   );
-  // The Stage source the browser could not load. The Stage keeps it hidden while its source stays, also into a new
-  // session, which then gets no new browser error.
+  // The Stage source the browser could not load, as the Stage reports it while it shows that source, or `null`. The
+  // Stage keeps that image hidden while its source stays, also into a new session, which then gets no new browser error.
   let failedStageSource: string | null = null;
-  // A Stage image that is no package file; one that is but fails to load is reported by the Stage itself.
+  // A Stage image that is no package file, or one the Stage shows as failed when a session starts.
   watch([generation, stageImage], ([, image]) => {
-    const source = image === null ? null : resolveAsset(image);
-    if (source !== failedStageSource) failedStageSource = null;
     if (image === null) return;
     if (resolvePackageAsset(image) === null)
       reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "missing"));
-    else if (source === failedStageSource)
+    else if (failedStageSource !== null && resolveAsset(image) === failedStageSource)
       reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "failed"));
   });
 
@@ -590,13 +588,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /** The authored Stage image of the session, or `null` for an empty Stage. */
     stageImage,
     /**
-     * Reports that the Stage could not load or decode the image at `src`; ignored unless it is still the session's
-     * Stage image.
+     * The Stage source the browser could not load or decode, or `null` once the Stage shows another source. A failure is
+     * reported only while `src` is still the session's Stage image.
      */
-    stageImageFailed(src: string) {
-      const image = stageImage.value;
-      if (image === null || resolveAsset(image) !== src) return;
+    stageImageFailure(src: string | null) {
       failedStageSource = src;
+      const image = stageImage.value;
+      if (src === null || image === null || resolveAsset(image) !== src) return;
       reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "failed"));
     },
     /** The session camera's live track while the script shows a camera view and the camera is available, else `null`. */

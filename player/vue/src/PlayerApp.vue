@@ -211,7 +211,7 @@ async function toggleFullscreen() {
             :media="stageMedia"
             :camera="stageCamera"
             @media-aspect="mediaAspect = $event"
-            @media-error="player.stageImageFailed"
+            @media-failure="player.stageImageFailure"
           >
             <template v-if="capture && !captureInWindow" #camera>
               <ImageCapture

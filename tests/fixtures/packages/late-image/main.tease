@@ -1,0 +1,7 @@
+showImage "images/late.png"
+showButton "Hide"
+hideImage
+showButton "Show"
+showImage "images/valid.svg"
+showButton "Done"
+exit
