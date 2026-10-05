@@ -6,7 +6,6 @@ function sexscriptLegacyCall(action, args) {
     }
     return pauseCycle(args[0])
   }
-  return null
 }
 let sexscriptBackgroundSounds = []
 function sexscriptLegacyPlayBackgroundSound(file, passes) {

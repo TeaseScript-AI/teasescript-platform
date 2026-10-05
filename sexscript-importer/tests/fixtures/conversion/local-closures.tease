@@ -6,7 +6,6 @@ function sexscriptLegacyCall(action, args) {
   if action == "announceCallback1" {
     return announceCallback1(args[0])
   }
-  return null
 }
 function announceCallback1(t) {
   say "Count ${t}"

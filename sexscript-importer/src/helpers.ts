@@ -51,7 +51,8 @@ export function withActionDispatcher(program: MigrationProgram): MigrationProgra
       calls.push(callWith(action, required));
       return ifS(bin("==", v("action"), id), calls);
     });
-  const dispatcher = fn(ACTION_DISPATCHER, ["action", "args"], [...branches, ret(lit(null))]);
+  // An unknown action returns null by reaching the end, which keeps the result type the actions' own (V30 §17).
+  const dispatcher = fn(ACTION_DISPATCHER, ["action", "args"], branches);
   const note: IrStatement = {
     kind: "comment",
     text: "// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.",

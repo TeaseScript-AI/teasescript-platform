@@ -1303,8 +1303,11 @@ function isLiteralValue(value: IrExpression): boolean {
     case "list":
       return value.items.every(isLiteralValue);
     case "object":
+      // A dict's keys may be written as text too.
       return value.properties.every(
-        (property) => property.key === undefined && isLiteralValue(property.value),
+        (property) =>
+          (property.key === undefined || property.key.kind === "literal") &&
+          isLiteralValue(property.value),
       );
     default:
       return false;

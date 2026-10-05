@@ -189,17 +189,20 @@ export function withReturnTypes(statements: IrStatement[]): IrStatement[] {
   return statements.map((statement) => {
     if (statement.kind !== "function" || statement.returnType !== undefined) return statement;
     const types = returned.get(statement.name) ?? [];
-    const values = types.filter((type) => type.kind !== "null");
-    if (values.length === 0 || values.some((type) => nonNull(type).kind === "unknown"))
-      return statement;
+    const all = types.filter((type) => type.kind !== "null");
+    // Returns of unknown type, such as an unannotated parameter's, take the type of the others; a union of the known
+    // ones is still written, since the compiler needs it either way.
+    const values = all.filter((type) => nonNull(type).kind !== "unknown");
+    const unknowns = values.length < all.length;
+    if (values.length === 0) return statement;
     let shared: TeaseType | null = nonNull(values[0]!);
     for (const type of values.slice(1)) shared = shared === null ? null : unionOf(shared, type);
     if (shared === null) return statement;
-    const optional =
-      values.length < types.length || values.some((type) => type.kind === "optional");
+    const optional = all.length < types.length || all.some((type) => type.kind === "optional");
     // One type of value needs no annotation, also where the function can end without one; a `return null` beside it
     // does (V30 §17).
-    if (shared.kind !== "union" && !(optional && returnsNull(statement.body))) return statement;
+    if (shared.kind !== "union" && (unknowns || !(optional && returnsNull(statement.body))))
+      return statement;
     const written = annotation(optional ? { kind: "optional", value: shared } : shared);
     return written === null ? statement : { ...statement, returnType: written };
   });
