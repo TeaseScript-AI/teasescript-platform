@@ -1453,11 +1453,15 @@ class Parser {
       return false;
     this.#reportToken(parserDiagnosticCode.invalidMediaForm, message, this.#peek());
     let depth = 0;
+    let braces = 0;
     while (!this.#check(TokenKind.Newline) && !this.#check(TokenKind.EndOfFile)) {
-      // An unclosed group never takes the closing brace of an enclosing block on the same line.
-      if (depth > 0 && this.#check(TokenKind.RightBrace)) break;
+      // An unclosed group never takes the closing brace of an enclosing block on the same line; braces opened inside
+      // the group, as in an object argument, close there.
+      if (depth > 0 && braces === 0 && this.#check(TokenKind.RightBrace)) break;
       const token = this.#advance();
-      if (token.kind === TokenKind.LeftParenthesis) depth += 1;
+      if (token.kind === TokenKind.LeftBrace) braces += 1;
+      else if (token.kind === TokenKind.RightBrace) braces -= 1;
+      else if (token.kind === TokenKind.LeftParenthesis) depth += 1;
       else if (token.kind === TokenKind.RightParenthesis && --depth === 0) break;
     }
     return true;
@@ -3828,8 +3832,12 @@ class Parser {
     }
   }
 
+  /** A statement that ends an unclosed block, such as a speaker missing its closing brace, which a value cannot start. */
   #isRecoveredTopLevelStatement(): boolean {
-    return this.#atStatementStart() && this.#peek(1).kind !== TokenKind.Colon;
+    return (
+      (this.#atStatementStart() || this.#checkIdentifier("showCamera")) &&
+      this.#peek(1).kind !== TokenKind.Colon
+    );
   }
 
   /** A statement keyword, or a protected statement-only command, which can never be a value. */

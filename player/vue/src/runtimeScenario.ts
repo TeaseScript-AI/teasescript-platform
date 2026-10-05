@@ -68,7 +68,12 @@ if photo != null {
 showButton "Put me on your Stage"
 view.placement = "stage"
 say "Now you are on my Stage, over your picture.", instant
+showButton "Back to the window"
+view.placement = "window"
+say "Back in your little window.", instant
 showButton "Yes, Mistress"
 hideCamera
+say "Good. That's enough looking for now.", instant
+showButton "Thank you, Mistress"
 exit
 `;

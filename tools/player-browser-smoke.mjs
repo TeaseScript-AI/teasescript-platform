@@ -1448,9 +1448,32 @@ async function viewfinderScenario(cdp, origin) {
     8_000,
     "The Stage did not take the camera's aspect",
   );
+  // Centred on the Stage like the image underneath, also where a narrow Stage cannot take the camera's aspect.
+  await setViewport(cdp, 390, 844);
+  await waitFor(
+    cdp,
+    `(() => { const camera = document.querySelector('[data-stage-camera] [data-viewfinder]').getBoundingClientRect(); const frame = document.querySelector('.stage-media-frame').getBoundingClientRect(); return camera.height < frame.height - 1 && Math.abs(camera.top + camera.height / 2 - (frame.top + frame.height / 2)) < 1; })()`,
+    8_000,
+    "The camera view over a narrow Stage is not centred",
+  );
+  await setViewport(cdp, 1440, 900);
+  // Back in the window, the view keeps the place it had.
+  await clickButton(cdp, "Back to the window");
+  await waitFor(cdp, `document.body.innerText.includes("Back in your little window.")`);
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-floating-viewfinder] [data-viewfinder] video')`,
+  );
+  assertEqual(
+    await value(cdp, place),
+    shown,
+    "The window lost its place on the way back from the Stage",
+  );
   // hideCamera hides the view; the Stage image was there all along.
+  // The script keeps running after hideCamera, so only hiding, not the end of the session, can remove the view.
   await clickButton(cdp, "Yes, Mistress");
-  await waitFor(cdp, `${viewfinders} === 0`, 8_000, "hideCamera left a camera view");
+  await waitFor(cdp, `document.body.innerText.includes("Good. That's enough looking for now.")`);
+  assertEqual(await value(cdp, viewfinders), 0, "hideCamera left a camera view");
   assertEqual(
     await value(cdp, `!!document.querySelector('.stage-media')`),
     true,

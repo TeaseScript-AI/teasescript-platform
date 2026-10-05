@@ -71,6 +71,8 @@ function cameraMeasured(ratio: number) {
 .stage-camera {
   position: absolute; inset: 0; margin: auto;
   width: min(100%, 100cqh * var(--viewfinder-ratio)); max-height: 100%;
+  /* Its own height, so the margins centre it like the image underneath. */
+  aspect-ratio: var(--viewfinder-ratio);
 }
 .stage-camera-mirror {
   position: absolute; top: 8px; right: 8px; display: flex;

@@ -224,4 +224,19 @@ test("showCamera may start the line after a colon, and a broken call keeps the c
     ["TSP035"],
   );
   assert.equal(broken.program.statements.length, 3);
+  // A brace opened inside the rejected group closes there, so the block keeps its statements.
+  const argument = parse(
+    'if true { hideImage({ a: 1 })\n    say "inside", instant\n}\nsay "after", instant\nexit',
+  );
+  assert.deepEqual(
+    argument.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSP035"],
+  );
+  assert.equal(argument.program.statements.length, 3);
+  // showCamera still ends a speaker declaration that misses its closing brace.
+  const speaker = parse('speaker person {\n    name: "Person"\nshowCamera\nsay "after"\nexit');
+  assert.deepEqual(
+    speaker.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSP007"],
+  );
 });

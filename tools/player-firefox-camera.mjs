@@ -174,6 +174,15 @@ async function checks(page, url) {
       );
     }, selector);
   await wide("[data-floating-viewfinder]");
+  const windowPlace = () =>
+    tab.evaluate(() => {
+      const box = document.querySelector("[data-floating-viewfinder]").getBoundingClientRect();
+      return [box.left, box.top, box.width, box.height].map(Math.round).join();
+    });
+  // Down against the Player's bottom edge, where a wrong aspect on the way back would move it.
+  await tab.locator("[data-floating-viewfinder]").focus();
+  for (let step = 0; step < 20; step++) await tab.keyboard.press("Shift+ArrowDown");
+  const placed = await windowPlace();
   await tab.locator("button", { hasText: "I'm ready, Mistress" }).click();
   await shows(tab, "There you are. I'll keep that one.");
   await tab.waitForFunction(decodedPhotos);
@@ -190,8 +199,17 @@ async function checks(page, url) {
           16 / 9,
       ) < 0.01,
   );
+  await tab.locator("button", { hasText: "Back to the window" }).click();
+  await wide("[data-floating-viewfinder]");
+  // A 16:9 camera's window comes back with the place and size it had.
+  check(
+    (await windowPlace()) === placed,
+    "The window lost its place on the way back from the Stage",
+  );
+  // The script keeps running after hideCamera, so only hiding, not the end of the session, can remove the view.
   await tab.locator("button", { hasText: "Yes, Mistress" }).click();
-  await tab.waitForFunction(() => document.querySelectorAll("[data-viewfinder]").length === 0);
+  await shows(tab, "Good. That's enough looking for now.");
+  check((await tab.locator("[data-viewfinder]").count()) === 0, "hideCamera left a camera view");
   check(messages.length === 0, `The viewfinder run reported: ${messages.join(" | ")}`);
   await tab.close();
   return "PASS a late-sized first frame with an aborted play(), the saved photo in a new run, a camera without frames, and the viewfinder";

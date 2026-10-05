@@ -13,6 +13,8 @@ export interface FloatingPlace {
   readonly x: number;
   readonly y: number;
   readonly width: number;
+  /** The camera's aspect when the place was last set, so a window shown again keeps its height and place. */
+  readonly ratio?: number;
 }
 defineProps<{ track: MediaStreamTrack }>();
 const place = defineModel<FloatingPlace | null>("place", { default: null });
@@ -58,6 +60,7 @@ watch(
     const area = anchor.value?.parentElement;
     if (!parent || !area) return;
     bounds.value = { width: parent.clientWidth, height: parent.clientHeight };
+    if (place.value?.ratio !== undefined) ratio.value = place.value.ratio;
     // First shown in the Player area beside the sidebar, below the title, leaving the conversation readable.
     const shell = parent.getBoundingClientRect();
     const start = area.getBoundingClientRect();
@@ -84,6 +87,7 @@ function clamp({ x, y, width }: FloatingPlace): FloatingPlace {
     width: clampedWidth,
     x: Math.min(Math.max(x, EDGE), Math.max(EDGE, maxWidth - clampedWidth - EDGE)),
     y: Math.min(Math.max(y, EDGE), Math.max(EDGE, maxHeight - heightOf(clampedWidth) - EDGE)),
+    ratio: ratio.value,
   };
 }
 /**
