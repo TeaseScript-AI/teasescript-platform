@@ -20,7 +20,10 @@ export type JavaHelperName =
   | "isInteger"
   | "isNumber"
   | "countText"
-  | "indexFrom";
+  | "indexFrom"
+  | "character"
+  | "insert"
+  | "aroundText";
 
 /** The Java helpers in their stable order after the other generated helpers. */
 export const JAVA_HELPER_ORDER: readonly JavaHelperName[] = [
@@ -38,6 +41,9 @@ export const JAVA_HELPER_ORDER: readonly JavaHelperName[] = [
   "isNumber",
   "countText",
   "indexFrom",
+  "character",
+  "insert",
+  "aroundText",
 ];
 
 const DEPENDENCIES = new Map<string, JavaHelperName[]>([
@@ -136,11 +142,15 @@ const template = (...parts: Array<string | IrExpression>): IrExpression => ({
 /** A whole number written with at least `width` digits. */
 const padded = (value: IrExpression, width: number): IrExpression =>
   method(call("toString", value), "padStart", lit(width), lit("0"));
-/** Stops the script where Java's result was NaN or Infinity, naming the case. */
-const fail = (reason: string): IrStatement[] => [
-  letS("noNumber", { kind: "object", properties: [], dict: true }, "number dict"),
-  ret({ kind: "index", target: v("noNumber"), index: lit(reason), dict: true }),
+/** Stops the script where Java had no result of the helper's type, such as NaN, naming the case. */
+const fail = (reason: string, type = "number"): IrStatement[] => [
+  letS("noResult", { kind: "object", properties: [], dict: true }, `${type} dict`),
+  ret({ kind: "index", target: v("noResult"), index: lit(reason), dict: true }),
 ];
+/** The printable ASCII characters, from code 32 (a space) to 126 (`~`). */
+const PRINTABLE = Array.from({ length: 95 }, (_, index) => String.fromCharCode(index + 32)).join(
+  "",
+);
 const between = (value: IrExpression, low: string, high: string): IrExpression =>
   bin("and", bin(">=", value, lit(low)), bin("<=", value, lit(high)));
 
@@ -643,5 +653,112 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
           ret(bin("+", v("found"), v("from"))),
         ],
       ),
+  },
+  // Java's (char) code of a printable ASCII character.
+  character: {
+    name: "sexscriptLegacyCharacter",
+    build: () =>
+      fn(
+        "sexscriptLegacyCharacter",
+        ["code"],
+        [
+          ifS(
+            bin("or", bin("<", v("code"), lit(32)), bin(">", v("code"), lit(126))),
+            fail("a character code outside printable ASCII", "string"),
+          ),
+          ret(
+            method(
+              lit(PRINTABLE),
+              "substring",
+              bin("-", v("code"), lit(32)),
+              bin("-", v("code"), lit(31)),
+            ),
+          ),
+        ],
+      ),
+  },
+  // Java List.add(index, value): a new list of the elements before the position, the value, and the rest; a position
+  // outside 0 to the length failed in Java.
+  insert: {
+    name: "sexscriptLegacyInsert",
+    build: () =>
+      fn(
+        "sexscriptLegacyInsert",
+        ["items", "index", "value"],
+        [
+          ifS(bin("or", bin("<", v("index"), lit(0)), bin(">", v("index"), length(v("items")))), [
+            letS("noList", { kind: "object", properties: [], dict: true }, "list dict"),
+            ret({
+              kind: "index",
+              target: v("noList"),
+              index: lit("a list position outside the list"),
+              dict: true,
+            }),
+          ]),
+          letS("result", { kind: "list", items: [] }),
+          letS("position", lit(0)),
+          forS("item", v("items"), [
+            ifS(bin("==", v("position"), v("index")), [
+              {
+                kind: "expression",
+                expression: method(v("result"), "add", v("value")),
+                span: null,
+              },
+            ]),
+            { kind: "expression", expression: method(v("result"), "add", v("item")), span: null },
+            set("position", lit(1), "+="),
+          ]),
+          ifS(bin("==", v("index"), length(v("items"))), [
+            { kind: "expression", expression: method(v("result"), "add", v("value")), span: null },
+          ]),
+          ret(v("result")),
+        ],
+      ),
+  },
+  // Java matches() of `.{a,b}text.{c,d}` (a maximum below 0 has no limit): the text has no line break, which `.` does
+  // not match, and an occurrence of the part splits it into counts in both ranges.
+  aroundText: {
+    name: "sexscriptLegacyAroundText",
+    build: () => {
+      const within = (count: IrExpression, low: string, high: string): IrExpression =>
+        bin(
+          "and",
+          bin(">=", count, v(low)),
+          bin("or", bin("<", v(high), lit(0)), bin("<=", count, v(high))),
+        );
+      return fn(
+        "sexscriptLegacyAroundText",
+        ["text", "part", "minBefore", "maxBefore", "minAfter", "maxAfter"],
+        [
+          forS(
+            "lineBreak",
+            {
+              kind: "list",
+              items: ["\n", "\r", "\u0085", "\u2028", "\u2029"].map((lineBreak) => lit(lineBreak)),
+            },
+            [ifS(method(v("text"), "contains", v("lineBreak")), [ret(lit(false))])],
+          ),
+          letS("before", lit(0)),
+          letS("rest", v("text")),
+          letS("found", method(v("rest"), "indexOf", v("part"))),
+          whileS(bin(">=", v("found"), lit(0)), [
+            set("before", v("found"), "+="),
+            letS("after", bin("-", bin("-", length(v("text")), v("before")), length(v("part")))),
+            ifS(
+              bin(
+                "and",
+                within(v("before"), "minBefore", "maxBefore"),
+                within(v("after"), "minAfter", "maxAfter"),
+              ),
+              [ret(lit(true))],
+            ),
+            set("rest", method(v("rest"), "substring", bin("+", v("found"), lit(1)))),
+            set("before", lit(1), "+="),
+            set("found", method(v("rest"), "indexOf", v("part"))),
+          ]),
+          ret(lit(false)),
+        ],
+      );
+    },
   },
 };

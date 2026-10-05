@@ -41,10 +41,13 @@ import {
 } from "./java-time.ts";
 import {
   analyzeText,
+  textAssignment,
   textCall,
   textConstructor,
   textDeclaration,
+  textMatch,
   textProperty,
+  textStatement,
   type TextAnalysis,
 } from "./java-text.ts";
 import { packageFilePath } from "./lower.ts";
@@ -66,6 +69,11 @@ export interface JavaRuleHost {
   valueType(node: AstNode): number;
   /** Whether a name is a variable of the script rather than a Java class. */
   isVariable(name: string): boolean;
+  /**
+   * Checks a write to a list: false after a diagnostic when Groovy changed a list that a caller or loop shares, true
+   * otherwise, with a note when another variable shared it.
+   */
+  listWrite(receiver: AstNode, node: AstNode): boolean;
   readonly state: JavaFileState;
 }
 
@@ -143,6 +151,13 @@ interface ResourceAnalysis {
   readonly propertiesValues: ReadonlySet<AstNode>;
   /** Properties variables: assigned one `new Properties()` and loaded once from a package resource. */
   readonly properties: ReadonlySet<string>;
+  /**
+   * Presence variables: assigned `File` values of fixed paths and true or false, and read only by `exists()` and as
+   * conditions, so each `File` value may stand for whether its file is in the package.
+   */
+  readonly presence: ReadonlySet<string>;
+  /** The `File` constructors that presence variables are assigned. */
+  readonly presenceValues: ReadonlySet<AstNode>;
 }
 
 const FILE_TYPES = new Set(["File", "java.io.File"]);
@@ -286,7 +301,13 @@ export function javaFileState(
         : analyzeTemporal(body),
     text:
       body === null
-        ? { randoms: new Set(), charArrays: new Set(), orderedSets: new Set() }
+        ? {
+            randoms: new Set(),
+            charArrays: new Set(),
+            orderedSets: new Set(),
+            textBuffers: new Set(),
+            bufferValues: new Set(),
+          }
         : analyzeText(body),
     data: shared?.data ?? {
       lines: new Map(),
@@ -304,6 +325,8 @@ function emptyAnalysis(): ResourceAnalysis {
     sources: new Map(),
     propertiesValues: new Set(),
     properties: new Set(),
+    presence: new Set(),
+    presenceValues: new Set(),
   };
 }
 
@@ -406,7 +429,64 @@ function analyzeResources(root: AstNode): ResourceAnalysis {
     const value = tree.assignments.get(name)?.[0];
     if (value !== null && value !== undefined) propertiesValues.add(value);
   }
-  return { values, variables, sources, propertiesValues, properties };
+  const { presence, presenceValues } = presenceVariables(tree, variables);
+  return { values, variables, sources, propertiesValues, properties, presence, presenceValues };
+}
+
+/**
+ * Variables that hold a `File` of a fixed path until a test of its existence replaces it with true or false, as
+ * add-on checks do: `def pack = new File("...")`, `if (pack.exists()) pack = true`.
+ */
+function presenceVariables(
+  tree: Tree,
+  resources: ReadonlyMap<string, ResourceKind>,
+): { presence: Set<string>; presenceValues: Set<AstNode> } {
+  const presence = new Set<string>();
+  const presenceValues = new Set<AstNode>();
+  for (const [name, values] of tree.assignments) {
+    if (resources.has(name) || tree.parameters.has(name)) continue;
+    const files = values.filter(
+      (value): value is AstNode =>
+        value !== null &&
+        value.kind === "constructorCall" &&
+        FILE_TYPES.has(String(value.type)) &&
+        argumentsOf(value).length === 1 &&
+        pathPattern(argumentsOf(value)[0]!).complete,
+    );
+    const others = values.every(
+      (value) =>
+        value === null ||
+        files.includes(value) ||
+        (value.kind === "constant" && (typeof value.value === "boolean" || value.value === null)),
+    );
+    if (files.length === 0 || !others) continue;
+    const reads = (tree.reads.get(name) ?? []).every((read) => {
+      const member = memberOf(read, tree);
+      if (member !== null)
+        return !member.property && member.name === "exists" && member.arguments.length === 0;
+      return conditionUse(read, tree);
+    });
+    if (!reads) continue;
+    presence.add(name);
+    for (const value of files) presenceValues.add(value);
+  }
+  return { presence, presenceValues };
+}
+
+/** A read whose value Groovy took as a condition: of an if, a loop, `!`, `&&`, `||`, or `?:`. */
+function conditionUse(read: AstNode, tree: Tree): boolean {
+  let node = read;
+  for (let parent = tree.parents.get(node) ?? null; parent?.kind === "boolean";) {
+    node = parent;
+    parent = tree.parents.get(node) ?? null;
+  }
+  const parent = tree.parents.get(node) ?? null;
+  if (parent === null) return false;
+  if (parent.kind === "not") return true;
+  if (parent.kind === "binary") return parent.operator === "&&" || parent.operator === "||";
+  if (["if", "while", "ternary"].includes(parent.kind))
+    return asNode(parent.condition) === node || asNode(parent.boolean) === node;
+  return false;
 }
 
 /** The kind of resource a constructor of a resource type makes, whatever its arguments. */
@@ -730,6 +810,7 @@ export function javaConstructor(
     return first === undefined ? undefined : host.lower(first);
   }
   if (analysis.propertiesValues.has(node)) return { kind: "object", properties: [], dict: true };
+  if (analysis.presenceValues.has(node)) return filePresence(node, host);
   return temporalConstructor(node, host) ?? textConstructor(node, host);
 }
 
@@ -763,6 +844,9 @@ export function javaMethodCall(
   const receiver = asNode(node.object);
   if (receiver === null) return undefined;
   const { analysis } = host.state;
+  // The variable already holds whether its file is in the package.
+  if (name === "exists" && args.length === 0 && analysis.presence.has(variableName(receiver) ?? ""))
+    return host.lower(receiver);
   const kind = resourceKindOf(receiver, analysis);
   if (kind !== null) {
     if (name === "readLines" && args.length === 0 && kind !== "ini")
@@ -812,7 +896,16 @@ export function javaProperty(
 
 /** Groovy operators on Java values, such as `date + days`. */
 export function javaBinary(node: AstNode, host: JavaRuleHost): IrExpression | null | undefined {
-  return temporalBinary(node, host);
+  return temporalBinary(node, host) ?? textMatch(node, host);
+}
+
+/** Groovy assignments to parts of Java values, such as `buffer[1..2] = text`. */
+export function javaAssignment(
+  node: AstNode,
+  span: SourceSpan | null,
+  host: JavaRuleHost,
+): IrStatement[] | null {
+  return textAssignment(node, span, host);
 }
 
 /** `properties.load(reader)` and `reader.close()` on package resources as statements. */
@@ -837,7 +930,9 @@ export function javaCallStatement(
   }
   const table = variableName(receiver);
   if (name !== "load" || args.length !== 1 || table === null || !analysis.properties.has(table))
-    return temporalStatement(node, name, args, span, host);
+    return (
+      temporalStatement(node, name, args, span, host) ?? textStatement(node, name, args, span, host)
+    );
   // After a diagnostic, the lowering keeps the statement as manual work.
   const value = packageTextRead(node, args[0]!, "properties", host);
   if (value === undefined || value === null) return null;
@@ -1182,6 +1277,33 @@ function resourceExists(
     name: "contains",
     arguments: [host.helper("packagePath", [path])],
   };
+}
+
+/** A `File` of a fixed path as whether the package holds its file, unless a script of the package may change it. */
+function filePresence(node: AstNode, host: JavaRuleHost): IrExpression | null | undefined {
+  const { resources } = host.state;
+  const path = argumentsOf(node)[0];
+  if (resources === null || path === undefined) return undefined;
+  const file = packageFilePath(pathPattern(path).prefix);
+  const written = resources.writes.find((write) => matches(write, file));
+  if (written !== undefined) {
+    host.diagnostic(
+      "SX_PACKAGE_TEXT_WRITTEN",
+      "error",
+      `The package's scripts may write or delete ${file} (${written.origin ?? "a write the conversion cannot follow"}), so whether it exists is not fixed at conversion time.`,
+      node.span,
+    );
+    return null;
+  }
+  host.diagnostic(
+    "SX_FILE_EXISTS",
+    "warning",
+    "The legacy script tested whether a file exists on the player's computer; the test reads the package's files as they were converted, and a program (.exe) never exists.",
+    node.span,
+  );
+  const present =
+    !file.endsWith(".exe") && (resources.files.has(file) || resources.ambiguous.has(file));
+  return { kind: "literal", value: present };
 }
 
 /**

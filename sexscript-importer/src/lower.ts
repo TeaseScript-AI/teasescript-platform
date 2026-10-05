@@ -21,6 +21,7 @@ import {
   type HelperName,
 } from "./helpers.ts";
 import {
+  javaAssignment,
   javaBinary,
   javaCallStatement,
   javaConstructor,
@@ -3705,6 +3706,8 @@ function lowerAssignment(
   span: SourceSpan | null,
   context: LowerContext,
 ): IrStatement[] {
+  const java = javaAssignment(node, span, javaHost(context));
+  if (java !== null) return java;
   const operator = text(node.operator);
   if (operator === "<<") {
     // Groovy `list << value` appends one element.
@@ -12731,6 +12734,15 @@ function javaHost(context: LowerContext): JavaRuleHost {
     calendarField: (field, value, node) => dateTimeField(field, value, node, context),
     valueType: (node) => inferType(node, context.types),
     isVariable: (name) => context.types.variables.has(name),
+    listWrite: (receiver, node) => {
+      const parameterWrite = parameterListWrite(receiver, node, context);
+      if (parameterWrite !== null) {
+        addDiagnostic(context, "SX_PARAMETER_LIST_WRITE", "error", parameterWrite, node.span);
+        return false;
+      }
+      noteSharedListWrite(receiver, node, context);
+      return true;
+    },
     state: context.java,
   };
 }

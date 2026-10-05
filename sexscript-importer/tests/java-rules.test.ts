@@ -247,6 +247,53 @@ test("converts Java text, number, random, and collection APIs", { skip }, async 
   ]);
 });
 
+// Text buffers become text that appends and range writes replace, the platform line separator a line break, a (char)
+// code its ASCII character, list.add(index, value) an insertion, a `.{a,b}text.{c,d}` match a check of the parts
+// around the text, and a File of a fixed add-on path whose existence decides a flag the presence of that file.
+test(
+  "converts text buffers, character codes, insertions, shape matches, and add-on checks",
+  { skip },
+  async () => {
+    const source = await convert(
+      [
+        "def endCode = new StringBuffer('OEE52B')",
+        'def email = "ab@example.com"',
+        'if (email.matches(".{1,50}@.{5,50}")) endCode[1..2] = "XY"',
+        'endCode[4..4] = "9"',
+        "def builder = new StringBuilder()",
+        'builder.append("x")',
+        "builder.append(3)",
+        'def nl = System.getProperty("line.separator")',
+        "def letter = String.valueOf((char)(3 + 64))",
+        'def scripts = ["a", "b"]',
+        'scripts.add(0, "Back")',
+        'scripts.add(2, "Mid")',
+        "show(\"${endCode.toString()} ${builder.toString()} ${nl.length()} ${letter} ${scripts.join(',')} ${scripts.get(1)}\")",
+        "show(\"${'a@b' ==~ /.{1,50}@.{5,50}/} ${'x@y\\nz.com' ==~ /.+@.+/} ${'me@home.org'.matches('.+@.+')}\")",
+        'def pack = new File("scripts/DLC/pack1.groovy")',
+        'def missing = new File("scripts/DLC/pack2.groovy")',
+        "if (pack.exists()) pack = true else pack = false",
+        "if (missing.exists()) missing = true else missing = false",
+        'if (pack && !missing) show("pack only")',
+      ],
+      { "DLC/pack1.groovy": "// add-on\n" },
+    );
+    assert.match(
+      source,
+      /^endCode = "\$\{endCode\.substring\(0, 4\)\}9\$\{endCode\.substring\(5\)\}"$/mu,
+    );
+    assert.match(source, /^scripts = \["Back"\] \+ scripts$/mu);
+    assert.match(source, /^let pack = true$/mu);
+    assert.match(source, /^let missing = false$/mu);
+    assert.doesNotMatch(source, /TODO/u);
+    assert.deepEqual(run(source), [
+      "OXY59B x3 1 C Back,a,Mid,b a",
+      "false false true",
+      "pack only",
+    ]);
+  },
+);
+
 function groovyParserUnavailableReason(): string | false {
   if (spawnSync("java", ["-version"], { stdio: "ignore" }).status !== 0) {
     return "Java is not available for the Groovy 2.5.21 parser helper.";

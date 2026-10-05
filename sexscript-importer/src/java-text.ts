@@ -8,6 +8,7 @@ import { constantString, variableName, type AstNode, type SourceSpan } from "./a
 import type { IrExpression, IrStatement } from "./ir.ts";
 import { argumentsOf, asNode, buildTree, dottedName, memberOf, type Tree } from "./java-ast.ts";
 import { noteOnce, type JavaRuleHost } from "./java-data.ts";
+import { whole } from "./java-time.ts";
 import { LIST, NULL, NUMBER, onlyOf, STRING } from "./types.ts";
 
 /** The values of a body that Java text, number, and random rules recognize. */
@@ -18,6 +19,10 @@ export interface TextAnalysis {
   readonly charArrays: ReadonlySet<string>;
   /** HashSet constructors kept in a variable whose order a loop, a listing, or another use may observe. */
   readonly orderedSets: ReadonlySet<AstNode>;
+  /** StringBuilder and StringBuffer variables whose every use reads, appends to, or replaces part of the text. */
+  readonly textBuffers: ReadonlySet<string>;
+  /** The constructors that the text buffer variables are assigned. */
+  readonly bufferValues: ReadonlySet<AstNode>;
 }
 
 const RANDOM_TYPES = new Set(["Random", "java.util.Random"]);
@@ -39,6 +44,18 @@ const SET_TYPES = new Set([
 /** Set members that do not observe the order of a Java HashSet. */
 const ORDER_FREE_SET_MEMBERS = new Set(["add", "contains", "isEmpty", "remove", "size"]);
 const MATH_CLASSES = new Set(["Math", "java.lang.Math", "StrictMath"]);
+const BUFFER_TYPES = new Set([
+  "StringBuilder",
+  "java.lang.StringBuilder",
+  "StringBuffer",
+  "java.lang.StringBuffer",
+]);
+/** Members of a text buffer that read its text. */
+const BUFFER_READS = new Set(["length", "toString"]);
+const SYSTEM_CLASSES = new Set(["System", "java.lang.System"]);
+const CHARACTER_CLASSES = new Set(["Character", "java.lang.Character"]);
+/** Java regex `.` matches any character except these line terminators. */
+const LINE_TERMINATORS = ["\n", "\r", "\u0085", "\u2028", "\u2029"];
 const URL_ENCODER = new Set(["URLEncoder", "java.net.URLEncoder"]);
 const STRING_CLASSES = new Set(["String", "java.lang.String"]);
 
@@ -56,6 +73,10 @@ const ROUNDING_NOTE =
   "Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13).";
 const DECIMAL_ROUNDING_NOTE =
   "Groovy rounded a decimal (BigDecimal) number half up at its decimal digits; the binary number here can round a tie such as 12.345 down.";
+const LINE_SEPARATOR_NOTE =
+  "Java used the platform's line separator, \\r\\n on Windows; the text uses a line break (\\n), as TeaseScript text does.";
+const CHARACTER_NOTE =
+  "Java's (char) cast made any character from its code; the generated helper makes the printable ASCII characters and stops the script at any other code.";
 const SET_ORDER_NOTE =
   "A Java HashSet listed its members in hash order; a TeaseScript set keeps the order in which they were added.";
 
@@ -67,6 +88,8 @@ export function analyzeText(root: AstNode): TextAnalysis {
   const randoms = new Set<string>();
   const charArrays = new Set<string>();
   const orderedSets = new Set<AstNode>();
+  const textBuffers = new Set<string>();
+  const bufferValues = new Set<AstNode>();
   for (const [name, values] of tree.assignments) {
     if (tree.parameters.has(name)) continue;
     const reads = tree.reads.get(name) ?? [];
@@ -95,8 +118,20 @@ export function analyzeText(root: AstNode): TextAnalysis {
     if (observesOrder(reads, tree)) {
       for (const value of values) if (value !== null && hashOrdered(value)) orderedSets.add(value);
     }
+    const only = values.length === 1 ? values[0] : null;
+    if (
+      only !== null &&
+      only !== undefined &&
+      only.kind === "constructorCall" &&
+      BUFFER_TYPES.has(String(only.type)) &&
+      argumentsOf(only).length <= 1 &&
+      reads.every((read) => bufferUse(read, tree))
+    ) {
+      textBuffers.add(name);
+      bufferValues.add(only);
+    }
   }
-  return { randoms, charArrays, orderedSets };
+  return { randoms, charArrays, orderedSets, textBuffers, bufferValues };
 }
 
 /** A HashSet (not a LinkedHashSet), whose iteration order Java chose by hash codes. */
@@ -106,6 +141,49 @@ function hashOrdered(node: AstNode): boolean {
     SET_TYPES.has(String(node.type)) &&
     !String(node.type).endsWith("LinkedHashSet")
   );
+}
+
+/** `buffer.toString()`, `buffer.length()`, `buffer.append(part)` as a statement, or `buffer[from..to] = text`. */
+function bufferUse(read: AstNode, tree: Tree): boolean {
+  const member = memberOf(read, tree);
+  if (member !== null && !member.property) {
+    if (BUFFER_READS.has(member.name)) return member.arguments.length === 0;
+    return (
+      member.name === "append" &&
+      member.arguments.length === 1 &&
+      tree.parents.get(member.call)?.kind === "expressionStatement"
+    );
+  }
+  return rangeWrite(read, tree) !== null;
+}
+
+/** The index range of `buffer[from..to] = text` whose receiver is the read, with literal whole bounds. */
+function rangeWrite(
+  read: AstNode,
+  tree: Tree,
+): { from: number; to: number; value: AstNode } | null {
+  const index = tree.parents.get(read) ?? null;
+  if (index?.kind !== "binary" || index.operator !== "[" || asNode(index.left) !== read)
+    return null;
+  const assignment = tree.parents.get(index) ?? null;
+  if (
+    assignment?.kind !== "binary" ||
+    assignment.operator !== "=" ||
+    asNode(assignment.left) !== index
+  )
+    return null;
+  if (tree.parents.get(assignment)?.kind !== "expressionStatement") return null;
+  const range = asNode(index.right);
+  const from = range?.kind === "range" ? asNode(range.from)?.value : undefined;
+  const to = range?.kind === "range" ? asNode(range.to)?.value : undefined;
+  const value = asNode(assignment.right);
+  if (typeof from !== "number" || typeof to !== "number" || value === null) return null;
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from) return null;
+  return range?.inclusive === true
+    ? { from, to, value }
+    : to > from
+      ? { from, to: to - 1, value }
+      : null;
 }
 
 function observesOrder(reads: readonly AstNode[], tree: Tree): boolean {
@@ -173,12 +251,35 @@ export function textCall(
       noteOnce(host, "SX_FORM_ENCODE", ENCODE_NOTE, node.span);
       return host.helper("formEncode", [text]);
     }
-    if (STRING_CLASSES.has(owner) && name === "valueOf" && args.length === 1) {
+    if (
+      (STRING_CLASSES.has(owner) && name === "valueOf") ||
+      (CHARACTER_CLASSES.has(owner) && name === "toString")
+    ) {
+      if (args.length !== 1) return undefined;
+      const code = characterCode(args[0]!);
+      if (code !== null) {
+        const value = host.lower(code);
+        if (value === null) return null;
+        noteOnce(host, "SX_CHARACTER_CODE", CHARACTER_NOTE, node.span);
+        return host.helper("character", [whole(value)]);
+      }
       const chars = variableName(args[0]);
-      if (chars === null || !analysis.charArrays.has(chars)) return undefined;
+      if (name !== "valueOf" || chars === null || !analysis.charArrays.has(chars)) return undefined;
       return method({ kind: "variable", name: chars }, "join", literal(""));
     }
+    if (SYSTEM_CLASSES.has(owner) && name === "getProperty" && args.length === 1) {
+      if (constantString(args[0]) !== "line.separator") return undefined;
+      noteOnce(host, "SX_LINE_SEPARATOR", LINE_SEPARATOR_NOTE, node.span);
+      return literal("\n");
+    }
     return undefined;
+  }
+  // The text of a StringBuilder or StringBuffer variable.
+  const buffer = variableName(receiver);
+  if (buffer !== null && analysis.textBuffers.has(buffer) && args.length === 0) {
+    const text: IrExpression = { kind: "variable", name: buffer };
+    if (name === "toString") return text;
+    if (name === "length") return { kind: "property", target: text, name: "length" };
   }
   // Draws of a Random object, which the conversion removes.
   const random = variableName(receiver);
@@ -190,6 +291,21 @@ export function textCall(
   const text = onlyOf(type, STRING | NULL) && (type & STRING) !== 0;
   const number = onlyOf(type, NUMBER);
   switch (name) {
+    case "matches": {
+      // A full match of `.{a,b}` text `.{c,d}`, such as the rough email shape `.{1,50}@.{5,50}`.
+      const shape = args.length === 1 ? aroundShape(constantString(args[0])) : null;
+      if (shape === null || (type & (NUMBER | LIST)) !== 0) return undefined;
+      const value = host.lower(receiver);
+      return value === null ? null : aroundCall(value, shape, host);
+    }
+    case "get": {
+      // Java List.get(index) reads a position; a negative one fails in both.
+      if (args.length !== 1 || !onlyOf(type, LIST | NULL) || (type & LIST) === 0) return undefined;
+      if (!onlyOf(host.valueType(args[0]!), NUMBER)) return undefined;
+      const list = host.lower(receiver);
+      const index = host.lower(args[0]!);
+      return list === null || index === null ? null : { kind: "index", target: list, index };
+    }
     case "toCharArray": {
       if (args.length !== 0 || !text) return undefined;
       const value = host.lower(receiver);
@@ -368,6 +484,143 @@ function isNewRandom(node: AstNode): boolean {
   );
 }
 
+/** `buffer.append(part)` and `list.add(index, value)` as statements. */
+export function textStatement(
+  node: AstNode,
+  name: string,
+  args: readonly AstNode[],
+  span: SourceSpan | null,
+  host: JavaRuleHost,
+): IrStatement[] | null {
+  const receiver = asNode(node.object);
+  const variable = variableName(receiver);
+  if (receiver === null || variable === null) return null;
+  const target: IrExpression = { kind: "variable", name: variable };
+  if (name === "append" && args.length === 1 && host.state.text.textBuffers.has(variable)) {
+    const part = host.lower(args[0]!);
+    if (part === null) return null;
+    return [{ kind: "assign", target, operator: "=", value: concat(target, part), span }];
+  }
+  // list.add(index, value) inserts: a new list of the elements before, the value, and the rest.
+  if (name === "add" && args.length === 2) {
+    const type = host.valueType(receiver);
+    if (!onlyOf(type, LIST | NULL) || (type & LIST) === 0) return null;
+    if (!onlyOf(host.valueType(args[0]!), NUMBER)) return null;
+    if (!host.listWrite(receiver, node)) return [];
+    const index = host.lower(args[0]!);
+    const value = host.lower(args[1]!);
+    if (index === null || value === null) return null;
+    const inserted =
+      index.kind === "literal" && index.value === 0
+        ? binary("+", { kind: "list", items: [value] }, target)
+        : host.helper("insert", [target, index, value]);
+    return [{ kind: "assign", target, operator: "=", value: inserted, span }];
+  }
+  return null;
+}
+
+/** `buffer[from..to] = text`: the text with that range replaced. */
+export function textAssignment(
+  node: AstNode,
+  span: SourceSpan | null,
+  host: JavaRuleHost,
+): IrStatement[] | null {
+  const index = asNode(node.left);
+  if (node.operator !== "=" || index?.kind !== "binary" || index.operator !== "[") return null;
+  const variable = variableName(index.left);
+  if (variable === null || !host.state.text.textBuffers.has(variable)) return null;
+  const range = asNode(index.right);
+  const from = range?.kind === "range" ? asNode(range.from)?.value : undefined;
+  const last = range?.kind === "range" ? asNode(range.to)?.value : undefined;
+  if (typeof from !== "number" || typeof last !== "number") return null;
+  const to = range?.inclusive === true ? last + 1 : last;
+  const valueNode = asNode(node.right);
+  const value = valueNode === null ? null : host.lower(valueNode);
+  if (value === null) return null;
+  const text: IrExpression = { kind: "variable", name: variable };
+  const replaced: IrExpression = {
+    kind: "template",
+    parts: [
+      { value: method(text, "substring", literal(0), literal(from)) },
+      textPart(value),
+      { value: method(text, "substring", literal(to)) },
+    ],
+  };
+  return [{ kind: "assign", target: text, operator: "=", value: replaced, span }];
+}
+
+/** Text joined with a part as Java's append() and `+` show it. */
+function concat(text: IrExpression, part: IrExpression): IrExpression {
+  return { kind: "template", parts: [{ value: text }, textPart(part)] };
+}
+
+/** A template part: literal text as text, any other value interpolated. */
+function textPart(value: IrExpression): { text: string } | { value: IrExpression } {
+  return value.kind === "literal" && typeof value.value === "string"
+    ? { text: value.value }
+    : { value };
+}
+
+/** The code of `(char) code`, with its parentheses. */
+function characterCode(node: AstNode): AstNode | null {
+  if (node.kind !== "cast" || (node.type !== "char" && node.type !== "Character")) return null;
+  return asNode(node.value);
+}
+
+interface AroundShape {
+  part: string;
+  before: [number, number];
+  after: [number, number];
+}
+
+/**
+ * A regular expression `.{a,b}text.{c,d}` (each count also `*`, `+`, `?`, `{n}`, `{n,}`, or none), whose text is
+ * literal characters or escaped punctuation without a line break.
+ */
+function aroundShape(pattern: string | null): AroundShape | null {
+  if (pattern === null) return null;
+  const count = String.raw`(\{\d+(?:,\d*)?\}|[*+?])?`;
+  const match = new RegExp(
+    String.raw`^\.${count}((?:\\[^A-Za-z0-9]|[^\\.[\]{}()*+?^$|])+)\.${count}$`,
+    "u",
+  ).exec(pattern);
+  if (match === null) return null;
+  const part = match[2]!.replace(/\\(.)/gu, "$1");
+  if (LINE_TERMINATORS.some((terminator) => part.includes(terminator))) return null;
+  const bounds = (quantifier: string | undefined): [number, number] => {
+    if (quantifier === undefined) return [1, 1];
+    if (quantifier === "*") return [0, -1];
+    if (quantifier === "+") return [1, -1];
+    if (quantifier === "?") return [0, 1];
+    const [low, high] = quantifier.slice(1, -1).split(",");
+    return [Number(low), high === undefined ? Number(low) : high === "" ? -1 : Number(high)];
+  };
+  return { part, before: bounds(match[1]), after: bounds(match[3]) };
+}
+
+function aroundCall(value: IrExpression, shape: AroundShape, host: JavaRuleHost): IrExpression {
+  return host.helper("aroundText", [
+    value,
+    literal(shape.part),
+    literal(shape.before[0]),
+    literal(shape.before[1]),
+    literal(shape.after[0]),
+    literal(shape.after[1]),
+  ]);
+}
+
+/** `text ==~ /.{a,b}text.{c,d}/`, Groovy's full match of a regular expression. */
+export function textMatch(node: AstNode, host: JavaRuleHost): IrExpression | null | undefined {
+  if (node.operator !== "==~") return undefined;
+  const left = asNode(node.left);
+  const right = asNode(node.right);
+  const shape = right === null ? null : aroundShape(constantString(right));
+  if (left === null || shape === null || (host.valueType(left) & (NUMBER | LIST)) !== 0)
+    return undefined;
+  const value = host.lower(left);
+  return value === null ? null : aroundCall(value, shape, host);
+}
+
 /** `def rnd = new Random()`: the draws use the session's random numbers, so the object goes. */
 export function textDeclaration(
   name: string,
@@ -380,13 +633,23 @@ export function textDeclaration(
   return [];
 }
 
-/** `new ArrayList()` and `new HashSet(list)` as TeaseScript lists and sets. */
+/** `new ArrayList()` and `new HashSet(list)` as TeaseScript lists and sets, and text buffers as their text. */
 export function textConstructor(
   node: AstNode,
   host: JavaRuleHost,
 ): IrExpression | null | undefined {
   const type = String(node.type);
   const args = argumentsOf(node);
+  const first = args[0];
+  // new String(text) copies the text; a buffer starts with its text, or empty with a capacity.
+  if (STRING_CLASSES.has(type) && args.length === 1 && first !== undefined) {
+    return onlyOf(host.valueType(first), STRING) ? host.lower(first) : undefined;
+  }
+  if (BUFFER_TYPES.has(type) && args.length <= 1) {
+    if (!host.state.text.bufferValues.has(node)) return undefined;
+    if (first === undefined || onlyOf(host.valueType(first), NUMBER)) return literal("");
+    return onlyOf(host.valueType(first), STRING) ? host.lower(first) : undefined;
+  }
   const isList = LIST_TYPES.has(type);
   const isSet = SET_TYPES.has(type);
   if ((!isList && !isSet) || args.length > 1) return undefined;

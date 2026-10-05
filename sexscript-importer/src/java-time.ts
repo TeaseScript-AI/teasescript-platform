@@ -350,7 +350,7 @@ function fromMilliseconds(count: IrExpression): IrExpression {
 }
 
 /** A whole number: Java's int and long parameters drop the fraction toward zero, as toInteger() does. */
-function whole(value: IrExpression): IrExpression {
+export function whole(value: IrExpression): IrExpression {
   return isWhole(value) ? value : call("toInteger", value);
 }
 
