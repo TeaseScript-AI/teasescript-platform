@@ -1,0 +1,25 @@
+{
+  "patches": [
+    {
+      "id": "set-new-image-name",
+      "layer": "source",
+      "category": "e",
+      "reason": "The image changer was renamed setNewImage1 (with first=false as default); every other old setNewImage() call is commented out, but this one still calls the old name and failed in Groovy.",
+      "diff": "set-new-image-name.diff"
+    },
+    {
+      "id": "unlock-combination-text",
+      "layer": "source",
+      "category": "e",
+      "reason": "The unlock message closes show(...) one line early, so \"Kombinationen är: <combination>\" was concatenated to show's null result and the following showButton, and the player never saw the combination the message announces. Close show after the combination; showButton stays the next statement.",
+      "diff": "unlock-combination-text.diff"
+    },
+    {
+      "id": "distraction-text",
+      "layer": "source",
+      "category": "e",
+      "reason": "The distraction message closes show(...) after its first line and adds the next two lines to show's null result, so only the first line appeared. Close show after the last line.",
+      "diff": "distraction-text.diff"
+    }
+  ]
+}

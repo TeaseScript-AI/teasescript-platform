@@ -1,0 +1,21 @@
+--- a/scripts/DisciplineClinic/Punish.groovy
++++ b/scripts/DisciplineClinic/Punish.groovy
+@@ -169,6 +169,7 @@
+ def cornerProtected = false
+ def lyingProtected = false
+ def missedMaintenanceProtected = false
++def repeatOffenseProtected = false
+ def seriousOffenseProtected = false
+ 
+ def sessions = 0
+@@ -681,8 +682,8 @@
+ 			missedMaintenanceProtection--
+ 			break
+ 		case "repeatOffense":
+-			repeatOffense = true
+-			repeatOffense--
++			repeatOffenseProtected = true
++			repeatOffenseProtection--
+ 			break
+ 		case "seriousOffense":
+ 			seriousOffenseProtected = true
