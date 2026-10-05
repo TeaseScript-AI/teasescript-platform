@@ -1,12 +1,3 @@
-function sexscriptLegacyConcat(lists) {
-  let combined = []
-  for part in lists {
-    for item in part {
-      combined.add(item)
-    }
-  }
-  return combined
-}
 function randomIntegerValue(rangeValue) {
   return 99
 }
@@ -24,7 +15,7 @@ if empty != {} {
   say "Has entries"
 }
 let items = ["a", "b"]
-let more = sexscriptLegacyConcat([items, ["c"]])
+let more = items + ["c"]
 let check = (1 < 2) == true
 let setValue = "tools" // protected in TeaseScript
 say "Set: ${setValue}"

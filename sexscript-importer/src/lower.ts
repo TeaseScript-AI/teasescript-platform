@@ -1144,7 +1144,7 @@ let helperResults: ReadonlyMap<string, TeaseType> | undefined;
 function withEnforcedTypes(statements: IrStatement[], context: LowerContext): IrStatement[] {
   helperResults ??= functionResultTypes(allHelperStatements());
   const result = enforceVariableTypes(statements, helperResults);
-  if (result.appended.length > 0) context.syntheticHelpers.add("concat");
+  if (result.rangeAppended.length > 0) context.syntheticHelpers.add("concat");
   // A list or text append no longer needs the note that its `+` operands were not proven numeric.
   const appendedLines = new Set(
     [...result.appended, ...result.textAppended].map((statement) => statement.span?.line),
@@ -3956,6 +3956,29 @@ function lowerCallStatement(
     );
     return [{ kind: "exit", span }];
   }
+  // `list.addAll(otherList)` appends the other list's elements in place, as TeaseScript addAll does (#609).
+  if (call !== null && !call.inherited && call.name === "addAll" && call.arguments.length === 1) {
+    const receiver = asNode(node.object);
+    if (
+      receiver !== null &&
+      isKnownListExpression(receiver, context) &&
+      isListType(inferType(call.arguments[0]!, context.types))
+    ) {
+      const parameterWrite = parameterListWrite(receiver, node, context);
+      if (parameterWrite !== null)
+        return [unsupportedStatement(context, node, "SX_PARAMETER_LIST_WRITE", parameterWrite)];
+      const target = lowerExpression(receiver, context);
+      const value = lowerExpression(call.arguments[0]!, context);
+      if (target === null || value === null) return [];
+      return [
+        {
+          kind: "expression",
+          expression: { kind: "methodCall", target, name: "addAll", arguments: [value] },
+          span,
+        },
+      ];
+    }
+  }
   if (call !== null && !call.inherited && (call.name === "push" || call.name === "leftShift")) {
     // `list.leftShift(value)` is `list << value`; Groovy 2.5 List.push inserts at the front, as a stack's push.
     const receiver = asNode(node.object);
@@ -3977,9 +4000,12 @@ function lowerCallStatement(
             kind: "assign",
             target,
             operator: "=",
-            value: useHelper(context, "concat", [
-              { kind: "list", items: [{ kind: "list", items: [value] }, target] },
-            ]),
+            value: {
+              kind: "binary",
+              operator: "+",
+              left: { kind: "list", items: [value] },
+              right: target,
+            },
             span,
           },
         ];
@@ -7086,9 +7112,13 @@ function lowerPlus(node: AstNode, context: LowerContext): IrExpression | null {
   const rightType = inferType(rightNode, context.types);
   if (isListType(leftType)) {
     // Decided before lowering, so each operand is lowered (and its prompts emitted) exactly once.
+    // TeaseScript `+` joins two lists into a new one (#609); an appended element becomes a one-element list.
     const lists = listConcatenationOperands(node, context);
     if (lists === null) return null;
-    return useHelper(context, "concat", [{ kind: "list", items: lists }]);
+    // A range is no list for TeaseScript `+`, so the concatenation helper appends its numbers.
+    if (lists.some((item) => item.kind === "range"))
+      return useHelper(context, "concat", [{ kind: "list", items: lists }]);
+    return lists.reduce((left, right) => ({ kind: "binary", operator: "+", left, right }));
   }
   const left = lowerExpression(leftNode, context);
   const right = lowerExpression(rightNode, context);

@@ -475,7 +475,7 @@ test(
       assert.match(output, /^ {2}items = sexscriptLegacyConcat\(\[items, 1\.\.=3\]\)$/mu);
       // A value that may be a list or one element is reported; a function result is a list.
       assert.match(output, /^ {2}\/\/ TODO SX_LIST_CONCATENATION line 5: /mu);
-      assert.match(output, /^ {2}items = sexscriptLegacyConcat\(\[items, extra\(\)\]\)$/mu);
+      assert.match(output, /^ {2}items \+= extra\(\)$/mu);
       // A list literal is checked element by element, as the compiler does; mixed elements need a union.
       assert.match(output, /^let weights: \(integer \| string\)\[\] = \[1, 2\]$/mu);
       // A list case holding a range keeps Groovy's membership test.

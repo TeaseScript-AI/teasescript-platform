@@ -1,15 +1,10 @@
-function sexscriptLegacyConcat(lists) {
-  let combined = []
-  for part in lists {
-    for item in part {
-      combined.add(item)
-    }
-  }
-  return combined
-}
 // Groovy 2.5 push() puts the value first, as a stack's push; leftShift() appends like <<.
 let rules = ["Kneel"]
-rules = sexscriptLegacyConcat([["Listen"], rules])
+rules = ["Listen"] + rules
 rules.add("Obey")
 say "First rule: ${rules[0]}, last: ${rules[2]}"
+// addAll() appends another list's elements in place.
+let extras = ["Kneel"]
+extras.addAll(["Wait", "Listen"])
+say "${extras.length} rules"
 exit
