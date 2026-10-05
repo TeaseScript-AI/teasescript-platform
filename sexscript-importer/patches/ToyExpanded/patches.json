@@ -195,6 +195,13 @@
       "category": "b",
       "reason": "The calendar, the debug status, and the debug lounge line showed times with java.time (localTimeOf(s).format(soonFormatter), pattern \"EEEE 'at' h:mma\"), which does not convert, so they showed null; the calendar's collect over the plans did not convert either. Format the same text from the local time arithmetic of localTimeOffset (English day names and AM/PM, as the English pattern gave), and list the plans in a loop that skips a plan without an event, as before.",
       "diff": "soon-text.diff"
+    },
+    {
+      "id": "native-sessions",
+      "layer": "source",
+      "category": "b",
+      "reason": "sessionPlay ran the nine session plans of images/toy/domme.groovy by evaluating their require and number expression strings with Eval.me in a scope of closures, which does not convert, so no play session ever ran (owner decision 2026-10-05: native code instead of eval emulation). Each plan becomes a method of a new module toy/domme.groovy (the data file under images is no script the converter reads): its phases are plain calls in the same order, with the conditions as ifs and the numbers as arguments, so randRange draws happen where the expressions drew them; sessionChoices lists the sessions whose condition holds with their probabilities for the same weighted pick, and runSession calls a session by its theme. The runner in play.groovy keeps the rest: wildcards expand by tags in the same order with repetitions kept, the session dresses for the activities of all its phases first, take/repeat/sequence and the punishMultiply/punishApply uses run as before, and the session reads the punishment once at its start as the loaded toy.punishment was (0 when missing, where the legacy division failed). The DEBUG self-check of the expression strings is dropped, since no strings are left to check.",
+      "diff": "native-sessions.diff"
     }
   ]
 }
