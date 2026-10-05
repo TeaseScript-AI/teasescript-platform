@@ -517,9 +517,12 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   path, with only waits, images, and sounds in between, says only what it adds, and one that only repeats it is
   dropped, joining the waits around it (growing dots become one text and one wait). Texts compare with whitespace and line breaks collapsed and without the earlier text's final punctuation,
   the repeat ends at a word boundary, and only literal text and interpolations of identical expressions compare. Any
-  other statement, a nested block, or a call in an image or sound starts over. The report counts the dropped,
-  shortened, and kept texts (`repeatedText`; `SX_REPEATED_TEXT_DROPPED`, `SX_REPEATED_TEXT_SHORTENED`,
-  `SX_REPEATED_TEXT_KEPT` where the interpolated values differ).
+  other statement, a nested block, or a call in an image or sound starts over. The display also kept the last text
+  across a chain to the next script: before a `goto` to a script whose start shows the same literal texts again, with
+  a confirm button of the same label (ignoring case), the caller drops them, while the target keeps them for other
+  callers. The report counts the dropped, shortened, and kept texts and those dropped across a chain (`repeatedText`;
+  `SX_REPEATED_TEXT_DROPPED`, `SX_REPEATED_TEXT_SHORTENED`, `SX_REPEATED_TEXT_KEPT` where the interpolated values
+  differ, `SX_REPEATED_TEXT_ACROSS_CHAIN`).
 - Launch markers: the legacy player saved `<script>.launch.firsttime`, `.lasttime`, and `.nb` at every script start
   (`FullScript.groovytemplate`); a script whose markers the package reads saves them first (`SX_LAUNCH_MARKERS`).
 - Java text: `String.format` with `%s`, `%d`, `%f`, a `0` flag, a width, and a precision becomes interpolation,

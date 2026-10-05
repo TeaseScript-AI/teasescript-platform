@@ -1,3 +1,4 @@
 save "chapters/last" as "chapter.after"
 say "Chapter one."
+// The next script starts with the same text and button, which the legacy display showed once.
 goto "chapters/second.tease"

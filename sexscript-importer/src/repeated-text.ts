@@ -243,3 +243,153 @@ function withNestedBlocks(
       return statement;
   }
 }
+
+type SayStatement = Extract<IrStatement, { kind: "say" }>;
+type ChainItem = {
+  statement: IrStatement;
+  say: SayStatement | null;
+  text: Token[] | null;
+  label: string | null;
+};
+
+/**
+ * The legacy display also kept a script's last text when it chained to the next script, so a script that starts with
+ * the text it was chained from repeated it: across `goto "file"`, the texts and the confirm button just before the
+ * transfer that the target's start shows again go from the caller. The target keeps them, since other scripts may
+ * enter it. Texts compare as in withoutRepeatedText, without interpolations; a button goes only where the target's
+ * matching button has the same label, ignoring case.
+ */
+export function withoutRepeatedChainText<
+  T extends { statements: IrStatement[]; diagnostics: MigrationDiagnostic[] },
+>(programs: readonly T[], paths: ReadonlyArray<string | null>): T[] {
+  const functions = new Map<string, IrStatement[]>();
+  for (const program of programs)
+    for (const statement of program.statements)
+      if (statement.kind === "function") functions.set(statement.name, statement.body);
+  const silentFunctions = new Map<string, boolean>();
+  const silent = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.every(silent);
+    if (typeof value !== "object" || value === null || !("kind" in value)) return true;
+    const kind = value.kind;
+    if (
+      kind === "say" ||
+      kind === "showButton" ||
+      kind === "showPopup" ||
+      kind === "permanentButton" ||
+      kind === "goto" ||
+      kind === "exit" ||
+      kind === "choice" ||
+      kind === "listChoice" ||
+      kind === "input" ||
+      kind === "button" ||
+      kind === "function"
+    )
+      return false;
+    if (kind === "call" && "name" in value && typeof value.name === "string") {
+      const body = functions.get(value.name);
+      if (body !== undefined) {
+        if (!silentFunctions.has(value.name)) {
+          silentFunctions.set(value.name, false);
+          silentFunctions.set(value.name, silent(body));
+        }
+        if (!silentFunctions.get(value.name)) return false;
+      }
+    }
+    return Object.values(value).every(silent);
+  };
+  const item = (statement: IrStatement): ChainItem | null => {
+    if (statement.kind === "say") {
+      const text = textTokens(statement.value);
+      return text !== null && text.every((token) => "char" in token)
+        ? { statement, say: statement, text, label: null }
+        : null;
+    }
+    if (
+      statement.kind === "showButton" &&
+      statement.timeout === null &&
+      statement.label.kind === "literal" &&
+      typeof statement.label.value === "string"
+    )
+      return {
+        statement,
+        say: null,
+        text: null,
+        label: statement.label.value.trim().toLowerCase(),
+      };
+    return null;
+  };
+  const passive = (statement: IrStatement): boolean =>
+    statement.kind === "comment" ||
+    statement.kind === "blank" ||
+    statement.kind === "hideImage" ||
+    ((statement.kind === "wait" || statement.kind === "showImage" || statement.kind === "playAudio") &&
+      silent(statement));
+  // The outputs a script shows first, before anything else that shows or asks.
+  const leading = new Map<string, ChainItem[]>();
+  programs.forEach((program, index) => {
+    const path = paths[index];
+    if (path == null) return;
+    const items: ChainItem[] = [];
+    for (const statement of program.statements) {
+      // A function definition runs nothing where it stands.
+      if (statement.kind === "function") continue;
+      const found = item(statement);
+      if (found !== null) items.push(found);
+      else if (!passive(statement) && !silent(statement)) break;
+    }
+    leading.set(path, items);
+  });
+  const same = (left: ChainItem, right: ChainItem): boolean => {
+    if (left.say !== null && right.say !== null && left.text !== null && right.text !== null) {
+      return (
+        sameVoice(left.say, right.say) &&
+        repeatedPart(left.text, right.text, sameToken) === "all" &&
+        repeatedPart(right.text, left.text, sameToken) === "all"
+      );
+    }
+    return left.label !== null && left.label === right.label;
+  };
+  return programs.map((program) => {
+    let dropped = 0;
+    const block = (items: IrStatement[]): IrStatement[] => {
+      const result = items.map((statement) => withNestedBlocks(statement, block));
+      const removed = new Set<IrStatement>();
+      result.forEach((statement, index) => {
+        if (statement.kind !== "goto" || statement.target.kind !== "file") return;
+        const target = leading.get(statement.target.path);
+        if (target === undefined || target.length === 0) return;
+        const trailing: ChainItem[] = [];
+        for (let position = index - 1; position >= 0; position -= 1) {
+          const previous = result[position]!;
+          const found = item(previous);
+          if (found !== null) trailing.unshift(found);
+          else if (!passive(previous)) break;
+        }
+        for (let count = Math.min(trailing.length, target.length); count > 0; count -= 1) {
+          const tail = trailing.slice(trailing.length - count);
+          if (!tail.every((entry, position) => same(entry, target[position]!))) continue;
+          for (const entry of tail) removed.add(entry.statement);
+          dropped += tail.length;
+          break;
+        }
+      });
+      return result.filter((statement) => !removed.has(statement));
+    };
+    const statements = block(program.statements);
+    if (dropped === 0) return program;
+    return {
+      ...program,
+      statements,
+      diagnostics: [
+        ...program.diagnostics,
+        ...Array.from({ length: dropped }, (): MigrationDiagnostic => ({
+          code: "SX_REPEATED_TEXT_ACROSS_CHAIN",
+          severity: "info",
+          message:
+            "Dropped a text or button before a transfer that the target script shows again first; the legacy display kept it across the transfer.",
+          span: null,
+        })),
+      ],
+    };
+  });
+}

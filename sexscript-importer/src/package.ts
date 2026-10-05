@@ -27,6 +27,7 @@ import {
   photoCopy,
   withGuardedInputs,
 } from "./lower.ts";
+import { withoutRepeatedChainText } from "./repeated-text.ts";
 import {
   helperDefinitionOrder,
   SYSTEM_SPEAKER,
@@ -913,18 +914,20 @@ export function lowerPackage(
   // Calls in any file may pass null for a parameter whose default gives it a type.
   const nullable = withNullableParameters([apartMain, ...apartPrograms]);
   const main = nullable[0]!;
-  const programs = nullable.slice(1);
+  const paths = files.map(
+    (file, index) =>
+      scripts.pathOf.get(index) ??
+      (classOutputs.has(index) || (moduleFiles.has(index) && !scripts.pathOf.has(index))
+        ? packagePath(file.sourceName, scripts.root)
+        : null),
+  );
+  // Text a script repeats from the end of the script that chains to it is said once (repeated-text.ts).
+  const programs = withoutRepeatedChainText(nullable.slice(1), paths);
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
     composed: programs,
     main: legacyMain !== null ? { file: legacyMain } : { menu: main },
-    paths: files.map(
-      (file, index) =>
-        scripts.pathOf.get(index) ??
-        (classOutputs.has(index) || (moduleFiles.has(index) && !scripts.pathOf.has(index))
-          ? packagePath(file.sourceName, scripts.root)
-          : null),
-    ),
+    paths,
   };
 }
 
