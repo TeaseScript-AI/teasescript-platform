@@ -16,11 +16,11 @@
  * Needs Playwright: `PLAYWRIGHT_CORE` names the `playwright-core` package folder (default: the agent stack's
  * Playwright CLI install).
  */
-import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { packageContentHash } from "./catalog.ts";
 
 const PLAYWRIGHT_CORE =
   process.env.PLAYWRIGHT_CORE ?? "/opt/agent-stack/playwright-cli/node_modules/playwright-core";
@@ -158,9 +158,14 @@ try {
 async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResult> {
   const folder = path.join(root, id);
   const files = await packageFiles(folder);
-  const hash = createHash("sha256");
-  for (const file of files.filter((item) => item.endsWith(".tease")))
-    hash.update(`${file}\0${await readFile(path.join(folder, file), "utf8")}\0`);
+  const sources = await Promise.all(
+    files
+      .filter((item) => item.endsWith(".tease"))
+      .map(async (file) => ({
+        path: file,
+        source: await readFile(path.join(folder, file), "utf8"),
+      })),
+  );
   const present = new Set(files);
   const outFolder = path.join(out, id);
   await rm(outFolder, { recursive: true, force: true });
@@ -233,7 +238,7 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
     id,
     checkedAt: new Date().toISOString(),
     base: values.base,
-    contentHash: hash.digest("hex"),
+    contentHash: packageContentHash(sources),
     verdict,
     summary,
     runs,
