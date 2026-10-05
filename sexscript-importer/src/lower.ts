@@ -3245,6 +3245,35 @@ function substituteNode(value: AstNode, target: AstNode, replacement: AstNode): 
 }
 
 /** Constant values that are safe and readable as an unconditional initial value. */
+/** Whether a value is literal data: constants, and lists and maps of them, which mean the same wherever evaluated. */
+function isLiteralData(node: AstNode): boolean {
+  if (node.kind === "constant") return true;
+  if (node.kind === "unaryMinus") return asNode(node.value)?.kind === "constant";
+  if (node.kind === "list") return nodeArray(node.items).every(isLiteralData);
+  if (node.kind === "map")
+    return nodeArray(node.entries).every((entry) => {
+      const key = asNode(entry.key);
+      const value = asNode(entry.value);
+      return key?.kind === "constant" && value !== null && isLiteralData(value);
+    });
+  return false;
+}
+
+/**
+ * The empty value of the kind a computed value plainly has, a list for `[...] - [...]` and text for text, so the
+ * variable that waits for it does not start as null; null where the kind is not plain.
+ */
+function emptyValueLike(node: AstNode): AstNode | null {
+  const base =
+    node.kind === "binary" && ["+", "-"].includes(text(node.operator) ?? "")
+      ? asNode(node.left)
+      : node;
+  if (base?.kind === "list") return { kind: "list", span: null, items: [] };
+  if (base?.kind === "gstring" || (base?.kind === "constant" && typeof base.value === "string"))
+    return { kind: "constant", span: null, value: "" };
+  return null;
+}
+
 function isSimpleValue(node: AstNode): boolean {
   if (node.kind === "constant") return true;
   if (node.kind === "unaryMinus") return asNode(node.value)?.kind === "constant";
@@ -13389,11 +13418,14 @@ function desugarMixinModule(
     const right = asNode(expression?.right);
     if (name !== null && right?.kind === "closure") {
       globals.push(statement);
+    } else if (name !== null && right !== null && isLiteralData(right)) {
+      // A module constant of literal data, such as `final LUNCH = "lunch"`, starts with its value.
+      globals.push(statement);
     } else if (name !== null && right !== null) {
       globals.push(
         declaration(
           name,
-          {
+          emptyValueLike(right) ?? {
             kind: "unsupportedExpression",
             span: null,
             groovyType: "org.codehaus.groovy.ast.expr.EmptyExpression",

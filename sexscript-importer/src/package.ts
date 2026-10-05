@@ -894,10 +894,11 @@ function withGlobalReach(programs: readonly MigrationProgram[]): MigrationProgra
     const statement = definitions[file]!.get(name);
     if (statement?.kind === "function") queue.push({ file, statement });
   };
+  // A module file holds declarations only: its functions and its values are all global.
   programs.forEach((program, file) => {
     if (file === 0) return;
     for (const statement of program.statements)
-      if (statement.kind === "function") mark(file, statement.name);
+      if (statement.kind === "function" || statement.kind === "let") mark(file, statement.name);
   });
   while (queue.length > 0) {
     const { file, statement } = queue.shift()!;
