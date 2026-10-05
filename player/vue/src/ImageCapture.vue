@@ -184,9 +184,11 @@ function focusOut(event: FocusEvent) {
   place-items: center;
   overflow-y: auto;
 }
+/* Its words may break, so the alert fits a camera window at its smallest. */
 .image-capture-status {
   position: relative;
   inline-size: min(100%, 28rem);
+  overflow-wrap: anywhere;
 }
 /* The question keeps the controls in view: in a small viewfinder it takes at most a third of it and scrolls. */
 .image-capture-question {
