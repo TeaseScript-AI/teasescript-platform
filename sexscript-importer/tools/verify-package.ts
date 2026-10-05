@@ -14,7 +14,8 @@ import { copyFile, link, mkdir, readFile, readdir, stat, writeFile } from "node:
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { packageContentHash } from "./catalog.ts";
+import { isRecord } from "../src/ast.ts";
+import { packageContentHash, parsePlayCheck } from "./catalog.ts";
 
 const DOC = fileURLToPath(new URL("../docs/VERIFIED.md", import.meta.url));
 const DOC_HEADER = `# Verified packages
@@ -68,31 +69,24 @@ const sources = await Promise.all(
     .filter((file) => file.endsWith(".tease"))
     .map(async (file) => ({ path: file, source: await readFile(path.join(source, file), "utf8") })),
 );
-const check = JSON.parse(await readFile(path.join(values.checks, id, "result.json"), "utf8")) as {
-  contentHash: string;
-  verdict: string;
-  checkedAt: string;
-  runs: unknown[];
-  coverage: {
-    files: string[];
-    fileCount: number;
-    sites: number;
-    siteCount: number;
-    choices: number;
-  };
-  missingImages: string[];
-  missingMedia: string[];
-};
+const check = parsePlayCheck(
+  JSON.parse(await readFile(path.join(values.checks, id, "result.json"), "utf8")),
+);
+if (check === null) fail("The Player check result is malformed.");
 if (check.contentHash !== packageContentHash(sources))
   fail("The Player check is of other .tease files than the package has now.");
 if (check.verdict !== "plays") fail(`The Player check verdict is ${check.verdict}, not plays.`);
 if (check.missingImages.length + check.missingMedia.length > 0)
   fail("The Player check found missing media.");
-const summary = await readFile(path.join(root, ".conversion-summary.json"), "utf8").then(
-  (text) => JSON.parse(text) as { importerCommit?: string },
-  () => ({ importerCommit: undefined }),
+const importerCommit = await readFile(path.join(root, ".conversion-summary.json"), "utf8").then(
+  (text) => {
+    const summary: unknown = JSON.parse(text);
+    return isRecord(summary) && typeof summary.importerCommit === "string"
+      ? summary.importerCommit
+      : "unknown";
+  },
+  () => "unknown",
 );
-const importerCommit = summary.importerCommit ?? "unknown";
 const date = new Date().toISOString().slice(0, 10);
 const { files: covered, fileCount, sites, siteCount, choices } = check.coverage;
 const paths = `${check.runs.length} automated runs to the end (${covered.length}/${fileCount} files, ${sites}/${siteCount} interactions, ${choices} choices); manual: ${values.manual}`;
