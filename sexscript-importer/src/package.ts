@@ -1671,11 +1671,15 @@ function composeProgram(
   }
   helperStatements.unshift(...fields);
 
-  const dispatched = withActionDispatcher({
-    ...program,
-    statements: [...helperStatements, ...program.statements],
-    ...(actions.size === 0 ? {} : { actions: [...actions] }),
-  });
+  const statements = [...helperStatements, ...program.statements];
+  const results = functionResultTypes(statements);
+  const voidActions = new Set(
+    [...actions].filter((action) => results.get(action)?.kind === "null"),
+  );
+  const dispatched = withActionDispatcher(
+    { ...program, statements, ...(actions.size === 0 ? {} : { actions: [...actions] }) },
+    voidActions,
+  );
   // A function whose returns mix types, such as the dispatcher, declares its result type.
   const composed = { ...dispatched, statements: withReturnTypes(dispatched.statements) };
   diagnostics.push(...packageDependencyDiagnostics(composed.statements, globalFunctions));

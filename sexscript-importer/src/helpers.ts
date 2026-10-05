@@ -16,7 +16,11 @@ export const ACTION_DISPATCHER_MARKER = "#dispatch";
  * supplied arguments, up to the parameters the function declares, so omitted optional parameters keep their
  * defaults. Unlike Groovy, extra arguments are ignored and unknown actions return null.
  */
-export function withActionDispatcher(program: MigrationProgram): MigrationProgram {
+export function withActionDispatcher(
+  program: MigrationProgram,
+  /** Actions whose functions return no value, which the dispatcher calls and then leaves with a bare `return`. */
+  voidActions: ReadonlySet<string> = new Set(),
+): MigrationProgram {
   const actions = program.actions ?? [];
   if (!actions.includes(ACTION_DISPATCHER_MARKER)) return program;
   const signatures = new Map<string, { required: number; total: number }>();
@@ -27,14 +31,22 @@ export function withActionDispatcher(program: MigrationProgram): MigrationProgra
     ).length;
     signatures.set(statement.name, { required, total: statement.parameters.length });
   }
-  const callWith = (action: string, count: number): IrStatement =>
-    ret({
+  // A function that returns no value gives null; a bare `return` gives it without fixing the result type (V30 §17).
+  const callWith = (action: string, count: number): IrStatement[] => {
+    const call: IrExpression = {
       kind: "call",
       name: action,
       positional: Array.from({ length: count }, (_, index) => at(v("args"), lit(index))),
       named: {},
       local: true,
-    });
+    };
+    return voidActions.has(action)
+      ? [
+          { kind: "expression", expression: call, span: null },
+          { kind: "return", value: null, span: null },
+        ]
+      : [ret(call)];
+  };
   const branches = actions
     .filter((action) => action !== ACTION_DISPATCHER_MARKER)
     .toSorted()
@@ -44,11 +56,9 @@ export function withActionDispatcher(program: MigrationProgram): MigrationProgra
       const id: IrExpression = { kind: "literal", value: action, action: true };
       const calls: IrStatement[] = [];
       for (let count = total; count > required; count -= 1) {
-        calls.push(
-          ifS(bin(">=", prop(v("args"), "length"), lit(count)), [callWith(action, count)]),
-        );
+        calls.push(ifS(bin(">=", prop(v("args"), "length"), lit(count)), callWith(action, count)));
       }
-      calls.push(callWith(action, required));
+      calls.push(...callWith(action, required));
       return ifS(bin("==", v("action"), id), calls);
     });
   // An unknown action returns null by reaching the end, which keeps the result type the actions' own (V30 §17).

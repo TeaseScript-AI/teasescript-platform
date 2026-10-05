@@ -4,7 +4,8 @@
 // Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
 function sexscriptLegacyCall(action, args) {
   if action == "announceCallback1" {
-    return announceCallback1(args[0])
+    announceCallback1(args[0])
+    return
   }
 }
 function announceCallback1(t) {

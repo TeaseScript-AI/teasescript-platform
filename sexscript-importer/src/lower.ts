@@ -1356,7 +1356,11 @@ export function lowerParsedFile(
       : { loadsModuleDirectories: [...context.loadsModuleDirectories].sort() }),
   };
   if (options.renameIdentifiers === false) return program;
-  const dispatched = withActionDispatcher(program);
+  const results = functionResultTypes(program.statements);
+  const dispatched = withActionDispatcher(
+    program,
+    new Set((program.actions ?? []).filter((action) => results.get(action)?.kind === "null")),
+  );
   return renameConflictingIdentifiers({
     ...dispatched,
     statements: withReturnTypes(dispatched.statements),

@@ -2,9 +2,11 @@
 function sexscriptLegacyCall(action, args) {
   if action == "pauseCycle" {
     if args.length >= 2 {
-      return pauseCycle(args[0], args[1])
+      pauseCycle(args[0], args[1])
+      return
     }
-    return pauseCycle(args[0])
+    pauseCycle(args[0])
+    return
   }
 }
 global sexscriptBackgroundSounds = []
