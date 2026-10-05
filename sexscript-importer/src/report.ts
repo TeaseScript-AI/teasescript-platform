@@ -486,8 +486,10 @@ function diagnosticsByPath(
 }
 
 /** A stand-in for a file that has no runnable conversion: reaching it ends the run as `blocked`. */
-function stub(path: string): string {
-  return `${BLOCKED}(${JSON.stringify(path)})\nexit\n`;
+function stub(path: string, source = ""): string {
+  // Speakers are global (V30 §37): the files that run still need the speakers a failing file declares.
+  const speakers = source.match(/^speaker \w+ \{\n(?: {2}.*\n)*\}\n/gmu) ?? [];
+  return `${speakers.join("")}${BLOCKED}(${JSON.stringify(path)})\nexit\n`;
 }
 
 /**
@@ -545,16 +547,20 @@ function runPackageProject(
   for (const { path } of entries)
     caseCounts.set(path.toLowerCase(), (caseCounts.get(path.toLowerCase()) ?? 0) + 1);
   const probeLines = new Map<string, { line: number; shift: number }>();
+  const stubbed = new Set<string>();
   const sources = new Map(
     entries.map(({ path, shim, fileIndex }): [string, string] => {
-      if (!runnable.has(path) || caseCounts.get(path.toLowerCase())! > 1) return [path, stub(path)];
+      if (!runnable.has(path) || caseCounts.get(path.toLowerCase())! > 1) {
+        stubbed.add(path);
+        return [path, stub(path, shim.source)];
+      }
       if (fileIndex === null && path !== MAIN) return [path, shim.source];
       const { source, probe } = announced(path, shim);
       probeLines.set(path, probe);
       return [path, source];
     }),
   );
-  const runs = (path: string): boolean => sources.get(path) !== stub(path);
+  const runs = (path: string): boolean => !stubbed.has(path);
   // A runnable file may use a global or another file that became a stub; it becomes a stub too.
   for (;;) {
     const result = compiler(
@@ -570,7 +576,8 @@ function runPackageProject(
     );
     if (failing.size === 0) return;
     for (const path of failing) {
-      sources.set(path, stub(path));
+      sources.set(path, stub(path, sources.get(path)));
+      stubbed.add(path);
       probeLines.delete(path);
     }
   }
