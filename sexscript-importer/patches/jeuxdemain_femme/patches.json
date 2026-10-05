@@ -6,7 +6,7 @@
       "category": "b",
       "reason": "The clitoris, nipple and labia calibration animations start a background Thread whose showButton(text, 60) waits for a click or 60 seconds while the animation plays, then saves the seconds waited (clitoErec, tetonErec, nympheErec, which later scale the automatic rounds), clears jeuxdemain.stopButton so the animation loop ends, and shows the result image. TeaseScript has no threads; a permanent button with a 60-second asynchronous timer does the same. The rounds move into a function so the paused form can remove the button and stop the timer when the animation ends. Coordinator decision: a patch, not a converter rule.",
       "file": "jeuxdemain_femme.tease",
-      "baseHash": "1bb218f613f3f16a90f01a717d0e60e8233b482668b607976c732b80c939db1b",
+      "baseHash": "57e5d5d72ac136f93657b77d253969a98b8a90928227a3c6c555732566d0a378",
       "edits": [
         {
           "find": "let stopJouis = false\n",
