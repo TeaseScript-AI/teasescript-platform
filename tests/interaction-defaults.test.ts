@@ -6,6 +6,7 @@ import {
   createPlayerRuntimeSession,
   playerRuntimeForeground,
   restorePlayerRuntimeSession,
+  submitPlayerRuntimeComposer,
 } from "../player/runtime-adapter.js";
 import { compileSource } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
@@ -18,11 +19,12 @@ import { run } from "../src/runtime/engine.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { createFreshRuntimeSnapshot, validateRuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { AMSTERDAM } from "./helpers/temporal-fixtures.js";
 
 type Plan = ReturnType<typeof compileValidPlan>;
 type Snapshot = ReturnType<typeof createFreshRuntimeSnapshot>;
 
-function pendingInput(plan: Plan, globals: Record<string, string | number> = {}) {
+function pendingInput(plan: Plan, globals: Record<string, string | number | null> = {}) {
   const pending = run(plan, createFreshRuntimeSnapshot(plan, { globals }));
   const action = pending.snapshot.foregroundAction;
   assert.ok(
@@ -156,6 +158,11 @@ test("a default the compiler knows is wrong is a compile error that names the fi
       "The default answer of askText must contain a non-whitespace character. Remove 'default:' to start with an empty field.",
     ],
     [
+      'let answer = askText default: ""\nexit',
+      "TSV039",
+      "The default answer of askText must contain a non-whitespace character. Remove 'default:' to start with an empty field.",
+    ],
+    [
       "let answer = askText default: null\nexit",
       "TSV039",
       "The default answer of askText must be text, not null. Remove 'default:' to start with an empty field.",
@@ -174,11 +181,6 @@ test("a default the compiler knows is wrong is a compile error that names the fi
       "let answer = askNumber default: 1 s + 2 s\nexit",
       "TSV039",
       "The default answer of askNumber must be a number, not a duration. Use a number, such as 'default: 10'.",
-    ],
-    [
-      "let limit: number? = value\nlet answer = askNumber default: limit\nexit",
-      "TSV039",
-      "The default answer of askNumber must be a number, but 'limit' holds a number or null. Check it first: if limit != null { ... }",
     ],
     [
       "let answer = askNumber default: 1 == 1\nexit",
@@ -226,13 +228,7 @@ test("an invalid dynamic default fails before the field opens", () => {
     "The default answer of askNumber must be a finite number. Ask without 'default:' when there is no number to offer.";
   const cases = [
     ["let answer = askText default: value\nexit", 5, notText],
-    [
-      "let answer = askText default: value\nexit",
-      " \n",
-      "The default answer of askText must contain a non-whitespace character. Ask without 'default:' when there is no answer to offer.",
-    ],
     ["let answer = askNumber default: value\nexit", "10", notNumber],
-    ["let answer = askNumber default: value\nexit", null, notNumber],
   ] as const;
   for (const [source, value, message] of cases) {
     const plan = compileValidPlan(source, { globals: ["value"] });
@@ -248,6 +244,94 @@ test("an invalid dynamic default fails before the field opens", () => {
       false,
     );
   }
+});
+
+test("a default that is null or blank when the field opens starts the field empty", () => {
+  const asks = [
+    ["askText", "ask-text", "Ada"],
+    ["askNumber", "ask-number", "2.5"],
+    ["askInteger", "ask-number", "7"],
+    ["askDate", "ask-date", "2026-10-04"],
+    ["askTime", "ask-time", "14:30"],
+    ["askDateTime", "ask-datetime", "2026-10-04T18:00"],
+  ] as const;
+  // A first play has not saved the key yet, so `load` gives null; a saved value may also be blank text.
+  for (const stored of [undefined, "", " \n\t"]) {
+    for (const [command, kind, typed] of asks) {
+      const label = `${command} with ${JSON.stringify(stored)}`;
+      const session = createPlayerRuntimeSession(
+        `let answer = ${command} "Hint", default: load "saved"\nsay "Got \${answer}"\nexit`,
+        {
+          temporalContext: AMSTERDAM,
+          ...(stored === undefined ? {} : { scriptStorage: [{ key: "saved", value: stored }] }),
+        },
+      );
+      assert.equal(session.snapshot.failure, null, label);
+      const foreground = playerRuntimeForeground(session);
+      assert.equal(foreground?.kind, kind, label);
+      assert.equal("prefill" in foreground, false, label);
+
+      const answered = submitPlayerRuntimeComposer(session, typed);
+      assert.ok(answered !== null, label);
+      assert.equal(answered.outcome.kind, "completed", label);
+      // A date or time answer is shown in the player's presentation, by the transcript and `say` alike.
+      const [shown, said] = answered.session.transcriptEntries.map((entry) => entry.text);
+      if (kind === "ask-text" || kind === "ask-number") assert.equal(shown, typed, label);
+      assert.equal(said, `Got ${shown}`, label);
+    }
+  }
+
+  // Once saved, the same source prefills the field as before.
+  const saved = createPlayerRuntimeSession(
+    'let answer = askText "Your name?", default: load "name"\nexit',
+    { scriptStorage: [{ key: "name", value: "Ada" }] },
+  );
+  const prefilled = playerRuntimeForeground(saved);
+  assert.ok(prefilled?.kind === "ask-text");
+  assert.equal(prefilled.prefill, "Ada");
+});
+
+test("a default that may be null compiles, and prefills only when it holds a value", () => {
+  const plan = compileValidPlan(
+    "let limit: number? = value\nlet answer = askNumber default: limit\nexit",
+    { globals: ["value"] },
+  );
+  assert.equal("prefill" in pendingInput(plan, { value: null }).ui, false);
+  assert.equal(pendingInput(plan, { value: 5 }).ui.prefill, "5");
+});
+
+test("an open field without a prefill restores without one", () => {
+  const plan = compileValidPlan('let answer = askText "Your name?", default: load "name"\nexit');
+  const { snapshot, ui } = pendingInput(plan);
+  assert.equal("prefill" in ui, false);
+  assert.equal(validateRuntimeSnapshot(snapshot, plan).valid, true);
+
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, snapshot)));
+  assert.deepEqual(restored.snapshot, snapshot);
+  const uninterrupted = submit(plan, snapshot, "Ada");
+  assert.deepEqual(submit(restored.plan, restored.snapshot, "Ada"), uninterrupted);
+  // The answered field keeps no prefill in its retained settlement, which a checkpoint accepts.
+  assert.equal(validateRuntimeSnapshot(uninterrupted.snapshot, plan).valid, true);
+  const settled = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(plan, uninterrupted.snapshot)),
+  ).snapshot;
+  assert.deepEqual(settled, uninterrupted.snapshot);
+  assert.equal(answer(plan, uninterrupted.snapshot), "Ada");
+
+  const tampered = structuredClone(snapshot);
+  assert.ok(tampered.foregroundAction?.kind === "interaction");
+  // EVIDENCE: fixture adds only a published prefill that the empty default never presented.
+  (tampered.foregroundAction.ui as { prefill?: string }).prefill = "Ada";
+  assert.equal(validateRuntimeSnapshot(tampered, plan).valid, false);
+
+  const session = createPlayerRuntimeSession(
+    'let answer = askDate "Which day?", default: load "day"\nexit',
+    { temporalContext: AMSTERDAM },
+  );
+  const reopened = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.equal(validateRuntimeSnapshot(reopened.snapshot, reopened.plan).valid, true);
+  assert.deepEqual(playerRuntimeForeground(reopened), playerRuntimeForeground(session));
+  assert.equal("prefill" in playerRuntimeForeground(reopened)!, false);
 });
 
 test("a computed default keeps its runtime arithmetic errors whether or not the hint is constant", () => {
@@ -297,10 +381,10 @@ test("a retained settlement keeps the prefill its field presented", () => {
     const settlement = checkpoint.snapshot.lastSettlement;
     assert.ok(settlement?.actionKind === "interaction" && settlement.ui.kind === "text", source);
     assert.equal(settlement.ui.prefill, source.includes("default:") ? "Ada" : undefined, source);
-    // EVIDENCE: the cloned fixture is mutable; it only removes the presented prefill, or adds one never presented.
-    const ui = settlement.ui as { prefill?: string };
-    if (ui.prefill === undefined) ui.prefill = "Ada";
-    else delete ui.prefill;
+    // A default that was empty when the field opened presented none, so only a field without a default is checked.
+    if (source.includes("default:")) continue;
+    // EVIDENCE: the cloned fixture is mutable; it only adds a prefill that a field without a default never presented.
+    (settlement.ui as { prefill?: string }).prefill = "Ada";
     assert.throws(() => deserializeCheckpoint(JSON.stringify(checkpoint)), source);
   }
 });
