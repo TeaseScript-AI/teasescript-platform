@@ -71,6 +71,15 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   // for the underlying image to remain part of the composition.
   const mediaSurface = surface(dark ? 24 : 94);
   const mediaText = neutral(dark ? 100 : 15);
+  // Player notice levels use the conventional fixed hues (info blue, warning orange, error red), independent of the
+  // accent: a solid tone for icons, borders, marks and short labels, and a soft tone for a level-tinted surface.
+  const status = (hue: number, chroma: number) => ({
+    solid: tonalColor(hue, chroma, dark ? (high ? 85 : 78) : high ? 30 : 45),
+    soft: tonalColor(hue, chroma / 4, dark ? 22 : 95),
+  });
+  const info = status(260, 56);
+  const warning = status(60, 64);
+  const error = status(25, 72);
   const base = {
     "surface-canvas": surface(tones.canvas),
     "surface-chrome": surface(tones.chrome, dark ? 0.85 : 0.75),
@@ -93,6 +102,12 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
     "overlay-text": white,
     "media-text": mediaText,
     "media-text-disabled": mixColors(mediaSurface, mediaText, 0.55),
+    "status-info": info.solid,
+    "status-info-soft": info.soft,
+    "status-warning": warning.solid,
+    "status-warning-soft": warning.soft,
+    "status-error": error.solid,
+    "status-error-soft": error.soft,
   };
   const roles = {
     ...base,
@@ -146,6 +161,12 @@ export function generatePlayerTheme(intent: PlayerThemeIntent) {
   for (const background of ["accent-solid", "accent-hover", "accent-pressed"] as const) {
     inspect("text-on-accent", background, textTarget);
     inspect(background, "surface-raised", 3);
+  }
+  for (const level of ["info", "warning", "error"] as const) {
+    inspect(`status-${level}`, "surface-floating", high ? 4.5 : 3);
+    // The solid tone also labels text on the tint, such as "Needs action".
+    inspect(`status-${level}`, `status-${level}-soft`, textTarget);
+    inspect("text-primary", `status-${level}-soft`, textTarget);
   }
   inspect("text-disabled", "surface-disabled", null);
   const effects = {

@@ -13,6 +13,13 @@ export interface PlayerTimerPresentation {
   readonly totalSeconds: number;
 }
 
+/** One shown permanent button, in creation order. A busy button stays in place but is inactive until its block ends. */
+export interface PlayerPermanentButtonPresentation {
+  readonly buttonId: number;
+  readonly label: string;
+  readonly busy: boolean;
+}
+
 export interface PlayerSpeakerPresentation {
   readonly name: string;
   readonly accent: string;

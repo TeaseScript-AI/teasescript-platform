@@ -39,6 +39,7 @@ import { CAPTURE_UNAVAILABLE_REASONS, requiredActionCompletionEvents } from "./a
 import { buttonTimeoutMilliseconds } from "./actions/interaction.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import { validMediaAction } from "./media-validation.js";
+import { validPermanentButtonAction } from "./permanent-button-validation.js";
 import { validTimerAction } from "./timer-validation.js";
 import { validateScriptStorageEntries } from "./script-storage.js";
 import {
@@ -187,6 +188,8 @@ function validBackgroundPacingActions(
       if (!validTimerAction(action, snapshot, plan)) return false;
     } else if (action.kind === "media") {
       if (!validMediaAction(action, snapshot, plan)) return false;
+    } else if (action.kind === "permanentButton") {
+      if (!validPermanentButtonAction(action, snapshot, plan)) return false;
     } else {
       pacingGates += 1;
       if (pacingGates > 1 || !validPacingGateAction(action, snapshot, plan, false)) return false;

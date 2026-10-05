@@ -26,15 +26,19 @@ import type {
 } from "../state.js";
 import { assertCounterCanAdvance, assertEventSequenceCapacity, copySpan } from "./support.js";
 import { stopTimerAction } from "./timer-lifecycle.js";
+import {
+  removePermanentButtons,
+  type RuntimePermanentButtonSnapshot,
+} from "../permanent-buttons.js";
 
 /*
  * Transfers (ADR 0022 §5). Each entry into a file is an activation with its own top-level variables, in a root scope.
  * The current activation is the innermost one: the base activation, or the file called last. A transfer leaves the
  * functions, expiry or media blocks, loops, and blocks of the activation it continues in, so an action that a block
- * interrupted is abandoned rather than resumed. A non-persistent timer belongs to the activation that started it and
- * stops, with its queued blocks, when that activation is left: by a goto from it, by its end, or when a block's goto
- * abandons it. A call leaves nothing. Persistent timers and all media keep running (V30 §22, §27). A root that leaves
- * the stack stays retained while a block may still need it.
+ * interrupted is abandoned rather than resumed. A non-persistent timer or permanent button belongs to the activation
+ * that started or showed it and goes, with its queued blocks, when that activation is left: by a goto from it, by its
+ * end, or when a block's goto abandons it. A call leaves nothing. Persistent timers and buttons and all media stay
+ * (V30 §22, §27, §28). A root that leaves the stack stays retained while a block may still need it.
  */
 
 /**
@@ -59,7 +63,7 @@ export function executeGoto(
     segment !== undefined
       ? activationRootsFrom(snapshot, segment)
       : new Set([rootId, ...activationRootsFrom(snapshot, innermostFileCallIndex(snapshot))]);
-  removeNonPersistentTimers(snapshot, left, instruction.span, events);
+  removeNonPersistentWork(snapshot, left, instruction.span, events);
   if (segment !== undefined) resetActivation(snapshot, segment);
   else replaceCurrentRoot(snapshot, snapshot.retainedScopes.splice(retained, 1)[0]!);
   snapshot.nextInstruction = instruction.target;
@@ -98,7 +102,7 @@ export function executeTransfer(
   const root = freshRoot(snapshot, destination);
   if (instruction.mode === "goto") {
     const left = activationRootsFrom(snapshot, innermostFileCallIndex(snapshot));
-    removeNonPersistentTimers(snapshot, left, instruction.span, events);
+    removeNonPersistentWork(snapshot, left, instruction.span, events);
     replaceCurrentRoot(snapshot, root);
   } else {
     const call: RuntimeFileCallFrameSnapshot = {
@@ -137,12 +141,7 @@ export function executeEnd(
     );
   }
   if (index < 0) assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
-  removeNonPersistentTimers(
-    snapshot,
-    activationRootsFrom(snapshot, index),
-    instruction.span,
-    events,
-  );
+  removeNonPersistentWork(snapshot, activationRootsFrom(snapshot, index), instruction.span, events);
   if (index < 0) {
     // A glob fallback draws its file each time it is used.
     const fallback = drawDestination(snapshot, snapshot.fallback!);
@@ -230,7 +229,7 @@ function drawDestination(
 
 /**
  * Drops the roots no block can reach anymore: a retained root stays while a running or queued block, a block of a
- * running timer or media, or a function frame refers to it.
+ * running timer or media, a shown permanent button, or a function frame refers to it.
  */
 function sweepRetainedScopes(snapshot: RuntimeSnapshot): void {
   if (snapshot.retainedScopes.length === 0) return;
@@ -246,7 +245,9 @@ function sweepRetainedScopes(snapshot: RuntimeSnapshot): void {
           : action.timer.rootScopeId
         : action.kind === "media"
           ? action.media.handlerRootScopeId
-          : null;
+          : action.kind === "permanentButton"
+            ? action.button.rootScopeId
+            : null;
     if (owner !== null) referenced.add(owner);
   }
   let kept = 0;
@@ -319,19 +320,26 @@ function activationRootsFrom(snapshot: RuntimeSnapshot, index: number): Set<numb
   return roots;
 }
 
-/** Stops the non-persistent timers of the activations a transfer leaves, with their queued blocks. */
-function removeNonPersistentTimers(
+/**
+ * Stops the non-persistent timers and removes the non-persistent permanent buttons of the activations a transfer
+ * leaves, with their queued blocks.
+ */
+function removeNonPersistentWork(
   snapshot: RuntimeSnapshot,
   left: ReadonlySet<number>,
   span: PlanSourceLocation,
   events: InterpreterEvent[],
 ): void {
-  const leaves = (timer: RuntimeTimerSnapshot): boolean =>
-    !timer.persist && left.has(timer.rootScopeId);
+  const leaves = (owned: RuntimeTimerSnapshot | RuntimePermanentButtonSnapshot): boolean =>
+    !owned.persist && left.has(owned.rootScopeId);
   const stopping = snapshot.backgroundActions.filter(
     (action) => action.kind === "timer" && leaves(action.timer),
   );
-  assertEventSequenceCapacity(snapshot, stopping.length, span);
+  const removing = snapshot.backgroundActions.filter(
+    (action) => action.kind === "permanentButton" && leaves(action.button),
+  );
+  // Every settlement must fit before any of them happens.
+  assertEventSequenceCapacity(snapshot, stopping.length + removing.length, span);
   for (const action of stopping) {
     if (action.kind === "timer") stopTimerAction(snapshot, action, span, events);
   }
@@ -343,4 +351,5 @@ function removeNonPersistentTimers(
       snapshot.pendingTimerHandlers.splice(index, 1);
     }
   }
+  removePermanentButtons(snapshot, (action) => leaves(action.button), span, events);
 }

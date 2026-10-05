@@ -19,6 +19,8 @@ This is a local inspection route, not the production cross-origin Player/host pr
 
 - `runtime-adapter.ts` contains framework-independent runtime-to-Player translation and shared action helpers used by
   the Player and playground workspace controller, including reporting a persisted script-storage write.
+- `notices.ts` contains the Player notice channel and its fixed wording per condition; see
+  [`PLAYER-UI.md`](../docs/ui/PLAYER-UI.md#player-notices).
 - `script-storage.ts` contains the asynchronous script-storage provider boundary and its browser-local
   implementation; see [`DATA-AND-API.md`](../docs/DATA-AND-API.md#script-storage-in-the-browser).
 - `vue/src/` contains the Player composition, components, shared layout/theme CSS, demo host, and development preview;
@@ -85,6 +87,13 @@ computed class maps. `tw-animate-css` supplies the overlay enter/exit animation 
 components; the alternative is maintained CSS keyframes. They add browser code/CSS and dependency-update review, without
 a network service, data access or host boundary. On upgrades, verify icons, focus/autosizing, variants and overlay
 animations.
+
+`vue-sonner` (MIT) draws the Player notice toasts through shadcn-vue's Sonner wrapper: stacking, enter/exit
+animation, swipe-to-hide, pause under the pointer and polite announcement. The alternative is a locally maintained
+toast stack with its own timers, stacking and animation. It adds browser code/CSS and dependency-update review from a single
+maintainer, without a network service, data access or host boundary; notice state, the bell and the panel stay
+Player-owned. Version 2.0.9 orders its stack by mount, so `PlayerToasts.vue` creates each toast in its own render. On
+upgrades, verify that order, placement, swipe, expiry and the theme status colours.
 
 ## Tool panel ordering
 

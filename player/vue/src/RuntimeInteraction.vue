@@ -13,7 +13,6 @@ import {
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
-import PlayerActionButton from "@/components/PlayerActionButton.vue";
 import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";
 import Transcript from "./Transcript.vue";
@@ -29,10 +28,10 @@ const props = defineProps<{
   transcriptKey: string;
   /** Brings scene time up to date before input and returns the published session. */
   observeTime?: () => PlayerRuntimeSession | null;
-  /** The browser refused audible playback; offer a deliberate retry above the composer. */
-  audioBlocked?: boolean;
 }>();
-const emit = defineEmits<{ "update:session": [session: PlayerRuntimeSession]; retryAudio: [] }>();
+const emit = defineEmits<{
+  "update:session": [session: PlayerRuntimeSession];
+}>();
 const actionId = computed(() =>
   props.session ? activePlayerRuntimeInteraction(props.session.snapshot)?.actionId : undefined,
 );
@@ -297,12 +296,6 @@ function submit(source: "input" | "button") {
         </Transcript>
       </template>
       <template #interaction>
-        <p v-if="audioBlocked" class="audio-retry" role="status">
-          <span>The browser blocked audio.</span>
-          <PlayerActionButton data-audio-retry @click="emit('retryAudio')"
-            >Enable audio</PlayerActionButton
-          >
-        </p>
         <Composer
           ref="composer"
           v-model="draft"
@@ -335,15 +328,3 @@ function submit(source: "input" | "button") {
     </ConversationSurface>
   </div>
 </template>
-
-<style scoped>
-.audio-retry {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  justify-content: center;
-  margin: 0 0 8px;
-  pointer-events: auto;
-}
-</style>

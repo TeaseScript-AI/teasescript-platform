@@ -31,6 +31,7 @@ accept syntax, architecture, or implementation details.
   with a Clear saved script data control.
 - **Pending actions, timers, and chat pacing:** blocking `wait`/`timer` and asynchronous timers with presentation metadata,
   labels, opaque handles, lifecycle control, repetition, queued expiry interrupts, and scene-time checkpoint/restore;
+  permanent buttons (`showPermanentButton`, `removePermanentButton`) whose clicks run their blocks like expiry interrupts;
   protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, prepared
   output, typed skip settlement, and interaction/timer composition.
 - **Stage image and media:** `showImage`/`hideImage` Stage state, tag queries over the compiled package image catalog
@@ -48,7 +49,8 @@ accept syntax, architecture, or implementation details.
   Vue/Vite, Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the transcript
   owner. A framework-independent adapter connects it to the implemented transcript, foreground-interaction, pacing,
   time-observation, runtime timer, checkpoint, and restore slice, including typed message markup with controlled links;
-  authored runtime timers render in its timer rail on a session-owned scene clock (#444).
+  authored runtime timers render in its timer rail on a session-owned scene clock (#444), and permanent buttons below
+  them, inactive while their block runs (#610).
   It also has the tools framework and browser-local Player Settings. It shows the runtime Stage image and plays authored
   audio through `player/media-device.ts` after the explicit Start activation (#446). The default build plays the
   repository demo `examples/demo/demo.tease` (#448), or with `?package=<id>` a package of the playground's development
@@ -67,8 +69,8 @@ contracts and boundaries.
 - complete V30 coverage, complete static typing, measurement units, generalized duration ranges, and locale-aware
   duration presentation;
 - production cross-origin Player/host integration, richer editor support, and final browser acceptance coverage;
-- pending-action capabilities beyond the implemented timer, interaction, pacing, and media families; browser video
-  playback, the layered scene, camera capture beyond `takePhoto()`, and custom views;
+- pending-action capabilities beyond the implemented timer, permanent button, interaction, pacing, and media
+  families; browser video playback, the layered scene, camera capture beyond `takePhoto()`, and custom views;
 - the cross-origin player-host protocol and production browser security integration;
 - TypeScript library linkage, final Standard Library/package identity and compatibility, richer module selection, and
   community dependency resolution;

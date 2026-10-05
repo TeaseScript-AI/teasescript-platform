@@ -58,8 +58,8 @@ specification may lead the implementation. The Player presents supported transcr
 pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds Visual
 Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The default
 build plays the repository demo without that preview; the development server or explicit `?dev` URL opt-in loads it.
-Runtime timers, the Stage image, and audio are wired; browser video playback and production host integration remain
-separate work. Values marked for retesting remain provisional tuning baselines.
+Runtime timers, permanent buttons, the Stage image, and audio are wired; browser video playback and production host
+integration remain separate work. Values marked for retesting remain provisional tuning baselines.
 
 A current implementation detail is not a durable requirement merely because it exists. Owner-confirmed behavior here is
 the target unless higher authority conflicts with it.
@@ -70,10 +70,11 @@ This temporary checklist records Owner-decided behavior that still needs synchro
 Library, persistence, or accepted-language owner. It is not a second permanent authority layer. Remove an item when its
 controlling source adopts it; remove this section and its router references when empty.
 
-- **Long-lived control presentation:** the maintained right-rail sections below currently choose busy-in-place and
-  visible-history behavior that still needs final visual testing and later accepted-language/Standard-Library
-  synchronization. Runtime value, scheduling, stale-event, media-continuity, lifecycle, and provenance semantics are
-  maintained in [`RUNTIME.md`](../RUNTIME.md); exact public API names and author syntax remain open.
+- **Long-lived control presentation:** for the toggles, selects, and status items beyond permanent buttons, the
+  maintained right-rail sections below choose inactive-in-place and visible-history behavior that still needs final
+  visual testing and later accepted-language/Standard-Library synchronization. Runtime value, scheduling, stale-event,
+  media-continuity, lifecycle, and provenance semantics are maintained in [`RUNTIME.md`](../RUNTIME.md); exact public
+  API names and author syntax remain open.
 - **Timer presentation metadata:** the maintained timer section below defines visible/mystery/hidden presentation and
   optional labeling. Authored timers carry visible/mystery/hidden display and optional labels (see
   [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time)); `player/runtime-adapter.ts` derives presented timers and
@@ -388,9 +389,41 @@ the account setting when the host supplies one, else the browser's. They are ses
 
 If the browser still refuses required audible playback, the Player surfaces a deliberate activation/retry control. It
 does not silently substitute muted playback or report the audio as played: refused audio reports no progress, so its
-cues and settlement wait, and an **Enable audio** control retries playback from the user's click. In the Player the
+cues and settlement wait, and an **Enable audio** [player notice](#player-notices) retries playback from the user's
+click. In the Player the
 session is created only when Start is activated; the Continue path applies to a session the host restores. Durable
 checkpoint storage and automatic resume across page reloads are tracked in #469.
+
+## Player notices
+
+Player notices tell the player that something about the session's environment matters, such as blocked audio,
+unavailable storage, or a camera problem. They never stop the session and are separate from runtime developer warnings,
+which are creator diagnostics about a script location. Host features publish them through one Player-owned channel
+(`player/notices.ts`) with fixed Player wording per condition; a condition has one notice, which it replaces or
+withdraws, so repeated causes do not stack.
+
+Notices belong to the Player, not the story, so they never appear in the conversation. A new or replaced notice shows
+as a temporary toast (shadcn-vue Sonner) at the top centre of the window, below the Player's top controls, whether or
+not a side panel is open; on a narrow screen the toast spans the window and may cover the timer. Each toast shows a level icon (info, warning, or error), its text, and at
+most one action control that runs from the player's click (such as **Enable audio**). Up to three toasts show as a
+stack with the newest in front; the pointer expands the stack and pauses expiry. Info toasts expire after 5 seconds,
+warnings after 8, and errors after 10; swiping a toast away hides it sooner. Hiding or expiry removes only the toast.
+The toasts are announced politely, errors included.
+
+The notification bell in the top controls opens the notification panel, which lists every current notice, newest
+first, with its age, its action, and a dismiss control; **Clear all** dismisses every dismissible notice. A dot on the
+bell marks notices published since the panel was last opened and any notice the player must act on. Opening the panel
+marks the notices seen and replaces the toasts. When dismissal, **Clear all**, or a resolved condition removes the
+focused control, focus moves to the nearest remaining control; with none left, the panel closes and focus returns to
+the bell. A notice whose action is the only way to continue, such as **Enable audio** while the script waits for that
+audio, is labelled **Needs action**, offers no dismiss control, and disappears once its condition resolves.
+
+The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
+(info: saved progress is not kept), and a failed script-storage write (warning, for the run it happened in; a new
+Start withdraws it). Each level also has a theme status colour, following the usual convention: info blue, warning
+orange, error red. A toast uses the level's soft tint as its surface and its solid tone for the border and icon; a
+panel entry uses the same tint with a solid mark along its start edge and a solid icon; and the bell's dot takes the
+most severe level that needs attention. The development preview's Visual Lab shows every level.
 
 ## Stage and media presentation
 
@@ -739,8 +772,9 @@ region.
 
 ### Background controls and status
 
-Runtime-backed long-lived controls/status are not yet implemented in the Player; the development preview demonstrates
-only local button/toggle/disabled presentation.
+Permanent buttons ([V30 §28](../specifications/accepted-syntaxes-v30.md#28-permanent-buttons)) are the implemented
+momentary buttons. Toggles, selects, and status items are not yet implemented; the development preview demonstrates
+them only as local fixtures while the script shows no permanent button.
 
 The Standard rail presentation supports:
 
@@ -754,16 +788,15 @@ not styled or exposed as a disabled button. A switch exposes toggle semantics; a
 single-choice semantics. Determinate progress/fill may be shown on a status item and may also be used on an interactive
 control when the explicit progress data is meaningful and does not obscure the control state.
 
-Interactive right-rail controls remain in place while their handlers execute and expose a distinct busy state without
-changing the control's committed value or implying that the control was disabled or removed. This target supersedes the
-accepted V30 permanent-button disappear-while-handler-runs presentation once the controlling runtime/Standard-Library
-contract is synchronized. Exact busy animation remains an unresolved visual-tuning detail; it should use a familiar
-indeterminate-activity cue, must not require control reflow, and must remain distinguishable from keyboard focus and
-disabled/inert presentation. Programmatic updates visibly change the same control state but must remain recognizable as
-script-initiated rather than user input. They add a neutral session event to transcript history rather than a speaker
-message. Momentary buttons do not generate explanatory text on their own; narrative responses come from the script.
-Feedback for programmatic updates is transient and must not add permanent text to the control or change rail geometry.
-Explicit removal is a separate lifecycle operation.
+From an activation until its handler finishes, an interactive right-rail control stays in place and is inactive (Owner
+decision on #610): it uses the disabled presentation without a separate busy animation, cannot be activated, and is
+exposed as disabled (`aria-disabled`) while it keeps keyboard focus; its committed value does not change. It becomes
+active again when the handler finishes, unless the script removed it. When a focused control is removed, focus moves to
+the control that takes its place. Programmatic updates visibly change the same control state but must remain
+recognizable as script-initiated rather than user input. They add a neutral session event to transcript history rather
+than a speaker message. Momentary buttons do not generate explanatory text on their own; narrative responses come from
+the script. Feedback for programmatic updates is transient and must not add permanent text to the control or change rail
+geometry. Explicit removal is a separate lifecycle operation.
 
 Ordering is stable and deterministic at the presentation level:
 

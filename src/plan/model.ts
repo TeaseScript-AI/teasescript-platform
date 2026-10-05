@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 54;
+export const INSTRUCTION_PLAN_VERSION = 55;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -88,10 +88,10 @@ export interface CompiledFunctionParameter {
 export interface CompiledFunctionDefinition {
   readonly id: number;
   /**
-   * A parameterless timer expiry block or media cue block; it is entered only by the runtime as an interrupt, never by
-   * `callFunction`. `null` for a user function.
+   * A parameterless timer expiry block, media cue block, or permanent button block; it is entered only by the runtime
+   * as an interrupt, never by `callFunction`. `null` for a user function.
    */
-  readonly handler: "timer" | "media" | null;
+  readonly handler: "timer" | "media" | "button" | null;
   /**
    * A `global function`, which every file may call, or a block inside one. It sees the project's globals but not its
    * file's top-level variables (ADR 0022 §3).
@@ -147,6 +147,7 @@ export type Instruction =
   | ShowImageInstruction
   | ShowCameraInstruction
   | HideCameraInstruction
+  | ShowPermanentButtonInstruction
   | StorageWriteInstruction
   | PlayMediaInstruction
   | InteractionInstruction
@@ -451,6 +452,19 @@ export interface ShowCameraInstruction extends InstructionBase {
 /** `hideCamera`: hides every camera view. */
 export interface HideCameraInstruction extends InstructionBase {
   readonly kind: "hideCamera";
+}
+
+/**
+ * `showPermanentButton <text> { ... }`: evaluates `text` and shows a button whose click runs the parameterless `button`
+ * handler region `handlerFunctionId`. Its identifier goes to `destinationTemporary` when the command is used as a
+ * value.
+ */
+export interface ShowPermanentButtonInstruction extends InstructionBase {
+  readonly kind: "showPermanentButton";
+  readonly text: ExpressionPlan;
+  readonly persist: boolean;
+  readonly handlerFunctionId: number;
+  readonly destinationTemporary: number | null;
 }
 
 /** `save <value> as <key>`, or `delete <key>` when `value` is `null`; evaluates the value, then the key. */
@@ -835,6 +849,7 @@ export type TypePlanName =
   | "timer"
   | "media"
   | "camera"
+  | "permanentButton"
   | "script";
 
 export interface TypePropertyPlan {

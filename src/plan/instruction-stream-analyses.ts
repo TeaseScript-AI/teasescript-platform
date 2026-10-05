@@ -1205,7 +1205,8 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
     instruction.kind === "capture" ||
     instruction.kind === "startTimer" ||
     instruction.kind === "playMedia" ||
-    instruction.kind === "showCamera"
+    instruction.kind === "showCamera" ||
+    instruction.kind === "showPermanentButton"
   ) {
     value = instruction.destinationTemporary;
   }
@@ -1486,14 +1487,15 @@ function validateFunctionDefinitions(
     if (
       definition.handler !== null &&
       definition.handler !== "timer" &&
-      definition.handler !== "media"
+      definition.handler !== "media" &&
+      definition.handler !== "button"
     ) {
       errors.push(planError("TSC002", "Function handler kind is invalid.", path));
     } else if (
       definition.handler !== null &&
       (!Array.isArray(definition.parameters) || definition.parameters.length !== 0)
     ) {
-      errors.push(planError("TSC002", "A timer or media handler has no parameters.", path));
+      errors.push(planError("TSC002", "A handler region has no parameters.", path));
     }
     if (
       definition.selfHandle !== null &&
@@ -1648,7 +1650,9 @@ function validateFunctionDefinitions(
       );
     }
     if (
-      (instruction.kind === "callFunction" || instruction.kind === "startTimer") &&
+      (instruction.kind === "callFunction" ||
+        instruction.kind === "startTimer" ||
+        instruction.kind === "showPermanentButton") &&
       typeof (instruction.kind === "callFunction"
         ? instruction.functionId
         : instruction.handlerFunctionId) === "number"
@@ -1668,16 +1672,21 @@ function validateFunctionDefinitions(
         errors,
       );
       const target = targetRange?.definition;
-      if (
-        target !== undefined &&
-        target.handler !== (instruction.kind === "startTimer" ? "timer" : null)
-      ) {
+      const handler =
+        instruction.kind === "startTimer"
+          ? "timer"
+          : instruction.kind === "showPermanentButton"
+            ? "button"
+            : null;
+      if (target !== undefined && target.handler !== handler) {
         errors.push(
           planError(
             "TSC002",
-            instruction.kind === "startTimer"
+            handler === "timer"
               ? "A timer must refer to a timer-handler region."
-              : "A call must not enter a handler region.",
+              : handler === "button"
+                ? "A permanent button must refer to a button-handler region."
+                : "A call must not enter a handler region.",
             `$.instructions[${instructionIndex}]`,
           ),
         );
@@ -1863,6 +1872,7 @@ function validateFunctionPrologue(
           "validateCallReceiver",
           "jumpIfFalse",
           "jump",
+          "showPermanentButton",
         ])
       ) {
         errors.push(

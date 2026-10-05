@@ -12,6 +12,7 @@ import type {
   Identifier,
   InteractionChoiceOption,
   ShowButtonParts,
+  ShowPermanentButtonParts,
   TimerParts,
   Expression,
   MediaParts,
@@ -421,10 +422,10 @@ class SemanticScope {
   }
 }
 
-/** A timer expiry block or media cue block, validated after the function bodies. */
+/** A timer expiry block, media cue block, or permanent button block, validated after the function bodies. */
 interface PendingHandler {
   readonly block: Block;
-  readonly owner: "timer" | "media";
+  readonly owner: "timer" | "media" | "button";
   readonly selfHandle: string | null;
   /** The global function the block is in, directly or through other blocks. */
   readonly globalFunction: FunctionDeclaration | null;
@@ -518,6 +519,7 @@ class SemanticValidator {
           "takePhoto",
           "showCamera",
           "hideCamera",
+          "showPermanentButton",
         ].includes(name),
       ),
     );
@@ -651,7 +653,7 @@ class SemanticValidator {
   /** The labels of the file, which stand only in its outer scope. */
   readonly #labels = new Set<string>();
 
-  #handlerOwner: "timer" | "media" = "timer";
+  #handlerOwner: "timer" | "media" | "button" = "timer";
 
   #validateTimer(timer: TimerParts, scope: SemanticScope, valuePosition: boolean): void {
     if (typeof timer.display === "object" && timer.display !== null) {
@@ -767,6 +769,22 @@ class SemanticValidator {
         origin: this.#context,
         created: this.#statement!,
       });
+  }
+
+  /** The button text is checked like any shown text; the click action runs later, like a timer expiry block. */
+  *#validatePermanentButtonTask(
+    button: ShowPermanentButtonParts,
+    scope: SemanticScope,
+  ): CompileTask<void> {
+    yield* compileChild(this.#validateExpressionTask(button.text, scope, null));
+    this.#pendingHandlers.push({
+      block: button.handler,
+      owner: "button",
+      selfHandle: null,
+      globalFunction: this.#globalFunction,
+      origin: this.#context,
+      created: this.#statement!,
+    });
   }
 
   /** Static checks of a play command; runtime validates the values that are not literals. */
@@ -1211,6 +1229,9 @@ class SemanticValidator {
       case "timerStatement":
         this.#validateTimer(statement, scope, false);
         return;
+      case "showPermanentButtonStatement":
+        yield* compileChild(this.#validatePermanentButtonTask(statement, scope));
+        return;
       case "playMediaStatement":
         yield* compileChild(this.#validateMediaTask(statement, scope, false, null));
         return;
@@ -1360,7 +1381,9 @@ class SemanticValidator {
             semanticCode.invalidTimer,
             this.#handlerOwner === "timer"
               ? "A timer expiry block may use 'return' only without a value."
-              : "A media block may use 'return' only without a value.",
+              : this.#handlerOwner === "media"
+                ? "A media block may use 'return' only without a value."
+                : "A button block may use 'return' only without a value.",
             statement.value.span,
           );
         }
@@ -1816,6 +1839,9 @@ class SemanticValidator {
         return;
       case "timerExpression":
         this.#validateTimer(expression, scope, true);
+        return;
+      case "showPermanentButtonExpression":
+        yield* compileChild(this.#validatePermanentButtonTask(expression, scope));
         return;
       case "playMediaExpression":
         yield* compileChild(this.#validateMediaTask(expression, scope, true, null));
@@ -2532,6 +2558,7 @@ class SemanticValidator {
         case "timerExpression":
         case "playMediaExpression":
         case "showCameraExpression":
+        case "showPermanentButtonExpression":
           this.#report(
             semanticCode.invalidStartValue,
             `${subject} cannot ask the player, wait, or play media: ${speaker ? "a speaker is set up" : "it is set"} at the start of the session, before the story runs.${speaker ? "" : ` Give it a plain start value, and assign the answer later, as in '${owner.name.name} = ...'.`}`,
@@ -2725,6 +2752,7 @@ function isDefinitelyNonFileReference(expression: Expression): boolean {
     kind === "timerExpression" ||
     kind === "playMediaExpression" ||
     kind === "showCameraExpression" ||
+    kind === "showPermanentButtonExpression" ||
     kind === "unaryExpression"
   );
 }
@@ -2828,7 +2856,8 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
     expression.kind === "showButtonExpression" ||
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression" ||
-    expression.kind === "showCameraExpression"
+    expression.kind === "showCameraExpression" ||
+    expression.kind === "showPermanentButtonExpression"
   );
 }
 
@@ -2864,7 +2893,8 @@ function isDefinitelyNonString(expression: Expression): boolean {
     expression.kind === "showButtonExpression" ||
     expression.kind === "timerExpression" ||
     expression.kind === "playMediaExpression" ||
-    expression.kind === "showCameraExpression"
+    expression.kind === "showCameraExpression" ||
+    expression.kind === "showPermanentButtonExpression"
   );
 }
 
