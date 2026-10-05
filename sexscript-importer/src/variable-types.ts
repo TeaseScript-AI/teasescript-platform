@@ -76,6 +76,8 @@ export interface VariableTypeResult {
   rangeAppended: IrStatement[];
   /** `text += value` statements, emitted as numeric `+=` because the text was not proven while lowering. */
   textAppended: IrStatement[];
+  /** Storage reads into a variable whose type cannot hold null, which now keep the variable's value as default. */
+  loadDefaults: IrStatement[];
 }
 
 const UNKNOWN: TeaseType = { kind: "unknown" };
@@ -150,6 +152,7 @@ interface Rounds {
   /** Truncations of a value of unknown type that Groovy may have held as text. */
   textIntegers: Set<IrStatement>;
   indexes: Set<IrExpression>;
+  loadDefaults: Set<IrStatement>;
 }
 
 /** Analysis rounds until no declaration or function result changes. */
@@ -167,6 +170,7 @@ function runRounds(
     integerLoads: new Set(),
     textIntegers: new Set(),
     indexes: new Set(),
+    loadDefaults: new Set(),
   };
   let results = new Map(knownResults);
   for (let round = 0; round < 50; round += 1) {
@@ -176,6 +180,7 @@ function runRounds(
     rounds.textAppends = analysis.textAppends;
     rounds.unguarded = analysis.unguarded;
     rounds.indexes = analysis.indexes;
+    rounds.loadDefaults = analysis.loadDefaults;
     for (const statement of analysis.truncations) rounds.truncations.add(statement);
     for (const statement of analysis.integerLoads) rounds.integerLoads.add(statement);
     rounds.textIntegers = analysis.textIntegers;
@@ -195,8 +200,16 @@ export function enforceVariableTypes(
   knownResults: ReadonlyMap<string, TeaseType> = new Map(),
 ): VariableTypeResult {
   const accepted = runRounds(statements, knownResults);
-  const { bindings, appends, textAppends, truncations, integerLoads, textIntegers, indexes } =
-    accepted;
+  const {
+    bindings,
+    appends,
+    textAppends,
+    truncations,
+    integerLoads,
+    textIntegers,
+    indexes,
+    loadDefaults,
+  } = accepted;
   const conflicts = accepted.conflicts;
   // A repair that needs a type no annotation can write, such as an optional object, becomes a conflict too.
   const conflicting = new Set(conflicts.map((conflict) => conflict.binding));
@@ -240,6 +253,7 @@ export function enforceVariableTypes(
     appended: [],
     rangeAppended: [],
     textAppended: [],
+    loadDefaults: [],
   };
   for (const [declaration, items] of declarationConflicts) {
     result.conflicts.push({
@@ -325,6 +339,15 @@ export function enforceVariableTypes(
           return rewritten;
         }
         case "assign": {
+          // A missing key read null, which the variable's type cannot hold, so the variable keeps its value.
+          if (loadDefaults.has(statement) && statement.value.kind === "load") {
+            const rewritten = {
+              ...statement,
+              value: { ...statement.value, defaultValue: statement.target },
+            };
+            result.loadDefaults.push(rewritten);
+            return rewritten;
+          }
           if (textAppends.has(statement)) {
             // Groovy `text += value` appended the value's text.
             result.textAppended.push(statement);
@@ -456,6 +479,8 @@ interface Analysis {
   textAppends: Set<IrStatement>;
   /** The importer's null tests of input questions on variables that can never hold null. */
   unguarded: Set<IrStatement>;
+  /** Unguarded storage reads into a variable with a type that cannot hold null, read with the variable as default. */
+  loadDefaults: Set<IrStatement>;
 }
 
 function analyse(
@@ -474,6 +499,7 @@ function analyse(
     appends: new Map(),
     textAppends: new Set(),
     unguarded: new Set(),
+    loadDefaults: new Set(),
   };
   // The `return` value types of the function being walked; null for a bare `return` or falling off the end.
   let returns: TeaseType[] | null = null;
@@ -539,12 +565,26 @@ function analyse(
       return;
     }
     // A storage read is checked when stored; it may be null, which matters only where the program tests the variable
-    // for null and so expects one.
+    // for null and so expects one. Elsewhere a missing key would stop the script where the variable's type cannot hold
+    // null, so the read keeps the variable's value then.
     if (
       nonNull(value).kind === "unknown" &&
       !(value.kind === "optional" && nullTested.has(target.name))
-    )
+    ) {
+      const type = bindingType(target);
+      if (
+        value.kind === "optional" &&
+        statement.kind === "assign" &&
+        statement.operator === "=" &&
+        statement.value.kind === "load" &&
+        statement.value.defaultValue === undefined &&
+        statement.target.kind === "variable" &&
+        type !== undefined &&
+        type.kind !== "optional"
+      )
+        analysis.loadDefaults.add(statement);
       return;
+    }
     const type = bindingType(target);
     // A list that starts empty takes its element type from its first elements (ADR 0021 rule 1.3), so elements of
     // several types need that union written on the declaration.

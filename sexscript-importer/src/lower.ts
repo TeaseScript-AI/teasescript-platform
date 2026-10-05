@@ -1189,6 +1189,30 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
       statement,
     ]);
   }
+  for (const statement of result.loadDefaults) {
+    const span = statement.span;
+    const name =
+      statement.kind === "assign" && statement.target.kind === "variable"
+        ? statement.target.name
+        : "";
+    const diagnostic: MigrationDiagnostic = {
+      code: "SX_LOAD_KEEPS_VALUE",
+      severity: "warning",
+      message: `Groovy stored null in '${name}' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.`,
+      span,
+    };
+    context.diagnostics.push(diagnostic);
+    context.renderedDiagnostics.add(diagnostic);
+    replaced.set(statement, [
+      {
+        kind: "comment",
+        text: `// NOTE ${diagnostic.code}${span === null ? "" : ` line ${span.line}`}: ${diagnostic.message}`,
+        trailing: false,
+        span: null,
+      },
+      statement,
+    ]);
+  }
   for (const { statement, name, type, example, elements } of result.unions) {
     const span = statement.span;
     const diagnostic: MigrationDiagnostic = {

@@ -18,4 +18,9 @@ if (load "training.finished") == true {
 }
 delete "training.old"
 say "Visit ${visits + 1}"
+// A read into a variable whose type cannot hold null keeps its value where the key is missing.
+let greeting = "Mistress"
+// NOTE SX_LOAD_KEEPS_VALUE line 14: Groovy stored null in 'greeting' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+greeting = load "training.greeting", default: greeting
+say "Hello ${greeting}"
 exit

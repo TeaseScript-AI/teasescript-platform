@@ -7,12 +7,7 @@ import {
   type ParsedGroovyFile,
   type SourceSpan,
 } from "./ast.ts";
-import type {
-  IrExpression,
-  IrStatement,
-  MigrationDiagnostic,
-  MigrationProgram,
-} from "./ir.ts";
+import type { IrExpression, IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
 import {
   buildHelperRegistry,
   describeMixinModule,
