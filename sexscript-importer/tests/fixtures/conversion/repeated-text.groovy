@@ -26,3 +26,6 @@ show("Wait")
 show("Waiting for you")
 def count = days + 1
 show("Waiting for you, ${count} days")
+// A photo request whose title repeats the text before it says the title once, as its question.
+show("Show me how you kneel.")
+setImage(getFile("Show me how you kneel."))

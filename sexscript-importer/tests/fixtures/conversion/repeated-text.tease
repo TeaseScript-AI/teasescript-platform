@@ -23,4 +23,7 @@ say "Wait"
 say "Waiting for you"
 let count = days + 1
 say "Waiting for you, ${count} days"
+// A photo request whose title repeats the text before it says the title once, as its question.
+// NOTE SX_FILE_PHOTO line 31: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
+showImage askImage("Show me how you kneel.")
 exit

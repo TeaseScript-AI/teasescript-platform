@@ -122,7 +122,8 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   becomes the question of its ask, which the Player says before the field opens (#634): `askInteger "How many?",
   default: 3`, also inside an expression as `askInteger("How many?", default: 3)`, where the text is said right before
   the ask with the ask's speaker; otherwise it stays a `say` before the statement (counted as `askQuestions` in the
-  report).
+  report). The same holds for the photo that `askImage` asks for (#636): a text said right before it fills a missing
+  message, and one that its message repeats goes.
 - `say` text is message markup: legacy `*emphasis*` renders as formatting and URLs become links. Line-start list,
   heading, or quote markers and backslash escapes get a `NOTE` (`escapeMarkup()` keeps text literal).
 - Single-field input prefilled its field with the default, also when the default was null (the field showed "null")

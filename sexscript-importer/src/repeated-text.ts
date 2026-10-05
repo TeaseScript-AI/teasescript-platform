@@ -395,7 +395,16 @@ export function withoutRepeatedChainText<
   });
 }
 
-const ASKING_STATEMENTS = new Set(["let", "assign", "expression", "if", "switch", "return", "save"]);
+const ASKING_STATEMENTS = new Set([
+  "let",
+  "assign",
+  "expression",
+  "if",
+  "switch",
+  "return",
+  "save",
+  "showImage",
+]);
 
 /**
  * An ask's text is its question, which the Player says in the chat as the asking speaker before the field opens
@@ -436,15 +445,31 @@ export function withAskQuestions(
   return block(statements);
 }
 
-/** The statement with its one sure ask taking the text as its question; null where it has no such single ask. */
+/**
+ * The statement with its one sure ask taking the text as its question; null where it has no such single ask. An
+ * `askImage` whose message already says the same text keeps it, and the `say` goes.
+ */
 function withQuestion(statement: IrStatement, say: SayStatement): IrStatement | null {
   if (!ASKING_STATEMENTS.has(statement.kind)) return null;
   let asks = 0;
   let sure = true;
+  const said = textTokens(say.value);
   const count = (value: IrExpression, guarded: boolean): void => {
     if (value.kind === "input") {
       asks += 1;
       if (guarded || value.question !== undefined || value.speaker !== say.speaker) sure = false;
+    }
+    if (value.kind === "call" && value.name === "askImage") {
+      asks += 1;
+      const message = value.positional[0];
+      const asked = message === undefined ? null : textTokens(message);
+      const repeats =
+        said !== null &&
+        asked !== null &&
+        repeatedPart(said, asked, sameToken) === "all" &&
+        repeatedPart(asked, said, sameToken) === "all";
+      const empty = message === undefined || (message.kind === "literal" && message.value === null);
+      if (guarded || say.speaker !== undefined || !(empty || repeats)) sure = false;
     }
     if (value.kind === "binary" && (value.operator === "and" || value.operator === "or")) {
       count(value.left, guarded);
@@ -461,7 +486,15 @@ function withQuestion(statement: IrStatement, say: SayStatement): IrStatement | 
     return value;
   });
   if (asks !== 1 || !sure) return null;
-  const ask = (value: IrExpression): IrExpression =>
-    value.kind === "input" ? { ...value, question: say.value } : mapChildren(value, ask);
+  const ask = (value: IrExpression): IrExpression => {
+    if (value.kind === "input") return { ...value, question: say.value };
+    if (value.kind === "call" && value.name === "askImage") {
+      const message = value.positional[0];
+      return message === undefined || (message.kind === "literal" && message.value === null)
+        ? { ...value, positional: [say.value, ...value.positional.slice(1)] }
+        : value;
+    }
+    return mapChildren(value, ask);
+  };
   return mapOwnExpressions(statement, ask);
 }
