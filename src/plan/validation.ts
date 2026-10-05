@@ -2,6 +2,7 @@ import { isStoredDurationRecord } from "../duration.js";
 import { isNormalizedOpaqueColor } from "../color.js";
 import { isInteractionChoiceValue } from "../choice-values.js";
 import { isValidInteractionPrefill } from "../interaction-answers.js";
+import { validImageRequestFields } from "../image-input.js";
 import {
   boundedInteractionUtf8ByteLength,
   interactionStringHasNonWhitespace,
@@ -1247,7 +1248,7 @@ function validateInteractionInstruction(
     errors.push(planError("TSC002", "Interaction instruction contains unsupported fields.", path));
   }
   const kind = value.interactionKind;
-  if (!isOneOf(kind, ["button", "text", "number", "choice", "temporal"])) {
+  if (!isOneOf(kind, ["button", "text", "number", "choice", "temporal", "image"])) {
     errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
   }
   if (value.target !== "standardChat")
@@ -1333,7 +1334,9 @@ function validateStaticInteractionUi(
             ...(kind === "number" && "integer" in ui ? ["integer"] : []),
             ...(kind === "temporal" ? ["temporalKind"] : []),
           ]
-        : ["kind", "options", "accessibleName"];
+        : kind === "image"
+          ? ["kind", "hint", "accessibleName", "allowCamera", "allowFile", "types", "mime"]
+          : ["kind", "options", "accessibleName"];
   if (
     !hasExactKeys(ui, uiKeys) ||
     ("integer" in ui && ui.integer !== true) ||
@@ -1412,6 +1415,11 @@ function validateStaticInteractionUi(
       errors.push(
         planError("TSC002", "Interaction prefill is not a valid answer.", `${path}.prefill`),
       );
+  }
+  if (kind === "image") {
+    if (ui.hint !== null) countString(ui.hint, `${path}.hint`);
+    if (!validImageRequestFields(ui, (text) => countString(text, path)))
+      errors.push(planError("TSC002", "Image request is invalid.", path));
   }
   if (kind === "choice") {
     if (
@@ -1497,7 +1505,9 @@ function validatePreparedInteractionUi(
             ...(kind === "number" && "integer" in ui ? ["integer"] : []),
             ...(kind === "temporal" ? ["temporalKind"] : []),
           ]
-        : ["kind", "optionsTemporary", "values", "accessibleName"];
+        : kind === "image"
+          ? ["kind", "requestTemporary", "accessibleName"]
+          : ["kind", "optionsTemporary", "values", "accessibleName"];
   if (
     !hasExactKeys(ui, keys) ||
     ("integer" in ui && ui.integer !== true) ||
@@ -1580,6 +1590,10 @@ function validatePreparedInteractionUi(
   if (kind === "text" || kind === "number" || kind === "temporal") {
     if (ui.hintTemporary !== null) addTemporary(ui.hintTemporary, `${path}.hintTemporary`);
     if ("prefillTemporary" in ui) addTemporary(ui.prefillTemporary, `${path}.prefillTemporary`);
+    return;
+  }
+  if (kind === "image") {
+    addTemporary(ui.requestTemporary, `${path}.requestTemporary`);
     return;
   }
   if (kind !== "choice") return;
@@ -2016,6 +2030,16 @@ function validateExpressionNode(
       ) {
         errors.push(
           planError("TSC002", "takePhoto() must be lowered to a capture instruction.", path),
+        );
+      }
+      // `askImage(...)` waits for the player's image; it lowers to an interaction.
+      if (
+        isRecord(value.callee) &&
+        value.callee.kind === "identifier" &&
+        value.callee.name === "askImage"
+      ) {
+        errors.push(
+          planError("TSC002", "askImage() must be lowered to an interaction instruction.", path),
         );
       }
       validateOptionalTypeCheck(value, path, errors);

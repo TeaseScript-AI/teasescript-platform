@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
+import { ref, type ShallowRef } from "vue";
+import { Activity, FastForward, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
 import type { PlayerTimerKind } from "../../model.js";
@@ -9,9 +9,13 @@ import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
+import DevelopmentTimeBadge from "./DevelopmentTimeBadge.vue";
+import DevelopmentTimePanel from "./DevelopmentTimePanel.vue";
+import { prepareHostedScript, type ScriptHost } from "./hostedScript";
 import LayoutDebug from "./LayoutDebug.vue";
 import PlayerApp from "./PlayerApp.vue";
 import type { PlayerTool } from "./PlayerToolsShell.vue";
+import type { ScriptFailure } from "./ScriptProblems.vue";
 import { resolveDemoAsset } from "./demoHost";
 import { resolveDevelopmentAsset } from "./developmentMedia";
 import {
@@ -27,12 +31,18 @@ import ThemeLab from "./ThemeLab.vue";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
 import TimerRegion from "./TimerRegion.vue";
 import { browserStorage } from "./usePlayerPreference";
+import { useDevelopmentTime } from "./useDevelopmentTime";
 import { usePlayerSession } from "./usePlayerSession";
 import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 
 // Development preview root; main.ts loads it on the development server or with `?dev`.
 // Visual Lab holds temporary Owner A/B settings only; runtime content comes from a real script.
+const query = new URLSearchParams(window.location.search);
+// The time controls exist only with the explicit `?dev` opt-in, also on the development server; `time=skip` starts
+// them with auto-skip on.
+const timeControls = query.has("dev");
 const tools: readonly PlayerTool[] = [
+  ...(timeControls ? [{ name: "Time Controls", icon: FastForward }] : []),
   { name: "Visual Lab", icon: FlaskConical },
   { name: "Layout Debug", icon: ScanLine },
   // Panels that exercise multi-panel arrangement and drawer behavior; Playback Diagnostics also lists the Player's
@@ -49,26 +59,46 @@ const timerPaused = ref(true);
 const backgroundControlsReset = ref(0);
 const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
 
-const props = defineProps<{ capturedMediaRepository?: CapturedMediaRepository | null }>();
+const props = defineProps<{
+  capturedMediaRepository?: CapturedMediaRepository | null;
+  /** The package `?package=<id>` selects; the preview plays it instead of a development scenario. */
+  packageHost?: ScriptHost | null;
+}>();
 // `?scenario=camera` opens the camera scenario with the session camera capability and persistent script storage, so
 // a saved photo is shown again in a later run. `?scenario=viewfinder` opens the viewfinder scenario with the camera,
 // and `?scenario=buttons` the permanent buttons scenario.
-const scenario = new URLSearchParams(window.location.search).get("scenario");
+const packageHost = props.packageHost ?? null;
+const scenario = packageHost === null ? query.get("scenario") : null;
 const cameraScenario = scenario === "camera";
 const viewfinderScenario = scenario === "viewfinder";
 const buttonsScenario = scenario === "buttons";
-const player = usePlayerSession({
-  // The camera scenarios speak as the repository demo's Mistress and use its images and sounds.
-  resolveAsset:
-    cameraScenario || viewfinderScenario || buttonsScenario
-      ? (path) => resolveDevelopmentAsset(path) ?? resolveDemoAsset(path)
-      : resolveDevelopmentAsset,
-  capabilities: { camera: cameraScenario || viewfinderScenario },
-  ...(cameraScenario && {
-    scriptStorage: createLocalScriptStorage(browserStorage(), "development-camera"),
-    capturedMedia: { repository: props.capturedMediaRepository ?? null },
-  }),
-});
+const player = usePlayerSession(
+  packageHost !== null
+    ? {
+        resolveAsset: packageHost.resolveAsset,
+        scriptStorage: createLocalScriptStorage(browserStorage(), packageHost.storageScope),
+        // As in the default build: an image the script saves a reference to stays in this browser for later runs.
+        capturedMedia: { repository: props.capturedMediaRepository ?? null },
+      }
+    : {
+        // The camera scenarios speak as the repository demo's Mistress and use its images and sounds.
+        resolveAsset:
+          cameraScenario || viewfinderScenario || buttonsScenario
+            ? (path) => resolveDevelopmentAsset(path) ?? resolveDemoAsset(path)
+            : resolveDevelopmentAsset,
+        capabilities: { camera: cameraScenario || viewfinderScenario },
+        ...(cameraScenario && {
+          scriptStorage: createLocalScriptStorage(browserStorage(), "development-camera"),
+          capturedMedia: { repository: props.capturedMediaRepository ?? null },
+        }),
+      },
+);
+const time = timeControls
+  ? useDevelopmentTime(player, {
+      enabled: query.get("time") === "skip",
+      autoSkip: query.get("time") === "skip",
+    })
+  : null;
 
 // Notice preview: the Player's own wording for real conditions, plus an error sample that no condition reports yet.
 const sampleNotices: readonly PlayerNotice[] = [
@@ -84,7 +114,10 @@ function clearSampleNotices() {
   for (const notice of sampleNotices) player.withdrawNotice(notice.key);
 }
 const startOptions = () => ({ temporalContext: playerTemporalContext(), wallClockMs: Date.now() });
-if (cameraScenario)
+// A package is compiled and prepared like in the default build; a scenario is a fixed development script.
+let failure: ShallowRef<ScriptFailure | null> | null = null;
+if (packageHost !== null) failure = prepareHostedScript(player, packageHost);
+else if (cameraScenario)
   void player
     .loadScriptStorage()
     .then(() =>
@@ -107,10 +140,15 @@ else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptio
     v-model:theme-intent="themeIntent"
     :player="player"
     :tools="tools"
-    title="Evening by the coast"
+    :title="packageHost === null ? 'Evening by the coast' : ''"
+    :failure="failure ?? null"
     :media="mediaFixture === 'Runtime' ? undefined : stageFixtures[mediaFixture]"
   >
+    <template #overlay>
+      <DevelopmentTimeBadge v-if="time" :time="time" />
+    </template>
     <template #tool="{ tool, player: playerElement }">
+      <DevelopmentTimePanel v-if="tool === 'Time Controls' && time" :time="time" />
       <LayoutDebug v-if="tool === 'Layout Debug' && playerElement" :player="playerElement" />
       <ul
         v-if="tool === 'Playback Diagnostics' && player.diagnostics.value.length > 0"

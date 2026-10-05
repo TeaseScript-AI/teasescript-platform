@@ -6,7 +6,15 @@ import {
   temporalAnswer,
 } from "../../interaction-answers.js";
 import { interactionStringFits } from "../../interaction-limits.js";
-import type { InteractionChoiceOption, InteractionChoiceValue } from "../../plan/model.js";
+import { IMAGE_ANSWER_TRANSCRIPT_TEXT } from "../../image-input.js";
+import type {
+  InteractionAccessibleName,
+  InteractionChoiceOption,
+  InteractionChoiceValue,
+  InteractionUiPayload,
+} from "../../plan/model.js";
+import type { SerializableRuntimeValue } from "../serializable-values.js";
+import type { CapturedMediaAdmission } from "./capture.js";
 import { presentDate, presentDateTime, presentTime, type TemporalContext } from "../../temporal.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
 import type { RuntimeInteractionActionSnapshot } from "./model.js";
@@ -29,11 +37,15 @@ export type ResolvedInteraction =
   | { readonly ok: true; readonly result: InteractionChoiceValue; readonly transcriptText: string }
   | { readonly ok: false; readonly message: string };
 
-/** `context` is the player's presentation now, which shows a date or time answer in the transcript. */
+/**
+ * `context` is the player's presentation now, which shows a date or time answer in the transcript. `capturedMedia`
+ * vouches for an image answer; without it no image request completes.
+ */
 export function resolveInteractionCompletion(
   action: RuntimeInteractionActionSnapshot,
   payload: unknown,
   context: TemporalContext,
+  capturedMedia: CapturedMediaAdmission | undefined,
 ): ResolvedInteraction {
   if (!isPlainRecord(payload)) {
     return { ok: false, message: "Interaction completion payload must be an object." };
@@ -135,6 +147,20 @@ export function resolveInteractionCompletion(
           : presentDateTime(context.presentation, answer);
     return { ok: true, result: answer, transcriptText };
   }
+  // The answer is an image the trusted host stored, by its reference; the transcript never shows the reference.
+  if (action.ui.kind === "image") {
+    const reference =
+      payload.kind === "image" && Object.keys(payload).length === 2 ? payload.reference : undefined;
+    if (typeof reference !== "string" || reference.length === 0 || !completionStringFits(reference))
+      return {
+        ok: false,
+        message:
+          "Image completion requires { kind: 'image', reference } with a stored image reference.",
+      };
+    if (capturedMedia?.holds(reference, "image") !== true)
+      return { ok: false, message: "The image is not stored media of this host." };
+    return { ok: true, result: reference, transcriptText: IMAGE_ANSWER_TRANSCRIPT_TEXT };
+  }
   if (action.ui.kind !== "choice") {
     return { ok: false, message: "Choice action payload is malformed." };
   }
@@ -171,6 +197,46 @@ export function resolveInteractionCompletion(
     ok: true,
     result: cloneInteractionChoiceValue(selected.value),
     transcriptText: selected.text,
+  };
+}
+
+type ImageInteractionUi = Extract<InteractionUiPayload, { kind: "image" }>;
+
+export function cloneImageUi(
+  ui: ImageInteractionUi,
+  accessibleName: InteractionAccessibleName,
+): ImageInteractionUi {
+  return {
+    kind: "image",
+    hint: ui.hint,
+    allowCamera: ui.allowCamera,
+    allowFile: ui.allowFile,
+    types: ui.types === null ? null : [...ui.types],
+    mime: ui.mime === null ? null : [...ui.mime],
+    accessibleName,
+  };
+}
+
+/**
+ * What an open image request keeps in its request temporary: its arguments as they apply, with the message as text and
+ * no message, `types`, or `mime` when there is none. Reading it again gives the same request.
+ */
+export function imageRequestValue(
+  ui: Pick<ImageInteractionUi, "hint" | "allowCamera" | "allowFile" | "types" | "mime">,
+): SerializableRuntimeValue {
+  const texts = (items: readonly string[]): SerializableRuntimeValue => ({
+    kind: "list",
+    items: [...items],
+  });
+  return {
+    kind: "object",
+    properties: [
+      ...(ui.hint === null ? [] : [{ name: "message", value: ui.hint }]),
+      { name: "allowCamera", value: ui.allowCamera },
+      { name: "allowFile", value: ui.allowFile },
+      ...(ui.types === null ? [] : [{ name: "types", value: texts(ui.types) }]),
+      ...(ui.mime === null ? [] : [{ name: "mime", value: texts(ui.mime) }]),
+    ],
   };
 }
 

@@ -129,6 +129,8 @@ export function requiredInstructionTemporaries(
             output.add(instruction.preparedUi.backgroundTemporary);
           if (instruction.preparedUi.timeoutTemporary !== undefined)
             output.add(instruction.preparedUi.timeoutTemporary);
+        } else if (instruction.preparedUi.kind === "image") {
+          output.add(instruction.preparedUi.requestTemporary);
         } else if (instruction.preparedUi.kind !== "choice") {
           if (instruction.preparedUi.hintTemporary !== null)
             output.add(instruction.preparedUi.hintTemporary);
