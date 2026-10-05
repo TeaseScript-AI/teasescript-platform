@@ -240,3 +240,16 @@ test("showCamera may start the line after a colon, and a broken call keeps the c
     ["TSP007"],
   );
 });
+
+test("a mix with a camera view never suggests a type that cannot be written", () => {
+  for (const source of [
+    "let view = showCamera\nlet mixed = [view, 1]\nexit",
+    "let view = showCamera\nlet views = [view]\nlet more = views + [1]\nexit",
+    "let view = showCamera\nlet views = set[view]\nlet more = views.union(set[1])\nexit",
+  ]) {
+    const messages = compileSource(source).diagnostics.map((diagnostic) => diagnostic.message);
+    assert.equal(messages.length, 1, source);
+    assert.doesNotMatch(messages[0]!, /camera \|/u, source);
+    assert.match(messages[0]!, /keep camera views apart/u, source);
+  }
+});
