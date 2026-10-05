@@ -63,7 +63,7 @@ test("lowers common SexScript flow to accepted TeaseScript forms", () => {
   assert.equal(
     emitTease(program),
     [
-      'say "Hello"',
+      'say "Hello", instant',
       "wait 2",
       "timer 3",
       'showImage "scene/one.jpg"',

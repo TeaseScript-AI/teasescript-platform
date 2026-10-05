@@ -60,7 +60,8 @@ export interface IrFunctionParameter {
 }
 
 export type IrStatement =
-  | (IrBase & { kind: "say"; value: IrExpression })
+  /** `instant` shows the text without reading time (`say text, instant`). */
+  | (IrBase & { kind: "say"; value: IrExpression; instant?: true })
   | (IrBase & { kind: "wait"; duration: IrExpression; visible: boolean; unit: "s" | "ms" })
   | (IrBase & { kind: "showButton"; label: IrExpression; timeout: IrExpression | null })
   | (IrBase & { kind: "showPopup"; message: IrExpression })

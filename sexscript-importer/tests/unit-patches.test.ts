@@ -111,7 +111,7 @@ test(
       converted(await convertUnit(options));
       const main = path.join(options.outputRoot, "Walk/main.tease");
       const generated = await readFile(main, "utf8");
-      assert.match(generated, /say "Hello"\nwait 1\nsay "Bye"\nexit/u);
+      assert.match(generated, /say "Hello", instant\nwait 1\nsay "Bye"\nexit/u);
 
       const outputPatch = {
         id: "farewell",

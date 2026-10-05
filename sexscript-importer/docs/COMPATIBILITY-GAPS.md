@@ -500,6 +500,11 @@ pixel size, or an image-size query.
   letter case, around spaces, or below a repeated folder name (`SX_MEDIA_PATH`); several files that match apart from
   case get a note (`SX_MEDIA_PATH_CASE`). A MIDI file becomes an MP3 rendered at conversion (fluidsynth with a General
   MIDI soundfont, then ffmpeg).
+- Pacing: legacy `show()` displayed its text at once and a `wait()` right after it set the timing, so text shown
+  directly before a wait becomes `say …, instant`; other text keeps TeaseScript's reading time (converter owner,
+  2026-10-05).
+- Launch markers: the legacy player saved `<script>.launch.firsttime`, `.lasttime`, and `.nb` at every script start
+  (`FullScript.groovytemplate`); a script whose markers the package reads saves them first (`SX_LAUNCH_MARKERS`).
 - Java text: `String.format` with `%s`, `%d`, `%f`, a `0` flag, a width, and a precision becomes interpolation,
   `padStart`, and a fixed-decimals helper (`SX_FORMAT`); `tokenize()` becomes a helper that splits at any delimiter
   character without empty parts.

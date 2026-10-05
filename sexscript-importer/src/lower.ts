@@ -1508,7 +1508,21 @@ function lowerStatementList(
   }
   context.knownKeys.splice(context.knownKeys.length - added, added);
   emitComments(takeCommentsBefore(context, enclosingSpan === null ? null : endOf(enclosingSpan)));
-  return withVisibleCountdowns(withReusedLoopCounters(result), context);
+  return withInstantShows(withVisibleCountdowns(withReusedLoopCounters(result), context));
+}
+
+/**
+ * Legacy `show()` displayed its text at once, and the `wait()` right after it set the timing, so text shown directly
+ * before a wait appears without reading time (converter owner decision 2026-10-05); counting loops keep their pace.
+ */
+function withInstantShows(statements: IrStatement[]): IrStatement[] {
+  return statements.map((statement, index) => {
+    if (statement.kind !== "say") return statement;
+    const next = statements
+      .slice(index + 1)
+      .find((item) => item.kind !== "blank" && item.kind !== "comment");
+    return next?.kind === "wait" && !next.visible ? { ...statement, instant: true } : statement;
+  });
 }
 
 /**

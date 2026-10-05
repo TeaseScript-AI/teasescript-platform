@@ -1,5 +1,5 @@
 // Intro scene
-say "Welcome" // greeting
+say "Welcome", instant // greeting
 wait 2
 
 /* Ask how the session

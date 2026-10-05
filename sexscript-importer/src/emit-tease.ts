@@ -65,7 +65,9 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
   const pad = "  ".repeat(depth);
   switch (statement.kind) {
     case "say":
-      lines.push(`${pad}say ${emitExpression(statement.value)}`);
+      lines.push(
+        `${pad}say ${emitExpression(statement.value)}${statement.instant === true ? ", instant" : ""}`,
+      );
       return;
     case "wait": {
       const unit = statement.unit === "ms" ? " ms" : "";
