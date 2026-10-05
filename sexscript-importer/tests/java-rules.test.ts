@@ -309,10 +309,19 @@ test("converts clock texts, file names, and closures kept in record fields", { s
     "strike.action()",
     "soft.action()",
     'show("${clock} ${wrapped} ${shortName} ${count}")',
+    "def rolledDice = [3, 1, 2]",
+    "rolledDice = rolledDice.sort()",
+    "rolledDice = rolledDice.reverse()",
+    "def times = [5, 2, 9]",
+    "Collections.sort(times)",
+    'def tags = ["a", "b", "c"]',
+    "Collections.shuffle(tags)",
+    "show(\"${rolledDice.join(',')} ${'abc'.reverse()} ${times.join(',')} ${tags.size()}\")",
   ]);
   assert.match(source, /^sexscriptLegacyCall\(strike\.action, \[\]\)$/mu);
   assert.doesNotMatch(source, /TODO/u);
-  assert.deepEqual(run(source), ["01:02:05 01:00 bed.jpg 11"]);
+  assert.match(source, /^times\.sort\(\)$/mu);
+  assert.deepEqual(run(source), ["01:02:05 01:00 bed.jpg 11", "3,2,1 cba 2,5,9 3"]);
 });
 
 function groovyParserUnavailableReason(): string | false {

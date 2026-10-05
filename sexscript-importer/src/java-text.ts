@@ -56,6 +56,7 @@ const BUFFER_TYPES = new Set([
 const BUFFER_READS = new Set(["length", "toString"]);
 const SYSTEM_CLASSES = new Set(["System", "java.lang.System"]);
 const FILE_CLASSES = new Set(["File", "java.io.File"]);
+const COLLECTIONS_CLASSES = new Set(["Collections", "java.util.Collections"]);
 /** Methods of a Groovy map, which a map key of the same name does not replace. */
 const MAP_METHODS = new Set([
   "clear",
@@ -382,6 +383,13 @@ export function textCall(
       const index = host.lower(args[0]!);
       return list === null || index === null ? null : { kind: "index", target: list, index };
     }
+    case "reverse": {
+      // Groovy reverse() of a list or text is a new reversed value; the receiver stays as it was.
+      const list = onlyOf(type, LIST | NULL) && (type & LIST) !== 0;
+      if (args.length !== 0 || (!list && !text)) return undefined;
+      const value = host.lower(receiver);
+      return value === null ? null : host.helper(list ? "reversed" : "reversedText", [value]);
+    }
     case "toCharArray": {
       if (args.length !== 0 || !text) return undefined;
       const value = host.lower(receiver);
@@ -569,6 +577,25 @@ export function textStatement(
   host: JavaRuleHost,
 ): IrStatement[] | null {
   const receiver = asNode(node.object);
+  // Collections.sort(list) sorts the list in place, as TeaseScript sort() does.
+  const owner = dottedName(receiver);
+  const list = args[0];
+  if (
+    owner !== null &&
+    COLLECTIONS_CLASSES.has(owner) &&
+    !host.isVariable(owner.split(".")[0]!) &&
+    name === "sort" &&
+    args.length === 1 &&
+    list !== undefined &&
+    variableName(list) !== null
+  ) {
+    const type = host.valueType(list);
+    if (!onlyOf(type, LIST | NULL) || (type & LIST) === 0) return null;
+    if (!host.listWrite(list, node)) return [];
+    const value = host.lower(list);
+    if (value === null) return null;
+    return [{ kind: "expression", expression: method(value, name), span }];
+  }
   const variable = variableName(receiver);
   if (receiver === null || variable === null) return null;
   const target: IrExpression = { kind: "variable", name: variable };

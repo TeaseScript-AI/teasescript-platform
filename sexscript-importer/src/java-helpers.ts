@@ -25,7 +25,9 @@ export type JavaHelperName =
   | "insert"
   | "aroundText"
   | "fileName"
-  | "clockText";
+  | "clockText"
+  | "reversed"
+  | "reversedText";
 
 /** The Java helpers in their stable order after the other generated helpers. */
 export const JAVA_HELPER_ORDER: readonly JavaHelperName[] = [
@@ -48,6 +50,8 @@ export const JAVA_HELPER_ORDER: readonly JavaHelperName[] = [
   "aroundText",
   "fileName",
   "clockText",
+  "reversed",
+  "reversedText",
 ];
 
 const DEPENDENCIES = new Map<string, JavaHelperName[]>([
@@ -826,6 +830,44 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
               padded(v("rest"), 2),
             ),
           ),
+        ],
+      ),
+  },
+  // Groovy reverse() of a list: a new list of its elements in reverse order.
+  reversed: {
+    name: "sexscriptLegacyReversed",
+    build: () =>
+      fn(
+        "sexscriptLegacyReversed",
+        ["items"],
+        [
+          letS("result", { kind: "list", items: [] }),
+          letS("index", bin("-", length(v("items")), lit(1))),
+          whileS(bin(">=", v("index"), lit(0)), [
+            {
+              kind: "expression",
+              expression: method(v("result"), "add", at(v("items"), v("index"))),
+              span: null,
+            },
+            set("index", lit(1), "-="),
+          ]),
+          ret(v("result")),
+        ],
+      ),
+  },
+  // Groovy reverse() of text: its characters in reverse order.
+  reversedText: {
+    name: "sexscriptLegacyReversedText",
+    build: () =>
+      fn(
+        "sexscriptLegacyReversedText",
+        ["text"],
+        [
+          letS("result", lit("")),
+          forS("character", method(v("text"), "split", lit("")), [
+            set("result", template(v("character"), v("result"))),
+          ]),
+          ret(v("result")),
         ],
       ),
   },
