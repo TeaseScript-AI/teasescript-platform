@@ -62,7 +62,13 @@ server.listen(httpsPort, host, () =>
 if (values["http-port"] !== undefined) {
   const httpPort = Number(values["http-port"]);
   createHttpServer((request, response) => {
-    const hostname = new URL(`http://${request.headers.host ?? "localhost"}`).hostname;
+    let hostname: string;
+    try {
+      hostname = new URL(`http://${request.headers.host ?? "localhost"}`).hostname;
+    } catch {
+      response.writeHead(400).end();
+      return;
+    }
     response.writeHead(302, { Location: `https://${hostname}:${httpsPort}${request.url ?? "/"}` });
     response.end();
   }).listen(httpPort, host, () =>

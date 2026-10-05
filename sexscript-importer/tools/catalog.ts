@@ -230,7 +230,7 @@ async function readEntry(root: string, id: string, tools: CatalogTools): Promise
           )
           .sort();
   const todos = sources.reduce(
-    (sum, { source }) => sum + (source.match(/^\s*\/\/ TODO CODE line /gmu)?.length ?? 0),
+    (sum, { source }) => sum + (source.match(/^\s*\/\/ TODO [A-Z0-9_]+ line \d+:/gmu)?.length ?? 0),
     0,
   );
   return {
@@ -340,7 +340,7 @@ function partialConversion(
   return {
     kind: "partial",
     label: `partly converted (${clean}/${total}, ${todos} TODO${todos === 1 ? "" : "s"})`,
-    detail: `${clean} of ${total} Groovy files converted without errors; the .tease files have ${todos} TODO CODE markers for manual migration.`,
+    detail: `${clean} of ${total} Groovy files converted without errors; the .tease files have ${todos} TODO markers for manual migration.`,
   };
 }
 
