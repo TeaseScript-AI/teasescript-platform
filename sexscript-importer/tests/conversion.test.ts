@@ -901,7 +901,8 @@ test(
         );
       }
       if (name === "shared-helpers") {
-        // The scripts call the shared functions, which read the shared table and the global each script assigns.
+        // The scripts call the shared functions, which read the shared table and the global each script assigns; the
+        // cellar keeps its own variable of a global's name, with values of another type.
         const report = analyzeFeasibility(files, {
           compiler: projectResult.compiler,
           runner: projectResult.runner,
@@ -912,7 +913,12 @@ test(
             {
               start: "main.tease",
               status: "halted",
-              visited: ["main.tease", "rooms/hall.tease", "rooms/garden.tease"],
+              visited: [
+                "main.tease",
+                "rooms/hall.tease",
+                "rooms/garden.tease",
+                "rooms/cellar.tease",
+              ],
             },
           ],
         );

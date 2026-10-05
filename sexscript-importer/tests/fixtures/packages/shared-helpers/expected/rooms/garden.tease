@@ -17,4 +17,4 @@ function report {
 enter()
 report()
 greet()
-exit
+goto "rooms/cellar.tease"
