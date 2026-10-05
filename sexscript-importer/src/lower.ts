@@ -216,6 +216,8 @@ interface LowerContext {
   fileVariables: ReadonlySet<string>;
   /** The variable each such value is kept in. */
   filePathOwners: ReadonlyMap<AstNode, string>;
+  /** Variables that hold a photo the script took (getImage, getFile, receiveImage). */
+  photoVariables: ReadonlySet<string>;
   /**
    * Whether a read of a name nothing assigns is reported. Only with package context: a file converted alone, such
    * as a mixin module, reads names that other package files define.
@@ -931,6 +933,7 @@ export function lowerParsedFile(
     fileValues: new Set(),
     fileVariables: new Set(),
     filePathOwners: new Map(),
+    photoVariables: new Set(),
     checksUndefinedVariables: options.packageFunctions !== undefined,
   };
   if (file.diagnostics.length > 0 || file.root === null) {
@@ -1006,6 +1009,7 @@ export function lowerParsedFile(
       options.mapUses ?? mapUsesOf([{ body, types: context.types, keys: context.bindings }]);
     context.elementRemovals = elementRemovals(body);
     Object.assign(context, fileTests(body));
+    context.photoVariables = photoVariables(body);
     // A lookup reads the type of the dict's values, as an index reads a list's element type.
     const listElements = new Map(context.types.listElements ?? []);
     for (const [key, type] of context.mapUses.dictionaryValues) {
@@ -1395,6 +1399,7 @@ function lowerHelperMethod(
     files: baseContext.files,
     actualFiles: baseContext.actualFiles,
     ...fileTests(body),
+    photoVariables: photoVariables(body),
     checksUndefinedVariables: baseContext.checksUndefinedVariables,
     currentFunction: {
       name,
@@ -3094,12 +3099,15 @@ function lowerClosureDeclaration(
   // A function body runs later, when keys known present here may be gone.
   const outerKeys = context.knownKeys.splice(0);
   try {
-    const lowered = lowerBlock(
-      closure.implicitReturn === false || !context.resultUses.has(name)
-        ? body
-        : withImplicitReturn(body, context),
-      context,
-    );
+    const composed = composedImage(body, context);
+    const lowered =
+      composed ??
+      lowerBlock(
+        closure.implicitReturn === false || !context.resultUses.has(name)
+          ? body
+          : withImplicitReturn(body, context),
+        context,
+      );
     const ownDiagnostics = context.diagnostics.slice(firstDiagnostic);
     return [
       {
@@ -3888,6 +3896,33 @@ function lowerCallStatement(
   if (call !== null && !call.inherited && receiver !== null && isDictionary(receiver, context)) {
     const dictionary = dictStatement(receiver, call, span, context);
     if (dictionary !== null) return dictionary;
+  }
+  // Deleting the file of a photo the script took: the reference is cleared, and the Player removes a photo that
+  // nothing references (V30 §33).
+  const deletedPath =
+    call?.name === "delete" &&
+    call.arguments.length === 0 &&
+    receiver !== null &&
+    isFileConstructor(receiver)
+      ? variableName(nodeArray(asNode(receiver.arguments)?.items)[0])
+      : null;
+  if (deletedPath !== null && context.photoVariables.has(deletedPath)) {
+    addDiagnostic(
+      context,
+      "SX_PHOTO_DELETE",
+      "warning",
+      "The legacy script deleted the file of a photo it took; the reference is cleared instead, and the Player removes a photo that nothing references any more (V30 §33).",
+      span,
+    );
+    return [
+      {
+        kind: "assign",
+        target: { kind: "variable", name: deletedPath },
+        operator: "=",
+        value: { kind: "literal", value: null },
+        span,
+      },
+    ];
   }
   const recordName = receiver === null ? null : variableName(receiver);
   if (
@@ -11751,6 +11786,108 @@ function storedValues(node: AstNode, context: LowerContext): ReadonlySet<string>
   if (name === null || context.types.singleAssignment?.has(name) !== true) return null;
   const initializer = context.constantInitializers.get(name) ?? null;
   return read(initializer);
+}
+
+/** The variables a script assigns a photo it took: getImage(), getFile(), or receiveImage(). */
+function photoVariables(body: AstNode): Set<string> {
+  const names = new Set<string>();
+  walkAst(body, (node) => {
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    const value = assigns ? asNode(node.right) : null;
+    const name = assigns ? variableName(node.left) : null;
+    if (
+      name !== null &&
+      value?.kind === "methodCall" &&
+      value.implicitThis === true &&
+      ["getImage", "getFile", "receiveImage"].includes(constantString(value.method) ?? "")
+    )
+      names.add(name);
+  });
+  return names;
+}
+
+/**
+ * A function that only composes an image in memory and shows it with `setImage(bytes, n)`: TeaseScript has no image
+ * composition yet (the accepted layered scene is not implemented), so the function shows the base image it read, the
+ * first one, with a note. Null for any other function, also one that shows text, waits, saves, or changes a
+ * variable it does not declare.
+ */
+function composedImage(body: AstNode, context: LowerContext): IrStatement[] | null {
+  let showsBytes = false;
+  let other = false;
+  let base: AstNode | null = null;
+  const locals = new Set<string>();
+  walkAst(body, (node) => {
+    if (node.kind === "declaration") {
+      const name = variableName(node.left);
+      if (name !== null) locals.add(name);
+    }
+  });
+  walkAst(body, (node) => {
+    if (node.kind === "binary" && node.operator === "=") {
+      const target = variableName(node.left);
+      if (target === null || !locals.has(target)) other = true;
+    }
+    if (node.kind !== "methodCall") return;
+    const method = constantString(node.method) ?? "";
+    const args = nodeArray(asNode(node.arguments)?.items);
+    if (node.implicitThis === true) {
+      if (method === "setImage" && args.length === 2) showsBytes = true;
+      else if (!context.functions.has(method)) other = true;
+      return;
+    }
+    // A change of a list or map the function does not declare would be lost.
+    const receiver = variableName(node.object);
+    if (
+      receiver !== null &&
+      !locals.has(receiver) &&
+      [
+        "add",
+        "addAll",
+        "clear",
+        "push",
+        "put",
+        "putAt",
+        "remove",
+        "removeAll",
+        "leftShift",
+      ].includes(method)
+    )
+      other = true;
+    if (base === null && (method === "getImage" || method === "read") && args.length === 1) {
+      const argument = args[0]!;
+      base = isFileConstructor(argument)
+        ? (nodeArray(asNode(argument.arguments)?.items)[0] ?? null)
+        : argument;
+    }
+  });
+  if (!showsBytes || other || base === null) return null;
+  const image = imagePathBelowImages(base, context);
+  if (image === null) return null;
+  addDiagnostic(
+    context,
+    "SX_IMAGE_COMPOSITION",
+    "warning",
+    "The legacy function composed an image in memory from parts of other images and showed it; TeaseScript cannot compose images yet (the accepted layered scene with showOverlayImage is not implemented), so the function shows the base image it read.",
+    body.span,
+  );
+  return [{ kind: "showImage", file: mediaFile(image, "images", body, context), span: body.span }];
+}
+
+/** A path the legacy script read below `images/`, as a path of the package's images; null for another path. */
+function imagePathBelowImages(node: AstNode, context: LowerContext): IrExpression | null {
+  const literal = constantString(node);
+  if (literal !== null)
+    return /^images\//iu.test(literal)
+      ? { kind: "literal", value: literal.slice("images/".length) }
+      : null;
+  if (node.kind === "binary" && node.operator === "+") {
+    const prefix = constantString(node.left);
+    const rest = asNode(node.right);
+    if (prefix?.toLowerCase() === "images/" && rest !== null) return lowerExpression(rest, context);
+  }
+  return null;
 }
 
 /** Audio files the legacy useFile() opened in the system's player. */

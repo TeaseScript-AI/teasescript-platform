@@ -1,0 +1,8 @@
+// A function that only composes an image in memory shows the base image it read, until TeaseScript composes images.
+// NOTE SX_IMAGE_COMPOSITION line 2: The legacy function composed an image in memory from parts of other images and showed it; TeaseScript cannot compose images yet (the accepted layered scene with showOverlayImage is not implemented), so the function shows the base image it read.
+function showTiles(picture, spacing) {
+  showImage picture
+}
+showTiles("puzzle/cat.jpg", 2)
+say "Solve the puzzle"
+exit

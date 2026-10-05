@@ -15,3 +15,7 @@ def switchOn = "SwitchBox.exe 7 ein"
 switchOn.toString().execute()
 "SwitchBox.exe 7 aus".execute()
 show("Best score ${best}")
+// Deleting the file of a photo the script took clears the reference.
+def selfie = getImage("Smile")
+if (selfie != null) setImage(selfie)
+new File(selfie).delete()
