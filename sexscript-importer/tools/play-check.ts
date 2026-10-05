@@ -507,8 +507,20 @@ function readState(page: Page): Promise<PlayerState> {
       progress:
         (snapshot?.nextEventSequence ?? 0) * 1000 + (session?.transcriptEntries.length ?? 0),
       lastText: (session?.transcriptEntries.at(-1)?.text ?? "").slice(0, 200),
-      scriptFailure:
-        document.querySelector("[data-script-failure]")?.textContent?.trim().slice(0, 500) ?? null,
+      scriptFailure: (() => {
+        const panel = document.querySelector("[data-script-failure]");
+        if (panel === null) return null;
+        // Each listed problem is its location and message; warnings do not keep a script from starting.
+        const errors = [...panel.querySelectorAll("li")]
+          .map((item) =>
+            [...item.querySelectorAll("span")].map((span) => span.textContent?.trim() ?? ""),
+          )
+          .filter((parts) => !parts.some((part) => part.startsWith("Warning: ")))
+          .map((parts) => parts.join(" "));
+        return errors.length === 0
+          ? (panel.textContent?.trim().slice(0, 500) ?? "")
+          : `${errors.slice(0, 3).join(" | ")}${errors.length > 3 ? ` (${errors.length} errors)` : ""}`;
+      })(),
       sites:
         session?.plan.instructions.filter((instruction) => instruction.kind === "interaction")
           .length ?? 0,
