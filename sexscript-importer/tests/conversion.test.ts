@@ -847,6 +847,15 @@ test(
         sources.map((file) => parseGroovySource(path.join(scripts, file))),
       );
       const lowered = lowerPackage(files);
+      // Every generated call resolves to package code or an accepted capability, such as askImage() for getFile().
+      assert.deepEqual(
+        lowered.composed
+          .flatMap((program) => program.diagnostics)
+          .filter((diagnostic) => diagnostic.code === "SX_UNRESOLVED_PACKAGE_CALL")
+          .map((diagnostic) => diagnostic.message),
+        [],
+        name,
+      );
       // Each file keeps its legacy path from the scripts folder, beside a generated main.tease, as convert-package
       // writes them.
       const outputs = packageOutputs(lowered).map(

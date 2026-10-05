@@ -1,6 +1,3 @@
-// MIGRATION INCOMPLETE: 1 error diagnostic.
-// Review diagnostics before treating this file as behaviorally equivalent.
-
 speaker system {
   title: "System"
 }
