@@ -17,9 +17,11 @@
  * Legacy scripts name images relative to `images/` and
  * sounds relative to `sounds/`, while a TeaseScript package names its files from the package root (ADR 0022), so both
  * media trees are hard-linked into the package root. Resource packs (folders without scripts) are linked into the
- * script packages that name their media folders (see `resourcePackTargets`). Links are hard links, never copies.
+ * script packages that name their media folders (see `resourcePackTargets`). Links are hard links; only where the
+ * output is on another mount than the corpus, where hard links fail, are the files copied instead.
  */
 import { execFile } from "node:child_process";
+import { constants } from "node:fs";
 import {
   copyFile,
   link,
@@ -399,7 +401,8 @@ export async function reportUnit(options: UnitOptions): Promise<UnitResult | "re
 
 /**
  * The unit folder to convert: the corpus unit itself, or with source patches a staged copy whose media are hard links
- * and whose other files, and any file a diff names, are copies of their own, so patching never reaches the corpus.
+ * (copies when the stage is on another mount) and whose other files, and any file a diff names, are copies of
+ * their own, so patching never reaches the corpus.
  */
 async function patchedUnit(
   corpusRoot: string,
@@ -412,7 +415,12 @@ async function patchedUnit(
   if (patches === null || diffs.length === 0) return original;
   const staged = path.join(stage, "source", id);
   await mkdir(path.dirname(staged), { recursive: true });
-  const copied = await run("cp", ["-al", original, staged]);
+  // Hard links fail across mount points (a bind mount of the same filesystem too); the stage then copies the unit.
+  let copied = await run("cp", ["-al", original, staged]);
+  if (copied.exitCode !== 0) {
+    await rm(staged, { recursive: true, force: true });
+    copied = await run("cp", ["-a", original, staged]);
+  }
   if (copied.exitCode !== 0) throw new Error(`cannot stage ${original}: ${copied.stderr.trim()}`);
   const mediaRoots = await Promise.all(
     MEDIA_FOLDERS.map((media) => mediaRoot(corpusRoot, id, media)),
@@ -702,18 +710,25 @@ export function resourcePackTargets(
 }
 
 /**
- * Hard-links `source` as `target`: `same` when `target` already is that file (the corpus links identical content),
- * `taken` when it is another file.
+ * Hard-links `source` as `target`, or copies it when `target` is on another mount: `same` when `target` already is
+ * that file (the corpus links identical content) or holds the same bytes, `taken` when it is another file.
  */
 async function hardLink(source: string, target: string): Promise<"linked" | "same" | "taken"> {
   await mkdir(path.dirname(target), { recursive: true });
   try {
-    await link(source, target);
+    await link(source, target).catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "EXDEV")
+        return copyFile(source, target, constants.COPYFILE_EXCL);
+      throw error;
+    });
     return "linked";
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
     const [existing, wanted] = await Promise.all([stat(target), stat(source)]);
-    return existing.ino === wanted.ino && existing.dev === wanted.dev ? "same" : "taken";
+    if (existing.ino === wanted.ino && existing.dev === wanted.dev) return "same";
+    if (existing.size !== wanted.size) return "taken";
+    const [had, wants] = await Promise.all([readFile(target), readFile(source)]);
+    return had.equals(wants) ? "same" : "taken";
   }
 }
 
