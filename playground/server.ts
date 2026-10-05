@@ -1,6 +1,13 @@
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type RequestListener,
+  type Server,
+  type ServerResponse,
+} from "node:http";
+import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https";
 import { extname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { PLAYGROUND_EXAMPLES } from "./examples.js";
@@ -16,6 +23,7 @@ import {
   executeWorkspaceSource,
   type WorkspaceResult,
 } from "./workspace/controller.js";
+import { playgroundCertificate, playgroundCertificateNames } from "./tls.js";
 
 export interface PlaygroundServerOptions {
   readonly projectRoot?: string;
@@ -36,9 +44,18 @@ export interface PlaygroundServerOptions {
 export interface StartPlaygroundServerOptions extends PlaygroundServerOptions {
   readonly host?: string;
   readonly port?: number;
+  /**
+   * Serve HTTPS with a self-signed development certificate (`--https`), so that a browser on another machine of the
+   * local network has the secure context the Player's camera needs.
+   */
+  readonly https?: boolean;
 }
 
 export function createPlaygroundServer(options: PlaygroundServerOptions = {}): Server {
+  return createServer(playgroundRequestListener(options));
+}
+
+function playgroundRequestListener(options: PlaygroundServerOptions): RequestListener {
   const projectRoot = resolve(options.projectRoot ?? defaultProjectRoot());
   const playgroundRoot = resolve(projectRoot, "playground");
   const distRoot = resolve(projectRoot, "dist");
@@ -58,7 +75,7 @@ export function createPlaygroundServer(options: PlaygroundServerOptions = {}): S
     resultRevision: null,
   };
 
-  return createServer((request, response) => {
+  return (request, response) => {
     void serveRequest(
       request,
       { projectRoot, playgroundRoot, distRoot, examplesRoot, packageFolder, packageRoot },
@@ -69,12 +86,12 @@ export function createPlaygroundServer(options: PlaygroundServerOptions = {}): S
         sendJson(response, 500, { error: { code: "internalError", message: "Server error." } });
       else response.destroy();
     });
-  });
+  };
 }
 
 export async function startPlaygroundServer(
   options: StartPlaygroundServerOptions = {},
-): Promise<Server> {
+): Promise<Server | HttpsServer> {
   const host = options.host ?? process.env.HOST ?? "127.0.0.1";
   const port = options.port ?? environmentPort(process.env.PORT) ?? 4173;
   if (host.length === 0) throw new TypeError("HOST must not be empty.");
@@ -86,11 +103,21 @@ export async function startPlaygroundServer(
   if (packageRoot !== undefined && packagesRoot !== undefined) {
     throw new TypeError("Set PLAYGROUND_PACKAGE or PLAYGROUND_PACKAGES, not both.");
   }
-  const server = createPlaygroundServer({
+  const listener = playgroundRequestListener({
     ...options,
     ...(packageRoot === undefined ? {} : { packageRoot }),
     ...(packagesRoot === undefined ? {} : { packagesRoot }),
   });
+  const https = options.https ?? process.argv.includes("--https");
+  const server = https
+    ? createHttpsServer(
+        await playgroundCertificate(
+          resolve(options.projectRoot ?? defaultProjectRoot()),
+          playgroundCertificateNames(host, process.env.PLAYGROUND_TLS_NAMES),
+        ),
+        listener,
+      )
+    : createServer(listener);
   await new Promise<void>((resolveListen, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {
@@ -99,7 +126,13 @@ export async function startPlaygroundServer(
     });
   });
   const printableHost = host.includes(":") ? `[${host}]` : host;
-  process.stdout.write(`TeaseScript playground: http://${printableHost}:${port}/\n`);
+  process.stdout.write(
+    `TeaseScript playground: ${https ? "https" : "http"}://${printableHost}:${port}/\n`,
+  );
+  if (https)
+    process.stdout.write(
+      "Self-signed certificate: the browser warns once; accept it to continue (development only).\n",
+    );
   if (packageRoot !== undefined) {
     process.stdout.write(`Development package: ${resolve(packageRoot)}\n`);
   }

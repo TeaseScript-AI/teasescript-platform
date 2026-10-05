@@ -7,6 +7,7 @@ import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import type { PlayerSpeakerPresentation } from "../../model.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
+import FloatingViewfinder, { type FloatingPlace } from "./FloatingViewfinder.vue";
 import PlayerComposition from "./PlayerComposition.vue";
 import PlayerToolsShell, { type PlayerTool } from "./PlayerToolsShell.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
@@ -37,6 +38,9 @@ const props = withDefaults(
   }>(),
   { title: "", tools: () => [], failure: null },
 );
+// The viewfinder keeps the place the user gave it, and its mirroring, while the Player is mounted.
+const floatingPlace = ref<FloatingPlace | null>(null);
+const viewfinderMirrored = ref(true);
 const themeIntent = defineModel<PlayerThemeIntent>("themeIntent", {
   default: () => defaultPlayerThemeIntents.light,
 });
@@ -177,6 +181,12 @@ async function toggleFullscreen() {
           <Stage ref="stage" :media="stageMedia" @media-aspect="mediaAspect = $event" />
         </template>
         <template #overlay>
+          <FloatingViewfinder
+            v-if="player.viewfinder.value"
+            v-model:place="floatingPlace"
+            v-model:mirrored="viewfinderMirrored"
+            :track="player.viewfinder.value"
+          />
           <ScriptProblems v-if="failure" :failure="failure" />
           <SessionActivation v-else :activation="player.activation.value" @activate="player.activate" />
         </template>

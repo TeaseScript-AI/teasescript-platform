@@ -41,6 +41,18 @@ HOST=0.0.0.0 PORT=4173 npm run playground
 
 Binding to `0.0.0.0` exposes this development server to every network that can reach the container. The playground is not production-ready and is not a public Node backend; Laravel remains the only eventual public backend.
 
+Browsers allow the Player's camera only in a secure context: HTTPS, or `localhost` on the same machine. To use the
+camera from another machine of the local network, serve HTTPS with a self-signed development certificate:
+
+```shell
+HOST=0.0.0.0 PORT=4173 PLAYGROUND_TLS_NAMES=agents.home.arpa npm run playground:https
+```
+
+The certificate covers `localhost`, this machine's host name, and the comma-separated `PLAYGROUND_TLS_NAMES`. It is made
+once with the system's `openssl` and kept in `.playground-tls/` (ignored by Git), and made again when those names
+change. The browser warns about it once; accept the warning to continue. It proves nothing about the server and is for
+development only.
+
 The page offers fixed repository examples for core behavior, control flow, active-loop checkpoints, and functions. Saved checkpoints are namespaced by example and checkpoint format version.
 
 To try image tags (#572) with your own images, point the server at a package folder; it is read again on each page
