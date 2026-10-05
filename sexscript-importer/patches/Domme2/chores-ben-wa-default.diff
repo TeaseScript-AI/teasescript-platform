@@ -1,0 +1,12 @@
+--- a/scripts/Domme2/chores.groovy
++++ b/scripts/Domme2/chores.groovy
+@@ -14,7 +14,8 @@
+ int chn = loadInteger("domme2.chores.day")
+ int knk = loadInteger("domme2.kinky")
+ int chw
+-int chanceBenWaBalls = loadInteger("domme2.chanceBenWaBalls")
++Integer chanceBenWaBalls = loadInteger("domme2.chanceBenWaBalls")
++if(chanceBenWaBalls == null) chanceBenWaBalls = 8
+ if(chanceBenWaBalls<8){
+ 	chanceBenWaBalls = 8
+ 	save("domme2.chanceBenWaBalls",chanceBenWaBalls)

@@ -25,7 +25,7 @@
       "id": "eat-ben-wa-chance",
       "layer": "source",
       "category": "e",
-      "reason": "eat's ben-wa-balls feedback raises or lowers chanceBenWaBalls and saves it as domme.chanceBenWaBalls, but only chores declares and loads that variable, so Groovy failed on the first ++/--. Load it at the top of eat exactly as chores does.",
+      "reason": "eat's ben-wa-balls feedback raises or lowers chanceBenWaBalls and saves it as domme.chanceBenWaBalls, but only chores declares and loads that variable, so Groovy failed on the first ++/--. Load it at the top of eat as chores does, with the same default of 8 for a profile that has none yet (see chores-ben-wa-default).",
       "diff": "eat-ben-wa-chance.diff"
     },
     {
@@ -34,6 +34,13 @@
       "category": "e",
       "reason": "SMinder ends its own story with return \"Domme\", return null and \"End of the Script\"; after that, two pasted copies of a Milovana tease (33003) redeclare endReached, block and newBlock at script level, which Groovy rejects (\"The current scope already contains a variable\"), so the script never compiled. Wrap the unreachable tail in a block comment; it contains no */ of its own.",
       "diff": "sminder-pasted-tail.diff"
+    },
+    {
+      "id": "chores-ben-wa-default",
+      "layer": "source",
+      "category": "e",
+      "reason": "chores reads domme.chanceBenWaBalls into an int, which fails on a fresh profile because nothing has saved the key yet (only chores and eat save it, and chores reads it first). Its next lines raise any value below 8 to 8 and save it, so 8 is the value the tease starts with: read into an Integer and default a missing key to 8.",
+      "diff": "chores-ben-wa-default.diff"
     }
   ]
 }
