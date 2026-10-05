@@ -2809,7 +2809,11 @@ function findDeferred(
   // A menu over a list that a loop builds converts at the start of its own statement (runtimeListSelectedValue).
   const call = node.kind === "methodCall" ? legacyApiCall(node, context) : null;
   const input = call?.name === "getSelectedValue";
-  if (input && !inputOptions && isLoopMenu(node, context)) return node;
+  if (input && !inputOptions && isLoopMenu(node, context)) {
+    // Its message, such as a ternary, is computed before the options.
+    const message = nodeArray(asNode(node.arguments)?.items)[0];
+    return (message === undefined ? null : findDeferred(message, context)) ?? node;
+  }
   for (const child of evaluationChildren(node)) {
     const options = input && child.kind === "arguments" ? nodeArray(child.items) : [];
     const found =
@@ -13141,12 +13145,14 @@ function pushPrompt(
   inputNode: AstNode,
   messageNode: AstNode,
   message: IrExpression,
+  /** An argument whose statements already run before the prompt, such as the loop that builds a menu's options. */
+  evaluated: AstNode | null = null,
 ): boolean {
   if (isNullConstant(messageNode)) return true;
   const root = context.statementRoot;
   // Groovy evaluates all arguments before showing the message, so other arguments must not have effects.
   const otherArguments = (callParts(inputNode)?.arguments ?? []).filter(
-    (argument) => argument !== messageNode,
+    (argument) => argument !== messageNode && argument !== evaluated,
   );
   const ordered =
     root !== null &&
@@ -13301,7 +13307,8 @@ function runtimeListSelectedValue(
     options.push({ kind: "option", value: index, text });
   }
   context.prelude.push(...loop);
-  if (!pushPrompt(context, node, messageNode, message)) return null;
+  if (!pushPrompt(context, node, messageNode, message, loop.length > 0 ? optionsNode : null))
+    return null;
   const first: IrExpression = { kind: "literal", value: writtenItems.length };
   options.push({
     kind: "list",
@@ -15321,13 +15328,17 @@ function mediaFile(
       return file;
     }
   }
-  // An empty path clears the image, and a URL is no package file.
-  if (written.trim() !== "" && !/^[a-z]+:\/\//iu.test(written))
+  // An empty path clears the image, a URL is no package file, and a photo the package copies there exists once copied.
+  if (
+    written.trim() !== "" &&
+    !/^[a-z]+:\/\//iu.test(written) &&
+    !(folder === "images" && context.copiedImages.has(written))
+  )
     addDiagnostic(
       context,
       "SX_MEDIA_MISSING",
       "warning",
-      `No file in the package matches "${written}"; the legacy player showed nothing here either.`,
+      `No file in the package matches "${written}"; unless the script creates it while running, the legacy player showed nothing here either.`,
       node.span,
     );
   return { kind: "literal", value: midi(written) };

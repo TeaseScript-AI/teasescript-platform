@@ -80,4 +80,22 @@ say "Reset ${reset}"
 let choices: object[] = [{ lbl: "Stroked", act: "stroked" }]
 choices = [{ lbl: "Nothing", act: null }] + choices
 say "Choices ${choices.length}"
+// A menu over a list that a loop builds asks its question after the loop, also one that a ternary computes.
+say "Strict?"
+let strict = (choose yes: "Yes", no: "No") == "yes"
+let tasks = [
+  { name: "Kneel" },
+  { name: "Crawl" }
+]
+let conditional = "Pick one"
+if strict {
+  conditional = "Pick, now."
+}
+let menuTexts3 = []
+for it in tasks {
+  menuTexts3.add(it.name)
+}
+say conditional
+let task = choose sexscriptLegacyMenuOptions(menuTexts3, 0)
+say "Task ${task}"
 exit

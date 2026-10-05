@@ -41,3 +41,8 @@ show("Reset " + reset)
 def choices = [[lbl: "Stroked", act: "stroked"]]
 choices = [[lbl: "Nothing", act: null]] + choices
 show("Choices " + choices.size())
+// A menu over a list that a loop builds asks its question after the loop, also one that a ternary computes.
+def strict = getBoolean("Strict?")
+def tasks = [[name: "Kneel"], [name: "Crawl"]]
+def task = getSelectedValue(strict ? "Pick, now." : "Pick one", tasks.collect { it.name })
+show("Task " + task)

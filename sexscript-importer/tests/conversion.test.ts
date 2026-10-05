@@ -492,7 +492,10 @@ test("names media files as the package holds them", { skip: parserUnavailable },
     ])
       assert.ok(source.includes(`\n${expected}\n`), expected);
     assert.match(source, /NOTE SX_MEDIA_PATH_CASE line 6/u);
-    assert.match(source, /NOTE SX_MEDIA_MISSING line 7: No file in the package matches "Domme\/Domme43.jpg"/u);
+    assert.match(
+      source,
+      /NOTE SX_MEDIA_MISSING line 7: No file in the package matches "Domme\/Domme43.jpg"; unless the script creates it/u,
+    );
     assert.equal(source.match(/SX_MEDIA_MISSING/gu)?.length, 1);
   } finally {
     rmSync(directory, { recursive: true, force: true });
