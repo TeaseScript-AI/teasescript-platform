@@ -1,6 +1,27 @@
 speaker system {
   title: "System"
 }
+function sexscriptLegacyTruth(value) {
+  if value is boolean {
+    return value
+  }
+  if value is number {
+    return value != 0
+  }
+  if value is string {
+    return value != ""
+  }
+  if value is list or value is set {
+    return value.length > 0
+  }
+  if value is dict {
+    return value.length > 0
+  }
+  if value is object {
+    return value != {}
+  }
+  return value != null
+}
 function sexscriptLegacyMaskUrl(url) {
   let parts = "${url}".split("?")
   if parts.length < 2 {
@@ -19,18 +40,18 @@ function sexscriptLegacyMaskUrl(url) {
   return "${parts[0]}?${masked.join("&")}"
 }
 // An online service cannot answer here: a system notice shows the request, with secret values hidden, and the
-// read is null, as when the request failed.
+// read is empty, as when the service answered nothing.
 let userId = load "training.id"
 let request = "https://example.org/cases.php?id=${userId}&apikey=SECRET&version=3"
-// NOTE SX_ONLINE_REQUEST line 5: The legacy script read this web address from an online service, which a package cannot reach; a system notice shows the request, with secret values hidden, and the read is null, as when the request failed.
+// NOTE SX_ONLINE_REQUEST line 5: The legacy script read this web address from an online service, which a package cannot reach; a system notice shows the request, with secret values hidden, and the read is empty, as when the service answered nothing.
 say as system "Online feature not available here. The original would have requested: GET ${sexscriptLegacyMaskUrl(request)}"
-let answer = null
-if answer == null {
+let answer = ""
+if not sexscriptLegacyTruth(answer) {
   say "We are having trouble connecting to the internet."
 }
-// NOTE SX_ONLINE_REQUEST line 7: The legacy script read this web address from an online service, which a package cannot reach; a system notice shows the request, with secret values hidden, and the read is null, as when the request failed.
+// NOTE SX_ONLINE_REQUEST line 7: The legacy script read this web address from an online service, which a package cannot reach; a system notice shows the request, with secret values hidden, and the read is empty, as when the service answered nothing.
 say as system "Online feature not available here. The original would have requested: GET http://example.org/api?token=…&page=1"
-let page = null
+let page = ""
 say "Page ${page}"
 // A function that talks to an online service, such as a language model, shows its request and fails as offline.
 // NOTE SX_ONLINE_REQUEST line 10: This function made a request to an online service, which a package cannot do; a system notice shows the request, with secret values hidden, and the function returns as when the request failed.

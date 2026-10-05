@@ -13332,7 +13332,8 @@ function playerFolder(
 /**
  * A read of a web address, `address.toURL().text` or `new URL(address).text`, which an online service answered: a
  * package has no such service (owner decision), so a system notice before the statement shows the request the
- * original made, with secret query values hidden, and the read is null, as when the request failed. Undefined for any
+ * original made, with secret query values hidden, and the read is empty, as when the service answered nothing, so code
+ * that goes on with the answer still runs. Undefined for any
  * other receiver.
  */
 function onlineRequest(
@@ -13357,7 +13358,7 @@ function onlineRequest(
     context,
     "SX_ONLINE_REQUEST",
     "warning",
-    "The legacy script read this web address from an online service, which a package cannot reach; a system notice shows the request, with secret values hidden, and the read is null, as when the request failed.",
+    "The legacy script read this web address from an online service, which a package cannot reach; a system notice shows the request, with secret values hidden, and the read is empty, as when the service answered nothing.",
     node.span,
   );
   const shown =
@@ -13374,7 +13375,9 @@ function onlineRequest(
       context,
     ),
   );
-  return { kind: "literal", value: null };
+  return node.kind === "methodCall" && constantString(node.method) === "readLines"
+    ? { kind: "list", items: [] }
+    : { kind: "literal", value: "" };
 }
 
 /** A URL with the values of query parameters named like a key, token, or password hidden (helper `maskUrl`). */
