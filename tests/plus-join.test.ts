@@ -117,6 +117,19 @@ test("joined and appended elements keep the list's element type", () => {
       '"a"',
     ],
   ]);
+  // A list whose elements may not fit is tested as a whole list first.
+  const either = 'let target: integer[] = []\nlet more: (integer | string)[] = [1, "x"]\n';
+  assert.deepEqual(diagnostics(`${either}target.addAll(more)\nexit`), [
+    [
+      "TSV041",
+      "'target' holds integer values (integer[]), so it cannot contain a whole number (integer) or text (string). Check it first: if more is integer[] { ... }",
+      "more",
+    ],
+  ]);
+  assert.deepEqual(
+    diagnostics(`${either}if more is integer[] {\n    target.addAll(more)\n}\nexit`),
+    [],
+  );
   // A non-whole number makes an integer list without a written type a number list, as add does.
   assert.deepEqual(
     diagnostics("let counts = [1]\ncounts += [2.5]\nlet first: integer = counts[0]\nexit").map(

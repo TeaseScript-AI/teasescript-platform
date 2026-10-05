@@ -399,6 +399,8 @@ interface Place {
   readonly label: string | null;
   /** For the elements of a collection, the collection's spelling, so element properties can be named. */
   readonly elementOf?: string | null;
+  /** For the elements of a list stored at once, as by `addAll`: a test checks that whole list. */
+  readonly listed?: boolean;
   /** For example `'score' holds a whole number (integer)` or `'scores' holds integer values (integer[])`. */
   readonly subject: string;
   /** What the value would do: `start as`, `be set to`, `contain`, `take`, or `return`. */
@@ -1625,7 +1627,7 @@ class TypeChecker {
     }
     this.#report(
       typeCode.typeMismatch,
-      `${place.subject}, so it cannot ${place.verb} ${describeValue(value)}.${this.#widenedNote(expression)}${checkFirstFix(place.type, value, expression) ?? place.fix(value, expression)}`,
+      `${place.subject}, so it cannot ${place.verb} ${describeValue(value)}.${this.#widenedNote(expression)}${checkFirstFix(place.type, value, expression, place.listed) ?? place.fix(value, expression)}`,
       expression.span,
     );
   }
@@ -1817,6 +1819,7 @@ class TypeChecker {
     value: StaticType,
     scope: Scope,
     verb?: string,
+    listed = false,
   ): CompileTask<void> {
     const collections = members(nonNullType(collection)).map(resolved);
     const label = expressionLabel(collectionExpression);
@@ -1832,6 +1835,7 @@ class TypeChecker {
             {
               ...elementPlace(member, label, nullable, this.#text, inferred, owner),
               ...(verb === undefined ? {} : { verb }),
+              listed,
             },
           ]
         : [],
@@ -3499,7 +3503,15 @@ class TypeChecker {
         );
     } else
       yield* compileChild(
-        this.#storeElementTask(collection, receiverExpression, argument, list, scope),
+        this.#storeElementTask(
+          collection,
+          receiverExpression,
+          argument,
+          list,
+          scope,
+          undefined,
+          true,
+        ),
       );
     this.#recordRuntimeCheck(
       call,
@@ -6466,6 +6478,7 @@ function checkFirstFix(
   target: StaticType,
   value: StaticType,
   expression: Expression,
+  listed = false,
 ): string | undefined {
   const all = members(value);
   const passing = all.filter((member) => isAssignable(target, member));
@@ -6474,9 +6487,11 @@ function checkFirstFix(
   // a property or element is first kept in a variable.
   const node = unwrap(expression);
   const label = node.kind === "identifier" ? node.name : null;
-  const test = all.every((member) => passing.includes(member) || member.kind === "null")
-    ? "!= null"
-    : `is ${typeName(union(passing))}`;
+  // The elements of a list stored at once are tested as that list, such as `more is integer[]`.
+  const test =
+    !listed && all.every((member) => passing.includes(member) || member.kind === "null")
+      ? "!= null"
+      : `is ${typeName(listed ? { kind: "list", element: union(passing) } : union(passing))}`;
   return label === null
     ? ` Keep it in a variable and check it first, as in: if value ${test} { ... }`
     : ` Check it first: if ${label} ${test} { ... }`;
