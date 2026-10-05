@@ -84,6 +84,7 @@ export type HelperName =
   | "askOnce"
   | "deviceId"
   | "maskUrl"
+  | "textLines"
   | "askText"
   | "compare"
   | "replaceChars"
@@ -185,6 +186,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "askOnce",
   "deviceId",
   "maskUrl",
+  "textLines",
   "askText",
   "compare",
   "replaceChars",
@@ -911,6 +913,43 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ),
           ]),
           ret(template(at(v("parts"), lit(0)), "?", method(v("masked"), "join", lit("&")))),
+        ],
+      );
+    },
+  },
+  // The lines of a text as File.readLines() split them: at LF, CR, or CRLF, without an empty last line.
+  textLines: {
+    name: "sexscriptLegacyTextLines",
+    build: () => {
+      const replace = (target: IrExpression, from: string, to: string): IrExpression => ({
+        kind: "methodCall",
+        target,
+        name: "replace",
+        arguments: [lit(from), lit(to)],
+      });
+      return fn(
+        "sexscriptLegacyTextLines",
+        ["text"],
+        [
+          letS("lines", {
+            kind: "methodCall",
+            target: replace(replace(template(v("text")), "\r\n", "\n"), "\r", "\n"),
+            name: "split",
+            arguments: [lit("\n")],
+          }),
+          ifS(bin("==", prop(v("lines"), "last"), lit("")), [
+            {
+              kind: "expression",
+              expression: {
+                kind: "methodCall",
+                target: v("lines"),
+                name: "removeLast",
+                arguments: [],
+              },
+              span: null,
+            },
+          ]),
+          ret(v("lines")),
         ],
       );
     },

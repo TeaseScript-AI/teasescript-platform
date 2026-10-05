@@ -32,6 +32,7 @@ import {
   javaFileState,
   javaMethodCall,
   javaProperty,
+  viewedText,
   type JavaFileState,
   type JavaRuleHost,
   type PackageResources,
@@ -13843,6 +13844,25 @@ function deviceCommand(node: AstNode): { name: string; label: string; state: str
   return found;
 }
 
+/** Text files that useFile() opened in an editor or viewer of the player's computer. */
+const TEXT_FILE_EXTENSIONS = new Set([".txt", ".log", ".csv", ".ini"]);
+
+/** The fixed text at the end of a path, `".txt"` of `"log_" + code + ".txt"`; null when the end is computed. */
+function pathSuffix(node: AstNode): string | null {
+  const literal = constantString(node);
+  if (literal !== null) return literal;
+  if (node.kind === "binary" && node.operator === "+") {
+    const right = asNode(node.right);
+    return right === null ? null : pathSuffix(right);
+  }
+  if (node.kind === "gstring") {
+    const strings = Array.isArray(node.strings) ? node.strings : [];
+    const last: unknown = strings.at(-1);
+    return typeof last === "string" && last !== "" ? last : null;
+  }
+  return null;
+}
+
 /** Programs a package may hold, which useFile() started on the player's computer. */
 const PROGRAM_EXTENSIONS = new Set([".exe", ".bat", ".cmd", ".com", ".jar", ".msi"]);
 
@@ -13918,6 +13938,26 @@ function useFileStatements(
         span,
       },
     ];
+  }
+  // A text file opened in the computer's editor or viewer, such as a log: its text shows in the chat as prose from the
+  // system speaker, since the player only reads it (owner decision).
+  const suffix = args.length === 1 ? pathSuffix(args[0]!) : null;
+  if (
+    suffix !== null &&
+    TEXT_FILE_EXTENSIONS.has(suffix.slice(suffix.lastIndexOf(".")).toLowerCase())
+  ) {
+    const viewed = viewedText(args[0]!, javaHost(context));
+    if (viewed === null) return [];
+    if (viewed !== undefined) {
+      addDiagnostic(
+        context,
+        "SX_FILE_VIEW",
+        "warning",
+        "useFile() opened this text file in a program of the player's computer; its text shows in the chat as prose from the system speaker.",
+        node.span,
+      );
+      return [systemSay(viewed.read, span, context, true)];
+    }
   }
   // A program the package holds, such as a puzzle, cannot start: a system notice says so (owner decision), and for a
   // puzzle the player says whether it was solved, so the story continues.
@@ -14125,7 +14165,18 @@ function systemSay(
   prose = false,
 ): IrStatement {
   context.syntheticHelpers.add("systemSpeaker");
-  return { kind: "say", value, speaker: SYSTEM_SPEAKER, ...(prose ? { prose: true } : {}), span };
+  // `prose (…)` would read as prose options (V30 §17), so other values are written as text.
+  const shown =
+    prose && value.kind !== "literal" && value.kind !== "template"
+      ? { kind: "template" as const, parts: [{ value }] }
+      : value;
+  return {
+    kind: "say",
+    value: shown,
+    speaker: SYSTEM_SPEAKER,
+    ...(prose ? { prose: true } : {}),
+    span,
+  };
 }
 
 function useHelper(context: LowerContext, name: HelperName, args: IrExpression[]): IrExpression {
