@@ -17,7 +17,7 @@ import {
   mainSourceSpan,
 } from "../plan/model.js";
 import { addTag, readTagText, type Tag } from "../tags.js";
-import { parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
+import { cloneMessageMarkup, parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
 import { isBlankTextAnswer, numberAnswerText, temporalAnswerText } from "../interaction-answers.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -1918,7 +1918,8 @@ function executeSay(
       events,
       instruction.span,
       prepared.speaker,
-      prepared.content,
+      // Captured markup is mutable; output markup is frozen.
+      cloneMessageMarkup(prepared.content),
       prepared.text,
       prepared.presentation,
     );
