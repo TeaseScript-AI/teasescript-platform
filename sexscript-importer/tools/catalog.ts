@@ -139,6 +139,7 @@ export interface PlayCheck {
   };
   readonly missingImages: readonly string[];
   readonly missingMedia: readonly string[];
+  readonly rawMarkup: readonly string[];
 }
 
 /** Where the status beyond the compiler comes from; see the module comment. */
@@ -528,6 +529,7 @@ export function parsePlayCheck(value: unknown): PlayCheck | null {
     },
     missingImages: strings(value.missingImages),
     missingMedia: strings(value.missingMedia),
+    rawMarkup: strings(value.rawMarkup),
   };
 }
 
@@ -547,14 +549,19 @@ function playStatus(play: PlayCheck, compileStatus: Status): Status {
       detail:
         compileStatus.kind === "error" ? compileStatus.detail : (play.runs[0]?.stop.detail ?? ""),
     };
+  const markup =
+    play.rawMarkup.length === 0
+      ? ""
+      : ` Its text shows legacy HTML as written, such as "${play.rawMarkup[0]}".`;
   if (play.verdict === "plays")
     return {
       kind: "plays",
-      label:
-        missing.length === 0
-          ? "plays to the end"
-          : `plays to the end, ${missing.length} media missing`,
-      detail: `Every run ended normally. ${coverage}${media}`,
+      label: [
+        "plays to the end",
+        ...(missing.length === 0 ? [] : [`${missing.length} media missing`]),
+        ...(play.rawMarkup.length === 0 ? [] : ["raw HTML in text"]),
+      ].join(", "),
+      detail: `Every run ended normally. ${coverage}${media}${markup}`,
     };
   const stop = play.runs.find((run) => run.stop.kind !== "ended")!.stop;
   const at = /^(\S+?:\d+) ([A-Z]+\d+)\b/u.exec(stop.detail);
