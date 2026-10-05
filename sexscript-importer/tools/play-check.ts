@@ -97,10 +97,18 @@ export interface RunResult {
     readonly kind:
       "ended" | "early-end" | "error" | "hang" | "budget" | "no-start" | "unsupported" | "harness";
     readonly detail: string;
+    /** Where the stop happened: the failing file and line, or the interaction that hung. */
+    readonly file: string | null;
+    readonly line: number | null;
+    /** The runtime error code, such as TSR027. */
+    readonly code: string | null;
   };
   readonly steps: number;
   readonly files: readonly string[];
+  /** Each interaction of the run as `file:line → answer`, in order. */
+  readonly path: readonly string[];
   readonly lastText: string;
+  /** Relative to the result's folder. */
   readonly screenshot: string | null;
 }
 
@@ -228,9 +236,13 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
         stop: {
           kind: "harness",
           detail: error instanceof Error ? error.message.split("\n")[0]! : String(error),
+          file: null,
+          line: null,
+          code: null,
         },
         steps: 0,
         files: [],
+        path: [],
         lastText: "",
         screenshot: null,
       };
@@ -304,14 +316,25 @@ async function playOnce(
     timeout: 30_000,
   });
   let state = await readState(page);
-  const finish = async (kind: RunResult["stop"]["kind"], detail: string, steps: number) => {
+  const taken: string[] = [];
+  const finish = async (
+    kind: RunResult["stop"]["kind"],
+    detail: string,
+    steps: number,
+    where: { file: string | null; line: number | null; code: string | null } = {
+      file: null,
+      line: null,
+      code: null,
+    },
+  ) => {
     const screenshot = `run-${run + 1}.png`;
     await page.screenshot({ path: path.join(outFolder, screenshot) });
     return {
       run,
-      stop: { kind, detail },
+      stop: { kind, detail, ...where },
       steps,
       files: [...files].sort(),
+      path: taken,
       lastText: state.lastText,
       screenshot,
     };
@@ -342,6 +365,9 @@ async function playOnce(
           ? "the session failed"
           : `${failure.path ?? ""}${failure.line === null ? "" : `:${failure.line}`} ${failure.code} ${failure.message}`.trim(),
         step,
+        failure === null
+          ? undefined
+          : { file: failure.path, line: failure.line, code: failure.code },
       );
     }
     if (pageErrors.length > 0) return finish("error", `page error: ${pageErrors[0]}`, step);
@@ -357,6 +383,12 @@ async function playOnce(
         "hang",
         `nothing happens while waiting for ${state.foreground ?? "nothing"}`,
         step,
+        {
+          file: state.site?.slice(0, state.site.lastIndexOf(":")) ?? state.file,
+          line:
+            state.site === null ? null : Number(state.site.slice(state.site.lastIndexOf(":") + 1)),
+          code: null,
+        },
       );
     if (state.foreground?.startsWith("interaction:") === true && state.site !== null) {
       const kind = state.foreground.slice("interaction:".length);
@@ -378,6 +410,7 @@ async function playOnce(
         const option = order[0]!;
         counts[option] = (counts[option] ?? 0) + 1;
         track.chose(state.site, option);
+        taken.push(`${state.site} → ${state.options[option] ?? option}`);
         await page.click(`[data-foreground-controls] button >> nth=${option}`, { timeout: 5_000 });
         step += 1;
       } else if (state.composer !== null) {
@@ -386,6 +419,7 @@ async function playOnce(
             ? NUMBER_ANSWERS
             : TEXT_ANSWERS;
         const answer = ISO_ANSWERS[state.composer.type] ?? answers[(run + visit) % answers.length]!;
+        taken.push(`${state.site} → "${answer}"`);
         await page.fill("[data-composer-input]", answer, { timeout: 5_000 });
         await page.press("[data-composer-input]", "Enter", { timeout: 5_000 });
         step += 1;
