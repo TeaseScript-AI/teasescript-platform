@@ -1,10 +1,10 @@
-import { createHash } from "node:crypto";
 import { walkAst, type ParsedGroovyFile } from "./ast.ts";
 import type {
   TeaseCompileDiagnostic,
   TeaseProjectCompiler,
   TeaseProjectCompileResult,
   TeaseProjectFile,
+  TeaseProjectImage,
 } from "./compile-check.ts";
 import { emitTease } from "./emit-tease.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
@@ -78,16 +78,28 @@ export interface FeasibilityOptions {
   /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
   files?: readonly string[];
   /**
-   * The converted package's files as written, after any manual output patches, which `finalPackage` compiles and runs
-   * as they are; needs `compiler`.
+   * The converted package as written, after any manual output patches, read as the Player reads it, which
+   * `finalPackage` compiles and runs as it is; needs `compiler`.
    */
-  finalPackage?: readonly TeaseProjectFile[];
+  finalPackage?: FinalPackageInput;
+}
+
+/** A converted package as the Player reads it: its sources with the SHA-256 of each file, and its tagged images. */
+export interface FinalPackageInput {
+  files: ReadonlyArray<TeaseProjectFile & { sha256: string }>;
+  images: readonly TeaseProjectImage[];
+  /** Files the Player skips or cannot read, each as `path: message`. */
+  problems: readonly string[];
 }
 
 /** The converted package as written: whether its files compile as one project, and a native run from `main.tease`. */
 export interface FinalPackageCheck {
   /** The files checked, with the SHA-256 of each. */
   files: Array<{ path: string; sha256: string }>;
+  /** The images of the catalog that tag queries searched. */
+  imageCount: number;
+  /** Files the Player skips or cannot read, each as `path: message`. */
+  problems: string[];
   compiles: boolean;
   /** The files with compiler errors. */
   failingFiles: string[];
@@ -435,26 +447,26 @@ const START = "sxSmokeStart";
 
 /** Compiles the package as written, without placeholders, and runs it natively from `main.tease` when it compiles. */
 function checkFinalPackage(
-  files: readonly TeaseProjectFile[],
+  { files, images, problems }: FinalPackageInput,
   compiler: TeaseProjectCompiler,
   runner: TeaseProjectRunner | undefined,
 ): FinalPackageCheck {
-  const compiled = compiler(files);
+  const sources = files.map(({ path, source }) => ({ path, source }));
+  const compiled = compiler(sources, [], images);
   const errors = compiled.diagnostics.filter(({ severity }) => severity === "error");
   const errorsByMessage = emptyCounts();
   for (const { code, message } of errors) increment(errorsByMessage, `${code} ${message}`);
   return {
-    files: files.map(({ path, source }) => ({
-      path,
-      sha256: createHash("sha256").update(source).digest("hex"),
-    })),
+    files: files.map(({ path, sha256 }) => ({ path, sha256 })),
+    imageCount: images.length,
+    problems: [...problems],
     compiles: compiled.compiled,
     failingFiles: [...new Set(errors.map(({ path }) => path))].sort(),
     errorsByMessage: sortCounts(errorsByMessage),
     run:
       runner === undefined || !compiled.compiled || !files.some(({ path }) => path === MAIN)
         ? null
-        : runner(files, {}),
+        : runner(sources, {}, { images }),
   };
 }
 

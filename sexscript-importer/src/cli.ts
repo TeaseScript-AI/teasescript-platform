@@ -1,7 +1,12 @@
+import { createHash } from "node:crypto";
 import { mkdir, open, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseParsedGroovyFile, type ParsedGroovyFile } from "./ast.ts";
-import { loadRepositoryProjectCompiler, type TeaseProjectCompiler } from "./compile-check.ts";
+import {
+  loadRepositoryPackageScanner,
+  loadRepositoryProjectCompiler,
+  type TeaseProjectCompiler,
+} from "./compile-check.ts";
 import { emitTease } from "./emit-tease.ts";
 import { inventoryFiles } from "./inventory.ts";
 import { lowerParsedFile } from "./lower.ts";
@@ -9,7 +14,7 @@ import { lowerPackage } from "./package.ts";
 import { parseProposals, type ProposalId } from "./proposals.ts";
 import { parseAcceptedForms, type AcceptedForm } from "./workarounds.ts";
 import type { MediaFile } from "./pending.ts";
-import { analyzeFeasibility, type FeasibilityOptions } from "./report.ts";
+import { analyzeFeasibility, type FeasibilityOptions, type FinalPackageInput } from "./report.ts";
 import { loadRepositoryProjectRunner } from "./runtime-check.ts";
 import { parseGroovySource } from "./source-parser.ts";
 
@@ -66,7 +71,7 @@ if (command === "inventory") {
     options.media = await packageMedia(path.join(dataRoot, "images"));
     options.files = await packageFiles(dataRoot);
   }
-  if (finalPackageDir !== null) options.finalPackage = await packageTeaseFiles(finalPackageDir);
+  if (finalPackageDir !== null) options.finalPackage = await finalPackage(finalPackageDir);
   const report = analyzeFeasibility(files, options);
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } else if (command === "convert") {
@@ -199,19 +204,24 @@ async function legacyDataRoot(scriptsRoot: string): Promise<string> {
   return path.join(scriptsRoot, "..");
 }
 
-/** The `.tease` files of a converted package, by their package paths. */
-async function packageTeaseFiles(root: string): Promise<Array<{ path: string; source: string }>> {
-  const paths = (await packageFiles(root)).filter(
-    (file) =>
-      file.toLowerCase().endsWith(".tease") &&
-      !file.split("/").some((part) => part.startsWith(".")),
-  );
-  return Promise.all(
-    paths.map(async (file) => ({
-      path: file,
-      source: await readFile(path.join(root, file), "utf8"),
-    })),
-  );
+/**
+ * A converted package as the Player reads it, by the playground server's package scan: its sources, decoded alike,
+ * with the SHA-256 of each file's bytes, and its images with their tags.
+ */
+async function finalPackage(root: string): Promise<FinalPackageInput> {
+  const scan = await (await loadRepositoryPackageScanner())(root);
+  return {
+    files: await Promise.all(
+      scan.sources.map(async (file) => ({
+        ...file,
+        sha256: createHash("sha256")
+          .update(await readFile(path.join(root, file.path)))
+          .digest("hex"),
+      })),
+    ),
+    images: scan.images,
+    problems: scan.problems,
+  };
 }
 
 /** Every file below the legacy data folder, relative to it with forward slashes. */

@@ -67,10 +67,14 @@ export interface ProjectRunResult {
   steps: number;
 }
 
+/** `images` is the package's image catalog, which tag queries search. */
 export type TeaseProjectRunner = (
   files: readonly ProjectSource[],
   builtins: Readonly<Record<string, HostFunction>>,
-  options?: { maxSteps?: number },
+  options?: {
+    maxSteps?: number;
+    images?: ReadonlyArray<{ path: string; keywords: readonly string[] }>;
+  },
 ) => ProjectRunResult;
 
 const repositoryIndexUrl = new URL("../../dist/src/index.js", import.meta.url);
@@ -155,15 +159,25 @@ export async function loadRepositoryRunner(): Promise<TeaseRunner> {
 export async function loadRepositoryProjectRunner(): Promise<TeaseProjectRunner> {
   const api = await loadRuntimeApi();
   // Runs of the same files with the same host functions reuse the last plan.
-  let last: { files: readonly ProjectSource[]; builtins: string; compiled: RuntimeData } | null =
-    null;
+  let last: {
+    files: readonly ProjectSource[];
+    builtins: string;
+    images: unknown;
+    compiled: RuntimeData;
+  } | null = null;
   return (files, builtins, options = {}) => {
     const names = Object.keys(builtins).sort().join("\n");
     const compiled =
-      last !== null && last.files === files && last.builtins === names
+      last !== null &&
+      last.files === files &&
+      last.builtins === names &&
+      last.images === options.images
         ? last.compiled
-        : api.call("compileProject", files, { builtins: Object.keys(builtins) });
-    last = { files, builtins: names, compiled };
+        : api.call("compileProject", files, {
+            builtins: Object.keys(builtins),
+            ...(options.images === undefined ? {} : { images: options.images }),
+          });
+    last = { files, builtins: names, images: options.images, compiled };
     return !isRecord(compiled.plan)
       ? NOT_COMPILED
       : smokeRun(
