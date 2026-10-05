@@ -171,8 +171,9 @@ export interface FeasibilityReport {
   projectCompilesAsGenerated: boolean | null;
   /**
    * Package smoke runs in the real runtime, which follows the transfers between files itself: the package project
-   * from `main.tease`, then isolated runs of runnable scripts no earlier run reached. Files that do not compile clean
-   * except pending capabilities become stubs that end the run as `blocked`; pending capabilities use placeholder
+   * from `main.tease`, then isolated runs of runnable scripts no earlier run reached. A file runs where the project
+   * compiles it, also with unconverted statements kept as TODO comments, as in the Player; a file that does not compile
+   * except pending capabilities becomes a stub that ends the run as `blocked`. Pending capabilities use placeholder
    * copies with host stand-ins. Assumes one package per report.
    */
   smokeRuns: PackageRunResult[];
@@ -365,7 +366,8 @@ export function analyzeFeasibility(
           increment(report.blockingPendingCapabilityFileCounts, capability);
         }
       }
-      if (compilerCleanExceptPending) runnable.add(projectPath);
+      // A file with unconverted statements, kept as TODO comments, still runs where it compiles, as in the Player.
+      if (errorFree(shimmedDiagnostics, projectPath)) runnable.add(projectPath);
       for (const diagnostic of compilerDiagnostics) {
         increment(report.compilerDiagnosticsByMessage, `${diagnostic.code} ${diagnostic.message}`);
       }

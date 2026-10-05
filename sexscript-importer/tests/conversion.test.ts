@@ -316,6 +316,31 @@ test(
   },
 );
 
+// A file with an unconverted statement, kept as a TODO comment, still runs where it compiles, as in the Player.
+test(
+  "smoke-runs a compiling file that keeps unconverted statements as TODO comments",
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
+  async () => {
+    if (!("compiler" in projectResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-todo-run-"));
+    try {
+      const sourcePath = path.join(directory, "start.groovy");
+      writeFileSync(sourcePath, 'show("Before")\nnew java.awt.Robot().delay(5)\nshow("After")\n');
+      const report = analyzeFeasibility([await parseGroovySource(sourcePath)], {
+        compiler: projectResult.compiler,
+        runner: projectResult.runner,
+      });
+      assert.equal(report.loweredScriptFileCount, 0);
+      assert.deepEqual(
+        report.smokeRuns.map(({ status, visited }) => ({ status, visited })),
+        [{ status: "halted", visited: ["main.tease"] }],
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 test("names media files as the package holds them", { skip: parserUnavailable }, async () => {
   const directory = mkdtempSync(path.join(tmpdir(), "sexscript-media-"));
   try {

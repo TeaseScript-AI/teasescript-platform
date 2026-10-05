@@ -1,0 +1,9 @@
+// A closure named like a SexScript method calls that method inside its own body, where the variable is not defined yet.
+def getRandom = { low, high -> low + getRandom(high - low) }
+show("Roll " + getRandom(3, 6))
+// A closure of one parameter called without an argument gets null.
+def greet = { who -> show(who == null ? "Hello" : "Hello " + who) }
+greet()
+// A local closure named sleep is called instead of Groovy sleep(milliseconds).
+def sleep = { show("You fall asleep.") }
+sleep()

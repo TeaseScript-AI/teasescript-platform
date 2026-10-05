@@ -78,15 +78,20 @@ if (check.contentHash !== packageContentHash(sources))
 if (check.verdict !== "plays") fail(`The Player check verdict is ${check.verdict}, not plays.`);
 if (check.missingImages.length + check.missingMedia.length > 0)
   fail("The Player check found missing media.");
-const importerCommit = await readFile(path.join(root, ".conversion-summary.json"), "utf8").then(
-  (text) => {
-    const summary: unknown = JSON.parse(text);
-    return isRecord(summary) && typeof summary.importerCommit === "string"
-      ? summary.importerCommit
-      : "unknown";
-  },
-  () => "unknown",
-);
+if (check.rawMarkup.length > 0) fail("The Player check found legacy HTML shown as text.");
+// A unit converted on its own records its importer commit as `converter`; the others share the root's.
+const readCommit = (file: string, field: string) =>
+  readFile(file, "utf8").then(
+    (text) => {
+      const record: unknown = JSON.parse(text);
+      return isRecord(record) && typeof record[field] === "string" ? record[field] : null;
+    },
+    () => null,
+  );
+const importerCommit =
+  (await readCommit(path.join(source, ".conversion.json"), "converter")) ??
+  (await readCommit(path.join(root, ".conversion-summary.json"), "importerCommit")) ??
+  "unknown";
 const date = new Date().toISOString().slice(0, 10);
 const { files: covered, fileCount, sites, siteCount, choices } = check.coverage;
 const paths = `${check.runs.length} automated runs to the end (${covered.length}/${fileCount} files, ${sites}/${siteCount} interactions, ${choices} choices); manual: ${values.manual}`;

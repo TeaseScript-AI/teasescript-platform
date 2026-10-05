@@ -122,7 +122,7 @@ function helperUnit(): ParsedGroovyFile {
                   expression: {
                     kind: "constructorCall",
                     span: span3,
-                    type: "java.io.File",
+                    type: "java.awt.Robot",
                     arguments: args(constant("x")),
                   },
                 },
