@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "episode2-disappointed-image",
+      "layer": "source",
+      "category": "b",
+      "reason": "Episode 2, in English and German, shows firstcuckold/disappointed.jpg when the player greets her with a complaint, but the picture exists only in firstcuckold2/, which the script's closing image list names and a later scene already uses. Use firstcuckold2/disappointed.jpg.",
+      "diff": "episode2-disappointed-image.diff"
+    }
+  ]
+}
