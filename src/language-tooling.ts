@@ -12,6 +12,7 @@ import type {
 } from "./ast.js";
 import { compileProject, compileSource } from "./compiler.js";
 import {
+  askOperands,
   mediaHandlerBlocks,
   mediaOperands,
   showButtonOptions,
@@ -868,9 +869,8 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       return;
     case "interactionExpression":
       visitor.interaction(expression);
-      if (expression.hint !== null) children.push({ kind: "expression", node: expression.hint });
-      if (expression.defaultValue !== null)
-        children.push({ kind: "expression", node: expression.defaultValue });
+      for (const operand of askOperands(expression))
+        children.push({ kind: "expression", node: operand });
       for (const option of expression.options)
         children.push({ kind: "expression", node: option.expression });
       return;
@@ -990,7 +990,8 @@ function formatInteraction(source: string, node: InteractionExpression, edits: O
     cursor = node.speaker.span.end.offset;
   }
   if (node.interactionKind !== "choice") {
-    if (node.hint !== null) whitespaceEdit(source, cursor, node.hint.span.start.offset, " ", edits);
+    if (node.question !== null)
+      whitespaceEdit(source, cursor, node.question.span.start.offset, " ", edits);
     return;
   }
   const first = node.options[0];

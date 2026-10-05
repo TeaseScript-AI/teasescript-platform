@@ -16,8 +16,8 @@ import { compileValidPlan as compiled } from "./helpers/compile-valid-plan.js";
 
 test("runtime inspection exposes foreground interaction provenance without mutation", () => {
   const source =
-    'speaker mistress { name: "Mistress" }\nlet answer = askText as mistress "Type here"\nexit';
-  const ask = 'askText as mistress "Type here"';
+    'speaker mistress { name: "Mistress" }\nlet answer = askText as mistress hint: "Type here"\nexit';
+  const ask = 'askText as mistress hint: "Type here"';
   const plan = compiled(source);
   const pending = run(plan, createFreshRuntimeSnapshot(plan));
   assert.equal(pending.snapshot.status, "waiting");

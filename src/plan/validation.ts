@@ -780,7 +780,15 @@ function validateInstruction(
       }
       return;
     case "prepareSayText":
-      if (!hasExactKeys(value, ["kind", "value", "destinationTemporary", "span"])) {
+      if (
+        !hasExactKeys(
+          value,
+          "field" in value
+            ? ["kind", "value", "destinationTemporary", "field", "span"]
+            : ["kind", "value", "destinationTemporary", "span"],
+        ) ||
+        ("field" in value && value.field !== true)
+      ) {
         errors.push(
           planError("TSC002", "Prepared say text instruction contains unsupported fields.", path),
         );

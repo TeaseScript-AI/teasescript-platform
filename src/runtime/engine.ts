@@ -501,10 +501,13 @@ function executePlannedInstruction(
       return;
     }
     case "prepareSayText": {
+      const value = evaluator.evaluate(instruction.value);
       setCapturedTemporary(
         snapshot.temporaries,
         instruction.destinationTemporary,
-        evaluator.sayText(evaluator.evaluate(instruction.value), instruction.value.span),
+        instruction.field === true
+          ? fieldText(value, instruction.value.span, currentTemporalContext(snapshot))
+          : evaluator.sayText(value, instruction.value.span),
       );
       advance(snapshot);
       return;

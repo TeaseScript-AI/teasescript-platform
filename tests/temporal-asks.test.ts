@@ -52,12 +52,12 @@ test("askDate, askTime, and askDateTime return the ISO answer as a value", () =>
     },
   ] as const) {
     const session = start(
-      `let value = ${command} "When?"\nsay value, instant\nsay value.toISO()\nexit`,
+      `let value = ${command} "When?", hint: "Pick one"\nsay value, instant\nsay value.toISO()\nexit`,
     );
     assert.deepEqual(playerRuntimeForeground(session), {
       kind,
       accessibleName: "Answer",
-      hint: "When?",
+      hint: "Pick one",
     });
     const answered = answer(session, text);
     assert.equal(answered.outcome.kind, "completed", text);

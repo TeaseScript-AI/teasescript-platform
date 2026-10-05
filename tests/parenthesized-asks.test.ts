@@ -52,15 +52,23 @@ test("a parenthesized basic ask compiles to the plan of its compact form", () =>
   for (const { command, fallback } of ASKS) {
     for (const [bounded, compact] of [
       [`${command}()`, command],
-      [`${command}("Hint?")`, `${command} "Hint?"`],
+      [`${command}("Question?")`, `${command} "Question?"`],
+      [
+        `${command}("Question?", hint: "Help", default: ${fallback})`,
+        `${command} "Question?", hint: "Help", default: ${fallback}`,
+      ],
+      [
+        `${command}(default: ${fallback}, hint: question())`,
+        `${command} default: ${fallback}, hint: question()`,
+      ],
       [`${command}(default: ${fallback})`, `${command} default: ${fallback}`],
       [
         `${command}(question(), default: ${fallback})`,
         `${command} question(), default: ${fallback}`,
       ],
       [
-        `${command} as mistress (\n    "Hint?",\n    default: ${fallback}\n)`,
-        `${command} as mistress "Hint?",\n    default: ${fallback}`,
+        `${command} as mistress (\n    "Question?",\n    default: ${fallback}\n)`,
+        `${command} as mistress "Question?",\n    default: ${fallback}`,
       ],
     ]) {
       assert.equal(planWithoutSpans(bounded!), planWithoutSpans(compact!), bounded);
@@ -71,13 +79,13 @@ test("a parenthesized basic ask compiles to the plan of its compact form", () =>
 test("each parenthesized basic ask completes after a checkpoint restore like its compact form", () => {
   for (const { command, fallback, answer: text, ...ask } of ASKS) {
     const transcripts = [
-      `${command}("When?", default: ${fallback})`,
-      `${command} "When?", default: ${fallback}`,
+      `${command}("When?", hint: "Pick", default: ${fallback})`,
+      `${command} "When?", hint: "Pick", default: ${fallback}`,
     ].map((expression) => {
       const session = start(`let result = ${expression}\nsay result, instant\nexit`);
       const foreground = playerRuntimeForeground(session);
       assert.ok(foreground !== null && "hint" in foreground, expression);
-      assert.equal(foreground.hint, "When?", expression);
+      assert.equal(foreground.hint, "Pick", expression);
       const restored = restorePlayerRuntimeSession(
         JSON.parse(JSON.stringify(createPlayerRuntimeRestorePoint(session))),
       );
@@ -91,8 +99,10 @@ test("each parenthesized basic ask completes after a checkpoint restore like its
       return resumed.transcriptEntries.map((entry) => entry.text);
     });
     assert.deepEqual(transcripts[0], transcripts[1], command);
-    // The answer, then `say result`, which shows the same value.
-    const [shownAnswer, said] = transcripts[0]!.slice(-2);
+    // The question, the answer, then `say result`, which shows the same value.
+    const [question, shownAnswer, said] = transcripts[0]!;
+    assert.equal(question, "When?", command);
+    assert.equal(transcripts[0]!.length, 3, command);
     assert.equal(said, shownAnswer, command);
     if ("shown" in ask) assert.equal(said, ask.shown, command);
   }
@@ -113,7 +123,11 @@ test("a parenthesized ask ends at its ')' inside larger expressions", () => {
   for (const text of ["4", "Ada", "Bea", "Cy", "key"]) {
     const foreground = playerRuntimeForeground(session);
     assert.ok(foreground !== null && "hint" in foreground);
-    asked.push([foreground.hint, "prefill" in foreground ? foreground.prefill : null]);
+    // Each field opens right after its question.
+    asked.push([
+      session.transcriptEntries.at(-1)?.text,
+      "prefill" in foreground ? foreground.prefill : null,
+    ]);
     session = answer(session, text);
   }
   // The nested default asks first and prefills the outer ask.
@@ -129,7 +143,7 @@ test("a parenthesized ask ends at its ')' inside larger expressions", () => {
 });
 
 test("a parenthesized ask records its command, speaker, arguments, and closing parenthesis", () => {
-  const source = 'let result = askText as mistress ("Hint?", default: "Ada")';
+  const source = 'let result = askText as mistress ("Question?", default: "Ada", hint: "Help")';
   const parsed = parse(source);
   assert.deepEqual(parsed.diagnostics, []);
   const statement = parsed.program.statements[0];
@@ -143,12 +157,13 @@ test("a parenthesized ask records its command, speaker, arguments, and closing p
   const asStart = source.indexOf(" as ") + 1;
   assert.deepEqual(offsets(ask.asSpan ?? undefined), [asStart, asStart + 2]);
   assert.deepEqual(offsets(ask.speaker?.span), at("mistress"));
-  assert.deepEqual(offsets(ask.hint?.span), at('"Hint?"'));
+  assert.deepEqual(offsets(ask.question?.span), at('"Question?"'));
   assert.deepEqual(offsets(ask.defaultValue?.span), at('"Ada"'));
+  assert.deepEqual(offsets(ask.hint?.span), at('"Help"'));
   assert.deepEqual(offsets(ask.span), [source.indexOf("askText"), source.length]);
 });
 
-test("a parenthesized ask takes one hint and the option 'default:', and names what is wrong", () => {
+test("a parenthesized ask takes one question and the options 'hint:' and 'default:', and names what is wrong", () => {
   const errors = (source: string) =>
     compileSource(`${PRELUDE}${source}\nlet = 1\nsay question()\nexit`)
       .diagnostics.filter((diagnostic) => diagnostic.severity === "error")
@@ -161,11 +176,11 @@ test("a parenthesized ask takes one hint and the option 'default:', and names wh
   for (const [source, error] of [
     [
       'let v = askText("a", "b")',
-      "TSP032 0:21 askText(...) takes one unnamed value; name the others, such as 'default:'.",
+      "TSP032 0:21 askText(...) takes one unnamed value; name the others, such as 'hint:'.",
     ],
     [
-      'let v = askNumber("a", hint: "b")',
-      "TSP032 0:23 Unknown askNumber option 'hint'; use 'default:'.",
+      'let v = askNumber("a", help: "b")',
+      "TSP032 0:23 Unknown askNumber option 'help'; use 'hint:' or 'default:'.",
     ],
     [
       'let v = askDate("a", default: 1, default: 2)',

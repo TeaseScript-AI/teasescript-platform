@@ -259,7 +259,7 @@ The Standard UI uses one fixed chat composer. Foreground interaction controls ap
 
 Choice buttons may occupy one or two rows. The Player application may instead render a dropdown when viewport, font, zoom, accessibility, or text constraints make buttons impractical. The presentation is not canonical runtime/checkpoint state and does not change completion or transcript semantics.
 
-Valid input and choice/button activations become player-authored transcript messages according to the accepted normalization and derivation rules. Control labels, field hints, localized validation feedback, and accessibility names do not automatically create duplicate speaker transcript output.
+Valid input and choice/button activations become player-authored transcript messages according to the accepted normalization and derivation rules. A basic ask's question is said once, as the requesting speaker's message, before its field opens. Control labels, field hints, localized validation feedback, and accessibility names do not automatically create duplicate speaker transcript output.
 
 ### Player and developer controls
 
