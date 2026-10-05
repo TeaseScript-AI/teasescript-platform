@@ -20,3 +20,7 @@ switch (getRandom(4)) {
 	default:
 		show("Go on")
 }
+// instanceof tests a value's type, which a Groovy map passes as a dict or an object.
+def given = getBoolean("A number?") ? 5 : "five"
+if (given instanceof Number) show("A number")
+if (given instanceof String) show("A text")

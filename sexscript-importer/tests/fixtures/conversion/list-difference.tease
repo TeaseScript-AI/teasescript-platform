@@ -1,3 +1,12 @@
+function sexscriptLegacyListMinus(items, removed) {
+  let kept = []
+  for item in items {
+    if not removed.contains(item) {
+      kept.add(item)
+    }
+  }
+  return kept
+}
 // Groovy list - value drops the value from a copy of the list; list - otherList drops each of its elements.
 let picked = load "picked"
 function pickToy {
@@ -6,26 +15,22 @@ function pickToy {
   if (choose yes: "Yes", no: "No") == "yes" {
     toys += ["strap"]
   }
-  // NOTE SX_LIST_DIFFERENCE line 6: Groovy list - kept repeated elements of the list; difference() keeps each remaining element once (V30 §16).
   if picked != null {
-    toys = toys.difference([picked])
+    toys = sexscriptLegacyListMinus(toys, [picked])
   }
   picked = toys.random
 }
 pickToy()
 say "Use the ${picked}"
 let rounds = [1, 2, 3, 4]
-// NOTE SX_LIST_DIFFERENCE line 12: Groovy list - kept repeated elements of the list; difference() keeps each remaining element once (V30 §16).
-rounds = rounds.difference([2])
-// NOTE SX_LIST_DIFFERENCE line 13: Groovy list - kept repeated elements of the list; difference() keeps each remaining element once (V30 §16).
-rounds = rounds.difference([1, 4])
+rounds = sexscriptLegacyListMinus(rounds, [2])
+rounds = sexscriptLegacyListMinus(rounds, [1, 4])
 say "Rounds left: ${rounds.length}"
 // A loop's element removed from the collection it iterates makes the collection a list, also for a parameter.
 function pickOwned(itemKeys) {
   for key in itemKeys {
-    // NOTE SX_LIST_DIFFERENCE line 18: Groovy list - kept repeated elements of the list; difference() keeps each remaining element once (V30 §16).
     if (load key) != true {
-      itemKeys = itemKeys.difference([key])
+      itemKeys = sexscriptLegacyListMinus(itemKeys, [key])
     }
   }
   // NOTE SX_LENGTH_RECEIVER line 20: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.

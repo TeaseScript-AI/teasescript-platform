@@ -88,6 +88,7 @@ export type HelperName =
   | "endsWithDigits"
   | "plainText"
   | "listPart"
+  | "listMinus"
   | "repeatList"
   | "compare"
   | "replaceChars"
@@ -193,6 +194,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "endsWithDigits",
   "plainText",
   "listPart",
+  "listMinus",
   "repeatList",
   "compare",
   "replaceChars",
@@ -1068,6 +1070,51 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         [
           ifS({ kind: "typeTest", value: v("value"), type: "list" }, [ret(v("value"))]),
           ret({ kind: "list", items: [v("value")] }),
+        ],
+      ),
+  },
+  // Groovy `list - other`: the elements that `removed` does not hold, repeated ones too, in order.
+  listMinus: {
+    name: "sexscriptLegacyListMinus",
+    build: () =>
+      fn(
+        "sexscriptLegacyListMinus",
+        ["items", "removed"],
+        [
+          { kind: "let", name: "kept", value: { kind: "list", items: [] }, span: null },
+          {
+            kind: "for",
+            variable: "item",
+            collection: v("items"),
+            body: [
+              ifS(
+                {
+                  kind: "unary",
+                  operator: "not",
+                  value: {
+                    kind: "methodCall",
+                    target: v("removed"),
+                    name: "contains",
+                    arguments: [v("item")],
+                  },
+                },
+                [
+                  {
+                    kind: "expression",
+                    expression: {
+                      kind: "methodCall",
+                      target: v("kept"),
+                      name: "add",
+                      arguments: [v("item")],
+                    },
+                    span: null,
+                  },
+                ],
+              ),
+            ],
+            span: null,
+          },
+          ret(v("kept")),
         ],
       ),
   },

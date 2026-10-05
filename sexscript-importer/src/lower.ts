@@ -8090,6 +8090,46 @@ function isTeaseObjectPropertyName(value: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
 }
 
+/** The TeaseScript types of Java classes that `instanceof` tests (#530): a Groovy map is a dict or an object. */
+const INSTANCE_TYPES: ReadonlyMap<string, readonly string[]> = new Map([
+  ...[
+    "Number",
+    "Integer",
+    "Long",
+    "Double",
+    "Float",
+    "Short",
+    "Byte",
+    "BigDecimal",
+    "BigInteger",
+  ].map((name): [string, string[]] => [name, ["number"]]),
+  ...["String", "GString", "CharSequence"].map((name): [string, string[]] => [name, ["string"]]),
+  ...["Boolean"].map((name): [string, string[]] => [name, ["boolean"]]),
+  ...["List", "ArrayList", "Collection", "Object[]"].map((name): [string, string[]] => [
+    name,
+    ["list"],
+  ]),
+  ...["Map", "HashMap", "LinkedHashMap", "TreeMap"].map((name): [string, string[]] => [
+    name,
+    ["dict", "object"],
+  ]),
+]);
+
+/** Groovy `x instanceof Number` as a type test, `x is number`; undefined for another class. */
+function instanceTest(node: AstNode, context: LowerContext): IrExpression | null | undefined {
+  const right = asNode(node.right);
+  const leftNode = asNode(node.left);
+  const name = (text(right?.type) ?? "").replace(/^java\.(?:lang|util|math)\./u, "");
+  const types = right?.kind === "classExpression" ? INSTANCE_TYPES.get(name) : undefined;
+  if (types === undefined || leftNode === null) return undefined;
+  if (types.length > 1 && !isRepeatableExpression(leftNode)) return undefined;
+  const value = lowerExpression(leftNode, context);
+  if (value === null) return null;
+  return types
+    .map((type): IrExpression => ({ kind: "typeTest", value, type }))
+    .reduce((left, right): IrExpression => ({ kind: "binary", operator: "or", left, right }));
+}
+
 /**
  * Groovy `text * n` and `list * n`: the text, or the list's elements, `n` times over, with a fractional count cut to
  * whole times as Groovy did. Undefined for other operands.
@@ -8125,6 +8165,10 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   if (operator === "*") {
     const repeated = repetition(node, context);
     if (repeated !== undefined) return repeated;
+  }
+  if (operator === "instanceof") {
+    const test = instanceTest(node, context);
+    if (test !== undefined) return test;
   }
   if (operator === "==" || operator === "!=") {
     // A listing of a missing folder was null; the images of a folder (imageFolderListing) are an empty list then.
@@ -9177,30 +9221,18 @@ function lowerListDifference(
   if (leftNode === null || rightNode === null) return null;
   const rightType = inferType(rightNode, context.types);
   const removesList = !element && isListType(rightType);
-  if (!element && !removesList && !onlyOf(rightType, NUMBER | STRING | BOOLEAN | NULL)) {
-    return unsupportedExpression(
-      context,
-      node,
-      "SX_LIST_DIFFERENCE",
-      "Groovy list - removed one value or every element of a list; the right side is not proven to be either. Use difference() with a list.",
-    );
-  }
+  const removesElement = element || onlyOf(rightType, NUMBER | STRING | BOOLEAN | NULL);
   const left = lowerExpression(leftNode, context);
   const right = lowerExpression(rightNode, context);
   if (left === null || right === null) return null;
-  addDiagnostic(
-    context,
-    "SX_LIST_DIFFERENCE",
-    "warning",
-    "Groovy list - kept repeated elements of the list; difference() keeps each remaining element once (V30 §16).",
-    node.span,
-  );
-  return {
-    kind: "methodCall",
-    target: left,
-    name: "difference",
-    arguments: [removesList ? right : { kind: "list", items: [right] }],
-  };
+  // Groovy `list - other` kept every element that `other` (a list, or else one value) does not hold, repeated ones too;
+  // a value not proven to be one or the other is decided at runtime.
+  const removed: IrExpression = removesList
+    ? right
+    : removesElement
+      ? { kind: "list", items: [right] }
+      : useHelper(context, "listPart", [right]);
+  return useHelper(context, "listMinus", [left, removed]);
 }
 
 /** A null list operand fails in Groovy and TeaseScript alike, so "list or null" counts as a list. */
