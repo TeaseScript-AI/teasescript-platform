@@ -424,6 +424,10 @@ export class Evaluator {
         if (expression.kind === "identifier") {
           const location = findBindingLocation(this.snapshot, this.plan, expression.name);
           if (location === undefined) throw this.#unknownName(expression.name, expression.span);
+          // Only the root of a prepared reference, reached through reference frames alone, keeps a copy: an index
+          // read after it can remove an ancestor of the value it selects. The receiver of an immediate call resolves
+          // through its binding, so it shares the root instead of copying it.
+          const prepared = pending.every((pendingFrame) => pendingFrame.reference);
           result = {
             value: location.binding.value,
             owned: false,
@@ -431,7 +435,9 @@ export class Evaluator {
               rootFrameId: location.frame.id,
               rootName: expression.name,
               path: [],
-              capturedRoot: cloneCapturedSerializableValue(location.binding.value),
+              capturedRoot: prepared
+                ? cloneCapturedSerializableValue(location.binding.value)
+                : location.binding.value,
               detached: false,
             },
             epoch: this.#referenceEpoch,
@@ -921,6 +927,17 @@ export class Evaluator {
 
   public prepareReference(expression: ExpressionPlan): SerializableRuntimeObject {
     const descriptor = this.#buildPreparedReference(expression);
+    // A collection call in an index can remove an ancestor of the selected value, so that the path no longer leads
+    // there from the binding. Such a reference is detached now, as its first use would detach it, so that a checkpoint
+    // taken before that use stays valid.
+    if (!descriptor.detached && this.#referenceEpoch !== 0) {
+      try {
+        this.#resolveDescriptor(descriptor, expression.span);
+      } catch (error) {
+        if (!(error instanceof RuntimeFault)) throw error;
+        return serializePreparedReference({ ...descriptor, detached: true });
+      }
+    }
     return serializePreparedReference(descriptor);
   }
 
