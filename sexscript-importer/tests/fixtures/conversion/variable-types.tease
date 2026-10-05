@@ -1,3 +1,9 @@
+// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
+function sexscriptLegacyCall(action, args): boolean | number | null {
+  if action == "chanceOrFlag" {
+    return chanceOrFlag(args[0])
+  }
+}
 function sexscriptLegacyText(value): string? {
   if value == null {
     return null
@@ -78,12 +84,21 @@ if startDelay == null {
 }
 let roundCount = "3"
 say "Delay ${delayText}, ${roundCount} rounds"
-// A function whose returns mix types declares its result type, which TeaseScript does not infer.
-function chanceOrFlag(n): number | boolean {
-  if n > 1 {
-    return 0.5
+// A function whose returns mix types declares its result type, which TeaseScript does not infer, also where several
+// returns share a type.
+function chanceOrFlag(n): boolean | number {
+  if n > 2 {
+    return true
   }
-  return false
+  if n > 1 {
+    return false
+  }
+  return 0.5
 }
 say "C ${chanceOrFlag(2)}"
+// A variable that holds what a closure value returns takes the result type of the dispatcher that calls it.
+let pick = "chanceOrFlag"
+let picked: boolean | number | null = false
+picked = sexscriptLegacyCall(pick, [3])
+say "P ${picked}"
 exit

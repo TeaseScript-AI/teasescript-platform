@@ -64,7 +64,7 @@ function asked {
   save true as "asked"
   return "fallback"
 }
-let found = null
+let found = ""
 if counts.contains(key) {
   found = counts[key]
 } else {

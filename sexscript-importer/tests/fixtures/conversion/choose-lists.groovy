@@ -37,3 +37,7 @@ resets.add([lbl: "Back", ID: null])
 show("Reset?")
 def reset = resets[getSelectedValue(null, resets.collect { it.lbl })].ID
 show("Reset " + reset)
+// Records put in front of a list by concatenation count too.
+def choices = [[lbl: "Stroked", act: "stroked"]]
+choices = [[lbl: "Nothing", act: null]] + choices
+show("Choices " + choices.size())

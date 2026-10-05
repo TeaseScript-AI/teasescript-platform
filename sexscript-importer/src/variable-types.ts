@@ -132,20 +132,30 @@ export function functionResultTypes(statements: IrStatement[]): Map<string, Teas
   return functionReturns(statements).results;
 }
 
-/** The result types of the functions among `statements`, and the types their `return`s give. */
-function functionReturns(statements: IrStatement[]): {
+/**
+ * The result types of the functions among `statements`, and the types their `return`s give; `knownResults` gives those
+ * of functions defined elsewhere.
+ */
+function functionReturns(
+  statements: IrStatement[],
+  knownResults: ReadonlyMap<string, TeaseType> = new Map(),
+): {
   results: Map<string, TeaseType>;
   returned: Map<string, TeaseType[]>;
 } {
   const bindings = new Map<BindingKey, Binding>();
-  let results = new Map<string, TeaseType>();
+  let results = new Map(knownResults);
   let returned = new Map<string, TeaseType[]>();
   for (let round = 0; round < 50; round += 1) {
     const analysis = analyse(statements, bindings, results);
-    const changed = [...analysis.results].some(
+    // A known result stays where the analysis finds none of its own, such as a union it does not infer.
+    const next = new Map(knownResults);
+    for (const [name, type] of analysis.results)
+      if (type.kind !== "unknown" || !next.has(name)) next.set(name, type);
+    const changed = [...next].some(
       ([name, type]) => typeName(type) !== typeName(results.get(name) ?? UNKNOWN),
     );
-    results = analysis.results;
+    results = next;
     returned = analysis.returned;
     if (!analysis.changed && !changed) break;
   }
@@ -184,28 +194,64 @@ function returnsNull(body: readonly IrStatement[]): boolean {
  * optional result type for a function that can return null besides a value (V30 §17), so a function whose returns
  * mix types, or a value and null, declares it.
  */
-export function withReturnTypes(statements: IrStatement[]): IrStatement[] {
-  const { returned } = functionReturns(statements);
+export function withReturnTypes(
+  statements: IrStatement[],
+  /** Result types of functions of other files, such as those of the script that loads a module. */
+  knownResults: ReadonlyMap<string, TeaseType> = new Map(),
+): IrStatement[] {
+  // A call of a function whose result is a union returns that union, which the analysis does not infer by itself;
+  // rounds pass the unions found so far until they stay the same.
+  let declared = new Map<string, { type: TeaseType; written: string }>();
+  for (let round = 0; round < 10; round += 1) {
+    const results = new Map(knownResults);
+    for (const [name, { type }] of declared) results.set(name, type);
+    const { returned } = functionReturns(statements, results);
+    const next = new Map<string, { type: TeaseType; written: string }>();
+    for (const statement of statements) {
+      if (statement.kind !== "function" || statement.returnType !== undefined) continue;
+      const result = declaredResult(statement, returned.get(statement.name) ?? []);
+      if (result !== null) next.set(statement.name, result);
+    }
+    const same =
+      next.size === declared.size &&
+      [...next].every(([name, { written }]) => declared.get(name)?.written === written);
+    declared = next;
+    if (same) break;
+  }
   return statements.map((statement) => {
     if (statement.kind !== "function" || statement.returnType !== undefined) return statement;
-    const types = returned.get(statement.name) ?? [];
-    const all = types.filter((type) => type.kind !== "null");
-    // Returns of unknown type, such as an unannotated parameter's, take the type of the others; a union of the known
-    // ones is still written, since the compiler needs it either way.
-    const values = all.filter((type) => nonNull(type).kind !== "unknown");
-    const unknowns = values.length < all.length;
-    if (values.length === 0) return statement;
-    let shared: TeaseType | null = nonNull(values[0]!);
-    for (const type of values.slice(1)) shared = shared === null ? null : unionOf(shared, type);
-    if (shared === null) return statement;
-    const optional = all.length < types.length || all.some((type) => type.kind === "optional");
-    // One type of value needs no annotation, also where the function can end without one; a `return null` beside it
-    // does (V30 §17).
-    if (shared.kind !== "union" && (unknowns || !(optional && returnsNull(statement.body))))
-      return statement;
-    const written = annotation(optional ? { kind: "optional", value: shared } : shared);
-    return written === null ? statement : { ...statement, returnType: written };
+    const written = declared.get(statement.name)?.written;
+    return written === undefined ? statement : { ...statement, returnType: written };
   });
+}
+
+/** The result type a function declares, from the types its returns give, or null where it needs none. */
+function declaredResult(
+  statement: Extract<IrStatement, { kind: "function" }>,
+  types: readonly TeaseType[],
+): { type: TeaseType; written: string } | null {
+  const all = types.filter((type) => type.kind !== "null");
+  // Returns of unknown type, such as an unannotated parameter's, take the type of the others; a union of the known
+  // ones is still written, since the compiler needs it either way.
+  const values = all.filter((type) => nonNull(type).kind !== "unknown");
+  const unknowns = values.length < all.length;
+  if (values.length === 0) return null;
+  let shared: TeaseType | null = nonNull(values[0]!);
+  for (const type of values.slice(1)) {
+    if (shared === null) break;
+    // A type the others already hold adds nothing; unionOf only forms unions of several members.
+    if (isAssignable(shared, nonNull(type))) continue;
+    shared = isAssignable(nonNull(type), shared) ? nonNull(type) : unionOf(shared, type);
+  }
+  if (shared === null) return null;
+  const optional = all.length < types.length || all.some((type) => type.kind === "optional");
+  // One type of value needs no annotation, also where the function can end without one; a `return null` beside it
+  // does (V30 §17).
+  if (shared.kind !== "union" && (unknowns || !(optional && returnsNull(statement.body))))
+    return null;
+  const type: TeaseType = optional ? { kind: "optional", value: shared } : shared;
+  const written = annotation(type);
+  return written === null ? null : { type, written };
 }
 
 interface Rounds {
@@ -1185,6 +1231,34 @@ function recordAdds(statements: readonly IrStatement[]): Map<string, IrExpressio
       isObjectLiteral(record)
     )
       result.set(target.name, [...(result.get(target.name) ?? []), record]);
+    // `opts = [[lbl: "None", act: null]] + opts`, `opts = opts + [...]`, and `opts += [...]` add records too.
+    if (
+      value.kind === "assign" &&
+      isRecord(target) &&
+      target.kind === "variable" &&
+      typeof target.name === "string"
+    ) {
+      const name = target.name;
+      const assigned = value.value;
+      const sides =
+        value.operator === "+="
+          ? [assigned]
+          : value.operator === "=" &&
+              isRecord(assigned) &&
+              assigned.kind === "binary" &&
+              assigned.operator === "+"
+            ? [assigned.left, assigned.right]
+            : [];
+      const self = (side: unknown): boolean =>
+        isRecord(side) && side.kind === "variable" && side.name === name;
+      const listed = sides.flatMap((side) =>
+        isRecord(side) && side.kind === "list" && Array.isArray(side.items)
+          ? side.items.filter(isObjectLiteral)
+          : [],
+      );
+      if (listed.length > 0 && (value.operator === "+=" || sides.some(self)))
+        result.set(name, [...(result.get(name) ?? []), ...listed]);
+    }
     for (const child of Object.values(value)) visit(child);
   };
   visit(statements);

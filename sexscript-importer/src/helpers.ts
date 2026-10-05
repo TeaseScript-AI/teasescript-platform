@@ -1,3 +1,4 @@
+import { isRecord } from "./ast.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
 import {
   JAVA_HELPER_ORDER,
@@ -70,6 +71,93 @@ export function withActionDispatcher(
     span: null,
   };
   return { ...program, statements: [note, dispatcher, ...program.statements] };
+}
+
+/**
+ * Variables that start with a literal and are later set to a dispatcher result take the dispatcher's declared result
+ * type, such as `boolean | number | null`, when it holds the literal: the variable types were settled before the
+ * dispatcher existed, and Groovy let the variable hold whatever the called closure returned.
+ */
+export function withDispatcherResultTypes(statements: IrStatement[]): IrStatement[] {
+  const dispatcher = statements.find(
+    (statement) => statement.kind === "function" && statement.name === ACTION_DISPATCHER,
+  );
+  const resultType = dispatcher?.kind === "function" ? dispatcher.returnType : undefined;
+  if (resultType === undefined) return statements;
+  const members = new Set(
+    (resultType.endsWith("?") ? `${resultType.slice(0, -1)} | null` : resultType)
+      .replaceAll(/[()]/gu, "")
+      .split("|")
+      .map((member) => member.trim()),
+  );
+  const holds = (value: IrExpression): boolean => {
+    if (value.kind !== "literal") return false;
+    if (value.value === null) return members.has("null");
+    if (typeof value.value === "boolean") return members.has("boolean");
+    if (typeof value.value === "string") return members.has("string");
+    return members.has("number") || (members.has("integer") && Number.isInteger(value.value));
+  };
+  // The names a body sets to a dispatcher result, outside the functions it defines.
+  const dispatched = (body: readonly IrStatement[]): Set<string> => {
+    const names = new Set<string>();
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) value.forEach(visit);
+      if (!isRecord(value) || value.kind === "function") return;
+      const { target, value: assigned } = value;
+      if (
+        value.kind === "assign" &&
+        value.operator === "=" &&
+        isRecord(target) &&
+        target.kind === "variable" &&
+        typeof target.name === "string" &&
+        isRecord(assigned) &&
+        assigned.kind === "call" &&
+        assigned.name === ACTION_DISPATCHER
+      )
+        names.add(target.name);
+      Object.values(value).forEach(visit);
+    };
+    visit(body);
+    return names;
+  };
+  const typed = (body: IrStatement[], names: ReadonlySet<string>): IrStatement[] =>
+    body.map((statement): IrStatement => {
+      if (statement.kind === "function") {
+        const own = dispatched(statement.body);
+        return own.size === 0 ? statement : { ...statement, body: typed(statement.body, own) };
+      }
+      if (
+        statement.kind === "let" &&
+        statement.type === undefined &&
+        names.has(statement.name) &&
+        holds(statement.value)
+      )
+        return { ...statement, type: resultType };
+      return withNestedBodies(statement, (inner) => typed(inner, names));
+    });
+  return typed(statements, dispatched(statements));
+}
+
+function withNestedBodies(
+  statement: IrStatement,
+  map: (body: IrStatement[]) => IrStatement[],
+): IrStatement {
+  switch (statement.kind) {
+    case "if":
+      return { ...statement, then: map(statement.then), else: map(statement.else) };
+    case "while":
+    case "repeat":
+    case "for":
+      return { ...statement, body: map(statement.body) };
+    case "switch":
+      return {
+        ...statement,
+        cases: statement.cases.map((item) => ({ ...item, body: map(item.body) })),
+        default: map(statement.default),
+      };
+    default:
+      return statement;
+  }
 }
 
 /**

@@ -76,4 +76,8 @@ for it in resets {
 }
 let reset = resets[(choose sexscriptLegacyMenuOptions(menuTexts2, 0))].ID
 say "Reset ${reset}"
+// Records put in front of a list by concatenation count too.
+let choices: object[] = [{ lbl: "Stroked", act: "stroked" }]
+choices = [{ lbl: "Nothing", act: null }] + choices
+say "Choices ${choices.length}"
 exit

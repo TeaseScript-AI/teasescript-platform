@@ -20,6 +20,7 @@ import {
   SECRET_PARAMETER_PARTS,
   SYSTEM_SPEAKER,
   withActionDispatcher,
+  withDispatcherResultTypes,
   type HelperName,
 } from "./helpers.ts";
 import {
@@ -1317,11 +1318,14 @@ export function lowerParsedFile(
       : new Set([...mixin.receiverMembers, ...(options.globalTypes?.keys() ?? [])]);
   const typedStatements = withLegacyMarkup(
     withEnforcedTypes(
-      [
-        ...bindingDeclarations(body, context, members),
-        ...context.closureFunctions,
-        ...withScriptBindings(authoredStatements, body, context, members),
-      ],
+      withDirectClosureCalls(
+        [
+          ...bindingDeclarations(body, context, members),
+          ...context.closureFunctions,
+          ...withScriptBindings(authoredStatements, body, context, members),
+        ],
+        context,
+      ),
       context,
     ),
     context,
@@ -1361,7 +1365,7 @@ export function lowerParsedFile(
   );
   return renameConflictingIdentifiers({
     ...dispatched,
-    statements: withReturnTypes(dispatched.statements),
+    statements: withDispatcherResultTypes(withReturnTypes(dispatched.statements)),
   });
 }
 
@@ -3180,8 +3184,9 @@ function lowerConditionalAssignment(
     const reassignsSelf = !declaration && variableName(value) === variableName(target);
     // With a plain fallback, the variable starts with it and takes the value only where that is true, tested through a
     // temporary, so the variable never holds the value's null: `let elvisValue = v`, `x = d`, then
-    // `if elvisValue != null and ... { x = elvisValue }`.
-    // Only a value of unknown type needs it: its truth goes through a helper, which proves the variable non-null nowhere.
+    // `if elvisValue != null and ... { x = elvisValue }`. A value that may be null needs it, since the variable keeps
+    // the fallback's type, and so does one of unknown type, whose truth goes through a helper that proves the variable
+    // non-null nowhere.
     const plainTruth = truthiness(
       { kind: "variable", name: variableName(target)! },
       inferType(value, context.types),
@@ -3189,7 +3194,11 @@ function lowerConditionalAssignment(
       target,
       context,
     );
-    if (!reassignsSelf && isSimpleValue(fallback) && plainTruth?.kind === "call") {
+    if (
+      !reassignsSelf &&
+      isSimpleValue(fallback) &&
+      (plainTruth?.kind === "call" || (inferType(value, context.types) & NULL) !== 0)
+    ) {
       const temporary = freshName("elvisValue", context);
       const valueType = inferType(value, context.types);
       const variables = new Map(context.types.variables);
@@ -3287,8 +3296,12 @@ function lowerConditionalAssignment(
       ),
     ];
   }
+  // Both branches assign the variable, so it starts with its type's empty value where both give one plain type.
+  const type = inferType(conditional, context.types);
+  const start =
+    type === BOOLEAN ? false : type === NUMBER ? 0 : type === STRING ? "" : null;
   return [
-    ...lowerStatement(assign(syntheticConstant(null, span)), context),
+    ...lowerStatement(assign(syntheticConstant(start, span)), context),
     ...lowerStatement(syntheticIf(condition, update(whenTrue), update(whenFalse), span), context),
   ];
 }
@@ -3577,7 +3590,7 @@ function syntheticNot(value: AstNode): AstNode {
   return { kind: "not", span: value.span, value };
 }
 
-function syntheticConstant(value: boolean | null, span: SourceSpan | null): AstNode {
+function syntheticConstant(value: boolean | number | string | null, span: SourceSpan | null): AstNode {
   return { kind: "constant", span, value };
 }
 
@@ -4531,6 +4544,106 @@ function lowerClosureValue(
   }
   context.actions.add(name);
   return { kind: "literal", value: name, action: true };
+}
+
+/**
+ * Calls of a function's local closure variable that nothing assigns again call the closure's function directly, not
+ * through the package dispatcher, when they pass it a number of arguments it takes. The variable goes where nothing
+ * else reads it, and so does the action where nothing else names it.
+ */
+function withDirectClosureCalls(statements: IrStatement[], context: LowerContext): IrStatement[] {
+  const functions = new Map(
+    statements.flatMap((statement): Array<[string, Extract<IrStatement, { kind: "function" }>]> =>
+      statement.kind === "function" ? [[statement.name, statement]] : [],
+    ),
+  );
+  const replacedActions = new Set<string>();
+  const rewritten = statements.map((statement): IrStatement => {
+    if (statement.kind !== "function") return statement;
+    const declarations = new Map<string, number>();
+    const actions = new Map<string, string>();
+    const assigned = new Set<string>();
+    const scan = (value: unknown): void => {
+      if (Array.isArray(value)) value.forEach(scan);
+      if (!isRecord(value)) return;
+      if (value.kind === "let" && typeof value.name === "string") {
+        declarations.set(value.name, (declarations.get(value.name) ?? 0) + 1);
+        const initial = value.value;
+        if (
+          isRecord(initial) &&
+          initial.kind === "literal" &&
+          initial.action === true &&
+          typeof initial.value === "string"
+        )
+          actions.set(value.name, initial.value);
+      }
+      if (value.kind === "for" && typeof value.variable === "string") assigned.add(value.variable);
+      if (value.kind === "assign" && isRecord(value.target) && value.target.kind === "variable")
+        assigned.add(String(value.target.name));
+      Object.values(value).forEach(scan);
+    };
+    scan(statement.body);
+    const direct = new Map(
+      [...actions].filter(
+        ([name, action]) =>
+          declarations.get(name) === 1 && !assigned.has(name) && functions.has(action),
+      ),
+    );
+    if (direct.size === 0) return statement;
+    const deep = (value: IrExpression): IrExpression => {
+      const mapped = mapChildren(value, deep);
+      if (
+        mapped.kind !== "call" ||
+        mapped.name !== ACTION_DISPATCHER ||
+        mapped.positional[0]?.kind !== "variable" ||
+        mapped.positional[1]?.kind !== "list"
+      )
+        return mapped;
+      const action = direct.get(mapped.positional[0].name);
+      const target = action === undefined ? undefined : functions.get(action);
+      const args = mapped.positional[1].items;
+      if (
+        action === undefined ||
+        target === undefined ||
+        args.length > target.parameters.length ||
+        args.length < target.parameters.filter((parameter) => parameter.defaultValue === null).length
+      )
+        return mapped;
+      replacedActions.add(action);
+      return { kind: "call", name: action, positional: args, named: {}, local: true };
+    };
+    const convert = (items: IrStatement[]): IrStatement[] =>
+      items.map((item) => mapOwnExpressions(withNestedStatements(item, convert), deep));
+    const body = convert(statement.body);
+    const read = new Set<string>();
+    const reads = (value: unknown): void => {
+      if (Array.isArray(value)) value.forEach(reads);
+      if (!isRecord(value)) return;
+      if (value.kind === "variable" && typeof value.name === "string") read.add(value.name);
+      Object.values(value).forEach(reads);
+    };
+    reads(body);
+    const unused = (item: IrStatement): boolean =>
+      item.kind === "let" && direct.has(item.name) && !read.has(item.name);
+    const prune = (items: IrStatement[]): IrStatement[] =>
+      items.filter((item) => !unused(item)).map((item) => withNestedStatements(item, prune));
+    return { ...statement, body: prune(body) };
+  });
+  if (replacedActions.size === 0) return rewritten;
+  const named = new Set<string>();
+  let dispatched = false;
+  const names = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(names);
+    if (!isRecord(value)) return;
+    if (value.kind === "literal" && value.action === true && typeof value.value === "string")
+      named.add(value.value);
+    if (value.kind === "call" && value.name === ACTION_DISPATCHER) dispatched = true;
+    Object.values(value).forEach(names);
+  };
+  names(rewritten);
+  for (const action of replacedActions) if (!named.has(action)) context.actions.delete(action);
+  if (!dispatched) context.actions.delete(ACTION_DISPATCHER_MARKER);
+  return rewritten;
 }
 
 /** The function a closure body only forwards to, passing its own parameters unchanged. */

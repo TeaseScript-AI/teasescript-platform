@@ -27,7 +27,12 @@ import {
   photoCopy,
   withGuardedInputs,
 } from "./lower.ts";
-import { helperDefinitionOrder, SYSTEM_SPEAKER, withActionDispatcher } from "./helpers.ts";
+import {
+  helperDefinitionOrder,
+  SYSTEM_SPEAKER,
+  withActionDispatcher,
+  withDispatcherResultTypes,
+} from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { legacyProfilePrompt } from "./profile.ts";
 import {
@@ -790,8 +795,23 @@ export function lowerPackage(
   // What a function nothing references cannot convert becomes a note, in the file and in the composed script.
   const uncalled: MigrationDiagnostic[][] = files.map(() => []);
   const texts = packageTexts(files);
+  // A module that becomes its own file declares its functions' result types there too, knowing what the functions of
+  // the package's scripts return; a name that several scripts define tells nothing.
+  const scriptFunctions = lowered.flatMap((program, index) =>
+    files[index]?.root?.kind === "scriptBody" && program.module === undefined
+      ? program.statements.filter((statement) => statement.kind === "function")
+      : [],
+  );
+  const scriptResults = functionResultTypes(
+    scriptFunctions.filter(
+      (statement) =>
+        scriptFunctions.filter((other) => other.name === statement.name).length === 1,
+    ),
+  );
   const composed = lowered.map((program, index) => {
-    if (files[index]?.root?.kind !== "scriptBody" || program.module !== undefined) return program;
+    if (program.module !== undefined)
+      return { ...program, statements: withReturnTypes(program.statements, scriptResults) };
+    if (files[index]?.root?.kind !== "scriptBody") return program;
     const script = withLaunchMarkers(
       composeProgram(
         withLoadedModules(
@@ -1682,7 +1702,10 @@ function composeProgram(
     voidActions,
   );
   // A function whose returns mix types, such as the dispatcher, declares its result type.
-  const composed = { ...dispatched, statements: withReturnTypes(dispatched.statements) };
+  const composed = {
+    ...dispatched,
+    statements: withDispatcherResultTypes(withReturnTypes(dispatched.statements)),
+  };
   diagnostics.push(...packageDependencyDiagnostics(composed.statements, globalFunctions));
   return renameConflictingIdentifiers({
     ...composed,

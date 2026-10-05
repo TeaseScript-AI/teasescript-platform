@@ -58,9 +58,16 @@ if (startDelay == null) {
 }
 String roundCount = 3
 show("Delay " + delayText + ", " + roundCount + " rounds")
-// A function whose returns mix types declares its result type, which TeaseScript does not infer.
+// A function whose returns mix types declares its result type, which TeaseScript does not infer, also where several
+// returns share a type.
 def chanceOrFlag = { n ->
-	if (n > 1) return 0.5
-	return false
+	if (n > 2) return true
+	if (n > 1) return false
+	return 0.5
 }
 show("C " + chanceOrFlag(2))
+// A variable that holds what a closure value returns takes the result type of the dispatcher that calls it.
+def pick = chanceOrFlag
+def picked = false
+picked = pick(3)
+show("P " + picked)
