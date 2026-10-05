@@ -41,7 +41,7 @@ accept syntax, architecture, or implementation details.
 - **Camera capture:** `takePhoto()` as a typed capture action with trusted reference admission and non-fatal
   unavailability under [Runtime](docs/RUNTIME.md#camera-capture). With a trusted host capability the Player opens the
   session camera after Start and captures silently; a photo saved through script storage is stored in the browser and
-  shown again in a later run. An optional host-driven viewfinder previews the session camera; no syntax requests it yet.
+  shown again in a later run. Scripts show the camera's live view in a floating window or over the Stage with `showCamera [stage]` and hide it with `hideCamera`.
   `askImage`, recording APIs, and the advanced package media API remain deferred.
 - **Player:** the POC Player is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. It uses
   Vue/Vite, Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the transcript

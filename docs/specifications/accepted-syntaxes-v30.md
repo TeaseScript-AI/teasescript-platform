@@ -2232,10 +2232,47 @@ A count is a whole number of at least one and a duration is exact and greater th
 `repeat: 3` is an error; write `3 times` or a duration. Blocking media may use a count or a duration but not
 indefinite repetition.
 
-On the ordinary story path, `showImage`, `hideImage`, `playAudio`, `playVideo`, and statement-level media handle
-operations such as `music.pause()` or `music.position = 2 min` wait until the previous message's pacing has completed or
-been skipped, like a following `say`. `wait` and `timer` keep overlapping message pacing
-([§27](#27-timers)). Timer and cue blocks keep the canonical interrupt pacing and add no media wait.
+On the ordinary story path, `showImage`, `hideImage`, `showCamera`, `hideCamera`, `playAudio`, `playVideo`, and
+statement-level media handle operations such as `music.pause()` or `music.position = 2 min`, and camera placement
+writes, wait until the previous message's pacing has completed or been skipped, like a following `say`. `wait` and
+`timer` keep overlapping message pacing ([§27](#27-timers)). Timer and cue blocks keep the canonical interrupt pacing
+and add no media wait.
+
+### Camera view
+
+**Status:** Accepted (Owner decisions on [#602](https://github.com/TeaseScript-AI/teasescript-platform/issues/602),
+2026-10-05) and implemented.
+
+```text
+showCamera                     // the camera's live view in the Player's floating window
+showCamera stage               // the camera's live view over the Stage image, which stays underneath
+let view = showCamera          // keeps a handle
+view.placement = "stage"       // moves the view, like a timer's t.display = "mystery"
+if view.placement == "window" { ... }
+hideCamera                     // hides every camera view
+```
+
+`showCamera [stage]` shows the camera's view: without a word in the Player's floating window, which the player may move
+and resize, and with `stage` over the Stage image. `stage` is recognized only directly after `showCamera`. Used as a
+value, `showCamera` evaluates to an opaque camera view handle, which may be ignored. The camera has one view:
+`showCamera` while it is shown moves it instead of opening a second, and after `hideCamera` shows it again, so an
+earlier handle refers to it again. `hideCamera` takes no arguments and hides every camera view; `exit` hides them too.
+Both use command syntax only.
+
+- The handle's one property is `placement`, `"window"` or `"stage"`, readable and assignable. Another value fails with
+  `TSR050`, or with `TSV059` when the compiler knows it; other properties and methods are `TSV059`. Assigning the
+  placement of a hidden view changes nothing and reports developer warning `TSW010`; reading it keeps working.
+- The view over the Stage covers the Stage image without replacing it: `showImage` and `hideImage` change the image
+  underneath, and the view stays until `hideCamera`. It also lies over a playing Stage video.
+- A camera view only shows the camera; it never takes a photo. `takePhoto()`
+  ([§33](#33-browser-api-file-folder-camera-and-url-references)) captures from the same camera and changes nothing on
+  screen.
+- Whether the Player has a camera is not part of the script: without one, `showCamera` shows nothing and the script
+  continues. Whether a camera view is shown, and its placement, are part of the session state and come back after a
+  checkpoint is restored.
+- Camera views and their handles cannot be saved, used as a parameter default, or given to a global or speaker at the
+  start of the session.
+- Later camera roles may open more views, each with its own handle; `hideCamera` keeps hiding all of them.
 
 ### Media handles
 
@@ -4219,6 +4256,8 @@ moveOverlay
 animateOverlay
 hideOverlay
 hideImage
+showCamera
+hideCamera
 showBlur
 hideBlur
 drawRectangle
@@ -4503,7 +4542,7 @@ Resolved in this revision:
 - visible measurements use account-preferred unit systems, automatic readable scaling, an account decimal preference defaulting to two places, and per-call `format(unit: ..., decimals: ...)` overrides;
 - `relativeTo: "background" | "viewport"`, background `fit: "contain" | "cover" | "stretch"`, and `"contain"` as the default are accepted;
 - overlays use `hideOverlay`, asynchronous `moveOverlay` and `animateOverlay`, optional blocking behavior, and keyframe hold durations;
-- `showImage <file>` and `hideImage` control the persistent Stage image; `playAudio` and `playVideo` are blocking by default, `async` returns a handle, and cues use `at`, `beforeEnd`, and `finish` ([§22](#22-stage-image-audio-and-video));
+- `showImage <file>` and `hideImage` control the persistent Stage image; `showCamera [stage]` and `hideCamera` show and hide the camera's view; `playAudio` and `playVideo` are blocking by default, `async` returns a handle, and cues use `at`, `beforeEnd`, and `finish` ([§22](#22-stage-image-audio-and-video));
 - blur uses `showBlur` and `hideBlur` as a separate non-destructive visual layer;
 - drawing uses dedicated shape/text functions and removable references;
 - initial layered-scene transitions are `"none"`, `"fade"`, and `"crossfade"` (accepted future direction; not implemented; see [§22](#22-stage-image-audio-and-video));

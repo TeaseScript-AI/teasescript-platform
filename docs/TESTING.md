@@ -575,9 +575,10 @@ viewport that keeps the first question's input visible. With Chromium's fake cam
 card it also runs the development preview's camera scenario (`/player/?dev&scenario=camera`): granted, the session camera
 opens at Start, `takePhoto()` puts a photo of the test card on the Stage, and the saved photo is shown again in a new
 run, after which the next mount reclaims a replaced photo; denied, the script continues without a photo; a forged
-reference in saved data shows no photo. The viewfinder scenario (`?scenario=viewfinder`) checks that the viewfinder
-window plays the test card mirrored while the script waits, stays in place while the sidebar is hidden and shown, and
-goes when the script takes its unmirrored photo, and that a denied camera shows none. Serving the fixture package root
+reference in saved data shows no photo. The camera view scenario (`?scenario=viewfinder`) checks that the script's
+camera view plays the test card mirrored in its window, stays in place while the sidebar is hidden and shown, and stays
+when the script takes its unmirrored photo; that `view.placement = "stage"` moves it over the Stage, where the photo stays
+underneath and the Stage takes the camera's aspect; that `hideCamera` hides it; and that a denied camera shows none. Serving the fixture package root
 `tests/fixtures/packages/`, it opens packages by URL in the Player, playground, and editor: a valid package starts at
 its `main.tease` with its own Stage image and plays its own sound, and one that does not compile lists its diagnostic
 with file and line. With a Windows user agent, the editor opens a package served only as a catalog whose file paths a
@@ -588,7 +589,8 @@ Firefox captures camera frames differently, so the same scenario has a Firefox r
 test:player:firefox-camera` drives Firefox's fake camera through `playwright-cli` and a Playwright-managed Firefox, and
 skips explicitly when either is missing. It checks a capture whose first frames have no size yet, as a real Firefox
 camera delivers them; the saved photo in a new run; a camera without frames, after which the script continues
-without a photo; and the viewfinder with such first frames from a wide camera, whose aspect it adopts. Neither route needs a physical or virtual camera device. `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium
+without a photo; and the camera view with such first frames from a wide camera, whose aspect it adopts in the window and over the
+Stage. Neither route needs a physical or virtual camera device. `CHROMIUM_BIN` is tried before the `/usr/bin` Chromium
 paths and then the newest Playwright-managed Chromium; an unusable value falls back to them. An unavailable Chromium
 executable is an explicit skip; an available browser must pass the configured smoke checks.
 

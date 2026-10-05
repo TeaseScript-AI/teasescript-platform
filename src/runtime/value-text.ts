@@ -15,6 +15,7 @@ import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import type {
   SerializableMediaHandle,
+  SerializableCameraViewHandle,
   SerializableRuntimeTemporal,
   SerializableRuntimeValue,
   SerializableScriptReference,
@@ -25,6 +26,7 @@ import {
   isDuration,
   isList,
   isMediaHandle,
+  isCameraView,
   isObject,
   isRange,
   isScriptReference,
@@ -141,7 +143,9 @@ export function fieldText(
 export function valueNotation(
   value: SerializableRuntimeValue,
   span: SourceSpan,
-  handleNotation: (handle: SerializableTimerHandle | SerializableMediaHandle) => string,
+  handleNotation: (
+    handle: SerializableTimerHandle | SerializableMediaHandle | SerializableCameraViewHandle,
+  ) => string,
 ): string {
   const output: string[] = [];
   const work: Array<{ readonly text: string } | { readonly value: SerializableRuntimeValue }> = [
@@ -194,7 +198,8 @@ export function valueNotation(
         `${plainScalarText(current.start, span)}${current.inclusive ? "..=" : ".."}${plainScalarText(current.end, span)}`,
       );
     else if (isSpeakerReference(current)) output.push(`<speaker ${current.identifier}>`);
-    else if (isTimerHandle(current) || isMediaHandle(current)) output.push(handleNotation(current));
+    else if (isTimerHandle(current) || isMediaHandle(current) || isCameraView(current))
+      output.push(handleNotation(current));
     else if (isTemporal(current)) output.push(temporalNotation(current));
     else output.push(plainScalarText(current, span));
   }

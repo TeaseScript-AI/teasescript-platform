@@ -1,14 +1,10 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
 import type { PlayerTimerKind } from "../../model.js";
-import {
-  createPlayerRuntimeSession,
-  playerRuntimeForeground,
-  playerTemporalContext,
-} from "../../runtime-adapter.js";
+import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime-adapter.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
@@ -76,18 +72,9 @@ if (cameraScenario)
         }),
       ),
     );
-else if (viewfinderScenario) {
+else if (viewfinderScenario)
   player.prepare(() => createPlayerRuntimeSession(viewfinderScenarioSource, startOptions()));
-  // Shown while the script waits on its photo button, until the language can request the viewfinder itself.
-  watch(
-    () => {
-      const current = player.session.value;
-      const foreground = current && playerRuntimeForeground(current);
-      return foreground?.kind === "show-button" && foreground.label === "I'm ready, Mistress";
-    },
-    (shown) => player.showViewfinder(shown),
-  );
-} else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptions()));
+else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptions()));
 </script>
 
 <template>

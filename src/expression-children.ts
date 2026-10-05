@@ -13,6 +13,7 @@ export function expressionChildren(expression: Expression): readonly Expression[
     case "identifier":
     case "interactionExpression":
     case "showButtonExpression":
+    case "showCameraExpression":
       return [];
     case "parenthesizedExpression":
       return [expression.expression];

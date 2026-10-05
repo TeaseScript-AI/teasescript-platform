@@ -40,6 +40,8 @@ import type {
   TimerParts,
   TimerDisplay,
   HideImageStatement,
+  HideCameraStatement,
+  CameraPlacement,
   MediaCue,
   MediaHandlers,
   MediaKind,
@@ -92,11 +94,13 @@ export interface ParseResult {
 }
 
 // Commands that #parseStatement dispatches by name. A line that starts with one starts a statement; only `showButton`
-// also has an expression form, used after `=`, an operator, or an opening delimiter.
+// also has an expression form, used after `=`, an operator, or an opening delimiter. `showCamera`, like `timer`, is
+// not listed, so its value form may start a line after `:`.
 const statementOnlyCommands: ReadonlySet<string> = new Set([
   "showButton",
   "showImage",
   "hideImage",
+  "hideCamera",
   "save",
   "delete",
   "switch",
@@ -259,6 +263,13 @@ class Parser {
     }
     if (this.#checkIdentifier("hideImage")) {
       return this.#parseHideImageStatement();
+    }
+    if (this.#checkIdentifier("showCamera")) {
+      const parts = this.#parseShowCameraParts();
+      return parts === null ? null : Object.freeze({ kind: "showCameraStatement", ...parts });
+    }
+    if (this.#checkIdentifier("hideCamera")) {
+      return this.#parseHideCameraStatement();
     }
     if (this.#checkIdentifier("save")) {
       return this.#parseSaveStatement();
@@ -1396,6 +1407,31 @@ class Parser {
     });
   }
 
+  /** `showCamera [stage]`: the contextual word `stage` directly after the command places the view over the Stage. */
+  #parseShowCameraParts(): { placement: CameraPlacement; span: SourceSpan } | null {
+    const command = this.#advance();
+    if (
+      this.#rejectAdjacentParenthesis(
+        command,
+        "showCamera uses command syntax; write 'showCamera' or 'showCamera stage'.",
+      )
+    )
+      return null;
+    if (!this.#checkIdentifier("stage"))
+      return { placement: "window", span: copySpan(command.span) };
+    const word = this.#advance();
+    return { placement: "stage", span: spanFrom(command.span, word.span) };
+  }
+
+  #parseHideCameraStatement(): HideCameraStatement | null {
+    const command = this.#advance();
+    if (
+      this.#rejectAdjacentParenthesis(command, "hideCamera takes no arguments; write 'hideCamera'.")
+    )
+      return null;
+    return Object.freeze({ kind: "hideCameraStatement", span: copySpan(command.span) });
+  }
+
   #parseHideImageStatement(): HideImageStatement | null {
     const command = this.#advance();
     if (
@@ -1417,9 +1453,15 @@ class Parser {
       return false;
     this.#reportToken(parserDiagnosticCode.invalidMediaForm, message, this.#peek());
     let depth = 0;
+    let braces = 0;
     while (!this.#check(TokenKind.Newline) && !this.#check(TokenKind.EndOfFile)) {
+      // An unclosed group never takes the closing brace of an enclosing block on the same line; braces opened inside
+      // the group, as in an object argument, close there.
+      if (depth > 0 && braces === 0 && this.#check(TokenKind.RightBrace)) break;
       const token = this.#advance();
-      if (token.kind === TokenKind.LeftParenthesis) depth += 1;
+      if (token.kind === TokenKind.LeftBrace) braces += 1;
+      else if (token.kind === TokenKind.RightBrace) braces -= 1;
+      else if (token.kind === TokenKind.LeftParenthesis) depth += 1;
       else if (token.kind === TokenKind.RightParenthesis && --depth === 0) break;
     }
     return true;
@@ -3007,6 +3049,10 @@ class Parser {
       const parts = yield* parseChild(this.#parseTimerParts());
       return parts === null ? null : Object.freeze({ kind: "timerExpression", ...parts });
     }
+    if (this.#checkIdentifier("showCamera")) {
+      const parts = this.#parseShowCameraParts();
+      return parts === null ? null : Object.freeze({ kind: "showCameraExpression", ...parts });
+    }
     if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
       const parts = yield* parseChild(this.#parseMediaParts());
       return parts === null ? null : Object.freeze({ kind: "playMediaExpression", ...parts });
@@ -3786,8 +3832,12 @@ class Parser {
     }
   }
 
+  /** A statement that ends an unclosed block, such as a speaker missing its closing brace, which a value cannot start. */
   #isRecoveredTopLevelStatement(): boolean {
-    return this.#atStatementStart() && this.#peek(1).kind !== TokenKind.Colon;
+    return (
+      (this.#atStatementStart() || this.#checkIdentifier("showCamera")) &&
+      this.#peek(1).kind !== TokenKind.Colon
+    );
   }
 
   /** A statement keyword, or a protected statement-only command, which can never be a value. */

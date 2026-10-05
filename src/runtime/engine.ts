@@ -141,6 +141,7 @@ import {
   isRange,
   isSet,
   isMediaHandle,
+  isCameraView,
   isSpeakerReference,
   isTime,
 } from "./value-predicates.js";
@@ -819,6 +820,7 @@ function executePlannedInstruction(
     case "exit":
       stopAllTimersForSessionEnd(snapshot);
       stopAllMediaForSessionEnd(snapshot);
+      if (snapshot.cameraView !== null) snapshot.cameraView.shown = false;
       snapshot.backgroundActions.length = 0;
       snapshot.preparedSayOutput = null;
       if (
@@ -853,6 +855,19 @@ function executePlannedInstruction(
       return;
     case "showImage":
       showImage(plan, instruction, snapshot, evaluator, events);
+      return;
+    case "showCamera":
+      // Shows the default camera's view, or moves it when it is shown already; the Player brings the camera, if any.
+      snapshot.cameraView = { placement: instruction.placement, shown: true };
+      if (instruction.destinationTemporary !== null)
+        setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, {
+          kind: "cameraView",
+        });
+      advance(snapshot);
+      return;
+    case "hideCamera":
+      if (snapshot.cameraView !== null) snapshot.cameraView.shown = false;
+      advance(snapshot);
       return;
     case "storageWrite":
       writeStorage(instruction, snapshot, evaluator, events);
@@ -2580,7 +2595,7 @@ function executePacingBarrier(
   if (
     gate !== undefined &&
     !interruptRunning(snapshot) &&
-    (instruction.receiver === null || isMediaHandle(evaluator.evaluate(instruction.receiver)))
+    (instruction.receiver === null || isPacedHandle(evaluator.evaluate(instruction.receiver)))
   ) {
     snapshot.backgroundActions.splice(snapshot.backgroundActions.indexOf(gate), 1);
     snapshot.foregroundAction = Object.freeze({ ...gate, preparedOutput: null });
@@ -2588,6 +2603,11 @@ function executePacingBarrier(
     return;
   }
   advance(snapshot);
+}
+
+/** Handles whose property writes wait for the previous message's pacing: media playback and camera views. */
+function isPacedHandle(value: SerializableRuntimeValue): boolean {
+  return isMediaHandle(value) || isCameraView(value);
 }
 
 export function timerDisplay(value: SerializableRuntimeValue, span: SourceSpan): DelayDisplay {

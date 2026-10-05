@@ -19,7 +19,7 @@ interface CameraHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly canClearScriptStorage: Readonly<Ref<boolean>>;
   readonly viewfinder: Readonly<Ref<FakeTrack | null>>;
-  showViewfinder(shown: boolean): void;
+  readonly viewfinderPlacement: Readonly<Ref<"window" | "stage" | null>>;
   loadScriptStorage(): Promise<void>;
   clearScriptStorage(): Promise<boolean>;
   prepare(create: () => PlayerRuntimeSession): void;
@@ -149,36 +149,35 @@ test("saved data cannot be cleared while a restored session waits for the camera
   assert.equal(host.canClearScriptStorage.value, true);
 });
 
-test("the viewfinder previews the session camera only while shown, and a new session starts without it", async (context) => {
+test("the script's camera view previews the session camera where it places it, also after a restore", async (context) => {
   const { grant, tracks } = stubBrowser(context);
   grant();
   const host = mount(context, { capabilities: { camera: true } });
-  const script = () => createPlayerRuntimeSession('showButton "Take photo"\nexit');
-  // Without an open camera there is nothing to preview.
-  host.showViewfinder(true);
-  assert.equal(host.viewfinder.value, null);
-
-  host.prepare(script);
+  const shown = 'let view = showCamera stage\nshowButton "Hide"\nexit';
+  host.prepare(() => createPlayerRuntimeSession(shown));
   await host.activate();
   const [camera] = tracks;
   assert.ok(camera);
-  assert.equal(host.viewfinder.value, null);
-  host.showViewfinder(true);
+  assert.equal(host.viewfinderPlacement.value, "stage");
   assert.equal(host.viewfinder.value, camera);
-  // Hiding the preview keeps the camera open for `takePhoto()`.
-  host.showViewfinder(false);
-  assert.equal(host.viewfinder.value, null);
-  assert.equal(camera.readyState, "live");
-
-  // An ended camera has nothing to preview.
-  host.showViewfinder(true);
+  const showing = host.session.value;
+  assert.ok(showing);
+  const saved = createPlayerRuntimeRestorePoint(showing);
+  // An ended camera has nothing to preview; the script's placement stays.
   camera.dispatchEvent(new Event("ended"));
   assert.equal(host.viewfinder.value, null);
+  assert.equal(host.viewfinderPlacement.value, "stage");
 
-  host.prepare(script);
+  // Hiding the view keeps the camera open for `takePhoto()`.
+  host.prepare(() => createPlayerRuntimeSession('showCamera\nhideCamera\nshowButton "Done"\nexit'));
   await host.activate();
-  assert.equal(tracks.length, 2);
+  assert.equal(host.viewfinderPlacement.value, null);
   assert.equal(host.viewfinder.value, null);
-  host.showViewfinder(true);
-  assert.equal(host.viewfinder.value, tracks[1]);
+  assert.equal(tracks[1]?.readyState, "live");
+
+  // A restored session shows the view where it was, with the camera Continue opens.
+  host.prepareRestore(restorePlayerRuntimeSession(saved));
+  await host.activate();
+  assert.equal(host.viewfinderPlacement.value, "stage");
+  assert.equal(host.viewfinder.value, tracks[2]);
 });
