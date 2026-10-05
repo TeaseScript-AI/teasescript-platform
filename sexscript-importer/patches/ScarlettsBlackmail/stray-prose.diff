@@ -1,0 +1,10 @@
+--- a/scripts/ScarlettsBlackmail_de.groovy
++++ b/scripts/ScarlettsBlackmail_de.groovy
+@@ -376,7 +376,6 @@
+ 				case 0:
+ 					if(getBoolean("Bist du dir sicher? Denke daran: Das ist echt!", "Ja, Göttin! Ich ruiniere gerne mein Leben, um aus der Keuschheit herauszukommen!", "Ich bleibe lieber keusch für dich, Göttin!"))
+ 					{
+-						Dann soll es so sein. Viel Glück bei der Suche nach einem neuen Ehemann/Freund und einem neuen Job mit all den Bildern von dir, die im Internet kursieren!
+ 						show("Dann soll es so sein. Viel Glück bei der Suche nach " + (isFemale?"einem neuen Ehemann/Freund":"einer neuen Frau/Freundin") + " und einem neuen Job mit all den Bildern von dir, die im Internet kursieren!");
+ 						send(scriptVersion+"_"+id+"_initiationCompleted", false);
+ 						sendEncrypted(scriptVersion+"_"+id+"_fullyExposed", true);

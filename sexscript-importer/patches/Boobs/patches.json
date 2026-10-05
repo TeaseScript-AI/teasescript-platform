@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "toy-count-typos",
+      "layer": "source",
+      "category": "e",
+      "reason": "The plug, gag and dildo punishments declare tocountNN = 0, count an owned toy into an undefined clcountNN, and then test tocountNN == 0 to fall back when the toy is missing. The increment fails in Groovy for a player who owns the toy; count into tocountNN as the test expects.",
+      "diff": "toy-count-typos.diff"
+    },
+    {
+      "id": "spanking-wait",
+      "layer": "source",
+      "category": "e",
+      "reason": "\"Spank fast and hard!\" waits for player, a name that is never assigned, so Groovy failed there; the spanking sound it plays (xatmspank.wav) is not in the package either, so its length cannot stand in. Let the player end the spanking with the script's own \"Done!\" button, as the preceding \"get into position\" step does. Judgment call: the author's intended duration is unknown.",
+      "diff": "spanking-wait.diff"
+    }
+  ]
+}

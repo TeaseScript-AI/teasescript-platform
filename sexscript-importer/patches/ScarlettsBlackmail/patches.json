@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "stray-prose",
+      "layer": "source",
+      "category": "e",
+      "reason": "In the German release branch an unquoted copy of the farewell sentence stands as code right before the show(...) that displays it (with the gender-dependent partner), so Groovy evaluated it as calls to undefined names and failed. Delete the stray line; the show call keeps the message.",
+      "diff": "stray-prose.diff"
+    }
+  ]
+}

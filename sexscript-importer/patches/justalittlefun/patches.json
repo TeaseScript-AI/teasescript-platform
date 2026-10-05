@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "concatenation-typo",
+      "layer": "source",
+      "category": "e",
+      "reason": "The even-roll message types a dot instead of + before the string (val3p.\" an even number…\"), which Groovy reads as a property lookup on the number and fails; the odd-roll line above concatenates val3p with +, so restore the +.",
+      "diff": "concatenation-typo.diff"
+    }
+  ]
+}

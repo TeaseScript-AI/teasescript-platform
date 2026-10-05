@@ -1,0 +1,25 @@
+{
+  "patches": [
+    {
+      "id": "de-restart",
+      "layer": "source",
+      "category": "b",
+      "reason": "When the player hesitates, the German script restarts itself with return \"Harte Zeiten\", a file name that is not in the package (the English hard_times.groovy returns its own name, \"hard_times\"); the legacy player found no such script and ended. Return the German script's own name, hard_times_de.",
+      "diff": "de-restart.diff"
+    },
+    {
+      "id": "de-fast-images",
+      "layer": "source",
+      "category": "b",
+      "reason": "The German script shows hard_times/fast*.jpg, which do not exist; its own image list in the closing comment names hard_times/kathia_nobili/fast*.jpg, which it already uses for fast3.jpg a few lines earlier and which are byte-identical to the English script's fast images. Use that folder.",
+      "diff": "de-fast-images.diff"
+    },
+    {
+      "id": "v01-restart",
+      "layer": "source",
+      "category": "b",
+      "reason": "Version 0.1 lives in scripts/Hard times/ but restarts itself with return \"Hard times\", which the legacy player resolved against the scripts root and did not find, so the session ended. Return its path from the scripts root.",
+      "diff": "v01-restart.diff"
+    }
+  ]
+}

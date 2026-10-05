@@ -1,0 +1,20 @@
+--- a/scripts/enforced_slave.groovy
++++ b/scripts/enforced_slave.groovy
+@@ -64,6 +64,7 @@
+ if(limits==null){limits="limits"}
+ if(slaverating==null){slaverating=""}
+ def next_sub = subroutine
++def optionalendmessage = ""
+ def tempdecision=0,level=loadInteger("enforced_slave.level"),newid=0,slavenum=loadInteger("enforced_slave.slavenum"),id=loadInteger("enforced_slave.id"),maxbreak=loadInteger("enforced_slave.maxbreak"),maxtasks=loadInteger("enforced_slave.maxtasks"),taskscomplete=loadInteger("enforced_slave.taskscomplete"),tasksremain=loadInteger("enforced_slave.tasksremain")
+ def dir = System.getProperty("user.dir")
+ def t_start = new Date().format( "yyyy-MM-dd HH:mm:ss"),t_end = new Date().format( "yyyy-MM-dd HH:mm:ss")
+--- a/scripts/enforced_slave__sha256_bd3543990a70.groovy
++++ b/scripts/enforced_slave__sha256_bd3543990a70.groovy
+@@ -19,6 +19,7 @@
+ if(limits==null){limits="limits"}
+ if(slaverating==null){slaverating=""}
+ def next_sub = subroutine
++def optionalendmessage = ""
+ def tempdecision=0,level=loadInteger("enforced_slave.level"),newid=0,slavenum=loadInteger("enforced_slave.slavenum"),id=loadInteger("enforced_slave.id"),maxbreak=loadInteger("enforced_slave.maxbreak"),maxtasks=loadInteger("enforced_slave.maxtasks"),taskscomplete=loadInteger("enforced_slave.taskscomplete"),tasksremain=loadInteger("enforced_slave.tasksremain")
+ def dir = System.getProperty("user.dir")
+ def t_start = new Date().format( "yyyy-MM-dd HH:mm:ss"),t_end = new Date().format( "yyyy-MM-dd HH:mm:ss")

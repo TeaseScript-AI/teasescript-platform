@@ -1,0 +1,60 @@
+--- a/scripts/Banjo/dungeoncrawl.groovy
++++ b/scripts/Banjo/dungeoncrawl.groovy
+@@ -5205,7 +5205,7 @@
+ 		}
+ 	}
+ 	else if(purchaseItem=="Map, Cave (50c)") {
+-		if(hasMap) {
++		if(hasMapCave) {
+ 			show("You already own that item!")
+ 			showButton("Continue")
+ 		} else {
+@@ -5221,7 +5221,7 @@
+ 		}
+ 	}
+ 	else if(purchaseItem=="Map, Forest (30c)") {
+-		if(hasMap) {
++		if(hasMapForest) {
+ 			show("You already own that item!")
+ 			showButton("Continue")
+ 		} else {
+--- a/scripts/Banjo/dungeoncrawl__sha256_4bcc7f413976.groovy
++++ b/scripts/Banjo/dungeoncrawl__sha256_4bcc7f413976.groovy
+@@ -5205,7 +5205,7 @@
+ 		}
+ 	}
+ 	else if(purchaseItem=="Map, Cave (50c)") {
+-		if(hasMap) {
++		if(hasMapCave) {
+ 			show("You already own that item!")
+ 			showButton("Continue")
+ 		} else {
+@@ -5221,7 +5221,7 @@
+ 		}
+ 	}
+ 	else if(purchaseItem=="Map, Forest (30c)") {
+-		if(hasMap) {
++		if(hasMapForest) {
+ 			show("You already own that item!")
+ 			showButton("Continue")
+ 		} else {
+--- a/scripts/Banjo/dungeoncrawl__sha256_f82b1130d5b1.groovy
++++ b/scripts/Banjo/dungeoncrawl__sha256_f82b1130d5b1.groovy
+@@ -5205,7 +5205,7 @@
+ 		}
+ 	}
+ 	else if(purchaseItem=="Map, Cave (50c)") {
+-		if(hasMap) {
++		if(hasMapCave) {
+ 			show("You already own that item!")
+ 			showButton("Continue")
+ 		} else {
+@@ -5221,7 +5221,7 @@
+ 		}
+ 	}
+ 	else if(purchaseItem=="Map, Forest (30c)") {
+-		if(hasMap) {
++		if(hasMapForest) {
+ 			show("You already own that item!")
+ 			showButton("Continue")
+ 		} else {

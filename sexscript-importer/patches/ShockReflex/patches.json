@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "start-level-max",
+      "layer": "source",
+      "category": "e",
+      "reason": "When a hit or miss is set to step the intensity down, each set starts at powerLevelMax, which is never defined (only powerLevelMin = pLevelMin is), so Groovy failed there. Start at the saved maximum, pLevelMax.",
+      "diff": "start-level-max.diff"
+    }
+  ]
+}
