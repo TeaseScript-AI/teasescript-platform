@@ -98,6 +98,9 @@ export function requiredInstructionTemporaries(
     case "pacingBarrier":
       if (instruction.receiver !== null) collect(instruction.receiver);
       break;
+    case "showPermanentButton":
+      collect(instruction.text);
+      break;
     case "showImage":
       if (instruction.image !== null) collect(instruction.image);
       break;
@@ -163,6 +166,7 @@ export function instructionKilledTemporaries(instruction: Instruction): Readonly
     case "startTimer":
     case "playMedia":
     case "showCamera":
+    case "showPermanentButton":
       return instruction.destinationTemporary === null
         ? new Set<number>()
         : new Set([instruction.destinationTemporary]);

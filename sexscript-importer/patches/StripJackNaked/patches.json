@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "swimsuit-image-name",
+      "layer": "source",
+      "category": "b",
+      "reason": "The shared clothing-image helper returns \"swipsuitF.png\" for a female swimsuit; the package ships images/Bclothes/swimsuitF.png, and the male entries next to it (speedosM.png, shortsM.png) are spelled correctly. Fix the misspelled file name.",
+      "diff": "swimsuit-image-name.diff"
+    }
+  ]
+}

@@ -4,12 +4,13 @@ import type {
   TeaseProjectCompiler,
   TeaseProjectCompileResult,
   TeaseProjectFile,
+  TeaseProjectImage,
 } from "./compile-check.ts";
 import { emitTease } from "./emit-tease.ts";
+import { imageCatalog } from "./image-tags.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrStatement, MigrationProgram } from "./ir.ts";
 import { lowerPackage } from "./package.ts";
-import type { ProposalId } from "./proposals.ts";
 import type { AcceptedForm } from "./workarounds.ts";
 import {
   pendingHostFunctions,
@@ -68,14 +69,47 @@ export interface FeasibilityOptions {
   compiler?: TeaseProjectCompiler;
   /** Real TeaseScript runtime used for smoke runs of the package project; needs `compiler`. */
   runner?: TeaseProjectRunner;
-  /** Proposed language changes to emit in their working syntax; the shim makes them compile and run. */
-  proposals?: ReadonlySet<ProposalId>;
   /** Accepted forms to emit instead of their workarounds; the shim makes them compile and run. */
   accepted?: ReadonlySet<AcceptedForm>;
-  /** The package's images, which legacy image counts read at conversion time and proposed media tags at runtime. */
+  /**
+   * The package's images, which legacy image counts read at conversion time, and which the gate and the smoke runs give
+   * the compiler with the folder tags their generated sidecars carry.
+   */
   media?: readonly MediaFile[];
   /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
   files?: readonly string[];
+  /** Scripts that are no entries of their own, which the generated entry menu does not offer (PackageOptions). */
+  internalScripts?: readonly string[];
+  /**
+   * The converted package as written, after any manual output patches, read as the Player reads it, which
+   * `finalPackage` compiles and runs as it is; needs `compiler`.
+   */
+  finalPackage?: FinalPackageInput;
+}
+
+/** A converted package as the Player reads it: its sources with the SHA-256 of each file, and its tagged images. */
+export interface FinalPackageInput {
+  files: ReadonlyArray<TeaseProjectFile & { sha256: string }>;
+  images: readonly TeaseProjectImage[];
+  /** Files the Player skips or cannot read, each as `path: message`. */
+  problems: readonly string[];
+}
+
+/** The converted package as written: whether its files compile as one project, and a native run from `main.tease`. */
+export interface FinalPackageCheck {
+  /** The files checked, with the SHA-256 of each. */
+  files: Array<{ path: string; sha256: string }>;
+  /** The images of the catalog that tag queries searched. */
+  imageCount: number;
+  /** Files the Player skips or cannot read, each as `path: message`. */
+  problems: string[];
+  compiles: boolean;
+  /** The files with compiler errors. */
+  failingFiles: string[];
+  /** Compiler errors grouped by code and message. */
+  errorsByMessage: Record<string, number>;
+  /** Null without a runner or `main.tease`, or when the project does not compile. */
+  run: ProjectRunResult | null;
 }
 
 /** One smoke run of a package project. */
@@ -158,6 +192,8 @@ export interface FeasibilityReport {
     helpersCompile: boolean | null;
   } | null;
   files: FeasibilityFileReport[];
+  /** The check of the package as written; null unless its files and a compiler were given. */
+  finalPackage: FinalPackageCheck | null;
 }
 
 export function analyzeFeasibility(
@@ -171,10 +207,10 @@ export function analyzeFeasibility(
     globals,
     paths,
   } = lowerPackage(files, {
-    ...(options.proposals === undefined ? {} : { proposals: options.proposals }),
     ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
     ...(options.media === undefined ? {} : { media: options.media }),
     ...(options.files === undefined ? {} : { files: options.files }),
+    ...(options.internalScripts === undefined ? {} : { internalScripts: options.internalScripts }),
   });
   const helpers = globals?.helpers ?? null;
   const isScriptBodyAt = (index: number): boolean =>
@@ -201,14 +237,18 @@ export function analyzeFeasibility(
   ].map((entry) => ({ ...entry, shim: shimPendingCapabilities(entry.program) }));
   const shimOf = new Map(projectFiles.map((entry) => [entry.path, entry.shim]));
   const placeholders = [...new Set(projectFiles.flatMap((entry) => entry.shim.builtins))].sort();
+  const images = options.media === undefined ? undefined : imageCatalog(options.media);
   const shimmed =
     options.compiler?.(
       projectFiles.map(({ path, shim }) => ({ path, source: shim.source })),
       placeholders,
+      images,
     ) ?? null;
   const generated =
     options.compiler?.(
       projectFiles.map(({ path, program }) => ({ path, source: emitTease(program) })),
+      [],
+      images,
     ) ?? null;
   const shimmedDiagnostics = diagnosticsByPath(shimmed);
   const generatedDiagnostics = diagnosticsByPath(generated);
@@ -254,6 +294,10 @@ export function analyzeFeasibility(
           },
     smokeRunReachedScriptFileCount: options.runner === undefined ? null : 0,
     files: [],
+    finalPackage:
+      options.finalPackage === undefined || options.compiler === undefined
+        ? null
+        : checkFinalPackage(options.finalPackage, options.compiler, options.runner),
   };
 
   // The project files a smoke run may execute: every file that compiles clean except pending capabilities.
@@ -361,14 +405,7 @@ export function analyzeFeasibility(
     report.blockingPendingCapabilityFileCounts,
   );
   if (options.runner !== undefined && options.compiler !== undefined) {
-    runPackageProject(
-      report,
-      projectFiles,
-      runnable,
-      options.compiler,
-      options.runner,
-      options.media,
-    );
+    runPackageProject(report, projectFiles, runnable, options.compiler, options.runner, images);
     const reached = new Set(report.smokeRuns.flatMap(({ visited }) => visited));
     for (const [index, path] of projectPathOf) {
       const fileReport = report.files[index]!;
@@ -408,6 +445,31 @@ const ENTER = "sxSmokeEnter";
 const BLOCKED = "sxSmokeBlocked";
 const START = "sxSmokeStart";
 
+/** Compiles the package as written, without placeholders, and runs it natively from `main.tease` when it compiles. */
+function checkFinalPackage(
+  { files, images, problems }: FinalPackageInput,
+  compiler: TeaseProjectCompiler,
+  runner: TeaseProjectRunner | undefined,
+): FinalPackageCheck {
+  const sources = files.map(({ path, source }) => ({ path, source }));
+  const compiled = compiler(sources, [], images);
+  const errors = compiled.diagnostics.filter(({ severity }) => severity === "error");
+  const errorsByMessage = emptyCounts();
+  for (const { code, message } of errors) increment(errorsByMessage, `${code} ${message}`);
+  return {
+    files: files.map(({ path, sha256 }) => ({ path, sha256 })),
+    imageCount: images.length,
+    problems: [...problems],
+    compiles: compiled.compiled,
+    failingFiles: [...new Set(errors.map(({ path }) => path))].sort(),
+    errorsByMessage: sortCounts(errorsByMessage),
+    run:
+      runner === undefined || !compiled.compiled || !files.some(({ path }) => path === MAIN)
+        ? null
+        : runner(sources, {}, { images }),
+  };
+}
+
 function diagnosticsByPath(
   result: TeaseProjectCompileResult | null,
 ): Map<string, TeaseCompileDiagnostic[]> {
@@ -426,7 +488,14 @@ function stub(path: string): string {
  * The shimmed source of a runnable file with a first statement that announces the file, since the runtime reports
  * no transfers itself; and the line of that statement, which later lines of the generated file follow by one.
  */
-function announced(path: string, shim: PendingShim): { source: string; line: number } {
+/**
+ * A runnable file that announces itself when it starts: its source, the probe's line, and how many lines the probe
+ * added, which can be two when the emitter keeps a paragraph break after it.
+ */
+function announced(
+  path: string,
+  shim: PendingShim,
+): { source: string; probe: { line: number; shift: number } } {
   const source = emitTease({
     ...shim.program,
     statements: [
@@ -443,8 +512,9 @@ function announced(path: string, shim: PendingShim): { source: string; line: num
       ...shim.program.statements,
     ],
   });
-  const line = source.split("\n").findIndex((text) => text.startsWith(`${ENTER}(`)) + 1;
-  return { source, line };
+  const lines = source.split("\n");
+  const line = lines.findIndex((text) => text.startsWith(`${ENTER}(`)) + 1;
+  return { source, probe: { line, shift: lines.length - shim.source.split("\n").length } };
 }
 
 /**
@@ -459,7 +529,7 @@ function runPackageProject(
   runnable: ReadonlySet<string>,
   compiler: TeaseProjectCompiler,
   runner: TeaseProjectRunner,
-  media: readonly MediaFile[] | undefined,
+  images: readonly TeaseProjectImage[] | undefined,
 ): void {
   if (!entries.some(({ path }) => path === MAIN)) return;
   const builtins = [
@@ -468,13 +538,13 @@ function runPackageProject(
   const caseCounts = new Map<string, number>();
   for (const { path } of entries)
     caseCounts.set(path.toLowerCase(), (caseCounts.get(path.toLowerCase()) ?? 0) + 1);
-  const probeLines = new Map<string, number>();
+  const probeLines = new Map<string, { line: number; shift: number }>();
   const sources = new Map(
     entries.map(({ path, shim, fileIndex }): [string, string] => {
       if (!runnable.has(path) || caseCounts.get(path.toLowerCase())! > 1) return [path, stub(path)];
       if (fileIndex === null && path !== MAIN) return [path, shim.source];
-      const { source, line } = announced(path, shim);
-      probeLines.set(path, line);
+      const { source, probe } = announced(path, shim);
+      probeLines.set(path, probe);
       return [path, source];
     }),
   );
@@ -484,6 +554,7 @@ function runPackageProject(
     const result = compiler(
       [...sources].map(([path, source]) => ({ path, source })),
       builtins,
+      images,
     );
     if (result.compiled) break;
     const failing = new Set(
@@ -503,19 +574,18 @@ function runPackageProject(
     let blocked: string | null = null;
     let started = false;
     const hosts: Record<string, HostFunction> = {};
-    for (const { shim } of entries)
-      Object.assign(hosts, pendingHostFunctions(shim, answers, media));
+    for (const { shim } of entries) Object.assign(hosts, pendingHostFunctions(shim, answers));
     hosts[ENTER] = ([path]: readonly RuntimeValue[]) => (visits.push(String(path)), null);
     hosts[BLOCKED] = ([target]: readonly RuntimeValue[]) => ((blocked = String(target)), null);
     hosts[START] = () => (started ? "" : ((started = true), entry));
-    const result = runner(files, hosts);
+    const result = runner(files, hosts, images === undefined ? {} : { images });
     const failure = blocked === null ? result.failure : null;
-    // The announcing statement moved the generated file's lines down by one.
+    // The announcing statement moved the generated file's lines after it down.
     const probe = failure?.path === null ? undefined : probeLines.get(failure?.path ?? "");
     const line =
-      failure === null || failure.line === null || probe === undefined || failure.line < probe
+      failure === null || failure.line === null || probe === undefined || failure.line < probe.line
         ? (failure?.line ?? null)
-        : failure.line - 1;
+        : failure.line - probe.shift;
     const flow: PackageRunResult = {
       entry,
       isolated,

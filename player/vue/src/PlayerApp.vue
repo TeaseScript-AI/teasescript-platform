@@ -9,9 +9,12 @@ import type { PlayerSpeakerPresentation } from "../../model.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import FloatingViewfinder, { type FloatingPlace } from "./FloatingViewfinder.vue";
 import PlayerComposition from "./PlayerComposition.vue";
+import PlayerNotificationCenter from "./PlayerNotificationCenter.vue";
+import PlayerToasts from "./PlayerToasts.vue";
 import PlayerToolsShell, { type PlayerTool } from "./PlayerToolsShell.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
 import { playerRuntimeMedia } from "../../runtime-adapter.js";
+import PermanentButtons from "./PermanentButtons.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import ScriptProblems, { type ScriptFailure } from "./ScriptProblems.vue";
 import SessionActivation from "./SessionActivation.vue";
@@ -21,6 +24,7 @@ import TimerRegion from "./TimerRegion.vue";
 import { speakerAvatarSource } from "./speakerAvatar";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
+import { usePlayerNotifications } from "./usePlayerNotifications";
 import { usePlayerPreference } from "./usePlayerPreference";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
@@ -46,6 +50,7 @@ const themeIntent = defineModel<PlayerThemeIntent>("themeIntent", {
 });
 
 usePlayerKeyboardFocus();
+const notifications = usePlayerNotifications(props.player.notices);
 provide(
   enhancedTranscriptContrast,
   computed(() => themeIntent.value.contrast === "high"),
@@ -167,6 +172,15 @@ async function toggleFullscreen() {
             @toggle-fullscreen="toggleFullscreen"
             @toggle-theme-mode="toggleThemeMode"
           >
+            <template #notifications>
+              <PlayerNotificationCenter
+                :notifications="notifications.notifications.value"
+                :attention-level="notifications.attentionLevel.value"
+                :attention-count="notifications.attentionCount.value"
+                @dismiss="player.dismissNotice"
+                @open="notifications.markSeen"
+              />
+            </template>
             <template v-if="!sidebarVisible" #tools>
               <Tooltip>
                 <TooltipTrigger as-child>
@@ -195,13 +209,29 @@ async function toggleFullscreen() {
           />
           <ScriptProblems v-if="failure" :failure="failure" />
           <SessionActivation v-else :activation="player.activation.value" @activate="player.activate" />
+          <PlayerToasts
+            :notifications="notifications.notifications.value"
+            :seen-sequence="notifications.seenSequence.value"
+            :theme-mode="themeIntent.mode"
+          />
         </template>
         <template #right-rail>
-          <!-- Runtime timers are runtime-owned content; the preview may add fixtures around them. -->
-          <slot name="right-rail" :timers="player.timers.value">
-            <StageRightRail v-if="player.timers.value.length">
-              <template #timers>
+          <!-- Runtime timers and buttons are runtime-owned content; the preview may add fixtures around them. -->
+          <slot
+            name="right-rail"
+            :timers="player.timers.value"
+            :buttons="player.permanentButtons.value"
+            :press="player.pressPermanentButton"
+          >
+            <StageRightRail v-if="player.timers.value.length || player.permanentButtons.value.length">
+              <template v-if="player.timers.value.length" #timers>
                 <TimerRegion :timers="player.timers.value" />
+              </template>
+              <template v-if="player.permanentButtons.value.length" #controls>
+                <PermanentButtons
+                  :buttons="player.permanentButtons.value"
+                  @press="player.pressPermanentButton"
+                />
               </template>
             </StageRightRail>
           </slot>
@@ -215,8 +245,6 @@ async function toggleFullscreen() {
           :speakers="transcript.speakers"
           :revision="transcript.revision"
           :observe-time="player.observe"
-          :audio-blocked="player.audioBlocked.value"
-          @retry-audio="player.retryAudio"
           @update:session="player.update"
         />
       </PlayerComposition>

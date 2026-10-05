@@ -6,6 +6,24 @@ keywords: "training"
 ---
 // Legacy setInfos(): API version 9, status "working", color 0x000000, language "EN"
 
+function sexscriptLegacyCompare(left, right) {
+  if left == null {
+    if right == null {
+      return 0
+    }
+    return -1
+  }
+  if right == null {
+    return 1
+  }
+  if left < right {
+    return -1
+  }
+  if left > right {
+    return 1
+  }
+  return 0
+}
 let visits = load "training.visits", default: 0
 save visits + 1 as "training.visits"
 let title = load "training.title"
@@ -18,4 +36,13 @@ if (load "training.finished") == true {
 }
 delete "training.old"
 say "Visit ${visits + 1}"
+// A read into a variable whose type cannot hold null keeps its value where the key is missing.
+let greeting = "Mistress"
+// NOTE SX_LOAD_KEEPS_VALUE line 14: Groovy stored null in 'greeting' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+greeting = load "training.greeting", default: greeting
+say "Hello ${greeting}"
+// Groovy ordered a missing storage value, null, below every value.
+if sexscriptLegacyCompare(load "training.level", 3) < 0 {
+  say "Still a beginner"
+}
 exit

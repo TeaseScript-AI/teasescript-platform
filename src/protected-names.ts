@@ -147,6 +147,7 @@ export const CORE_RUNTIME_BUILTINS = Object.freeze([
   "getDateTime",
   "getTimestamp",
   "script",
+  "removePermanentButton",
 ] as const);
 
 /** Temporary direct-call bridge for implemented Platform Standard Library helpers. */

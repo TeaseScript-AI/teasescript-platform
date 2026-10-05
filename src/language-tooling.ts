@@ -8,6 +8,7 @@ import type {
   ShowButtonParts,
   Statement,
   TimerParts,
+  ShowPermanentButtonParts,
 } from "./ast.js";
 import { compileProject, compileSource } from "./compiler.js";
 import {
@@ -796,6 +797,9 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "timerStatement":
       visitTimer(statement, children);
       return;
+    case "showPermanentButtonStatement":
+      visitPermanentButton(statement, children);
+      return;
     case "playMediaStatement":
       visitMedia(statement, children);
       return;
@@ -837,6 +841,11 @@ function visitTimer(timer: TimerParts, children: VisitItem[]): void {
   if (timer.label !== null) children.push({ kind: "expression", node: timer.label });
   for (const child of timer.handler?.statements ?? [])
     children.push({ kind: "statement", node: child });
+}
+
+function visitPermanentButton(button: ShowPermanentButtonParts, children: VisitItem[]): void {
+  children.push({ kind: "expression", node: button.text });
+  for (const child of button.handler.statements) children.push({ kind: "statement", node: child });
 }
 
 function visitMedia(parts: MediaParts, children: VisitItem[]): void {
@@ -914,6 +923,9 @@ function visitExpression(expression: Expression, visitor: Visitor, children: Vis
       return;
     case "timerExpression":
       visitTimer(expression, children);
+      return;
+    case "showPermanentButtonExpression":
+      visitPermanentButton(expression, children);
       return;
     case "playMediaExpression":
       visitMedia(expression, children);

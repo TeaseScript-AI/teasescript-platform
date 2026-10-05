@@ -31,12 +31,13 @@ with the direction TeaseScript already took, and common practice in other langua
 | C5 | Warning when a choice result is compared with a value no option has | Merged as part of #504 (#535) |
 | T1 | Type enforcement, union types, type tests, narrowing | #504: merged (#519 enforcement, #526 type rules, #520 runtime checks, #530 unions, `is`, and narrowing) |
 | D1 | Dictionaries: lookup by runtime key (`toys[name]`) | Owner-decided as a separate `dict` type (#536); merged as #555 |
-| M1 | Media selected by tags (include/exclude tags, count matches) | Evaluated (counting); likely succeeded by #572's tagged selection and XMP image tags (ADR 0023) |
+| M1 | Media selected by tags (include/exclude tags, count matches) | Succeeded by #572's tagged selection and XMP image tags (ADR 0023), which the importer emits; the `--proposed` mode is removed |
 
 The importer emits L1 and C1–C3 in its default output as merged in #515, and the text operations, `join`, and
 conversions of #508 as merged in #518; the compiler gate and smoke runs check both with `main`'s implementation. It
 also emits the `dict` type of #536 for D1 as merged in #555, and declares unions (#530) for variables that Groovy gave
-several types. Only M1 remains a proposal (`--proposed`).
+several types. Legacy image counts use #572's `findImages` with one generated tag per image folder (owner decision
+2026-10-05), so no proposal remains open.
 
 ## Corpus evaluation
 

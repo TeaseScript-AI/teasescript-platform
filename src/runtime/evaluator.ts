@@ -107,6 +107,7 @@ import {
   type SerializableTimerHandle,
   type SerializableMediaHandle,
   type SerializableCameraViewHandle,
+  type SerializablePermanentButtonHandle,
   type SerializableScriptReference,
 } from "./serializable-values.js";
 import {
@@ -130,6 +131,7 @@ import {
   isTimerHandle,
   isMediaHandle,
   isCameraView,
+  isPermanentButton,
 } from "./value-predicates.js";
 import {
   assertValueType,
@@ -168,6 +170,7 @@ import {
   stopTimerAction,
   timerRecord,
 } from "./operations/timer-lifecycle.js";
+import { removePermanentButtons, shownPermanentButton } from "./permanent-buttons.js";
 import { contextRootId, findRoot } from "./activations.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import {
@@ -1182,16 +1185,27 @@ export class Evaluator {
   }
 
   /**
-   * A timer or media handle as `say` shows it, from the state the snapshot holds now: `<timer "Beat", 7 s left>`,
-   * `<timer, paused, 7 s left>`, `<media "music.mp3", playing at 12 s>`, or a settled `<timer, finished>`.
+   * A handle as `say` shows it, from the state the snapshot holds now: `<timer "Beat", 7 s left>`,
+   * `<timer, paused, 7 s left>`, `<media "music.mp3", playing at 12 s>`, a settled `<timer, finished>`, or
+   * `<permanent button "Stop">`.
    */
   #handleNotation(
-    handle: SerializableTimerHandle | SerializableMediaHandle | SerializableCameraViewHandle,
+    handle:
+      | SerializableTimerHandle
+      | SerializableMediaHandle
+      | SerializablePermanentButtonHandle
+      | SerializableCameraViewHandle,
     span: SourceSpan,
   ): string {
     if (isCameraView(handle)) {
       const view = this.#cameraView();
       return view.shown ? `<camera ${view.placement}>` : "<camera, hidden>";
+    }
+    if (isPermanentButton(handle)) {
+      const shown = shownPermanentButton(this.snapshot, handle.buttonId);
+      return shown === undefined
+        ? "<permanent button, removed>"
+        : `<permanent button ${quotedText(shown.button.text)}>`;
     }
     const now = this.snapshot.currentSessionTimeMs;
     const time = (value: SerializableRuntimeValue | undefined): string =>
@@ -1408,6 +1422,8 @@ export class Evaluator {
       if (MIN_MAX_BUILTINS.has(name))
         return this.#minMaxBuiltin(name, positional, named, expression.span);
       if (name === "script") return scriptReference(positional, named, expression.span);
+      if (name === "removePermanentButton")
+        return this.#removePermanentButton(positional, named, expression.span);
       const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
       const builtin = Object.hasOwn(this.#builtins, name) ? this.#builtins[name] : undefined;
@@ -1752,6 +1768,30 @@ export class Evaluator {
         return removeSerializableDictEntry(receiver, key)!.value;
       }
     }
+  }
+
+  /** `removePermanentButton(button)` removes a shown button and its queued click; removing it again does nothing. */
+  #removePermanentButton(
+    positional: readonly SerializableRuntimeValue[],
+    named: Readonly<Record<string, SerializableRuntimeValue>>,
+    span: SourceSpan,
+  ): null {
+    if (positional.length !== 1 || Object.keys(named).length !== 0)
+      throw fault("TSR028", "removePermanentButton takes one argument: the button.", span);
+    const button = positional[0]!;
+    if (!isPermanentButton(button))
+      throw fault(
+        "TSR058",
+        `removePermanentButton(...) takes the identifier that showPermanentButton gives, but this is ${describeRuntimeValue(button)}.`,
+        span,
+      );
+    removePermanentButtons(
+      this.snapshot,
+      (shown) => shown.button.buttonId === button.buttonId,
+      span,
+      this.events,
+    );
+    return null;
   }
 
   #timer(handle: SerializableTimerHandle, span: SourceSpan): RuntimeTimerSnapshot {

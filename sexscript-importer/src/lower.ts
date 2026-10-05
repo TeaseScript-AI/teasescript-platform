@@ -22,7 +22,8 @@ import {
 } from "./helpers.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { enforceVariableTypes, functionResultTypes, type TeaseType } from "./variable-types.ts";
-import type { ProposalId } from "./proposals.ts";
+import { pathTag } from "./image-tags.ts";
+import { legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
@@ -99,8 +100,6 @@ export interface LowerOptions {
    * the composed program once.
    */
   renameIdentifiers?: boolean;
-  /** Proposed language changes to emit in their working syntax instead of reporting the construct. */
-  proposals?: ReadonlySet<ProposalId>;
   /** Accepted forms to emit instead of their workarounds in implemented TeaseScript (workarounds.ts). */
   accepted?: ReadonlySet<AcceptedForm>;
   /** The package's images, which a legacy image count reads at conversion time. */
@@ -197,7 +196,6 @@ interface LowerContext {
   knownKeys: string[];
   /** Assignment targets being lowered, which are written rather than read. */
   writeTargets: Set<AstNode>;
-  proposals: ReadonlySet<ProposalId>;
   accepted: ReadonlySet<AcceptedForm>;
   /**
    * `items -= item` and `items = items - item` inside `for (item in items)`: the loop's element leaves the collection it
@@ -924,7 +922,6 @@ export function lowerParsedFile(
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
-    proposals: options.proposals ?? new Set(),
     accepted: options.accepted ?? new Set(),
     elementRemovals: new Set(),
     media: options.media ?? null,
@@ -1034,8 +1031,8 @@ export function lowerParsedFile(
     mixin === null && !terminates(lowered)
       ? [...lowered, { kind: "exit" as const, span: null }]
       : lowered;
-  const typedStatements = withEnforcedTypes(
-    [...context.closureFunctions, ...authoredStatements],
+  const typedStatements = withLegacyMarkup(
+    withEnforcedTypes([...context.closureFunctions, ...authoredStatements], context),
     context,
   );
   const statements = [...helperStatements(context.syntheticHelpers), ...typedStatements];
@@ -1062,6 +1059,39 @@ export function lowerParsedFile(
   };
   if (options.renameIdentifiers === false) return program;
   return renameConflictingIdentifiers(withActionDispatcher(program));
+}
+
+/**
+ * Legacy show() rendered HTML, which `say` text keeps as message markup (markup.ts); layout tags that markup cannot
+ * express are dropped, with one note for the file.
+ */
+function withLegacyMarkup(statements: IrStatement[], context: LowerContext): IrStatement[] {
+  let dropped = 0;
+  const convert = (items: IrStatement[]): IrStatement[] =>
+    items.map((statement) => {
+      if (statement.kind === "function") return { ...statement, body: convert(statement.body) };
+      if (statement.kind !== "say") return withNestedStatements(statement, convert);
+      const value = statement.value;
+      const parts: TextPart[] | null =
+        value.kind === "literal" && typeof value.value === "string"
+          ? [{ text: value.value }]
+          : value.kind === "template"
+            ? value.parts
+            : null;
+      if (parts === null) return statement;
+      const result = legacyHtmlToMarkup(parts);
+      if (!result.changed) return statement;
+      if (result.dropped) dropped += 1;
+      return { ...statement, value: templateOrLiteral(result.parts) };
+    });
+  const converted = convert(statements);
+  if (dropped === 0) return converted;
+  const message = `Legacy show() rendered HTML; the text keeps bold, italic, colour, and line breaks as message markup, and drops layout tags such as TEXTFORMAT, FONT FACE and SIZE, and ALIGN (${dropped} text${dropped === 1 ? "" : "s"} in this file).`;
+  context.diagnostics.push({ code: "SX_HTML_LAYOUT", severity: "warning", message, span: null });
+  return [
+    { kind: "comment", text: `// NOTE SX_HTML_LAYOUT: ${message}`, trailing: false, span: null },
+    ...converted,
+  ];
 }
 
 function lowerHelperCompilationUnit(
@@ -1189,6 +1219,30 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
         text: `// NOTE ${diagnostic.code}${span === null ? "" : ` line ${span.line}`}: ${diagnostic.message}`,
         trailing: false,
         span,
+      },
+      statement,
+    ]);
+  }
+  for (const statement of result.loadDefaults) {
+    const span = statement.span;
+    const name =
+      statement.kind === "assign" && statement.target.kind === "variable"
+        ? statement.target.name
+        : "";
+    const diagnostic: MigrationDiagnostic = {
+      code: "SX_LOAD_KEEPS_VALUE",
+      severity: "warning",
+      message: `Groovy stored null in '${name}' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.`,
+      span,
+    };
+    context.diagnostics.push(diagnostic);
+    context.renderedDiagnostics.add(diagnostic);
+    replaced.set(statement, [
+      {
+        kind: "comment",
+        text: `// NOTE ${diagnostic.code}${span === null ? "" : ` line ${span.line}`}: ${diagnostic.message}`,
+        trailing: false,
+        span: null,
       },
       statement,
     ]);
@@ -1392,7 +1446,6 @@ function lowerHelperMethod(
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
-    proposals: baseContext.proposals,
     accepted: baseContext.accepted,
     elementRemovals: elementRemovals(body),
     media: baseContext.media,
@@ -1489,7 +1542,21 @@ function lowerStatementList(
   }
   context.knownKeys.splice(context.knownKeys.length - added, added);
   emitComments(takeCommentsBefore(context, enclosingSpan === null ? null : endOf(enclosingSpan)));
-  return withVisibleCountdowns(withReusedLoopCounters(result), context);
+  return withInstantShows(withVisibleCountdowns(withReusedLoopCounters(result), context));
+}
+
+/**
+ * Legacy `show()` displayed its text at once, and the `wait()` right after it set the timing, so text shown directly
+ * before a wait appears without reading time (converter owner decision 2026-10-05); counting loops keep their pace.
+ */
+function withInstantShows(statements: IrStatement[]): IrStatement[] {
+  return statements.map((statement, index) => {
+    if (statement.kind !== "say") return statement;
+    const next = statements
+      .slice(index + 1)
+      .find((item) => item.kind !== "blank" && item.kind !== "comment");
+    return next?.kind === "wait" && !next.visible ? { ...statement, instant: true } : statement;
+  });
 }
 
 /**
@@ -1697,6 +1764,7 @@ function hasIrCall(expression: IrExpression): boolean {
     case "range":
       return hasIrCall(expression.from) || hasIrCall(expression.to);
     case "unary":
+    case "typeTest":
       return hasIrCall(expression.value);
     case "binary":
       return hasIrCall(expression.left) || hasIrCall(expression.right);
@@ -1864,6 +1932,26 @@ function lowerStatementNode(node: AstNode, context: LowerContext): IrStatement[]
       return lowerFor(node, context);
     case "switch":
       return lowerSwitch(node, context);
+    // A labelled block statement, `Check: { ... }`, runs its statements in place; one that declares variables keeps
+    // them in a scope of their own, as `if true { ... }`.
+    case "block": {
+      const statements = lowerBlock(node, context);
+      const declares = nodeArray(node.statements).some(
+        (statement) =>
+          statement.kind === "declaration" || asNode(statement.expression)?.kind === "declaration",
+      );
+      return declares
+        ? [
+            {
+              kind: "if",
+              condition: { kind: "literal", value: true },
+              then: statements,
+              else: [],
+              span: node.span,
+            },
+          ]
+        : statements;
+    }
     case "return":
       return lowerReturnStatement(node, context);
     case "break":
@@ -4209,7 +4297,19 @@ function lowerCallStatement(
       );
     case "useUrl":
       return oneArgumentStatement(args, context, node, (url) => urlStatements(url, span, context));
-    case "setImage":
+    case "setImage": {
+      // A function given an image that it draws into a frame and shows, such as a zoom-in, shows the image itself.
+      const given = args.length === 2 ? givenImage(context) : null;
+      if (given !== null) {
+        addDiagnostic(
+          context,
+          "SX_IMAGE_COMPOSITION",
+          "warning",
+          "The legacy function drew the image it was given into a frame in memory and showed the frame; TeaseScript cannot compose images yet, so the image itself is shown.",
+          node.span,
+        );
+        return [{ kind: "showImage", file: mediaFile(given, "images", node, context), span }];
+      }
       if (args.length !== 1)
         return [
           unsupportedStatement(
@@ -4227,6 +4327,7 @@ function lowerCallStatement(
         file: mediaFile(file, "images", node, context),
         span,
       }));
+    }
     case "playSound":
       return oneArgumentStatement(args, context, node, (file) => ({
         kind: "playAudio",
@@ -4720,7 +4821,11 @@ function lowerEachStatement(
       ),
     ];
   }
-  if (receiverNode.kind !== "range" && !isKnownListExpression(receiverNode, context)) {
+  if (
+    receiverNode.kind !== "range" &&
+    !isKnownListExpression(receiverNode, context) &&
+    !onlyOf(inferType(receiverNode, context.types), STRING | NULL)
+  ) {
     return [
       unsupportedStatement(
         context,
@@ -4773,7 +4878,7 @@ function lowerEachStatement(
   }
   const variable = parameterSpecified ? closureParameters[0]!.name : "it";
 
-  const collection = lowerExpression(receiverNode, context);
+  const collection = lowerIterated(receiverNode, context);
   if (collection === null) {
     return [
       unsupportedStatement(
@@ -5115,11 +5220,20 @@ function negate(condition: IrExpression): IrExpression {
 function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
   const variable = text(node.variable);
   const collectionNode = asNode(node.collection);
-  const body = asNode(node.body);
+  const loopBody = asNode(node.body);
   if (variable === "forLoopDummyParameter" && collectionNode?.kind === "list") {
-    return lowerCStyleFor(node, collectionNode, body, context);
+    return lowerCStyleFor(node, collectionNode, loopBody, context);
   }
-  const collection = collectionNode === null ? null : lowerExpression(collectionNode, context);
+  // A single statement as the body is a block of one statement.
+  const body =
+    loopBody !== null && loopBody.kind !== "block" && loopBody.kind !== "empty"
+      ? { kind: "block", span: loopBody.span, statements: [loopBody] }
+      : loopBody;
+  // A loop that removes its element from the collection proves it a list (elementRemovals).
+  let removes = false;
+  if (body !== null) walkAst(body, (child) => (removes ||= context.elementRemovals.has(child)));
+  const collection =
+    collectionNode === null ? null : lowerIterated(collectionNode, context, removes);
   if (variable === null || collection === null || body?.kind !== "block") {
     return [
       unsupportedStatement(
@@ -5145,6 +5259,148 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
   const facts = dict === null ? [] : [`${dict}\u0000$${loopKey ?? variable}`];
   const loweredBody = withPresentKeys(facts, body, context, () => lowerBlock(body, context));
   return [{ kind: "for", variable, collection, body: loweredBody, span: node.span }];
+}
+
+/**
+ * A collection a loop iterates. Groovy iterated a range up to the whole number at or below a fractional upper bound,
+ * where TeaseScript stops, so a bound that may hold a fraction is floored.
+ */
+function lowerIterated(
+  node: AstNode,
+  context: LowerContext,
+  provenList = false,
+): IrExpression | null {
+  const collection = lowerExpression(node, context);
+  if (collection === null) return null;
+  // Groovy iterated text by character.
+  const type = node.kind === "range" || provenList ? 0 : inferType(node, context.types);
+  if ((type & STRING) !== 0) {
+    if (onlyOf(type, STRING | NULL))
+      return {
+        kind: "methodCall",
+        target: collection,
+        name: "split",
+        arguments: [{ kind: "literal", value: "" }],
+      };
+    addDiagnostic(
+      context,
+      "SX_ITEMS_OF_TEXT",
+      "info",
+      "Groovy iterated text by character and a list by element; this value is not proven to be one of them, so a helper splits text into its characters.",
+      node.span,
+    );
+    return useHelper(context, "items", [collection]);
+  }
+  const toNode = node.kind === "range" ? asNode(node.to) : null;
+  if (collection.kind !== "range" || toNode === null || !mayBeFractional(toNode, context))
+    return collection;
+  addDiagnostic(
+    context,
+    "SX_RANGE_FLOOR",
+    "info",
+    "Groovy iterated this range up to the whole number at or below its upper bound, which may hold a fraction; the bound is floored.",
+    node.span,
+  );
+  return {
+    ...collection,
+    to: { kind: "call", name: "floor", positional: [collection.to], named: {} },
+  };
+}
+
+/**
+ * Whether a list position can be one past the end: a random position plus a positive number, `getRandom(n) + 1` for a
+ * 1-based pick, a list's size, or a variable assigned one of these.
+ */
+function mayIndexPastEnd(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
+  if (node.kind === "binary" && text(node.operator) === "+") {
+    const [left, right] = [asNode(node.left), asNode(node.right)];
+    const random = (side: AstNode | null): boolean =>
+      side?.kind === "methodCall" &&
+      ["getRandom", "nextInt"].includes(constantString(side.method) ?? "");
+    const positive = (side: AstNode | null): boolean => {
+      const value = side === null ? undefined : constantValue(side);
+      return typeof value === "number" && value > 0;
+    };
+    return (random(left) && positive(right)) || (random(right) && positive(left));
+  }
+  if (node.kind === "methodCall" && constantString(node.method) === "size") return true;
+  if (node.kind === "property" && ["size", "length"].includes(constantString(node.property) ?? ""))
+    return true;
+  if (node.kind === "variable") {
+    const key = bindingKey(node, context.bindings);
+    if (key === null || seen.has(key)) return false;
+    seen.add(key);
+    return (context.assignedValues.get(key) ?? []).some((value) =>
+      mayIndexPastEnd(value, context, seen),
+    );
+  }
+  return false;
+}
+
+/**
+ * Whether a value may be a missing storage value, which Groovy read as null: a storage read, or a variable that starts
+ * with one or with null.
+ */
+function mayReadNull(node: AstNode, context: LowerContext): boolean {
+  if (node.kind === "methodCall")
+    return DIRECT_STORAGE_LOADS.has(legacyApiCall(node, context)?.name ?? "");
+  if (node.kind !== "variable") return false;
+  const key = bindingKey(node, context.bindings);
+  const first = key === null ? undefined : context.assignedValues.get(key)?.[0];
+  return first !== undefined && (isNullConstant(first) || mayReadNull(first, context));
+}
+
+/** Methods whose results are whole numbers. */
+const WHOLE_NUMBER_METHODS = new Set([
+  "size",
+  "length",
+  "getRandom",
+  "round",
+  "intdiv",
+  "toInteger",
+  "intValue",
+  "indexOf",
+  "count",
+  "floor",
+  "ceil",
+]);
+
+/**
+ * Whether a Groovy number may hold a fraction: a fractional literal, a division (which gave a decimal where it did not
+ * divide evenly), a value of unknown origin such as a parameter, or a variable assigned one of these.
+ */
+function mayBeFractional(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
+  switch (node.kind) {
+    case "constant":
+      return typeof node.value !== "number" || !Number.isInteger(node.value);
+    case "unaryMinus":
+    case "unaryPlus": {
+      const value = asNode(node.value);
+      return value === null || mayBeFractional(value, context, seen);
+    }
+    case "binary": {
+      const operator = text(node.operator) ?? "";
+      const left = asNode(node.left);
+      const right = asNode(node.right);
+      if (!["+", "-", "*", "%"].includes(operator) || left === null || right === null) return true;
+      return mayBeFractional(left, context, seen) || mayBeFractional(right, context, seen);
+    }
+    case "property":
+      return !["size", "length"].includes(constantString(node.property) ?? "");
+    case "methodCall":
+      return !WHOLE_NUMBER_METHODS.has(constantString(node.method) ?? "");
+    case "variable": {
+      const key = bindingKey(node, context.bindings);
+      if (key === null) return true;
+      if (context.integerVariables.has(key) || seen.has(key)) return false;
+      const values = context.assignedValues.get(key);
+      if (values === undefined || values.length === 0) return true;
+      seen.add(key);
+      return values.some((value) => mayBeFractional(value, context, seen));
+    }
+    default:
+      return true;
+  }
 }
 
 function lowerCStyleFor(
@@ -6010,6 +6266,42 @@ function lowerPrefixValue(node: AstNode, context: LowerContext): IrExpression | 
   return { kind: "variable", name };
 }
 
+/**
+ * A compound assignment used as a value, `save("k", total -= 5)`: Groovy changed the variable and used its new value,
+ * so the change comes first, as its own statement, and the statement uses the variable. As for `++x`, this needs a
+ * statement that reads the variable nowhere else and calls no local function.
+ */
+function lowerCompoundValue(node: AstNode, context: LowerContext): IrExpression | null {
+  const name = variableName(asNode(node.left));
+  const root = context.statementRoot;
+  let uses = 0;
+  let localCalls = false;
+  if (root !== null)
+    walkAst(root, (child) => {
+      if (variableName(child) === name && child.kind === "variable") uses += 1;
+      if (child.kind === "methodCall" && child.implicitThis === true)
+        localCalls ||= context.functions.has(constantString(child.method) ?? "");
+    });
+  if (
+    name === null ||
+    root === null ||
+    uses !== 1 ||
+    localCalls ||
+    !isHoistable(root, node, context)
+  ) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_ASSIGNMENT_VALUE",
+      "A compound assignment is used as a value where the change cannot simply come before the statement: the variable is used again in the statement, the change is guarded by && / || / ?:, or a function called in the statement could read the variable. Move the assignment to its own statement.",
+    );
+  }
+  const statements = lowerAssignment(node, node.span, context);
+  if (statements.some((statement) => statement.kind === "unsupported")) return null;
+  context.prelude.push(...statements);
+  return { kind: "variable", name };
+}
+
 function incrementsAfterStatement(
   root: AstNode,
   target: AstNode,
@@ -6366,6 +6658,17 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     }
     const index = lowerExpression(indexNode, context);
     if (index === null) return null;
+    // Groovy read null past the end of a list, which code that picks `getRandom(size) + 1` relies on.
+    if (!context.writeTargets.has(node) && mayIndexPastEnd(indexNode, context)) {
+      addDiagnostic(
+        context,
+        "SX_INDEX_PAST_END",
+        "warning",
+        "This position can be one past the end of the list, where Groovy read null; a helper reads null there too.",
+        node.span,
+      );
+      return useHelper(context, "itemAt", [target, index]);
+    }
     return { kind: "index", target, index };
   }
   if (operator === "&&" || operator === "||") {
@@ -6394,6 +6697,8 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     return { kind: "binary", operator: operator === "&" ? "and" : "or", left, right };
   }
   const mapped = operator;
+  if (operator !== null && ["+=", "-=", "*=", "/=", "%="].includes(operator))
+    return lowerCompoundValue(node, context);
   if (operator === "=") {
     return unsupportedExpression(
       context,
@@ -6415,6 +6720,30 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   }
   const leftNode = asNode(node.left);
   const rightNode = asNode(node.right);
+  // Groovy ordered null below every value, where TeaseScript stops at an ordering of null (TSR009).
+  if (
+    ["<", "<=", ">", ">="].includes(mapped) &&
+    leftNode !== null &&
+    rightNode !== null &&
+    (mayReadNull(leftNode, context) || mayReadNull(rightNode, context))
+  ) {
+    const left = lowerExpression(leftNode, context);
+    const right = lowerExpression(rightNode, context);
+    if (left === null || right === null) return null;
+    addDiagnostic(
+      context,
+      "SX_NULL_ORDER",
+      "info",
+      "A side of this comparison may be a storage value that is missing; Groovy ordered null below every value, so a helper compares the sides as Groovy did.",
+      node.span,
+    );
+    return {
+      kind: "binary",
+      operator: mapped,
+      left: useHelper(context, "compare", [left, right]),
+      right: { kind: "literal", value: 0 },
+    };
+  }
   if ((mapped === "==" || mapped === "!=") && leftNode !== null && rightNode !== null) {
     // Groovy read a missing key as null; a dict reports it, so the comparison tests the key.
     const [lookupNode, other] = isNullConstant(rightNode)
@@ -7513,9 +7842,11 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
       "Dynamic Groovy property access is not lowered automatically.",
     );
   }
+  // Groovy on the legacy Java read a list's private `size` field, and an array's `length`; no other legacy value had
+  // such a property, apart from a map key, so a receiver not proven to be a map is a list.
   if (
     (property === "size" || property === "length") &&
-    isKnownListExpression(targetNode, context)
+    (isKnownListExpression(targetNode, context) || !isDictionary(targetNode, context))
   ) {
     const target = lowerExpression(targetNode, context);
     return target === null ? null : { kind: "property", target, name: "length" };
@@ -7746,12 +8077,15 @@ function lowerObjectMethodCallExpression(
     );
   }
 
-  if (context.proposals.has("media-tags")) {
-    const proposed = proposedImageCount(node, name, argumentsNodes, context);
-    if (proposed !== undefined) return proposed;
-  } else if (context.media !== null) {
-    const counted = conversionTimeImageCount(node, name, argumentsNodes, context, context.media);
+  if (context.media !== null) {
+    const counted = imageCount(node, name, argumentsNodes, context, context.media);
     if (counted !== undefined) return counted;
+  }
+  // Groovy `a.equals(b)` compares values as `==` does for text, numbers, lists, and maps.
+  if (name === "equals" && argumentsNodes.length === 1 && targetNode !== null) {
+    const left = lowerExpression(targetNode, context);
+    const right = lowerExpression(argumentsNodes[0]!, context);
+    return left === null || right === null ? null : { kind: "binary", operator: "==", left, right };
   }
   if (targetNode !== null && isDictionary(targetNode, context)) {
     const operation = dictOperation(node, targetNode, name, argumentsNodes, context);
@@ -7845,7 +8179,10 @@ function lowerObjectMethodCallExpression(
       case "first":
       case "last":
         return { kind: "property", target, name };
+      // Lists copy on assignment, so a copy or an array of the elements is the list itself.
       case "toList":
+      case "clone":
+      case "toArray":
         return target;
       case "max":
         return useHelper(context, "listMax", [target]);
@@ -7876,6 +8213,9 @@ function lowerObjectMethodCallExpression(
     const separator = lowerExpression(argumentsNodes[0]!, context);
     return separator === null ? null : listJoin(target, separator);
   }
+  // `toArray(new String[0])` only names the array type.
+  if (name === "toArray" && argumentsNodes.length === 1 && isPure(argumentsNodes[0]!, context))
+    return target;
   return unsupportedExpression(
     context,
     node,
@@ -7950,7 +8290,18 @@ function unprovenReceiverOperation(
     arguments: args,
   });
   let changes = false;
+  let position = false;
   switch (name) {
+    // Lists copy on assignment, so a copy or an array of the elements is the list itself.
+    case "clone":
+    case "toArray":
+      if (!mayBeList || argumentsNodes.length > 1) return undefined;
+      if (
+        argumentsNodes.length === 1 &&
+        (name !== "toArray" || !isPure(argumentsNodes[0]!, context))
+      )
+        return undefined;
+      break;
     case "contains":
     case "indexOf":
       if (argumentsNodes.length !== 1 || !(mayBeList || mayBeText)) return undefined;
@@ -7984,9 +8335,12 @@ function unprovenReceiverOperation(
       changes = true;
       break;
     case "remove":
-      // Groovy remove(int) removes a position from a list, but the value from a set.
-      if (argumentsNodes.length !== 1 || !mayBeList || !whole) return undefined;
-      if (!onlyOf(argumentType, STRING | BOOLEAN | LIST | OBJECT)) return undefined;
+      // Groovy remove(int) removes a position from a list and returns the element, as removeAt does; with another
+      // value, it removes the value.
+      if (argumentsNodes.length !== 1 || !mayBeList) return undefined;
+      position = onlyOf(argumentType, NUMBER) && argumentType !== 0;
+      if (!position && (!whole || !onlyOf(argumentType, STRING | BOOLEAN | LIST | OBJECT)))
+        return undefined;
       changes = true;
       break;
     case "clear":
@@ -8024,6 +8378,11 @@ function unprovenReceiverOperation(
       return listJoin(target, args[0] ?? { kind: "literal", value: "" });
     case "pop":
       return call("removeFirst", [], target);
+    case "clone":
+    case "toArray":
+      return target;
+    case "remove":
+      return call(position ? "removeAt" : "remove", args, target);
     default:
       return call(name, args, target);
   }
@@ -9381,44 +9740,12 @@ function imageListing(
 }
 
 /**
- * The proposed tag count (media-tags, M1) of a legacy image count (imageListing): every folder below `images/` is a
- * tag of the images it holds (matched without regard to case), so `images/Domme3/Domme${pack}/` counts images tagged
- * `Domme3` and `Domme<pack>`. Tags cannot filter by file name, so a name filter is dropped with a note.
+ * A legacy image count (imageListing) as a tag query (#572): the converted package gives each image one tag for its
+ * full legacy folder path in a generated sidecar (image-tags.ts), so the images tagged with the listed folder's tag are
+ * exactly its images. A computed folder gets its tag from the pathTag helper at runtime. The legacy listing also counted
+ * subfolders and other files; the query counts images only. A name filter keeps the conversion-time count.
  */
-function proposedImageCount(
-  node: AstNode,
-  name: string,
-  argumentsNodes: AstNode[],
-  context: LowerContext,
-): IrExpression | null | undefined {
-  const listing = imageListing(node, name, argumentsNodes, context);
-  if (listing === null || listing === undefined) return listing;
-  addDiagnostic(
-    context,
-    "SX_IMAGE_COUNT",
-    "warning",
-    listing.nameFilter === null
-      ? "The legacy count listed every entry directly in the folder; the proposed tag count counts the images tagged with the folder names, including images in subfolders."
-      : "The legacy count included only files directly in the folder whose names matched a pattern; the proposed tag count counts every image tagged with the folder names, including images in subfolders.",
-    node.span,
-  );
-  return {
-    kind: "call",
-    name: "countImages",
-    positional: [],
-    named: {
-      tags: { kind: "list", items: listing.segments.map((parts) => templateOrLiteral(parts)) },
-    },
-  };
-}
-
-/**
- * A legacy image count (imageListing) as the number of images of the package, counted when it is converted, since the
- * player cannot list package folders: a number for a fixed folder, and for a folder that depends on values, a dict of
- * the matching folders' counts read with the folder's lower-case path. A name filter whose pattern is literal text
- * applies at conversion time.
- */
-function conversionTimeImageCount(
+function imageCount(
   node: AstNode,
   name: string,
   argumentsNodes: AstNode[],
@@ -9427,6 +9754,47 @@ function conversionTimeImageCount(
 ): IrExpression | null | undefined {
   const listing = imageListing(node, name, argumentsNodes, context);
   if (listing === null || listing === undefined) return listing;
+  if (listing.nameFilter !== null) return conversionTimeImageCount(listing, node, context, media);
+  const folder = templateOrLiteral(
+    [[{ text: "images" }], ...listing.segments].flatMap((parts, index) =>
+      index === 0 ? parts : [{ text: "/" }, ...parts],
+    ),
+  );
+  const tag =
+    folder.kind === "literal" && typeof folder.value === "string"
+      ? { kind: "literal" as const, value: pathTag(folder.value) }
+      : useHelper(context, "pathTag", [folder]);
+  addDiagnostic(
+    context,
+    "SX_IMAGE_TAGS",
+    "warning",
+    "The legacy script counted the files of an images folder; each package image carries a generated tag for its folder, so this counts the folder's images by that tag, without subfolders and other files.",
+    node.span,
+  );
+  return {
+    kind: "property",
+    target: {
+      kind: "call",
+      name: "findImages",
+      positional: [],
+      named: { all: { kind: "list", items: [tag] } },
+    },
+    name: "length",
+  };
+}
+
+/**
+ * A legacy image count (imageListing) with a name filter as the number of the package's images whose names match,
+ * counted when it is converted, since tags do not filter by file name: a number for a fixed folder, and for a folder
+ * that depends on values, a dict of the matching folders' counts read with the folder's lower-case path. Only a
+ * pattern of literal text applies.
+ */
+function conversionTimeImageCount(
+  listing: NonNullable<ReturnType<typeof imageListing>>,
+  node: AstNode,
+  context: LowerContext,
+  media: readonly MediaFile[],
+): IrExpression | undefined {
   const pattern =
     listing.nameFilter === null ? null : namePattern(asNode(listing.nameFilter.right));
   if (listing.nameFilter !== null && pattern === null) return undefined;
@@ -9450,7 +9818,7 @@ function conversionTimeImageCount(
     context,
     "SX_IMAGE_COUNT_WORKAROUND",
     "warning",
-    "Workaround for counting package images, which TeaseScript cannot list: the images of each folder were counted at conversion time, so images added to the package later are not counted, and only image files count. Tag the images (findImages, V30 §41) or update the counts when the package changes.",
+    "Workaround for counting the package images whose names match a pattern, which tags cannot express: the matching images of each folder were counted at conversion time, so images added to the package later are not counted, and only image files count.",
     node.span,
   );
   const fixed = listing.segments.every((parts) => parts.every((part) => "text" in part));
@@ -10275,7 +10643,15 @@ function lowerSingleInput(
     }
     textPrefill = templateOrLiteral(parts);
   } else {
-    if (prefill !== null) notePrefill(name, defaultNode!, node, context);
+    // A prefill that may be blank or null opens the input without a default then, as the legacy empty field did.
+    if (prefill !== null && !notePrefill(name, defaultNode!, node, context)) {
+      if (!pushPrompt(context, node, argumentNodes[0]!, args[0]!)) return null;
+      return useHelper(
+        context,
+        name === "getString" ? "askText" : name === "getInteger" ? "askInteger" : "askNumber",
+        [prefill],
+      );
+    }
     if (prefill !== null && name === "getString" && !onlyOf(defaultType, STRING)) {
       textPrefill =
         prefill.kind === "literal"
@@ -10293,15 +10669,16 @@ function lowerSingleInput(
 
 /**
  * A default TeaseScript rejects when the input opens: `null` for numbers, and blank text for text input (V30 §20).
- * Legacy showed "null" or an empty field instead, so a default that may be either gets a note. A text default that is
- * not text becomes text, which is never blank.
+ * Legacy showed "null" or an empty field instead, so a default that may be either goes through a helper that asks
+ * without it then, with a note; false for such a default. A text default that is not text becomes text, which is
+ * never blank.
  */
 function notePrefill(
   name: string,
   defaultNode: AstNode,
   node: AstNode,
   context: LowerContext,
-): void {
+): boolean {
   const type = inferType(defaultNode, context.types);
   const text = constantValue(defaultNode);
   const valid =
@@ -10311,16 +10688,17 @@ function notePrefill(
         (defaultNode.kind === "gstring" && gstringHasText(defaultNode)) ||
         onlyOf(type, NUMBER | BOOLEAN | NULL)
       : onlyOf(type, NUMBER);
-  if (valid) return;
+  if (valid) return true;
   addDiagnostic(
     context,
     "SX_INPUT_PREFILL",
     "warning",
     name === "getString"
-      ? `${name}() pre-filled its field with this value even when it was blank; a TeaseScript default must be non-blank text, or the input fails when it opens.`
-      : `${name}() pre-filled its field with this value even when it was null; a TeaseScript default must be ${name === "getInteger" ? "a whole number" : "a number"}, or the input fails when it opens.`,
+      ? `${name}() pre-filled its field with this value, also when it was blank or null; a TeaseScript default must be non-blank text, so a helper asks without the default then.`
+      : `${name}() pre-filled its field with this value, also when it was null; a TeaseScript default must be ${name === "getInteger" ? "a whole number" : "a number"}, so a helper asks without the default when it is not.`,
     node.span,
   );
+  return false;
 }
 
 /** Whether a GString has literal text other than whitespace, so it is never blank. */
@@ -11818,7 +12196,7 @@ function photoVariables(body: AstNode): Set<string> {
 function composedImage(body: AstNode, context: LowerContext): IrStatement[] | null {
   let showsBytes = false;
   let other = false;
-  let base: AstNode | null = null;
+  const reads: AstNode[] = [];
   const locals = new Set<string>();
   walkAst(body, (node) => {
     if (node.kind === "declaration") {
@@ -11857,13 +12235,23 @@ function composedImage(body: AstNode, context: LowerContext): IrStatement[] | nu
       ].includes(method)
     )
       other = true;
-    if (base === null && (method === "getImage" || method === "read") && args.length === 1) {
+    if ((method === "getImage" || method === "read") && args.length === 1) {
       const argument = args[0]!;
-      base = isFileConstructor(argument)
+      const path = isFileConstructor(argument)
         ? (nodeArray(asNode(argument.arguments)?.items)[0] ?? null)
         : argument;
+      if (path !== null) reads.push(path);
     }
   });
+  // The base is the image the function was given, as a parameter, or else the first it read: a frame or background
+  // read first stays in the composition only.
+  const parameters = new Set(context.currentFunction?.parameters ?? []);
+  const given = reads.find((read) => {
+    let names = false;
+    walkAst(read, (node) => (names ||= parameters.has(variableName(node) ?? "")));
+    return names;
+  });
+  const base = given ?? reads[0] ?? null;
   if (!showsBytes || other || base === null) return null;
   const image = imagePathBelowImages(base, context);
   if (image === null) return null;
@@ -11875,7 +12263,7 @@ function composedImage(body: AstNode, context: LowerContext): IrStatement[] | nu
     context,
     "SX_IMAGE_COMPOSITION",
     "warning",
-    "The legacy function composed an image in memory from parts of other images and showed it; TeaseScript cannot compose images yet (the accepted layered scene with showOverlayImage is not implemented), so the function shows the base image it read.",
+    "The legacy function composed an image in memory from parts of other images and showed it; TeaseScript cannot compose images yet (the accepted layered scene with showOverlayImage is not implemented), so the function shows the image it was given, or else the first image it read.",
     body.span,
   );
   return [{ kind: "showImage", file: mediaFile(image, "images", body, context), span: body.span }];
@@ -12069,6 +12457,31 @@ function layeredScene(
 }
 
 /** A path the legacy script read below `images/`, as a path of the package's images; null for another path. */
+/**
+ * The image the current function was given: the path below `images/` of an image it reads (`getImage`,
+ * `ImageIO.read`) that names one of its parameters; null outside a function or without such a read.
+ */
+function givenImage(context: LowerContext): IrExpression | null {
+  const current = context.currentFunction;
+  const parameters = new Set(current?.parameters ?? []);
+  if (current === undefined || current === null || parameters.size === 0) return null;
+  let found: AstNode | null = null;
+  walkAst(current.body, (node) => {
+    if (found !== null || node.kind !== "methodCall") return;
+    const method = constantString(node.method) ?? "";
+    const args = nodeArray(asNode(node.arguments)?.items);
+    if ((method !== "getImage" && method !== "read") || args.length !== 1) return;
+    const path = isFileConstructor(args[0]!)
+      ? (nodeArray(asNode(args[0]!.arguments)?.items)[0] ?? null)
+      : args[0]!;
+    let names = false;
+    if (path !== null)
+      walkAst(path, (child) => (names ||= parameters.has(variableName(child) ?? "")));
+    if (names) found = path;
+  });
+  return found === null ? null : imagePathBelowImages(found, context);
+}
+
 function imagePathBelowImages(node: AstNode, context: LowerContext): IrExpression | null {
   const literal = constantString(node);
   if (literal !== null)
@@ -12085,10 +12498,20 @@ function imagePathBelowImages(node: AstNode, context: LowerContext): IrExpressio
 
 /** Audio files the legacy useFile() opened in the system's player. */
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".m4a", ".mid", ".midi"]);
+/** Video files a browser plays, and the formats the corpus driver converts to MP4 (H.264) at conversion time. */
+const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".m4v", ".ogv"]);
+export const CONVERTED_VIDEO_EXTENSIONS = new Set([
+  ".wmv",
+  ".avi",
+  ".mpg",
+  ".mpeg",
+  ".flv",
+  ".mov",
+]);
 
 /**
- * `useFile(path)` opened a file with a program of the player's computer: an audio file plays in the session, and
- * anything else, such as a device control program or an executable, cannot start from a package.
+ * `useFile(path)` opened a file with a program of the player's computer: an audio or video file plays in the session,
+ * and anything else, such as a device control program or an executable, cannot start from a package.
  */
 function useFileStatements(
   args: AstNode[],
@@ -12098,6 +12521,34 @@ function useFileStatements(
 ): IrStatement[] {
   const path = args.length === 1 ? constantString(args[0]) : null;
   const extension = path === null ? "" : path.slice(path.lastIndexOf(".")).toLowerCase();
+  if (
+    path !== null &&
+    (VIDEO_EXTENSIONS.has(extension) || CONVERTED_VIDEO_EXTENSIONS.has(extension))
+  ) {
+    const converted = CONVERTED_VIDEO_EXTENSIONS.has(extension);
+    addDiagnostic(
+      context,
+      "SX_USE_FILE_VIDEO",
+      "warning",
+      `useFile() opened this video in the system's player; it plays in the session here, without waiting.${converted ? " The package holds it as an MP4 converted at import, since browsers do not play this format." : ""}`,
+      node.span,
+    );
+    // The package root holds the images folder's files; other data folders keep their names.
+    const file = path.replaceAll("\\", "/").replace(/^images\//iu, "");
+    return [
+      {
+        kind: "playAudio",
+        video: true,
+        file: {
+          kind: "literal",
+          value: converted ? `${file.slice(0, file.lastIndexOf("."))}.mp4` : file,
+        },
+        async: true,
+        repeatCount: null,
+        span,
+      },
+    ];
+  }
   if (path === null || !AUDIO_EXTENSIONS.has(extension))
     return [
       unsupportedStatement(
@@ -12132,7 +12583,8 @@ function useFileStatements(
 
 /**
  * `command.execute()` started a program of the player's computer. A device switch program, whose command ends with
- * on or off (also `ein`, `an`, `aus`), shows the switch state; it runs at runtime for a computed command.
+ * on or off (also `ein`, `an`, `aus`), shows the switch state as a persistent permanent button (V30 §28), since the
+ * device state spans scripts; the state is read at runtime for a computed command.
  */
 function switchCommand(
   targetNode: AstNode,
@@ -12156,18 +12608,12 @@ function switchCommand(
   if (command === null) return null;
   addDiagnostic(
     context,
-    "SX_SWITCH_WORKAROUND",
+    "SX_SWITCH_BUTTON",
     "warning",
-    context.accepted.has("permanentButton")
-      ? "The legacy script ran a device switch program; the switch state is a permanent button, replaced when the state changes."
-      : "Workaround for a permanent switch button (showPermanentButton, which main does not implement yet): the legacy script ran a device switch program, which a package cannot start; the chat shows the switch state instead. Switch back to the permanent button when it is implemented.",
+    "The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.",
     node.span,
   );
-  return useHelper(
-    context,
-    context.accepted.has("permanentButton") ? "switchButton" : "switchState",
-    [command],
-  );
+  return useHelper(context, "switchButton", [command]);
 }
 
 /** ON or OFF for a device switch command by its last word, or null for another command. */

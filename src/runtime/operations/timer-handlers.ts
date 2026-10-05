@@ -9,9 +9,9 @@ import { settleBackgroundPacingGate } from "./pacing-gate.js";
 import { assertCounterCanAdvance, copySpan } from "./support.js";
 
 /**
- * Starts the next queued expiry block as an interrupt frame. The block sees top-level names and its own locals;
- * the interrupted foreground action becomes inert inside the frame. Emits no event and runs no instruction; due work that became due meanwhile stays unsettled until the block
- * returns or a later observation arrives while it waits.
+ * Starts the next queued expiry, cue, or button block as an interrupt frame. The block sees top-level names and its own
+ * locals; the interrupted foreground action becomes inert inside the frame. Emits no event and runs no instruction; due
+ * work that became due meanwhile stays unsettled until the block returns or a later observation arrives while it waits.
  */
 export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapshot): void {
   const invocation = snapshot.pendingTimerHandlers[0]!;
@@ -44,7 +44,9 @@ export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapsh
     timerInterruption:
       "mediaId" in invocation
         ? { mediaId: invocation.mediaId, dueAtMs: invocation.dueAtMs, suspendedAction }
-        : { timerId: invocation.timerId, dueAtMs: invocation.dueAtMs, suspendedAction },
+        : "buttonId" in invocation
+          ? { buttonId: invocation.buttonId, dueAtMs: invocation.dueAtMs, suspendedAction }
+          : { timerId: invocation.timerId, dueAtMs: invocation.dueAtMs, suspendedAction },
     callerTemporaries: snapshot.temporaries.map((temporary) => ({ ...temporary })),
     scopeBaseDepth: snapshot.frames.length,
     loopBaseDepth: snapshot.loopFrames.length,

@@ -7,6 +7,8 @@ import { storyChoiceVariables } from "../../../theme/story-choice.js";
 const props = defineProps<{
   authoredFill?: string | undefined;
   disabled?: boolean;
+  /** Looks and is announced disabled but keeps keyboard focus, for a control that becomes active again in place. */
+  inactive?: boolean;
   label?: string | undefined;
 }>();
 const emit = defineEmits<{ widthChange: [] }>();
@@ -71,6 +73,7 @@ const material = computed(() =>
     class="player-action-button"
     :style="material"
     :disabled="disabled"
+    :aria-disabled="inactive ? 'true' : undefined"
   >
     <span v-if="props.label !== undefined" ref="labelElement" class="player-action-label">{{ props.label }}</span>
     <slot v-else />
@@ -103,16 +106,17 @@ const material = computed(() =>
   min-width: 0;
   max-width: 55ch;
 }
-.player-action-button:hover:not(:disabled) {
+.player-action-button:hover:not(:disabled, [aria-disabled="true"]) {
   background: linear-gradient(var(--story-choice-hover-top), var(--story-choice-hover-bottom));
   box-shadow: inset 0 1px 0 #ffffff35, 0 1px 0 var(--story-choice-depth), 0 3px 5px #00000024;
 }
-.player-action-button:active:not(:disabled) {
+.player-action-button:active:not(:disabled, [aria-disabled="true"]) {
   background: var(--story-choice-pressed);
   box-shadow: inset 0 1px 2px #00000022;
 }
 /* Disabled actions use the shared theme roles, not opacity over an arbitrary background. */
-.player-action-button:disabled {
+.player-action-button:disabled,
+.player-action-button[aria-disabled="true"] {
   opacity: 1;
   color: var(--theme-text-disabled);
   background: var(--theme-surface-disabled);

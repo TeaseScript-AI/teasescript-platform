@@ -320,15 +320,23 @@ export function validateTimerState(
   let previousDue = -Infinity;
   const oneShotInvocations = new Map<number, number>();
   for (const invocation of queue) {
-    // Media cue invocations share the queue; their ownership is validated with media state, their order here.
-    if (isPlainRecord(invocation) && Object.hasOwn(invocation, "mediaId")) {
+    // Media cue and button invocations share the queue; their ownership is validated with their own state, their
+    // order here.
+    if (
+      isPlainRecord(invocation) &&
+      (Object.hasOwn(invocation, "mediaId") || Object.hasOwn(invocation, "buttonId"))
+    ) {
       if (
         !isValidSessionTime(invocation.dueAtMs) ||
         !isValidSessionTime(value.currentSessionTimeMs) ||
         invocation.dueAtMs > value.currentSessionTimeMs ||
         invocation.dueAtMs < previousDue
       ) {
-        errors.push("Runtime pending media cue block is malformed.");
+        errors.push(
+          Object.hasOwn(invocation, "mediaId")
+            ? "Runtime pending media cue block is malformed."
+            : "Runtime pending permanent button block is malformed.",
+        );
       } else {
         previousDue = invocation.dueAtMs;
       }
@@ -377,7 +385,8 @@ export function validateTimerState(
       if (
         !isPlainRecord(frame) ||
         !isPlainRecord(frame.timerInterruption) ||
-        Object.hasOwn(frame.timerInterruption, "mediaId")
+        Object.hasOwn(frame.timerInterruption, "mediaId") ||
+        Object.hasOwn(frame.timerInterruption, "buttonId")
       )
         continue;
       const record = positiveSafeInteger(frame.timerInterruption.timerId)

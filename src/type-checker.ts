@@ -14,6 +14,7 @@ import type {
   Program,
   ScalarTypeName,
   ShowButtonParts,
+  ShowPermanentButtonParts,
   SpeakerDeclaration,
   SwitchTypeTest,
   Statement,
@@ -849,6 +850,9 @@ class TypeChecker {
         yield* compileChild(this.#timerTask(statement, scope));
         this.#suspend();
         return true;
+      case "showPermanentButtonStatement":
+        yield* compileChild(this.#permanentButtonTask(statement, scope));
+        return true;
       case "playMediaStatement":
         yield* compileChild(this.#mediaTask(statement, scope, null));
         return true;
@@ -866,11 +870,13 @@ class TypeChecker {
       case "saveStatement": {
         const value = yield* compileChild(this.#expressionTask(statement.value, scope));
         if (
-          containsType(value, (part) => ["speaker", "timer", "media", "camera"].includes(part.kind))
+          containsType(value, (part) =>
+            ["speaker", "timer", "media", "camera", "permanentButton"].includes(part.kind),
+          )
         )
           this.#report(
             typeCode.invalidOperand,
-            `Speakers, camera views, and timer or media handles cannot be saved, but this is ${describeValue(value)}.`,
+            `Speakers, camera views, permanent buttons, and timer or media handles cannot be saved, but this is ${describeValue(value)}.`,
             statement.value.span,
           );
         yield* compileChild(this.#storageKeyTask(statement.key, scope));
@@ -2522,6 +2528,9 @@ class TypeChecker {
       case "showCameraExpression":
         this.#suspend();
         return { kind: "camera" };
+      case "showPermanentButtonExpression":
+        yield* compileChild(this.#permanentButtonTask(expression, scope));
+        return { kind: "permanentButton" };
       case "loadExpression": {
         yield* compileChild(this.#storageKeyTask(expression.key, scope));
         if (expression.defaultValue === null) return UNKNOWN_TYPE;
@@ -3598,12 +3607,14 @@ class TypeChecker {
   ): void {
     const target = targets.map(unwrap).find((node) => node.kind === "identifier");
     const name = target?.kind === "identifier" ? target.name : "values";
-    const written = typeName({ kind, element: union([own, other]) });
+    const mixed: StaticType = { kind, element: union([own, other]) };
+    const written = typeName(mixed);
     const property = misfitProperty(own, other);
     const fix =
       property !== undefined
         ? `give '${property.name}' one type in every element`
-        : `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`;
+        : (unnamedMixFix(mixed) ??
+          `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`);
     this.#report(
       typeCode.mixedTypes,
       `${operation} would mix ${mixDescription(own, other)}. A ${kind} holds one type; ${fix}.`,
@@ -3644,6 +3655,15 @@ class TypeChecker {
             "randomInteger(...) takes a range such as 1..=6",
           );
         return INTEGER_TYPE;
+      case "removePermanentButton":
+        if (argument !== undefined && value !== undefined)
+          this.#reportUnless(
+            value,
+            (member) => member.kind === "permanentButton",
+            argument.value,
+            "removePermanentButton(...) takes the identifier that showPermanentButton gives",
+          );
+        return NULL_TYPE;
       case "round":
       case "floor":
       case "ceil":
@@ -4135,7 +4155,7 @@ class TypeChecker {
     if (mixed === undefined) return;
     this.#report(
       typeCode.mixedTypes,
-      `This choose returns ${describeValue(mixed)}. A place keeps one type; ${fix(typeName(mixed))}.`,
+      `This choose returns ${describeValue(mixed)}. A place keeps one type; ${unnamedMixFix(mixed) ?? fix(typeName(mixed))}.`,
       expression.span,
     );
   }
@@ -4566,6 +4586,21 @@ class TypeChecker {
       });
   }
 
+  /** A button's text is shown text; its block runs later, when the player clicks it, like a timer expiry block. */
+  *#permanentButtonTask(button: ShowPermanentButtonParts, scope: Scope): CompileTask<void> {
+    this.#checkShownText(
+      button.text,
+      yield* compileChild(this.#expressionTask(button.text, scope)),
+      "a button label",
+    );
+    this.#handlers.push({
+      block: button.handler,
+      selfHandle: null,
+      scope: this.#outer,
+      file: this.#file,
+    });
+  }
+
   *#mediaTask(media: MediaParts, scope: Scope, selfHandle: string | null): CompileTask<StaticType> {
     // Media first waits for the previous message's pacing, and later for loading; handlers may run at both.
     this.#suspend();
@@ -4736,14 +4771,16 @@ class TypeChecker {
         literal.kind === "setLiteral" ? "set" : literal.kind === "dictLiteral" ? "dict" : "list";
       const first = types[0]!;
       const other = types.find((type) => joinTypes([first, type]) === undefined) ?? types[1]!;
-      const written = typeName({ kind, element: union(types) });
+      const mixed: StaticType = { kind, element: union(types) };
+      const written = typeName(mixed);
       const name = this.#declaredBy.get(literal);
       const property = misfitProperty(first, other);
       // A property type has no written form, so objects that disagree need one type for that property.
       const fix =
         property !== undefined
           ? `give '${property.name}' one type in every element`
-          : `to keep both, declare a union type, as in '${name === undefined ? `let values: ${written}` : `${this.#keyword(name)} ${name}: ${written}`} = ...'`;
+          : (unnamedMixFix(mixed) ??
+            `to keep both, declare a union type, as in '${name === undefined ? `let values: ${written}` : `${this.#keyword(name)} ${name}: ${written}`} = ...'`);
       this.#report(
         typeCode.mixedTypes,
         `This ${kind} mixes ${mixDescription(first, other)}. A ${kind} holds one type; ${fix}.`,
@@ -5100,6 +5137,10 @@ function programEffects(program: Program): ProgramEffects {
     switch (statement.kind) {
       case "functionDeclaration":
         enter(statement.body.statements, null, true);
+        // A parameter default runs in the function too, and the blocks it shows run later.
+        for (const parameter of statement.parameters)
+          if (parameter.defaultValue !== null)
+            work.push({ expression: parameter.defaultValue, loop: null, inside: true });
         continue;
       case "whileStatement": {
         const node = loopNode(statement.body, loop);
@@ -5367,10 +5408,12 @@ function nestedStatements(statement: Statement): readonly Statement[] {
   }
 }
 
-/** The timer or media blocks that a statement or expression registers. */
+/** The timer, media, or permanent button blocks that a statement or expression registers. */
 function handlerBlocks(node: Statement | Expression): readonly Block[] {
   if (node.kind === "timerStatement" || node.kind === "timerExpression")
     return node.handler === null ? [] : [node.handler];
+  if (node.kind === "showPermanentButtonStatement" || node.kind === "showPermanentButtonExpression")
+    return [node.handler];
   if (node.kind === "playMediaStatement" || node.kind === "playMediaExpression")
     return mediaHandlerBlocks(node);
   return [];
@@ -5403,6 +5446,8 @@ function statementExpressions(statement: Statement): readonly Expression[] {
       return [statement.duration];
     case "timerStatement":
       return timerOperands(statement);
+    case "showPermanentButtonStatement":
+      return [statement.text];
     case "playMediaStatement":
       return mediaOperands(statement);
     case "showImageStatement":
@@ -5721,6 +5766,7 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
       return temporalFieldType(value.name, name);
     case "range":
     case "null":
+    case "permanentButton":
       return undefined;
     default:
       return UNKNOWN_TYPE;
@@ -5979,6 +6025,18 @@ function declarationName(declaration: Declaration): string {
   return declaration.kind === "forStatement" ? declaration.variable.name : declaration.name.name;
 }
 
+/**
+ * The fix for a mix whose union type has no written form, because a camera view's or permanent button's type has no
+ * name, or `undefined` when the union can be declared.
+ */
+function unnamedMixFix(mixed: StaticType): string | undefined {
+  if (containsType(mixed, (part) => part.kind === "camera"))
+    return "a camera view's type cannot be declared, so keep camera views apart from other values";
+  if (containsType(mixed, (part) => part.kind === "permanentButton"))
+    return "a permanent button's type cannot be declared, so keep permanent buttons apart from other values";
+  return undefined;
+}
+
 /** Value kinds that `${...}` cannot show. */
 const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
   "list",
@@ -5989,6 +6047,7 @@ const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
   "timer",
   "media",
   "camera",
+  "permanentButton",
   "speaker",
 ]);
 
@@ -6160,6 +6219,7 @@ const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([
   ["chance", BOOLEAN_TYPE],
   ["randomInteger", INTEGER_TYPE],
   ["escapeMarkup", STRING_TYPE],
+  ["removePermanentButton", NULL_TYPE],
 ]);
 
 /** Speaker properties shown as text: the display name and the parts it is derived from. */

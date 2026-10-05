@@ -17,6 +17,7 @@ export type Statement =
   | HideImageStatement
   | ShowCameraStatement
   | HideCameraStatement
+  | ShowPermanentButtonStatement
   | PlayMediaStatement
   | SaveStatement
   | DeleteStatement
@@ -174,6 +175,28 @@ export interface ShowCameraExpression {
 export interface HideCameraStatement {
   readonly kind: "hideCameraStatement";
   readonly span: SourceSpan;
+}
+
+/**
+ * Shared data of `showPermanentButton <text> { [persist: true] ... }`. The block is the click action; `persist: true`,
+ * only as its first line, keeps the button when the file entry that showed it is left.
+ */
+export interface ShowPermanentButtonParts {
+  readonly text: Expression;
+  readonly persist: boolean;
+  readonly handler: Block;
+  readonly commandSpan: SourceSpan;
+  readonly span: SourceSpan;
+}
+
+/** A permanent button whose identifier is ignored. */
+export interface ShowPermanentButtonStatement extends ShowPermanentButtonParts {
+  readonly kind: "showPermanentButtonStatement";
+}
+
+/** A permanent button used as a value; it evaluates to the button's identifier. */
+export interface ShowPermanentButtonExpression extends ShowPermanentButtonParts {
+  readonly kind: "showPermanentButtonExpression";
 }
 
 export type MediaKind = "audio" | "video";
@@ -572,6 +595,7 @@ export type Expression =
   | TimerExpression
   | PlayMediaExpression
   | ShowCameraExpression
+  | ShowPermanentButtonExpression
   | LoadExpression
   | TagQueryExpression
   | TypeTestExpression;

@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "treasure-removal-order",
+      "layer": "source",
+      "category": "e",
+      "reason": "Handing a treasure to Elaina removes backPackArray[choice] from the backpack and then removes backPackArray[choice] from treasureArray, by which time that index names the next item (or nothing), so the wrong treasure, or none, left the treasure list. Remove the item from treasureArray first, then from the backpack, in both versions.",
+      "diff": "treasure-removal-order.diff"
+    }
+  ]
+}

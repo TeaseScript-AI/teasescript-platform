@@ -10,3 +10,13 @@ def showTiles = { picture, spacing ->
 }
 showTiles("puzzle/cat.jpg", 2)
 show("Solve the puzzle")
+// A zoom-in that draws the image it was given into growing frames shows the image itself.
+def zoomIn = { picture ->
+	for (step in 1..3) {
+		def sprite = javax.imageio.ImageIO.read(new File("images/" + picture))
+		def frame = new java.awt.image.BufferedImage(10 * step, 10 * step, 6)
+		setImage(frame, false)
+		wait(0.1)
+	}
+}
+zoomIn("puzzle/cat.jpg")

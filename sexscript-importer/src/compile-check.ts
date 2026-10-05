@@ -61,10 +61,63 @@ export interface TeaseProjectCompileResult {
   diagnostics: TeaseProjectDiagnostic[];
 }
 
+/** An image of a package with its tags, as the compiler's `images` option takes it. */
+export interface TeaseProjectImage {
+  path: string;
+  keywords: readonly string[];
+}
+
+/** `images` is the package's image catalog, which tag queries search. */
 export type TeaseProjectCompiler = (
   files: readonly TeaseProjectFile[],
   builtins?: readonly string[],
+  images?: readonly TeaseProjectImage[],
 ) => TeaseProjectCompileResult;
+
+/**
+ * A package folder read as the Player reads it: its sources, decoded alike, its images with their tags, and the files
+ * it skipped or could not read, each as `path: message`.
+ */
+export interface TeasePackageScan {
+  sources: TeaseProjectFile[];
+  images: TeaseProjectImage[];
+  problems: string[];
+}
+
+const repositoryPackageFolderUrl = new URL(
+  "../../dist/playground/package-folder.js",
+  import.meta.url,
+);
+
+/** Loads the playground server's package scan (`PackageFolder`) from the repository build. */
+export async function loadRepositoryPackageScanner(): Promise<
+  (root: string) => Promise<TeasePackageScan>
+> {
+  const module: unknown = await import(repositoryPackageFolderUrl.href);
+  if (!isRecord(module) || typeof module.PackageFolder !== "function")
+    throw new Error("Repository build does not export PackageFolder.");
+  // EVIDENCE: PackageFolder (playground/package-folder.ts) is constructed with the package root.
+  const PackageFolder = module.PackageFolder as new (root: string) => { scan(): Promise<object> };
+  return async (root) => {
+    const scan = await new PackageFolder(root).scan();
+    if (!isRecord(scan) || !Array.isArray(scan.sources) || !Array.isArray(scan.images))
+      throw new Error("PackageFolder.scan() returned an unexpected result shape.");
+    return {
+      sources: scan.sources
+        .filter(isRecord)
+        .map((file) => ({ path: String(file.path), source: String(file.source) })),
+      images: scan.images
+        .filter(isRecord)
+        .map((image) => ({
+          path: String(image.path),
+          keywords: Array.isArray(image.keywords) ? image.keywords.map(String) : [],
+        })),
+      problems: (Array.isArray(scan.problems) ? scan.problems : [])
+        .filter(isRecord)
+        .map((problem) => `${String(problem.path)}: ${String(problem.message)}`),
+    };
+  };
+}
 
 /** Loads the real compiler's project compilation (`compileProject`) from the repository build. */
 export async function loadRepositoryProjectCompiler(): Promise<TeaseProjectCompiler> {
@@ -73,10 +126,10 @@ export async function loadRepositoryProjectCompiler(): Promise<TeaseProjectCompi
     throw new Error("Repository build does not export compileProject().");
   }
   const compileProject = module.compileProject;
-  return (files, builtins = []) => {
+  return (files, builtins = [], images) => {
     const result: unknown = compileProject(
       files.map(({ path, source }) => ({ path, source })),
-      { builtins: [...builtins] },
+      { builtins: [...builtins], ...(images === undefined ? {} : { images: [...images] }) },
     );
     if (!isRecord(result) || !Array.isArray(result.diagnostics)) {
       throw new Error("compileProject() returned an unexpected result shape.");

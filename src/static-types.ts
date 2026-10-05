@@ -38,8 +38,11 @@ export type StaticType =
   | { readonly kind: "list" | "set" | "dict"; readonly element: StaticType }
   | { readonly kind: "object"; readonly properties: PropertyTable | null }
   | { readonly kind: "union"; readonly members: readonly StaticType[] }
-  /** `camera` is the handle of a camera view (`let view = showCamera`); scripts cannot name it as a type. */
-  | { readonly kind: "range" | "timer" | "media" | "camera" | "speaker" }
+  /**
+   * `camera` is the handle of a camera view (`let view = showCamera`), and `permanentButton` the identifier of a
+   * permanent button; scripts cannot name either as a type.
+   */
+  | { readonly kind: "range" | "timer" | "media" | "camera" | "permanentButton" | "speaker" }
   | OpenType;
 
 /** A list, set, or dict type. */
@@ -1307,7 +1310,8 @@ export function elementStoreType(type: StaticType): StaticType | undefined {
 
 /**
  * Whether a type can be written as an annotation without losing what the compiler knows. Objects with known properties
- * cannot, because a property type has no written form.
+ * cannot, because a property type has no written form, and neither can camera views or permanent buttons, whose types
+ * have no name.
  */
 export function isAnnotatable(type: StaticType): boolean {
   return (
@@ -1317,6 +1321,8 @@ export function isAnnotatable(type: StaticType): boolean {
       (part) =>
         part.kind === "never" ||
         part.kind === "open" ||
+        part.kind === "camera" ||
+        part.kind === "permanentButton" ||
         (part.kind === "object" && part.properties !== null),
     )
   );
@@ -1407,6 +1413,8 @@ export function describeValue(type: StaticType): string {
       return "a media handle";
     case "camera":
       return "a camera view";
+    case "permanentButton":
+      return "a permanent button";
     default:
       return `a ${value.kind}`;
   }

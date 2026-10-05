@@ -228,8 +228,9 @@ in [Runtime](RUNTIME.md#script-storage). The Player keeps script storage in brow
 Implemented timing includes exact and calendar duration literals/values, cross-unit comparisons, date, time, datetime,
 and timestamp values with strict ISO conversion and the player's numeric presentation, blocking `wait`/`timer`, and
 asynchronous timers with display, labels, handles, lifecycle control, repetition, expiry interrupts, and checkpoint
-restore. Accepted forms and current limits are defined in specification
-[§27](specifications/accepted-syntaxes-v30.md#27-timers) and
+restore, and permanent buttons whose clicks run their blocks like expiry interrupts. Accepted forms and current limits
+are defined in specification [§27](specifications/accepted-syntaxes-v30.md#27-timers),
+[§28](specifications/accepted-syntaxes-v30.md#28-permanent-buttons), and
 [§35](specifications/accepted-syntaxes-v30.md#35-date-time-durations-and-timestamps).
 
 Implemented media includes the persistent Stage image (`showImage`, `hideImage`), blocking and asynchronous

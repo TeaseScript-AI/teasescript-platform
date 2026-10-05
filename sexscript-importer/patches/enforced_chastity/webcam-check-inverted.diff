@@ -1,0 +1,13 @@
+--- a/scripts/enforced_chastity.groovy
++++ b/scripts/enforced_chastity.groovy
+@@ -446,8 +446,8 @@
+ show("<h1>Attempting to load settings</h1>")
+ try{
+ 	wager_image=getImage()
+-	if ((wager_image == null) || (!wager_image.contains("captured"))) {has_cam = true}
+-	else{has_cam = false}
++	if ((wager_image == null) || (!wager_image.contains("captured"))) {has_cam = false}
++	else{has_cam = true}
+ 	} 
+ catch( Throwable t ){has_cam = false}
+ save("enforced_chastity.has_cam",has_cam)

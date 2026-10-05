@@ -103,6 +103,12 @@ export function completeAction(
       message: "Media settles only through media load and progress reports and script operations.",
     });
   }
+  if (active.kind === "permanentButton") {
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: "A permanent button is clicked with pressPermanentButton and removed by the script.",
+    });
+  }
   if (value.actionKind !== active.kind) {
     const receivedActionKind = validRequestedActionKind(value.actionKind)
       ? value.actionKind

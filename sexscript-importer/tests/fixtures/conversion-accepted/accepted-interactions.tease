@@ -1,24 +1,6 @@
-// MIGRATION INCOMPLETE: 2 error diagnostics.
+// MIGRATION INCOMPLETE: 1 error diagnostic.
 // Review diagnostics before treating this file as behaviorally equivalent.
 
-let sexscriptLegacySwitchButton = null
-function sexscriptLegacyShowSwitch(command) {
-  let last = command.trim().split(" ").last.lowercase()
-  if ["on", "ein", "an"].contains(last) {
-    if sexscriptLegacySwitchButton != null {
-      removePermanentButton(sexscriptLegacySwitchButton)
-    }
-    sexscriptLegacySwitchButton = showPermanentButton "Power: ON" {
-    }
-  }
-  if ["off", "aus"].contains(last) {
-    if sexscriptLegacySwitchButton != null {
-      removePermanentButton(sexscriptLegacySwitchButton)
-    }
-    sexscriptLegacySwitchButton = showPermanentButton "Power: OFF" {
-    }
-  }
-}
 say "Are you ready?"
 let ready = (choose yes: "Yes", no: "No") == "yes"
 say "Really?"
@@ -84,7 +66,4 @@ let picture = chooseFile()
 if picture == null {
   say "No photo"
 }
-// A device switch program shows its state as a permanent button.
-// NOTE SX_SWITCH_WORKAROUND line 34: The legacy script ran a device switch program; the switch state is a permanent button, replaced when the state changes.
-sexscriptLegacyShowSwitch("SwitchBox.exe 7 ein")
 exit

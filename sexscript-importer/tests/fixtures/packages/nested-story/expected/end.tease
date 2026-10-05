@@ -1,0 +1,6 @@
+say "The end."
+// The legacy player counted the starts of each script; this one reads how often the story began.
+if (load "Story.start.launch.nb") != null {
+  say "You began ${load "Story.start.launch.nb"} times."
+}
+exit

@@ -1044,6 +1044,33 @@ function validateInstruction(
         errors.push(planError("TSC002", "Hide-camera instruction has an invalid shape.", path));
       }
       return;
+    case "showPermanentButton":
+      if (
+        !hasExactKeys(value, [
+          "kind",
+          "text",
+          "persist",
+          "handlerFunctionId",
+          "destinationTemporary",
+          "span",
+        ]) ||
+        typeof value.persist !== "boolean"
+      ) {
+        errors.push(
+          planError("TSC002", "Show-permanent-button instruction has an invalid shape.", path),
+        );
+      }
+      validateExpression(value.text, `${path}.text`, errors, false, temporaryCount);
+      validateFunctionId(value.handlerFunctionId, `${path}.handlerFunctionId`, functionIds, errors);
+      if (value.destinationTemporary !== null) {
+        validateTemporaryId(
+          value.destinationTemporary,
+          `${path}.destinationTemporary`,
+          temporaryCount,
+          errors,
+        );
+      }
+      return;
     case "storageWrite":
       if (!hasExactKeys(value, ["kind", "value", "key", "span"])) {
         errors.push(planError("TSC002", "Storage-write instruction has an invalid shape.", path));
@@ -1881,6 +1908,7 @@ const TYPE_PLAN_NAMES = [
   "timer",
   "media",
   "camera",
+  "permanentButton",
   "script",
 ];
 

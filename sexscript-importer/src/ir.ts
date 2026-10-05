@@ -60,17 +60,28 @@ export interface IrFunctionParameter {
 }
 
 export type IrStatement =
-  | (IrBase & { kind: "say"; value: IrExpression })
+  /** `instant` shows the text without reading time (`say text, instant`). */
+  | (IrBase & { kind: "say"; value: IrExpression; instant?: true })
   | (IrBase & { kind: "wait"; duration: IrExpression; visible: boolean; unit: "s" | "ms" })
   | (IrBase & { kind: "showButton"; label: IrExpression; timeout: IrExpression | null })
   | (IrBase & { kind: "showPopup"; message: IrExpression })
-  /** `target = showPermanentButton label { }` (V30 §28): a button without an action, its ID kept in `target`. */
-  | (IrBase & { kind: "permanentButton"; target: IrExpression; label: IrExpression })
+  /**
+   * `target = showPermanentButton label { }` (V30 §28): a button without an action, its ID kept in `target`; `persist`
+   * keeps it across files until `exit`.
+   */
+  | (IrBase & {
+      kind: "permanentButton";
+      target: IrExpression;
+      label: IrExpression;
+      persist: boolean;
+    })
   | (IrBase & { kind: "showImage"; file: IrExpression })
   | (IrBase & { kind: "hideImage" })
   | (IrBase & {
       kind: "playAudio";
       file: IrExpression;
+      /** `playVideo` instead of `playAudio`. */
+      video?: true;
       async: boolean;
       repeatCount: IrExpression | null;
       /** Declares a variable holding the handle of async media. */
@@ -194,6 +205,8 @@ export type IrExpression =
   | { kind: "index"; target: IrExpression; index: IrExpression; dict?: true }
   /** `dict` marks a member of a dict (#536). */
   | { kind: "property"; target: IrExpression; name: string; dict?: true }
+  /** `value is type`, a type test (#530). */
+  | { kind: "typeTest"; value: IrExpression; type: string }
   /** A dict `get` has the key and the default as its arguments: `dict.get(key, default: value)` (#536). */
   | {
       kind: "methodCall";

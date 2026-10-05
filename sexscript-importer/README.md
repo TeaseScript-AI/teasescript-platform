@@ -73,16 +73,17 @@ With a single directory argument, the sibling `images/` folder holds the package
 
 Accepted TeaseScript that `main` does not implement yet becomes a workaround in implemented TeaseScript, marked with a
 `// NOTE` at every site, so that converted packages play natively: `askBooleans` a yes/no choice per item and a
-confirmation, `showPopup` the message and an OK button, `openUrl` the link in the chat and a button, legacy `getFile`
-a cancelled `chooseFile()`, and a legacy count of the images in a package folder the counts of the package's images at
-conversion time. `--accepted` (every form) or `--accepted=askBooleans,showPopup,openUrl,chooseFile` emits the accepted
-forms instead, for when `main` implements them; the report then compiles and runs them through host stand-ins.
+confirmation, `showPopup` the message and an OK button, `openUrl` the link in the chat and a button, and an image
+composition its base image. `--accepted` (every form) or `--accepted=askBooleans,showPopup,openUrl,chooseFile,layeredScene`
+emits the accepted forms instead, for when `main` implements them; the report then compiles and runs them through host
+stand-ins.
 
-`--proposed` (every proposal) or `--proposed=media-tags` on `convert`, `convert-package`, and `report`
-emits a working syntax for proposed TeaseScript language changes instead of reporting the construct, to measure what
-they would resolve ([`docs/PROPOSED-LANGUAGE-CHANGES.md`](docs/PROPOSED-LANGUAGE-CHANGES.md)). That output is not
-accepted TeaseScript: the report compiles and runs it through stand-ins in current TeaseScript, counted as `proposed
-...` capabilities, and proposed media tags count the images in the package's sibling `images/` folder.
+A legacy count of the images in a package folder becomes a tag query (#572): when a package lists an images folder,
+`convert-package` gives each of its images a generated XMP sidecar (`x.jpg.xmp`) with one tag for its full legacy
+folder path, `images/Domme3/Pack 2/x.jpg` → `images-domme3-pack-2`, and the count becomes
+`findImages(all: ["images-domme3-pack-2"]).length`, or the `sexscriptLegacyPathTag` helper's tag of a computed folder
+(`SX_IMAGE_TAGS`). The report's gate and smoke runs give the compiler these tags. A count filtered by file name stays
+counted at conversion time (`SX_IMAGE_COUNT_WORKAROUND`).
 
 Generated files follow these conventions:
 
@@ -102,7 +103,7 @@ Mapping decisions and their rationale are in [`docs/POC-SCOPE.md`](docs/POC-SCOP
 A page that opens every converted package of a legacy corpus in the Player, with the status from playing it there:
 
 ```sh
-node tools/convert-corpus.ts [--jobs N] [--only id,id] [--report-only] /path/to/corpus external/converted
+node tools/convert-corpus.ts [--jobs N] [--only id,id] [--report-only] [--patches dir] /path/to/corpus external/converted
 # from the repository root, after npm run build: the converted and the verified packages, then the HTTPS front
 HOST=127.0.0.1 PORT=4182 PLAYGROUND_PACKAGES=$PWD/sexscript-importer/external/converted node dist/playground/server.js
 HOST=127.0.0.1 PORT=4183 PLAYGROUND_PACKAGES=$PWD/sexscript-importer/external/verified node dist/playground/server.js
@@ -117,13 +118,73 @@ node tools/catalog.ts [--player https://host:port] --play-checks external/play-c
 ```
 
 `convert-corpus` takes one corpus folder per package, each with `scripts/`, `images/`, and `sounds/`. It runs
-`convert-package` on each folder whose `scripts/` holds Groovy, then `report --run`, whose JSON it keeps as
-`.report.json`. Legacy scripts name media relative to `images/` and `sounds/`, and package paths start at the package
-root, so both trees are hard-linked into the package root. Media are never copied, so the corpus and the output must
-share one filesystem. A resource pack (a folder without scripts) is linked into each script package whose source names
+`convert-package` on each folder whose `scripts/` holds Groovy, then `report --run --package`, whose JSON it keeps as
+`.report.json`; its `finalPackage` reads the package as the Player does (the playground server's package scan, with
+the images and their tags), compiles the `.tease` files as written, and runs them natively from `main.tease`. Legacy scripts name media relative to `images/` and `sounds/`, and package paths start at the package
+root, so both trees are hard-linked into the package root, and a `videos/` folder keeps its name. Media are never
+copied, so the corpus and the output must share one filesystem; only MIDI files become MP3s and videos in formats
+browsers do not play become MP4s (H.264), both rendered with ffmpeg. A resource pack (a folder without scripts) is linked into each script package whose source names
 one of its top media folders, narrowed to the packages that name its subfolder when any do. Each package folder records
-the conversion in `.conversion.json` and `.conversion.log`; `.conversion-summary.json` in the root records the importer
-commit and the date.
+the conversion in `.conversion.json` (the converter commit, the SHA-256 of each legacy script, the patches applied,
+and the unit's status) and `.conversion.log`; `.conversion-summary.json` in the root records the importer commit and
+the date. A merged unit's `unit.json`, beside its `scripts/`, gives its status, such as `unfinished-content-stub`, and
+its `internalScripts`: scripts of expansions, story chapters, resource scripts, or hub games that are no entries of
+their own, which `convert-package` and `report` leave out of a generated entry menu. A menu with one script left
+starts there directly.
+
+Each unit is converted in `<converted-root>/.staging/<unit>/` and replaces its published folder only when every step
+succeeded. When a patch does not apply, or the converter, the report, or the driver fails, the previous output stays,
+the driver exits with status 1, and `.failures/<unit>.json` records the step and the message until a later conversion
+succeeds. TODOs, compiler errors, and smoke-run outcomes are results, not failures. A replacement interrupted between
+its two moves leaves the previous output in the staging folder, and the next run restores it.
+
+### Manual unit patches
+
+Script-specific fixes stay out of the converter (owner decision 2026-10-05). They live in `patches/<unit>/` with a
+`patches.json`, and every conversion of the unit applies them again, so reconversion never overwrites them:
+
+```json
+{
+  "patches": [
+    {
+      "id": "greeting",
+      "layer": "source",
+      "category": "b",
+      "reason": "…",
+      "diff": "greeting.diff"
+    },
+    {
+      "id": "farewell",
+      "layer": "output",
+      "category": "e",
+      "reason": "…",
+      "file": "main.tease",
+      "baseHash": "<SHA-256 of main.tease as generated>",
+      "edits": [{ "find": "say \"Bye\"\nexit", "replace": "say \"Goodbye\"\nexit", "count": 1 }]
+    }
+  ]
+}
+```
+
+- Source patches are the default layer: a unified diff of legacy files with paths from the unit folder, applied with
+  `patch -p1 --fuzz=0` to a staged copy before conversion, so the report and the package both come from the patched
+  sources. Edit a copy, never the corpus file, and keep its line endings, which `patch` matches exactly. `patch` reads
+  a path with spaces only when a tab and a timestamp follow it in the `---`/`+++` header, so give such a label one:
+  `--label $'a/scripts/My file.groovy\t2026-10-05 00:00:00'`.
+
+  ```sh
+  cd external/corpus2-merged/<unit>
+  cp scripts/start.groovy /tmp/agent-work/fix/start.groovy   # then edit the copy
+  diff -u --label a/scripts/start.groovy --label b/scripts/start.groovy scripts/start.groovy \
+    /tmp/agent-work/fix/start.groovy > ../../../patches/<unit>/greeting.diff
+  ```
+
+- Output edits are for additions that have no legacy form. Each names the SHA-256 of its file as the converter
+  generated it from the patched sources (`sha256sum` of the file after a conversion without the output patch) and how
+  often each `find` occurs; edits apply in order before the media are linked, so they reach only generated files. A changed or missing file, or another
+  count, fails the unit for review. An anchor needs code: generated `// NOTE` and `// TODO` lines move as the converter
+  changes. A patch that removes a TODO needs its diagnostic actually resolved.
+- Every patch needs an `id` and a `reason`; `category` is free text, such as the inspection category.
 
 The Player needs a secure context (HTTPS or localhost) on another machine, and the playground server serves its own
 page at `/`. `serve-catalog` therefore puts the catalog page and the Player on one HTTPS origin. It serves `/` and

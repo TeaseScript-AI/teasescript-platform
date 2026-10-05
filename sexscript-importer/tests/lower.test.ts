@@ -63,7 +63,7 @@ test("lowers common SexScript flow to accepted TeaseScript forms", () => {
   assert.equal(
     emitTease(program),
     [
-      'say "Hello"',
+      'say "Hello", instant',
       "wait 2",
       "timer 3",
       'showImage "scene/one.jpg"',
@@ -459,8 +459,9 @@ test("maps list-only Groovy size property and size() method to TeaseScript lengt
   );
 });
 
-test("keeps Groovy size access on a value that may be text or a list as a migration error", () => {
-  // The list is stored on one path only, so the read may see either value.
+test("reads the Groovy size property of a value that may be text or a list as length", () => {
+  // The list is stored on one path only, so the read may see either value; Groovy failed on the text, which has no
+  // size property, and read the list's size field.
   const source = file([
     statement({
       kind: "declaration",
@@ -505,9 +506,7 @@ test("keeps Groovy size access on a value that may be text or a list as a migrat
   ]);
 
   const program = lowerParsedFile(source);
-  assert.ok(
-    program.diagnostics.some((diagnostic) => diagnostic.code === "SX_UNSUPPORTED_PROPERTY"),
-  );
+  assert.match(emitTease(program), /^let count = items\.length$/mu);
 });
 
 test("lowers direct indexed assignment targets", () => {

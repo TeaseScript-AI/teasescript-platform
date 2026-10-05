@@ -36,4 +36,14 @@ function pickOwned(itemKeys) {
   }
 }
 say "Bring the ${pickOwned(["toys.paddle", "toys.crop"])}"
+// A list whose type is not proven, such as a closure result, read with the legacy size property.
+function collected {
+  let found = []
+  found.add("a")
+  return found
+}
+let got = collected()
+if got.length > 0 {
+  say "Found ${got.length}"
+}
 exit

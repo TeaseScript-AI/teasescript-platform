@@ -9,4 +9,10 @@ if (loadBoolean("training.finished")) {
 }
 save("training.old", null)
 show("Visit " + (visits + 1))
+// A read into a variable whose type cannot hold null keeps its value where the key is missing.
+def greeting = "Mistress"
+greeting = load("training.greeting")
+show("Hello " + greeting)
+// Groovy ordered a missing storage value, null, below every value.
+if (loadInteger("training.level") < 3) show("Still a beginner")
 return null

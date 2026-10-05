@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "co02-image-name",
+      "layer": "source",
+      "category": "b",
+      "reason": "The second script shows mandys_blackmail/co2.jpg, which the image pack lacks; the pack carries short-name copies that are byte-identical to the zero-padded ones (co1 = co01, co3 = co03, co9 = co09), and co02.jpg exists. Use co02.jpg.",
+      "diff": "co02-image-name.diff"
+    }
+  ]
+}
