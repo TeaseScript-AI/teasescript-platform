@@ -1832,6 +1832,18 @@ async function askImageCameraScenario(cdp, origin, profile) {
       "The paperclip is not offered beside the camera",
     );
     await physicalClick(cdp, "[data-image-capture-shutter]");
+    // The shutter counts down from five over the live viewfinder before it takes the photo.
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-image-capture-countdown]')?.textContent.trim() === '5' && ${liveVideo("[data-stage-camera]")}`,
+      2_000,
+      "The shutter did not start the countdown",
+    );
+    assertEqual(
+      await value(cdp, `!!${photo}`),
+      false,
+      "The photo was taken before the countdown ended",
+    );
     await waitFor(cdp, photoReady, 10_000, "The photo taken is not shown for review");
     assertTestCard(
       await value(cdp, quadrantColors(photo)),

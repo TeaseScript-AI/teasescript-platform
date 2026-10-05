@@ -594,7 +594,7 @@ a paperclip, which opens the native picker, and a drop target; a chosen and a dr
 Stage, while a text file, two files, or a file outside the request's filters are refused and the request keeps waiting;
 its `picture-race` package checks that a file chosen for a request a timer's request replaced answers neither; and
 its `picture-camera` and `picture-camera-view` packages check that the camera opens by itself, on the Stage or in the
-script's camera window, take a photo of the fake camera's test card with Retake before Use this, check that the camera
+script's camera window, take a photo of the fake camera's test card after the countdown, with Retake before Use this, check that the camera
 the request opened turns off after a photo or a file answered, and that a busy camera offers Try again while the
 paperclip stays. On the
 importer's route `/player/?dev&package=waiting&time=skip`, auto-skip ends that package's 15 s wait right after a
