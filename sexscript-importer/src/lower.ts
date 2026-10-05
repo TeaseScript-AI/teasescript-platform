@@ -6970,7 +6970,13 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
         ),
       ];
     const matchNode = asNode(caseNode.expression);
-    const match = matchNode === null ? null : lowerExpression(matchNode, context);
+    // A closure case is a condition on the switched value (closureCaseTest), tested in the if chain.
+    const match =
+      matchNode === null
+        ? null
+        : closureCaseTest(matchNode) !== null
+          ? ({ kind: "literal", value: null } satisfies IrExpression)
+          : lowerExpression(matchNode, context);
     if (match === null) {
       return [
         unsupportedStatement(
@@ -7034,7 +7040,8 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
       onlyOf(inferType(matchNodes[index]!, context.types), LIST);
     return listCase ? { ...switchCase, matches: match.items } : switchCase;
   });
-  if (isAcceptedSwitch(valueCases)) {
+  const closureCases = matchNodes.map((matchNode) => closureCaseTest(matchNode));
+  if (closureCases.every((test) => test === null) && isAcceptedSwitch(valueCases)) {
     return [
       { kind: "switch", value, cases: valueCases, default: defaultStatements, span: node.span },
     ];
@@ -7069,6 +7076,7 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
     }
     const boundsRepeatable = match.kind === "range" && [match.from, match.to].every(isPlainValue);
     const known =
+      closureCases[index] !== null ||
       match.kind === "list" ||
       boundsRepeatable ||
       (match.kind !== "range" &&
@@ -7099,18 +7107,40 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
   const subject: IrExpression = repeatable
     ? value
     : { kind: "variable", name: `switchValue${context.switchValues}` };
+  if (subject.kind === "variable" && !repeatable) context.generatedNames.add(subject.name);
   let chain: IrStatement[] = defaultStatements;
   for (let index = cases.length - 1; index >= 0; index -= 1) {
     const switchCase = cases[index]!;
-    chain = [
-      {
-        kind: "if",
-        condition: caseMatches(subject, switchCase.matches[0]!, listCases[index]!),
-        then: switchCase.body,
-        else: chain,
-        span: switchCase.span,
-      },
-    ];
+    const test = closureCases[index];
+    // Groovy called a closure case with the switched value and took the truth of its result.
+    const condition =
+      test === null || test === undefined
+        ? caseMatches(subject, switchCase.matches[0]!, listCases[index]!)
+        : lowerCondition(
+            replaceVariable(
+              test.expression,
+              test.parameter,
+              repeatable && valueNode !== null
+                ? valueNode
+                : {
+                    kind: "variable",
+                    span: null,
+                    name: subject.kind === "variable" ? subject.name : "switchValue",
+                    type: "java.lang.Object",
+                  },
+            ),
+            context,
+          );
+    if (condition === null)
+      return [
+        unsupportedStatement(
+          context,
+          matchNodes[index]!,
+          "SX_SWITCH_CASE_MATCH",
+          "This closure case's condition could not be converted; rewrite the case as an explicit condition.",
+        ),
+      ];
+    chain = [{ kind: "if", condition, then: switchCase.body, else: chain, span: switchCase.span }];
   }
   return repeatable
     ? chain
@@ -7123,6 +7153,39 @@ function lowerSwitch(node: AstNode, context: LowerContext): IrStatement[] {
         },
         ...chain,
       ];
+}
+
+/** A closure case's one expression and its parameter (`case { it < 2 }`), or null for any other case. */
+function closureCaseTest(node: AstNode | null): { expression: AstNode; parameter: string } | null {
+  if (node?.kind !== "closure") return null;
+  const parameters = groovyParameters(node.parameters);
+  if (parameters === null || parameters.length > 1) return null;
+  const parameter = node.parameterSpecified === true ? parameters[0]?.name : "it";
+  const statements = nodeArray(asNode(node.body)?.statements);
+  const only = statements.length === 1 ? statements[0]! : null;
+  const expression =
+    only?.kind === "expressionStatement"
+      ? asNode(only.expression)
+      : only?.kind === "return"
+        ? asNode(only.value)
+        : null;
+  return parameter === undefined || expression === null ? null : { expression, parameter };
+}
+
+/** A copy of an expression with each read of a variable replaced by another expression. */
+function replaceVariable(node: AstNode, name: string, replacement: AstNode): AstNode {
+  if (node.kind === "variable" && variableName(node) === name) return replacement;
+  if (node.kind === "closure") return node;
+  const result: AstNode = { ...node };
+  for (const [key, child] of Object.entries(node)) {
+    if (key === "span") continue;
+    if (isAstNode(child)) result[key] = replaceVariable(child, name, replacement);
+    else if (Array.isArray(child))
+      result[key] = child.map((item: unknown) =>
+        isAstNode(item) ? replaceVariable(item, name, replacement) : item,
+      );
+  }
+  return result;
 }
 
 /**
