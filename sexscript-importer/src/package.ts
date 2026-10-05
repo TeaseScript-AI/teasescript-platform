@@ -25,6 +25,7 @@ import {
   packageStableNames,
   packageStopsBackgroundSounds,
   photoCopy,
+  withGuardedInputs,
 } from "./lower.ts";
 import { helperDefinitionOrder, SYSTEM_SPEAKER, withActionDispatcher } from "./helpers.ts";
 import { promoteGlobalFunctions, type GlobalPromotion } from "./globals.ts";
@@ -476,9 +477,11 @@ function entryMenu(
 }
 
 export function lowerPackage(
-  files: readonly ParsedGroovyFile[],
+  parsedFiles: readonly ParsedGroovyFile[],
   options: PackageOptions = {},
 ): LoweredPackage {
+  // Questions inside short circuits are asked at their own moment (withGuardedInputs).
+  const files = parsedFiles.map(withGuardedInputs);
   const helperRegistry = buildHelperRegistry(files);
   const mixinModules = files.flatMap((file) => describeMixinModule(file) ?? []);
   const stableNames = packageStableNames(files);

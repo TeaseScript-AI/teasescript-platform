@@ -320,6 +320,201 @@ export function buildHelperRegistry(files: readonly ParsedGroovyFile[]): HelperR
   return registry;
 }
 
+/** Legacy input calls that show a question first (pushPrompt). */
+const PROMPTING_CALLS = new Set([
+  "getBoolean",
+  "getFloat",
+  "getInteger",
+  "getSelectedValue",
+  "getString",
+  "getFile",
+  "getImage",
+]);
+
+/**
+ * A file whose `while` conditions ask inside `&&`, `||`, or `?:`, as in `while (name == null ||
+ * !getBoolean("Good?"))`, rewritten so each question comes at its own moment: the condition is computed into a
+ * variable step by step, asking only where Groovy's short circuit reached the input, and a loop tests it at its top.
+ * Other files are returned as they are.
+ */
+export function withGuardedInputs(file: ParsedGroovyFile): ParsedGroovyFile {
+  const body = asNode(file.root?.body);
+  if (file.root === null || body === null) return file;
+  let found = false;
+  walkAst(body, (node) => {
+    if (node.kind === "while" && hasGuardedInput(asNode(node.condition))) found = true;
+  });
+  if (!found) return file;
+  const taken = new Set<string>();
+  walkAst(body, (node) => {
+    const name = variableName(node);
+    if (name !== null) taken.add(name);
+  });
+  const fresh = (): string => {
+    let name = "answered";
+    for (let suffix = 2; taken.has(name); suffix += 1) name = `answered${suffix}`;
+    taken.add(name);
+    return name;
+  };
+  const copy: AstNode = structuredClone(body);
+  rewriteGuardedInputs(copy, fresh);
+  return { ...file, root: { ...file.root, body: copy } };
+}
+
+/** Whether an input call sits where Groovy's `&&`, `||`, or `?:` decides whether it runs. */
+function hasGuardedInput(condition: AstNode | null): boolean {
+  if (condition === null) return false;
+  let guarded = false;
+  const visit = (node: AstNode, inGuard: boolean): void => {
+    if (node.kind === "closure") return;
+    if (inGuard && isPromptingCall(node)) guarded = true;
+    if (node.kind === "binary" && (node.operator === "&&" || node.operator === "||")) {
+      const left = asNode(node.left);
+      const right = asNode(node.right);
+      if (left !== null) visit(left, inGuard);
+      if (right !== null) visit(right, true);
+      return;
+    }
+    if (node.kind === "ternary" || node.kind === "elvis") {
+      for (const [key, child] of Object.entries(node))
+        if (isAstNode(child)) visit(child, inGuard || (key !== "condition" && key !== "boolean"));
+      return;
+    }
+    for (const child of nodeChildren(node)) visit(child, inGuard);
+  };
+  visit(condition, false);
+  return guarded;
+}
+
+function isPromptingCall(node: AstNode): boolean {
+  const name = node.kind === "methodCall" ? constantString(node.method) : null;
+  const receiver = asNode(node.object);
+  return (
+    name !== null &&
+    PROMPTING_CALLS.has(name) &&
+    (node.implicitThis === true || variableName(receiver) === "this")
+  );
+}
+
+/** Rewrites the statements of every block below `node` (withGuardedInputs). */
+function rewriteGuardedInputs(node: AstNode, fresh: () => string): void {
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) {
+      for (let index = 0; index < value.length; index += 1) {
+        const item: unknown = value[index];
+        if (!isAstNode(item)) continue;
+        rewriteGuardedInputs(item, fresh);
+        const replaced = guardedStatement(item, fresh);
+        if (replaced !== null) {
+          value.splice(index, 1, ...replaced);
+          index += replaced.length - 1;
+        }
+      }
+    } else if (isAstNode(value)) rewriteGuardedInputs(value, fresh);
+  }
+}
+
+/** A `while` or `if` statement whose condition asks inside a short circuit, rewritten (withGuardedInputs). */
+function guardedStatement(statement: AstNode, fresh: () => string): AstNode[] | null {
+  const condition = asNode(statement.condition);
+  // An if statement's condition already computes a guarded question first (the deferred conditional).
+  if (statement.kind !== "while" || !hasGuardedInput(condition)) return null;
+  const span = statement.span ?? null;
+  const answer = fresh();
+  const variable = (): AstNode => ({ kind: "variable", span, name: answer });
+  const steps = [
+    {
+      kind: "expressionStatement",
+      span,
+      expression: {
+        kind: "declaration",
+        span,
+        multipleAssignment: false,
+        left: variable(),
+        right: { kind: "constant", span, value: false },
+      },
+    },
+    ...conditionSteps(condition!, variable, span),
+  ];
+  const body = asNode(statement.body);
+  const inner = body?.kind === "block" ? nodeArray(body.statements) : body === null ? [] : [body];
+  return [
+    {
+      ...statement,
+      condition: { kind: "constant", span, value: true },
+      body: {
+        kind: "block",
+        span,
+        statements: [
+          ...steps,
+          {
+            kind: "if",
+            span,
+            condition: { kind: "not", span, value: variable() },
+            then: { kind: "block", span, statements: [{ kind: "break", span, label: null }] },
+            else: { kind: "empty", span },
+          },
+          ...inner,
+        ],
+      },
+    },
+  ];
+}
+
+/** Statements that compute a condition into the answer variable, asking only where the short circuit reaches. */
+function conditionSteps(
+  condition: AstNode,
+  variable: () => AstNode,
+  span: SourceSpan | null,
+): AstNode[] {
+  const assign = (value: AstNode): AstNode => ({
+    kind: "expressionStatement",
+    span,
+    expression: { kind: "binary", span, operator: "=", left: variable(), right: value },
+  });
+  const branch = (test: AstNode, then: AstNode[], otherwise: AstNode[]): AstNode => ({
+    kind: "if",
+    span,
+    condition: test,
+    then: { kind: "block", span, statements: then },
+    else: { kind: "block", span, statements: otherwise },
+  });
+  if (!hasGuardedInput(condition)) return [assign(condition)];
+  const left = asNode(condition.left);
+  const right = asNode(condition.right);
+  if (
+    condition.kind === "binary" &&
+    (condition.operator === "||" || condition.operator === "&&") &&
+    left !== null &&
+    right !== null
+  ) {
+    const or = condition.operator === "||";
+    const decided = assign({ kind: "constant", span, value: or });
+    // A left side without a question is tested where it stands, so a null test still narrows the right side.
+    if (!hasGuardedInput(left))
+      return [
+        or
+          ? branch(left, [decided], conditionSteps(right, variable, span))
+          : branch(left, conditionSteps(right, variable, span), [decided]),
+      ];
+    return [
+      ...conditionSteps(left, variable, span),
+      branch(
+        or ? { kind: "not", span, value: variable() } : variable(),
+        conditionSteps(right, variable, span),
+        [],
+      ),
+    ];
+  }
+  const inner = asNode(condition.value);
+  if (condition.kind === "not" && inner !== null)
+    return [
+      ...conditionSteps(inner, variable, span),
+      assign({ kind: "not", span, value: variable() }),
+    ];
+  return [assign(condition)];
+}
+
 export function lowerParsedFiles(files: readonly ParsedGroovyFile[]): MigrationProgram[] {
   const helperRegistry = buildHelperRegistry(files);
   return files.map((file) => lowerParsedFile(file, { helperRegistry }));
