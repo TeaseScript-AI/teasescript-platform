@@ -137,8 +137,9 @@ empty replacement: the browser-local provider stages the new values as a generat
 `player-storage-head:` plus the JSON scope, holding `{ v: 1, generation }`. From then on only that generation holds
 the scope's values, so a replacement that fails, for example on quota, keeps every previous value; an unreadable head
 makes the scope unreadable rather than revealing older values, until a replacement repairs it. Each operation runs
-synchronously within one browser task and removes the generation it displaced. A save from another open tab of the same
-script can still change replaced values, or land in a displaced generation and be lost; tabs are not coordinated.
+synchronously within one browser task; after publishing, a replacement attempts to remove only the generation it
+displaced. Tabs are not coordinated: a save from another open tab of the same script can still change replaced values,
+or land in a displaced generation and be lost.
 Providers treat values as ordinary TeaseScript values and never interpret them, for example as media references; a
 layer such as durable captured media wraps a provider instead and stores the media that written or replacing values
 reference before persisting them. Clearing or replacing a scope affects only that script's stored values, never a

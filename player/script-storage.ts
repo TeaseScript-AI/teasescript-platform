@@ -38,8 +38,8 @@ const GENERATION_PATTERN = /^[0-9a-f]{32}$/u;
  * `player-storage-generation:` plus `[scope, generation, key]`, and then publishes it with one write of the head item
  * `player-storage-head:` plus the JSON scope, holding `{ v: 1, generation }`; from then on only that generation's
  * items are the scope's values, so a failed replacement never shows half of it. Each operation runs synchronously in
- * one task, and browsers apply another tab's changes only between tasks, so it sees and leaves one consistent state;
- * the generation a replacement displaced is removed in the same task. Unreadable items are skipped; an unreadable head
+ * one task; after publishing, a replacement attempts to remove only the generation it displaced. Other tabs are not
+ * coordinated. Unreadable items are skipped; an unreadable head
  * rejects every operation but a replacement, so values of an older generation never reappear. Pass `undefined` when
  * the browser denies storage; every operation then rejects.
  */

@@ -368,3 +368,27 @@ test("only the published generation is a scope's values; an unreadable head neve
   }
   assert.deepEqual(await other.load(), [{ key: "answer", value: "other scope" }]);
 });
+
+test("replacing and clearing keep scopes with shared prefixes apart and ignore generation-name aliases", async () => {
+  const storage = new MemoryStorage();
+  // Scopes whose encodings share a prefix, or look like part of an item-name tuple.
+  const scopes = ["demo", "demo2", 'demo","x', "", 'demo"]'];
+  for (const [index, scope] of scopes.entries())
+    await createLocalScriptStorage(storage, scope).write("answer", index);
+  const provider = createLocalScriptStorage(storage, "demo");
+  await provider.replace([{ key: "answer", value: "replaced" }]);
+  const generation = generationOf(storage, "demo");
+  // An alias of a published item's name, with extra spaces, is never an entry, before or after a clear.
+  storage.setItem(
+    `player-storage-generation:[ "demo", "${generation}", "alias" ]`,
+    JSON.stringify({ v: 1, value: "alias" }),
+  );
+  assert.deepEqual(await provider.load(), [{ key: "answer", value: "replaced" }]);
+  await provider.clear();
+  assert.deepEqual(await provider.load(), []);
+  for (const [index, scope] of scopes.entries())
+    if (scope !== "demo")
+      assert.deepEqual(await createLocalScriptStorage(storage, scope).load(), [
+        { key: "answer", value: index },
+      ]);
+});
