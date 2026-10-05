@@ -58,7 +58,8 @@ specification may lead the implementation. The Player presents supported transcr
 pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds Visual
 Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The default
 build plays the repository demo without that preview; the development server or explicit `?dev` URL opt-in loads it.
-Only `?dev` adds development time controls, which are not a Standard Player tool; `player/README.md` describes them.
+Only `?dev` adds the Debug tool with development time controls, which is not a Standard Player tool; `player/README.md`
+describes it.
 Runtime timers, permanent buttons, the Stage image, and audio are wired; browser video playback and production host
 integration remain separate work. Values marked for retesting remain provisional tuning baselines.
 

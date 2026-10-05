@@ -48,8 +48,8 @@ specification.
   of the playground server's development package root instead and resolves its images, audio, and video; with `?dev`
   too, the development preview plays that package instead of a scenario. `hostedScript.ts` compiles the script before
   Start; one that does not compile shows `ScriptProblems.vue` with its diagnostics instead of Start. Only with `?dev`,
-  `useDevelopmentTime.ts` drives the time controls of `DevelopmentTimePanel.vue` and `DevelopmentTimeBadge.vue`
-  through the session host's `publishJump`.
+  the Debug tool's `DebugPanel.vue` and `DebugStatus.vue` show `useDebugLog.ts` and the time controls that
+  `useDevelopmentTime.ts` drives through the session host's `publishJump`.
 - `PlayerToolsShell.vue` receives its tool list from the root and owns tool selection, pinning, order, resizing, retained content and dock/drawer focus.
   Its tool slot supplies content; its default slot supplies the Player. Closing a visited panel retains its content.
   Tool bodies scroll vertically; the outer carousel handles overflow between panels. Shared shadcn-vue/Reka

@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
 import {
   activePlayerRuntimeInteraction,
@@ -12,39 +12,30 @@ import {
 import type { RuntimeSnapshot } from "../../../src/index.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
-const LISTED_JUMPS = 20;
 // How long one task may observe events of a jump before it yields to input and rendering.
 const JUMP_TASK_MS = 10;
 
-/** One jump as the development panel reports it; never part of the transcript, notices, or checkpoints. */
-export interface DevelopmentTimeJump {
-  readonly id: number;
-  readonly text: string;
-}
-
 /**
- * Development time controls of the Player with `?dev` (#615). Skip advances scene time to the next timed event, and
- * +10 s or +1 min advance it while the script waits for player input. Auto-skip skips event after event while no input
- * is pending, yielding between tasks; the player's think time before an answer stays real time. Every jump is made of
- * ordinary observations of the session, see `advancePlayerRuntimeTime`.
+ * Development time controls of the Player with `?dev` (#615), always active there. Skip advances scene time to the next
+ * timed event, and +10 s or +1 min advance it while the script waits for player input. Auto-skip skips event after
+ * event while no input is pending, yielding between tasks; the player's think time before an answer stays real time.
+ * Every jump is made of ordinary observations of the session, see `advancePlayerRuntimeTime`, and `log` receives a
+ * line for it ("⏩ 30 s skipped").
  */
 export function useDevelopmentTime(
   player: PlayerSessionHost,
-  initial: { readonly enabled: boolean; readonly autoSkip: boolean },
+  initial: { readonly autoSkip: boolean },
+  log: (text: string) => void,
 ) {
-  const enabled = ref(initial.enabled);
   const autoSkip = ref(initial.autoSkip);
   const jumping = ref(false);
-  const jumps = shallowRef<readonly DevelopmentTimeJump[]>([]);
-  let jumpCount = 0;
 
   const snapshot = computed(() => player.session.value?.snapshot ?? null);
   const canSkip = computed(
-    () => enabled.value && !jumping.value && snapshot.value !== null && skippable(snapshot.value),
+    () => !jumping.value && snapshot.value !== null && skippable(snapshot.value),
   );
   const canAdvance = computed(
     () =>
-      enabled.value &&
       !jumping.value &&
       snapshot.value !== null &&
       activePlayerRuntimeInteraction(snapshot.value) !== null,
@@ -55,17 +46,13 @@ export function useDevelopmentTime(
 
   function record(from: PlayerRuntimeSession, to: PlayerRuntimeSession) {
     const skippedMs = to.snapshot.observedSessionTimeMs - from.snapshot.observedSessionTimeMs;
-    if (skippedMs <= 0) return;
-    jumps.value = [
-      { id: ++jumpCount, text: `⏩ ${durationText(skippedMs)} skipped` },
-      ...jumps.value.slice(0, LISTED_JUMPS - 1),
-    ];
+    if (skippedMs > 0) log(`⏩ ${durationText(skippedMs)} skipped`);
   }
 
   // A jump that waits for the host continues with the next published session.
   let wake: (() => void) | null = null;
   let disposed = false;
-  watch([player.session, enabled], () => {
+  watch(player.session, () => {
     wake?.();
     wake = null;
   });
@@ -80,7 +67,7 @@ export function useDevelopmentTime(
       if (start === null || targetMs === null || playerRuntimeAwaitsHost(start.snapshot)) return;
       let current = start;
       for (;;) {
-        // Each task observes events for a bounded time, so a long jump stays responsive and can be switched off.
+        // Each task observes events for a bounded time, so a long jump keeps input and rendering responsive.
         const published = current;
         const until = performance.now() + JUMP_TASK_MS;
         for (let next = stepPlayerRuntimeTime(current, targetMs); next !== current;) {
@@ -95,7 +82,7 @@ export function useDevelopmentTime(
           await new Promise<void>((resolve) => (wake = resolve));
         else if (current !== published) await new Promise((resolve) => setTimeout(resolve, 0));
         else break;
-        if (disposed || !enabled.value || player.generation.value !== generation) break;
+        if (disposed || player.generation.value !== generation) break;
         current = player.session.value ?? current;
       }
       if (player.generation.value === generation) record(start, current);
@@ -146,17 +133,7 @@ export function useDevelopmentTime(
     wake?.();
   });
 
-  return {
-    /** Whether the controls are on; off, scene time keeps what was skipped and runs at real time again. */
-    enabled,
-    autoSkip,
-    canSkip,
-    canAdvance,
-    skip,
-    advanceBy,
-    /** The latest jumps, newest first. */
-    jumps: computed(() => jumps.value),
-  };
+  return { autoSkip, canSkip, canAdvance, skip, advanceBy };
 }
 
 export type DevelopmentTime = ReturnType<typeof useDevelopmentTime>;

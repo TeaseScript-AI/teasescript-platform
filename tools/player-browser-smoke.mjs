@@ -1204,37 +1204,35 @@ async function packageScenario(cdp, origin) {
 }
 
 /**
- * The importer's route (#615): a folder package opened by URL with development time controls, auto-skip on from the
- * URL. After a physical Start the 15 s wait ends at once; +10 s at the waiting button shows in its elapsed time.
- * Without auto-skip, Skip ends the wait; the default build has no time controls.
+ * The importer's route (#615): a folder package opened by URL with the Debug tool, auto-skip on from the URL. After a
+ * physical Start the 15 s wait ends at once; +10 s at the waiting button shows in its elapsed time. Without auto-skip,
+ * Skip event ends the wait; the default build has no Debug tool.
  */
 async function developmentTimeScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
   const done = `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === 'Done')`;
-  const skipped = `/^⏩ 1[0-5] s skipped$/.test(document.querySelector('[data-development-time-marker]')?.textContent ?? '')`;
+  const logged = (pattern) =>
+    `${pattern}.test(document.querySelector('[data-debug-log] li')?.textContent ?? '')`;
   const start = async (url) => {
     await navigate(cdp, url);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
     await physicalClick(cdp, "[data-session-activation] button");
   };
   const openPanel = async () => {
-    await physicalClick(cdp, '[data-launcher] button[aria-label="Time Controls"]');
-    await waitFor(cdp, `!!document.querySelector('[data-development-time]')`);
+    await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+    await waitFor(cdp, `!!document.querySelector('[data-debug-panel]')`);
   };
 
   await start(`${origin}/player/?dev&package=waiting&time=skip`);
+  await openPanel();
   await waitFor(
     cdp,
-    `${done} && ${skipped}`,
+    `${done} && ${logged("/^⏩ 1[0-5] s skipped$/")}`,
     5_000,
     "Auto-skip did not end the package's 15 s wait at once",
   );
-  await openPanel();
   await physicalClick(cdp, '[data-development-time-action="advance-10s"]');
-  await waitFor(
-    cdp,
-    `document.querySelector('[data-development-time-jumps] li')?.textContent === '⏩ 10 s skipped'`,
-  );
+  await waitFor(cdp, logged("/^⏩ 10 s skipped$/"));
   await physicalClick(cdp, "[data-foreground-controls] button");
   await waitFor(
     cdp,
@@ -1245,10 +1243,14 @@ async function developmentTimeScenario(cdp, origin) {
 
   await start(`${origin}/player/?dev&package=waiting`);
   await openPanel();
-  await physicalClick(cdp, "[data-development-time-enable]");
   await waitFor(cdp, `!document.querySelector('[data-development-time-action="skip"]').disabled`);
   await physicalClick(cdp, '[data-development-time-action="skip"]');
-  await waitFor(cdp, `${done} && ${skipped}`, 5_000, "Skip did not end the package's 15 s wait");
+  await waitFor(
+    cdp,
+    `${done} && ${logged("/^⏩ 1[0-5] s skipped$/")}`,
+    5_000,
+    "Skip event did not end the package's 15 s wait",
+  );
 
   await start(`${origin}/player/?package=waiting`);
   await waitFor(
@@ -1258,10 +1260,10 @@ async function developmentTimeScenario(cdp, origin) {
   assertEqual(
     await value(
       cdp,
-      `!!document.querySelector('[data-launcher] button[aria-label="Time Controls"], [data-development-time-badge]')`,
+      `!!document.querySelector('[data-launcher] button[aria-label="Debug"], [data-debug-panel], [data-development-time-badge]')`,
     ),
     false,
-    "The default build offered time controls",
+    "The default build offered the Debug tool",
   );
 }
 
