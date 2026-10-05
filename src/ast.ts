@@ -615,8 +615,11 @@ export interface InteractionExpression {
   readonly commandSpan: SourceSpan;
   readonly asSpan: SourceSpan | null;
   readonly speaker: Identifier | null;
+  /** The question of a basic ask, said in the chat by its speaker before the field opens. */
+  readonly question: Expression | null;
+  /** The `hint:` text shown in the field only; its position against `default:` gives their evaluation order. */
   readonly hint: Expression | null;
-  /** The `default:` answer that prefills an `askText` or `askNumber` field. */
+  /** The `default:` answer that prefills the field of a basic ask. */
   readonly defaultValue: Expression | null;
   readonly options: readonly InteractionChoiceOption[];
   readonly span: SourceSpan;

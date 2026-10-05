@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 57;
+export const INSTRUCTION_PLAN_VERSION = 58;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -303,6 +303,8 @@ export interface PrepareSayTextInstruction extends InstructionBase {
   readonly kind: "prepareSayText";
   readonly value: ExpressionPlan;
   readonly destinationTemporary: number;
+  /** The question of an ask: text as an input field shows it, so a list is an error instead of shown notation. */
+  readonly field?: true;
 }
 
 export interface PrepareInteractionSpeakerInstruction extends InstructionBase {

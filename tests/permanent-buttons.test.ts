@@ -222,7 +222,8 @@ test("a click interrupts a question, which returns with its identity, or a goto 
   const question = session.snapshot.foregroundAction;
   assert.equal(question?.kind, "interaction");
   session.click(1);
-  assert.deepEqual(session.said(), ["hint"]);
+  // The question is said once; the block's output follows it, and the field returns without it.
+  assert.deepEqual(session.said(), ["Name?", "hint"]);
   assert.deepEqual(session.snapshot.foregroundAction, question);
   assert.deepEqual(
     session.events.filter(
@@ -233,7 +234,7 @@ test("a click interrupts a question, which returns with its identity, or a goto 
   );
   assert.deepEqual(session.buttons(), ["Hint", "Skip"]);
   session.click(2);
-  assert.deepEqual(session.said(), ["hint", "skipped"]);
+  assert.deepEqual(session.said(), ["Name?", "hint", "skipped"]);
   assert.equal(session.snapshot.status, "halted");
   assert.equal(session.answer("Bo", question!.actionId), "staleAction");
   assert.deepEqual(session.buttons(), []);

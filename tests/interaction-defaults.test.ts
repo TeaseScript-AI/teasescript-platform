@@ -115,7 +115,7 @@ test("the player may replace or clear a default answer, and a cleared field is r
 
 test("a dynamic default is evaluated once after the hint and survives checkpoint restore", () => {
   const plan = compileValidPlan(
-    'let calls = 0\nfunction next {\n    calls += 1\n    return calls * 10\n}\nlet answer = askNumber "Hint ${next()}", default: next()\nexit',
+    'let calls = 0\nfunction next {\n    calls += 1\n    return calls * 10\n}\nlet answer = askNumber hint: "Hint ${next()}", default: next()\nexit',
   );
   const { snapshot, ui } = pendingInput(plan);
   assert.deepEqual([ui.hint, ui.prefill], ["Hint 10", "20"]);
@@ -192,11 +192,7 @@ test("a default the compiler knows is wrong is a compile error that names the fi
       "TSP028",
       "Expected a default answer after 'default:'.",
     ],
-    [
-      'let answer = askText "Name?" default: "Ada"',
-      "TSP017",
-      "Expected ',' between the hint and 'default:'.",
-    ],
+    ['let answer = askText "Name?" default: "Ada"', "TSP017", "Expected ',' before 'default:'."],
   ] as const;
   for (const [source, code, message] of cases) {
     const result = compileSource(source, { globals: ["value"] });
@@ -260,7 +256,7 @@ test("a default that is null or blank when the field opens starts the field empt
     for (const [command, kind, typed] of asks) {
       const label = `${command} with ${JSON.stringify(stored)}`;
       const session = createPlayerRuntimeSession(
-        `let answer = ${command} "Hint", default: load "saved"\nsay "Got \${answer}"\nexit`,
+        `let answer = ${command} hint: "Hint", default: load "saved"\nsay "Got \${answer}"\nexit`,
         {
           temporalContext: AMSTERDAM,
           ...(stored === undefined ? {} : { scriptStorage: [{ key: "saved", value: stored }] }),
@@ -391,7 +387,7 @@ test("a retained settlement keeps the prefill its field presented", () => {
 
 test("the Player composer receives the default answer, also after a restore", () => {
   const session = createPlayerRuntimeSession(
-    'let answer = askNumber "How many?", default: 12\nexit',
+    'let answer = askNumber hint: "How many?", default: 12\nexit',
   );
   const expected = {
     kind: "ask-number",

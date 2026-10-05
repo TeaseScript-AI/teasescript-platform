@@ -42,12 +42,12 @@ test("askInteger returns a whole number as an integer and shows it as the player
     { text: "9007199254740991", value: Number.MAX_SAFE_INTEGER },
   ]) {
     let session = createPlayerRuntimeSession(
-      'let count = askInteger "How many?"\nlet doubled: integer = count * 2\nexit',
+      'let count = askInteger "How many?", hint: "A whole number"\nlet doubled: integer = count * 2\nexit',
     );
     assert.deepEqual(playerRuntimeForeground(session), {
       kind: "ask-number",
       accessibleName: "Number",
-      hint: "How many?",
+      hint: "A whole number",
       integer: true,
     });
     const answered = answer(session, text);

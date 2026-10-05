@@ -1,4 +1,24 @@
-import type { Block, Expression, MediaParts, ShowButtonParts, TagQueryExpression } from "./ast.js";
+import type {
+  Block,
+  Expression,
+  InteractionExpression,
+  MediaParts,
+  ShowButtonParts,
+  TagQueryExpression,
+} from "./ast.js";
+
+/**
+ * The operands of a basic ask in evaluation order: the question, then `hint:` and `default:` in the order they are
+ * written.
+ */
+export function askOperands(expression: InteractionExpression): readonly Expression[] {
+  const named = [expression.hint, expression.defaultValue].filter(
+    (operand): operand is Expression => operand !== null,
+  );
+  if (named.length === 2 && named[1]!.span.start.offset < named[0]!.span.start.offset)
+    named.reverse();
+  return expression.question === null ? named : [expression.question, ...named];
+}
 export function expressionChildren(expression: Expression): readonly Expression[] {
   switch (expression.kind) {
     case "booleanLiteral":

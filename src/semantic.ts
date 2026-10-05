@@ -41,6 +41,7 @@ import {
 } from "./static-evaluation.js";
 import { runCompileTask, compileChild, type CompileTask } from "./compiler/continuation.js";
 import {
+  askOperands,
   expressionChildren,
   mediaHandlerBlocks,
   mediaOperands,
@@ -1761,16 +1762,8 @@ class SemanticValidator {
         if (expression.interactionKind === "choice") {
           yield* compileChild(this.#validateChoiceTask(expression, scope, contextualSpeaker));
         } else {
-          if (expression.hint !== null) {
-            yield* compileChild(
-              this.#validateExpressionTask(expression.hint, scope, contextualSpeaker),
-            );
-          }
-          if (expression.defaultValue !== null) {
-            yield* compileChild(
-              this.#validateExpressionTask(expression.defaultValue, scope, contextualSpeaker),
-            );
-          }
+          for (const operand of askOperands(expression))
+            yield* compileChild(this.#validateExpressionTask(operand, scope, contextualSpeaker));
         }
         return;
       }
@@ -2973,8 +2966,7 @@ function visitExpression(
       current.kind === "interactionExpression"
         ? [
             ...(current.speaker === null ? [] : [current.speaker]),
-            ...(current.hint === null ? [] : [current.hint]),
-            ...(current.defaultValue === null ? [] : [current.defaultValue]),
+            ...askOperands(current),
             ...current.options.map((option) => option.expression),
           ]
         : current.kind === "showButtonExpression"
