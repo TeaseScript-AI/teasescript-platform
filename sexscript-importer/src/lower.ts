@@ -3526,7 +3526,7 @@ function lowerClosureDeclaration(
   // A function body runs later, when keys known present here may be gone.
   const outerKeys = context.knownKeys.splice(0);
   try {
-    const composed = composedImage(body, context);
+    const composed = composedImage(body, context) ?? pixelCheck(body, closure, context);
     const lowered =
       composed ??
       lowerBlock(
@@ -3553,6 +3553,33 @@ function lowerClosureDeclaration(
     context.currentFunction = outerFunction;
     context.knownKeys.splice(0, context.knownKeys.length, ...outerKeys);
   }
+}
+
+/**
+ * A function that inspects the pixels of a photo (`image.getRGB(x, y)`) and answers yes or no, such as a check whether
+ * the camera gave a blank picture: a package cannot read pixels, so it answers false, as for a photo in which there is
+ * nothing to detect (owner decision: reading photo pixels is skipped, with a note). Null for any other body.
+ */
+function pixelCheck(body: AstNode, node: AstNode, context: LowerContext): IrStatement[] | null {
+  let readsPixels = false;
+  let answers = true;
+  walkAst(body, (child) => {
+    if (child.kind === "methodCall" && constantString(child.method) === "getRGB")
+      readsPixels = true;
+    if (child.kind === "return") {
+      const value = constantValue(asNode(child.value) ?? undefined);
+      if (typeof value !== "boolean") answers = false;
+    }
+  });
+  if (!readsPixels || !answers) return null;
+  addDiagnostic(
+    context,
+    "SX_PHOTO_PIXELS",
+    "warning",
+    "This function read the pixels of a photo to answer yes or no; a package cannot read pixels, so it answers false, as for a photo in which there is nothing to detect.",
+    node.span,
+  );
+  return [{ kind: "return", value: { kind: "literal", value: false }, span: node.span }];
 }
 
 const INPUT_CALLS = new Set([
@@ -4425,6 +4452,22 @@ function lowerCallStatement(
 ): IrStatement[] {
   const call = callParts(node);
   const receiver = asNode(node.object);
+  // Settings of the Java network stack, such as TLS options or the HTTP user agent, mean nothing in a package.
+  const property = call?.name === "setProperty" ? constantString(call.arguments[0]) : null;
+  if (
+    variableName(receiver) === "System" &&
+    property !== null &&
+    /^(?:jsse|javax?\.net|https?|sun\.net|networkaddress)\./iu.test(property)
+  ) {
+    addDiagnostic(
+      context,
+      "SX_JVM_SETTING",
+      "info",
+      `System.setProperty("${property}") set up the Java network stack of the legacy player, which a package does not have; it is dropped.`,
+      node.span,
+    );
+    return [];
+  }
   if (call !== null && !call.inherited && receiver !== null && isDictionary(receiver, context)) {
     const dictionary = dictStatement(receiver, call, span, context);
     if (dictionary !== null) return dictionary;

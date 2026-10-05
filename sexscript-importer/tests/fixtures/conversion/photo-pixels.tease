@@ -1,0 +1,14 @@
+// A check of a photo's pixels cannot run in a package; it answers false, as for a photo with nothing to detect.
+// NOTE SX_PHOTO_PIXELS line 2: This function read the pixels of a photo to answer yes or no; a package cannot read pixels, so it answers false, as for a photo in which there is nothing to detect.
+function isBlank(picture) {
+  return false
+}
+// NOTE SX_CAMERA_FALLBACK line 8: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
+let photo = takePhoto()
+if isBlank(photo) {
+  say "Your camera gave a blank picture"
+} else {
+  say "Good, I can see you"
+}
+// Settings of the Java network stack mean nothing in a package and are dropped.
+exit
