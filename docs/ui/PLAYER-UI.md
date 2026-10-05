@@ -422,11 +422,12 @@ audio, is labelled **Needs action**, offers no dismiss control, and disappears o
 
 The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
 (info: saved progress is not kept), a failed script-storage write (warning, for the run it happened in; a new
-Start withdraws it), and an image request that allows only the camera where no camera can be used (warning,
-withdrawn when the request ends). Each level also has a theme status colour, following the usual convention: info blue, warning
-orange, error red. A toast uses the level's soft tint as its surface and its solid tone for the border and icon; a
-panel entry uses the same tint with a solid mark along its start edge and a solid icon; and the bell's dot takes the
-most severe level that needs attention. The development preview's Visual Lab shows every level.
+Start withdraws it), an image request that allows only the camera where no camera can be used (warning,
+withdrawn when the request ends), and a media file the script refers to that the Player cannot use (warning, see
+[Stage and media presentation](#stage-and-media-presentation)). Each level also has a theme status colour, following
+the usual convention: info blue, warning orange, error red. A toast uses the level's soft tint as its surface and its
+solid tone for the border and icon; a panel entry uses the same tint with a solid mark along its start edge and a solid
+icon; and the bell's dot takes the most severe level that needs attention. The development preview's Visual Lab shows every level.
 
 ## Stage and media presentation
 
@@ -465,12 +466,17 @@ users may ever control playback is open; if accepted, such controls send typed h
 acting on the media element ([`RUNTIME.md`](../RUNTIME.md#stage-image-and-media-playback)).
 
 The trusted host resolves authored package-relative references, such as `sounds/bell.mp3`, to playable sources; the
-runtime keeps them opaque, and arbitrary external URLs are not resolved. An audio reference the host cannot resolve is
-reported as a failed load; an unresolvable Stage image leaves the Stage empty. The Player plays audio; a `playVideo`
-request is reported as a failed load ("Video playback is not supported by this Player yet."), so the script continues
-with the runtime's warning. An authored Stage image has no alternative text yet. Media-derived ambience, explicit
-transitions, and custom stage rendering are not yet implemented in the Player; the development preview's Stage media
-picker can override the Stage for layout comparison.
+runtime keeps them opaque, and arbitrary external URLs are not resolved. An audio reference the host cannot resolve, or
+that the browser cannot load, is reported as a failed load; a Stage image that does not resolve, or that the browser
+cannot load or decode, leaves the Stage empty. The Player plays audio; a `playVideo` request is reported as a failed
+load ("Video playback is not supported by this Player yet."), so the script continues with the runtime's warning. Each
+such package file is a warning [player notice](#player-notices), once per session and authored path, for example
+"Image not found: images/hall.jpg" or "Audio could not be loaded: sounds/bell.wav (main.tease, line 4)"; audio and
+video also name the file and line of the play that started them. A video that does resolve gets no notice, since only
+video playback itself is missing; captured photos and chosen images are no package files and are never reported. An
+authored Stage image has no alternative text yet. Media-derived ambience, explicit transitions, and custom stage
+rendering are not yet implemented in the Player; the development preview's Stage media picker can override the Stage
+for layout comparison.
 
 Standard image/video-like presentation:
 

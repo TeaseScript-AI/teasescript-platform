@@ -14,7 +14,6 @@ import PlayerNotificationCenter from "./PlayerNotificationCenter.vue";
 import PlayerToasts from "./PlayerToasts.vue";
 import PlayerToolsShell, { type PlayerTool } from "./PlayerToolsShell.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
-import { playerRuntimeMedia } from "../../runtime-adapter.js";
 import PermanentButtons from "./PermanentButtons.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import ScriptProblems, { type ScriptFailure } from "./ScriptProblems.vue";
@@ -117,7 +116,7 @@ const transcript = computed(() =>
 // The Stage shows the runtime's Stage image; an authored image has no alternative text yet. A development
 // override replaces it for layout comparison only.
 const stageSource = computed(() => {
-  const image = session.value ? playerRuntimeMedia(session.value.snapshot).stage.image : null;
+  const image = props.player.stageImage.value;
   return image === null ? null : props.player.resolveAsset(image);
 });
 // Derived from the source string, so frequent observations keep the same object and the Stage does not reset its
@@ -212,6 +211,7 @@ async function toggleFullscreen() {
             :media="stageMedia"
             :camera="stageCamera"
             @media-aspect="mediaAspect = $event"
+            @media-error="player.stageImageFailed"
           >
             <template v-if="capture && !captureInWindow" #camera>
               <ImageCapture

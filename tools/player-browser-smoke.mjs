@@ -114,12 +114,13 @@ async function main() {
       await packageScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
       await developmentTimeScenario(cdp, origin);
+      await missingMediaScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, development time controls, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, development time controls, missing media, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -1202,6 +1203,59 @@ async function packageScenario(cdp, origin) {
   } finally {
     await cdp.call("Emulation.setUserAgentOverride", { userAgent });
   }
+}
+
+/**
+ * The `missing-media` package refers to an image and a sound the package lacks, and to an image and a sound that are no
+ * valid files. With auto-skip on, the failed loads end their waits as settled, so the session reaches its button and its
+ * end at once; each path is one warning, also when the script uses it again, and a valid image restores the Stage.
+ */
+async function missingMediaScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const button = (label) =>
+    `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === ${JSON.stringify(label)})`;
+  const notices = `[...document.querySelectorAll('[data-player-notice]')].map((notice) => notice.getAttribute('data-notice-level') + ' ' + notice.querySelector('p').textContent.trim())`;
+  await navigate(cdp, `${origin}/player/?dev&package=missing-media&time=skip`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  // Its 30 s wait and both failed blocking plays pass at once.
+  await waitFor(cdp, button("Next"), 5_000, "Failed media held the session before Next");
+  // The browser has tried the invalid image before the script replaces it, and the Stage stays empty.
+  await waitFor(
+    cdp,
+    `(() => {
+      const image = document.querySelector('.stage-media');
+      return !!image && image.complete && image.naturalWidth === 0 &&
+        image.getAttribute('src') === '/dev-package/missing-media/files/images/corrupt.png' &&
+        getComputedStyle(image).display === 'none';
+    })()`,
+    5_000,
+    "The invalid image did not leave the Stage empty",
+  );
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, button("Finish"), 5_000, "Failed media held the session before Finish");
+  await waitFor(
+    cdp,
+    `(() => {
+      const image = document.querySelector('.stage-media');
+      return !!image && image.complete && image.naturalWidth > 0 &&
+        image.getAttribute('src') === '/dev-package/missing-media/files/images/valid.svg';
+    })()`,
+    5_000,
+    "The valid image did not restore the Stage",
+  );
+  await physicalClick(cdp, "[data-notification-bell]");
+  await waitFor(cdp, `!!document.querySelector('[data-player-notification-panel]')`);
+  assertEqual(
+    JSON.stringify(await value(cdp, `${notices}.sort()`)),
+    JSON.stringify([
+      "warning Warning: Audio could not be loaded: sounds/corrupt.wav (main.tease, line 5)",
+      "warning Warning: Audio not found: sounds/missing.wav (main.tease, line 4)",
+      "warning Warning: Image could not be loaded: images/corrupt.png",
+      "warning Warning: Image not found: images/missing.png",
+    ]),
+    "The notifications did not list one warning per unusable path",
+  );
 }
 
 /**
