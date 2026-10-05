@@ -208,11 +208,15 @@ certificate works once its browser warning is accepted.
 
 `play-check` plays each package in the real Player with Playwright (`PLAYWRIGHT_CORE` names the `playwright-core`
 folder), one browser at a time. A run presses buttons, picks choices, and types answers until the session halts,
-fails, hangs, or uses up its steps. Playwright's fake clock skips waits, timers, and chat pacing, and media play at 16
-times speed. Each run prefers the choices that earlier runs tried least, and a package stops after a run that reaches
-nothing new. The session state is read from the Player's Vue tree, because the Player shows no runtime failure. The
-result in `<out>/<id>/result.json` records each run's stop, the files and interactions reached, missing media, and a
-screenshot of each stop, for the package's current `.tease` files.
+fails, hangs, or uses up its steps. It opens `/player/?dev&package=<id>&time=skip`, whose development time controls
+skip waits, timers, pacing, and audio while no input is pending; `--clock fake` falls back to Playwright's fake clock.
+When the same prompt comes back three times in a row, the script may time its answer, so the runner lets 30, then 120,
+then 300 seconds pass before answering (+10 s and +1 min presses), noted as `[waited 30 s]` in the run's path. A text
+prompt that quotes a sentence gets that sentence. Each run prefers the choices that earlier runs tried least, and a
+package stops after a run that reaches nothing new. The session state is read from the Player's Vue tree, because the
+Player shows no runtime failure. The result in `<out>/<id>/result.json` records each run's stop, the path of answers,
+the files and interactions reached, missing media, legacy HTML shown as text, and a screenshot of each stop, for the
+package's current `.tease` files.
 
 `verify-package` freezes a package whose check plays to the end without missing media, after a manual check, into
 `external/verified/<id>/` and adds a row to [`docs/VERIFIED.md`](docs/VERIFIED.md). It never replaces a verified copy.
@@ -225,7 +229,8 @@ owner-approved. Each table row shows the `---` header of `main.tease`, or of the
 this order, the owner-approved list (the first column of the Markdown table in `--approved`), the verified copy, the
 Player check of the current files, or else the compiler and the report's smoke run. A `partly converted` mark counts
 unconverted code; click a status for details. The source column links the legacy Groovy and converted `.tease` files,
-which `catalog` hard-links under `source/` next to the page. A Pin button keeps favourites in `localStorage` and lists
+which `catalog` hard-links under `source/` next to the page; earlier versions that the unit's `unit.json` lists under
+`earlierVersions` appear in a collapsed section with links to their original Groovy. A Pin button keeps favourites in `localStorage` and lists
 them at the top.
 
 ## Tests
