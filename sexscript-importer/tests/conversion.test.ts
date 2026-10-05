@@ -826,6 +826,8 @@ test(
       "nested-story",
       "helper-class",
       "other-versions",
+      "folder-scripts",
+      "global-locals",
     ]) {
       const directory = fileURLToPath(new URL(`./fixtures/packages/${name}/`, import.meta.url));
       const scripts = path.join(directory, "scripts");

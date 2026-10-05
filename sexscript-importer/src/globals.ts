@@ -28,6 +28,21 @@ export interface GlobalPromotion {
   kept: KeptFunction[];
 }
 
+/** A global function whose locals that have a global's name get other names (renameConflictingIdentifiers). */
+function withoutGlobalNames(
+  statement: FunctionStatement,
+  globals: ReadonlySet<string>,
+): FunctionStatement {
+  const program: MigrationProgram = {
+    sourceName: "",
+    metadata: null,
+    statements: [statement],
+    diagnostics: [],
+  };
+  const [renamed] = renameConflictingIdentifiers(program, new Set(), false, globals).statements;
+  return renamed?.kind === "function" ? renamed : statement;
+}
+
 /** The generated list of a file's background sound handles (helpers.ts), which stays with its file. */
 const BACKGROUND_SOUNDS = "sexscriptBackgroundSounds";
 
@@ -262,8 +277,9 @@ export function promoteGlobalFunctions(
         span: null,
       },
       ...globals,
+      // A local of a global function may not have a global's name, which every file sees (V30 §11).
       ...[...candidates.values()].map(({ statement }): IrStatement => ({
-        ...statement,
+        ...withoutGlobalNames(statement, globalNames),
         global: true,
       })),
       { kind: "exit", span: null },

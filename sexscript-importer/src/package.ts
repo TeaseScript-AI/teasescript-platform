@@ -398,12 +398,20 @@ function entryMenu(
           ? 1
           : -1,
     );
-  const choices =
+  const rooted =
     offered.length > 0
       ? offered
       : (listed.length > 0 ? listed : scripts.rootScripts).map((index) =>
           scripts.pathOf.get(index)!,
         );
+  // A package whose scripts are all in folders, such as System/, offers the scripts nothing chains to, or every script.
+  const everyScript = [...scripts.pathOf.values()].sort();
+  const choices =
+    rooted.length > 0
+      ? rooted
+      : everyScript.some((path) => !targeted(path))
+        ? everyScript.filter((path) => !targeted(path))
+        : everyScript;
   const variants = [...scripts.pathOf.values()]
     .filter((path) => base(path) !== path && targeted(path) && !targets.has(path.toLowerCase()))
     .sort();
