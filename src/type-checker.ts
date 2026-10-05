@@ -146,6 +146,11 @@ import {
   assignedType,
   widenedType,
   widenPath,
+  decidePath,
+  observe,
+  placedSlots,
+  nextDecision,
+  type OpenType,
   numberPaths,
   integerParts,
   ownPartOrigins,
@@ -241,12 +246,25 @@ export function checkTypes(
   const lines = lineNamer(files);
   // An integer variable is a number when one of its assignments can store a non-whole number, also an assignment
   // after its uses (rule 1.2). A check that finds a new one starts again with that variable declared as a number, so
-  // the last check, which finds none, sees every variable with its final type and alone reports.
+  // the last check, which finds none, sees every variable with its final type and alone reports. Likewise, a place
+  // that starts as null and that a read saw before its first other value, also one in another file, starts again with
+  // the type that value gives it.
   const widened: Widened = new Map();
+  const decided: Decided = new Map();
+  const copies: Copies = new Map();
   for (;;) {
-    const checker = new TypeChecker(options, widened, programs.length, onFile, lines);
+    const checker = new TypeChecker(
+      options,
+      widened,
+      decided,
+      copies,
+      programs.length,
+      onFile,
+      lines,
+    );
     checker.check(programs);
-    if (!checker.widenedMore) {
+    checker.recordDecisions();
+    if (!checker.widenedMore && !checker.decidedMore) {
       const closedLoops = closedLoopWarnings(programs, checker.unreachable);
       return Object.freeze({
         diagnostics: Object.freeze(
@@ -268,6 +286,99 @@ export function checkTypes(
  * assignment: by the declaration of the variable that holds them, then by their path in it (see {@link PlacePath}).
  */
 type Widened = Map<Declaration, Map<string, SourceSpan>>;
+
+/**
+ * The places still undecided when a read saw them, such as a property that so far took only null, with the type and
+ * site of the store that later decided them: by the declaration of the variable that holds them, then by their path.
+ */
+type Decided = Map<Declaration, Map<string, Decision>>;
+
+/**
+ * The places that are a copy of another variable's place taken while that place was undecided, with that variable's
+ * name: by the declaration of the variable that holds them, then by their path.
+ */
+type Copies = Map<Declaration, Map<string, string>>;
+
+/** The type that decided a slot, and the store that decided it. */
+interface Decision {
+  readonly type: StaticType;
+  readonly at: SourceSpan;
+}
+
+/**
+ * For each given slot, the slot whose own first value decided it by the end of a check, or `null`. A slot shares the decision of the slot it was copied from, since it may hold what that slot held (ADR 0021
+ * rule 1.2), and of a still undecided place stored in it, such as `a = b` while `b` took only null. Of all decisions it
+ * shares this way, the first in checking order decides, also around a cycle of copies. Every slot is visited once, so a
+ * whole chain of copies and stores needs no check per step.
+ */
+function decidingSlots(slots: readonly OpenType[]): Map<OpenType, OpenType | null> {
+  const starts = [...new Set(slots)];
+  // The slots each one shares decisions with, found from the given ones, and those a value of their own decided.
+  const sharers = new Map<OpenType, OpenType[]>();
+  const own: OpenType[] = [];
+  const seen = new Set<OpenType>(starts);
+  const work = [...starts];
+  while (work.length > 0) {
+    const slot = work.pop()!;
+    const shared: OpenType[] = [];
+    if (slot.copiedFrom !== undefined) shared.push(slot.copiedFrom);
+    if (slot.resolved !== null) {
+      const stored = storedPlace(slot);
+      if (stored === undefined) own.push(slot);
+      else shared.push(stored);
+    }
+    for (const next of shared) {
+      const list = sharers.get(next) ?? [];
+      list.push(slot);
+      sharers.set(next, list);
+      if (!seen.has(next)) {
+        seen.add(next);
+        work.push(next);
+      }
+    }
+  }
+  const deciding = new Map<OpenType, OpenType | null>();
+  own.sort((left, right) => (left.order ?? Infinity) - (right.order ?? Infinity));
+  for (const decider of own) {
+    const reached = [decider];
+    while (reached.length > 0) {
+      const slot = reached.pop()!;
+      if (deciding.has(slot)) continue;
+      deciding.set(slot, decider);
+      for (const sharer of sharers.get(slot) ?? []) reached.push(sharer);
+    }
+  }
+  for (const slot of starts) if (!deciding.has(slot)) deciding.set(slot, null);
+  return deciding;
+}
+
+/** The slot itself and the still undecided places stored in it, as far as they lead (see {@link decidingSlots}). */
+function storedIn(slot: OpenType): Set<OpenType> {
+  const chain = new Set<OpenType>();
+  for (let current: OpenType | undefined = slot; current !== undefined && !chain.has(current);) {
+    chain.add(current);
+    current = storedPlace(current);
+  }
+  return chain;
+}
+
+/**
+ * The still undecided place whose value a decided slot holds, such as `b` after `a = b` while `b` took only null, or
+ * `undefined` when a value of its own decided it.
+ */
+function storedPlace(slot: OpenType): OpenType | undefined {
+  if (slot.resolved === null) return undefined;
+  const parts = slot.resolved.kind === "union" ? slot.resolved.members : [slot.resolved];
+  const open = parts.find((part): part is OpenType => part.kind === "open");
+  return open !== undefined && parts.every((part) => part.kind === "open" || part.kind === "null")
+    ? open
+    : undefined;
+}
+
+/** The name of the variable a declaration creates. */
+function declaredName(declaration: Declaration): string {
+  return declaration.kind === "forStatement" ? declaration.variable.name : declaration.name.name;
+}
 
 /**
  * Where a place is inside a variable without a type annotation: the steps from the variable, each a property name or `[]`
@@ -518,6 +629,58 @@ class TypeChecker {
   /** Whether this check found a variable to widen that earlier checks did not. */
   widenedMore = false;
 
+  /** Whether this check found a place decided after a read that earlier checks did not (see {@link Decided}). */
+  decidedMore = false;
+
+  /**
+   * Records the places that a store decided after a read or copy saw them undecided, and for a copy of such a place, the
+   * variable it was copied from, which a mismatch in the copy names.
+   */
+  public recordDecisions(): void {
+    const places = new Map<OpenType, PlacePath>();
+    for (const [root, variable] of this.#declared)
+      for (const { slot, path } of placedSlots(variable.type))
+        if (!places.has(slot)) places.set(slot, { root, path });
+    const observed = [...places.keys()].filter((slot) => slot.observed === true);
+    const copied = [...places.keys()].filter((slot) => slot.copiedFrom !== undefined);
+    const deciding = decidingSlots([...observed, ...copied]);
+    // A decision that still leaves a part undecided, such as a list that holds itself, is not taken over: it would only
+    // give the next check another part to decide.
+    const settled = (decider: OpenType | null | undefined): decider is OpenType =>
+      decider !== null &&
+      decider !== undefined &&
+      !containsType(decider.resolved!, (part) => part.kind === "open");
+    for (const slot of observed) {
+      const decider = deciding.get(slot);
+      if (!settled(decider)) continue;
+      const place = places.get(slot)!;
+      const paths = this.#decided.get(place.root) ?? new Map<string, Decision>();
+      const key = place.path.join(".");
+      if (paths.has(key)) continue;
+      paths.set(key, { type: decider.resolved!, at: slot.resolvedAt ?? decider.resolvedAt! });
+      this.#decided.set(place.root, paths);
+      this.decidedMore = true;
+    }
+    for (const [slot, place] of places) {
+      let source = slot.copiedFrom;
+      while (source !== undefined && (places.get(source)?.root ?? place.root) === place.root)
+        source = source.copiedFrom;
+      // A copy is named after its source only when the source's type does not come from the copy's own first value.
+      const decider = source === undefined ? undefined : deciding.get(source);
+      if (source === undefined || !settled(decider) || storedIn(slot).has(decider)) continue;
+      const copies = this.#copies.get(place.root) ?? new Map<string, string>();
+      copies.set(place.path.join("."), declaredName(places.get(source)!.root));
+      this.#copies.set(place.root, copies);
+    }
+  }
+
+  readonly #decided: Decided;
+
+  readonly #copies: Copies;
+
+  /** For each variable, the paths of {@link #decided} that its type does not have yet. */
+  readonly #pendingDecisions = new Map<Declaration, Set<string>>();
+
   /** Widens every place that follows a widened one (see {@link #followers}). */
   public widenFollowers(): void {
     const pending: PlacePath[] = [];
@@ -555,12 +718,16 @@ class TypeChecker {
   public constructor(
     options: TypeCheckOptions,
     widened: Widened,
+    decided: Decided,
+    copies: Copies,
     files: number,
     private readonly onFile: (file: number) => void,
     private readonly lines: LineNamer,
   ) {
     this.fileDiagnostics = Array.from({ length: files }, () => []);
     this.#widened = widened;
+    this.#decided = decided;
+    this.#copies = copies;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
     this.#scriptCatalog =
       options.scriptCatalog?.map((file) => ({
@@ -1486,13 +1653,14 @@ class TypeChecker {
           second.element,
           [target],
           statement.value.span,
+          this.#copyNote(extendPath(place.widening, "[]"), first.element),
         );
         return;
       }
       const subject = place.subject;
       this.#report(
         typeCode.typeMismatch,
-        `${subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${operandFix(nonNullType(kept), value, statement)}`,
+        `${subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${this.#copyNote(place.widening, place.type)}${operandFix(nonNullType(kept), value, statement)}`,
         statement.value.span,
       );
       return;
@@ -1502,7 +1670,7 @@ class TypeChecker {
     if (!isAssignable(place.type, result))
       this.#report(
         typeCode.typeMismatch,
-        `${place.subject}, so '${statement.operator}' cannot make ${place.verb === "contain" ? "an element" : "it"} ${describeValue(result)}.${place.fix(result, null)}`,
+        `${place.subject}, so '${statement.operator}' cannot make ${place.verb === "contain" ? "an element" : "it"} ${describeValue(result)}.${this.#copyNote(place.widening, place.type)}${place.fix(result, null)}`,
         statement.value.span,
       );
     else {
@@ -1632,16 +1800,32 @@ class TypeChecker {
     if (property !== undefined) {
       this.#report(
         typeCode.typeMismatch,
-        `${place.subject}, so its property '${property.name}', which holds ${describeValue(property.kept)}, cannot be set to ${describeValue(property.value)}. Use a separate property for a value of another type.`,
+        `${place.subject}, so its property '${property.name}', which holds ${describeValue(property.kept)}, cannot be set to ${describeValue(property.value)}.${this.#copyNote(place.widening, place.type)} Use a separate property for a value of another type.`,
         expression.span,
       );
       return;
     }
     this.#report(
       typeCode.typeMismatch,
-      `${place.subject}, so it cannot ${place.verb} ${describeValue(value)}.${this.#widenedNote(expression)}${checkFirstFix(place.type, value, expression, place.listed) ?? place.fix(value, expression)}`,
+      `${place.subject}, so it cannot ${place.verb} ${describeValue(value)}.${this.#widenedNote(expression)}${this.#copyNote(place.widening, place.type)}${checkFirstFix(place.type, value, expression, place.listed) ?? place.fix(value, expression)}`,
       expression.span,
     );
+  }
+
+  /**
+   * Why a place of type `type` has its type when it is, or is inside, a copy of another variable's place that was still
+   * undecided (see `Copies`). A part that a value of its own decided, such as a property added to the copy later, has
+   * its own reason.
+   */
+  #copyNote(owner: PlacePath | undefined, type: StaticType): string {
+    const copies = owner === undefined ? undefined : this.#copies.get(owner.root);
+    if (owner === undefined || copies === undefined || findDecidedSlot(type) !== null) return "";
+    for (let length = owner.path.length; length >= 0; length -= 1) {
+      const source = copies.get(owner.path.slice(0, length).join("."));
+      if (source !== undefined)
+        return ` '${declaredName(owner.root)}' was copied from '${source}' before its type was decided, so the first value stored in '${source}' decided it.`;
+    }
+    return "";
   }
 
   /**
@@ -1708,6 +1892,15 @@ class TypeChecker {
     for (const path of paths?.keys() ?? []) if (path !== "") own = widenPath(own, path.split("."));
     own = ownOrigins(own, declaration);
     ownPartOrigins(own, (path) => this.#partOrigin(declaration, path));
+    const decisions = this.#decided.get(declaration);
+    if (decisions !== undefined) {
+      this.#pendingDecisions.set(declaration, new Set(decisions.keys()));
+      // A decided part may bring elements or properties that earlier checks widened.
+      if (this.#decide(declaration, own)) {
+        for (const path of paths?.keys() ?? []) if (path !== "") widenPath(own, path.split("."));
+        ownPartOrigins(own, (path) => this.#partOrigin(declaration, path));
+      }
+    }
     return own;
   }
 
@@ -1719,9 +1912,29 @@ class TypeChecker {
     const variable = this.#declared.get(root);
     if (variable === undefined) return;
     this.#unappliedWidening.delete(root);
+    this.#decide(root, variable.type);
     for (const path of this.#widened.get(root)?.keys() ?? [])
       if (path !== "") widenPath(variable.type, path.split("."));
     ownPartOrigins(variable.type, (path) => this.#partOrigin(root, path));
+  }
+
+  /**
+   * Decides in a variable's type what earlier checks found decided after a read (see {@link Decided}), for the parts
+   * it has: a property that a store adds later is decided when it is added.
+   */
+  #decide(root: Declaration, type: StaticType): boolean {
+    const pending = this.#pendingDecisions.get(root);
+    if (pending === undefined || pending.size === 0) return false;
+    const decisions = this.#decided.get(root)!;
+    let decided = false;
+    for (const path of pending) {
+      const { type: value, at } = decisions.get(path)!;
+      if (decidePath(type, path === "" ? [] : path.split("."), value, at)) {
+        pending.delete(path);
+        decided = true;
+      }
+    }
+    return decided;
   }
 
   /** The type a variable keeps at a path in it, or `undefined` when that part does not exist. */
@@ -2362,7 +2575,11 @@ class TypeChecker {
   *#expressionTask(expression: Expression, scope: Scope): CompileTask<StaticType> {
     const result = yield* compileChild(this.#expressionTypeTask(expression, scope));
     const type = result.kind === "placeRead" ? result.type : result;
-    if (result.kind === "placeRead") this.#placeReads.add(expression);
+    if (result.kind === "placeRead") {
+      this.#placeReads.add(expression);
+      // A store that decides the place later in the check decides it for this read too (see `Decided`).
+      observe(type);
+    }
     this.#types.set(expression, type);
     return type;
   }
@@ -3677,6 +3894,7 @@ class TypeChecker {
     other: StaticType,
     targets: readonly Expression[],
     span: SourceSpan,
+    note = "",
   ): void {
     const target = targets.map(unwrap).find((node) => node.kind === "identifier");
     const name = target?.kind === "identifier" ? target.name : "values";
@@ -3690,7 +3908,7 @@ class TypeChecker {
           `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`);
     this.#report(
       typeCode.mixedTypes,
-      `${operation} would mix ${mixDescription(own, other)}. A ${kind} holds one type; ${fix}.`,
+      `${operation} would mix ${mixDescription(own, other)}.${note} A ${kind} holds one type; ${fix}.`,
       span,
     );
   }
@@ -6344,6 +6562,7 @@ function decidedSlot(type: StaticType, at: SourceSpan): StaticType {
   const slot = openType();
   slot.resolved = type;
   slot.resolvedAt = at;
+  slot.order = nextDecision();
   return slot;
 }
 

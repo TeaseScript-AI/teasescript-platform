@@ -407,21 +407,27 @@ test("a dict holds one value type, keyed by text, and its methods take the forms
     failure(`${DYNAMIC}let c: integer dict = dict{}\nsay c.get("z", default: dynamic("x"))\nexit`),
     ["TSR058", "A value of 'c' holds a whole number (integer), so it cannot take text (string)."],
   );
-  // The result is a copy of the default: what decides one does not decide the other.
+  // The result is a copy of the default: it has the default's type, but its values are its own.
   assert.deepEqual(
     says(
       [
         "let backup = []",
         "let table = dict{}",
         'let copy = table.get("missing", default: backup)',
-        "copy.add(1)",
+        'copy.add("first")',
         'backup.add("text")',
         "say copy",
         "say backup",
         "exit",
       ].join("\n"),
     ),
-    ["[1]", '["text"]'],
+    ['["first"]', '["text"]'],
+  );
+  assert.deepEqual(
+    codes(
+      'let backup = []\nlet table = dict{}\nlet copy = table.get("missing", default: backup)\ncopy.add(1)\nbackup.add("text")\nexit',
+    ),
+    [["TSV041", "1"]],
   );
   assert.deepEqual(
     diagnostics(

@@ -963,6 +963,10 @@ picks.add("three")    // compile error
   session sets them up. A package checks its files in turn, `main.tease` first and then the others by path; a global
   function's body is checked where a call first needs its result, otherwise after its own file. The message for a later
   contradiction names the line of the first value, and its file when that is another one.
+- The decided type holds wherever the place is read, also before that first value in checking order, such as in a
+  function body checked earlier or in another file. A copy taken while no value decided its source yet, such as
+  `let b = a`, `a.toSet()`, or a property read into a variable, holds what the source held then, so it shares the
+  source's type: after `let a = []` and `let b = a.toSet()`, a later `a.add(1)` makes `b.add("x")` a compile error.
 - A value whose type the compiler cannot know, such as untyped storage, host data, or a parameter of unknown type,
   decides nothing and is not rejected at compile time.
 
