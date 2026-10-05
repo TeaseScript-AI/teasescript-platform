@@ -43,6 +43,19 @@ test(
       const walk =
         '---\ntitle: "Night <Walk> & Talk"\nauthor: "Ann"\ndescription: "A short walk."\nkeywords: "walk", "night"\n---\nsay "Hello"\nexit\n';
       await write("corpus/Night Walk/scripts/walk.groovy", 'show("Hello")\n');
+      // An earlier version stays in the legacy folder; it is listed with its version, not as the package's source.
+      await write("corpus/Night Walk/scripts/walk__old.groovy", 'show("Hi")\n');
+      await write("corpus/Night Walk/unit.json", {
+        unit: "Night Walk",
+        earlierVersions: [
+          {
+            title: "Night Walk 1.0",
+            status: "finished",
+            date: "2013-05-01",
+            files: ["scripts/walk__old.groovy"],
+          },
+        ],
+      });
       await write("converted/Night Walk/.conversion.json", {
         source: path.join(work, "corpus/Night Walk"),
       });
@@ -111,6 +124,11 @@ test(
       );
       assert.ok(
         page.includes(
+          '<details class="earlier"><summary>Earlier versions (1)</summary><ul><li>Night Walk 1.0 &middot; finished &middot; 2013-05-01<br>Groovy: <a href="source/Night%20Walk/earlier/1/scripts/walk__old.groovy">scripts/walk__old.groovy</a></li></ul></details>',
+        ),
+      );
+      assert.ok(
+        page.includes(
           '<dl class="summary"><div><dt>Listed</dt><dd>7</dd></div><div><dt>Convert fully</dt><dd>6</dd></div><div><dt>Compile</dt><dd>4</dd></div><div><dt>Play to the end</dt><dd>3</dd></div><div><dt>Stop during play</dt><dd>0</dd></div><div><dt>Do not start</dt><dd>1</dd></div><div><dt>Do not compile</dt><dd>2</dd></div><div><dt>Not played yet</dt><dd>0</dd></div><div><dt>Blocked by unbuilt commands</dt><dd>0</dd></div><div><dt>Verified</dt><dd>1</dd></div><div><dt>Owner-approved</dt><dd>1</dd></div><div><dt>Unfinished stubs</dt><dd>1</dd></div></dl>',
         ),
       );
@@ -126,6 +144,13 @@ test(
       assert.equal(
         await readFile(path.join(work, "catalog/source/Night Walk/groovy/walk.groovy"), "utf8"),
         'show("Hello")\n',
+      );
+      assert.equal(
+        await readFile(
+          path.join(work, "catalog/source/Night Walk/earlier/1/scripts/walk__old.groovy"),
+          "utf8",
+        ),
+        'show("Hi")\n',
       );
       assert.match(
         await readFile(path.join(work, "catalog/source/garden/tease/main.tease"), "utf8"),
