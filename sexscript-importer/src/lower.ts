@@ -1324,11 +1324,14 @@ export function lowerParsedFile(
   const typedStatements = withLegacyMarkup(
     withEnforcedTypes(
       withDirectClosureCalls(
-        [
-          ...bindingDeclarations(body, context, members),
-          ...context.closureFunctions,
-          ...withScriptBindings(authoredStatements, body, context, members),
-        ],
+        withPlacedBindings(
+          bindingDeclarations(body, context, members),
+          withPlacedFunctions(
+            context.closureFunctions,
+            withScriptBindings(authoredStatements, body, context, members),
+          ),
+          context,
+        ),
         context,
       ),
       context,
@@ -2726,6 +2729,7 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
     root.kind !== "declaration" &&
     split !== null &&
     hoistedCondition !== null &&
+    repeatsLittle(node, deferred, split, context) &&
     isHoistable(node, deferred, context, hoistedCondition)
   ) {
     return lowerStatement(
@@ -2748,6 +2752,33 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
       ),
     ]
   );
+}
+
+/**
+ * Whether repeating a statement per branch of its conditional stays small: a return or a call with one argument whose
+ * other conditionals, if any, sit inside the branches, as in a chain `a ? x : b ? y : z`. A larger statement, such as a
+ * dialogue call with several text fragments, computes its conditionals into temporaries instead, so its text is
+ * written once (hoistDeferred).
+ */
+function repeatsLittle(
+  statement: AstNode,
+  deferred: AstNode,
+  split: { whenTrue: AstNode; whenFalse: AstNode },
+  context: LowerContext,
+): boolean {
+  if (statement.keepsWhole === true) return false;
+  const expression = statement.kind === "return" ? null : asNode(statement.expression);
+  const small =
+    statement.kind === "return" ||
+    (expression?.kind === "methodCall" && nodeArray(asNode(expression.arguments)?.items).length <= 1);
+  const inside = (branch: AstNode): boolean => {
+    const rest = findDeferred(substituteNode(statement, deferred, branch), context);
+    if (rest === null) return true;
+    let found = false;
+    walkAst(branch, (node) => (found ||= node === rest));
+    return found;
+  };
+  return small && inside(split.whenTrue) && inside(split.whenFalse);
 }
 
 /**
@@ -2974,7 +3005,9 @@ function hoistDeferred(
     replacements.set(part, syntheticVariable(name, span));
   }
   const result: IrStatement[] = [];
-  for (const item of [...declarations, substituteNodes(statement, replacements)]) {
+  // The rest of the statement computes its other conditionals first too, rather than repeating it per branch.
+  const rest: AstNode = { ...substituteNodes(statement, replacements), keepsWhole: true };
+  for (const item of [...declarations, rest]) {
     const [prelude, lowered, postlude] = withSurroundings(context, item);
     result.push(...prelude, ...lowered, ...postlude);
     // A part that could not be converted leaves its temporary undefined; the root cause is reported already.
@@ -4551,6 +4584,63 @@ function lowerClosureValue(
   }
   context.actions.add(name);
   return { kind: "literal", value: name, action: true };
+}
+
+/**
+ * The functions made of closure values (lowerClosureValue), each placed just before the first statement that uses it,
+ * so the file keeps the legacy order; one that nothing uses comes first.
+ */
+function withPlacedFunctions(lifted: IrStatement[], statements: IrStatement[]): IrStatement[] {
+  if (lifted.length === 0) return statements;
+  const functions = new Map(
+    lifted.flatMap((statement): Array<[string, IrStatement]> =>
+      statement.kind === "function" ? [[statement.name, statement]] : [],
+    ),
+  );
+  const uses = (value: unknown, found: Set<string>): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) uses(item, found);
+      return;
+    }
+    if (!isRecord(value)) return;
+    const name =
+      value.kind === "call" || (value.kind === "literal" && value.action === true)
+        ? value.kind === "call"
+          ? value.name
+          : value.value
+        : undefined;
+    if (typeof name === "string" && functions.has(name)) found.add(name);
+    for (const child of Object.values(value)) uses(child, found);
+  };
+  const placed = new Set<string>();
+  const place = (statement: IrStatement): IrStatement[] => {
+    const used = new Set<string>();
+    uses(statement, used);
+    const before: IrStatement[] = [];
+    for (const name of used) {
+      if (placed.has(name)) continue;
+      placed.add(name);
+      before.push(...place(functions.get(name)!));
+    }
+    return [...before, statement];
+  };
+  // The comments right before a statement stay with it, after the functions placed before it.
+  const body: IrStatement[] = [];
+  let comments: IrStatement[] = [];
+  for (const statement of statements) {
+    if (statement.kind === "blank" || (statement.kind === "comment" && !statement.trailing)) {
+      comments.push(statement);
+      continue;
+    }
+    const [own, ...before] = place(statement).reverse();
+    body.push(...before.reverse(), ...comments, own!);
+    comments = [];
+  }
+  body.push(...comments);
+  return [
+    ...lifted.filter((statement) => statement.kind !== "function" || !placed.has(statement.name)),
+    ...body,
+  ];
 }
 
 /**
@@ -14906,7 +14996,7 @@ function formatText(
 /** The empty value of a type, the start of a variable whose own initializer could not convert; null otherwise. */
 /**
  * Variables a closure assigns that nothing declares: Groovy kept them in the script's binding, shared by every
- * closure, so they are declared at the top of the script, starting with their type's empty value.
+ * closure, so they are declared in the script, starting with their type's empty value (withPlacedBindings places them).
  */
 function bindingDeclarations(
   body: AstNode | null,
@@ -14962,27 +15052,106 @@ function bindingDeclarations(
       !context.packageFunctions.has(name) &&
       !isLegacyGetterProperty(name),
   );
-  if (names.length === 0) return [];
-  const message = `Groovy kept ${names.join(", ")}, which functions assign without a declaration, in the script's binding that every function shares; ${names.length === 1 ? "it is" : "they are"} declared at the top of the script with an empty value.`;
-  context.diagnostics.push({
-    code: "SX_BINDING_VARIABLE",
-    severity: "warning",
-    message,
-    span: null,
-  });
-  return [
-    {
-      kind: "comment",
-      text: `// NOTE SX_BINDING_VARIABLE: ${message}`,
-      trailing: false,
-      span: null,
-    },
-    ...names.map((name): IrStatement => ({
+  return names.map(
+    (name): IrStatement => ({
       kind: "let",
       name,
       value: neutralValue(context.types.variables.get(name) ?? UNKNOWN),
       span: null,
-    })),
+    }),
+  );
+}
+
+/**
+ * The script's statements with each binding declaration (bindingDeclarations) just before the first statement that
+ * may use the variable: one that names it or calls a function that reaches it, also through the dispatcher when an
+ * action reaches it. A variable that only functions nothing calls use is declared first.
+ */
+function withPlacedBindings(
+  declarations: IrStatement[],
+  statements: IrStatement[],
+  context: LowerContext,
+): IrStatement[] {
+  if (declarations.length === 0) return statements;
+  type Found = { variables: Set<string>; calls: Set<string> };
+  const names = (value: unknown, found: Found = { variables: new Set(), calls: new Set() }): Found => {
+    if (Array.isArray(value)) {
+      for (const item of value) names(item, found);
+      return found;
+    }
+    if (!isRecord(value)) return found;
+    if (value.kind === "variable" && typeof value.name === "string") found.variables.add(value.name);
+    if (value.kind === "call" && typeof value.name === "string") found.calls.add(value.name);
+    if (value.kind === "literal" && value.action === true && typeof value.value === "string")
+      found.calls.add(value.value);
+    for (const child of Object.values(value)) names(child, found);
+    return found;
+  };
+  const functions = new Map(
+    statements.flatMap((statement): Array<[string, Found]> =>
+      statement.kind === "function" ? [[statement.name, names(statement.body)]] : [],
+    ),
+  );
+  const firstUse = (name: string): number => {
+    // The functions that reach the variable, directly or through another one.
+    const reaching = new Set(
+      [...functions].flatMap(([fn, found]) => (found.variables.has(name) ? [fn] : [])),
+    );
+    for (let grown = true; grown; ) {
+      grown = false;
+      const dispatched = [...reaching].some((fn) => context.actions.has(fn));
+      for (const [fn, found] of functions) {
+        if (reaching.has(fn)) continue;
+        if (
+          [...found.calls].some((call) => reaching.has(call)) ||
+          (dispatched && found.calls.has(ACTION_DISPATCHER))
+        ) {
+          reaching.add(fn);
+          grown = true;
+        }
+      }
+    }
+    const dispatched = [...reaching].some((fn) => context.actions.has(fn));
+    return statements.findIndex((statement) => {
+      if (statement.kind === "function") return false;
+      const found = names(statement);
+      return (
+        found.variables.has(name) ||
+        [...found.calls].some((call) => reaching.has(call)) ||
+        (dispatched && found.calls.has(ACTION_DISPATCHER))
+      );
+    });
+  };
+  const before = new Map<number, IrStatement[]>();
+  for (const declaration of declarations) {
+    if (declaration.kind !== "let") continue;
+    let index = firstUse(declaration.name);
+    if (index < 0) index = 0;
+    // The comments right before a statement stay with it.
+    while (index > 0) {
+      const previous = statements[index - 1]!;
+      if (previous.kind !== "blank" && !(previous.kind === "comment" && !previous.trailing)) break;
+      index -= 1;
+    }
+    before.set(index, [...(before.get(index) ?? []), declaration]);
+  }
+  const result: IrStatement[] = [];
+  statements.forEach((statement, index) => {
+    result.push(...bindingNote(before.get(index) ?? [], context), statement);
+  });
+  return result;
+}
+
+function bindingNote(declarations: IrStatement[], context: LowerContext): IrStatement[] {
+  const names = declarations.flatMap((declaration) =>
+    declaration.kind === "let" ? [declaration.name] : [],
+  );
+  if (names.length === 0) return [];
+  const message = `Groovy kept ${names.join(", ")}, which functions assign without a declaration, in the script's binding that every function shares; ${names.length === 1 ? "it is" : "they are"} declared here, before the script first uses ${names.length === 1 ? "it" : "them"}, with an empty value.`;
+  context.diagnostics.push({ code: "SX_BINDING_VARIABLE", severity: "warning", message, span: null });
+  return [
+    { kind: "comment", text: `// NOTE SX_BINDING_VARIABLE: ${message}`, trailing: false, span: null },
+    ...declarations,
   ];
 }
 

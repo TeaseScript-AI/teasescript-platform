@@ -70,4 +70,18 @@ if given is number {
 if given is string {
   say "A text"
 }
+// Several conditional fragments in one text are computed first, so the text is written once.
+say "Leashed?"
+let leashed = (choose yes: "Yes", no: "No") == "yes"
+say "Gagged?"
+let gagged = (choose yes: "Yes", no: "No") == "yes"
+let conditional = ""
+if leashed {
+  conditional = " with the leash"
+}
+let conditional2 = ", mouth open"
+if gagged {
+  conditional2 = ""
+}
+say "Crawl to me${conditional}${conditional2}."
 exit
