@@ -32,9 +32,11 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
 - Keep serializable-set validation and reconstruction linear while preserving insertion order, scalar equality, and the canonical array representation.
 - Fresh-runtime global initialization consumes each already captured unique own global property once; it does not rescan previously constructed bindings.
 - Detailed instruction-plan validation builds one local instruction-owner/function index. Detailed snapshot validation
-  builds one local function/region index, call-frame argument and temporary maps, and reuses suspended-continuation
-  liveness results for each validated active-loop variant. These are operation-local only; no caller-supplied plan or
-  snapshot data enters a global cache. Validation work may be measured diagnostically, but structural validity is not
+  uses one function/region and plan-fact index per plan plus local call-frame argument and temporary maps, and derives
+  what a suspended continuation needs from liveness over only the control flow it can reach with its active loops. The
+  index and the needs of accepted snapshots' continuations are kept in process only for an immutable plan that complete
+  validation registered, and only while that plan lives; any other plan is indexed per operation, and every snapshot is
+  still captured and validated in full. Validation work may be measured diagnostically, but structural validity is not
   conditioned on a generic validation-work budget.
 - [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md) owns resource-limit classification, coupling evidence, and follow-up routing; this security document owns the trust-boundary behavior.
 - Interaction-result handoff validation is a fixed local structural check and does not add another control-flow fixed point, future-writer scan, or settlement-provenance cache.

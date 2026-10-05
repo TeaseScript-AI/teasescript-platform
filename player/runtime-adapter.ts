@@ -42,6 +42,7 @@ import {
   type TimeObservationOutcome,
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
+import { instructionSourcePath } from "../src/plan/model.js";
 import { runValidatedState } from "../src/runtime/engine.js";
 import {
   mediaTerminalProgressMs,
@@ -746,6 +747,33 @@ export function playerRuntimeMedia(snapshot: RuntimeSnapshot): {
     stage: stageProjection(snapshot),
     media: mediaPlaybackProjection(snapshot),
   });
+}
+
+/**
+ * The authored source of an active media instance and the script file and line of the `playMedia` that started it, or
+ * `null` when no such media is active.
+ */
+export function playerRuntimeMediaOrigin(
+  session: PlayerRuntimeSession,
+  mediaId: number,
+): {
+  readonly media: "audio" | "video";
+  readonly source: string;
+  readonly location: { readonly path: string; readonly line: number };
+} | null {
+  for (const action of session.snapshot.backgroundActions) {
+    if (action.kind !== "media" || action.media.mediaId !== mediaId) continue;
+    const instruction = session.plan.instructions[action.owningInstruction]!;
+    return Object.freeze({
+      media: action.media.media,
+      source: action.media.source,
+      location: Object.freeze({
+        path: instructionSourcePath(session.plan, action.owningInstruction),
+        line: instruction.span.sl + 1,
+      }),
+    });
+  }
+  return null;
 }
 
 function completePlayerAction(
