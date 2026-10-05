@@ -22,7 +22,7 @@ test(
   async () => {
     const work = await mkdtemp(path.join(tmpdir(), "sexscript-catalog-"));
     try {
-      const write = async (file: string, content: string | object) => {
+      const write = async (file: string, content: string | Record<string, unknown>) => {
         await mkdir(path.dirname(path.join(work, file)), { recursive: true });
         await writeFile(
           path.join(work, file),
@@ -70,10 +70,9 @@ test(
       await write("converted/menu/rooms/hall.tease", "say 1\nexit\n");
       await write("converted/.hidden/main.tease", 'say "not a package"\nexit\n');
 
-      const entries = await readCatalogEntries(
-        path.join(work, "converted"),
-        (toolsResult as { tools: CatalogTools }).tools,
-      );
+      // EVIDENCE: the test is skipped unless the tools loaded, so toolsResult holds them here.
+      const tools = (toolsResult as { tools: CatalogTools }).tools;
+      const entries = await readCatalogEntries(path.join(work, "converted"), tools);
       assert.deepEqual(
         entries.map(({ id, status, partial }) => [id, status.label, partial?.label ?? null]),
         [

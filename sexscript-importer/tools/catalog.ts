@@ -13,6 +13,7 @@
 import { copyFile, link, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isRecord } from "../src/ast.ts";
 
 export interface CatalogEntry {
   readonly id: string;
@@ -129,6 +130,7 @@ async function main(rawArgs: string[]): Promise<void> {
   const entries = await readCatalogEntries(root, await loadRepositoryCatalogTools());
   const measurement = await readFile(path.join(root, ".conversion-summary.json"), "utf8").then(
     (text) => {
+      // EVIDENCE: convert-corpus.ts writes .conversion-summary.json as one JSON object of counts.
       const summary = JSON.parse(text) as Record<string, unknown>;
       return {
         importerCommit: typeof summary.importerCommit === "string" ? summary.importerCommit : null,
@@ -170,12 +172,14 @@ export async function loadRepositoryCatalogTools(): Promise<CatalogTools> {
   if (typeof PackageFolder !== "function" || typeof compileProject !== "function")
     throw new Error("The repository build does not export PackageFolder and compileProject().");
   type Folder = { scan(): Promise<PackageScan> };
+  // Both were checked to be functions above.
+  // EVIDENCE: the build's PackageFolder (src/player/package-folder.ts) is constructed with the package root.
+  const Scanner = PackageFolder as new (root: string) => Folder;
+  // EVIDENCE: as above, compileProject(sources, { images }) returns a ProjectCompilationResult.
+  const compile = compileProject as (...args: unknown[]) => ReturnType<CatalogTools["compile"]>;
   return {
-    scan: (folder) => new (PackageFolder as new (root: string) => Folder)(folder).scan(),
-    compile: (sources, images) =>
-      (compileProject as (...args: unknown[]) => ReturnType<CatalogTools["compile"]>)(sources, {
-        images,
-      }),
+    scan: (folder) => new Scanner(folder).scan(),
+    compile: (sources, images) => compile(sources, { images }),
   };
 }
 
@@ -210,10 +214,14 @@ async function readEntry(root: string, id: string, tools: CatalogTools): Promise
   const header = primaryHeader(sources, compilation.files);
   const readJson = (name: string) =>
     readFile(path.join(folder, name), "utf8").then(
-      (text) => JSON.parse(text) as Record<string, unknown>,
+      (text): Record<string, unknown> | null => {
+        const value: unknown = JSON.parse(text);
+        return isRecord(value) ? value : null;
+      },
       () => null,
     );
   const conversion = await readJson(".conversion.json");
+  // EVIDENCE: see readJson above; a failed report has only `error`, which the fields read below treat as absent.
   const report = (await readJson(".report.json")) as ImporterReport | null;
   const groovyRoot =
     typeof conversion?.source === "string" ? path.join(conversion.source, "scripts") : null;

@@ -113,6 +113,7 @@ async function main(rawArgs: string[]): Promise<void> {
   const summaryPath = path.join(outputRoot, ".conversion-summary.json");
   if (reportOnly) {
     if (only === null) {
+      // EVIDENCE: this tool writes the summary file as one JSON object of counts.
       const summary = JSON.parse(await readFile(summaryPath, "utf8")) as Record<string, unknown>;
       const reported = {
         ...summary,
@@ -204,9 +205,10 @@ async function reportOne(corpusRoot: string, outputRoot: string, id: string): Pr
     "--run",
     path.join(corpusRoot, id, "scripts"),
   ]);
-  let report: unknown;
+  let report: Record<string, unknown> | null;
   try {
-    report = exitCode === 0 ? JSON.parse(stdout) : null;
+    const parsed: unknown = exitCode === 0 ? JSON.parse(stdout) : null;
+    report = isRecordValue(parsed) ? parsed : null;
   } catch {
     report = null;
   }
@@ -253,6 +255,7 @@ export function resourcePackTargets(
   };
   const all = [...sources.keys()];
   return packFiles.map(({ pack, source, relative }) => {
+    // EVIDENCE: split() returns at least one element, so the first is a string.
     const [first, second] = relative.toLowerCase().split("/") as [string, string | undefined];
     let packages: string[];
     if (second === undefined) packages = naming(first, `${escapeRegex(first)}(?![\\w.-])`, all);
@@ -333,4 +336,8 @@ function toPosix(relative: string): string {
 
 function escapeRegex(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
