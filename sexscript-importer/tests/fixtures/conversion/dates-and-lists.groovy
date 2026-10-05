@@ -22,3 +22,6 @@ show("Status of " + stamp + " at " + new Date().format("HH:mm") + ", day " + day
 def lockedSince = loadInteger("training.lockedSince")
 if (lockedSince == null) lockedSince = 1790000000
 show("Locked since " + new Date((long) lockedSince * 1000).format("dd, MMM, yyyy"))
+// A list + a value that may be a list or one element appends at runtime what Groovy appended.
+def pickAll = { impl -> ([] + impl).size() }
+show("Picked " + pickAll(["paddle", "cane"]) + " " + pickAll("belt"))

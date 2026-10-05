@@ -1675,6 +1675,7 @@ function withEnforcedTypes(statements: IrStatement[], context: LowerContext): Ir
   helperResults ??= functionResultTypes(allHelperStatements());
   const result = enforceVariableTypes(statements, helperResults);
   if (result.rangeAppended.length > 0) context.syntheticHelpers.add("concat");
+  if (result.partAppended.length > 0) context.syntheticHelpers.add("listPart");
   // A list or text append no longer needs the note that its `+` operands were not proven numeric.
   const appendedLines = new Set(
     [...result.appended, ...result.textAppended].map((statement) => statement.span?.line),
@@ -5558,7 +5559,8 @@ function lowerCollectionAssignment(
     return null;
   }
 
-  // From here on the idiom is recognized; an inner failure keeps its own root diagnostic.
+  // From here on the idiom is recognized; an inner failure keeps its own root diagnostic, and a declared variable
+  // stays declared with a neutral value of its type, so the code that uses it still compiles.
   const failed = (): IrStatement[] => [
     unsupportedStatement(
       context,
@@ -5566,6 +5568,16 @@ function lowerCollectionAssignment(
       "SX_UNSUPPORTED_DECLARATION_VALUE",
       `Cannot safely migrate the ${call.name}() loop for ${target}.`,
     ),
+    ...(declaration
+      ? [
+          {
+            kind: "let" as const,
+            name: target,
+            value: neutralValue(context.types.variables.get(target) ?? UNKNOWN),
+            span,
+          },
+        ]
+      : []),
   ];
   const collection = lowerExpression(receiver, context);
   if (collection === null) return failed();
@@ -8917,24 +8929,22 @@ function listConcatenationOperands(node: AstNode, context: LowerContext): IrExpr
     const leftNode = asNode(node.left);
     const rightNode = asNode(node.right);
     if (leftNode !== null && rightNode !== null && isListType(inferType(leftNode, context.types))) {
-      // Groovy `list + element` appends one element; `list + otherList` appends all elements, so the right
-      // side must be proven one or the other (a null right side is appended as an element).
+      // Groovy `list + element` appends one element and `list + otherList` all elements (a null right side is
+      // appended as an element); a right side not proven to be one or the other is decided at runtime.
       const rightType = inferType(rightNode, context.types);
       const rightIsList = onlyOf(rightType, LIST);
       const rightIsElement = (rightType & (LIST | NULL)) === 0 && rightType !== 0;
-      if (!rightIsList && !rightIsElement) {
-        unsupportedExpression(
-          context,
-          rightNode,
-          "SX_LIST_CONCATENATION",
-          "Groovy list + appends a list's elements or a single value; the type of this right side is not proven, so convert it manually.",
-        );
-        return null;
-      }
       const left = listConcatenationOperands(leftNode, context);
       const right = lowerExpression(rightNode, context);
       if (left === null || right === null) return null;
-      return [...left, rightIsList ? right : { kind: "list", items: [right] }];
+      return [
+        ...left,
+        rightIsList
+          ? right
+          : rightIsElement
+            ? { kind: "list", items: [right] }
+            : useHelper(context, "listPart", [right]),
+      ];
     }
   }
   const value = lowerExpression(node, context);

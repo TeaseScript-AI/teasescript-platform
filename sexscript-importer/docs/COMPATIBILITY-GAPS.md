@@ -517,7 +517,9 @@ pixel size, or an image-size query.
   clothes the player owns; a package that reads such keys and never saves them asks the missing ones once at the start
   of `main.tease`, with the distribution's questions, and saves them under the legacy keys (`SX_LEGACY_PROFILE`).
 - `show("")` only cleared the legacy text area and is dropped; an empty or blank image path clears the image.
-- Lists join with TeaseScript `+`, `+=`, and `addAll` (#609); the concatenation helper remains only for ranges.
+- Lists join with TeaseScript `+`, `+=`, and `addAll` (#609); the concatenation helper remains only for ranges. A right
+  side not proven to be a list or one element (`[] + impl` with a parameter) goes through a generated helper that
+  returns a list as it is and wraps any other value, also null, as Groovy appended it (63 corpus sites, 26 in Toy).
 
 - Actions a browser cannot do (owner decision 2026-10-05): questions and notices that the importer adds come from a
   global speaker `system` (title "System"), declared once in `helpers.tease` or in a lone script. Device commands kept

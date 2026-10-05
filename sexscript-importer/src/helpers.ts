@@ -87,6 +87,7 @@ export type HelperName =
   | "textLines"
   | "endsWithDigits"
   | "plainText"
+  | "listPart"
   | "askText"
   | "compare"
   | "replaceChars"
@@ -191,6 +192,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "textLines",
   "endsWithDigits",
   "plainText",
+  "listPart",
   "askText",
   "compare",
   "replaceChars",
@@ -1079,6 +1081,19 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       );
     },
+  },
+  // What Groovy `list + value` appended: the elements of a list, or any other value, also null, as one element.
+  listPart: {
+    name: "sexscriptLegacyListPart",
+    build: () =>
+      fn(
+        "sexscriptLegacyListPart",
+        ["value"],
+        [
+          ifS({ kind: "typeTest", value: v("value"), type: "list" }, [ret(v("value"))]),
+          ret({ kind: "list", items: [v("value")] }),
+        ],
+      ),
   },
   // The items a Groovy loop visited: the characters of text, the elements of anything else.
   items: {
