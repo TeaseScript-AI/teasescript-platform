@@ -7,3 +7,8 @@ greet()
 // A local closure named sleep is called instead of Groovy sleep(milliseconds).
 def sleep = { show("You fall asleep.") }
 sleep()
+// A flag that later holds a number is false at 0, as Groovy truth was.
+def playing = true
+while (playing) {
+  if (getBoolean("Stop?")) playing = 0
+}

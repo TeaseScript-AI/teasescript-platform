@@ -7589,6 +7589,25 @@ function truthiness(
   });
   if (onlyOf(type, BOOLEAN | NULL)) return compare("==", { kind: "literal", value: true });
   if (type === NULL) return notNull;
+  // A variable that holds a flag or a number, `menu = true` and later `menu = 0`: Groovy treated 0 as false.
+  if (
+    repeatable &&
+    (type & BOOLEAN) !== 0 &&
+    (type & NUMBER) !== 0 &&
+    onlyOf(type, BOOLEAN | NUMBER | NULL)
+  )
+    return {
+      kind: "binary",
+      operator: "or",
+      left: and(
+        { kind: "typeTest", value, type: "boolean" },
+        compare("==", { kind: "literal", value: true }),
+      ),
+      right: and(
+        { kind: "typeTest", value, type: "number" },
+        compare("!=", { kind: "literal", value: 0 }),
+      ),
+    };
   if (isDictionary(node, context)) {
     // A dict is false when it is empty, as a Groovy map was.
     return {
