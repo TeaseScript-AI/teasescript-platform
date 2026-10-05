@@ -114,7 +114,7 @@ async function main() {
       await packageScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
       await developmentTimeScenario(cdp, origin);
-      await askImageCameraScenario(cdp, origin);
+      await askImageCameraScenario(cdp, origin, profile);
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
@@ -1767,93 +1767,143 @@ async function askImageScenario(cdp, origin, profile) {
 }
 
 /**
- * The camera route of `askImage` on the Stage: the camera button opens the camera from the player's click, the shutter
- * takes a photo the player may take again, and "Use this" alone answers the request with the camera's own, unmirrored
- * picture. A camera that fails offers "Try again" while the paperclip stays; Escape closes the view, and the request
- * waits.
+ * The camera route of `askImage`: the camera opens by itself with the request, on the Stage, or in the camera window a
+ * script shows. The shutter on the viewfinder takes a photo the player may take again, and "Use this" alone answers the
+ * request with the camera's own, unmirrored picture. A camera the request opened turns off after the answer, also one
+ * given as a file. A camera that fails offers "Try again" while the paperclip stays.
  */
-async function askImageCameraScenario(cdp, origin) {
-  const liveVideo = `(() => { const video = document.querySelector('[data-image-capture] video'); return !!video && video.readyState >= 2 && video.videoWidth > 0; })()`;
+async function askImageCameraScenario(cdp, origin, profile) {
+  const file = join(profile, "camera-alternative.png");
+  await writeFile(file, solidPng(32, 24, [10, 120, 200]));
+  const liveVideo = (frame) =>
+    `(() => { const video = document.querySelector('${frame} [data-image-capture]')?.parentElement.querySelector('video'); return !!video && video.readyState >= 2 && video.videoWidth > 0; })()`;
   const photo = `document.querySelector('[data-image-capture-photo]')`;
   const photoReady = `(${photo}?.complete && ${photo}.naturalWidth > 0) === true`;
   const imageAnswers = `[...document.querySelectorAll('.transcript-entry')].filter((entry) => entry.textContent.trim() === 'Image').length`;
-  const start = async () => {
-    await navigate(cdp, `${origin}/player/?package=picture-camera`);
+  // Every camera track the page opens, so the smoke can see the camera turn off.
+  const cameraOff = `window.__cameraTracks.length > 0 && window.__cameraTracks.every((track) => track.readyState === 'ended')`;
+  const start = async (pkg) => {
+    await navigate(cdp, `${origin}/player/?package=${pkg}`);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
     await physicalClick(cdp, "[data-session-activation] button");
-    await waitFor(
-      cdp,
-      visible("[data-composer-camera]"),
-      8_000,
-      "The image request offered no camera button",
-    );
   };
-  await cdp.call("Browser.setPermission", {
-    origin,
-    permission: { name: "camera" },
-    setting: "granted",
-  });
-  await start();
-  assertEqual(
-    await value(cdp, `!!document.querySelector('[data-image-capture]')`),
-    false,
-    "The camera opened by itself",
-  );
-  await physicalClick(cdp, "[data-composer-camera]");
-  await waitFor(cdp, liveVideo, 8_000, "The camera view showed no live camera");
-  assertEqual(
-    await value(
-      cdp,
-      `document.querySelector('[data-image-capture]').textContent.includes('Take a selfie for me')`,
-    ),
-    true,
-    "The camera view does not ask the request's question",
-  );
-  await physicalClick(cdp, "[data-image-capture-shutter]");
-  await waitFor(cdp, photoReady, 8_000, "The photo taken is not shown for review");
-  assertTestCard(
-    await value(cdp, quadrantColors(photo)),
-    "The photo taken does not show the camera's frame",
-  );
-  assertEqual(
-    await value(cdp, `${imageAnswers}`),
-    0,
-    "Taking a photo answered the request before Use this",
-  );
-  await physicalClick(cdp, "[data-image-capture-retake]");
-  await waitFor(cdp, liveVideo, 8_000, "Retake did not return to the live camera");
-  await physicalClick(cdp, "[data-image-capture-shutter]");
-  await waitFor(cdp, photoReady);
-  await physicalClick(cdp, "[data-image-capture-use]");
-  await waitFor(
-    cdp,
-    `!document.querySelector('[data-image-capture]') && ${imageAnswers} === 1 && document.body.innerText.includes('Lovely.')`,
-    8_000,
-    "Use this did not answer the request",
-  );
-  await waitFor(
-    cdp,
-    `(() => { const image = document.querySelector('.stage-media'); return !!image && image.complete && image.src.startsWith('blob:'); })()`,
-  );
-  assertTestCard(
-    await value(cdp, quadrantColors(`document.querySelector('.stage-media')`)),
-    "The Stage does not show the photo used",
-  );
-
-  // The camera is busy the first time: the view offers Try again, the paperclip stays, and Escape closes it.
-  const {
-    result: { identifier },
-  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+  const tracking = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
     source: `{
+      window.__cameraTracks = [];
+      // Set before a navigation: that page's first camera request fails as if another application held the camera.
+      window.__busyOnce = sessionStorage.getItem('busyOnce') === '1';
+      sessionStorage.removeItem('busyOnce');
       const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-      let calls = 0;
-      navigator.mediaDevices.getUserMedia = (constraints) =>
-        ++calls === 1 ? Promise.reject(new DOMException('busy', 'NotReadableError')) : real(constraints);
+      navigator.mediaDevices.getUserMedia = async (constraints) => {
+        if (window.__busyOnce) {
+          window.__busyOnce = false;
+          throw new DOMException('busy', 'NotReadableError');
+        }
+        const stream = await real(constraints);
+        window.__cameraTracks.push(...stream.getVideoTracks());
+        return stream;
+      };
     }`,
   });
   try {
-    await start();
-    await physicalClick(cdp, "[data-composer-camera]");
+    await cdp.call("Browser.setPermission", {
+      origin,
+      permission: { name: "camera" },
+      setting: "granted",
+    });
+    await start("picture-camera");
+    await waitFor(
+      cdp,
+      liveVideo("[data-stage-camera]"),
+      8_000,
+      "The camera did not open by itself on the Stage",
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `document.querySelector('[data-image-capture]').textContent.includes('Take a selfie for me')`,
+      ),
+      true,
+      "The viewfinder does not ask the request's question",
+    );
+    assertEqual(
+      await value(cdp, visible("[data-composer-attach]")),
+      true,
+      "The paperclip is not offered beside the camera",
+    );
+    await physicalClick(cdp, "[data-image-capture-shutter]");
+    await waitFor(cdp, photoReady, 10_000, "The photo taken is not shown for review");
+    assertTestCard(
+      await value(cdp, quadrantColors(photo)),
+      "The photo taken does not show the camera's frame",
+    );
+    assertEqual(
+      await value(cdp, `${imageAnswers}`),
+      0,
+      "Taking a photo answered the request before Use this",
+    );
+    await physicalClick(cdp, "[data-image-capture-retake]");
+    await waitFor(
+      cdp,
+      `!${photo} && ${liveVideo("[data-stage-camera]")}`,
+      8_000,
+      "Retake did not return to the live camera",
+    );
+    await physicalClick(cdp, "[data-image-capture-shutter]");
+    await waitFor(cdp, photoReady, 10_000);
+    await physicalClick(cdp, "[data-image-capture-use]");
+    await waitFor(
+      cdp,
+      `!document.querySelector('[data-image-capture]') && ${imageAnswers} === 1 && document.body.innerText.includes('Lovely.')`,
+      8_000,
+      "Use this did not answer the request",
+    );
+    await waitFor(
+      cdp,
+      cameraOff,
+      8_000,
+      "The camera the request opened stayed on after the answer",
+    );
+    await waitFor(
+      cdp,
+      `(() => { const image = document.querySelector('.stage-media'); return !!image && image.complete && image.src.startsWith('blob:'); })()`,
+    );
+    assertTestCard(
+      await value(cdp, quadrantColors(`document.querySelector('.stage-media')`)),
+      "The Stage does not show the photo used",
+    );
+
+    // With a camera window the script shows, the photo is taken there; a file answer turns the camera off too.
+    await start("picture-camera-view");
+    await waitFor(
+      cdp,
+      liveVideo("[data-floating-viewfinder]"),
+      8_000,
+      "The camera did not open in the script's camera window",
+    );
+    assertEqual(
+      await value(cdp, `!!document.querySelector('[data-stage-camera]')`),
+      false,
+      "The camera opened on the Stage as well",
+    );
+    await openPicker(cdp);
+    await setInputFiles(cdp, "[data-composer-file]", [file]);
+    await waitFor(
+      cdp,
+      `!document.querySelector('[data-image-capture]') && ${imageAnswers} === 1`,
+      8_000,
+      "A file did not answer the camera request",
+    );
+    await waitFor(
+      cdp,
+      cameraOff,
+      8_000,
+      "The camera the request opened stayed on after a file answered",
+    );
+
+    // The camera is busy the first time: the viewfinder offers Try again, and the paperclip stays.
+    await evaluate(cdp, "sessionStorage.setItem('busyOnce', '1')");
+    await start("picture-camera");
     await waitFor(
       cdp,
       visible("[data-image-capture-retry]"),
@@ -1866,33 +1916,18 @@ async function askImageCameraScenario(cdp, origin) {
       "The paperclip went with the camera",
     );
     await physicalClick(cdp, "[data-image-capture-retry]");
-    await waitFor(cdp, liveVideo, 8_000, "Try again did not open the camera");
-    await pressEscape(cdp);
     await waitFor(
       cdp,
-      `!document.querySelector('[data-image-capture]')`,
+      liveVideo("[data-stage-camera]"),
       8_000,
-      "Escape did not close the camera view",
-    );
-    assertEqual(
-      await value(cdp, visible("[data-composer-camera]")),
-      true,
-      "Closing the camera view ended the request",
+      "Try again did not open the camera",
     );
   } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", {
+      identifier: tracking.result.identifier,
+    });
     await cdp.call("Browser.resetPermissions");
   }
-}
-
-async function pressEscape(cdp) {
-  for (const type of ["keyDown", "keyUp"])
-    await cdp.call("Input.dispatchKeyEvent", {
-      type,
-      key: "Escape",
-      code: "Escape",
-      windowsVirtualKeyCode: 27,
-    });
 }
 
 /** Opens the file picker with the paperclip; the native dialog itself is suppressed, and `setInputFiles` answers it. */

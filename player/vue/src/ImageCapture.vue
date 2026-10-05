@@ -1,21 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from "vue";
-import { Camera, X } from "@lucide/vue";
+import { Camera } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import PlayerActionButton from "@/components/PlayerActionButton.vue";
-import Viewfinder from "./Viewfinder.vue";
-import ViewfinderMirrorButton from "./ViewfinderMirrorButton.vue";
 import type { ImageCaptureView } from "./useImageCapture";
 
-// Taking a photo for `askImage` on the Stage: the request's question over the live camera with a shutter, then the photo
-// with "Use this" and "Retake". These are Player controls, not story messages: nothing here enters the transcript, and
-// the request is answered only by "Use this". Closing returns to the composer, where the request still waits.
+// Taking a photo for `askImage`, drawn on the viewfinder it fills: the request's question over the live camera with the
+// shutter on the picture, then the photo taken with "Use this" and "Retake". These are Player controls, not story
+// messages: nothing here enters the transcript, and the request is answered only by "Use this". The view opens by
+// itself with the request, so it takes keyboard focus only once the player works in it.
 const props = defineProps<{ view: ImageCaptureView }>();
-const mirrored = defineModel<boolean>("mirrored", { default: true });
-const emit = defineEmits<{ shutter: []; retake: []; use: []; close: []; retry: [] }>();
+const emit = defineEmits<{ shutter: []; retake: []; use: []; retry: [] }>();
 const questionId = useId();
-const liveRatio = ref(4 / 3);
 const root = ref<HTMLElement | null>(null);
+const focusInside = ref(false);
 
 const status = computed(() =>
   props.view.phase === "opening"
@@ -25,10 +23,11 @@ const status = computed(() =>
       : "",
 );
 
-// Each step puts keyboard focus on its main control, so the flow can be completed from the keyboard.
+// After the player's step, focus moves to the next step's main control, so the flow can be completed from the keyboard.
 watch(
   () => props.view.phase,
   async (phase) => {
+    if (!focusInside.value) return;
     await nextTick();
     const target =
       phase === "live"
@@ -40,8 +39,12 @@ watch(
             : null;
     if (target) root.value?.querySelector<HTMLElement>(target)?.focus({ preventScroll: true });
   },
-  { immediate: true },
 );
+function focusOut(event: FocusEvent) {
+  // A control that disappears with its step keeps the focus "inside" until the next step's control takes it.
+  if (event.relatedTarget instanceof Node && !root.value?.contains(event.relatedTarget))
+    focusInside.value = false;
+}
 </script>
 
 <template>
@@ -52,49 +55,34 @@ watch(
     data-image-capture
     :data-phase="view.phase"
     :aria-labelledby="questionId"
-    @keydown.esc="emit('close')"
+    @focusin="focusInside = true"
+    @focusout="focusOut"
   >
+    <img
+      v-if="view.photo"
+      :src="view.photo"
+      alt="The photo you took"
+      class="image-capture-photo"
+      data-image-capture-photo
+    />
+    <div v-else-if="!view.track" class="image-capture-cover" />
     <p :id="questionId" class="image-capture-question">{{ view.question }}</p>
-    <div class="image-capture-picture">
-      <div
-        v-if="view.track"
-        class="image-capture-live"
-        :style="{ '--viewfinder-ratio': liveRatio }"
-      >
-        <Viewfinder :track="view.track" :mirrored="mirrored" @aspect="liveRatio = $event" />
-        <div class="image-capture-mirror">
-          <ViewfinderMirrorButton v-model="mirrored" />
-        </div>
+    <p v-if="status" class="image-capture-status" role="status">{{ status }}</p>
+    <!-- In a floating window, pressing a control does not start moving the window. -->
+    <div class="image-capture-controls" @pointerdown.stop>
+      <div v-if="view.phase === 'live' || view.phase === 'taking'" class="image-capture-shutter">
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          aria-label="Take photo"
+          title="Take photo"
+          data-image-capture-shutter
+          :disabled="view.phase === 'taking'"
+          @click="emit('shutter')"
+        >
+          <Camera aria-hidden="true" />
+        </Button>
       </div>
-      <img
-        v-else-if="view.photo"
-        :src="view.photo"
-        alt="The photo you took"
-        class="image-capture-photo"
-        data-image-capture-photo
-      />
-      <p v-else class="image-capture-status" role="status">{{ status }}</p>
-    </div>
-    <div class="image-capture-controls">
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        aria-label="Close the camera"
-        title="Close the camera"
-        data-image-capture-close
-        @click="emit('close')"
-      >
-        <X aria-hidden="true" />
-      </Button>
-      <PlayerActionButton
-        v-if="view.phase === 'live' || view.phase === 'taking'"
-        data-image-capture-shutter
-        :inactive="view.phase === 'taking'"
-        @click="view.phase === 'live' && emit('shutter')"
-      >
-        <Camera aria-hidden="true" class="size-4" />
-        Take photo
-      </PlayerActionButton>
       <template v-else-if="view.phase === 'review'">
         <PlayerActionButton data-image-capture-retake @click="emit('retake')">Retake</PlayerActionButton>
         <PlayerActionButton data-image-capture-use @click="emit('use')">Use this</PlayerActionButton>
@@ -111,43 +99,21 @@ watch(
 </template>
 
 <style scoped>
-/* Over the whole Stage, the question above the picture and the controls below it. */
+/*
+ * Over the whole viewfinder: the question and the controls at the bottom of the picture, so its top stays clear for the
+ * Player's title and controls over the Stage.
+ */
 .image-capture {
   position: absolute;
   inset: 0;
-  z-index: 1;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
   gap: 8px;
   padding: 8px;
-  /* Clear of the title and global controls that overlay the top of the Stage. */
-  padding-block-start: calc(var(--player-top-control-size) + 16px);
-  background: var(--media-surface);
   color: var(--media-text);
-  backdrop-filter: blur(6px);
-}
-.image-capture-question {
-  margin: 0;
-  justify-self: center;
-  max-inline-size: 100%;
-  padding: 4px 12px;
-  text-align: center;
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-.image-capture-picture {
-  position: relative;
-  display: grid;
-  place-items: center;
-  min-block-size: 0;
-  container: image-capture-picture / size;
-}
-/* The live picture and the photo keep their aspect, as large as the area allows. */
-.image-capture-live {
-  position: relative;
-  width: min(100%, 100cqh * var(--viewfinder-ratio));
-  max-height: 100%;
-  aspect-ratio: var(--viewfinder-ratio);
+  container: image-capture / size;
 }
 .image-capture-photo {
   position: absolute;
@@ -155,26 +121,65 @@ watch(
   width: 100%;
   height: 100%;
   object-fit: contain;
+  background: var(--media-surface);
 }
-.image-capture-mirror {
+/* Where the camera shows no picture yet, or cannot. */
+.image-capture-cover {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  display: flex;
+  inset: 0;
+  background: var(--media-surface);
+  backdrop-filter: blur(6px);
+}
+.image-capture-question,
+.image-capture-status {
+  position: relative;
+  margin: 0;
+  max-inline-size: 100%;
+  padding: 4px 12px;
   border: 1px solid var(--media-border);
   border-radius: 8px;
   background: var(--media-surface);
-}
-.image-capture-status {
-  margin: 0;
-  max-inline-size: 32rem;
+  box-shadow: 0 1px 3px var(--media-shadow);
+  backdrop-filter: blur(3px);
   text-align: center;
+  overflow-wrap: anywhere;
+}
+.image-capture-question {
+  font-weight: 700;
+}
+/* Why there is no picture, in the middle of the frame. */
+.image-capture-status {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  inline-size: max-content;
+  max-inline-size: min(calc(100% - 16px), 28rem);
+  font-size: 0.875rem;
 }
 .image-capture-controls {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   align-items: center;
   gap: 8px;
+}
+/* The shutter: a round control on the picture, in the media-control material. */
+.image-capture-shutter {
+  display: flex;
+  border: 2px solid var(--media-border);
+  border-radius: 999px;
+  background: var(--media-surface);
+  box-shadow: 0 1px 3px var(--media-shadow);
+  backdrop-filter: blur(3px);
+  overflow: hidden;
+}
+/* A small viewfinder keeps the picture readable: the question shrinks, the controls stay. */
+@container image-capture (max-height: 200px) {
+  .image-capture-question {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+  }
 }
 </style>

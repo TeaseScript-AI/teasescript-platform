@@ -46,7 +46,7 @@ accept syntax, architecture, or implementation details.
   shown again in a later run. Scripts show the camera's live view in a floating window or over the Stage with `showCamera [stage]` and hide it with `hideCamera`.
   `askImage(...)` is a mandatory image interaction under [Runtime](docs/RUNTIME.md#image-input); the Player answers it
   with an image file chosen through a composer paperclip or dropped onto the composer, or with a photo taken and
-  reviewed in a camera view on the Stage, stored like a photo. Recording APIs and the advanced package media API remain
+  reviewed in a viewfinder that opens by itself, stored like a photo. Recording APIs and the advanced package media API remain
   deferred.
 - **Player:** the POC Player is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. It uses
   Vue/Vite, Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the transcript

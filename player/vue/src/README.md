@@ -80,8 +80,9 @@ specification.
   `playerRuntimeForeground` maps authored backgrounds from live/restored actions; `player/theme/story-choice.ts`
   supplies theme/authored button material. See [ADR 0018](../../../docs/decisions/0018-first-standard-library-poc-contract.md)
   for syntax and completion semantics.
-- `useImageCapture.ts` holds the Player-only state of taking a photo for `askImage` and answers the request on
-  "Use this"; `ImageCapture.vue` shows it over the Stage through `Stage.vue`'s slot.
+- `useImageCapture.ts` holds the Player-only state of taking a photo for `askImage`, opens and turns off the camera it
+  uses, and answers the request on "Use this"; `ImageCapture.vue` draws it on the viewfinder, through `Stage.vue`'s
+  `camera` slot or `FloatingViewfinder.vue`'s default slot.
 - `usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
   See [theme evaluation](../../README.md#experimental-dynamic-theme-evaluation).
 - `StageRightRail.vue` owns the right overlay rail and its viewport-centred control placement, `TimerRegion.vue` its

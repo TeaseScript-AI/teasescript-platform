@@ -226,22 +226,32 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     },
   );
 
-  // The camera route of `askImage`: with the camera capability the session camera is already open; otherwise the
-  // player's click on the camera button opens it for the capture, and it closes again when the capture ends.
+  // The camera route of `askImage` uses the session camera while it is open. Otherwise the player's click on the camera
+  // button opens a camera of the capture's own, which only captures use and which is released when the capture ends,
+  // so it never serves `takePhoto()` or a script's camera view. Its problems show in the capture view itself.
   const cameraOffered =
     options.capabilities?.camera === true ||
     (typeof navigator !== "undefined" &&
       typeof navigator.mediaDevices?.getUserMedia === "function");
+  const captureCamera: SessionCamera<MediaStreamTrack> = new SessionCamera(
+    new CaptureDevice(
+      createBrowserCaptureHost((kind, state) => {
+        if (kind !== "camera") return;
+        if (state.status === "ended") captureCamera.revoked();
+        cameraRevision.value++;
+      }),
+      capturedMedia,
+    ),
+    () => {},
+  );
   const imageCapture = useImageCapture({
     session,
     generation,
-    camera,
+    sessionCamera: camera,
+    captureCamera,
     cameraRevision,
     media: capturedMedia,
-    openCamera: () => camera.open(true),
-    captureEnded: () => {
-      if (options.capabilities?.camera !== true) camera.release();
-    },
+    offered: cameraOffered,
     observe: () => clock.observe(),
     publish: (next) => (session.value = next),
   });
@@ -308,6 +318,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     }
     captures.stop();
     camera.release();
+    captureCamera.release();
     // Issued saves still finish and store their photos before the live lock and the session media are released.
     void (capturedMediaPersistence?.close() ?? Promise.resolve()).finally(() =>
       capturedMedia.close(),
@@ -543,22 +554,22 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
      * ended while the file was read.
      */
     images: {
-      /** Whether the camera route can be offered: the session camera, or a camera the browser can open on request. */
+      /** Whether a camera can be used here for a request that allows it: the session camera, or one the browser opens. */
       camera: cameraOffered,
-      /** Opens the camera view for the presented request that allows the camera. */
-      openCamera: imageCapture.open,
       store: storeImageFile,
       admission: imageAdmission,
       discard: (reference: string) => capturedMedia.discard(reference),
     },
-    /** Taking a photo for an `askImage` request on the Stage, or `null` while no capture is open. */
+    /**
+     * Taking a photo for an `askImage` request that allows the camera: open while the request is presented, on the
+     * Stage or in the script's camera window; `null` otherwise.
+     */
     imageCapture: {
       view: imageCapture.view,
       retry: imageCapture.retry,
       shutter: imageCapture.shutter,
       retake: imageCapture.retake,
       use: imageCapture.use,
-      close: imageCapture.close,
     },
     /** Bounded developer diagnostics, for example an unavailable session camera. */
     diagnostics: computed(() => diagnostics.value),

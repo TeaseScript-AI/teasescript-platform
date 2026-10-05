@@ -32,31 +32,40 @@ interface Capture {
   readonly phase: ImageCapturePhase;
   /** The stored photo while it is reviewed; it becomes the answer only through `use`. */
   readonly reference: string | null;
+  /** Whether the capture uses the camera it opened itself rather than the session camera. */
+  readonly own: boolean;
 }
 
 export interface ImageCaptureHost {
   readonly session: ShallowRef<PlayerRuntimeSession | null>;
   readonly generation: Readonly<Ref<number>>;
-  readonly camera: SessionCamera<MediaStreamTrack>;
-  /** Changes whenever the camera may have opened, failed, ended, or been released. */
+  /** The session camera: a capture uses it while it is open, and never opens or releases it. */
+  readonly sessionCamera: SessionCamera<MediaStreamTrack>;
+  /**
+   * The camera a capture opens itself, from the player's click, while the session camera is not open. Only captures
+   * use it, so it never serves `takePhoto()` or a script's camera view, and it is released when the capture ends.
+   */
+  readonly captureCamera: SessionCamera<MediaStreamTrack>;
+  /** Changes whenever a camera may have opened, failed, ended, or been released. */
   readonly cameraRevision: Readonly<Ref<number>>;
   readonly media: CapturedMediaStore;
-  /** Opens the camera for a capture, from the player's click; resolves to whether it can be used. */
-  openCamera(): Promise<boolean>;
-  /** Called when a capture ends, so a camera opened only for it can be released. */
-  captureEnded(): void;
+  /** Whether a camera can be used here at all; without it no capture opens. */
+  readonly offered: boolean;
   /** Observes the current time, publishes the result, and returns the published session. */
   observe(): PlayerRuntimeSession | null;
   publish(session: PlayerRuntimeSession): void;
 }
 
 /**
- * The camera route of `askImage`: Player-only state, never runtime state, so a restored session starts again from the
- * source choice and never takes a photo by itself. A photo is stored as session media when it is taken, answers the
- * request only when the player uses it, and is dropped when the player takes another or the capture ends.
+ * The camera route of `askImage`: as soon as a request that allows the camera is presented, its capture opens the camera
+ * and shows the live picture; it ends with the request, whichever way it is answered. It is Player-only state, never
+ * runtime state, so a restored session opens the camera again but never takes a photo by itself. A photo is stored as
+ * session media when it is taken, answers the request only when the player uses it, and is dropped when the player
+ * takes another or the capture ends.
  */
 export function useImageCapture(host: ImageCaptureHost) {
   const capture = shallowRef<Capture | null>(null);
+  const cameraOf = (target: Capture) => (target.own ? host.captureCamera : host.sessionCamera);
 
   const presentedRequest = (current: PlayerRuntimeSession | null) => {
     const action = current && activePlayerRuntimeInteraction(current.snapshot);
@@ -71,11 +80,12 @@ export function useImageCapture(host: ImageCaptureHost) {
     if (previous?.reference && previous.reference !== next?.reference)
       host.media.discard(previous.reference);
     capture.value = next;
-    if (next === null && previous !== null) host.captureEnded();
+    // A camera the capture opened itself is released as soon as it no longer uses it.
+    if (previous?.own && !next?.own) host.captureCamera.release();
   }
 
   /** Continues `target` with `change` while it is still the capture of the request it answers. */
-  function update(target: Capture, change: Partial<Pick<Capture, "phase" | "reference">>) {
+  function update(target: Capture, change: Partial<Pick<Capture, "phase" | "reference" | "own">>) {
     if (capture.value !== target) {
       // Only a photo taken for a capture that is gone needs dropping.
       if (change.reference) host.media.discard(change.reference);
@@ -86,21 +96,30 @@ export function useImageCapture(host: ImageCaptureHost) {
     return next;
   }
 
+  /** Uses the session camera while it is open; otherwise opens the capture's own camera. */
   async function openCamera(target: Capture) {
-    const opened = await host.openCamera();
-    update(target, { phase: opened && host.camera.available ? "live" : "unavailable" });
+    if (host.sessionCamera.available) {
+      update(target, { phase: "live", own: false });
+      return;
+    }
+    const opening = update(target, { own: true });
+    if (!opening) return;
+    await host.captureCamera.open(true);
+    update(opening, { phase: host.captureCamera.available ? "live" : "unavailable" });
   }
 
-  /** Opens the capture view for the presented request, from the camera button. */
+  /** Opens the capture for the presented request. */
   function open(): void {
     const request = presentedRequest(host.session.value);
-    if (request === null || request.ui.kind !== "image" || capture.value !== null) return;
+    if (!host.offered || request === null || request.ui.kind !== "image" || capture.value !== null)
+      return;
     const target: Capture = {
       generation: host.generation.value,
       actionId: request.actionId,
       question: request.ui.hint ?? "Take a photo",
       phase: "opening",
       reference: null,
+      own: false,
     };
     set(target);
     void openCamera(target);
@@ -120,7 +139,7 @@ export function useImageCapture(host: ImageCaptureHost) {
     if (target?.phase !== "live") return;
     const taking = update(target, { phase: "taking" });
     if (!taking) return;
-    const answer = await host.camera.answer();
+    const answer = await cameraOf(taking).answer();
     update(
       taking,
       answer.kind === "captured"
@@ -129,10 +148,14 @@ export function useImageCapture(host: ImageCaptureHost) {
     );
   }
 
-  /** Drops the photo and frames another. */
+  /** Drops the photo and frames another, or offers "Try again" when the camera ended meanwhile. */
   function retake(): void {
     const target = capture.value;
-    if (target?.phase === "review") update(target, { phase: "live", reference: null });
+    if (target?.phase === "review")
+      update(target, {
+        phase: cameraOf(target).available ? "live" : "unavailable",
+        reference: null,
+      });
   }
 
   /** Answers the request with the photo, at the observed time. */
@@ -142,23 +165,29 @@ export function useImageCapture(host: ImageCaptureHost) {
     const current = host.observe() ?? host.session.value;
     if (current === null || !answers(current, target)) return set(null);
     const result = answerPlayerRuntimeImage(current, target.reference, host.media);
-    if (result?.outcome.kind === "completed") {
-      // The photo is the answer now, so it stays.
-      capture.value = { ...target, reference: null };
-      set(null);
-      host.publish(result.session);
-    } else set(null);
-  }
-
-  /** Closes the capture view; the request waits for another answer. */
-  function close(): void {
+    if (result?.outcome.kind !== "completed") return;
+    // The photo is the answer now, so it stays.
+    capture.value = { ...target, reference: null };
     set(null);
+    host.publish(result.session);
   }
 
-  // A capture belongs to one request: when the request ends, is interrupted, or its session is replaced, it closes.
-  watch([host.session, host.generation], ([current]) => {
+  // A capture belongs to one request: when the request ends, however it was answered, is interrupted, or its session is
+  // replaced, it closes and a camera it opened turns off; a presented request that allows the camera opens one.
+  watch(
+    [host.session, host.generation, capture],
+    ([current]) => {
+      const target = capture.value;
+      if (target !== null && !answers(current, target)) set(null);
+      if (capture.value === null) open();
+    },
+    { immediate: true },
+  );
+  // A camera that ends while the player frames the photo, as when it is unplugged, offers "Try again".
+  watch(host.cameraRevision, () => {
     const target = capture.value;
-    if (target !== null && !answers(current, target)) set(null);
+    if (target?.phase === "live" && !cameraOf(target).available)
+      update(target, { phase: "unavailable" });
   });
 
   const view = computed<ImageCaptureView | null>(() => {
@@ -169,10 +198,14 @@ export function useImageCapture(host: ImageCaptureHost) {
     return {
       phase: target.phase,
       question: target.question,
-      track: target.phase === "live" || target.phase === "taking" ? host.camera.previewTrack : null,
+      // The live picture stays under the photo under review, so the view keeps its size.
+      track:
+        target.phase === "live" || target.phase === "taking" || target.phase === "review"
+          ? cameraOf(target).previewTrack
+          : null,
       photo: photo?.state === "ready" ? photo.url : null,
     };
   });
 
-  return { view, open, retry, shutter, retake, use, close, end: () => set(null) };
+  return { view, retry, shutter, retake, use };
 }

@@ -32,8 +32,6 @@ export interface PlayerImageInput {
   discard(reference: string): void;
   /** Whether a photo from the camera can answer here. */
   readonly camera: boolean;
-  /** Opens the camera view for the presented request. */
-  openCamera(): void;
 }
 
 const props = defineProps<{
@@ -100,19 +98,18 @@ const attach = computed(() =>
       }
     : null,
 );
-const cameraButton = computed(() =>
-  imageRequest.value?.allowCamera === true && props.images?.camera === true
-    ? { label: "Take a photo" }
-    : null,
+// The camera opens by itself for a request that allows it, on the Stage or in the camera window.
+const camera = computed(
+  () => imageRequest.value?.allowCamera === true && props.images?.camera === true,
 );
 // Typed text never answers an image request; the notice names the routes it offers.
 const imageTextFeedback = computed(() =>
-  attach.value && cameraButton.value
-    ? "Attach or drop an image, or take a photo with the camera button."
+  attach.value && camera.value
+    ? "Take a photo with the camera, or attach or drop an image."
     : attach.value
       ? "Attach an image with the paperclip, or drop it onto the message field."
-      : cameraButton.value
-        ? "Take a photo with the camera button."
+      : camera.value
+        ? "Take a photo with the camera."
         : "",
 );
 type ImageRequestIdentity = NonNullable<typeof attach.value>["request"];
@@ -422,7 +419,6 @@ function submit(source: "input" | "button") {
                 : 'Type your response…'
           "
           :attach="attach"
-          :camera="cameraButton"
           :accessible-name="foreground?.accessibleName ?? 'Response'"
           :input-mode="
             foreground?.kind !== 'ask-number' ? 'text' : foreground.integer ? 'numeric' : 'decimal'
@@ -442,7 +438,6 @@ function submit(source: "input" | "button") {
           @submit="submit"
           @skip="skipPacing(true)"
           @files="submitImage"
-          @camera="props.images?.openCamera()"
         />
       </template>
     </ConversationSurface>

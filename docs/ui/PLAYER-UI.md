@@ -688,17 +688,18 @@ does a cancelled picker. A file chosen in a picker opened for a request that is 
 because a timer's request replaced it meanwhile, answers nothing and shows the composer notice. An accepted image is
 stored as session media and recorded in the transcript as the player message `Image`.
 
-An `askImage(...)` that allows the camera shows a camera button, named "Take a photo", beside the paperclip. It opens a
-camera view over the Stage: the request's message as its question above the live camera, mirrored like the viewfinder
-and with the same flip control, and below it a close control and **Take photo**. The photo taken replaces the live
-picture, unmirrored as it will be used, with **Retake** and **Use this**; only **Use this** answers the request, and
-**Retake** drops the photo and returns to the live camera. Each step focuses its main control, and Escape or the close
-control returns to the composer while the request waits. None of these controls enter the transcript. Without an open
-session camera, the camera button opens the camera from that click, and the view releases it when it closes. A camera
-that is denied, missing, or broken shows why with **Try again**, which opens it again from that click, while the
-paperclip stays. The view belongs to its request: it closes when the request ends, is interrupted, or its session is
-replaced, and a restored session never reopens it or takes a photo by itself. Where no camera can be used, such as on
-a page that is not a secure context, a request that allows only the camera cannot be answered, and a
+An `askImage(...)` that allows the camera turns the camera on by itself as it asks, where the browser can capture. Its
+viewfinder opens over the Stage, or in the camera window when the script shows one, and draws on the picture the
+request's message as its question and a round **Take photo** shutter, both at the bottom so the top stays clear. The
+photo taken covers the live picture, unmirrored as it will be used, with **Retake** and **Use this**; only **Use this**
+answers the request, and **Retake** drops the photo and returns to the live camera. The paperclip stays available
+throughout. Once the player works in the viewfinder, each step moves keyboard focus to its main control; opening by
+itself, it takes no focus. None of these controls enter the transcript. The session camera is used when it is open;
+otherwise the request opens a camera of its own, only for itself, and turns it off after the answer, whether a photo or
+a file answered. A camera that is denied, missing, broken, or ended shows why with **Try again**, which asks for it
+again. The viewfinder belongs to its request: it closes when the request ends or is interrupted, or its session is
+replaced, and a restored session asks for the camera again but never takes a photo by itself. Where no camera can be
+used, such as on a page that is not a secure context, a request that allows only the camera cannot be answered, and a
 [player notice](#player-notices) says so.
 
 `choose` and `showButton` keep the composer enabled rather than visually disabling it:

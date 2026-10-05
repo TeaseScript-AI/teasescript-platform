@@ -1,7 +1,7 @@
 <script setup lang="ts" generic="Request">
 import { computed, nextTick, ref, useId, watch } from "vue";
 import { useTextareaAutosize } from "@vueuse/core";
-import { Camera, Paperclip } from "@lucide/vue";
+import { Paperclip } from "@lucide/vue";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { usePlayerConditions } from "./usePlayerConditions";
@@ -25,8 +25,6 @@ const props = withDefaults(
      * files are for.
      */
     attach?: { readonly accept: string; readonly label: string; readonly request: Request } | null;
-    /** While an image request accepts a photo: a camera button, beside the paperclip, opens the camera view. */
-    camera?: { readonly label: string } | null;
   }>(),
   {
     disabled: false,
@@ -38,7 +36,6 @@ const props = withDefaults(
     feedback: "",
     pacing: false,
     attach: null,
-    camera: null,
   },
 );
 
@@ -46,8 +43,6 @@ const emit = defineEmits<{
   "update:modelValue": [value: string];
   submit: [source: "input" | "button"];
   skip: [];
-  /** The camera button was activated. */
-  camera: [];
   /** Files the player chose or dropped, with the `attach.request` offered when the picker opened or at the drop. */
   files: [files: readonly File[], request: Request];
 }>();
@@ -214,9 +209,8 @@ defineExpose({ focusInput });
         data-runtime-composer
         @submit.prevent="emit('submit', 'button')"
       >
-        <div v-if="attach || camera" class="composer-sources" data-composer-sources>
+        <template v-if="attach">
           <Button
-            v-if="attach"
             type="button"
             variant="ghost"
             size="icon-sm"
@@ -228,20 +222,7 @@ defineExpose({ focusInput });
           >
             <Paperclip aria-hidden="true" />
           </Button>
-          <Button
-            v-if="camera"
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            data-composer-camera
-            :aria-label="camera.label"
-            :title="camera.label"
-            :disabled="disabled || submitting"
-            @click="emit('camera')"
-          >
-            <Camera aria-hidden="true" />
-          </Button>
-        </div>
+        </template>
         <input
           ref="filePicker"
           data-composer-file
@@ -345,12 +326,8 @@ defineExpose({ focusInput });
   gap: 8px;
   font-size: var(--player-reading-font-size, 1rem);
 }
-.composer-form:has(> [data-composer-sources]) {
+.composer-form:has(> [data-composer-attach]) {
   grid-template-columns: auto minmax(0, 1fr) auto;
-}
-.composer-sources {
-  display: flex;
-  gap: 2px;
 }
 .conversation-glass[data-drop-active] {
   outline: 2px dashed var(--focus-ring);
