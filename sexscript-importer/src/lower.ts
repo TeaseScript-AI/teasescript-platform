@@ -1312,7 +1312,15 @@ export function lowerParsedFile(
     withEnforcedTypes(
       [
         // A module's `object.name`, without its receiver, is the script object's member, not a binding variable.
-        ...bindingDeclarations(body, context, mixin?.receiverMembers),
+        // A name of the loading script's object, such as a field, is that object's member too (Groovy read the field
+        // where the module's binding had no value).
+        ...bindingDeclarations(
+          body,
+          context,
+          mixin === null
+            ? undefined
+            : new Set([...mixin.receiverMembers, ...(options.globalTypes?.keys() ?? [])]),
+        ),
         ...context.closureFunctions,
         ...authoredStatements,
       ],

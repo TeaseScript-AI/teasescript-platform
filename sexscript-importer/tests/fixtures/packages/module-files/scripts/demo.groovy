@@ -9,6 +9,8 @@ return new Object() {
 	};
 	int rounds = 2
 	boolean enabled = false
+	// A field that only a module uses is the object's field there too.
+	def boost = 1.5
 	def pauseCycle = { int delay, int cycle = 60 -> wait(delay / cycle) }
 
 	def main() {
