@@ -596,6 +596,15 @@ therefore does not consume timer time; a timer continues with its saved remainin
 wall-clock deadlines belong to future scheduled events, not to timers.
 Presentation refresh cadence does not impose a minimum timer duration.
 
+The development Player (`?dev`, see [`player/README.md`](../player/README.md#development-only-behavior)) can jump
+scene time forward without an engine mode. A jump first observes the time that really elapsed, then submits one
+ordinary observation at each next timed event up to its target: the earliest Player deadline or media timeline event,
+with running loaded media reported as playing on at 1× from their last sample. Blocks, timeouts, and continuations
+therefore run in scene-time order, and a block's change to playback or its `save`, `delete`, or `takePhoto()` applies
+before later events; the jump waits while such a host answer is pending. The Player then seeks its media elements to
+the reported playhead and rebases its clock on the new observed time. A session with jumps is an ordinary session:
+`getTimestamp()` differences and elapsed results include the jumped time, and checkpoints record no jump.
+
 A blocking `timer` is a foreground `delay` like `wait`, with its presentation (`visible`, `mystery`, or `hidden`) and
 evaluated label. An asynchronous timer is a background action of kind `timer`: it allocates an action ID and emits
 `actionRequested` when started and `actionCompleted` when it finishes naturally or through `stop()`; script-end and
@@ -732,7 +741,9 @@ Players report every running media on every observation. The engine interpolates
 never extrapolates past the latest one: a gap between reports usually means buffering, a throttled or suspended
 background tab, or blocked playback, so assumed progress could fire cues for content that never played, and a
 committed cue cannot be withdrawn. A late report instead places each crossing at its canonical scene time, so waiting
-costs only latency. A Player may extrapolate for display, such as a progress bar, but reports only measured progress. Every canonical timeline change starts a new segment
+costs only latency. A Player may extrapolate for display, such as a progress bar, but reports only measured progress; only a development
+time jump (see [Timers and scene time](#timers-and-scene-time)) reports 1× progress, after which the Player seeks its
+elements to it. Every canonical timeline change starts a new segment
 anchored at `(scene time, 0)`: load, pause, resume from pause, seek, stop, and Stage replacement; lifecycle no-ops and
 volume changes do not. A Player acknowledges a new segment by reporting progress `0` when it applies it.
 

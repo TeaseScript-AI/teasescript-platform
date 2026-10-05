@@ -12,7 +12,8 @@ ADRs.
 For local inspection, run `npm run dev:player -- --host 0.0.0.0` and open `/player/`; the development server loads the
 development preview. The default build, served on `/player/` by `npm run playground`, plays the repository demo in
 [`examples/demo/`](../examples/demo/demo.tease) behind Start and loads preview fixtures only when `?dev` is selected.
-With a development package root, `?package=<id>` plays that package instead (see the repository `README.md`).
+With a development package root, `?package=<id>` plays that package instead (see the repository `README.md`), and
+`?dev&package=<id>` plays it in the development preview.
 This is a local inspection route, not the production cross-origin Player/host protocol.
 
 ## Implementation seams
@@ -113,6 +114,17 @@ resolves the scenario's Stage images to the development illustrations and its ch
 "Runtime" option shows the scenario's own Stage image, and a fixture overrides it. Visual Lab and Layout Debug are development
 surfaces, not Standard Player product tools or runtime/package/host APIs. Fixture timer/control values remain local;
 the opening scenario still uses the shared canonical runtime adapter.
+
+With the explicit `?dev` opt-in, also on the development server, the preview adds the Time Controls tool (#615) for
+testing long scripts. Its **Enable time controls** switch arms **Skip to next timed event**, which advances scene time
+to the next wait, timer round, pacing pause, button timeout, or audio cue or end, and **+10 s** and **+1 min**, which
+apply only while the script waits for player input. **Auto-skip** skips event after event while no input is pending and
+no media is loading, so a player's think time and the background timers running meanwhile stay real time. Jumps are
+ordinary observations (see [`docs/RUNTIME.md`](../docs/RUNTIME.md#timers-and-scene-time)); playing audio seeks along,
+and browser video seeking waits for video playback. While the controls are on, a badge over the Stage shows them and
+announces each jump ("⏩ 30 s skipped"), and the panel lists recent jumps; these markers are local UI state, never
+transcript entries, notices, or checkpoint data. `?dev&time=skip` starts with the controls and auto-skip on, plain
+`?dev` with both off; the switches change them during a session.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
 [`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's
