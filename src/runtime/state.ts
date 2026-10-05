@@ -97,7 +97,6 @@ import {
 } from "../plan/temporary-uses.js";
 import {
   snapshotValidationAnalysis,
-  type PlannedLoop,
   type PreparedSayTemporaryOwnership,
   type SnapshotValidationAnalysis,
 } from "./snapshot-validation-analysis.js";
@@ -2099,6 +2098,8 @@ function validateCallFrames(
         frame.callerTemporaries,
         nonNegativeSafeInteger(frame.destinationTemporary) ? frame.destinationTemporary : null,
         frame.returnInstruction,
+        // The caller stands at its call, or where it was interrupted.
+        isPlainRecord(interruption) ? frame.returnInstruction : frame.returnInstruction - 1,
         contextLoopIds(
           Array.isArray(loopFrames) && nonNegativeSafeInteger(frame.loopBaseDepth)
             ? loopFrames.slice(0, frame.loopBaseDepth)
@@ -2566,6 +2567,7 @@ function validateSuspendedContinuationTemporaries(
   callerTemporaries: unknown[],
   destinationTemporary: number | null,
   returnInstruction: number,
+  callerPosition: number,
   contextLoops: readonly number[],
   analysis: SnapshotValidationAnalysis,
   continuationRequests: ContinuationRequests,
@@ -2576,6 +2578,7 @@ function validateSuspendedContinuationTemporaries(
   const required = requiredContinuationTemporaries(
     analysis,
     returnInstruction,
+    callerPosition,
     contextLoops,
     continuationRequests,
   );
@@ -2612,12 +2615,17 @@ const NOTHING_LIVE: ReadonlySet<number> = new Set<number>();
 function requiredContinuationTemporaries(
   analysis: SnapshotValidationAnalysis,
   startInstruction: number,
+  callerPosition: number,
   contextLoops: readonly number[],
   continuationRequests: ContinuationRequests,
 ): ReadonlySet<number> {
-  const activeLoops = analysableLoops(analysis, contextLoops);
-  const loopsKey = activeLoops.join(",");
   // A continuation by where it resumes and the loops of its context, outermost first.
+  const kept = analysis.continuationRequirements.get(
+    `${startInstruction}:${contextLoops.join(",")}`,
+  );
+  if (kept !== undefined) return kept;
+  const activeLoops = analysableLoops(analysis, contextLoops, callerPosition);
+  const loopsKey = activeLoops.join(",");
   const key = `${startInstruction}:${loopsKey}`;
   const known =
     analysis.continuationRequirements.get(key) ?? continuationRequests.required.get(key);
@@ -2633,27 +2641,45 @@ function requiredContinuationTemporaries(
 }
 
 /**
- * The context's loops as a continuation query uses them. A session's are planned loops, each nested in the one before,
- * so there are no more of them than the plan nests. Any other list fails loop validation; its query uses only its
- * innermost planned loop, so that the list cannot enlarge the analysis.
+ * The context's loops as a continuation query uses them: a list that a session can have where its caller stands, as
+ * loop validation requires. That is planned loops in nesting order whose header or body holds the position, including
+ * every loop whose body holds it, so the plan's nesting bounds both the list and the contexts of one position. Any
+ * other list fails loop validation; its query uses only its innermost planned loop, so that impossible contexts can
+ * neither enlarge nor multiply the analysis.
  */
 function analysableLoops(
   analysis: SnapshotValidationAnalysis,
   loopIds: readonly number[],
+  position: number,
 ): readonly number[] {
-  let outer: PlannedLoop | undefined;
+  const listed = new Set<number>();
+  let previousStart = -1;
+  let possible = true;
   for (const loopId of loopIds) {
     const loop = analysis.loops.get(loopId);
     if (
       loop === undefined ||
-      (outer !== undefined && (loop.start <= outer.start || loop.start >= outer.target))
+      loop.start <= previousStart ||
+      position < loop.continueStart ||
+      position >= loop.target
     ) {
-      const innermost = loopIds.at(-1);
-      return innermost !== undefined && analysis.loops.has(innermost) ? [innermost] : [];
+      possible = false;
+      break;
     }
-    outer = loop;
+    previousStart = loop.start;
+    listed.add(loopId);
   }
-  return loopIds;
+  if (possible) {
+    for (const [loopId, loop] of analysis.loops) {
+      if (position > loop.start && position < loop.target && !listed.has(loopId)) {
+        possible = false;
+        break;
+      }
+    }
+  }
+  if (possible) return loopIds;
+  const innermost = loopIds.at(-1);
+  return innermost !== undefined && analysis.loops.has(innermost) ? [innermost] : [];
 }
 
 /**
