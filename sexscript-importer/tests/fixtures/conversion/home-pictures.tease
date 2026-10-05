@@ -1,0 +1,12 @@
+speaker system {
+  title: "System"
+}
+// Looking through the pictures in the player's home folders becomes asking for a photo, as the system speaker.
+let found = 0
+// NOTE SX_HOME_FOLDER line 3: The legacy script named a folder of the player's home on the computer, which a package cannot see; the path only names it, as ~ and the folder below the home.
+let dir = "~/Downloads"
+// NOTE SX_HOME_PICTURES line 4: eachFileRecurse() looked through the files of a folder of the player's computer, such as the pictures in the home, Downloads, or Documents folder, which a package cannot see; the player is asked for a photo instead.
+say as system "The original looked through the pictures on your computer. Take a photo to show here instead."
+showImage takePhoto()
+say "Interesting pictures you have"
+exit

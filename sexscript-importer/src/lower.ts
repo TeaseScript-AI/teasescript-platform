@@ -4542,6 +4542,37 @@ function lowerCallStatement(
       { kind: "exit", span },
     ];
   }
+  // Looking through the player's pictures on the computer becomes asking for a photo (owner decision).
+  if (
+    call !== null &&
+    receiver !== null &&
+    FOLDER_WALKS.has(call.name) &&
+    walksHome(receiver, context)
+  ) {
+    addDiagnostic(
+      context,
+      "SX_HOME_PICTURES",
+      "warning",
+      `${call.name}() looked through the files of a folder of the player's computer, such as the pictures in the home, Downloads, or Documents folder, which a package cannot see; the player is asked for a photo instead.`,
+      node.span,
+    );
+    return [
+      systemSay(
+        {
+          kind: "literal",
+          value:
+            "The original looked through the pictures on your computer. Take a photo to show here instead.",
+        },
+        span,
+        context,
+      ),
+      {
+        kind: "showImage",
+        file: { kind: "call", name: "takePhoto", positional: [], named: {} },
+        span,
+      },
+    ];
+  }
   // Settings of the Java network stack, such as TLS options or the HTTP user agent, mean nothing in a package.
   const property = call?.name === "setProperty" ? constantString(call.arguments[0]) : null;
   if (
@@ -6909,6 +6940,18 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       }
       if (context.fileValues.has(node)) {
         const pathNode = nodeArray(asNode(node.arguments)?.items)[0];
+        if (pathNode !== undefined && isHomePath(pathNode)) {
+          // A folder of the player's home, where the legacy script looked for pictures; walks through it ask for a
+          // photo (homePictures), so the path only names it.
+          addDiagnostic(
+            context,
+            "SX_HOME_FOLDER",
+            "warning",
+            "The legacy script named a folder of the player's home on the computer, which a package cannot see; the path only names it, as ~ and the folder below the home.",
+            node.span,
+          );
+          return { kind: "literal", value: `~${homeSuffix(pathNode)}` };
+        }
         return pathNode === undefined ? null : lowerExpression(pathNode, context);
       }
       return unsupportedExpression(
@@ -13171,6 +13214,34 @@ function fileExists(
   );
   // A path of text and getDataFolder(), or a variable that only ever holds such paths, is known now.
   const variable = variableName(pathNode);
+  // A folder of the player's home existed on the computer (SX_HOME_FOLDER).
+  const sources = context.fileVariables.has(variable ?? "")
+    ? [...context.filePathOwners]
+        .filter(([, owner]) => owner === variable)
+        .map(([value]) => nodeArray(asNode(value.arguments)?.items)[0] ?? value)
+    : [pathNode];
+  if (sources.some(isHomePath)) {
+    if (sources.every(isHomePath)) return { kind: "literal", value: true };
+    const path = lowerExpression(pathNode, context);
+    const others = fileExists(
+      pathNode,
+      node,
+      { ...context, fileVariables: new Set(), filePathOwners: new Map() },
+      files,
+    );
+    if (path === null || others === null) return null;
+    return {
+      kind: "binary",
+      operator: "or",
+      left: {
+        kind: "methodCall",
+        target: path,
+        name: "startsWith",
+        arguments: [{ kind: "literal", value: "~" }],
+      },
+      right: others,
+    };
+  }
   const paths = context.fileVariables.has(variable ?? "")
     ? [...context.filePathOwners]
         .filter(([, owner]) => owner === variable)
@@ -13285,6 +13356,47 @@ export function maskedUrl(url: string): string {
       : pair;
   });
   return `${base}?${pairs.join("&")}`;
+}
+
+/** Whether a path names a folder of the player's home, `System.getProperty("user.home") + "/Downloads"`. */
+function isHomePath(node: AstNode): boolean {
+  let home = false;
+  walkAst(node, (child) => {
+    home ||=
+      child.kind === "methodCall" &&
+      constantString(child.method) === "getProperty" &&
+      variableName(child.object) === "System" &&
+      constantString(nodeArray(asNode(child.arguments)?.items)[0]) === "user.home";
+  });
+  return home;
+}
+
+/** The fixed text after the home in a home path, `/Downloads`; empty for a computed rest. */
+function homeSuffix(node: AstNode): string {
+  if (node.kind === "binary" && node.operator === "+") {
+    const left = asNode(node.left);
+    const right = asNode(node.right);
+    if (left !== null && isHomePath(left) && right !== null) {
+      const rest = staticPath(right);
+      return left.kind === "methodCall" ? rest.text : `${homeSuffix(left)}${rest.text}`;
+    }
+  }
+  return "";
+}
+
+/** Whether a folder walk's receiver may be a folder of the player's home: a home File, or a variable holding one. */
+function walksHome(receiver: AstNode, context: LowerContext): boolean {
+  if (isFileConstructor(receiver))
+    return isHomePath(nodeArray(asNode(receiver.arguments)?.items)[0] ?? receiver);
+  const variable = variableName(receiver);
+  return (
+    variable !== null &&
+    context.fileVariables.has(variable) &&
+    [...context.filePathOwners].some(
+      ([value, owner]) =>
+        owner === variable && isHomePath(nodeArray(asNode(value.arguments)?.items)[0] ?? value),
+    )
+  );
 }
 
 /**
