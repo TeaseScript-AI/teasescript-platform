@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
-import { effectScope, type Ref } from "vue";
+import { effectScope, nextTick, type Ref } from "vue";
 import { createServer } from "vite";
 
 import {
   answerPlayerRuntimeImage,
   createPlayerRuntimeSession,
+  observePlayerRuntimeTime,
   playerRuntimeForeground,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
@@ -17,6 +18,7 @@ import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 interface ImageHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly notices: Readonly<Ref<readonly { readonly key: string }[]>>;
+  dismissNotice(key: string): void;
   readonly images: {
     store(
       file: File,
@@ -180,16 +182,34 @@ test("an image that never answered can be dropped, and the runtime admits only s
   assert.equal(playerRuntimeForeground(result!.session)?.kind, "ask-image");
 });
 
-test("an image request that allows only the camera is reported as a Player notice while it waits", async (context) => {
+test("each image request that allows only the camera is reported as a Player notice while it waits", async (context) => {
   stubBrowser(context);
   const scope = effectScope();
   const host = scope.run(() => usePlayerSession({}));
   assert.ok(host);
   context.after(() => scope.stop());
   const keys = () => host.notices.value.map((notice) => notice.key);
-  host.prepare(() => createPlayerRuntimeSession("let pick = askImage(allowFile: false)\nexit"));
+  const cameraOnly =
+    'timer async 2 {\n  let late = askImage("Timer", allowFile: false)\n}\nlet pick = askImage(allowFile: false)\nexit';
+  host.prepare(() => createPlayerRuntimeSession(cameraOnly));
   await host.activate();
   await until(() => keys().includes("image-needs-camera"), "the notice was not published");
+  // A dismissal holds for its request, while the session goes on.
+  host.dismissNotice("image-needs-camera");
+  host.update({ ...host.session.value! });
+  await nextTick();
+  assert.equal(keys().includes("image-needs-camera"), false);
+  // The timer's request that replaces it is another request, reported again.
+  host.update(observePlayerRuntimeTime(host.session.value!, 2_000).session);
+  await until(() => keys().includes("image-needs-camera"), "the timer's request was not reported");
+  // So is the same request in a new run of the same story.
+  host.dismissNotice("image-needs-camera");
+  host.prepare(() => createPlayerRuntimeSession(cameraOnly));
+  await host.activate();
+  await until(
+    () => keys().includes("image-needs-camera"),
+    "the new run's request was not reported",
+  );
   // A new session without such a request withdraws it.
   host.prepare(() => createPlayerRuntimeSession('let pick = askImage("Add an image")\nexit'));
   await host.activate();

@@ -226,15 +226,19 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   );
 
   // Until the Player offers the camera route, an image request that allows only the camera cannot be answered here.
+  // Each such request, of a session and an action, is reported once, so a dismissal holds only for the request it was
+  // given for.
   watch(
     () => {
       const request = session.value && activePlayerRuntimeInteraction(session.value.snapshot);
-      return request?.ui.kind === "image" && !request.ui.allowFile;
+      return request?.ui.kind === "image" && !request.ui.allowFile
+        ? `${generation.value}:${request.actionId}`
+        : null;
     },
-    (cameraOnly) =>
-      cameraOnly
-        ? notices.publish(playerNotices.imageNeedsCamera())
-        : notices.dismiss(playerNoticeKeys.imageNeedsCamera),
+    (cameraOnlyRequest) =>
+      cameraOnlyRequest === null
+        ? notices.dismiss(playerNoticeKeys.imageNeedsCamera)
+        : notices.publish(playerNotices.imageNeedsCamera()),
   );
   const decodeImage = options.decodeImage ?? browserImageDecoder;
   // The runtime accepts an image answer only when the store vouches for it.
