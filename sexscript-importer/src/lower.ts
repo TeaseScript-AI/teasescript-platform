@@ -4263,7 +4263,19 @@ function lowerCallStatement(
       );
     case "useUrl":
       return oneArgumentStatement(args, context, node, (url) => urlStatements(url, span, context));
-    case "setImage":
+    case "setImage": {
+      // A function given an image that it draws into a frame and shows, such as a zoom-in, shows the image itself.
+      const given = args.length === 2 ? givenImage(context) : null;
+      if (given !== null) {
+        addDiagnostic(
+          context,
+          "SX_IMAGE_COMPOSITION",
+          "warning",
+          "The legacy function drew the image it was given into a frame in memory and showed the frame; TeaseScript cannot compose images yet, so the image itself is shown.",
+          node.span,
+        );
+        return [{ kind: "showImage", file: mediaFile(given, "images", node, context), span }];
+      }
       if (args.length !== 1)
         return [
           unsupportedStatement(
@@ -4281,6 +4293,7 @@ function lowerCallStatement(
         file: mediaFile(file, "images", node, context),
         span,
       }));
+    }
     case "playSound":
       return oneArgumentStatement(args, context, node, (file) => ({
         kind: "playAudio",
@@ -12102,7 +12115,7 @@ function photoVariables(body: AstNode): Set<string> {
 function composedImage(body: AstNode, context: LowerContext): IrStatement[] | null {
   let showsBytes = false;
   let other = false;
-  let base: AstNode | null = null;
+  const reads: AstNode[] = [];
   const locals = new Set<string>();
   walkAst(body, (node) => {
     if (node.kind === "declaration") {
@@ -12141,13 +12154,23 @@ function composedImage(body: AstNode, context: LowerContext): IrStatement[] | nu
       ].includes(method)
     )
       other = true;
-    if (base === null && (method === "getImage" || method === "read") && args.length === 1) {
+    if ((method === "getImage" || method === "read") && args.length === 1) {
       const argument = args[0]!;
-      base = isFileConstructor(argument)
+      const path = isFileConstructor(argument)
         ? (nodeArray(asNode(argument.arguments)?.items)[0] ?? null)
         : argument;
+      if (path !== null) reads.push(path);
     }
   });
+  // The base is the image the function was given, as a parameter, or else the first it read: a frame or background
+  // read first stays in the composition only.
+  const parameters = new Set(context.currentFunction?.parameters ?? []);
+  const given = reads.find((read) => {
+    let names = false;
+    walkAst(read, (node) => (names ||= parameters.has(variableName(node) ?? "")));
+    return names;
+  });
+  const base = given ?? reads[0] ?? null;
   if (!showsBytes || other || base === null) return null;
   const image = imagePathBelowImages(base, context);
   if (image === null) return null;
@@ -12159,7 +12182,7 @@ function composedImage(body: AstNode, context: LowerContext): IrStatement[] | nu
     context,
     "SX_IMAGE_COMPOSITION",
     "warning",
-    "The legacy function composed an image in memory from parts of other images and showed it; TeaseScript cannot compose images yet (the accepted layered scene with showOverlayImage is not implemented), so the function shows the base image it read.",
+    "The legacy function composed an image in memory from parts of other images and showed it; TeaseScript cannot compose images yet (the accepted layered scene with showOverlayImage is not implemented), so the function shows the image it was given, or else the first image it read.",
     body.span,
   );
   return [{ kind: "showImage", file: mediaFile(image, "images", body, context), span: body.span }];
@@ -12353,6 +12376,31 @@ function layeredScene(
 }
 
 /** A path the legacy script read below `images/`, as a path of the package's images; null for another path. */
+/**
+ * The image the current function was given: the path below `images/` of an image it reads (`getImage`,
+ * `ImageIO.read`) that names one of its parameters; null outside a function or without such a read.
+ */
+function givenImage(context: LowerContext): IrExpression | null {
+  const current = context.currentFunction;
+  const parameters = new Set(current?.parameters ?? []);
+  if (current === undefined || current === null || parameters.size === 0) return null;
+  let found: AstNode | null = null;
+  walkAst(current.body, (node) => {
+    if (found !== null || node.kind !== "methodCall") return;
+    const method = constantString(node.method) ?? "";
+    const args = nodeArray(asNode(node.arguments)?.items);
+    if ((method !== "getImage" && method !== "read") || args.length !== 1) return;
+    const path = isFileConstructor(args[0]!)
+      ? (nodeArray(asNode(args[0]!.arguments)?.items)[0] ?? null)
+      : args[0]!;
+    let names = false;
+    if (path !== null)
+      walkAst(path, (child) => (names ||= parameters.has(variableName(child) ?? "")));
+    if (names) found = path;
+  });
+  return found === null ? null : imagePathBelowImages(found, context);
+}
+
 function imagePathBelowImages(node: AstNode, context: LowerContext): IrExpression | null {
   const literal = constantString(node);
   if (literal !== null)
