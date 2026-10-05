@@ -191,7 +191,8 @@ export type IrExpression =
   /** `action` marks the ID of a function kept as a value; renaming the function renames the ID. */
   | { kind: "literal"; value: string | number | boolean | null; action?: true }
   | { kind: "variable"; name: string }
-  | { kind: "list"; items: IrExpression[] }
+  /** `set` marks a set literal `set[...]` (V30 §16). */
+  | { kind: "list"; items: IrExpression[]; set?: true }
   /**
    * An object literal, or with `dict` a dict literal `dict{ ... }` (#536). A property with `key` has a key that is
    * computed or not a name, written `[key]: value` or `"key": value`; `name` is unused then.

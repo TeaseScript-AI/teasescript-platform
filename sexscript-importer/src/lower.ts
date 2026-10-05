@@ -12729,6 +12729,8 @@ function javaHost(context: LowerContext): JavaRuleHost {
       addDiagnostic(context, code, severity, message, span),
     helper: (name, args) => useHelper(context, name, args),
     calendarField: (field, value, node) => dateTimeField(field, value, node, context),
+    valueType: (node) => inferType(node, context.types),
+    isVariable: (name) => context.types.variables.has(name),
     state: context.java,
   };
 }

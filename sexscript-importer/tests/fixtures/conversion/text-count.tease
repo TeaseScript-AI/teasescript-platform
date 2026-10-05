@@ -1,6 +1,3 @@
-// MIGRATION INCOMPLETE: 1 error diagnostic.
-// Review diagnostics before treating this file as behaviorally equivalent.
-
 function sexscriptLegacyCount(items, value) {
   let matches = 0
   for item in items {
@@ -9,6 +6,20 @@ function sexscriptLegacyCount(items, value) {
     }
   }
   return matches
+}
+function sexscriptLegacyCountText(text, part) {
+  if part == "" {
+    return text.length + 1
+  }
+  let count = 0
+  let rest = text
+  let found = rest.indexOf(part)
+  while found >= 0 {
+    count += 1
+    rest = rest.substring(found + 1)
+    found = rest.indexOf(part)
+  }
+  return count
 }
 // Groovy count() counts every occurrence in text and equal elements in a list.
 let outfit = "Bikini top and bikini bottom".lowercase()
@@ -19,6 +30,5 @@ say "Words: ${outfit.split(" ").length - 1 + 1}"
 let rolls = [6, 2, 6]
 say "Sixes: ${sexscriptLegacyCount(rolls, 6)}"
 // "aa" overlaps itself: Groovy counts 2 in "aaa", the parts between occurrences only 1.
-// TODO SX_STRING_METHOD line 8: Groovy count() counted every occurrence of a text, overlapping ones too; it converts only for a literal text whose occurrences cannot overlap.
-// | show("Pairs: " + "aaa".count("aa"))
+say "Pairs: ${sexscriptLegacyCountText("aaa", "aa")}"
 exit

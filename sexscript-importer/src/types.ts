@@ -135,6 +135,16 @@ const OBJECT_METHOD_RESULT_TYPES = new Map<string, ValueType>([
   ["trim", STRING],
 ]);
 
+/** Java list classes, whose constructors make a list. */
+const LIST_CONSTRUCTORS = new Set([
+  "ArrayList",
+  "java.util.ArrayList",
+  "LinkedList",
+  "java.util.LinkedList",
+  "Vector",
+  "java.util.Vector",
+]);
+
 const ARITHMETIC_OPERATORS = new Set(["-", "*", "/", "%", "**"]);
 const BOOLEAN_OPERATORS = new Set([
   "==",
@@ -166,6 +176,9 @@ export function inferType(node: AstNode | null, environment: TypeEnvironment): V
       return LIST;
     case "map":
       return OBJECT;
+    // `new ArrayList()` and its relatives are lists (java-text.ts converts them).
+    case "constructorCall":
+      return LIST_CONSTRUCTORS.has(String(node.type)) ? LIST : UNKNOWN;
     case "variable": {
       const name = variableName(node);
       if (name === null) return UNKNOWN;

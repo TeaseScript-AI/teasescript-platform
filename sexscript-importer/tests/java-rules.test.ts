@@ -188,6 +188,53 @@ test("keeps writes to a shared Calendar as manual work", { skip }, async () => {
   assert.match(source, /TODO SX_CALENDAR_SHARED line 3/u);
 });
 
+// Java text, number, and random APIs: URL form encoding of UTF-8 bytes, Math functions within the last digits, Random
+// draws from the session's random numbers, character arrays, Groovy's number predicates and overlapping counts, Java
+// number conversions, and collection constructors. Expected values follow from the Java and Groovy definitions.
+test("converts Java text, number, random, and collection APIs", { skip }, async () => {
+  const close = (expression: string, value: string) => `Math.abs(${expression} - ${value}) < 1e-12`;
+  const source = await convert([
+    'show(URLEncoder.encode("Zoë & Bob", "UTF-8") + " " + URLEncoder.encode("a+b c/d*~", "UTF-8"))',
+    `show("\${${close("Math.sqrt(16)", "4")}} \${${close("Math.sqrt(2)", "1.4142135623730951")}} \${${close("Math.log(Math.E)", "1")}} \${${close("Math.log(8) / Math.log(2)", "3")}}")`,
+    `show("\${Math.pow(2, 10)} \${${close("Math.pow(9, 0.5)", "3")}} \${Math.pow(2, -2)} \${${close("Math.cos(Math.PI)", "-1")}} \${${close("Math.sin(Math.PI / 2)", "1")}}")`,
+    "def rnd = new Random()",
+    "def roll = rnd.nextInt(6)",
+    'show("${roll >= 0 && roll < 6} ${rnd.nextFloat() < 1} ${rnd.nextGaussian() < 100} ${rnd.nextBoolean() || true} ${Math.random() < 1}")',
+    'String code = "abc"',
+    "def chars = code.toCharArray()",
+    "chars[1] = 'X'",
+    "show(String.valueOf(chars))",
+    'def t = " 42 "',
+    'def u = "4.5e3"',
+    "show(\"${t.isInteger()} ${u.isInteger()} ${u.isNumber()} ${'x1'.isNumber()} ${'2147483648'.isInteger()} ${'-2147483648'.isInteger()}\")",
+    'String s = "aaaa"',
+    "show(\"${s.count('aa')} ${s.count('')} ${'a|b|c|d'.indexOf('|', 2)} ${'abc'.charAt(1)}\")",
+    "def total = 17",
+    "def diff = -3",
+    'show("${total.intdiv(5)} ${(-17).intdiv(5)} ${diff.abs()} ${(2.5).round()} ${(1.005 as double).round(2) == 1} ${(7.9).intValue()}")',
+    "def items = new ArrayList<String>()",
+    'items.add("x")',
+    "def copy = new ArrayList(items)",
+    'def seen = new HashSet<String>(["captured", "x"])',
+    "show(\"${items.size()} ${copy.size()} ${seen.contains('x')}\")",
+  ]);
+  assert.match(source, /sexscriptLegacyFormEncode\("Zoë & Bob"\)/u);
+  assert.doesNotMatch(source, /TODO|let rnd/u);
+  assert.match(source, /^let seen = set\["captured", "x"\]$/mu);
+  assert.match(source, /^let chars = code\.split\(""\)$/mu);
+  assert.deepEqual(run(source), [
+    "Zo%C3%AB+%26+Bob a%2Bb+c%2Fd*%7E",
+    "true true true true",
+    "1024 true 0.25 true true",
+    "true true true true true",
+    "aXc",
+    "true false true false false true",
+    "3 5 3 b",
+    "3 -3 3 3 true 7",
+    "1 1 true",
+  ]);
+});
+
 function groovyParserUnavailableReason(): string | false {
   if (spawnSync("java", ["-version"], { stdio: "ignore" }).status !== 0) {
     return "Java is not available for the Groovy 2.5.21 parser helper.";

@@ -39,6 +39,14 @@ import {
   temporalStatement,
   type TemporalAnalysis,
 } from "./java-time.ts";
+import {
+  analyzeText,
+  textCall,
+  textConstructor,
+  textDeclaration,
+  textProperty,
+  type TextAnalysis,
+} from "./java-text.ts";
 import { packageFilePath } from "./lower.ts";
 
 /** What the rules need from the lowering of the current file. */
@@ -54,6 +62,10 @@ export interface JavaRuleHost {
   helper(name: HelperName, args: IrExpression[]): IrExpression;
   /** A java.util.Calendar field (`MONTH`, `DAY_OF_WEEK`, ...) of a date and time, or null after a diagnostic. */
   calendarField(field: string, value: IrExpression, node: AstNode): IrExpression | null;
+  /** The legacy value types a node may have (types.ts). */
+  valueType(node: AstNode): number;
+  /** Whether a name is a variable of the script rather than a Java class. */
+  isVariable(name: string): boolean;
   readonly state: JavaFileState;
 }
 
@@ -91,6 +103,8 @@ export interface JavaFileState {
   readonly analysis: ResourceAnalysis;
   /** The Calendar and Date values of the body (java-time.ts). */
   readonly temporal: TemporalAnalysis;
+  /** The Random objects, character arrays, and HashSets of the body (java-text.ts). */
+  readonly text: TextAnalysis;
   /** Generated data per kind, by normalized path, shared by every context lowering the file. */
   readonly data: {
     lines: Map<string, string[]>;
@@ -270,6 +284,10 @@ export function javaFileState(
       body === null
         ? { variables: new Map(), fields: new Map(), writable: new Set() }
         : analyzeTemporal(body),
+    text:
+      body === null
+        ? { randoms: new Set(), charArrays: new Set(), orderedSets: new Set() }
+        : analyzeText(body),
     data: shared?.data ?? {
       lines: new Map(),
       properties: new Map(),
@@ -712,7 +730,7 @@ export function javaConstructor(
     return first === undefined ? undefined : host.lower(first);
   }
   if (analysis.propertiesValues.has(node)) return { kind: "object", properties: [], dict: true };
-  return temporalConstructor(node, host);
+  return temporalConstructor(node, host) ?? textConstructor(node, host);
 }
 
 /** `Properties props = new Properties()`: a dict of text whose missing keys read as null, as Properties.get() does. */
@@ -722,7 +740,8 @@ export function javaDeclaration(
   span: SourceSpan | null,
   host: JavaRuleHost,
 ): IrStatement[] | null {
-  if (!host.state.analysis.propertiesValues.has(value)) return null;
+  if (!host.state.analysis.propertiesValues.has(value))
+    return textDeclaration(name, value, span, host);
   return [
     {
       kind: "let",
@@ -756,7 +775,7 @@ export function javaMethodCall(
   }
   const table = variableName(receiver);
   if (table === null || !analysis.properties.has(table))
-    return temporalCall(node, name, args, host);
+    return temporalCall(node, name, args, host) ?? textCall(node, name, args, host);
   const target: IrExpression = { kind: "variable", name: table };
   if ((name === "get" || name === "getProperty") && args.length === 1) {
     const key = host.lower(args[0]!);
@@ -788,7 +807,7 @@ export function javaProperty(
   name: string,
   host: JavaRuleHost,
 ): IrExpression | null | undefined {
-  return temporalProperty(node, name, host);
+  return temporalProperty(node, name, host) ?? textProperty(node, name);
 }
 
 /** Groovy operators on Java values, such as `date + days`. */
