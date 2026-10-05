@@ -65,6 +65,7 @@ export type HelperName =
   | "askBooleans"
   | "backgroundSounds"
   | "concat"
+  | "count"
   | "indexOf"
   | "listMax"
   | "listMin"
@@ -112,6 +113,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "random",
   "loadFirstTrue",
   "indexOf",
+  "count",
   "concat",
   "array",
   "shuffled",
@@ -384,6 +386,22 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             set(v("index"), lit(1), "+="),
           ]),
           ret(lit(-1)),
+        ],
+      ),
+  },
+  // Groovy count(value) on a list counts the elements equal to the value.
+  count: {
+    name: "sexscriptLegacyCount",
+    build: () =>
+      fn(
+        "sexscriptLegacyCount",
+        ["items", "value"],
+        [
+          letS("matches", lit(0)),
+          forS("item", v("items"), [
+            ifS(bin("==", v("item"), v("value")), [set(v("matches"), lit(1), "+=")]),
+          ]),
+          ret(v("matches")),
         ],
       ),
   },

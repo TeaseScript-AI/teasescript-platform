@@ -170,6 +170,10 @@ interface LowerContext {
   dateValues: ReadonlySet<string>;
   /** List variables that Groovy shared with another variable by an assignment of one to the other. */
   aliasedLists: ReadonlySet<string>;
+  /** Bindings of closure parameters and loop variables (parameterBindings). */
+  parameterBindings: ReadonlySet<string>;
+  /** The values each binding is assigned (assignedValues). */
+  assignedValues: ReadonlyMap<string, readonly AstNode[]>;
   /** How the maps are used, by binding: dicts (#536), object fields, value and key types. */
   mapUses: MapUses;
   /** Binding keys of variables that closures declare (bindingKeys). */
@@ -677,7 +681,7 @@ function bindingKeys(body: AstNode, sourceName: string): Map<AstNode | string, s
     if (id !== null) keys.set(id, key);
   };
   const keyAt = (name: string, span: SourceSpan | null | undefined): string =>
-    `${name}@${sourceName}:${span?.line ?? 0}:${span?.column ?? 0}`;
+    scopedBindingKey(name, span, sourceName);
   const visit = (value: unknown, scopes: ReadonlyArray<Map<string, string>>): void => {
     if (Array.isArray(value)) {
       for (const item of value) visit(item, scopes);
@@ -726,6 +730,82 @@ function bindingKeys(body: AstNode, sourceName: string): Map<AstNode | string, s
   };
   visit(body, []);
   return keys;
+}
+
+/** The key of a variable a closure declares at `span` (see `bindingKeys`). */
+function scopedBindingKey(
+  name: string,
+  span: SourceSpan | null | undefined,
+  sourceName: string,
+): string {
+  return `${name}@${sourceName}:${span?.line ?? 0}:${span?.column ?? 0}`;
+}
+
+/**
+ * Bindings of closure parameters and loop variables (see `bindingKeys`), which Groovy gave the caller's list or the
+ * iterated element itself, where TeaseScript passes a copy. A loop outside closures has no scoped key, so its
+ * variable name stands for every script-level binding of that name. Without a source name (a helper class method,
+ * whose closures have no scoped keys), every key is the plain name.
+ */
+function parameterBindings(
+  body: AstNode,
+  sourceName: string | null,
+  parameters: readonly string[] = [],
+): Set<string> {
+  const keys = new Set<string>(parameters);
+  const keyAt = (name: string, span: SourceSpan | null, scoped: boolean): string =>
+    scoped && sourceName !== null ? scopedBindingKey(name, span, sourceName) : name;
+  const visit = (value: unknown, inClosure: boolean): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, inClosure);
+      return;
+    }
+    if (!isAstNode(value)) return;
+    if (value.kind === "closure") {
+      for (const parameter of groovyParameters(value.parameters) ?? [])
+        keys.add(keyAt(parameter.name, value.span, true));
+      if (value.parameterSpecified !== true) keys.add(keyAt("it", value.span, true));
+    }
+    if (value.kind === "for" && typeof value.variable === "string")
+      keys.add(keyAt(value.variable, value.span, inClosure));
+    for (const child of nodeChildren(value)) visit(child, inClosure || value.kind === "closure");
+  };
+  visit(body, false);
+  return keys;
+}
+
+/**
+ * The values assigned to each binding by a declaration or `=`, by binding key. A name of a destructuring declaration
+ * (`def (a, b) = list`) receives an element, which an index read of the list stands for.
+ */
+function assignedValues(body: AstNode, keys: BindingKeys): Map<string, AstNode[]> {
+  const values = new Map<string, AstNode[]>();
+  const add = (target: unknown, value: AstNode): void => {
+    const key = bindingKey(target, keys);
+    if (key === null) return;
+    if (!values.has(key)) values.set(key, []);
+    values.get(key)!.push(value);
+  };
+  walkAst(body, (node) => {
+    if (node.kind !== "declaration" && !(node.kind === "binary" && node.operator === "=")) return;
+    const left = asNode(node.left);
+    const right = asNode(node.right);
+    if (left === null || right === null) return;
+    if (left.kind !== "arguments") {
+      add(left, right);
+      return;
+    }
+    for (const item of nodeArray(left.items)) {
+      add(item, {
+        kind: "binary",
+        span: right.span,
+        operator: "[",
+        left: right,
+        right: { kind: "constant", span: null, value: 0 },
+      });
+    }
+  });
+  return values;
 }
 
 /** The binding a variable reference names (see `bindingKeys`); null for any other expression. */
@@ -793,6 +873,8 @@ export function lowerParsedFile(
     scriptPaths: options.scriptPaths ?? null,
     dateValues: new Set(),
     aliasedLists: new Set(),
+    parameterBindings: new Set(),
+    assignedValues: new Map(),
     mapUses: mapUsesOf([]),
     bindings: new Map(),
     integerVariables: new Set(),
@@ -864,6 +946,8 @@ export function lowerParsedFile(
     context.dateValues = currentDateVariables(body, context.types);
     context.aliasedLists = aliasedListVariables(body, context.types);
     context.bindings = bindingKeys(body, file.sourceName);
+    context.parameterBindings = parameterBindings(body, file.sourceName);
+    context.assignedValues = assignedValues(body, context.bindings);
     context.constantInitializers = declarationInitializers(body, context.types);
     context.integerVariables = integerVariables(body, context.bindings);
     context.mapUses =
@@ -1237,6 +1321,12 @@ function lowerHelperMethod(
     scriptPaths: baseContext.scriptPaths,
     dateValues: new Set(),
     aliasedLists: new Set(),
+    parameterBindings: parameterBindings(
+      body,
+      null,
+      authoredRecords.map((parameter) => parameter.name),
+    ),
+    assignedValues: assignedValues(body, new Map()),
     mapUses: baseContext.mapUses,
     bindings: new Map(),
     integerVariables: new Set(),
@@ -3428,11 +3518,27 @@ function lowerAssignment(
     // Groovy `list << value` appends one element.
     const listNode = asNode(node.left);
     const valueNode = asNode(node.right);
-    if (listNode !== null && valueNode !== null && isKnownListExpression(listNode, context)) {
+    const known = listNode !== null && isKnownListExpression(listNode, context);
+    if (
+      listNode !== null &&
+      valueNode !== null &&
+      (known || mayAppendToUnprovenList(listNode, context))
+    ) {
+      const parameterWrite = parameterListWrite(listNode, node, context);
+      if (parameterWrite !== null)
+        return [unsupportedStatement(context, node, "SX_PARAMETER_LIST_WRITE", parameterWrite)];
+      if (!known) {
+        addDiagnostic(
+          context,
+          "SX_LEFT_SHIFT_RECEIVER",
+          "warning",
+          "Groovy << appended to a list, but this receiver is not proven to be one; on text, a number, or a map, << meant something else there (a text buffer, a bit shift, adding entries), and add() stops the script.",
+          node.span,
+        );
+      }
       const target = lowerExpression(listNode, context);
       const value = lowerExpression(valueNode, context);
       if (target === null || value === null) return [];
-      noteSharedListWrite(listNode, node, context);
       return [
         {
           kind: "expression",
@@ -3785,17 +3891,33 @@ function lowerCallStatement(
     return [{ kind: "exit", span }];
   }
   if (call !== null && !call.inherited && (call.name === "push" || call.name === "leftShift")) {
-    // Groovy 2.5 List.push appends like add().
+    // `list.leftShift(value)` is `list << value`; Groovy 2.5 List.push inserts at the front, as a stack's push.
     const receiver = asNode(node.object);
     if (
       receiver !== null &&
       isKnownListExpression(receiver, context) &&
-      call.arguments.length === 1
+      call.arguments.length === 1 &&
+      (call.name === "leftShift" || receiver.kind === "variable")
     ) {
+      const parameterWrite = parameterListWrite(receiver, node, context);
+      if (parameterWrite !== null)
+        return [unsupportedStatement(context, node, "SX_PARAMETER_LIST_WRITE", parameterWrite)];
       const target = lowerExpression(receiver, context);
       const value = lowerExpression(call.arguments[0]!, context);
       if (target === null || value === null) return [];
-      noteSharedListWrite(receiver, node, context);
+      if (call.name === "push") {
+        return [
+          {
+            kind: "assign",
+            target,
+            operator: "=",
+            value: useHelper(context, "concat", [
+              { kind: "list", items: [{ kind: "list", items: [value] }, target] },
+            ]),
+            span,
+          },
+        ];
+      }
       return [
         {
           kind: "expression",
@@ -4047,7 +4169,9 @@ function lowerCollectionAssignment(
     isKnownListExpression(receiver, context)
   ) {
     // `list = list.sort()` sorts the list in place, which TeaseScript sort() does as well.
-    noteSharedListWrite(receiver, right, context);
+    const parameterWrite = parameterListWrite(receiver, right, context);
+    if (parameterWrite !== null)
+      return [unsupportedStatement(context, right, "SX_PARAMETER_LIST_WRITE", parameterWrite)];
     const list: IrExpression = { kind: "variable", name: target };
     return [
       {
@@ -4360,9 +4484,15 @@ function lowerCollectionStatement(
   const listName = variableName(listTarget);
   if (listName === null || !isKnownListExpression(listTarget, context)) return null;
   const list: IrExpression = { kind: "variable", name: listName };
-  const reassign = (value: IrExpression): IrStatement[] => [
-    { kind: "assign", target: list, operator: "=", value, span },
-  ];
+  // Each form below changes the list in place in Groovy.
+  const parameterWrite = (): IrStatement[] | null => {
+    const reason = parameterListWrite(listTarget, node, context);
+    return reason === null
+      ? null
+      : [unsupportedStatement(context, node, "SX_PARAMETER_LIST_WRITE", reason)];
+  };
+  const reassign = (value: IrExpression): IrStatement[] =>
+    parameterWrite() ?? [{ kind: "assign", target: list, operator: "=", value, span }];
   if (shuffledList !== undefined && call.arguments.length === 1) {
     return reassign(useHelper(context, "shuffled", [list]));
   }
@@ -4370,7 +4500,8 @@ function lowerCollectionStatement(
     return reassign(useHelper(context, "unique", [list]));
   if (call.name === "sort" && call.arguments.length === 0) {
     // Groovy sort() sorts the list in place, as TeaseScript sort() does.
-    noteSharedListWrite(listTarget, node, context);
+    const blocked = parameterWrite();
+    if (blocked !== null) return blocked;
     return [
       {
         kind: "expression",
@@ -4386,6 +4517,8 @@ function lowerCollectionStatement(
     const argumentType = inferType(argument, context.types);
     const byPosition = onlyOf(argumentType, NUMBER);
     if (byPosition || onlyOf(argumentType, STRING | BOOLEAN | LIST | OBJECT)) {
+      const blocked = parameterWrite();
+      if (blocked !== null) return blocked;
       const value = lowerExpression(argument, context);
       if (value === null) return null;
       const name = byPosition ? "removeAt" : "remove";
@@ -4399,13 +4532,15 @@ function lowerCollectionStatement(
     }
   }
   if (call.name === "clear" && call.arguments.length === 0) {
-    return [
-      {
-        kind: "expression",
-        expression: { kind: "methodCall", target: list, name: "clear", arguments: [] },
-        span,
-      },
-    ];
+    return (
+      parameterWrite() ?? [
+        {
+          kind: "expression",
+          expression: { kind: "methodCall", target: list, name: "clear", arguments: [] },
+          span,
+        },
+      ]
+    );
   }
   return null;
 }
@@ -7394,8 +7529,14 @@ function lowerObjectMethodCallExpression(
       "SX_STRING_METHOD",
       name === "size" || name === "length"
         ? `Groovy ${name}() counted the entries of this map, which is an object with fixed properties here; objects have no length. Use the map as a dict (#536) if it is a lookup table.`
-        : `Groovy string method ${name}() has no TeaseScript text operation in this form: regular expressions and tokenize() need manual work (a future .ts text library).`,
+        : name === "count"
+          ? "Groovy count() counted every occurrence of a text, overlapping ones too; it converts only for a literal text whose occurrences cannot overlap."
+          : `Groovy string method ${name}() has no TeaseScript text operation in this form: regular expressions and tokenize() need manual work (a future .ts text library).`,
     );
+  }
+  if (targetNode !== null && !isKnownListExpression(targetNode, context)) {
+    const operation = unprovenReceiverOperation(node, targetNode, name, argumentsNodes, context);
+    if (operation !== undefined) return operation;
   }
   if (targetNode === null || !isKnownListExpression(targetNode, context)) {
     return unsupportedExpression(
@@ -7405,13 +7546,21 @@ function lowerObjectMethodCallExpression(
       "Object/dynamic Groovy method calls are not lowered by the first slice.",
     );
   }
+  const changes =
+    (name === "add" && argumentsNodes.length === 1) ||
+    (name === "pop" && argumentsNodes.length === 0) ||
+    (name === "remove" &&
+      argumentsNodes.length === 1 &&
+      onlyOf(inferType(argumentsNodes[0]!, context.types), NUMBER));
+  const parameterWrite = changes ? parameterListWrite(targetNode, node, context) : null;
+  if (parameterWrite !== null)
+    return unsupportedExpression(context, node, "SX_PARAMETER_LIST_WRITE", parameterWrite);
   const target = lowerExpression(targetNode, context);
   if (target === null) return null;
   if (name === "size" && argumentsNodes.length === 0) {
     return { kind: "property", target, name: "length" };
   }
   if ((name === "contains" || name === "add") && argumentsNodes.length === 1) {
-    if (name === "add") noteSharedListWrite(targetNode, node, context);
     const args = lowerArguments(argumentsNodes, context);
     return args === null ? null : { kind: "methodCall", target, name, arguments: args };
   }
@@ -7420,18 +7569,25 @@ function lowerObjectMethodCallExpression(
     if (args === null) return null;
     return useHelper(context, "indexOf", [target, args[0]!]);
   }
+  if (name === "count" && argumentsNodes.length === 1 && argumentsNodes[0]!.kind !== "closure") {
+    // Groovy count(value) counts the elements equal to the value.
+    const args = lowerArguments(argumentsNodes, context);
+    return args === null ? null : useHelper(context, "count", [target, args[0]!]);
+  }
   if (
     name === "remove" &&
     argumentsNodes.length === 1 &&
     onlyOf(inferType(argumentsNodes[0]!, context.types), NUMBER)
   ) {
     // Groovy remove(int) returns the removed element, as removeAt does (#517).
-    noteSharedListWrite(targetNode, node, context);
     const args = lowerArguments(argumentsNodes, context);
     return args === null ? null : { kind: "methodCall", target, name: "removeAt", arguments: args };
   }
   if (argumentsNodes.length === 0) {
     switch (name) {
+      case "pop":
+        // Groovy 2.5 pop() removes and returns the first element, as removeFirst() does.
+        return { kind: "methodCall", target, name: "removeFirst", arguments: [] };
       case "isEmpty":
         return {
           kind: "binary",
@@ -7511,6 +7667,116 @@ function joinableElements(listNode: AstNode, node: AstNode, context: LowerContex
 /** Accepted list `join` (PR #518), which shows each element as `${...}` does. */
 function listJoin(list: IrExpression, separator: IrExpression): IrExpression {
   return { kind: "methodCall", target: list, name: "join", arguments: [separator] };
+}
+
+/**
+ * List and text methods on a receiver the importer cannot prove to be a list or text, such as a parameter, a list
+ * element, or a function result. TeaseScript members follow the runtime value, and a value of unknown type is
+ * checked when the member runs (#520), so a method converts as is when Groovy gave it the same meaning on every kind
+ * of value it exists for, and failed on the others as TeaseScript does: `contains` on lists, sets, and text; `add`,
+ * `join`, `remove(value)`, `clear`, `sort`, `min`, `max`, and `pop` (the first element in Groovy 2.5) on lists and sets;
+ * `count` of a value that is not text, which Groovy counted only in lists. `indexOf` converts as the text operation,
+ * which fails on a list, with a note. A method that changes the list must be a statement on a variable, element, or
+ * field. Returns undefined for
+ * methods whose meaning depends on the receiver's kind, such as `remove(number)` (a position in a list, a value in a
+ * set) or `count(text)` (substrings of text, elements of a list).
+ */
+function unprovenReceiverOperation(
+  node: AstNode,
+  targetNode: AstNode,
+  name: string,
+  argumentsNodes: AstNode[],
+  context: LowerContext,
+): IrExpression | null | undefined {
+  if (argumentsNodes.some((argument) => argument.kind === "closure")) return undefined;
+  const type = inferType(targetNode, context.types);
+  const mayBeList = (type & LIST) !== 0;
+  const mayBeText = (type & STRING) !== 0;
+  const argumentType = argumentsNodes.length === 1 ? inferType(argumentsNodes[0]!, context.types) : 0;
+  const statement = context.statementRoot?.kind === "expressionStatement";
+  const whole = statement && asNode(context.statementRoot!.expression) === node;
+  const call = (method: string, args: IrExpression[], target: IrExpression): IrExpression => ({
+    kind: "methodCall",
+    target,
+    name: method,
+    arguments: args,
+  });
+  let changes = false;
+  switch (name) {
+    case "contains":
+    case "indexOf":
+      if (argumentsNodes.length !== 1 || !(mayBeList || mayBeText)) return undefined;
+      if (name === "indexOf" && mayBeList && mayBeText) {
+        addDiagnostic(
+          context,
+          "SX_INDEX_OF_RECEIVER",
+          "warning",
+          "Groovy indexOf() found a text in text or an element in a list; this receiver is not proven to be text, and if it holds a list, indexOf() stops the script, since TeaseScript lists have no indexOf.",
+          node.span,
+        );
+      }
+      break;
+    case "join":
+      if (argumentsNodes.length > 1 || !mayBeList) return undefined;
+      break;
+    case "count":
+      if (argumentsNodes.length !== 1 || !mayBeList || (argumentType & STRING) !== 0)
+        return undefined;
+      break;
+    case "min":
+    case "max":
+      if (argumentsNodes.length !== 0 || !mayBeList) return undefined;
+      break;
+    case "pop":
+      if (argumentsNodes.length !== 0 || !mayBeList) return undefined;
+      changes = true;
+      break;
+    case "add":
+      if (argumentsNodes.length !== 1 || !mayBeList || !whole) return undefined;
+      changes = true;
+      break;
+    case "remove":
+      // Groovy remove(int) removes a position from a list, but the value from a set.
+      if (argumentsNodes.length !== 1 || !mayBeList || !whole) return undefined;
+      if (!onlyOf(argumentType, STRING | BOOLEAN | LIST | OBJECT)) return undefined;
+      changes = true;
+      break;
+    case "clear":
+    case "sort":
+      if (argumentsNodes.length !== 0 || !mayBeList || !whole) return undefined;
+      changes = true;
+      break;
+    default:
+      return undefined;
+  }
+  if (changes) {
+    if (placeRoot(targetNode) === null) return undefined;
+    const parameterWrite = parameterListWrite(targetNode, node, context);
+    if (parameterWrite !== null)
+      return unsupportedExpression(context, node, "SX_PARAMETER_LIST_WRITE", parameterWrite);
+  }
+  if (name === "join" && !joinableElements(targetNode, node, context)) return null;
+  const target = lowerExpression(targetNode, context);
+  const args = lowerArguments(argumentsNodes, context);
+  if (target === null || args === null) return null;
+  switch (name) {
+    case "indexOf":
+      // Text has indexOf; a list that cannot be text needs the helper.
+      return mayBeText ? call("indexOf", args, target) : useHelper(context, "indexOf", [target, args[0]!]);
+    case "count":
+      return useHelper(context, "count", [target, args[0]!]);
+    case "min":
+      return useHelper(context, "listMin", [target]);
+    case "max":
+      return useHelper(context, "listMax", [target]);
+    case "join":
+      // Groovy join() has no separator; TeaseScript's default separator is ", ".
+      return listJoin(target, args[0] ?? { kind: "literal", value: "" });
+    case "pop":
+      return call("removeFirst", [], target);
+    default:
+      return call(name, args, target);
+  }
 }
 
 /**
@@ -7623,6 +7889,25 @@ function textOperation(
       if (argumentsNodes.length !== 1 && argumentsNodes.length !== 2) return undefined;
       operation = "substring";
       break;
+    case "count": {
+      // Groovy counted every occurrence, overlapping ones too; the parts between occurrences that split() finds count
+      // all of them when no start of the text is also its end, as "aa" is in "aaa".
+      const part = literalText(argumentsNodes[0]);
+      if (argumentsNodes.length !== 1 || part === null || part === "" || overlapsItself(part))
+        return undefined;
+      const target = lowerExpression(targetNode, context);
+      if (target === null) return null;
+      return {
+        kind: "binary",
+        operator: "-",
+        left: {
+          kind: "property",
+          target: member("split", [{ kind: "literal", value: part }], target),
+          name: "length",
+        },
+        right: { kind: "literal", value: 1 },
+      };
+    }
     case "equalsIgnoreCase": {
       // TeaseScript has no case-insensitive comparison (owner, #508): both sides are lowercased. Groovy returns
       // false for a null argument, which lowercase() would not survive.
@@ -7647,6 +7932,14 @@ function textOperation(
   if (lowered === null) return null;
   noteCodePoints();
   return member(operation, lowered, target);
+}
+
+/** Whether occurrences of a text can overlap: some proper start of it is also its end. */
+function overlapsItself(text: string): boolean {
+  for (let length = 1; length < text.length; length += 1) {
+    if (text.slice(0, length) === text.slice(text.length - length)) return true;
+  }
+  return false;
 }
 
 /** Groovy/Java string method names whose TeaseScript text operation has another name. */
@@ -7676,7 +7969,7 @@ const STRING_METHODS = new Set([
 ]);
 
 /** Methods that lists have too, converted as text operations only on receivers proven to be text. */
-const TEXT_ONLY_METHODS = new Set(["contains", "indexOf", "lastIndexOf"]);
+const TEXT_ONLY_METHODS = new Set(["contains", "count", "indexOf", "lastIndexOf"]);
 
 /** Java Math helpers without an accepted TeaseScript built-in. */
 const MATH_HELPERS = new Map<string, { name: HelperName; arity: number }>([
@@ -7779,6 +8072,90 @@ function noteSharedListWrite(list: AstNode | null, node: AstNode, context: Lower
     `Groovy shared the list in ${name} with another variable assigned from it, so this change affected both; in TeaseScript the variables hold separate copies (ADR 0014).`,
     node.span,
   );
+}
+
+/**
+ * Checks a list method that changes the list in `receiver` (`add`, `remove`, `sort`, `<<`, ...). Groovy lists are
+ * shared references and TeaseScript lists are values (ADR 0014). A change through a closure parameter or loop
+ * variable, or through a list or object it holds, changed the caller's list or the iterated element in Groovy but
+ * would change only a copy here; the reason is returned for the caller to report. A variable assigned from another
+ * variable, a list element, or a field shared its list with that place, which a note marks. Returns null when the
+ * change converts.
+ */
+function parameterListWrite(
+  receiver: AstNode,
+  node: AstNode,
+  context: LowerContext,
+): string | null {
+  const root = placeRoot(receiver);
+  const name = root === null ? null : variableName(root);
+  if (root === null || name === null) return null;
+  const key = bindingKey(root, context.bindings) ?? name;
+  if (context.parameterBindings.has(key)) {
+    return `Groovy changed the list that ${name} refers to, which the caller or the iterated collection shares; in TeaseScript ${name} holds a copy (ADR 0014), so the change would be lost. Return the changed list and store it where it is kept.`;
+  }
+  if (context.aliasedLists.has(name)) {
+    noteSharedListWrite(root, node, context);
+  } else if ((context.assignedValues.get(key) ?? []).some((value) => sharesList(value, context))) {
+    addDiagnostic(
+      context,
+      "SX_SHARED_LIST_WRITE",
+      "warning",
+      `Groovy shared the list in ${name} with the variable, list element, or field it was assigned from, so this change affected that place too; in TeaseScript ${name} holds a separate copy (ADR 0014).`,
+      node.span,
+    );
+  }
+  return null;
+}
+
+/**
+ * Whether `<<` may append to the value of `receiver` although it is not proven to be a list: a variable, element, or
+ * field that may hold a list, and no assignment of the variable is a Java object (a file or text buffer, which `<<`
+ * writes to).
+ */
+function mayAppendToUnprovenList(receiver: AstNode, context: LowerContext): boolean {
+  if ((inferType(receiver, context.types) & LIST) === 0) return false;
+  const root = placeRoot(receiver);
+  if (root === null) return false;
+  if (root !== receiver) return true;
+  const key = bindingKey(root, context.bindings) ?? variableName(root)!;
+  return !(context.assignedValues.get(key) ?? []).some(
+    (value) => value.kind === "constructorCall",
+  );
+}
+
+/** The variable a place (`v`, `v[i]`, `v.field`, and chains of them) starts from; null for any other expression. */
+function placeRoot(node: AstNode): AstNode | null {
+  let current: AstNode | null = node;
+  while (
+    current !== null &&
+    (current.kind === "property" || (current.kind === "binary" && current.operator === "["))
+  )
+    current = asNode(current.kind === "property" ? current.object : current.left);
+  return current !== null && current.kind === "variable" ? current : null;
+}
+
+/** Whether an assigned value may be a list that Groovy kept shared with a variable, list element, or field. */
+function sharesList(value: AstNode, context: LowerContext): boolean {
+  switch (value.kind) {
+    case "variable":
+    case "property":
+      return (inferType(value, context.types) & LIST) !== 0;
+    case "binary":
+      return value.operator === "[" && (inferType(value, context.types) & LIST) !== 0;
+    case "ternary":
+      return [value.true, value.false].some(
+        (branch) => asNode(branch) !== null && sharesList(asNode(branch)!, context),
+      );
+    case "elvis":
+      return [value.boolean, value.false].some(
+        (branch) => asNode(branch) !== null && sharesList(asNode(branch)!, context),
+      );
+    case "cast":
+      return asNode(value.value) !== null && sharesList(asNode(value.value)!, context);
+    default:
+      return false;
+  }
 }
 
 function aliasedListVariables(body: AstNode, types: TypeEnvironment): Set<string> {
