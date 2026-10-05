@@ -542,7 +542,9 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 - The legacy player profile: the distribution's intro saved the player's name and gender, and its options the toys and
   clothes the player owns; a package that reads such keys and never saves them asks the missing ones once at the start
   of `main.tease`, with the distribution's questions, and saves them under the legacy keys (`SX_LEGACY_PROFILE`).
-- `show("")` only cleared the legacy text area and is dropped; an empty or blank image path clears the image.
+- `show("")` only cleared the legacy text area and is dropped, as is any other empty text, such as a question in a
+  variable that only ever holds `""` (`SX_BLANK_TEXT`, counted as `blankTexts`); an empty or blank image path clears
+  the image.
 - Lists join with TeaseScript `+`, `+=`, and `addAll` (#609); the concatenation helper remains only for ranges. A right
   side not proven to be a list or one element (`[] + impl` with a parameter) goes through a generated helper that
   returns a list as it is and wraps any other value, also null, as Groovy appended it (63 corpus sites, 26 in Toy).
