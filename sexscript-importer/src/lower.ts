@@ -21,12 +21,14 @@ import {
   type HelperName,
 } from "./helpers.ts";
 import {
+  javaBinary,
   javaCallStatement,
   javaConstructor,
   javaDataStatements,
   javaDeclaration,
   javaFileState,
   javaMethodCall,
+  javaProperty,
   type JavaFileState,
   type JavaRuleHost,
   type PackageResources,
@@ -6305,6 +6307,8 @@ function isTeaseObjectPropertyName(value: string): boolean {
 }
 
 function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpression | null {
+  const java = javaBinary(node, javaHost(context));
+  if (java !== undefined) return java;
   const operator = text(node.operator);
   if (operator === "[") {
     const targetNode = asNode(node.left);
@@ -7548,6 +7552,8 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
       "Dynamic Groovy property access is not lowered automatically.",
     );
   }
+  const java = javaProperty(node, property, javaHost(context));
+  if (java !== undefined) return java;
   if (
     (property === "size" || property === "length") &&
     isKnownListExpression(targetNode, context)
@@ -12276,6 +12282,7 @@ function javaHost(context: LowerContext): JavaRuleHost {
     diagnostic: (code, severity, message, span) =>
       addDiagnostic(context, code, severity, message, span),
     helper: (name, args) => useHelper(context, name, args),
+    calendarField: (field, value, node) => dateTimeField(field, value, node, context),
     state: context.java,
   };
 }

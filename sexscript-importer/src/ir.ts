@@ -223,8 +223,12 @@ export type IrExpression =
    */
   | { kind: "input"; input: "askText" | "askNumber" | "askInteger"; defaultValue?: IrExpression }
   | { kind: "range"; from: IrExpression; to: IrExpression; inclusive: boolean }
-  /** An elapsed duration literal such as `1 s`. */
-  | { kind: "duration"; value: number; unit: "s" | "ms" }
+  /** A duration literal: exact (`1 s`, `1 min`, `1 h`) or calendar (`1 day`, `1 week`, `1 month`, `1 year`). */
+  | {
+      kind: "duration";
+      value: number;
+      unit: "s" | "ms" | "min" | "h" | "day" | "week" | "month" | "year";
+    }
   /** `showButton label, timeout: t` used as a value: the elapsed duration until the click or the timeout (#531). */
   | { kind: "button"; label: IrExpression; timeout: IrExpression | null }
   | { kind: "unary"; operator: "not" | "+" | "-"; value: IrExpression }

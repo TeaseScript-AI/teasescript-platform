@@ -136,6 +136,58 @@ test("keeps reads of a package file that a script writes as manual work", { skip
   );
 });
 
+// A Calendar or Date is a local date and time: fields count months from 0 and weekdays from Sunday as Java's did, `add`
+// adds exact minutes and calendar days, a lenient `set` carries into the date, and Unix milliseconds round-trip. The
+// runner's player zone is UTC, so the expected values follow from the epoch milliseconds alone.
+test("converts Calendar and Date values to local dates and times", { skip }, async () => {
+  const source = await convert([
+    "def c = Calendar.getInstance()",
+    "c.setTimeInMillis(1791289800123)",
+    "c.add(Calendar.MINUTE, 50)",
+    "c.add(Calendar.DAY_OF_MONTH, -1)",
+    'show("${c.get(Calendar.HOUR_OF_DAY)}:${c.get(Calendar.MINUTE)} ${c.get(Calendar.DAY_OF_WEEK)} ${c.get(Calendar.MONTH)}")',
+    "def copy = c.clone()",
+    "c.set(Calendar.HOUR_OF_DAY, 25)",
+    "c.set(Calendar.SECOND, 5)",
+    'show("${c.get(Calendar.DAY_OF_MONTH)} ${copy.get(Calendar.DAY_OF_MONTH)} ${c.after(copy)} ${copy.before(c)}")',
+    "Date moment = new Date(1791289800123)",
+    "def later = moment + 2",
+    'show("${later.getTime() - moment.getTime()} ${later - moment} ${moment.getYear() + 1900} ${moment.getDay()}")',
+    'show("${c.getTime().getTime() - moment.getTime()} ${System.currentTimeMillis() > 0}")',
+    "Date built = new Date(126, 9, 6, 25, 0, 0)",
+    'show("${built.year + 1900}-${built.month + 1}-${built.date} ${built.hours}")',
+  ]);
+  assert.match(source, /^c = c \+ 50 \* 1 min$/mu);
+  assert.match(source, /^c = c - 1 \* 1 day$/mu);
+  assert.match(
+    source,
+    /^c = sexscriptLegacyCalendarTime\(c, 25, c\.minute, c\.second, c\.millisecond\)$/mu,
+  );
+  assert.match(source, /^let later = moment \+ 2 \* 1 day$/mu);
+  assert.match(source, /getTimestamp\(\)\.toMilliseconds\(\) > 0/u);
+  assert.match(source, /NOTE SX_DATE_MOMENT/u);
+  assert.doesNotMatch(source, /TODO/u);
+  assert.deepEqual(run(source), [
+    "13:20 2 9",
+    "6 5 true true",
+    "172800000 2 2026 2",
+    "-40195000 true",
+    "2026-10-7 1",
+  ]);
+});
+
+// Groovy changed a Calendar in place, so every variable, list, or record that shares it saw the change; a TeaseScript
+// value is a copy, so a write to a Calendar that something else may still share stays manual work.
+test("keeps writes to a shared Calendar as manual work", { skip }, async () => {
+  const source = await convert([
+    "def start = Calendar.getInstance()",
+    "def history = [start]",
+    "start.add(Calendar.MINUTE, 5)",
+    'show("${history.size()}")',
+  ]);
+  assert.match(source, /TODO SX_CALENDAR_SHARED line 3/u);
+});
+
 function groovyParserUnavailableReason(): string | false {
   if (spawnSync("java", ["-version"], { stdio: "ignore" }).status !== 0) {
     return "Java is not available for the Groovy 2.5.21 parser helper.";

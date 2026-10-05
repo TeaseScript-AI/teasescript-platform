@@ -11,15 +11,34 @@
  */
 import {
   constantString,
-  isAstNode,
-  isRecord,
   variableName,
   type AstNode,
   type ParsedGroovyFile,
   type SourceSpan,
 } from "./ast.ts";
+import {
+  argumentOf,
+  argumentsOf,
+  asNode,
+  buildTree,
+  dottedName,
+  isAssigned,
+  isNullConstant,
+  isWholeStatement,
+  memberOf,
+  type Tree,
+} from "./java-ast.ts";
 import type { HelperName } from "./helpers.ts";
 import type { IrExpression, IrStatement } from "./ir.ts";
+import {
+  analyzeTemporal,
+  temporalBinary,
+  temporalCall,
+  temporalConstructor,
+  temporalProperty,
+  temporalStatement,
+  type TemporalAnalysis,
+} from "./java-time.ts";
 import { packageFilePath } from "./lower.ts";
 
 /** What the rules need from the lowering of the current file. */
@@ -33,7 +52,22 @@ export interface JavaRuleHost {
     span: SourceSpan | null,
   ): void;
   helper(name: HelperName, args: IrExpression[]): IrExpression;
+  /** A java.util.Calendar field (`MONTH`, `DAY_OF_WEEK`, ...) of a date and time, or null after a diagnostic. */
+  calendarField(field: string, value: IrExpression, node: AstNode): IrExpression | null;
   readonly state: JavaFileState;
+}
+
+/** A note that a line gives once, however many of its operations differ the same way. */
+export function noteOnce(
+  host: JavaRuleHost,
+  code: string,
+  message: string,
+  span: SourceSpan | null,
+): void {
+  const key = `${code}:${span?.line ?? ""}`;
+  if (span !== null && host.state.data.noted.has(key)) return;
+  host.state.data.noted.add(key);
+  host.diagnostic(code, "warning", message, span);
 }
 
 /** Reads a file of the legacy data folder by its name in `PackageOptions.files`; null when it cannot be read. */
@@ -55,11 +89,15 @@ export interface PackageResources {
 export interface JavaFileState {
   readonly resources: PackageResources | null;
   readonly analysis: ResourceAnalysis;
+  /** The Calendar and Date values of the body (java-time.ts). */
+  readonly temporal: TemporalAnalysis;
   /** Generated data per kind, by normalized path, shared by every context lowering the file. */
   readonly data: {
     lines: Map<string, string[]>;
     properties: Map<string, Map<string, string>>;
     ini: Map<string, Map<string, string>>;
+    /** Notes already given, by code and line, so that one line explains each difference once. */
+    noted: Set<string>;
   };
 }
 
@@ -228,7 +266,16 @@ export function javaFileState(
   return {
     resources: shared?.resources ?? resources,
     analysis: body === null ? emptyAnalysis() : analyzeResources(body),
-    data: shared?.data ?? { lines: new Map(), properties: new Map(), ini: new Map() },
+    temporal:
+      body === null
+        ? { variables: new Map(), fields: new Map(), writable: new Set() }
+        : analyzeTemporal(body),
+    data: shared?.data ?? {
+      lines: new Map(),
+      properties: new Map(),
+      ini: new Map(),
+      noted: new Set(),
+    },
   };
 }
 
@@ -240,70 +287,6 @@ function emptyAnalysis(): ResourceAnalysis {
     propertiesValues: new Set(),
     properties: new Set(),
   };
-}
-
-interface Tree {
-  parents: Map<AstNode, AstNode | null>;
-  /** Names that a closure, method, or loop binds, which may hold any value. */
-  parameters: Set<string>;
-  /** Every assignment of each variable name: its value node, or null for a declaration without one. */
-  assignments: Map<string, Array<AstNode | null>>;
-  /** Every reference to each variable name that reads it. */
-  reads: Map<string, AstNode[]>;
-  constructors: AstNode[];
-  calls: AstNode[];
-}
-
-function buildTree(root: AstNode): Tree {
-  const tree: Tree = {
-    parents: new Map(),
-    parameters: new Set(),
-    assignments: new Map(),
-    reads: new Map(),
-    constructors: [],
-    calls: [],
-  };
-  const targets = new Set<AstNode>();
-  const visit = (value: unknown, parent: AstNode | null): void => {
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item, parent);
-      return;
-    }
-    if (!isRecord(value)) return;
-    if (!isAstNode(value)) {
-      for (const child of Object.values(value)) visit(child, parent);
-      return;
-    }
-    tree.parents.set(value, parent);
-    const assigns =
-      value.kind === "declaration" || (value.kind === "binary" && value.operator === "=");
-    const target = assigns ? asNode(value.left) : null;
-    const name = variableName(target);
-    if (assigns && target !== null) targets.add(target);
-    if (name !== null) {
-      const right = asNode(value.right);
-      const list = tree.assignments.get(name) ?? [];
-      list.push(right === null || isEmptyExpression(right) ? null : right);
-      tree.assignments.set(name, list);
-    }
-    if (value.kind === "constructorCall") tree.constructors.push(value);
-    if (Array.isArray(value.parameters)) {
-      for (const parameter of value.parameters)
-        if (isRecord(parameter) && typeof parameter.name === "string")
-          tree.parameters.add(parameter.name);
-    }
-    if (value.kind === "closure") tree.parameters.add("it");
-    if (value.kind === "for" && typeof value.variable === "string")
-      tree.parameters.add(value.variable);
-    if (value.kind === "methodCall") tree.calls.push(value);
-    if (value.kind === "variable" && !targets.has(value)) {
-      const read = variableName(value);
-      if (read !== null) tree.reads.set(read, [...(tree.reads.get(read) ?? []), value]);
-    }
-    for (const child of Object.values(value)) visit(child, value);
-  };
-  visit(root, null);
-  return tree;
 }
 
 /**
@@ -708,17 +691,6 @@ function writtenPaths(tree: Tree): FileWrites {
   return writes;
 }
 
-/** Whether a node is the value assigned to a variable. */
-function isAssigned(node: AstNode, tree: Tree): boolean {
-  const parent = tree.parents.get(node) ?? null;
-  return (
-    parent !== null &&
-    (parent.kind === "declaration" || (parent.kind === "binary" && parent.operator === "=")) &&
-    asNode(parent.right) === node &&
-    variableName(parent.left) !== null
-  );
-}
-
 function fileValue(node: AstNode): boolean {
   return (
     node.kind === "constructorCall" &&
@@ -740,7 +712,7 @@ export function javaConstructor(
     return first === undefined ? undefined : host.lower(first);
   }
   if (analysis.propertiesValues.has(node)) return { kind: "object", properties: [], dict: true };
-  return undefined;
+  return temporalConstructor(node, host);
 }
 
 /** `Properties props = new Properties()`: a dict of text whose missing keys read as null, as Properties.get() does. */
@@ -783,7 +755,8 @@ export function javaMethodCall(
     return undefined;
   }
   const table = variableName(receiver);
-  if (table === null || !analysis.properties.has(table)) return undefined;
+  if (table === null || !analysis.properties.has(table))
+    return temporalCall(node, name, args, host);
   const target: IrExpression = { kind: "variable", name: table };
   if ((name === "get" || name === "getProperty") && args.length === 1) {
     const key = host.lower(args[0]!);
@@ -809,6 +782,20 @@ export function javaMethodCall(
   return undefined;
 }
 
+/** Java bean properties such as `calendar.time`. */
+export function javaProperty(
+  node: AstNode,
+  name: string,
+  host: JavaRuleHost,
+): IrExpression | null | undefined {
+  return temporalProperty(node, name, host);
+}
+
+/** Groovy operators on Java values, such as `date + days`. */
+export function javaBinary(node: AstNode, host: JavaRuleHost): IrExpression | null | undefined {
+  return temporalBinary(node, host);
+}
+
 /** `properties.load(reader)` and `reader.close()` on package resources as statements. */
 export function javaCallStatement(
   node: AstNode,
@@ -831,10 +818,10 @@ export function javaCallStatement(
   }
   const table = variableName(receiver);
   if (name !== "load" || args.length !== 1 || table === null || !analysis.properties.has(table))
-    return null;
+    return temporalStatement(node, name, args, span, host);
+  // After a diagnostic, the lowering keeps the statement as manual work.
   const value = packageTextRead(node, args[0]!, "properties", host);
-  if (value === undefined) return null;
-  if (value === null) return [];
+  if (value === undefined || value === null) return null;
   return [
     { kind: "assign", target: { kind: "variable", name: table }, operator: "=", value, span },
   ];
@@ -1009,7 +996,7 @@ function packageTextRead(
   if (resourceKindOf(resource, host.state.analysis) === null) return undefined;
   const files = resolveFiles(node, resource, kind, host);
   if (files === null) return null;
-  host.diagnostic("SX_PACKAGE_TEXT_SNAPSHOT", "warning", SNAPSHOT_NOTE, node.span);
+  noteOnce(host, "SX_PACKAGE_TEXT_SNAPSHOT", SNAPSHOT_NOTE, node.span);
   return dataCall(resource, kind, files, host);
 }
 
@@ -1197,7 +1184,7 @@ function iniRead(
     patterns.length > 0 &&
     patterns.every((pattern) => pattern.complete && pattern.prefix === patterns[0]!.prefix);
   const only = single ? files.get(packageFilePath(patterns[0]!.prefix)) : undefined;
-  host.diagnostic("SX_PACKAGE_TEXT_SNAPSHOT", "warning", SNAPSHOT_NOTE, node.span);
+  noteOnce(host, "SX_PACKAGE_TEXT_SNAPSHOT", SNAPSHOT_NOTE, node.span);
   if (section !== null && option !== null && only instanceof Map) {
     return { kind: "literal", value: only.get(iniKey(section, option)) ?? null };
   }
@@ -1457,75 +1444,4 @@ function matches(pattern: PathPattern, file: string): boolean {
   if (pattern.complete) return file === prefix;
   const suffix = pattern.suffix.replaceAll("\\", "/").toLowerCase();
   return file.startsWith(prefix) && file.endsWith(suffix);
-}
-
-interface Member {
-  call: AstNode;
-  name: string;
-  arguments: AstNode[];
-  property: boolean;
-}
-
-/** The method call or property access whose receiver a node is. */
-function memberOf(node: AstNode, tree: Tree): Member | null {
-  const parent = tree.parents.get(node) ?? null;
-  if (parent === null || asNode(parent.object) !== node) return null;
-  if (parent.kind === "methodCall") {
-    const name = constantString(parent.method);
-    return name === null
-      ? null
-      : { call: parent, name, arguments: argumentsOf(parent), property: false };
-  }
-  if (parent.kind === "property") {
-    const name = constantString(parent.property);
-    return name === null ? null : { call: parent, name, arguments: [], property: true };
-  }
-  return null;
-}
-
-/** The call a node is an argument of, with its position. */
-function argumentOf(node: AstNode, tree: Tree): { call: AstNode; index: number } | null {
-  const list = tree.parents.get(node) ?? null;
-  if (list?.kind !== "arguments") return null;
-  const call = tree.parents.get(list) ?? null;
-  if (call === null || (call.kind !== "methodCall" && call.kind !== "constructorCall")) return null;
-  const index = argumentsOf(call).indexOf(node);
-  return index < 0 ? null : { call, index };
-}
-
-function isWholeStatement(call: AstNode, tree: Tree): boolean {
-  return tree.parents.get(call)?.kind === "expressionStatement";
-}
-
-function argumentsOf(node: AstNode): AstNode[] {
-  const list = asNode(node.arguments);
-  return Array.isArray(list?.items) ? list.items.filter(isAstNode) : [];
-}
-
-/** `javax.imageio.ImageIO` for a property chain of names, or the name of a variable or class. */
-function dottedName(node: AstNode | null): string | null {
-  if (node === null) return null;
-  const name = variableName(node);
-  if (name !== null) return name;
-  if (node.kind === "classExpression" && typeof node.type === "string") return node.type;
-  if (node.kind === "property") {
-    const object = dottedName(asNode(node.object));
-    const property = constantString(node.property);
-    return object === null || property === null ? null : `${object}.${property}`;
-  }
-  return null;
-}
-
-function isNullConstant(node: AstNode): boolean {
-  return node.kind === "constant" && node.value === null;
-}
-
-function isEmptyExpression(node: AstNode): boolean {
-  return (
-    node.kind === "unsupportedExpression" && String(node.groovyType).endsWith("EmptyExpression")
-  );
-}
-
-function asNode(value: unknown): AstNode | null {
-  return isAstNode(value) ? value : null;
 }
