@@ -383,6 +383,7 @@ test("+10 s continues after the host stores a block's write, at the block's scen
       scope: "test",
       load: async () => [],
       write: async (key) => void writes.push(key),
+      replace: async () => {},
       clear: async () => {},
     },
   );

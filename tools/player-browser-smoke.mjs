@@ -524,6 +524,20 @@ async function scriptStorageScenario(cdp, origin) {
 
   await reloadBeforeStart();
   await clearBeforeStart();
+  // Clearing publishes an empty generation and removes the values saved before it, in real browser storage.
+  assertEqual(
+    await value(
+      cdp,
+      `(() => {
+        const names = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index));
+        const head = localStorage.getItem('player-storage-head:"repository-demo"') !== null;
+        const values = names.filter((name) => name.includes('"repository-demo"') && !name.startsWith('player-storage-head:'));
+        return head + ' head, ' + values.length + ' values';
+      })()`,
+    ),
+    "true head, 0 values",
+    "Clearing leaves only the scope's empty head",
+  );
   await reloadBeforeStart();
   await physicalClick(cdp, start);
   // Reach the introductory Session message so an absent returning-visit line is conclusive.
@@ -536,6 +550,15 @@ async function scriptStorageScenario(cdp, origin) {
     await value(cdp, `${messages}.some((text) => text.includes('Back again'))`),
     false,
     "Clearing saved data resets the demo's visit count",
+  );
+  // Saves after the clear persist in the published generation and load fresh after a reload.
+  await reloadBeforeStart();
+  await physicalClick(cdp, start);
+  await waitFor(
+    cdp,
+    `${messages}.some((text) => text.includes('Back again. Visit 2.'))`,
+    15_000,
+    "A save after clearing must load after a reload",
   );
 
   // Leave the existing end-to-end demo scenario with its original first-visit state.

@@ -127,6 +127,10 @@ test("a chosen image is session media: kept durably only when saved, and release
     load: async () => [...entries].map(([key, value]) => ({ key, value })),
     write: async (key, value) =>
       void (value === null ? entries.delete(key) : entries.set(key, value)),
+    replace: async (next) => {
+      entries.clear();
+      for (const { key, value } of next) entries.set(key, value);
+    },
     clear: async () => entries.clear(),
   };
   const repository = new FakeMediaRepository();
