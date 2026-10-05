@@ -3,13 +3,16 @@
  * Plays converted packages in the real Player through its UI, on several paths per package, and records how far each
  * run got and why it stopped.
  *
- * Usage: node tools/play-check.ts [--base <origin>] [--runs N] [--steps N] [--only id,id] <converted-root> <out-dir>
+ * Usage: node tools/play-check.ts [--base <origin>] [--runs N] [--steps N] [--only id,id] [--again] <converted-root>
+ *   <out-dir>
  *
  * Each package opens at `<origin>/player/?package=<id>` (default `https://agents.home.arpa:4443`, see
  * `serve-catalog.ts`) in headless Chromium, one browser at a time. A run presses buttons, picks choices, and types
  * answers until the session halts, fails, hangs, or the step budget ends. Playwright's fake clock skips waits, timers,
  * and chat pacing, and media play at 16 times speed. Each run picks, at every choice, the option tried least often in
- * earlier runs, so later runs take other branches; a package stops after a run that reached nothing new. The session
+ * earlier runs, so later runs take other branches; a package stops after a run that reached nothing new, or after a
+ * run that hung or used up its steps, which other paths rarely change. A package whose `.tease` files are unchanged
+ * since its last check is skipped unless `--again` is given. The session
  * state is read from the Player's mounted Vue tree (read-only), as the Player shows no runtime failure itself.
  *
  * Writes `<out-dir>/<id>/result.json` and a screenshot of where each run stopped.
@@ -20,7 +23,7 @@ import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { packageContentHash } from "./catalog.ts";
+import { packageContentHash, parsePlayCheck } from "./catalog.ts";
 
 const PLAYWRIGHT_CORE =
   process.env.PLAYWRIGHT_CORE ?? "/opt/agent-stack/playwright-cli/node_modules/playwright-core";
@@ -128,6 +131,7 @@ const { values, positionals } = parseArgs({
     runs: { type: "string", default: "6" },
     steps: { type: "string", default: "300" },
     only: { type: "string" },
+    again: { type: "boolean", default: false },
   },
 });
 if (positionals.length !== 2) {
@@ -154,14 +158,17 @@ try {
   for (const [index, id] of ids.entries()) {
     const result = await checkPackage(browser, id);
     process.stderr.write(
-      `${index + 1}/${ids.length} ${id}: ${result.verdict} - ${result.summary}\n`,
+      result === null
+        ? `${index + 1}/${ids.length} ${id}: unchanged since its last check\n`
+        : `${index + 1}/${ids.length} ${id}: ${result.verdict} - ${result.summary}\n`,
     );
   }
 } finally {
   await browser.close();
 }
 
-async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResult> {
+/** Checks a package; `null` when its last check is of the same `.tease` files and `--again` is not given. */
+async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResult | null> {
   const folder = path.join(root, id);
   const files = await packageFiles(folder);
   const sources = await Promise.all(
@@ -174,6 +181,13 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
   );
   const present = new Set(files);
   const outFolder = path.join(out, id);
+  if (!values.again) {
+    const last = await readFile(path.join(outFolder, "result.json"), "utf8").then(
+      (text) => parsePlayCheck(JSON.parse(text)),
+      () => null,
+    );
+    if (last?.contentHash === packageContentHash(sources)) return null;
+  }
   await rm(outFolder, { recursive: true, force: true });
   await mkdir(outFolder, { recursive: true });
 
@@ -224,7 +238,7 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
       await context.close();
     }
     runs.push(result);
-    if (result.stop.kind === "no-start") break;
+    if (["no-start", "hang", "budget", "harness"].includes(result.stop.kind)) break;
     if (run > 0 && coveredFiles.size + coveredSites.size + coveredChoices.size === before) break;
   }
   fileCount = Math.max(fileCount, coveredFiles.size);
