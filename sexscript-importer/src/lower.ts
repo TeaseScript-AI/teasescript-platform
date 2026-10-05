@@ -7513,9 +7513,11 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
       "Dynamic Groovy property access is not lowered automatically.",
     );
   }
+  // Groovy on the legacy Java read a list's private `size` field, and an array's `length`; no other legacy value had
+  // such a property, apart from a map key, so a receiver not proven to be a map is a list.
   if (
     (property === "size" || property === "length") &&
-    isKnownListExpression(targetNode, context)
+    (isKnownListExpression(targetNode, context) || !isDictionary(targetNode, context))
   ) {
     const target = lowerExpression(targetNode, context);
     return target === null ? null : { kind: "property", target, name: "length" };
