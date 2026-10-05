@@ -11,6 +11,7 @@
  */
 import {
   constantString,
+  isAstNode,
   variableName,
   type AstNode,
   type ParsedGroovyFile,
@@ -162,6 +163,8 @@ interface ResourceAnalysis {
   readonly presence: ReadonlySet<string>;
   /** The `File` constructors that presence variables are assigned. */
   readonly presenceValues: ReadonlySet<AstNode>;
+  /** Variables assigned once with a path text known whole (constantPaths). */
+  readonly constants: ReadonlyMap<string, string>;
 }
 
 const FILE_TYPES = new Set(["File", "java.io.File"]);
@@ -218,6 +221,8 @@ const WRITING_MEMBERS = new Set([
 ]);
 /** Folder members that hand out the folder's files, which code may then write. */
 const LISTING_FILE_MEMBERS = new Set([
+  "absoluteFile",
+  "canonicalFile",
   "eachDir",
   "eachFile",
   "eachFileMatch",
@@ -226,8 +231,13 @@ const LISTING_FILE_MEMBERS = new Set([
   "getCanonicalFile",
   "getParentFile",
   "listFiles",
+  "parentFile",
   "traverse",
 ]);
+/** Members that run a closure with the File as its delegate, whose unqualified calls act on the File. */
+const DELEGATE_MEMBERS = new Set(["identity", "tap", "with"]);
+/** Groovy assignment operators: `=` and the compound ones such as `+=` and `<<=`. */
+const ASSIGNMENT_OPERATORS = /^(?:[-+*/%&|^]|<<|>>>?|\*\*)?=$/u;
 /** Calls that return a `File` the package did not construct. */
 const FILE_PRODUCING_CALLS = new Set([
   "createTempFile",
@@ -332,6 +342,7 @@ function emptyAnalysis(): ResourceAnalysis {
     properties: new Set(),
     presence: new Set(),
     presenceValues: new Set(),
+    constants: new Map(),
   };
 }
 
@@ -348,6 +359,7 @@ function analyzeResources(root: AstNode): ResourceAnalysis {
   // Candidates by the type they construct; the loop below drops those whose values or uses do not fit.
   const variables = new Map<string, ResourceKind>();
   for (const [name, values] of tree.assignments) {
+    if (tree.parameters.has(name)) continue;
     const kinds = values.flatMap((value) => {
       const kind = value === null ? null : constructedKind(value);
       return kind === null ? [] : [kind];
@@ -357,6 +369,7 @@ function analyzeResources(root: AstNode): ResourceAnalysis {
   }
   const properties = new Set<string>();
   for (const [name, values] of tree.assignments) {
+    if (tree.parameters.has(name)) continue;
     if (
       values.length === 1 &&
       values[0]?.kind === "constructorCall" &&
@@ -434,8 +447,18 @@ function analyzeResources(root: AstNode): ResourceAnalysis {
     const value = tree.assignments.get(name)?.[0];
     if (value !== null && value !== undefined) propertiesValues.add(value);
   }
-  const { presence, presenceValues } = presenceVariables(tree, variables);
-  return { values, variables, sources, propertiesValues, properties, presence, presenceValues };
+  const constants = constantPaths(tree);
+  const { presence, presenceValues } = presenceVariables(tree, variables, constants);
+  return {
+    values,
+    variables,
+    sources,
+    propertiesValues,
+    properties,
+    presence,
+    presenceValues,
+    constants,
+  };
 }
 
 /**
@@ -445,6 +468,7 @@ function analyzeResources(root: AstNode): ResourceAnalysis {
 function presenceVariables(
   tree: Tree,
   resources: ReadonlyMap<string, ResourceKind>,
+  constants: ReadonlyMap<string, string>,
 ): { presence: Set<string>; presenceValues: Set<AstNode> } {
   const presence = new Set<string>();
   const presenceValues = new Set<AstNode>();
@@ -456,7 +480,7 @@ function presenceVariables(
         value.kind === "constructorCall" &&
         FILE_TYPES.has(String(value.type)) &&
         argumentsOf(value).length === 1 &&
-        pathPattern(argumentsOf(value)[0]!).complete,
+        pathPattern(argumentsOf(value)[0]!, constants).complete,
     );
     const others = values.every(
       (value) =>
@@ -465,33 +489,21 @@ function presenceVariables(
         (value.kind === "constant" && (typeof value.value === "boolean" || value.value === null)),
     );
     if (files.length === 0 || !others) continue;
+    // Any other read could still see the File, which Groovy took as true where the flag may be false.
     const reads = (tree.reads.get(name) ?? []).every((read) => {
       const member = memberOf(read, tree);
-      if (member !== null)
-        return !member.property && member.name === "exists" && member.arguments.length === 0;
-      return conditionUse(read, tree);
+      return (
+        member !== null &&
+        !member.property &&
+        member.name === "exists" &&
+        member.arguments.length === 0
+      );
     });
     if (!reads) continue;
     presence.add(name);
     for (const value of files) presenceValues.add(value);
   }
   return { presence, presenceValues };
-}
-
-/** A read whose value Groovy took as a condition: of an if, a loop, `!`, `&&`, `||`, or `?:`. */
-function conditionUse(read: AstNode, tree: Tree): boolean {
-  let node = read;
-  for (let parent = tree.parents.get(node) ?? null; parent?.kind === "boolean";) {
-    node = parent;
-    parent = tree.parents.get(node) ?? null;
-  }
-  const parent = tree.parents.get(node) ?? null;
-  if (parent === null) return false;
-  if (parent.kind === "not") return true;
-  if (parent.kind === "binary") return parent.operator === "&&" || parent.operator === "||";
-  if (["if", "while", "ternary"].includes(parent.kind))
-    return asNode(parent.condition) === node || asNode(parent.boolean) === node;
-  return false;
 }
 
 /** The kind of resource a constructor of a resource type makes, whatever its arguments. */
@@ -617,8 +629,9 @@ interface FileWrites {
   /** Paths that a writer or a writing member of a known `File` changes. */
   direct: PathPattern[];
   /**
-   * Paths of `File` values that leave the code the analysis follows (handed to a function, stored, returned, or listed
-   * from a folder); any write to a value of unknown origin may change them.
+   * Paths of `File` values that leave the code the analysis follows (handed to a function, stored, returned, listed
+   * from a folder, or kept in a variable of the script binding that other files share); any write to a value of unknown
+   * origin may change them.
    */
   escaped: PathPattern[];
   /** Whether a writing member is called on a value that may be a `File` of unknown origin. */
@@ -627,16 +640,29 @@ interface FileWrites {
 
 /**
  * The paths a body may write. A file changes only through a write: a writer constructor that opens a path or a `File`,
- * a writing member (`write`, `append`, `delete`, `text =`, `<<`, `store`, ...) of a `File` or `Wini` value, a `File`
- * handed to a writing class such as `ImageIO`, or java.nio `Paths`/`Files`. A `File` comes from a constructor, so a
- * write to a value of unknown origin, such as a parameter or a call result, can only change a `File` that left the
- * code the analysis follows.
+ * a writing member (`write`, `append`, `delete`, `renameTo`, `text =`, `text +=`, `<<`, `store`, ...) of a `File` or
+ * `Wini` value, a `File` handed to a writing class such as `ImageIO`, or java.nio `Paths`/`Files`. A `File` comes from a
+ * constructor or an `as File` cast, so a write to a value of unknown origin, such as a parameter or a call result, can
+ * only change a `File` that left the code the analysis follows. A write of a folder covers the files below it.
  */
 function writtenPaths(tree: Tree): FileWrites {
   const writes: FileWrites = { direct: [], escaped: [], unknownWrite: false };
+  const constants = constantPaths(tree);
+  // Variables that hold a File: assigned one, or another such variable.
   const fileVariables = new Set<string>();
-  for (const [name, values] of tree.assignments) {
-    if (values.some((value) => value !== null && fileValue(value))) fileVariables.add(name);
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [name, values] of tree.assignments) {
+      if (fileVariables.has(name)) continue;
+      const holdsFile = values.some(
+        (value) =>
+          value !== null && (fileValue(value) || fileVariables.has(variableName(value) ?? "")),
+      );
+      if (holdsFile) {
+        fileVariables.add(name);
+        changed = true;
+      }
+    }
   }
   /** The paths a path text or a `File` (or `Wini`) value names. */
   const pathsOf = (node: AstNode, seen: Set<string>): PathPattern[] => {
@@ -650,16 +676,24 @@ function writtenPaths(tree: Tree): FileWrites {
         value === null || isNullConstant(value) ? [] : pathsOf(value, seen),
       );
     }
+    if (node.kind === "cast") {
+      const value = asNode(node.value);
+      return value === null ? [unknownPattern()] : pathsOf(value, seen);
+    }
     if (node.kind === "constructorCall") {
-      const first = argumentsOf(node)[0];
-      return fileValue(node) && first !== undefined ? pathsOf(first, seen) : [unknownPattern()];
+      const [first, second] = argumentsOf(node);
+      if (!fileValue(node) || first === undefined) return [unknownPattern()];
+      if (second === undefined || INI_TYPES.has(String(node.type))) return pathsOf(first, seen);
+      // new File(parent, child) names the child below the parent.
+      const child = pathPattern(second, constants);
+      return pathsOf(first, seen).map((parent) => joinPatterns(parent, child));
     }
     if (node.kind === "methodCall" || node.kind === "property") {
       // A call result may be any path, unless it is a stream or writer, which names no file.
       const method = constantString(node.method) ?? constantString(node.property) ?? "";
       return /(?:Stream|Writer)$/u.test(method) ? [] : [unknownPattern()];
     }
-    return [pathPattern(node)];
+    return [pathPattern(node, constants)];
   };
   const at = (list: PathPattern[], node: AstNode, paths: readonly PathPattern[]) => {
     const origin = node.span === null ? "" : `:${node.span.line}`;
@@ -670,6 +704,7 @@ function writtenPaths(tree: Tree): FileWrites {
   /** Whether a value is certainly not a `File`: text, numbers, collections, or another constructed type. */
   const notFile = (node: AstNode, seen: Set<string>): boolean => {
     if (node.kind === "constructorCall") return !fileValue(node);
+    if (node.kind === "cast") return !fileValue(node);
     if (
       ["constant", "gstring", "list", "map", "range", "array", "closure", "not"].includes(node.kind)
     )
@@ -694,12 +729,13 @@ function writtenPaths(tree: Tree): FileWrites {
   // Where each File value and each read of a File variable goes.
   const fileUses = [
     ...tree.constructors.filter(fileValue),
+    ...[...tree.parents.keys()].filter((node) => node.kind === "cast" && fileValue(node)),
     ...[...fileVariables].flatMap((name) => tree.reads.get(name) ?? []),
   ];
   for (const node of fileUses) {
     const member = memberOf(node, tree);
     if (member !== null) {
-      // Members that hand out the files of a folder: any file below may be written through them.
+      // Members that hand out the files of a folder or another File: any file below may be written through them.
       if (LISTING_FILE_MEMBERS.has(member.name))
         at(
           writes.escaped,
@@ -710,6 +746,9 @@ function writtenPaths(tree: Tree): FileWrites {
             complete: false,
           })),
         );
+      // A closure that runs with the File as its delegate, as `file.with { write(text) }`, may write it.
+      if (DELEGATE_MEMBERS.has(member.name))
+        at(writes.direct, member.call, pathsOf(node, new Set()));
       continue;
     }
     const argument = argumentOf(node, tree);
@@ -736,6 +775,14 @@ function writtenPaths(tree: Tree): FileWrites {
     if (isAssigned(node, tree)) continue;
     at(writes.escaped, node, pathsOf(node, new Set()));
   }
+  // A File variable of the script binding, assigned without a declaration, is shared with the files the script loads.
+  for (const name of fileVariables) {
+    if (tree.declared.has(name)) continue;
+    const reference = (tree.reads.get(name) ?? [])[0];
+    const origin = reference ?? tree.assignments.get(name)?.find((value) => value !== null);
+    if (origin !== undefined && origin !== null)
+      at(writes.escaped, origin, pathsOf({ kind: "variable", span: null, name }, new Set()));
+  }
   for (const node of tree.constructors) {
     if (!WRITER_TYPES.has(String(node.type))) continue;
     const first = argumentsOf(node)[0];
@@ -761,9 +808,14 @@ function writtenPaths(tree: Tree): FileWrites {
       call.implicitThis !== true &&
       !className
     ) {
-      // StringBuilder.delete(start, end) is no file deletion; Wini.store(file) writes its argument.
+      // StringBuilder.delete(start, end) is no file deletion; Wini.store(file) writes its argument; renameTo(target)
+      // changes both files.
       if (method === "store" && args.length > 0) write(args[0]!, call);
       else if (method !== "delete" || args.length === 0) write(receiver, call);
+      // The target of renameTo() is a File or, through Groovy, a path text.
+      const renamed = receiver !== null && (isFile(receiver) || !notFile(receiver, new Set()));
+      if (method === "renameTo" && args[0] !== undefined && renamed)
+        at(writes.direct, call, pathsOf(args[0], new Set()));
     }
     if (owner === null || !className || !WRITING_CLASSES.test(owner)) continue;
     if (READING_CALLS.has(`${owner}.${method}`)) continue;
@@ -771,7 +823,7 @@ function writtenPaths(tree: Tree): FileWrites {
       at(
         writes.direct,
         call,
-        args[0] === undefined ? [unknownPattern()] : pathsOf(args[0], new Set()),
+        args.length === 0 ? [unknownPattern()] : args.flatMap((arg) => pathsOf(arg, new Set())),
       );
       continue;
     }
@@ -779,14 +831,14 @@ function writtenPaths(tree: Tree): FileWrites {
     const outputs = /(?:^|\.)ImageIO$/u.test(owner) ? args.slice(2) : args;
     for (const output of outputs) write(output, call);
   }
-  // `file.text = value`, `file.bytes = value`, and `file << value`.
+  // `file.text = value`, `file.bytes += value`, and `file << value`.
   for (const [node, parent] of tree.parents) {
     if (node.kind === "binary" && node.operator === "<<") write(asNode(node.left), node);
     if (
       node.kind === "property" &&
       ["text", "bytes"].includes(constantString(node.property) ?? "") &&
       parent?.kind === "binary" &&
-      parent.operator === "=" &&
+      ASSIGNMENT_OPERATORS.test(String(parent.operator)) &&
       asNode(parent.left) === node
     )
       write(asNode(node.object), node);
@@ -794,7 +846,41 @@ function writtenPaths(tree: Tree): FileWrites {
   return writes;
 }
 
+/** Variables assigned once with a path text that is known whole, such as `def folder = getDataFolder()`. */
+function constantPaths(tree: Tree): Map<string, string> {
+  const constants = new Map<string, string>();
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [name, values] of tree.assignments) {
+      if (constants.has(name) || tree.parameters.has(name) || values.length !== 1) continue;
+      const value = values[0];
+      if (value === null || value === undefined) continue;
+      const pattern = pathPattern(value, constants);
+      if (!pattern.complete) continue;
+      constants.set(name, pattern.prefix);
+      changed = true;
+    }
+  }
+  return constants;
+}
+
+/** The path of a child below a parent folder, as `new File(parent, child)` joins them. */
+function joinPatterns(parent: PathPattern, child: PathPattern): PathPattern {
+  const separator = parent.prefix === "" || /[\\/]$/u.test(parent.prefix) ? "" : "/";
+  if (parent.complete && child.complete) {
+    const text = `${parent.prefix}${separator}${child.prefix}`;
+    return { prefix: text, suffix: text, complete: true };
+  }
+  return {
+    prefix: parent.complete ? `${parent.prefix}${separator}${child.prefix}` : parent.prefix,
+    suffix: child.suffix,
+    complete: false,
+  };
+}
+
+/** A `File` or `Wini` constructor, or an `as File` cast. */
 function fileValue(node: AstNode): boolean {
+  if (node.kind === "cast") return FILE_TYPES.has(String(node.type));
   return (
     node.kind === "constructorCall" &&
     (FILE_TYPES.has(String(node.type)) || INI_TYPES.has(String(node.type)))
@@ -1082,7 +1168,7 @@ function resourcePaths(
         !FILE_TYPES.has(type) &&
         (analysis.variables.has(variableName(first) ?? "") || first.kind === "constructorCall")
           ? resourcePaths(first, analysis)
-          : [{ pattern: pathPattern(first), charset: "bytes" as const }];
+          : [{ pattern: pathPattern(first, analysis.constants), charset: "bytes" as const }];
       const stream = STREAM_TYPES.get(type);
       if (stream === "platform") return inner.map((path) => ({ ...path, charset: "platform" }));
       if (stream !== "reader") return inner;
@@ -1188,16 +1274,22 @@ function resolveFiles(
         "SX_PACKAGE_TEXT_UNKNOWN",
         `The computed path of this file matches ${candidates.length} package files; the conversion holds the text of at most ${MAX_CANDIDATES}.`,
       );
-    if (pattern.complete && candidates.length === 0) {
-      host.diagnostic(
-        "SX_PACKAGE_TEXT_MISSING",
-        "warning",
-        `The package holds no file ${pattern.prefix}; Groovy failed to read it, and the converted read stops the script.`,
-        node.span,
+    if (candidates.length === 0) {
+      const path = packageFilePath(pattern.prefix);
+      const written = pattern.complete
+        ? resources.writes.find((write) => writeMatches(write, path))
+        : undefined;
+      return unsupported(
+        written !== undefined ? "SX_PACKAGE_TEXT_WRITTEN" : "SX_PACKAGE_TEXT_MISSING",
+        written !== undefined
+          ? `The package holds no file ${path}, which its scripts may write (${written.origin ?? "a write the conversion cannot follow"}); keep it as stored data instead.`
+          : pattern.complete
+            ? `The package holds no file ${path}; Groovy could not read it either, unless the player added it.`
+            : "No package file matches the computed path of this file.",
       );
     }
     for (const file of candidates) {
-      const written = resources.writes.find((write) => matches(write, file));
+      const written = resources.writes.find((write) => writeMatches(write, file));
       if (written !== undefined)
         return unsupported(
           "SX_PACKAGE_TEXT_WRITTEN",
@@ -1209,10 +1301,17 @@ function resolveFiles(
           "SX_PACKAGE_TEXT_UNKNOWN",
           `The package file ${file} could not be read.`,
         );
-      // Properties.load(InputStream) reads ISO-8859-1; File.readLines() and Wini the platform charset.
+      // Properties.load(InputStream) reads ISO-8859-1, ini4j's Wini UTF-8 from a File or stream, and File.readLines()
+      // the platform charset.
       const decoded = decodeText(
         bytes,
-        charset !== "bytes" ? charset : kind === "properties" ? "iso-8859-1" : "platform",
+        charset !== "bytes"
+          ? charset
+          : kind === "properties"
+            ? "iso-8859-1"
+            : kind === "ini"
+              ? "utf-8"
+              : "platform",
       );
       if (decoded === null)
         return unsupported(
@@ -1235,7 +1334,7 @@ function resolveFiles(
         if (table === null)
           return unsupported(
             "SX_PACKAGE_TEXT_FORMAT",
-            `The INI file ${file} uses escapes, quotes, comments after values, repeated names, or lines outside a section, which the conversion does not read the way ini4j did.`,
+            `The INI file ${file} uses escapes, repeated sections, options without a value, or lines outside a section, which the conversion does not read the way ini4j did.`,
           );
         result.set(file, table);
       }
@@ -1289,8 +1388,8 @@ function filePresence(node: AstNode, host: JavaRuleHost): IrExpression | null | 
   const { resources } = host.state;
   const path = argumentsOf(node)[0];
   if (resources === null || path === undefined) return undefined;
-  const file = packageFilePath(pathPattern(path).prefix);
-  const written = resources.writes.find((write) => matches(write, file));
+  const file = packageFilePath(pathPattern(path, host.state.analysis.constants).prefix);
+  const written = resources.writes.find((write) => writeMatches(write, file));
   if (written !== undefined) {
     host.diagnostic(
       "SX_PACKAGE_TEXT_WRITTEN",
@@ -1396,7 +1495,7 @@ function decodeText(
   if (utf8 !== null)
     return {
       text: bom ? utf8.slice(1) : utf8,
-      note: "Java read this file in the player's platform charset (on Windows usually windows-1252); its text is UTF-8, as which the conversion reads it.",
+      note: `Java read this file in the player's platform charset (on Windows usually windows-1252); its text is UTF-8, as which the conversion reads it${bom ? ", without the byte order mark at its start, which Java read as text" : ""}.`,
     };
   return {
     text: new TextDecoder("windows-1252").decode(bytes),
@@ -1498,10 +1597,10 @@ function unescapeProperties(text: string): string | null {
 }
 
 /**
- * An INI file as ini4j's `Wini` reads its plain form: `[section]` headers, `option = value` or `option: value` with
- * trimmed names and values, and `;` or `#` comment lines. Null for what the conversion does not reproduce: escapes,
- * quotes, text after a value that may be a comment, an option without a value or outside a section, and repeated
- * sections or options.
+ * An INI file as ini4j's `Wini` (0.5.2, as the legacy player bundled it) reads its plain form: `[section]` headers,
+ * `option = value` or `option: value` with trimmed names and values that keep quotes and later `;` or `#` as text, `;`
+ * or `#` comment lines, and the last value of a repeated option. Null for what the conversion does not reproduce:
+ * escapes, an option without a value or outside a section, and repeated sections.
  */
 function parseIni(text: string): Map<string, string> | null {
   const table = new Map<string, string>();
@@ -1510,7 +1609,7 @@ function parseIni(text: string): Map<string, string> | null {
   for (const line of text.split(/\r\n|\r|\n/u)) {
     const trimmed = line.trim();
     if (trimmed === "" || trimmed.startsWith(";") || trimmed.startsWith("#")) continue;
-    if (/[\\"]/u.test(trimmed)) return null;
+    if (trimmed.includes("\\")) return null;
     if (trimmed.startsWith("[")) {
       if (!trimmed.endsWith("]")) return null;
       section = trimmed.slice(1, -1).trim();
@@ -1523,10 +1622,8 @@ function parseIni(text: string): Map<string, string> | null {
     if (operator <= 0) return null;
     const option = trimmed.slice(0, operator).trim();
     const value = trimmed.slice(operator + 1).trim();
-    if (option === "" || /[;#]/u.test(value)) return null;
-    const key = iniKey(section, option);
-    if (table.has(key)) return null;
-    table.set(key, value);
+    if (option === "") return null;
+    table.set(iniKey(section, option), value);
   }
   return table;
 }
@@ -1546,42 +1643,66 @@ function iniKey(section: string, option: string): string {
 // ---------------------------------------------------------------------------------------------------------------
 // Paths and AST helpers
 
-/** The fixed beginning and end of a path expression, with `getDataFolder()` as the package root. */
-function pathPattern(node: AstNode): PathPattern {
+/**
+ * The fixed beginning and end of a path expression, with `getDataFolder()` as the package root and the variables of
+ * `constants` as their text.
+ */
+function pathPattern(
+  node: AstNode,
+  constants: ReadonlyMap<string, string> = new Map(),
+): PathPattern {
+  const whole = (text: string): PathPattern => ({ prefix: text, suffix: text, complete: true });
   const literal = constantString(node);
-  if (literal !== null) return { prefix: literal, suffix: literal, complete: true };
+  if (literal !== null) return whole(literal);
+  const name = variableName(node);
+  if (name !== null) {
+    const text = constants.get(name);
+    return text === undefined ? unknownPattern() : whole(text);
+  }
   if (node.kind === "methodCall" && constantString(node.method) === "getDataFolder")
-    return { prefix: "", suffix: "", complete: true };
+    return whole("");
   if (node.kind === "gstring") {
     const strings = Array.isArray(node.strings) ? node.strings.map(String) : [];
     const values = Array.isArray(node.values) ? node.values : [];
-    if (values.length === 0) {
-      const text = strings.join("");
-      return { prefix: text, suffix: text, complete: true };
-    }
-    return { prefix: strings[0] ?? "", suffix: strings.at(-1) ?? "", complete: false };
+    let pattern = whole(strings[0] ?? "");
+    values.forEach((value, index) => {
+      const part = isAstNode(value) ? pathPattern(value, constants) : unknownPattern();
+      pattern = joinText(joinText(pattern, part), whole(strings[index + 1] ?? ""));
+    });
+    return pattern;
   }
   if (node.kind === "binary" && node.operator === "+") {
     const left = asNode(node.left);
     const right = asNode(node.right);
     if (left === null || right === null) return unknownPattern();
-    const start = pathPattern(left);
-    const end = pathPattern(right);
-    if (start.complete && end.complete) {
-      const text = start.prefix + end.prefix;
-      return { prefix: text, suffix: text, complete: true };
-    }
-    return {
-      prefix: start.complete ? start.prefix + end.prefix : start.prefix,
-      suffix: end.complete ? start.suffix + end.suffix : end.suffix,
-      complete: false,
-    };
+    return joinText(pathPattern(left, constants), pathPattern(right, constants));
   }
   return unknownPattern();
 }
 
+/** Two path parts one after the other. */
+function joinText(start: PathPattern, end: PathPattern): PathPattern {
+  if (start.complete && end.complete) {
+    const text = start.prefix + end.prefix;
+    return { prefix: text, suffix: text, complete: true };
+  }
+  return {
+    prefix: start.complete ? start.prefix + end.prefix : start.prefix,
+    suffix: end.complete ? start.suffix + end.suffix : end.suffix,
+    complete: false,
+  };
+}
+
 function unknownPattern(): PathPattern {
   return { prefix: "", suffix: "", complete: false };
+}
+
+/** Whether a write may change a normalized package path: the path itself, or a file below a written folder. */
+function writeMatches(write: PathPattern, file: string): boolean {
+  const prefix = packageFilePath(write.prefix);
+  if (write.complete) return file === prefix || file.startsWith(`${prefix.replace(/\/$/u, "")}/`);
+  const suffix = write.suffix.replaceAll("\\", "/").toLowerCase();
+  return file.startsWith(prefix) && (file.endsWith(suffix) || file.includes(`${suffix}/`));
 }
 
 /** Whether a path pattern may name a normalized package path. */

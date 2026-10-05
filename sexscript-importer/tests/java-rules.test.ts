@@ -159,7 +159,7 @@ test("converts Calendar and Date values to local dates and times", { skip }, asy
     "c.add(Calendar.DAY_OF_MONTH, -1)",
     'show("${c.get(Calendar.HOUR_OF_DAY)}:${c.get(Calendar.MINUTE)} ${c.get(Calendar.DAY_OF_WEEK)} ${c.get(Calendar.MONTH)}")',
     "def copy = c.clone()",
-    "c.set(Calendar.HOUR_OF_DAY, 25)",
+    "c.set(Calendar.HOUR_OF_DAY, 1)",
     "c.set(Calendar.SECOND, 5)",
     'show("${c.get(Calendar.DAY_OF_MONTH)} ${copy.get(Calendar.DAY_OF_MONTH)} ${c.after(copy)} ${copy.before(c)}")',
     "Date moment = new Date(1791289800123)",
@@ -173,7 +173,7 @@ test("converts Calendar and Date values to local dates and times", { skip }, asy
   assert.match(source, /^c = c - 1 \* 1 day$/mu);
   assert.match(
     source,
-    /^c = sexscriptLegacyCalendarTime\(c, 25, c\.minute, c\.second, c\.millisecond\)$/mu,
+    /^c = sexscriptLegacyCalendarTime\(c, 1, c\.minute, c\.second, c\.millisecond\)$/mu,
   );
   assert.match(source, /^let later = moment \+ 2 \* 1 day$/mu);
   assert.match(source, /getTimestamp\(\)\.toMilliseconds\(\) > 0/u);
@@ -181,9 +181,9 @@ test("converts Calendar and Date values to local dates and times", { skip }, asy
   assert.doesNotMatch(source, /TODO/u);
   assert.deepEqual(run(source), [
     "13:20 2 9",
-    "6 5 true true",
+    "5 5 false false",
     "172800000 2 2026 2",
-    "-40195000 true",
+    "-126595000 true",
     "2026-10-7 1",
   ]);
 });
@@ -269,6 +269,10 @@ test(
         "def builder = new StringBuilder()",
         'builder.append("x")',
         "builder.append(3)",
+        // StringBuilder.replace() ends a range past the end at the end of the text.
+        'def clamp = new StringBuilder("abcde")',
+        'clamp[2..10] = "x"',
+        "show(clamp.toString())",
         'def nl = System.getProperty("line.separator")',
         "def letter = String.valueOf((char)(3 + 64))",
         'def scripts = ["a", "b"]',
@@ -280,23 +284,18 @@ test(
         'def missing = new File("scripts/DLC/pack2.groovy")',
         "if (pack.exists()) pack = true else pack = false",
         "if (missing.exists()) missing = true else missing = false",
-        'if (pack && !missing) show("pack only")',
       ],
       { "DLC/pack1.groovy": "// add-on\n" },
     );
     assert.match(
       source,
-      /^endCode = "\$\{endCode\.substring\(0, 4\)\}9\$\{endCode\.substring\(5\)\}"$/mu,
+      /^endCode = "\$\{endCode\.substring\(0, 4\)\}9\$\{endCode\.substring\(min\(5, endCode\.length\)\)\}"$/mu,
     );
     assert.match(source, /^scripts = \["Back"\] \+ scripts$/mu);
     assert.match(source, /^let pack = true$/mu);
     assert.match(source, /^let missing = false$/mu);
     assert.doesNotMatch(source, /TODO/u);
-    assert.deepEqual(run(source), [
-      "OXY59B x3 1 C Back,a,Mid,b a",
-      "false false true",
-      "pack only",
-    ]);
+    assert.deepEqual(run(source), ["abx", "OXY59B x3 1 C Back,a,Mid,b a", "false false true"]);
   },
 );
 
@@ -329,6 +328,62 @@ test("converts clock texts, file names, and closures kept in record fields", { s
   assert.match(source, /^times\.sort\(\)$/mu);
   assert.deepEqual(run(source), ["01:02:05 01:00 bed.jpg 11", "3,2,1 cba 2,5,9 3"]);
 });
+
+// Every way a script may change a file keeps its reads manual: through another variable, as a rename target, below a
+// folder it deletes, as the child of a parent folder, by `text +=`, through `as File`, through a File it derives, or in a
+// closure with the File as delegate.
+test("keeps reads of files that any write of the package may change", { skip }, async () => {
+  const files = { "quiz.txt": "first\n", "tmp.txt": "tmp\n", "data/quiz.txt": "data\n" };
+  const writes: Array<[string, string]> = [
+    ['def f = new File("scripts/quiz.txt"); def g = f; g.delete()', "scripts/quiz.txt"],
+    ['new File("scripts/tmp.txt").renameTo("scripts/quiz.txt")', "scripts/quiz.txt"],
+    ['new File("scripts", "quiz.txt").write("x")', "scripts/quiz.txt"],
+    ['new File("scripts/data").deleteDir()', "scripts/data/quiz.txt"],
+    ['def f = new File("scripts/quiz.txt"); f.text += "x"', "scripts/quiz.txt"],
+    ['("scripts/quiz.txt" as File).write("x")', "scripts/quiz.txt"],
+    ['new File("scripts/quiz.txt").absoluteFile.text = "x"', "scripts/quiz.txt"],
+    ['new File("scripts/quiz.txt").with { write("x") }', "scripts/quiz.txt"],
+  ];
+  for (const [write, read] of writes) {
+    const source = await convert([write, `def lines = new File("${read}").readLines()`], files);
+    assert.match(source, /TODO SX_PACKAGE_TEXT_WRITTEN line 2/u, write);
+  }
+});
+
+// A path from getDataFolder() names a file of the package root; a file the package lacks, a flag that a read may still
+// see as a File, an out-of-range Calendar.set(), and a key name alone stay manual or keep the lowering's own form.
+test(
+  "converts package paths and keeps unproven files, flags, and calendar values manual",
+  { skip },
+  async () => {
+    const source = await convert(
+      [
+        'def lines = new File("${getDataFolder()}/quiz.txt").readLines()',
+        'def none = new File("scripts/none.txt").readLines()',
+        'def pack = new File("scripts/addon.txt")',
+        "if (pack.exists()) pack = true",
+        'if (pack) show("yes")',
+        "def c = Calendar.getInstance()",
+        "c.set(Calendar.MINUTE, 90)",
+        'def menu = [label: "x", trim: { 1 }]',
+        'def name = "  a "',
+        'def b = new StringBuilder("abcde")',
+        'b[2..10] = "x"',
+        'def settings = new org.ini4j.Wini(new File("scripts/settings.ini"))',
+        'show(lines[0] + " " + name.trim() + " " + b.toString())',
+        'show(settings.get("S", "q") + settings.get("S", "c") + settings.get("S", "d"))',
+      ],
+      { "quiz.txt": "first\n", "settings.ini": '[S]\nq="a"\nc=x ; n\nd=1\nd=2\n' },
+    );
+    assert.match(source, /^let lines = sexscriptLegacyTextLines\("\$\{""\}\/quiz\.txt"\)$/mu);
+    assert.match(source, /TODO SX_PACKAGE_TEXT_MISSING line 2/u);
+    assert.doesNotMatch(source, /^let pack = (?:true|false)$/mu);
+    assert.match(source, /TODO SX_CALENDAR_SET_RANGE line 7/u);
+    assert.match(source, /name\.trim\(\)/u);
+    // ini4j 0.5.2 kept quotes and a later ; in a value, and read the last value of a repeated option.
+    assert.match(source, /"\\"a\\"" \+ "x ; n" \+ "2"/u);
+  },
+);
 
 function groovyParserUnavailableReason(): string | false {
   if (spawnSync("java", ["-version"], { stdio: "ignore" }).status !== 0) {

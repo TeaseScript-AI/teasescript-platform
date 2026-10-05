@@ -11,6 +11,8 @@ export interface Tree {
   reads: Map<string, AstNode[]>;
   constructors: AstNode[];
   calls: AstNode[];
+  /** Names that a declaration (`def name`, `Type name`) introduces, as opposed to script binding variables. */
+  declared: Set<string>;
 }
 
 export function buildTree(root: AstNode): Tree {
@@ -21,6 +23,7 @@ export function buildTree(root: AstNode): Tree {
     reads: new Map(),
     constructors: [],
     calls: [],
+    declared: new Set(),
   };
   const targets = new Set<AstNode>();
   const visit = (value: unknown, parent: AstNode | null): void => {
@@ -45,6 +48,7 @@ export function buildTree(root: AstNode): Tree {
       list.push(right === null || isEmptyExpression(right) ? null : right);
       tree.assignments.set(name, list);
     }
+    if (value.kind === "declaration" && name !== null) tree.declared.add(name);
     if (value.kind === "constructorCall") tree.constructors.push(value);
     if (Array.isArray(value.parameters)) {
       for (const parameter of value.parameters)

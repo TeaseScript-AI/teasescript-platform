@@ -22,6 +22,7 @@ import {
   type Tree,
 } from "./java-ast.ts";
 import { noteOnce, type JavaRuleHost } from "./java-data.ts";
+import { NUMBER, onlyOf } from "./types.ts";
 
 export type TemporalKind = "calendar" | "date";
 
@@ -206,7 +207,9 @@ export function temporalKind(node: AstNode, analysis: TemporalAnalysis): Tempora
         args.length === 0
       )
         return "calendar";
-      if (owner !== null && DATE_TYPES.has(owner) && name === "parse") return "date";
+      // Date.parse(pattern, text) is a Date; Date.parse(text) gave Unix milliseconds.
+      if (owner !== null && DATE_TYPES.has(owner) && name === "parse" && args.length >= 2)
+        return "date";
       const kind = temporalKind(receiver, analysis);
       if (name === "clone" && args.length === 0) return kind;
       if (name === "getTime" && args.length === 0 && kind === "calendar") return "date";
@@ -555,6 +558,8 @@ export function temporalConstructor(
   if (GREGORIAN_TYPES.has(type) && args.length === 0) return call("getDateTime");
   if (!DATE_TYPES.has(type)) return undefined;
   if (args.length === 1) {
+    // new Date(text) parsed the text instead.
+    if (!onlyOf(host.valueType(args[0]!), NUMBER)) return undefined;
     const count = host.lower(args[0]!);
     return count === null ? null : fromMilliseconds(count);
   }
@@ -641,6 +646,24 @@ export function temporalStatement(
     case "set": {
       const index = TIME_FIELDS.findIndex((time) => time === field);
       if (args.length !== 2 || index < 0) return null;
+      // Java normalizes the fields of a lenient Calendar when it next reads them, so a value outside its range combines
+      // with later set() calls; a literal value in range needs no normalization.
+      const literalValue = args[1]!.kind === "constant" ? args[1]!.value : undefined;
+      const limit = [23, 59, 59, 999][index]!;
+      if (
+        typeof literalValue !== "number" ||
+        !Number.isInteger(literalValue) ||
+        literalValue < 0 ||
+        literalValue > limit
+      ) {
+        host.diagnostic(
+          "SX_CALENDAR_SET_RANGE",
+          "error",
+          `Calendar.set() converts for a literal ${TIME_FIELDS[index]} from 0 to ${limit}; Java combined other values with the later set() calls before it normalized them.`,
+          node.span,
+        );
+        return null;
+      }
       const amount = host.lower(args[1]!);
       if (amount === null) return null;
       const parts = TIME_PROPERTIES.map((time, position) =>

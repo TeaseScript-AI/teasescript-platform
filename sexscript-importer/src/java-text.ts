@@ -17,7 +17,7 @@ import {
 } from "./java-ast.ts";
 import { noteOnce, type JavaRuleHost } from "./java-data.ts";
 import { whole } from "./java-time.ts";
-import { LIST, NULL, NUMBER, onlyOf, STRING } from "./types.ts";
+import { LIST, NULL, NUMBER, OBJECT, onlyOf, STRING } from "./types.ts";
 
 /** The values of a body that Java text, number, and random rules recognize. */
 export interface TextAnalysis {
@@ -91,7 +91,7 @@ const STRING_CLASSES = new Set(["String", "java.lang.String"]);
 const MATH_NOTE =
   "Java computed this with its own floating-point library; the generated helper computes it with ordinary arithmetic, which can differ in the last digits, and stops the script where Java gave NaN or Infinity, which are no TeaseScript numbers.";
 const ENCODE_NOTE =
-  "Java encoded every character as UTF-8; the generated helper encodes ASCII and Latin-1 characters the same way and stops the script at any other character, such as an emoji.";
+  "Java encoded every character as UTF-8; the generated helper encodes printable ASCII and Latin-1 characters, tabs, and line breaks the same way and stops the script at any other character, such as another control character or an emoji.";
 const NUMBER_TEXT_NOTE =
   "Java also accepted digits of other scripts, such as Arabic-Indic digits; the generated check accepts the digits 0 to 9.";
 const RANDOM_NOTE =
@@ -99,7 +99,7 @@ const RANDOM_NOTE =
 const INT_NOTE =
   "Java's intValue() dropped the bits of a whole number beyond the int range and capped a decimal number at it; toInteger() keeps the whole number.";
 const ROUNDING_NOTE =
-  "Java Math.round() rounds .5 toward positive infinity (-1.5 becomes -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13).";
+  "If this number was a Java double, Groovy round() rounded .5 toward positive infinity (-1.5 became -1); TeaseScript round() rounds ties away from zero (-1.5 becomes -2, V30 §13), as Groovy did for a decimal (BigDecimal) number.";
 const DECIMAL_ROUNDING_NOTE =
   "Groovy rounded a decimal (BigDecimal) number half up at its decimal digits; the binary number here can round a tie such as 12.345 down.";
 const LINE_SEPARATOR_NOTE =
@@ -351,7 +351,9 @@ export function textCall(
   // `record.action()` calls the closure that the record's field holds, as a Groovy map did.
   if (
     analysis.closureFields.has(name) &&
-    (owner === null || host.isVariable(owner.split(".")[0]!))
+    (owner === null || host.isVariable(owner.split(".")[0]!)) &&
+    onlyOf(host.valueType(receiver), OBJECT | NULL) &&
+    (host.valueType(receiver) & OBJECT) !== 0
   ) {
     const field = host.lower({
       kind: "property",
@@ -663,7 +665,14 @@ export function textAssignment(
     parts: [
       { value: method(text, "substring", literal(0), literal(from)) },
       textPart(value),
-      { value: method(text, "substring", literal(to)) },
+      // StringBuilder.replace() ends the range at the end of the text.
+      {
+        value: method(
+          text,
+          "substring",
+          call("min", literal(to), { kind: "property", target: text, name: "length" }),
+        ),
+      },
     ],
   };
   return [{ kind: "assign", target: text, operator: "=", value: replaced, span }];

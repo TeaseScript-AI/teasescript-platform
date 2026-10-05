@@ -163,7 +163,13 @@ const between = (value: IrExpression, low: string, high: string): IrExpression =
   bin("and", bin(">=", value, lit(low)), bin("<=", value, lit(high)));
 
 const LN2 = 0.6931471805599453;
-const TWO_PI = 2 * Math.PI;
+/**
+ * 2 pi in three parts whose sum is exact to about 1e-32: the first has few enough bits that a whole multiple of it is
+ * exact, so an angle reduces without losing its fraction.
+ */
+const TWO_PI_HIGH = Math.floor(2 * Math.PI * 2 ** 24) / 2 ** 24;
+const TWO_PI_MIDDLE = 2 * Math.PI - TWO_PI_HIGH;
+const TWO_PI_LOW = 2.4492935982947064e-16;
 const POWER_32 = 4294967296;
 
 /** Java URLEncoder keeps these characters; it writes a space as `+` and every other character as `%XX` bytes. */
@@ -203,9 +209,20 @@ function trigonometry(name: string, sine: boolean): IrStatement {
     name,
     ["value"],
     [
-      letS("angle", bin("%", v("value"), lit(TWO_PI)), "number"),
-      ifS(bin(">", v("angle"), lit(Math.PI)), [set("angle", lit(TWO_PI), "-=")]),
-      ifS(bin("<", v("angle"), lit(-Math.PI)), [set("angle", lit(TWO_PI), "+=")]),
+      letS("turns", call("round", bin("/", v("value"), lit(2 * Math.PI)))),
+      letS(
+        "angle",
+        bin(
+          "-",
+          bin(
+            "-",
+            bin("-", v("value"), bin("*", v("turns"), lit(TWO_PI_HIGH))),
+            bin("*", v("turns"), lit(TWO_PI_MIDDLE)),
+          ),
+          bin("*", v("turns"), lit(TWO_PI_LOW)),
+        ),
+        "number",
+      ),
       letS("square", bin("*", v("angle"), v("angle")), "number"),
       letS("term", sine ? v("angle") : lit(1.0), "number"),
       letS("sum", v("term"), "number"),
