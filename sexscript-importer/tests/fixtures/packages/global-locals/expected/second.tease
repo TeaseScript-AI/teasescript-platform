@@ -1,0 +1,5 @@
+// lastTime is a global of helpers.tease; this script starts it with its own value.
+lastTime = getTimestamp().toSeconds()
+remember()
+say "Elapsed ${elapsed()}"
+exit

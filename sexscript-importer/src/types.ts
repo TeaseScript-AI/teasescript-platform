@@ -34,6 +34,11 @@ export interface TypeEnvironment {
   singleAssignment?: ReadonlySet<string>;
   /** Union of the values each local function (a closure in a variable) returns. */
   functionResults?: ReadonlyMap<string, ValueType>;
+  /**
+   * The positions of the parameters a local function returns unchanged, whose arguments a call adds to the result:
+   * `{ key, fallback -> ... return fallback }` returns what a call passes as `fallback`.
+   */
+  functionPassThrough?: ReadonlyMap<string, readonly number[]>;
   /** Set while the list elements are not inferred yet, so an element read adds no type (inferVariableTypes). */
   elementsPending?: true;
   /**
@@ -294,8 +299,17 @@ function methodCallType(node: AstNode, environment: TypeEnvironment): ValueType 
   const name = constantString(node.method);
   if (name === null) return UNKNOWN;
   const receiver = variableName(node.object);
-  if (node.implicitThis === true && environment.localFunctions?.has(name) === true)
-    return environment.functionResults?.get(name) ?? UNKNOWN;
+  if (node.implicitThis === true && environment.localFunctions?.has(name) === true) {
+    const passed = environment.functionPassThrough?.get(name);
+    if (passed === undefined) return environment.functionResults?.get(name) ?? UNKNOWN;
+    const items: unknown = asNode(node.arguments)?.items;
+    const args = Array.isArray(items) ? items.filter(isAstNode) : [];
+    return passed.reduce(
+      (type, position) =>
+        type | (args[position] === undefined ? NULL : inferType(args[position], environment)),
+      environment.functionResults?.get(name) ?? 0,
+    );
+  }
   if (node.implicitThis === true || receiver === "main") {
     return SEXSCRIPT_RESULT_TYPES.get(name) ?? UNKNOWN;
   }
@@ -343,8 +357,10 @@ export function inferVariableTypes(
   };
   const { assignments, unknownKeys } = collector;
   const localFunctions = new Set<string>(localFunctionNames);
-  // The values each closure kept in a variable returns, which calls of it produce.
+  // The values each closure kept in a variable returns, which calls of it produce; a returned parameter that the
+  // closure never assigns is the call's argument (functionPassThrough).
   const returns: Array<{ name: string; values: AstNode[] }> = [];
+  const passThrough = new Map<string, number[]>();
   walkAst(body, (node) => {
     collectAssignments(node, collector);
     const closure = node.kind === "declaration" ? asNode(node.right) : null;
@@ -352,7 +368,33 @@ export function inferVariableTypes(
       const name = variableName(node.left);
       if (name !== null) {
         localFunctions.add(name);
-        returns.push({ name, values: closureReturnValues(closure) });
+        const parameterNames =
+          closure.parameterSpecified === true
+            ? (groovyParameters(closure.parameters) ?? []).map((parameter) => parameter.name)
+            : [];
+        const assignedInside = new Set<string>();
+        walkAst(closure.body, (inner) => {
+          const target =
+            inner.kind === "binary" &&
+            String(inner.operator).endsWith("=") &&
+            inner.operator !== "=="
+              ? variableName(inner.left)
+              : null;
+          if (target !== null) assignedInside.add(target);
+        });
+        const values = closureReturnValues(closure);
+        const passed = values.flatMap((value) => {
+          const position = parameterNames.indexOf(variableName(value) ?? "");
+          return position >= 0 && !assignedInside.has(parameterNames[position]!) ? [position] : [];
+        });
+        if (passed.length > 0) passThrough.set(name, [...new Set(passed)]);
+        returns.push({
+          name,
+          values: values.filter((value) => {
+            const position = parameterNames.indexOf(variableName(value) ?? "");
+            return !(position >= 0 && passed.includes(position));
+          }),
+        });
       }
     }
   });
@@ -395,6 +437,7 @@ export function inferVariableTypes(
     variables: types,
     localFunctions,
     functionResults,
+    functionPassThrough: passThrough,
     elementsPending: true,
     ...scoped,
   };
@@ -441,11 +484,24 @@ export function inferVariableTypes(
       previous !== undefined &&
       listElements.size === previous.size &&
       [...listElements].every(([name, type]) => previous.get(name) === type);
-    environment = { variables: types, localFunctions, functionResults, listElements, ...scoped };
+    environment = {
+      variables: types,
+      localFunctions,
+      functionResults,
+      functionPassThrough: passThrough,
+      listElements,
+      ...scoped,
+    };
     settle();
   }
   if (!settled) {
-    environment = { variables: types, localFunctions, functionResults, ...scoped };
+    environment = {
+      variables: types,
+      localFunctions,
+      functionResults,
+      functionPassThrough: passThrough,
+      ...scoped,
+    };
     settle();
   }
   for (const [key, type] of types) if (type === 0) types.set(key, UNKNOWN);
@@ -473,6 +529,7 @@ export function inferVariableTypes(
     localFunctions,
     singleAssignment,
     functionResults,
+    functionPassThrough: passThrough,
     listElements,
     ...(bindingOf === undefined ? {} : { bindingTypes, bindingOf }),
   };

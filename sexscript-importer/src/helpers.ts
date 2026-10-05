@@ -86,6 +86,7 @@ export type HelperName =
   | "maskUrl"
   | "textLines"
   | "endsWithDigits"
+  | "plainText"
   | "askText"
   | "compare"
   | "replaceChars"
@@ -189,6 +190,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "maskUrl",
   "textLines",
   "endsWithDigits",
+  "plainText",
   "askText",
   "compare",
   "replaceChars",
@@ -992,6 +994,49 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
               ),
             ),
           ),
+        ],
+      );
+    },
+  },
+  // Text without message markup markers, for a loop that shows it character by character (lower.ts plainCharacters).
+  plainText: {
+    name: "sexscriptLegacyPlainText",
+    build: () => {
+      const method = (
+        target: IrExpression,
+        name: string,
+        ...args: IrExpression[]
+      ): IrExpression => ({ kind: "methodCall", target, name, arguments: args });
+      const stripped = ["**", "~~", "[u]", "[/u]", "[/color]"].reduce(
+        (text, marker) => method(text, "replace", lit(marker), lit("")),
+        template(v("value")),
+      );
+      return fn(
+        "sexscriptLegacyPlainText",
+        ["value"],
+        [
+          letS("text", stripped),
+          letS("start", method(v("text"), "indexOf", lit("[color="))),
+          {
+            kind: "while",
+            condition: bin(">=", v("start"), lit(0)),
+            body: [
+              letS("end", method(v("text"), "indexOf", lit("]"))),
+              ifS(bin("<", v("end"), v("start")), [
+                ret(method(v("text"), "replace", lit("*"), lit(""))),
+              ]),
+              set(
+                v("text"),
+                template(
+                  method(v("text"), "substring", lit(0), v("start")),
+                  method(v("text"), "substring", bin("+", v("end"), lit(1))),
+                ),
+              ),
+              set(v("start"), method(v("text"), "indexOf", lit("[color="))),
+            ],
+            span: null,
+          },
+          ret(method(v("text"), "replace", lit("*"), lit(""))),
         ],
       );
     },

@@ -1,0 +1,21 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+// A try block that cannot fail on purpose runs without its catch, in its own block, then its finally block.
+let pause = 2
+// NOTE SX_TRY_WITHOUT_CATCH line 3: Legacy caught errors in this block; TeaseScript has no exceptions, so the block runs without its catch, and an error here stops the script.
+if true {
+  let shown = "Hold still"
+  say shown, instant
+  wait pause
+}
+say "Relax"
+// A try block that parses a number keeps its catch as manual work.
+// TODO SX_UNSUPPORTED_STATEMENT line 13: Unsupported Groovy statement: tryCatch
+// | try {
+// |   def count = Integer.parseInt(loadString("training.count"))
+// |   show("Count " + count)
+// | } catch (NumberFormatException e) {
+// |   show("No count")
+// | }
+exit

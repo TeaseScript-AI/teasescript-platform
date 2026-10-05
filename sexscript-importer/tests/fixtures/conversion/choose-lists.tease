@@ -43,4 +43,13 @@ for roundValue in 1..=2 {
   say "Picked ${options[picked]}"
   options = ["Plug", "Clamps"]
 }
+// Written options after a runtime list join it, so their positions follow the list's.
+let mistresses = ["Vera", "Anna"]
+say "Who will see you?"
+let pickMistress = choose sexscriptLegacyMenuOptions(mistresses + ["Back"], 0)
+if pickMistress == mistresses.length {
+  say "Back"
+} else {
+  say "Mistress ${mistresses[pickMistress]}"
+}
 exit

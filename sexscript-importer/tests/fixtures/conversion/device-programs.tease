@@ -16,7 +16,30 @@ function sexscriptLegacyOpenTray {
     removePermanentButton(sexscriptLegacyDeviceButtons["CD tray"])
   }
 }
+let sexscriptLegacySwitchButton = null
+function sexscriptLegacyShowSwitch(command) {
+  let last = command.trim().split(" ").last.lowercase()
+  if ["on", "ein", "an"].contains(last) {
+    if sexscriptLegacySwitchButton != null {
+      removePermanentButton(sexscriptLegacySwitchButton)
+    }
+    sexscriptLegacySwitchButton = showPermanentButton "Power: ON" {
+      persist: true
+    }
+  }
+  if ["off", "aus"].contains(last) {
+    if sexscriptLegacySwitchButton != null {
+      removePermanentButton(sexscriptLegacySwitchButton)
+    }
+    sexscriptLegacySwitchButton = showPermanentButton "Power: OFF" {
+      persist: true
+    }
+  }
+}
 // Device programs on the player's computer cannot run from a package; a permanent button shows each device's state.
+// An open CD tray is a button; clicking it closes the tray.
+// A command variable named for the switch state it sets shows that state.
+let switchbox_onText = ""
 // NOTE SX_DATA_FOLDER line 2: getDataFolder() was the legacy player's data folder on the player's computer; package paths start at the package root, so it is empty text here.
 let path = ""
 let estim_start = load "training.estim_start"
@@ -34,8 +57,15 @@ wait 2
 sexscriptLegacyShowDevice("Estim", "STOPPED")
 // NOTE SX_DEVICE_STATE line 11: useFile() ran the device command in arm_finish on the player's computer, which a package cannot start; a permanent button shows the device's state instead, "Lock: UNLOCKED".
 sexscriptLegacyShowDevice("Lock", "UNLOCKED")
-// An open CD tray is a button; clicking it closes the tray.
 // NOTE SX_DEVICE_STATE line 13: openCdTrays() opened the CD trays of the player's computer, which a package cannot do; a permanent button shows the open tray, and clicking it closes the tray.
 sexscriptLegacyOpenTray()
 say "Put the key in the tray"
+let switchbox_on = 0
+let switchbox_off = 0
+switchbox_onText = "usbcontrol.exe ${load "training.switchbox"} on"
+// NOTE SX_SWITCH_BUTTON line 18: The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.
+sexscriptLegacyShowSwitch(switchbox_onText)
+switchbox_off = 1
+// NOTE SX_SWITCH_BUTTON line 20: The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.
+sexscriptLegacyShowSwitch("switch off")
 exit

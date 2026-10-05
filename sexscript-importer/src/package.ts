@@ -25,6 +25,7 @@ import {
   packageStableNames,
   packageStopsBackgroundSounds,
   photoCopy,
+  withGuardedInputs,
 } from "./lower.ts";
 import { helperDefinitionOrder, SYSTEM_SPEAKER, withActionDispatcher } from "./helpers.ts";
 import { promoteGlobalFunctions, type GlobalPromotion } from "./globals.ts";
@@ -219,9 +220,24 @@ function menuLabels(
   for (const label of labels.values()) counts.set(label, (counts.get(label) ?? 0) + 1);
   return new Map(
     [...labels].map(([path, label]) =>
-      counts.get(label)! > 1 ? [path, `${label} (${base(path)})`] : [path, label],
+      counts.get(label)! > 1
+        ? [
+            path,
+            isOtherVersion(path)
+              ? `${label} (alternate version of ${base(path.replace(SHA_VERSION, ""))}, ${/__sha256_([0-9a-f]+)/iu.exec(path)![1]!.slice(0, 6)})`
+              : `${label} (${base(path)})`,
+          ]
+        : [path, label],
     ),
   );
+}
+
+/** The suffix by which the corpus merge kept another version of a script beside it: `name__sha256_<hash>`. */
+const SHA_VERSION = /__sha256_[0-9a-f]+(?=\.tease$)/iu;
+
+/** Whether a script is another version of a script, which the corpus merge kept beside it. */
+function isOtherVersion(path: string): boolean {
+  return SHA_VERSION.test(path);
 }
 
 /** The indexes of the files that `internal` names by their paths from the legacy scripts folder. */
@@ -368,16 +384,35 @@ function entryMenu(
   const targeted = (path: string): boolean =>
     targets.has(path.toLowerCase()) || targets.has(base(path).toLowerCase());
   const listed = scripts.rootScripts.filter((index) => !internal.has(index));
+  // Other versions of a script, which the corpus merge kept beside it as `name__sha256_<hash>`, come after the scripts.
   const offered = listed
     .map((index) => scripts.pathOf.get(index)!)
     .filter((path) => !targeted(path))
-    .sort();
-  const choices =
+    .sort((first, second) =>
+      isOtherVersion(first) === isOtherVersion(second)
+        ? first < second
+          ? -1
+          : first > second
+            ? 1
+            : 0
+        : isOtherVersion(first)
+          ? 1
+          : -1,
+    );
+  const rooted =
     offered.length > 0
       ? offered
       : (listed.length > 0 ? listed : scripts.rootScripts).map((index) =>
           scripts.pathOf.get(index)!,
         );
+  // A package whose scripts are all in folders, such as System/, offers the scripts nothing chains to, or every script.
+  const everyScript = [...scripts.pathOf.values()].sort();
+  const choices =
+    rooted.length > 0
+      ? rooted
+      : everyScript.some((path) => !targeted(path))
+        ? everyScript.filter((path) => !targeted(path))
+        : everyScript;
   const variants = [...scripts.pathOf.values()]
     .filter((path) => base(path) !== path && targeted(path) && !targets.has(path.toLowerCase()))
     .sort();
@@ -442,9 +477,11 @@ function entryMenu(
 }
 
 export function lowerPackage(
-  files: readonly ParsedGroovyFile[],
+  parsedFiles: readonly ParsedGroovyFile[],
   options: PackageOptions = {},
 ): LoweredPackage {
+  // Questions inside short circuits are asked at their own moment (withGuardedInputs).
+  const files = parsedFiles.map(withGuardedInputs);
   const helperRegistry = buildHelperRegistry(files);
   const mixinModules = files.flatMap((file) => describeMixinModule(file) ?? []);
   const stableNames = packageStableNames(files);

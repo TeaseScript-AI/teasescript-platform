@@ -1,0 +1,2 @@
+// NOTE SX_ENTRY_MENU: The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, which goes to first.tease, the only listed script that no other script chains to.
+goto "first.tease"

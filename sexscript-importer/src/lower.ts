@@ -320,6 +320,201 @@ export function buildHelperRegistry(files: readonly ParsedGroovyFile[]): HelperR
   return registry;
 }
 
+/** Legacy input calls that show a question first (pushPrompt). */
+const PROMPTING_CALLS = new Set([
+  "getBoolean",
+  "getFloat",
+  "getInteger",
+  "getSelectedValue",
+  "getString",
+  "getFile",
+  "getImage",
+]);
+
+/**
+ * A file whose `while` conditions ask inside `&&`, `||`, or `?:`, as in `while (name == null ||
+ * !getBoolean("Good?"))`, rewritten so each question comes at its own moment: the condition is computed into a
+ * variable step by step, asking only where Groovy's short circuit reached the input, and a loop tests it at its top.
+ * Other files are returned as they are.
+ */
+export function withGuardedInputs(file: ParsedGroovyFile): ParsedGroovyFile {
+  const body = asNode(file.root?.body);
+  if (file.root === null || body === null) return file;
+  let found = false;
+  walkAst(body, (node) => {
+    if (node.kind === "while" && hasGuardedInput(asNode(node.condition))) found = true;
+  });
+  if (!found) return file;
+  const taken = new Set<string>();
+  walkAst(body, (node) => {
+    const name = variableName(node);
+    if (name !== null) taken.add(name);
+  });
+  const fresh = (): string => {
+    let name = "answered";
+    for (let suffix = 2; taken.has(name); suffix += 1) name = `answered${suffix}`;
+    taken.add(name);
+    return name;
+  };
+  const copy: AstNode = structuredClone(body);
+  rewriteGuardedInputs(copy, fresh);
+  return { ...file, root: { ...file.root, body: copy } };
+}
+
+/** Whether an input call sits where Groovy's `&&`, `||`, or `?:` decides whether it runs. */
+function hasGuardedInput(condition: AstNode | null): boolean {
+  if (condition === null) return false;
+  let guarded = false;
+  const visit = (node: AstNode, inGuard: boolean): void => {
+    if (node.kind === "closure") return;
+    if (inGuard && isPromptingCall(node)) guarded = true;
+    if (node.kind === "binary" && (node.operator === "&&" || node.operator === "||")) {
+      const left = asNode(node.left);
+      const right = asNode(node.right);
+      if (left !== null) visit(left, inGuard);
+      if (right !== null) visit(right, true);
+      return;
+    }
+    if (node.kind === "ternary" || node.kind === "elvis") {
+      for (const [key, child] of Object.entries(node))
+        if (isAstNode(child)) visit(child, inGuard || (key !== "condition" && key !== "boolean"));
+      return;
+    }
+    for (const child of nodeChildren(node)) visit(child, inGuard);
+  };
+  visit(condition, false);
+  return guarded;
+}
+
+function isPromptingCall(node: AstNode): boolean {
+  const name = node.kind === "methodCall" ? constantString(node.method) : null;
+  const receiver = asNode(node.object);
+  return (
+    name !== null &&
+    PROMPTING_CALLS.has(name) &&
+    (node.implicitThis === true || variableName(receiver) === "this")
+  );
+}
+
+/** Rewrites the statements of every block below `node` (withGuardedInputs). */
+function rewriteGuardedInputs(node: AstNode, fresh: () => string): void {
+  for (const value of Object.values(node)) {
+    if (Array.isArray(value)) {
+      for (let index = 0; index < value.length; index += 1) {
+        const item: unknown = value[index];
+        if (!isAstNode(item)) continue;
+        rewriteGuardedInputs(item, fresh);
+        const replaced = guardedStatement(item, fresh);
+        if (replaced !== null) {
+          value.splice(index, 1, ...replaced);
+          index += replaced.length - 1;
+        }
+      }
+    } else if (isAstNode(value)) rewriteGuardedInputs(value, fresh);
+  }
+}
+
+/** A `while` or `if` statement whose condition asks inside a short circuit, rewritten (withGuardedInputs). */
+function guardedStatement(statement: AstNode, fresh: () => string): AstNode[] | null {
+  const condition = asNode(statement.condition);
+  // An if statement's condition already computes a guarded question first (the deferred conditional).
+  if (statement.kind !== "while" || !hasGuardedInput(condition)) return null;
+  const span = statement.span ?? null;
+  const answer = fresh();
+  const variable = (): AstNode => ({ kind: "variable", span, name: answer });
+  const steps = [
+    {
+      kind: "expressionStatement",
+      span,
+      expression: {
+        kind: "declaration",
+        span,
+        multipleAssignment: false,
+        left: variable(),
+        right: { kind: "constant", span, value: false },
+      },
+    },
+    ...conditionSteps(condition!, variable, span),
+  ];
+  const body = asNode(statement.body);
+  const inner = body?.kind === "block" ? nodeArray(body.statements) : body === null ? [] : [body];
+  return [
+    {
+      ...statement,
+      condition: { kind: "constant", span, value: true },
+      body: {
+        kind: "block",
+        span,
+        statements: [
+          ...steps,
+          {
+            kind: "if",
+            span,
+            condition: { kind: "not", span, value: variable() },
+            then: { kind: "block", span, statements: [{ kind: "break", span, label: null }] },
+            else: { kind: "empty", span },
+          },
+          ...inner,
+        ],
+      },
+    },
+  ];
+}
+
+/** Statements that compute a condition into the answer variable, asking only where the short circuit reaches. */
+function conditionSteps(
+  condition: AstNode,
+  variable: () => AstNode,
+  span: SourceSpan | null,
+): AstNode[] {
+  const assign = (value: AstNode): AstNode => ({
+    kind: "expressionStatement",
+    span,
+    expression: { kind: "binary", span, operator: "=", left: variable(), right: value },
+  });
+  const branch = (test: AstNode, then: AstNode[], otherwise: AstNode[]): AstNode => ({
+    kind: "if",
+    span,
+    condition: test,
+    then: { kind: "block", span, statements: then },
+    else: { kind: "block", span, statements: otherwise },
+  });
+  if (!hasGuardedInput(condition)) return [assign(condition)];
+  const left = asNode(condition.left);
+  const right = asNode(condition.right);
+  if (
+    condition.kind === "binary" &&
+    (condition.operator === "||" || condition.operator === "&&") &&
+    left !== null &&
+    right !== null
+  ) {
+    const or = condition.operator === "||";
+    const decided = assign({ kind: "constant", span, value: or });
+    // A left side without a question is tested where it stands, so a null test still narrows the right side.
+    if (!hasGuardedInput(left))
+      return [
+        or
+          ? branch(left, [decided], conditionSteps(right, variable, span))
+          : branch(left, conditionSteps(right, variable, span), [decided]),
+      ];
+    return [
+      ...conditionSteps(left, variable, span),
+      branch(
+        or ? { kind: "not", span, value: variable() } : variable(),
+        conditionSteps(right, variable, span),
+        [],
+      ),
+    ];
+  }
+  const inner = asNode(condition.value);
+  if (condition.kind === "not" && inner !== null)
+    return [
+      ...conditionSteps(inner, variable, span),
+      assign({ kind: "not", span, value: variable() }),
+    ];
+  return [assign(condition)];
+}
+
 export function lowerParsedFiles(files: readonly ParsedGroovyFile[]): MigrationProgram[] {
   const helperRegistry = buildHelperRegistry(files);
   return files.map((file) => lowerParsedFile(file, { helperRegistry }));
@@ -480,7 +675,13 @@ function mapUsesOf(bodies: readonly MapBody[]): MapUses {
       const right = node.kind === "declaration" ? asNode(node.right) : null;
       const key = right === null ? null : bindingKey(asNode(node.left), keys);
       const name = variableName(node.left);
-      const type = name === null ? UNKNOWN : (types.variables.get(name) ?? UNKNOWN);
+      // A function's local has its own type, apart from other variables of the same name.
+      const type =
+        name === null
+          ? UNKNOWN
+          : ((key === null ? undefined : types.bindingTypes?.get(key)) ??
+            types.variables.get(name) ??
+            UNKNOWN);
       if (
         key !== null &&
         (isEmptyGroovyExpression(right!) || isNullConstant(right!)) &&
@@ -2276,6 +2477,18 @@ function lowerStatementNode(node: AstNode, context: LowerContext): IrStatement[]
         ];
       }
       return [{ kind: node.kind, span: node.span }];
+    case "tryCatch": {
+      const kept = tryBody(node, context);
+      if (kept !== null) return kept;
+      return [
+        unsupportedStatement(
+          context,
+          node,
+          "SX_UNSUPPORTED_STATEMENT",
+          `Unsupported Groovy statement: ${node.kind}`,
+        ),
+      ];
+    }
     default:
       return [
         unsupportedStatement(
@@ -2286,6 +2499,82 @@ function lowerStatementNode(node: AstNode, context: LowerContext): IrStatement[]
         ),
       ];
   }
+}
+
+/** Calls and constructions whose failure a legacy catch handled: number parsing, files, network, and programs. */
+const FALLIBLE_CALLS = new Set([
+  "parseInt",
+  "parseDouble",
+  "parseFloat",
+  "parseLong",
+  "valueOf",
+  "toInteger",
+  "toDouble",
+  "toFloat",
+  "toLong",
+  "toBigDecimal",
+  "toURL",
+  "openConnection",
+  "openStream",
+  "readLines",
+  "getText",
+  "newReader",
+  "withReader",
+  "eachLine",
+  "execute",
+  "exitValue",
+  "waitFor",
+  "waitForOrKill",
+  "getBytes",
+  "decode",
+]);
+
+/**
+ * A try block whose body has nothing that fails on purpose, such as waits, sounds, or device states: TeaseScript has no
+ * exceptions, so the body runs in its own block without the catch, then the finally block, with a note. Null for a
+ * body that may throw what the catch handled, or that does not convert.
+ */
+function tryBody(node: AstNode, context: LowerContext): IrStatement[] | null {
+  const block = asNode(node.try);
+  const after = asNode(node.finally);
+  if (block?.kind !== "block") return null;
+  let fallible = false;
+  walkAst(block, (child) => {
+    if (child.kind === "throw" || child.kind === "cast") fallible = true;
+    if (child.kind === "methodCall" && FALLIBLE_CALLS.has(constantString(child.method) ?? ""))
+      fallible = true;
+    if (
+      child.kind === "constructorCall" &&
+      /URL|Reader|Stream|Socket|Process|File/u.test(String(child.type))
+    )
+      fallible = true;
+  });
+  if (fallible) return null;
+  const diagnostics = context.diagnostics.length;
+  const body = lowerBlock(block, context);
+  if (context.diagnostics.slice(diagnostics).some(({ severity }) => severity === "error")) {
+    context.diagnostics.length = diagnostics;
+    return null;
+  }
+  const last = after?.kind === "block" ? lowerBlock(after, context) : [];
+  addDiagnostic(
+    context,
+    "SX_TRY_WITHOUT_CATCH",
+    "warning",
+    "Legacy caught errors in this block; TeaseScript has no exceptions, so the block runs without its catch, and an error here stops the script.",
+    node.span,
+  );
+  // The block keeps its own scope, as Groovy's try block did.
+  return [
+    {
+      kind: "if",
+      condition: { kind: "literal", value: true },
+      then: body,
+      else: [],
+      span: node.span ?? null,
+    },
+    ...last,
+  ];
 }
 
 /**
@@ -3241,6 +3530,31 @@ function lowerDeclaration(
 ): IrStatement[] {
   const name = variableName(node.left);
   const right = asNode(node.right);
+  // `def (x, y) = values` declares each variable with the element at its position, null past the end.
+  const targets =
+    asNode(node.left)?.kind === "arguments" ? nodeArray(asNode(node.left)!.items) : [];
+  if (
+    node.multipleAssignment === true &&
+    right !== null &&
+    targets.length > 0 &&
+    targets.every((target) => variableName(target) !== null)
+  ) {
+    const values = lowerExpression(right, context);
+    if (values === null) return [];
+    const list = freshName("values", context);
+    return [
+      { kind: "let", name: list, value: values, span },
+      ...targets.map((target, position): IrStatement => ({
+        kind: "let",
+        name: variableName(target)!,
+        value: useHelper(context, "itemAt", [
+          { kind: "variable", name: list },
+          { kind: "literal", value: position },
+        ]),
+        span,
+      })),
+    ];
+  }
   if (name === null || right === null) {
     return [
       unsupportedStatement(
@@ -4645,6 +4959,52 @@ function lowerCallStatement(
       },
     ];
   }
+  // Deleting another file clears what the package keeps under its path: the reference of a photo copied there
+  // (photoCopy); making a folder does nothing in a package (owner decision).
+  if (
+    call !== null &&
+    (call.name === "delete" || call.name === "mkdir" || call.name === "mkdirs") &&
+    call.arguments.length === 0 &&
+    receiver !== null &&
+    isFileConstructor(receiver)
+  ) {
+    const pathNode = nodeArray(asNode(receiver.arguments)?.items)[0]!;
+    if (call.name !== "delete") {
+      addDiagnostic(
+        context,
+        "SX_FOLDER_CREATE",
+        "warning",
+        `${call.name}() made a folder on the player's computer; a package has no folders to make, so it is dropped.`,
+        span,
+      );
+      return [];
+    }
+    const path = lowerExpression(pathNode, context);
+    if (path === null) return [];
+    addDiagnostic(
+      context,
+      "SX_FILE_DELETE",
+      "warning",
+      "delete() removed this file from the player's computer; a package keeps no files, so the reference stored under its path, such as a photo copied there, is cleared.",
+      span,
+    );
+    return [
+      {
+        kind: "delete",
+        key: templateOrLiteral([
+          { text: SENT_IMAGE_PREFIX },
+          ...(path.kind === "template"
+            ? path.parts
+            : [
+                path.kind === "literal" && typeof path.value === "string"
+                  ? { text: path.value }
+                  : { value: path },
+              ]),
+        ]),
+        span,
+      },
+    ];
+  }
   const recordName = receiver === null ? null : variableName(receiver);
   if (
     call?.name === "clear" &&
@@ -5631,7 +5991,16 @@ function lowerEachStatement(
   }
   const variable = parameterSpecified ? closureParameters[0]!.name : "it";
 
-  const collection = lowerIterated(receiverNode, context);
+  const iterated = lowerIterated(receiverNode, context);
+  const collection =
+    iterated === null
+      ? null
+      : plainCharacters(
+          iterated,
+          body,
+          closure.parameterSpecified === true ? (closureParameters[0]?.name ?? "it") : "it",
+          context,
+        );
   if (collection === null) {
     return [
       unsupportedStatement(
@@ -5985,8 +6354,11 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
   // A loop that removes its element from the collection proves it a list (elementRemovals).
   let removes = false;
   if (body !== null) walkAst(body, (child) => (removes ||= context.elementRemovals.has(child)));
+  const iterated = collectionNode === null ? null : lowerIterated(collectionNode, context, removes);
   const collection =
-    collectionNode === null ? null : lowerIterated(collectionNode, context, removes);
+    iterated === null || body === null || variable === null
+      ? iterated
+      : plainCharacters(iterated, body, variable, context);
   if (variable === null || collection === null || body?.kind !== "block") {
     return [
       unsupportedStatement(
@@ -6058,6 +6430,51 @@ function lowerIterated(
     ...collection,
     to: { kind: "call", name: "floor", positional: [collection.to], named: {} },
   };
+}
+
+/**
+ * The characters of a text that a loop shows one by one, as a typewriter effect does: the text holds message markup
+ * (markup.ts) that would show as markers until its span closes, so the loop goes through the text without them. Other
+ * collections stay as they are.
+ */
+function plainCharacters(
+  collection: IrExpression,
+  body: AstNode,
+  variable: string,
+  context: LowerContext,
+): IrExpression {
+  // The loop shows the text so far: it adds each character to a text it shows.
+  let shows = false;
+  let adds = false;
+  walkAst(body, (child) => {
+    shows ||= child.kind === "methodCall" && legacyApiCall(child, context)?.name === "show";
+    if (child.kind !== "binary" || (child.operator !== "+=" && child.operator !== "=")) return;
+    walkAst(asNode(child.right), (part) => (adds ||= variableName(part) === variable));
+  });
+  if (!shows || !adds) return collection;
+  const characters =
+    collection.kind === "methodCall" &&
+    collection.name === "split" &&
+    collection.arguments.length === 1 &&
+    collection.arguments[0]!.kind === "literal" &&
+    collection.arguments[0]!.value === "";
+  const items = collection.kind === "call" && collection.name === "sexscriptLegacyItems";
+  if (!characters && !items) return collection;
+  addDiagnostic(
+    context,
+    "SX_TYPEWRITER_MARKUP",
+    "info",
+    "This loop shows a text character by character; message markup in the text would show as markers until its span closes, so the loop goes through the text without markup.",
+    body.span,
+  );
+  if (collection.kind === "methodCall")
+    return { ...collection, target: useHelper(context, "plainText", [collection.target]) };
+  if (collection.kind === "call")
+    return {
+      ...collection,
+      positional: [useHelper(context, "plainText", [collection.positional[0]!])],
+    };
+  return collection;
 }
 
 /**
@@ -8529,7 +8946,11 @@ function concatenationParts(node: AstNode, context: LowerContext): TemplatePart[
   if (node.kind === "binary" && node.operator === "+") {
     const leftNode = asNode(node.left);
     const rightNode = asNode(node.right);
-    if (leftNode !== null && rightNode !== null && onlyOf(inferType(node, context.types), STRING)) {
+    if (
+      leftNode !== null &&
+      rightNode !== null &&
+      (onlyOf(inferType(node, context.types), STRING) || startsWithText(node, context))
+    ) {
       const left = concatenationParts(leftNode, context);
       const right = concatenationParts(rightNode, context);
       return left === null || right === null ? null : [...left, ...right];
@@ -8542,6 +8963,25 @@ function concatenationParts(node: AstNode, context: LowerContext): TemplatePart[
   if (value.kind === "literal" && typeof value.value === "string") return [{ text: value.value }];
   if (value.kind === "template") return value.parts;
   return [{ value }];
+}
+
+/**
+ * Whether a `+` chain inside a text join starts with a variable that holds text: one the script starts with text, as
+ * `def dialog = ""`, and never gives a number, so Groovy joined every later part to it as text.
+ */
+function startsWithText(node: AstNode, context: LowerContext): boolean {
+  let first = node;
+  while (first.kind === "binary" && first.operator === "+" && asNode(first.left) !== null)
+    first = asNode(first.left)!;
+  const key = first.kind === "variable" ? bindingKey(first, context.bindings) : null;
+  const values = key === null ? undefined : context.assignedValues.get(key);
+  if (values === undefined || values.length === 0) return false;
+  const text = (value: AstNode): boolean =>
+    value.kind === "gstring" || (value.kind === "constant" && typeof value.value === "string");
+  const number = (value: AstNode): boolean =>
+    (value.kind === "constant" && typeof value.value === "number") ||
+    onlyOf(inferType(value, context.types), NUMBER);
+  return values.some(text) && !values.some(number);
 }
 
 /**
@@ -10563,6 +11003,25 @@ function dateFormat(
   if (javaFormat !== null && javaFormat.length === 1)
     return dateFormat(node, argumentsNodes[0]!, javaFormat, context);
   const pattern = argumentsNodes.length === 1 ? constantString(argumentsNodes[0]) : null;
+  const fromNumber = unixDate(targetNode, context);
+  if (fromNumber !== null && pattern !== null) {
+    const kind = datePatternKind(pattern);
+    if (fromNumber !== undefined && kind !== null && kind !== "isoDate") {
+      addDiagnostic(
+        context,
+        "SX_DATE_FROM_SECONDS",
+        "warning",
+        `Workaround: TeaseScript builds no timestamp from a Unix number (#532), so the moment is the current timestamp minus the seconds since then; Java's pattern ${JSON.stringify(pattern)} becomes the player's local ${kind === "dateTime" ? "date and time" : kind} form.`,
+        node.span,
+      );
+      return {
+        kind: "methodCall",
+        target: fromNumber,
+        name: `format${kind === "date" ? "Date" : kind === "time" ? "Time" : "DateTime"}`,
+        arguments: [],
+      };
+    }
+  }
   if (!isCurrentDateConstructor(targetNode)) {
     return unsupportedExpression(
       context,
@@ -10600,6 +11059,58 @@ function dateFormat(
     target: { kind: "call", name: getter, positional: [], named: {} },
     name: method,
     arguments: [],
+  };
+}
+
+/**
+ * `new Date(milliseconds)` as a timestamp: the current timestamp minus the exact seconds since that moment, since
+ * TeaseScript builds no timestamp from a number (#532). Null for another receiver, undefined after a diagnostic.
+ */
+function unixDate(node: AstNode, context: LowerContext): IrExpression | null | undefined {
+  const args = nodeArray(asNode(node.arguments)?.items);
+  if (
+    node.kind !== "constructorCall" ||
+    !/(?:^|\.)Date$/u.test(text(node.type) ?? "") ||
+    args.length !== 1
+  )
+    return null;
+  // `(long) seconds * 1000`, the usual form, gives the seconds themselves.
+  let millis = args[0]!;
+  while (millis.kind === "cast" && asNode(millis.expression) !== null)
+    millis = asNode(millis.expression)!;
+  const right = asNode(millis.right);
+  let secondsNode: AstNode | null = null;
+  if (
+    millis.kind === "binary" &&
+    millis.operator === "*" &&
+    constantValue(right ?? undefined) === 1000
+  ) {
+    secondsNode = asNode(millis.left);
+    while (secondsNode?.kind === "cast" && asNode(secondsNode.expression) !== null)
+      secondsNode = asNode(secondsNode.expression);
+  }
+  const value = lowerExpression(secondsNode ?? millis, context);
+  if (value === null) return undefined;
+  const seconds: IrExpression =
+    secondsNode !== null
+      ? value
+      : { kind: "binary", operator: "/", left: value, right: { kind: "literal", value: 1000 } };
+  const now: IrExpression = { kind: "call", name: "getTimestamp", positional: [], named: {} };
+  return {
+    kind: "binary",
+    operator: "-",
+    left: now,
+    right: {
+      kind: "binary",
+      operator: "*",
+      left: {
+        kind: "binary",
+        operator: "-",
+        left: { kind: "methodCall", target: now, name: "toSeconds", arguments: [] },
+        right: seconds,
+      },
+      right: { kind: "duration", value: 1, unit: "s" },
+    },
   };
 }
 
@@ -12048,10 +12559,16 @@ function runtimeListSelectedValue(
   optionsNode: AstNode,
   context: LowerContext,
 ): IrExpression | null | undefined {
-  const pieces = listPlusOperands(optionsNode);
+  const allPieces = listPlusOperands(optionsNode);
+  // Written options after the runtime list, `list + ["Back"]`, join it at runtime (#609), so their positions follow.
+  let end = allPieces.length;
+  while (end > 1 && allPieces[end - 1]!.kind === "list") end -= 1;
+  const trailing = allPieces.slice(end);
+  const pieces = allPieces.slice(0, end);
   const listNode = pieces.at(-1)!;
   const written = pieces.slice(0, -1);
   if (listNode.kind === "list" || written.some((piece) => piece.kind !== "list")) return undefined;
+  const trailingItems = trailing.flatMap((piece) => nodeArray(piece.items));
   const writtenItems = written.flatMap((piece) => nodeArray(piece.items));
   let loop: IrStatement[] = [];
   let list: IrExpression;
@@ -12079,6 +12596,11 @@ function runtimeListSelectedValue(
     const lowered = lowerExpression(listNode, context);
     if (lowered === null) return null;
     list = lowered;
+  }
+  if (trailingItems.length > 0) {
+    const after = lowerArguments(trailingItems, context);
+    if (after === null) return null;
+    list = { kind: "binary", operator: "+", left: list, right: { kind: "list", items: after } };
   }
   const options: IrListChoiceOption[] = [];
   for (const [index, item] of writtenItems.entries()) {
@@ -14413,6 +14935,18 @@ function switchCommand(
       : targetNode;
   const commandType = inferType(commandNode, context.types);
   const literal = constantString(commandNode);
+  // A variable named for the switch state it sets, `switchbox_on`, holds that state's command.
+  const named = /switch\w*?_(on|off)$/iu.exec(variableName(commandNode) ?? "")?.[1]?.toLowerCase();
+  if (named !== undefined) {
+    addDiagnostic(
+      context,
+      "SX_SWITCH_BUTTON",
+      "warning",
+      "The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.",
+      node.span,
+    );
+    return useHelper(context, "switchButton", [{ kind: "literal", value: `switch ${named}` }]);
+  }
   if (literal !== null && switchState(literal) === null) return undefined;
   if (literal === null && commandNode.kind !== "gstring" && !onlyOf(commandType, STRING | NULL))
     return undefined;

@@ -519,6 +519,23 @@ pixel size, or an image-size query.
 - `show("")` only cleared the legacy text area and is dropped; an empty or blank image path clears the image.
 - Lists join with TeaseScript `+`, `+=`, and `addAll` (#609); the concatenation helper remains only for ranges.
 
+- Actions a browser cannot do (owner decision 2026-10-05): questions and notices that the importer adds come from a
+  global speaker `system` (title "System"), declared once in `helpers.tease` or in a lone script. Device commands kept
+  in variables such as `estim_start` or `lock_finish`, and `switchbox_on`, become persistent permanent buttons with the
+  device's state (`Estim: RUNNING`, `Lock: LOCKED`, `Power: ON`); `openCdTrays()` shows `CD tray: OPEN` until clicked
+  (`SX_DEVICE_STATE`, `SX_SWITCH_BUTTON`). `System.getProperty("user.name")`, `"user.home"`, and the player's folder are
+  asked once and saved; a network hardware address becomes a random ID made once; `useEmailAddress()` asks the email
+  address once and says that no email is sent (`SX_OS_INFO`, `SX_EMAIL`). Text files that the package writes only
+  through a `File` of one path keep their text in storage under `file:` and the path (`SX_STORED_FILE`); `useFile()` of
+  a text file shows it as prose (`SX_FILE_VIEW`); a walk through a home, Downloads, or Documents folder asks for a photo
+  (`SX_HOME_PICTURES`); walking the installed scripts folder gives a notice and ends the session (`SX_SCRIPT_MANAGER`);
+  `delete()` clears the reference stored under the path and `mkdir()` is dropped (`SX_FILE_DELETE`,
+  `SX_FOLDER_CREATE`). A packaged program gives a notice, and a puzzle program a solved/not solved choice
+  (`SX_EXTERNAL_PROGRAM_NOTICE`). An online read or a function that talks to an online service gives a notice with the
+  request, secret query values hidden, and reads empty or returns as failed (`SX_ONLINE_REQUEST`). Java network
+  settings are dropped (`SX_JVM_SETTING`), and a function that reads photo pixels to answer yes or no answers false
+  (`SX_PHOTO_PIXELS`). A try block without fallible calls runs without its catch (`SX_TRY_WITHOUT_CATCH`).
+
 ## Remaining gaps by workaround class
 
 What still blocks conversion, ranked by whether current TeaseScript can express it. Counts are root errors or blocked scripts in default mode after
@@ -557,6 +574,26 @@ accepted implementation is still wanted. Each workaround the importer emits carr
 | --- | --- | --- |
 | Desktop and Java APIs: `java.time` formatting and zones (5), files (4), `java.util.Random` (4), JSON and Base64 (2), `Eval.me`, `java.util.function.Function`, `System.getProperty`, OS processes (1 each), Java objects, the Cornertime exchange | Toy 19 of its 53 dynamic calls and 8 constructors, distribution | Outside the product boundary by design (see Legacy baggage). `Random.nextInt(n)` alone could become `randomInteger()`, without the seed. |
 | Legacy bugs (variables nothing assigns, helpers without the script host) | Domme3 3 and 7, DisciplineClinic 1 | Need an author's repair; reporting them is correct. Six more sit in functions nothing calls and are notes now. |
+
+### Left after the step-4 rounds (corpus2-merged, 2026-10-05)
+
+At converter `884339a3`/`a2fadae4`, 2,249 root errors remained in 103 of the 209 merged units; 105 units played to
+the end. The classes below are what the last round deliberately left; counts are TODO sites and units.
+
+| Class | Sites, units | Why it stays |
+| --- | --- | --- |
+| In-memory image composition (`ImageIO`, `BufferedImage`, `Graphics.drawImage`, `setImage(bytes, 0)`) | 546, about 21 | A language gap; waits for an owner decision on layered scenes or composition. Unlocks about 7 units alone. |
+| Closures that capture local state | 84, 9 | TeaseScript has no closures; a rewrite with explicit state is per unit. |
+| `try`/`catch` around fallible calls (number parsing, files, network, programs) | part of 56, 27 | No exceptions; only try blocks without fallible calls run without their catch. |
+| Questions in other positions (arguments with effects, `?:`) | about 25, 6 | Only `while` conditions are rewritten; an `if` already computes its guarded question first. |
+| Nullable values that flow through unproven values (`+` of possible text, ternaries of nullable loads, loads tested for null elsewhere) | compile errors in about 10 units (Escape, OwlSays, gunfighter, questionnaire, scatslut, ashleyYHBS, spinthebottle, MatchDares, Stay, fapioh) | Each case needs its own type flow; returned parameters and function locals are typed now. |
+| The action dispatcher returning values of several types | RileyReid | Needs a declared union result type, which the IR does not write. |
+| A closure declared inside a top-level block (`if (estim) { def shock = { ... } }`) | NoPeeking 9 | The prepass finds closures at the top level only. |
+| Per-unit object models and data | Toy 456 compile errors, DungeonTrials 84, Farkel 28 | Patches, not rules. |
+| Units with many small idioms on unproven receivers | ScarlettsBlackmail 60, SpankingParty 32, OwlGames 24, Bondage_Fun beyond its switch | Each site needs its own proof of type. |
+| Dynamic code (`Eval.me`, `inspect`, per-script property objects) | 81, 9 | Patches. |
+| File metadata and other system calls without a decided substitute (`lastModified`, `traverse`, threads, zip, sockets) | about 20, 15 | Outside a browser package; reported as TODO. |
+| Legacy bugs (names nothing defines, `assert`, `throw`) | 31, 9 | Correctly reported. |
 
 ### Third-round findings
 

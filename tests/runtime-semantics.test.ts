@@ -171,6 +171,83 @@ test("copies sets independently for declaration and assignment", () => {
   assert.deepEqual(captured, [[1, 2], [1, 2, 3], [2]]);
 });
 
+test("a collection method changes its receiver in place and no copy of it", () => {
+  const captured: unknown[] = [];
+  const result = executeSource(
+    [
+      "function grow(values) {",
+      "    values.add(6)",
+      "    return values",
+      "}",
+      "let original = [1, 2]",
+      "let copy = original",
+      "copy.add(3)",
+      "original.removeFirst()",
+      "let record = { items: original }",
+      "record.items.addAll([8, 9])",
+      "let table = dict{ items: original }",
+      'table["items"].clear()',
+      "let tableCopy = table",
+      'tableCopy.remove("items")',
+      "let rows = [original, original]",
+      "for row in rows { row.add(7) }",
+      "let grown = grow(original)",
+      "let element = [5]",
+      "rows.add(element)",
+      "element.add(4)",
+      "rows[2].add(3)",
+      "capture(original)",
+      "capture(copy)",
+      "capture(record)",
+      "capture(table)",
+      "capture(tableCopy)",
+      "capture(rows)",
+      "capture(grown)",
+      "capture(element)",
+      "exit",
+    ],
+    { capture: captureInto(captured) },
+  );
+
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(captured, [
+    [2],
+    [1, 2, 3],
+    { items: [2, 8, 9] },
+    { items: [] },
+    {},
+    [[2], [2], [5, 3]],
+    [2, 6],
+    [5, 4],
+  ]);
+});
+
+test("a failing collection method leaves its receiver and every copy unchanged", () => {
+  const compiled = compileSource(
+    [
+      "function dynamic(value) {",
+      "    return value",
+      "}",
+      "let items: integer[] = [1]",
+      "let copy = items",
+      'let mixed: (integer | string)[] = [2, "a"]',
+      "let more = dynamic(mixed)",
+      "items.addAll(more)",
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(compiled.diagnostics, []);
+  const result = run(compiled.plan!, createImmediatePacingRuntimeSnapshot(compiled.plan!));
+
+  assert.equal(result.snapshot.failure?.code, "TSR058");
+  const bindings = result.snapshot.frames[0]!.bindings;
+  for (const name of ["items", "copy"])
+    assert.deepEqual(bindings.find((binding) => binding.name === name)?.value, {
+      kind: "list",
+      items: [1],
+    });
+});
+
 test("uses scalar equality for set uniqueness and retains insertion order", () => {
   const captured: unknown[] = [];
   const result = executeSource(
