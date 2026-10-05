@@ -78,6 +78,9 @@ export type HelperName =
   | "text"
   | "systemSpeaker"
   | "askBooleansSystem"
+  | "deviceButtons"
+  | "showDevice"
+  | "openTray"
   | "askText"
   | "compare"
   | "replaceChars"
@@ -127,6 +130,7 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
   const needed = new Set(names);
   if (needed.has("switchButton")) needed.add("switchButtonId");
   if (needed.has("askBooleansSystem")) needed.add("systemSpeaker");
+  if (needed.has("showDevice") || needed.has("openTray")) needed.add("deviceButtons");
   if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
   if (needed.has("stopBackgroundSounds")) needed.add("backgroundSounds");
   for (const name of needed)
@@ -168,6 +172,9 @@ const HELPER_ORDER: readonly HelperName[] = [
   "truth",
   "text",
   "askBooleansSystem",
+  "deviceButtons",
+  "showDevice",
+  "openTray",
   "askText",
   "compare",
   "replaceChars",
@@ -307,6 +314,38 @@ const randomBelow = (max: IrExpression): IrExpression => ({
   positional: [range(max)],
   named: {},
 });
+
+/** The button of a device in the device buttons (helper `deviceButtons`). */
+function deviceButton(device: IrExpression): IrExpression {
+  return { kind: "index", target: v("sexscriptLegacyDeviceButtons"), index: device, dict: true };
+}
+
+/** Removes a device's button, if it has one. */
+function removeDeviceButton(device: IrExpression): IrStatement[] {
+  return [
+    ifS(
+      {
+        kind: "methodCall",
+        target: v("sexscriptLegacyDeviceButtons"),
+        name: "contains",
+        arguments: [device],
+        dict: true,
+      },
+      [
+        {
+          kind: "expression",
+          expression: {
+            kind: "call",
+            name: "removePermanentButton",
+            positional: [deviceButton(device)],
+            named: {},
+          },
+          span: null,
+        },
+      ],
+    ),
+  ];
+}
 
 /** A yes/no answer per text, confirmed at the end: legacy getBooleans() and the profile's owned items. */
 function askBooleansHelper(name: string, speaker?: string): IrStatement {
@@ -725,6 +764,53 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
       properties: [{ name: "title", value: lit("System") }],
       span: null,
     }),
+  },
+  // The permanent buttons that show the state of each device the legacy script controlled through a program.
+  deviceButtons: {
+    name: "sexscriptLegacyDeviceButtons",
+    build: () =>
+      letS("sexscriptLegacyDeviceButtons", { kind: "object", properties: [], dict: true }),
+  },
+  // A device's state as a permanent button, `Estim: RUNNING`, replacing the device's earlier button (owner decision).
+  showDevice: {
+    name: "sexscriptLegacyShowDevice",
+    build: () =>
+      fn(
+        "sexscriptLegacyShowDevice",
+        ["device", "state"],
+        [
+          ...removeDeviceButton(v("device")),
+          {
+            kind: "permanentButton",
+            target: deviceButton(v("device")),
+            label: template(v("device"), ": ", v("state")),
+            persist: true,
+            span: null,
+          },
+        ],
+      ),
+  },
+  // An open CD tray as a permanent button; clicking it closes the tray, so the button goes (owner decision).
+  openTray: {
+    name: "sexscriptLegacyOpenTray",
+    build: () =>
+      fn(
+        "sexscriptLegacyOpenTray",
+        [],
+        [
+          ...removeDeviceButton(lit("CD tray")),
+          {
+            kind: "permanentButton",
+            target: deviceButton(lit("CD tray")),
+            label: lit("CD tray: OPEN"),
+            persist: true,
+            body: removeDeviceButton(lit("CD tray")).flatMap((statement) =>
+              statement.kind === "if" ? statement.then : [],
+            ),
+            span: null,
+          },
+        ],
+      ),
   },
   // A value stored in a Groovy String variable: its text, and null stays null.
   text: {

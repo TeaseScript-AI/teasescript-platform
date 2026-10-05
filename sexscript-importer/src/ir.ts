@@ -64,13 +64,7 @@ export type IrStatement =
    * `instant` shows the text without reading time (`say text, instant`); `speaker` says it `as` that speaker, and
    * `prose` shows it as prose rather than a speech bubble (V30 §17).
    */
-  | (IrBase & {
-      kind: "say";
-      value: IrExpression;
-      instant?: true;
-      speaker?: string;
-      prose?: true;
-    })
+  | (IrBase & { kind: "say"; value: IrExpression; instant?: true; speaker?: string; prose?: true })
   /** A speaker declaration, global in the package (V30 §37). */
   | (IrBase & {
       kind: "speaker";
@@ -89,6 +83,8 @@ export type IrStatement =
       target: IrExpression;
       label: IrExpression;
       persist: boolean;
+      /** What a click runs. */
+      body?: IrStatement[];
     })
   | (IrBase & { kind: "showImage"; file: IrExpression })
   | (IrBase & { kind: "hideImage" })

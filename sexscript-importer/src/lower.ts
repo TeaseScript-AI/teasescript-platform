@@ -4872,6 +4872,15 @@ function lowerCallStatement(
       return lowerSave(args, node, span, context);
     case "useFile":
       return useFileStatements(args, node, span, context);
+    case "openCdTrays":
+      addDiagnostic(
+        context,
+        "SX_DEVICE_STATE",
+        "warning",
+        "openCdTrays() opened the CD trays of the player's computer, which a package cannot do; a permanent button shows the open tray, and clicking it closes the tray.",
+        node.span,
+      );
+      return [{ kind: "expression", expression: useHelper(context, "openTray", []), span }];
     case "exit":
       if (args.length !== 0)
         return [
@@ -13564,6 +13573,29 @@ function imagePathBelowImages(node: AstNode, context: LowerContext): IrExpressio
   return null;
 }
 
+/**
+ * A device command that useFile() ran, named by the variable that holds it, such as `estim_start` or `lock_finish`:
+ * the device's label and the state the command left it in (owner decision: an estim unit runs or stops, and a lock
+ * or a guillotine's arm locks or unlocks). Null for any other path.
+ */
+function deviceCommand(node: AstNode): { name: string; label: string; state: string } | null {
+  let found: { name: string; label: string; state: string } | null = null;
+  walkAst(node, (child) => {
+    const name = variableName(child);
+    const match =
+      name === null ? null : /^(estim|lock|arm)_?(start|on|finish|stop|off|end)$/iu.exec(name);
+    if (found !== null || match === null) return;
+    const estim = match[1]!.toLowerCase() === "estim";
+    const starts = ["start", "on"].includes(match[2]!.toLowerCase());
+    found = {
+      name: name!,
+      label: estim ? "Estim" : "Lock",
+      state: estim ? (starts ? "RUNNING" : "STOPPED") : starts ? "LOCKED" : "UNLOCKED",
+    };
+  });
+  return found;
+}
+
 /** Audio files the legacy useFile() opened in the system's player. */
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".m4a", ".mid", ".midi"]);
 /** Video files a browser plays, and the formats the corpus driver converts to MP4 (H.264) at conversion time. */
@@ -13587,6 +13619,26 @@ function useFileStatements(
   span: SourceSpan | null,
   context: LowerContext,
 ): IrStatement[] {
+  const device = args.length === 1 ? deviceCommand(args[0]!) : null;
+  if (device !== null) {
+    addDiagnostic(
+      context,
+      "SX_DEVICE_STATE",
+      "warning",
+      `useFile() ran the device command in ${device.name} on the player's computer, which a package cannot start; a permanent button shows the device's state instead, "${device.label}: ${device.state}".`,
+      node.span,
+    );
+    return [
+      {
+        kind: "expression",
+        expression: useHelper(context, "showDevice", [
+          { kind: "literal", value: device.label },
+          { kind: "literal", value: device.state },
+        ]),
+        span,
+      },
+    ];
+  }
   const path = args.length === 1 ? constantString(args[0]) : null;
   const extension = path === null ? "" : path.slice(path.lastIndexOf(".")).toLowerCase();
   if (
