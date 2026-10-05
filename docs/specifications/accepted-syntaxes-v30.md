@@ -1923,7 +1923,7 @@ Rules:
 - A default that is `null` or blank text (empty or only whitespace) when the input opens prefills nothing: the field
   starts empty, as without `default:`. A prefill can therefore come from a value that may not exist yet, such as
   `askText "Your name?", default: load "name"` on a first play. A default known at compile time to be `null` or blank,
-  such as `default: ""` or `default: null`, is a compile error that says to remove `default:`.
+  such as `default: ""` or `default: null`, is a compile error; remove `default:` to start with an empty field.
 - The compiler rejects a default that it knows is invalid, and its error names the fix. Any other default is checked
   when the input opens; an invalid one is a runtime error, and the input does not open.
 - `askTyping` applies its `allow...` restrictions to the prefilled text as to typed text.
