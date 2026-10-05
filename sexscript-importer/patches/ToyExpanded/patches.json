@@ -244,6 +244,13 @@
       "category": "b",
       "reason": "The cum-permit trigger computed its mean wait from dl**2, an operator the converter does not map, so the mean became 0 hours and the permission came far too early. Write dl*dl, the same value for the integer denial level.",
       "diff": "denial-square.diff"
+    },
+    {
+      "id": "difficulty-menu",
+      "layer": "source",
+      "category": "b",
+      "reason": "The difficulty settings built the level overview with a collect over a GString holding a ternary and the choice list with (lmin..5).eachWithIndex, neither of which converts, so the overview was empty and only 'Cancel' could be chosen. Build both in loops with the same texts and IDs, and save the chosen level as the number it names: the defaults are numbers and getLevel reads a number, where the legacy saved the label text.",
+      "diff": "difficulty-menu.diff"
     }
   ]
 }
