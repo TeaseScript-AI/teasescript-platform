@@ -59,6 +59,13 @@ test(
       await write("converted/menu/rooms/hall.tease", "say 1\nexit\n");
       await write("converted/.hidden/main.tease", 'say "not a package"\nexit\n');
       await write("verified/garden/main.tease", '---\ntitle: "Garden"\n---\nsay "Green"\nexit\n');
+      // A session that halts at Start without showing anything does not start, although it compiles.
+      const quiet = '---\ntitle: "Quiet"\n---\nexit\n';
+      await write("converted/quiet/main.tease", quiet);
+      await write("checks/quiet/result.json", {
+        ...played(quiet, "stops"),
+        runs: [{ stop: { kind: "empty", detail: "the session ended without showing anything" } }],
+      });
       await write("converted/stub/.conversion.json", {
         unitStatus: "unfinished-content-stub",
         converter: "def5678",
@@ -84,6 +91,7 @@ test(
           ["menu", "no main.tease", null],
           ["Night Walk", "plays to the end", null],
           ["popup", "owner-approved", null],
+          ["quiet", "shows nothing", null],
           ["stub", "unfinished stub", null],
         ],
       );
@@ -103,16 +111,16 @@ test(
       );
       assert.ok(
         page.includes(
-          '<dl class="summary"><div><dt>Listed</dt><dd>6</dd></div><div><dt>Convert fully</dt><dd>5</dd></div><div><dt>Compile</dt><dd>3</dd></div><div><dt>Play to the end</dt><dd>3</dd></div><div><dt>Stop during play</dt><dd>0</dd></div><div><dt>Do not start</dt><dd>2</dd></div><div><dt>Not played yet</dt><dd>0</dd></div><div><dt>Blocked by unbuilt commands</dt><dd>0</dd></div><div><dt>Verified</dt><dd>1</dd></div><div><dt>Owner-approved</dt><dd>1</dd></div><div><dt>Unfinished stubs</dt><dd>1</dd></div></dl>',
+          '<dl class="summary"><div><dt>Listed</dt><dd>7</dd></div><div><dt>Convert fully</dt><dd>6</dd></div><div><dt>Compile</dt><dd>4</dd></div><div><dt>Play to the end</dt><dd>3</dd></div><div><dt>Stop during play</dt><dd>0</dd></div><div><dt>Do not start</dt><dd>1</dd></div><div><dt>Do not compile</dt><dd>2</dd></div><div><dt>Not played yet</dt><dd>0</dd></div><div><dt>Blocked by unbuilt commands</dt><dd>0</dd></div><div><dt>Verified</dt><dd>1</dd></div><div><dt>Owner-approved</dt><dd>1</dd></div><div><dt>Unfinished stubs</dt><dd>1</dd></div></dl>',
         ),
       );
       assert.match(
         page,
-        /Measured 2026-10-05 with importer commits abc1234 \(5 units\), def5678 \(1 units\)/u,
+        /Measured 2026-10-05 with importer commits abc1234 \(6 units\), def5678 \(1 units\)/u,
       );
       // A stub is listed without a Player link.
       assert.match(page, /<td class="title"><b>Stub<\/b><\/td>/u);
-      assert.equal(page.match(/<button type="button" data-pin=/gu)?.length, 6);
+      assert.equal(page.match(/<button type="button" data-pin=/gu)?.length, 7);
 
       await writeSourceViews(entries, path.join(work, "catalog"));
       assert.equal(

@@ -542,10 +542,11 @@ function playStatus(play: PlayCheck, compileStatus: Status): Status {
     missing.length === 0
       ? ""
       : ` Missing media: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? `, and ${missing.length - 5} more` : ""}.`;
+  // The Player lists compiler problems instead of a Start button: the package does not compile.
   if (play.verdict === "no-start")
     return {
-      kind: "nostart",
-      label: "does not start",
+      kind: "error",
+      label: "does not compile",
       detail:
         compileStatus.kind === "error" ? compileStatus.detail : (play.runs[0]?.stop.detail ?? ""),
     };
@@ -577,7 +578,14 @@ function playStatus(play: PlayCheck, compileStatus: Status): Status {
             : stop.kind === "budget"
               ? "no end in the step budget"
               : `stops (${stop.kind})`;
-  return { kind: "stops", label, detail: `${stop.detail}. ${coverage}${media}` };
+  // A session that halts right after Start, before showing anything or before its first interaction, does not start.
+  const atStart =
+    play.runs[0]?.stop.kind === stop.kind && (stop.kind === "empty" || stop.kind === "early-end");
+  return {
+    kind: atStart ? "nostart" : "stops",
+    label,
+    detail: `${stop.detail}. ${coverage}${media}`,
+  };
 }
 
 /** The importer's share of unconverted code: files with migration errors and the TODO markers it left. */
@@ -694,7 +702,8 @@ export function renderCatalogPage(
     ["Compile", entries.filter((entry) => entry.compiles).length],
     ["Play to the end", count("plays") + count("verified") + count("approved")],
     ["Stop during play", count("stops")],
-    ["Do not start", count("nostart") + count("error")],
+    ["Do not start", count("nostart")],
+    ["Do not compile", count("error")],
     ["Not played yet", count("compiles") + count("unbuilt")],
     ["Blocked by unbuilt commands", count("unbuilt")],
     ["Verified", count("verified")],
