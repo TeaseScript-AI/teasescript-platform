@@ -71,10 +71,16 @@ export type HelperName =
   | "askBooleans"
   | "fixed"
   | "packagePath"
+  | "pathTag"
+  | "items"
+  | "itemAt"
+  | "askText"
+  | "compare"
+  | "askInteger"
+  | "askNumber"
   | "sendImage"
   | "switchButton"
   | "switchButtonId"
-  | "switchState"
   | "tokenize"
   | "backgroundSounds"
   | "concat"
@@ -145,11 +151,17 @@ const HELPER_ORDER: readonly HelperName[] = [
   "askBooleans",
   "fixed",
   "packagePath",
+  "pathTag",
+  "items",
+  "itemAt",
+  "askText",
+  "compare",
+  "askInteger",
+  "askNumber",
   "tokenize",
   "sendImage",
   "switchButtonId",
   "switchButton",
-  "switchState",
   ...JAVA_HELPER_ORDER,
 ];
 
@@ -495,6 +507,158 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
+  // The image tag of a legacy folder path (pathTag in image-tags.ts): lower case, every run of other characters than
+  // ASCII letters and digits as one hyphen, none at either end.
+  pathTag: {
+    name: "sexscriptLegacyPathTag",
+    build: () =>
+      fn(
+        "sexscriptLegacyPathTag",
+        ["path"],
+        [
+          letS("tag", lit("")),
+          letS("gap", lit(false)),
+          forS(
+            "character",
+            {
+              kind: "methodCall",
+              target: { kind: "methodCall", target: v("path"), name: "lowercase", arguments: [] },
+              name: "split",
+              arguments: [lit("")],
+            },
+            [
+              ifS(
+                {
+                  kind: "methodCall",
+                  target: lit("abcdefghijklmnopqrstuvwxyz0123456789"),
+                  name: "contains",
+                  arguments: [v("character")],
+                },
+                [
+                  ifS(bin("and", v("gap"), bin("!=", v("tag"), lit(""))), [
+                    set(v("tag"), template(v("tag"), "-")),
+                  ]),
+                  set(v("tag"), template(v("tag"), v("character"))),
+                  set(v("gap"), lit(false)),
+                ],
+                [set(v("gap"), lit(true))],
+              ),
+            ],
+          ),
+          ret(v("tag")),
+        ],
+      ),
+  },
+  // Groovy's ordering, with null below every value: -1, 0, or 1.
+  compare: {
+    name: "sexscriptLegacyCompare",
+    build: () =>
+      fn(
+        "sexscriptLegacyCompare",
+        ["left", "right"],
+        [
+          ifS(bin("==", v("left"), lit(null)), [
+            ifS(bin("==", v("right"), lit(null)), [ret(lit(0))]),
+            ret(lit(-1)),
+          ]),
+          ifS(bin("==", v("right"), lit(null)), [ret(lit(1))]),
+          ifS(bin("<", v("left"), v("right")), [ret(lit(-1))]),
+          ifS(bin(">", v("left"), v("right")), [ret(lit(1))]),
+          ret(lit(0)),
+        ],
+      ),
+  },
+  // Legacy input with a prefill that may be blank or null, which a TeaseScript default rejects: no default then.
+  askText: {
+    name: "sexscriptLegacyAskText",
+    build: () =>
+      fn(
+        "sexscriptLegacyAskText",
+        ["prefill"],
+        [
+          ifS(
+            bin(
+              "or",
+              bin("==", v("prefill"), lit(null)),
+              bin(
+                "==",
+                { kind: "methodCall", target: template(v("prefill")), name: "trim", arguments: [] },
+                lit(""),
+              ),
+            ),
+            [ret({ kind: "input", input: "askText" })],
+          ),
+          ret({ kind: "input", input: "askText", defaultValue: template(v("prefill")) }),
+        ],
+      ),
+  },
+  askInteger: {
+    name: "sexscriptLegacyAskInteger",
+    build: () =>
+      fn(
+        "sexscriptLegacyAskInteger",
+        ["prefill"],
+        [
+          ifS({ kind: "typeTest", value: v("prefill"), type: "number" }, [
+            ifS(bin("==", bin("%", v("prefill"), lit(1)), lit(0)), [
+              ret({
+                kind: "input",
+                input: "askInteger",
+                defaultValue: {
+                  kind: "call",
+                  name: "floor",
+                  positional: [v("prefill")],
+                  named: {},
+                },
+              }),
+            ]),
+          ]),
+          ret({ kind: "input", input: "askInteger" }),
+        ],
+      ),
+  },
+  askNumber: {
+    name: "sexscriptLegacyAskNumber",
+    build: () =>
+      fn(
+        "sexscriptLegacyAskNumber",
+        ["prefill"],
+        [
+          ifS({ kind: "typeTest", value: v("prefill"), type: "number" }, [
+            ret({ kind: "input", input: "askNumber", defaultValue: v("prefill") }),
+          ]),
+          ret({ kind: "input", input: "askNumber" }),
+        ],
+      ),
+  },
+  // A list element as Groovy read it: null past the end.
+  itemAt: {
+    name: "sexscriptLegacyItemAt",
+    build: () =>
+      fn(
+        "sexscriptLegacyItemAt",
+        ["list", "position"],
+        [
+          ifS(bin(">=", v("position"), prop(v("list"), "length")), [ret(lit(null))]),
+          ret(at(v("list"), v("position"))),
+        ],
+      ),
+  },
+  // The items a Groovy loop visited: the characters of text, the elements of anything else.
+  items: {
+    name: "sexscriptLegacyItems",
+    build: () =>
+      fn(
+        "sexscriptLegacyItems",
+        ["value"],
+        [
+          ifS({ kind: "typeTest", value: v("value"), type: "string" }, [
+            ret({ kind: "methodCall", target: v("value"), name: "split", arguments: [lit("")] }),
+          ]),
+          ret(v("value")),
+        ],
+      ),
+  },
   // A path of the package as file tests compare it (packageFilePath in lower.ts).
   packagePath: {
     name: "sexscriptLegacyPackagePath",
@@ -564,19 +728,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
-  // Workaround for a permanent switch button: the switch state of a device command in the chat.
-  switchState: {
-    name: "sexscriptLegacySwitchState",
-    build: () =>
-      fn(
-        "sexscriptLegacySwitchState",
-        ["command"],
-        switchStateBody([
-          (state) => [{ kind: "say", value: lit(`Power switch: ${state}`), span: null }],
-        ]),
-      ),
-  },
-  // The accepted form: a permanent button that shows the switch state and replaces the previous one.
+  // A persistent permanent button that shows a device's switch state and replaces the previous one.
   switchButtonId: {
     name: "sexscriptLegacySwitchButton",
     build: () => letS("sexscriptLegacySwitchButton", lit(null)),
@@ -605,6 +757,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
               kind: "permanentButton",
               target: v("sexscriptLegacySwitchButton"),
               label: lit(`Power: ${state}`),
+              persist: true,
               span: null,
             },
           ],

@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "unused-execute-series",
+      "layer": "source",
+      "category": "e",
+      "reason": "executeSeries was copied from DisciplineClinic's Punish.groovy without the state it relies on there (thisSeries, lastSeries, anticipationPercent, spankLoc are never declared here), and nothing in this script calls it; its first loop test would fail on lastSeries. Wrap the unused closure in a block comment (it contains none of its own).",
+      "diff": "unused-execute-series.diff"
+    },
+    {
+      "id": "discarded-percentage-round",
+      "layer": "source",
+      "category": "e",
+      "reason": "percentage.round(2) on its own line discards its result, so it never changed percentage; the next line rounds it where it is shown. Comment out the no-op.",
+      "diff": "discarded-percentage-round.diff"
+    }
+  ]
+}

@@ -55,6 +55,8 @@ export function expressionChildren(expression: Expression): readonly Expression[
         expression.duration,
         ...(expression.label === null ? [] : [expression.label]),
       ];
+    case "showPermanentButtonExpression":
+      return [expression.text];
   }
 }
 

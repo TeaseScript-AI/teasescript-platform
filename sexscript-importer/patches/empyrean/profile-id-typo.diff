@@ -1,0 +1,11 @@
+--- a/scripts/empyrean/user.groovy
++++ b/scripts/empyrean/user.groovy
+@@ -5,7 +5,7 @@
+     stats ->
+     def map = stats
+     if(map.uuid != null) {
+-        show("Du hast schon ein Profil: " + uuid)
++        show("Du hast schon ein Profil: " + map.uuid)
+         showButton("Ok")
+     } else {
+         show("Es gibt keine Id")

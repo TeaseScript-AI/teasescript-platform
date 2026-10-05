@@ -1,0 +1,11 @@
+--- a/scripts/DisciplineClinic__sha256_8a19a29ebfc8.groovy
++++ b/scripts/DisciplineClinic__sha256_8a19a29ebfc8.groovy
+@@ -3341,7 +3341,7 @@
+ 			else if(ginger==1) {
+ 				show("Need a fresh ginger finger?\n\nMake one again and be quick!")
+ 				wait(7)
+-				showButton("Have a new one, "+tile+".")
++				showButton("Have a new one, "+title+".")
+ 				setImageIntro()
+ 				show("Plug yourself.\n\nI do hope it will be sufficient or else I'll make you doing it again and again!")
+ 				wait(7)

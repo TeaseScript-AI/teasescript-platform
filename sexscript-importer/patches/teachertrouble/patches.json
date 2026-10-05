@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "unwritten-scenarios",
+      "layer": "source",
+      "category": "e",
+      "reason": "scenarioSelect dispatches scenarios 1-5 for all nine teachers, but each teacherSetN caps scenarios (Rutherford 4, Pepezcu 3, the others 2) and both random and manual selection stay within that cap; the 24 calls beyond each teacher's cap name scenario functions that were never written. Comment out those condition/call pairs in the author's style, in all three retained versions; every written scenario stays reachable as before.",
+      "diff": "unwritten-scenarios.diff"
+    }
+  ]
+}

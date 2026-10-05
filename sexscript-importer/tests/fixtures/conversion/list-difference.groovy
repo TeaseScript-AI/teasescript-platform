@@ -20,3 +20,11 @@ def pickOwned = { itemKeys ->
 	return itemKeys.size() > 0 ? itemKeys[getRandom(itemKeys.size())] : null
 }
 show("Bring the ${pickOwned(["toys.paddle", "toys.crop"])}")
+// A list whose type is not proven, such as a closure result, read with the legacy size property.
+def collected = {
+  def found = []
+  found << "a"
+  return found
+}
+def got = collected()
+if (got.size > 0) show("Found " + got.size)

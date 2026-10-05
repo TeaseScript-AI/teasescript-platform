@@ -8,7 +8,6 @@ export const ACCEPTED_FORMS = [
   "showPopup",
   "openUrl",
   "chooseFile",
-  "permanentButton",
   "layeredScene",
 ] as const;
 
@@ -30,10 +29,9 @@ export function parseAcceptedForms(value: string): Set<AcceptedForm> {
   return selected;
 }
 
-/** An image of the package: its path below `images/`, and the lower-case folder names that hold it. */
+/** An image of the package: its path below `images/`. */
 export interface MediaFile {
   path: string;
-  tags: string[];
   /** The image's size in pixels, when it was read at conversion time. */
   width?: number;
   height?: number;

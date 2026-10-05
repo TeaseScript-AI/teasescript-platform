@@ -1,0 +1,67 @@
+{
+  "patches": [
+    {
+      "id": "harmony-free-session-exit",
+      "layer": "source",
+      "category": "e",
+      "reason": "Harmony refuses an unpaid session (\"Are you trying to get a free session?\") and then calls lowercase system.exit(0); no system object exists, so Groovy failed there. The author meant to quit, which the SexScript API spells exit().",
+      "diff": "harmony-free-session-exit.diff"
+    },
+    {
+      "id": "flank-series-typo",
+      "layer": "source",
+      "category": "e",
+      "reason": "The flank-spanking loop tests an undefined s (\"Do not alternate when spanking flanks\"); the series just drawn is thisSeries, and series 3-5 alternate sides. Groovy failed whenever the spot was a flank.",
+      "diff": "flank-series-typo.diff"
+    },
+    {
+      "id": "assignment-time-typo",
+      "layer": "source",
+      "category": "e",
+      "reason": "if (tmpTime == null) tmp = 0 defaults a stray name instead of tmpTime, unlike the same default a few lines above (tmpTime = 0); restore tmpTime.",
+      "diff": "assignment-time-typo.diff"
+    },
+    {
+      "id": "repeat-offense-credit-typo",
+      "layer": "source",
+      "category": "e",
+      "reason": "Spending a repeat-offense credit sets and decrements repeatOffense (true, then --), which fails on a boolean; every sibling case sets <kind>Protected and decrements <kind>Protection, and repeatOffenseProtection is the saved counter. Use those names and declare repeatOffenseProtected beside its siblings, which the author left out.",
+      "diff": "repeat-offense-credit-typo.diff"
+    },
+    {
+      "id": "ginger-button-typo",
+      "layer": "source",
+      "category": "e",
+      "reason": "The ginger-finger button reads tile, which is never assigned; every other button around it uses title.",
+      "diff": "ginger-button-typo.diff"
+    },
+    {
+      "id": "corner-position-names",
+      "layer": "source",
+      "category": "e",
+      "reason": "cornerPosition (never called) was copied from spankPosition and still tests positionName and clears positionSelection, which are locals of spankPosition; its own variables are cornerPosName and cornerPosSelection. Rename them in the three retained versions.",
+      "diff": "corner-position-names.diff"
+    },
+    {
+      "id": "claire-clothespins-case",
+      "layer": "source",
+      "category": "e",
+      "reason": "Claire's session 3 calls scene3clothespins(), but the scene is defined as scene3Clothespins, and its pictures (clothespinPics) are set for that session.",
+      "diff": "claire-clothespins-case.diff"
+    },
+    {
+      "id": "claire-unwritten-scenes",
+      "layer": "source",
+      "category": "e",
+      "reason": "Claire's session 3 ends with scene3CBT, scene3Pegging and scene3Estim, copied from another persona: Claire defines none of them and her session 3 sets no pictures for them, so Groovy failed right after the anal-dildo scene. Comment the unwritten scenes out in the author's style; the session then returns to the clinic menu as her other sessions do.",
+      "diff": "claire-unwritten-scenes.diff"
+    },
+    {
+      "id": "discarded-rating-round",
+      "layer": "source",
+      "category": "e",
+      "reason": "aveRating.round(2) discards its result, so it never changed the rating; the rating is shown through String.format(\"%5.2f\"), which rounds it. Comment out the no-op.",
+      "diff": "discarded-rating-round.diff"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "profile-id-typo",
+      "layer": "source",
+      "category": "e",
+      "reason": "getProfile tests map.uuid but then shows the existing profile with a bare uuid, which is never assigned, so Groovy failed for a player who already had a profile. Show map.uuid.",
+      "diff": "profile-id-typo.diff"
+    }
+  ]
+}

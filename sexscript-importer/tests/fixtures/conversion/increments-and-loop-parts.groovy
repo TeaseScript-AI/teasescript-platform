@@ -25,3 +25,13 @@ for (;;) {
 	if (lives < 2) break
 }
 show("Capped ${capped}, lives ${lives}")
+// A for-in loop whose body is a single statement without braces.
+def cards = [2, 3, 4]
+def score = 0
+for (def card : cards)
+    score += card
+show("Score: " + score)
+// A range up to a value that may hold a fraction iterates up to the whole number below it, as Groovy did.
+def swats = 17
+def perCheek = swats / 2
+for (swat in 1..perCheek) show("Swat " + swat)

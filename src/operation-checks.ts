@@ -243,6 +243,7 @@ const FIXED_PARAMETERS: ReadonlyMap<string, readonly string[]> = new Map([
   ["chance", ["percent"]],
   ["randomInteger", ["range"]],
   ["escapeMarkup", ["text"]],
+  ["removePermanentButton", ["button"]],
 ]);
 
 /** Argument names and the number of arguments of a built-in that takes fixed positional arguments. */

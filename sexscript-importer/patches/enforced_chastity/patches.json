@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "webcam-check-inverted",
+      "layer": "source",
+      "category": "e",
+      "reason": "The setup's webcam check sets has_cam = true when no photo was captured and false when one was, so a player with a working camera got \"System failed to detect webcam\"; the other retained v2.41 copy and v2.3 set it the other way round. Swap the two assignments.",
+      "diff": "webcam-check-inverted.diff"
+    }
+  ]
+}

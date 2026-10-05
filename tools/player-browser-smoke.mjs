@@ -113,8 +113,9 @@ async function main() {
       await packageScenario(cdp, origin);
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
+      await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, and the camera and viewfinder scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -1514,6 +1515,91 @@ async function viewfinderScenario(cdp, origin) {
 
 function documentTextIncludes(values, text) {
   return values.some((value) => value.includes(text));
+}
+
+/**
+ * The buttons scenario (`?scenario=buttons`) shows its permanent buttons in the rail. A click runs a button's block while
+ * the button stays in place, inactive and focused; a block may remove its own button, after which focus moves to the
+ * button in its place; Pause interrupts the waiting question and returns to it; Stop leaves the file entry, so only the
+ * persistent Pause stays, and exit removes it.
+ */
+async function permanentButtonsScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  await navigate(cdp, `${origin}/player/?dev&scenario=buttons`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const rail = `[...document.querySelectorAll('.stage-right-rail [data-permanent-button]')].map((button) => button.textContent.trim() + (button.getAttribute('aria-disabled') === 'true' ? ' (inactive)' : '')).join('|')`;
+  const button = (id) => `[data-permanent-button="${id}"]`;
+  const said = (text) => `document.body.innerText.split(${JSON.stringify(text)}).length - 1`;
+  const clickButton = (label) =>
+    evaluate(
+      cdp,
+      `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === ${JSON.stringify(label)}).click()`,
+    );
+  await waitFor(cdp, `${rail} === "Count one|Give me a hint|Pause|Stop"`);
+  await waitFor(cdp, `document.body.innerText.includes("Done counting")`);
+
+  await physicalClick(cdp, button(1));
+  await waitFor(
+    cdp,
+    `${rail} === "Count one (inactive)|Give me a hint|Pause|Stop"`,
+    8_000,
+    "The clicked button is not inactive in place while its block runs",
+  );
+  assertEqual(
+    await value(cdp, `document.activeElement === document.querySelector('${button(1)}')`),
+    true,
+    "The inactive button lost focus",
+  );
+  // A click on the inactive button runs nothing.
+  await physicalClick(cdp, button(1));
+  await waitFor(
+    cdp,
+    `${rail} === "Count one|Give me a hint|Pause|Stop"`,
+    8_000,
+    "The button did not become active again after its block",
+  );
+  assertEqual(await value(cdp, said("That makes 1.")), 1, "The block did not run exactly once");
+  assertEqual(await value(cdp, said("That makes 2.")), 0, "The inactive button ran its block");
+
+  await physicalClick(cdp, button(2));
+  await waitFor(cdp, `${rail} === "Count one|Pause|Stop"`, 8_000, "The hint button stayed");
+  assertEqual(
+    await value(cdp, `document.activeElement?.dataset.permanentButton`),
+    "3",
+    "Focus did not move to the button that took the removed one's place",
+  );
+
+  // Pause interrupts the waiting button and returns to it.
+  await physicalClick(cdp, button(3));
+  await waitFor(cdp, `document.body.innerText.includes("Ready, Mistress")`);
+  assertEqual(
+    await value(cdp, `${rail}`),
+    "Count one|Pause (inactive)|Stop",
+    "Pause is not inactive",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `[...document.querySelectorAll('button')].some((button) => button.textContent.trim() === "Done counting")`,
+    ),
+    false,
+    "The interrupted button stayed presented",
+  );
+  await clickButton("Ready, Mistress");
+  await waitFor(cdp, `${rail} === "Count one|Pause|Stop"`);
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('button')].some((button) => button.textContent.trim() === "Done counting")`,
+    8_000,
+    "The interrupted button did not return",
+  );
+
+  await physicalClick(cdp, button(4));
+  await waitFor(cdp, `${rail} === "Pause"`, 8_000, "Stop did not remove the entry's buttons");
+  await waitFor(cdp, `document.body.innerText.includes("Stopped at 1. Only Pause stays now.")`);
+  await clickButton("Yes, Mistress");
+  await waitFor(cdp, `${rail} === ""`, 8_000, "exit did not remove the persistent button");
 }
 
 async function click(cdp, selector) {

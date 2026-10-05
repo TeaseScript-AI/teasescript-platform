@@ -8,6 +8,7 @@ import {
   executeInstruction,
   interactionDeadlineMs,
   observeTime,
+  pressPermanentButton,
   reportMediaLoad,
   run,
   serializeCheckpoint,
@@ -42,6 +43,20 @@ export interface RuntimeResumeEquivalenceOptions {
   readonly scriptStorage?: readonly RuntimeScriptStorageEntrySnapshot[];
   /** How the session ends: `halted` by default, or `failed` for a scenario that ends with a runtime error. */
   readonly ending?: "halted" | "failed";
+  /**
+   * Permanent button scenarios: whenever execution waits, the simulated Player first clicks the button this returns,
+   * deciding from the state and every event so far, and observes time only when it returns `null`.
+   */
+  readonly press?: (
+    snapshot: RuntimeSnapshot,
+    events: readonly InterpreterEvent[],
+  ) => number | null;
+}
+
+/** How the simulated Player makes progress while execution waits. */
+interface Servicing {
+  readonly mediaDurationMs: number | undefined;
+  readonly press: RuntimeResumeEquivalenceOptions["press"];
 }
 
 /** Spacing of the simulated Player's media progress observations. */
@@ -100,14 +115,8 @@ export function assertRuntimeResumeEquivalent(
     `${scenario}: fresh snapshot must validate: ${initialSnapshotValidation.errors.join("; ")}`,
   );
 
-  const mediaDurationMs = options.mediaDurationMs;
-  const uninterrupted = runServicingDelays(
-    plan,
-    initial,
-    instructionGuard,
-    scenario,
-    mediaDurationMs,
-  );
+  const servicing: Servicing = { mediaDurationMs: options.mediaDurationMs, press: options.press };
+  const uninterrupted = runServicingDelays(plan, initial, instructionGuard, scenario, servicing);
   const ending = options.ending ?? "halted";
   assert.equal(
     uninterrupted.snapshot.status,
@@ -140,11 +149,12 @@ export function assertRuntimeResumeEquivalent(
       readonly events: readonly InterpreterEvent[];
     };
     if (awaitsTime(boundarySnapshot)) {
-      operation = observeDueDelay(
+      operation = serviceWait(
         plan,
         boundarySnapshot,
+        accumulatedEvents,
         `${scenario}: boundary ${boundary + 1}`,
-        mediaDurationMs,
+        servicing,
       );
     } else {
       const executed = executeInstruction(plan, boundarySnapshot);
@@ -187,7 +197,8 @@ export function assertRuntimeResumeEquivalent(
       restored.snapshot,
       instructionGuard,
       context,
-      mediaDurationMs,
+      servicing,
+      accumulatedEvents,
     );
     assert.equal(
       resumed.snapshot.status,
@@ -225,23 +236,25 @@ export function assertRuntimeResumeEquivalent(
 /**
  * Runs to completion, observing time at the next deadline whenever execution waits: a foreground or interrupted
  * delay (`wait` or blocking `timer`), a running async timer, or a presented button's timeout. Blocking behavior is
- * preserved: nothing settles without an observation, and no button is clicked.
+ * preserved: nothing settles without an observation, and no foreground button is clicked; only `press` clicks
+ * permanent buttons. `priorEvents` are the events before `snapshot`, which `press` decides from.
  */
 function runServicingDelays(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   instructionGuard: number,
   context: string,
-  mediaDurationMs: number | undefined,
+  servicing: Servicing,
+  priorEvents: readonly InterpreterEvent[] = [],
 ): { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] } {
   const events: InterpreterEvent[] = [];
   let current = snapshot;
   for (let observations = 0; ; observations += 1) {
     assert.ok(observations <= instructionGuard, `${context}: delay servicing exceeded guard`);
     if (awaitsTime(current)) {
-      const observed = observeDueDelay(plan, current, context, mediaDurationMs);
-      events.push(...observed.events);
-      current = observed.snapshot;
+      const serviced = serviceWait(plan, current, [...priorEvents, ...events], context, servicing);
+      events.push(...serviced.events);
+      current = serviced.snapshot;
       continue;
     }
     const operation = run(plan, current, {}, { instructionBudget: instructionGuard });
@@ -251,9 +264,24 @@ function runServicingDelays(
   }
 }
 
+/** The simulated Player's click when `press` gives one, else a time observation. */
+function serviceWait(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  events: readonly InterpreterEvent[],
+  context: string,
+  servicing: Servicing,
+): { readonly snapshot: RuntimeSnapshot; readonly events: readonly InterpreterEvent[] } {
+  const buttonId = servicing.press?.(snapshot, events) ?? null;
+  if (buttonId === null) return observeDueDelay(plan, snapshot, context, servicing.mediaDurationMs);
+  const pressed = pressPermanentButton(plan, snapshot, buttonId);
+  assert.equal(pressed.outcome.kind, "pressed", `${context}: the simulated click must be accepted`);
+  return pressed;
+}
+
 /**
- * Waiting with nothing runnable: only a time observation can make progress. A queued expiry block held behind pacing
- * or a running block is not runnable.
+ * Waiting with nothing runnable: only a time observation or a click can make progress. A queued block held behind
+ * pacing or a running block is not runnable.
  */
 function awaitsTime(snapshot: RuntimeSnapshot): boolean {
   return snapshot.status === "waiting" && !timerHandlerDispatchable(snapshot);

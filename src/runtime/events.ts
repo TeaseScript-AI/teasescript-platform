@@ -6,6 +6,7 @@ import type {
   RuntimePendingActionSnapshot,
   RuntimeTimerSettlementSnapshot,
   RuntimeMediaSettlementSnapshot,
+  RuntimePermanentButtonSettlementSnapshot,
 } from "./actions/model.js";
 
 export interface OutputSpeaker {
@@ -45,7 +46,8 @@ export interface ActionCompletedEvent {
   readonly settlement:
     | RuntimeActionSettlementSnapshot
     | RuntimeTimerSettlementSnapshot
-    | RuntimeMediaSettlementSnapshot;
+    | RuntimeMediaSettlementSnapshot
+    | RuntimePermanentButtonSettlementSnapshot;
   readonly span: SourceSpan;
 }
 
@@ -55,6 +57,15 @@ export interface PlayerTranscriptEvent {
   readonly sequence: number;
   readonly target: "standardChat";
   readonly requestingSpeakerId: number | null;
+  readonly text: string;
+  readonly span: SourceSpan;
+}
+
+/** A click on a permanent button, whose block then runs; it adds no transcript text of its own. */
+export interface PermanentButtonPressedEvent {
+  readonly kind: "permanentButtonPressed";
+  readonly sequence: number;
+  readonly buttonId: number;
   readonly text: string;
   readonly span: SourceSpan;
 }
@@ -84,5 +95,6 @@ export type InterpreterEvent =
   | ActionRequestedEvent
   | ActionCompletedEvent
   | PlayerTranscriptEvent
+  | PermanentButtonPressedEvent
   | DeveloperWarningEvent
   | RuntimeFailureEvent;

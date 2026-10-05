@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -24,6 +24,24 @@ function parsed(
     root,
   };
 }
+
+test("parses a script without its leading byte order mark, as the legacy player read it", async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "sexscript-bom-test-"));
+  try {
+    const sourcePath = path.join(directory, "start.groovy");
+    writeFileSync(sourcePath, Buffer.from([0xef, 0xbb, 0xbf, ...Buffer.from('show("Hi")\n')]));
+    const seen: string[] = [];
+    const runner: GroovyParserRunner = async (mode, file) => {
+      seen.push(readFileSync(file, "utf8"));
+      return { ...parsed(mode, [], null), sourceName: file };
+    };
+    const result = await parseGroovySource(sourcePath, runner);
+    assert.deepEqual(seen, ['show("Hi")\n']);
+    assert.equal(result.sourceName, sourcePath);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("keeps normal SexScript in script-body mode", async () => {
   const calls: string[] = [];

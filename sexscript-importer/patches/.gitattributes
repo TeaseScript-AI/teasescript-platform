@@ -1,0 +1,3 @@
+# Source patches are byte-exact diffs of legacy files: keep their line endings (CRLF included) and trailing
+# whitespace, which `patch --fuzz=0` matches exactly.
+*.diff -text -whitespace

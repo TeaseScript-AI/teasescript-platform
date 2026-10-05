@@ -1445,7 +1445,8 @@ In this notation, text is quoted with the string escapes of [§8](#8-strings-and
 short form, a set shows like a list, an object shows its properties in order, a dict shows its quoted keys and values in
 order, and a range shows as written. A speaker shows its identifier. A media handle shows its file and state:
 `playing at` or `paused at` its position, `stopped`, or `finished`. A timer handle shows its label when it has one and
-its state: the time left (after `paused,` when paused), `stopped`, or `finished`. Handles show the state at the moment
+its state: the time left (after `paused,` when paused), `stopped`, or `finished`. A permanent button identifier shows
+the button's text, `<permanent button "Stop">`, or `<permanent button, removed>`. Handles show the state at the moment
 `say` runs. Message markup is not applied to the notation.
 
 Other text fields, such as a button label, an input hint, the `text` of a choice object, a timer label, or a speaker's
@@ -2860,9 +2861,10 @@ longer than that can never end; the compiler rejects one it can see, such as `wa
 error.
 
 ## 28. Permanent buttons
-**Status:** Accepted
+**Status:** Accepted (inactive while the handler runs: Owner decision on #610, 2026-10-05)
 
-A permanent button remains available while the script continues and returns an identifier. Its block is inherently the click action, so no `onClick` wrapper is used:
+A permanent button remains available while the script continues and returns an identifier, which may be ignored. Its
+block is inherently the click action, so no `onClick` wrapper is used:
 
 ```text
 let buttonId = showPermanentButton "Add one" {
@@ -2878,7 +2880,7 @@ let buttonId = showPermanentButton "Stop" {
 }
 ```
 
-Persistent button:
+Persistent button; `persist: true` is recognized only as the first line of the block:
 
 ```text
 let buttonId = showPermanentButton "Fail" {
@@ -2887,18 +2889,21 @@ let buttonId = showPermanentButton "Fail" {
 }
 ```
 
-Remove a button explicitly:
+Remove a button explicitly; removing a button that is already gone does nothing:
 
 ```text
 removePermanentButton(buttonId)
 ```
 
+The text follows the rules of other button labels ([§16](#lists-in-text)). Buttons appear in the order they were shown.
+
 Click and handler behavior:
 
-- The button disappears immediately after it is clicked.
-- Its handler runs once.
-- Extra clicks are impossible while the handler runs because the button is not visible.
-- After a normal function handler finishes, the button returns unless it was explicitly removed.
+- A click runs the handler once, like a timer expiry block ([§27](#expiry-blocks)): it interrupts at the next
+  deterministic runtime boundary, also while the main path waits on an interaction, `wait`, or media, and waits while a
+  paced message still blocks the chat or another block runs. The interrupted action returns when the handler finishes.
+- From the click until its handler finishes, the button stays in place but is inactive and cannot be clicked. It
+  becomes active again unless it was removed.
 - A `goto` handler abandons the interrupted execution path.
 - Function handlers do not pause currently playing audio or video.
 

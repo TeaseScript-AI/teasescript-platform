@@ -7,7 +7,7 @@ import {
   type ParsedGroovyFile,
   type SourceSpan,
 } from "./ast.ts";
-import type { IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
+import type { IrExpression, IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
 import { packageResources, type PackageFileReader } from "./java-data.ts";
 import {
   buildHelperRegistry,
@@ -29,7 +29,6 @@ import { helperDefinitionOrder, withActionDispatcher } from "./helpers.ts";
 import { promoteGlobalFunctions, type GlobalPromotion } from "./globals.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { legacyProfilePrompt } from "./profile.ts";
-import type { ProposalId } from "./proposals.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 
 const ACCEPTED_EXTERNAL_CALLS = new Set([
@@ -40,8 +39,7 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "askText",
   "ceil",
   "chance",
-  // Proposed media-tags capability; emitted only when the proposal is selected.
-  "countImages",
+  "findImages",
   "floor",
   "getDate",
   "getDateTime",
@@ -50,6 +48,7 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "openUrl",
   "random",
   "randomInteger",
+  "removePermanentButton",
   "round",
   "showButton",
   "takePhoto",
@@ -64,8 +63,6 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
 ]);
 
 export interface PackageOptions {
-  /** Proposed language changes to emit in their working syntax (see proposals.ts). */
-  proposals?: ReadonlySet<ProposalId>;
   /** Accepted forms to emit instead of their workarounds (see workarounds.ts). */
   accepted?: ReadonlySet<AcceptedForm>;
   /** The package's images, which legacy image counts read at conversion time. */
@@ -75,10 +72,116 @@ export interface PackageOptions {
   /** Reads a file of `files`, whose text package text reads snapshot (java-data.ts). */
   readFile?: PackageFileReader;
   /**
+   * Scripts of the package that are no entries of their own, by their paths from the legacy scripts folder, such as an
+   * expansion or a story chapter of an assembled unit: the generated entry menu does not offer them.
+   */
+  internalScripts?: readonly string[];
+  /**
    * A lone file converted on its own, without a package around it: it keeps its name, and a transfer names the
    * converted file of any legacy script name. Otherwise a package's only script becomes its main.tease.
    */
   standalone?: boolean;
+}
+
+/** Every literal text of the package's files. */
+function packageTexts(files: readonly ParsedGroovyFile[]): Set<string> {
+  const texts = new Set<string>();
+  for (const file of files)
+    walkAst(file.root, (node) => {
+      const text = constantString(node);
+      if (text !== null) texts.add(text);
+    });
+  return texts;
+}
+
+/**
+ * The storage key under which the legacy player recorded each start of a script (FullScript.groovytemplate with
+ * ScriptContainer.getMiniCurrentScriptName): its path from the scripts folder, up to the first dot, without a
+ * language suffix such as `_de`, with dots for slashes. A merged variant's `__sha256_…` suffix is no part of it.
+ */
+function launchKey(sourceName: string): string {
+  let name = sourceName.replaceAll("\\", "/").replace(/__sha256_[0-9a-f]+(?=\.[^/]*$)/u, "");
+  const folder = name.lastIndexOf("scripts/");
+  name =
+    folder >= 0 ? name.slice(folder + "scripts/".length) : name.slice(name.lastIndexOf("/") + 1);
+  if (name.includes(".")) name = name.slice(0, name.indexOf("."));
+  if (name.includes("_") && name.lastIndexOf("_") > name.length - 4)
+    name = name.slice(0, name.lastIndexOf("_"));
+  return name.replaceAll("/", ".");
+}
+
+/**
+ * The legacy player saved `<key>.launch.firsttime`, `.lasttime` (Unix seconds), and `.nb` (the number of starts) when
+ * a script started. Where the package reads one of them, the script saves them first, after its leading comments.
+ */
+function withLaunchMarkers(
+  program: MigrationProgram,
+  key: string,
+  texts: ReadonlySet<string>,
+): MigrationProgram {
+  const [first, last, count] = ["firsttime", "lasttime", "nb"].map(
+    (name) => `${key}.launch.${name}`,
+  );
+  if (![first, last, count].some((name) => texts.has(name!))) return program;
+  const now: IrExpression = {
+    kind: "methodCall",
+    target: { kind: "call", name: "getTimestamp", positional: [], named: {} },
+    name: "toSeconds",
+    arguments: [],
+  };
+  const literal = (value: string): IrExpression => ({ kind: "literal", value });
+  const message = `The legacy player recorded each start of this script under "${key}.launch.*", which the package reads; the script saves the first and last start time and the number of starts as it did.`;
+  const markers: IrStatement[] = [
+    { kind: "comment", text: `// NOTE SX_LAUNCH_MARKERS: ${message}`, trailing: false, span: null },
+    {
+      kind: "if",
+      condition: {
+        kind: "binary",
+        operator: "==",
+        left: { kind: "load", key: literal(first!) },
+        right: { kind: "literal", value: null },
+      },
+      then: [{ kind: "save", key: literal(first!), value: now, span: null }],
+      else: [],
+      span: null,
+    },
+    { kind: "save", key: literal(last!), value: now, span: null },
+    {
+      kind: "save",
+      key: literal(count!),
+      value: {
+        kind: "binary",
+        operator: "+",
+        left: { kind: "load", key: literal(count!), defaultValue: { kind: "literal", value: 0 } },
+        right: { kind: "literal", value: 1 },
+      },
+      span: null,
+    },
+  ];
+  const leading = program.statements.findIndex((statement) => statement.kind !== "comment");
+  const at = leading < 0 ? program.statements.length : leading;
+  return {
+    ...program,
+    statements: [...program.statements.slice(0, at), ...markers, ...program.statements.slice(at)],
+    diagnostics: [
+      ...program.diagnostics,
+      { code: "SX_LAUNCH_MARKERS", severity: "warning", message, span: null },
+    ],
+  };
+}
+
+/** The indexes of the files that `internal` names by their paths from the legacy scripts folder. */
+function internalScripts(
+  files: readonly ParsedGroovyFile[],
+  internal: readonly string[] | undefined,
+): Set<number> {
+  const suffixes = (internal ?? []).map((path) => `/${path.replaceAll("\\", "/").toLowerCase()}`);
+  return new Set(
+    files.flatMap((file, index) => {
+      const name = `/${file.sourceName.replaceAll("\\", "/").toLowerCase()}`;
+      return suffixes.some((suffix) => name.endsWith(suffix)) ? [index] : [];
+    }),
+  );
 }
 
 export function lowerSelfContainedPackage(
@@ -158,14 +261,19 @@ function packageScripts(
       index === entry ? "main.tease" : relative(index).replace(/\.groovy$/iu, ".tease"),
     ]),
   );
-  const paths = new Map(
-    scripts.map((index) => [
-      relative(index)
+  // A legacy script name is a path from the legacy scripts folder, which may be an ancestor of the scripts' common
+  // directory (`TheProgram/002TherapistA` when every script is in `TheProgram/`), so the name also resolves with the
+  // common directory's own folders in front.
+  const paths = new Map<string, string>();
+  for (let depth = 0; depth <= root.length; depth += 1) {
+    const prefix = root.slice(root.length - depth).join("/");
+    for (const index of scripts) {
+      const name = `${prefix === "" ? "" : `${prefix}/`}${relative(index)}`
         .replace(/\.groovy$/iu, "")
-        .toLowerCase(),
-      pathOf.get(index)!,
-    ]),
-  );
+        .toLowerCase();
+      if (!paths.has(name)) paths.set(name, pathOf.get(index)!);
+    }
+  }
   return { paths, entry, rootScripts, pathOf, root: root.join("/") };
 }
 
@@ -177,6 +285,7 @@ function packageScripts(
 function entryMenu(
   scripts: PackageScripts,
   programs: readonly MigrationProgram[],
+  internal: ReadonlySet<number>,
 ): MigrationProgram {
   const targets = new Set<string>();
   const collect = (statements: readonly IrStatement[]): void => {
@@ -201,21 +310,48 @@ function entryMenu(
     path.replace(/_[a-z]{2}(?:_[a-z]{2})?\.tease$/iu, ".tease");
   const targeted = (path: string): boolean =>
     targets.has(path.toLowerCase()) || targets.has(base(path).toLowerCase());
-  const offered = scripts.rootScripts
+  const listed = scripts.rootScripts.filter((index) => !internal.has(index));
+  const offered = listed
     .map((index) => scripts.pathOf.get(index)!)
     .filter((path) => !targeted(path))
     .sort();
   const choices =
-    offered.length > 0 ? offered : scripts.rootScripts.map((index) => scripts.pathOf.get(index)!);
+    offered.length > 0
+      ? offered
+      : (listed.length > 0 ? listed : scripts.rootScripts).map((index) =>
+          scripts.pathOf.get(index)!,
+        );
   const variants = [...scripts.pathOf.values()]
     .filter((path) => base(path) !== path && targeted(path) && !targets.has(path.toLowerCase()))
     .sort();
   const message =
-    "The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, so this menu offers each script that no other script chains to." +
+    (choices.length === 1
+      ? `The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, which goes to ${choices[0]}, the only listed script that no other script chains to.`
+      : "The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, so this menu offers each script that no other script chains to.") +
     (variants.length === 0
       ? ""
       : ` The legacy player also chose a localized variant of a script by the system language, which the converted scripts do not, so these variants are not reached: ${variants.join(", ")}.`);
   const name = (path: string): string => path.replace(/\.tease$/u, "");
+  // With one script to offer, the package starts there.
+  const question: IrStatement[] =
+    choices.length === 1
+      ? []
+      : [
+          {
+            kind: "say",
+            value: { kind: "literal", value: "Which script do you want to start?" },
+            span: null,
+          },
+          {
+            kind: "let",
+            name: "picked",
+            value: {
+              kind: "choice",
+              options: choices.map((path) => ({ kind: "literal", value: name(path) })),
+            },
+            span: null,
+          },
+        ];
   const picked = { kind: "variable" as const, name: "picked" };
   let chain: IrStatement[] = [
     { kind: "goto", target: { kind: "file", path: choices.at(-1)! }, span: null },
@@ -241,20 +377,7 @@ function entryMenu(
     metadata: null,
     statements: [
       { kind: "comment", text: `// NOTE SX_ENTRY_MENU: ${message}`, trailing: false, span: null },
-      {
-        kind: "say",
-        value: { kind: "literal", value: "Which script do you want to start?" },
-        span: null,
-      },
-      {
-        kind: "let",
-        name: "picked",
-        value: {
-          kind: "choice",
-          options: choices.map((path) => ({ kind: "literal", value: name(path) })),
-        },
-        span: null,
-      },
+      ...question,
       ...chain,
     ],
     diagnostics: [{ code: "SX_ENTRY_MENU", severity: "warning", message, span: null }],
@@ -301,7 +424,6 @@ export function lowerPackage(
       directoryFiles,
       ...(scripts === null ? {} : { scriptPaths: scripts.paths }),
       renameIdentifiers: false,
-      ...(options.proposals === undefined ? {} : { proposals: options.proposals }),
       ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
       ...(options.media === undefined ? {} : { media: options.media }),
       ...(options.files === undefined ? {} : { files: options.files }),
@@ -316,9 +438,14 @@ export function lowerPackage(
 
   // What a function nothing references cannot convert becomes a note, in the file and in the composed script.
   const uncalled: MigrationDiagnostic[][] = files.map(() => []);
+  const texts = packageTexts(files);
   const composed = lowered.map((program, index) => {
     if (files[index]?.root?.kind !== "scriptBody" || program.module !== undefined) return program;
-    const script = composeProgram(withLoadedModules(program, modulePrograms), functionCatalog);
+    const script = withLaunchMarkers(
+      composeProgram(withLoadedModules(program, modulePrograms), functionCatalog),
+      launchKey(files[index]!.sourceName),
+      texts,
+    );
     uncalled[index] = uncalledDiagnostics(script, legacyUnreferencedFunctions(groups[index]!));
     return withUncalledNotes(script, uncalled[index]!);
   });
@@ -386,7 +513,17 @@ export function lowerPackage(
         ? null
         : scripts.entry !== null
           ? { file: scripts.entry }
-          : { menu: withProfile(entryMenu(scripts, composedPrograms), composedPrograms, accepted) },
+          : {
+              menu: withProfile(
+                entryMenu(
+                  scripts,
+                  composedPrograms,
+                  internalScripts(files, options.internalScripts),
+                ),
+                composedPrograms,
+                accepted,
+              ),
+            },
     globals:
       promotion === null
         ? null

@@ -30,6 +30,10 @@ export interface CatalogEntry {
   readonly compiles: boolean;
   /** Where the listed package comes from: the converted root, or its frozen verified copy. */
   readonly origin: "converted" | "verified";
+  /** Whether the title links to the Player; a unit marked as an unfinished stub is listed but not offered. */
+  readonly playable: boolean;
+  /** The importer commit that converted the unit, from `.conversion.json`, when it records one. */
+  readonly converter: string | null;
   readonly status: Status;
   /** Set when the importer left parts unconverted. */
   readonly partial: Status | null;
@@ -50,7 +54,8 @@ export interface Status {
     | "unbuilt"
     | "compiles"
     | "error"
-    | "partial";
+    | "partial"
+    | "stub";
   /** A few words for the table. */
   readonly label: string;
   readonly detail: string;
@@ -138,7 +143,8 @@ export interface PlayCheck {
 
 /** Where the status beyond the compiler comes from; see the module comment. */
 export interface StatusSources {
-  readonly playChecks?: string;
+  /** Folders of `play-check.ts` results; for each package the latest check of its current files counts. */
+  readonly playChecks?: readonly string[];
   readonly verified?: string;
   readonly approved?: ReadonlySet<string>;
 }
@@ -161,7 +167,7 @@ async function main(rawArgs: string[]): Promise<void> {
     allowPositionals: true,
     options: {
       player: { type: "string", default: "" },
-      "play-checks": { type: "string" },
+      "play-checks": { type: "string", multiple: true },
       verified: { type: "string" },
       approved: { type: "string" },
     },
@@ -182,7 +188,7 @@ async function main(rawArgs: string[]): Promise<void> {
   const entries = await readCatalogEntries(root, await loadRepositoryCatalogTools(), {
     ...(values["play-checks"] === undefined
       ? {}
-      : { playChecks: path.resolve(values["play-checks"]) }),
+      : { playChecks: values["play-checks"].map((folder) => path.resolve(folder)) }),
     ...(values.verified === undefined ? {} : { verified: path.resolve(values.verified) }),
     approved,
   });
@@ -341,15 +347,22 @@ async function readEntry(
               .join("/"),
           )
           .sort();
-  const play =
-    statusSources.playChecks === undefined
-      ? null
-      : await readFile(path.join(statusSources.playChecks, id, "result.json"), "utf8").then(
+  const hash = packageContentHash(scan.sources);
+  const checks = (
+    await Promise.all(
+      (statusSources.playChecks ?? []).map((checksFolder) =>
+        readFile(path.join(checksFolder, id, "result.json"), "utf8").then(
           (text) => parsePlayCheck(JSON.parse(text)),
           () => null,
-        );
-  const current =
-    play !== null && play.contentHash === packageContentHash(scan.sources) ? play : null;
+        ),
+      ),
+    )
+  )
+    .filter((check) => check !== null)
+    .sort((left, right) => right.checkedAt.localeCompare(left.checkedAt));
+  // The latest check of the current files, else the latest check of any files (a newer conversion of a verified copy).
+  const current = checks.find((check) => check.contentHash === hash) ?? null;
+  const play = current ?? checks[0] ?? null;
   const verifiedRecord = isVerified ? await readJson(".verified.json") : null;
   const compileStatus = packageStatus(
     sources.some((file) => file.path === MAIN),
@@ -357,8 +370,15 @@ async function readEntry(
     compilation.diagnostics,
     report,
   );
+  const unitStatus = typeof conversion?.unitStatus === "string" ? conversion.unitStatus : null;
   let status: Status;
-  if (statusSources.approved?.has(id) === true)
+  if (unitStatus !== null && !isVerified && statusSources.approved?.has(id) !== true)
+    status = {
+      kind: "stub",
+      label: unitStatus === "unfinished-content-stub" ? "unfinished stub" : unitStatus,
+      detail: `The importer marks this unit as ${unitStatus}: the legacy package is not a finished tease, so it is listed but not offered to play.`,
+    };
+  else if (statusSources.approved?.has(id) === true)
     status = {
       kind: "approved",
       label: "owner-approved",
@@ -367,9 +387,7 @@ async function readEntry(
   else if (isVerified) {
     // A Player check of a newer conversion is of other contents than the frozen copy.
     const regression =
-      play !== null &&
-      play.contentHash !== packageContentHash(scan.sources) &&
-      play.verdict !== "plays"
+      play !== null && play.contentHash !== hash && play.verdict !== "plays"
         ? ` A newer conversion does not play: ${playStatus(play, compileStatus).detail}`
         : "";
     status = {
@@ -390,6 +408,8 @@ async function readEntry(
     keywords: [...(header?.tags.map((tag) => tag.name) ?? []), ...(header?.keywords ?? [])],
     compiles: compilation.plan !== null,
     origin: isVerified ? "verified" : "converted",
+    playable: status.kind !== "stub",
+    converter: typeof conversion?.converter === "string" ? conversion.converter : null,
     status,
     partial: partialConversion(report, sources.length, todos),
     groovy: { root: groovyRoot, paths: groovy },
@@ -543,11 +563,13 @@ function playStatus(play: PlayCheck, compileStatus: Status): Status {
       ? `stops at ${at[1]} (${at[2]})`
       : stop.kind === "early-end"
         ? "ends at the start"
-        : stop.kind === "hang"
-          ? "hangs"
-          : stop.kind === "budget"
-            ? "no end in the step budget"
-            : `stops (${stop.kind})`;
+        : stop.kind === "empty"
+          ? "shows nothing"
+          : stop.kind === "hang"
+            ? "hangs"
+            : stop.kind === "budget"
+              ? "no end in the step budget"
+              : `stops (${stop.kind})`;
   return { kind: "stops", label, detail: `${stop.detail}. ${coverage}${media}` };
 }
 
@@ -640,9 +662,24 @@ export function renderCatalogPage(
   const count = (kind: Status["kind"]) =>
     entries.filter((entry) => entry.status.kind === kind).length;
   const { importerCommit, measuredAt } = options.measurement;
+  // A unit converted again records its own importer commit; the others share the root's.
+  const commits = new Map<string, number>();
+  for (const entry of entries) {
+    const commit = entry.converter ?? importerCommit;
+    if (commit !== null) commits.set(commit, (commits.get(commit) ?? 0) + 1);
+  }
+  const commitText =
+    commits.size <= 1
+      ? [...commits.keys()].map((commit) => `importer commit ${escapeHtml(commit)}`)
+      : [
+          `importer commits ${[...commits]
+            .sort((left, right) => right[1] - left[1])
+            .map(([commit, units]) => `${escapeHtml(commit)} (${units} units)`)
+            .join(", ")}`,
+        ];
   const measured = [
     ...(measuredAt === null ? [] : [`Measured ${measuredAt.slice(0, 10)}`]),
-    ...(importerCommit === null ? [] : [`importer commit ${escapeHtml(importerCommit)}`]),
+    ...commitText,
   ].join(" with ");
   const summary: Array<[string, number]> = [
     ["Listed", entries.length],
@@ -655,6 +692,7 @@ export function renderCatalogPage(
     ["Blocked by unbuilt commands", count("unbuilt")],
     ["Verified", count("verified")],
     ["Owner-approved", count("approved")],
+    ["Unfinished stubs", count("stub")],
   ];
   const head =
     "<thead><tr><th>Pin</th><th>Title</th><th>Author</th><th>Keywords</th><th>Description</th><th>Status</th><th>Source</th></tr></thead>";
@@ -682,6 +720,7 @@ dl.summary dd { margin: 0; font-size: 1.3em; font-weight: 600; }
 .status.verified, .status.approved { background: #1d5e1d; color: #fff; }
 .status.stops, .status.partial { background: #fff1cc; color: #6b4e00; }
 .status.unbuilt { background: #e6e3fb; color: #3c2f86; }
+.status.stub { background: #eee; color: #555; font-style: italic; }
 .status.error, .status.nostart { background: #fde2e1; color: #8a1c1c; }
 details summary { cursor: pointer; }
 td.status-cell details summary { list-style: none; }
@@ -758,7 +797,12 @@ function renderRow(entry: CatalogEntry, playerOrigin: string): string {
     .join("");
   const cells = [
     ["pin", `<button type="button" data-pin="${id}">Pin</button>`],
-    ["title", `<a href="${href}"><b>${escapeHtml(entry.title)}</b></a>`],
+    [
+      "title",
+      entry.playable
+        ? `<a href="${href}"><b>${escapeHtml(entry.title)}</b></a>`
+        : `<b>${escapeHtml(entry.title)}</b>`,
+    ],
     ["author", escapeHtml(entry.author ?? "")],
     ["keywords", entry.keywords.map(escapeHtml).join(", ")],
     ["description", escapeHtml(entry.description ?? "")],

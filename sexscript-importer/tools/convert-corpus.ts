@@ -34,6 +34,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CONVERTED_VIDEO_EXTENSIONS } from "../src/lower.ts";
 import {
   applyOutputPatches,
   applySourcePatches,
@@ -70,6 +71,8 @@ export interface ConversionRecord {
   readonly inputs: Readonly<Record<string, string>>;
   /** The manual patches applied, in order, with the SHA-256 of each diff file or output-patch entry. */
   readonly patches: ReadonlyArray<{ id: string; layer: "source" | "output"; sha256: string }>;
+  /** The unit's status from the merged corpus's `unit.json`, such as `unfinished-content-stub`; null for none. */
+  readonly unitStatus: string | null;
   readonly exitCode: number;
   readonly linkedMedia: number;
   readonly linkedResourceMedia: number;
@@ -95,11 +98,7 @@ export interface UnitFailure {
 }
 
 export type UnitResult =
-  | {
-      readonly converted: true;
-      readonly record: ConversionRecord;
-      readonly report: "ok" | "failed";
-    }
+  | { readonly converted: true; readonly record: ConversionRecord }
   | { readonly converted: false; readonly failure: UnitFailure };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));
@@ -175,14 +174,14 @@ async function main(rawArgs: string[]): Promise<void> {
         };
         const result = reportOnly ? await reportUnit(options) : await convertUnit(options);
         let progress: string;
-        if (typeof result === "string") progress = `report ${result}`;
+        if (typeof result === "string") progress = result;
         else if (!result.converted) {
           failures.set(id, result.failure);
           progress = `FAILED at ${result.failure.stage}, previous output kept: ${result.failure.message}`;
         } else {
           const { record } = result;
           records.set(id, record);
-          progress = `exit ${record.exitCode}, ${record.linkedMedia + record.linkedResourceMedia} media linked, ${record.patches.length} patches, report ${result.report}`;
+          progress = `exit ${record.exitCode}, ${record.linkedMedia + record.linkedResourceMedia} media linked, ${record.patches.length} patches`;
         }
         process.stderr.write(`${++done}/${selected.length} ${id}: ${progress}\n`);
       }
@@ -231,9 +230,12 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
   const stage = path.join(outputRoot, STAGING, id);
   const packageRoot = path.join(stage, "package");
   const published = path.join(outputRoot, id);
-  await rm(stage, { recursive: true, force: true });
-  let step = "patches";
+  const previous = path.join(stage, "previous");
+  let keepStage = false;
+  let step = "recovery";
   try {
+    await recoverPrevious(stage, published);
+    step = "patches";
     const patches = await readUnitPatches(options.patchesRoot, id);
     step = "source patch";
     const unitRoot = await patchedUnit(corpusRoot, id, stage, patches);
@@ -252,10 +254,11 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
       path.join(packageRoot, ".conversion.log"),
       stderr.replaceAll(packageRoot, published).replaceAll(unitRoot, path.join(corpusRoot, id)),
     );
-    step = "media";
-    const media = await linkMedia(corpusRoot, id, packageRoot, options.resources);
+    // Before the media are linked, the package holds only generated files, which output patches may edit.
     step = "output patch";
     if (patches !== null) await applyOutputPatches(packageRoot, patches);
+    step = "media";
+    const media = await linkMedia(corpusRoot, id, packageRoot, options.resources);
     step = "report";
     const report = await unitReport(unitRoot, packageRoot);
     const record: ConversionRecord = {
@@ -270,56 +273,74 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
               layer,
               sha256: patches.hashes.get(patchId)!,
             })),
+      unitStatus: await unitStatus(corpusRoot, id),
       exitCode,
       ...media,
     };
-    await writeFile(path.join(packageRoot, ".report.json"), `${JSON.stringify(report.json)}\n`);
+    await writeFile(path.join(packageRoot, ".report.json"), `${JSON.stringify(report)}\n`);
     await writeFile(
       path.join(packageRoot, ".conversion.json"),
       `${JSON.stringify(record, null, 2)}\n`,
     );
     step = "replacement";
-    const previous = path.join(stage, "previous");
+    await rm(failurePath(outputRoot, id), { force: true });
     const hadPrevious = (await stat(published).catch(() => null)) !== null;
     if (hadPrevious) await rename(published, previous);
     try {
       await rename(packageRoot, published);
     } catch (error) {
+      // Until the previous output is back, the staging folder keeps it, and the next conversion restores it.
+      keepStage = hadPrevious;
       if (hadPrevious) await rename(previous, published);
+      keepStage = false;
       throw error;
     }
-    await rm(failurePath(outputRoot, id), { force: true });
-    return { converted: true, record, report: report.ok ? "ok" : "failed" };
+    return { converted: true, record };
   } catch (error) {
     return { converted: false, failure: await recordFailure(outputRoot, id, step, error) };
   } finally {
     // The staging folder holds generated text and links, and after a replacement the previous output.
-    await rm(stage, { recursive: true, force: true });
+    if (!keepStage) await rm(stage, { recursive: true, force: true });
   }
 }
 
 /**
- * Writes a new `.report.json` for a unit already converted, from its patched sources and its package as written;
- * on a failure, the previous report stays.
+ * Restores a unit's previous output that an interrupted replacement left in its staging folder, then clears the
+ * folder.
  */
-export async function reportUnit(options: UnitOptions): Promise<UnitResult | "ok" | "failed"> {
+async function recoverPrevious(stage: string, published: string): Promise<void> {
+  const previous = path.join(stage, "previous");
+  if (
+    (await stat(published).catch(() => null)) === null &&
+    (await stat(previous).catch(() => null)) !== null
+  )
+    await rename(previous, published);
+  await rm(stage, { recursive: true, force: true });
+}
+
+/**
+ * Writes a new `.report.json` for a unit already converted, from its patched sources and its package as written;
+ * when a patch or the report fails, the previous report stays.
+ */
+export async function reportUnit(options: UnitOptions): Promise<UnitResult | "reported"> {
   const { id } = options;
   const corpusRoot = path.resolve(options.corpusRoot);
   const outputRoot = path.resolve(options.outputRoot);
   const stage = path.join(outputRoot, STAGING, id);
-  await rm(stage, { recursive: true, force: true });
-  let step = "patches";
+  const published = path.join(outputRoot, id);
+  let step = "recovery";
   try {
+    await recoverPrevious(stage, published);
+    step = "patches";
     const patches = await readUnitPatches(options.patchesRoot, id);
     step = "source patch";
     const unitRoot = await patchedUnit(corpusRoot, id, stage, patches);
     step = "report";
-    const published = path.join(outputRoot, id);
     const report = await unitReport(unitRoot, published);
     const temporary = path.join(published, ".report.json.tmp");
-    await writeFile(temporary, `${JSON.stringify(report.json)}\n`);
+    await writeFile(temporary, `${JSON.stringify(report)}\n`);
     await rename(temporary, path.join(published, ".report.json"));
-    return report.ok ? "ok" : "failed";
+    return "reported";
   } catch (error) {
     return { converted: false, failure: await recordFailure(outputRoot, id, step, error) };
   } finally {
@@ -377,14 +398,20 @@ async function linkMedia(
 > {
   const collisions: string[] = [];
   let linkedMedia = 0;
-  for (const media of MEDIA_FOLDERS) {
+  // Legacy scripts name videos from the data folder, `videos/x.mp4`, so that folder keeps its name.
+  for (const media of [...MEDIA_FOLDERS, "videos"]) {
     const root = await mediaRoot(corpusRoot, id, media);
+    const into = media === "videos" ? path.join(packageRoot, "videos") : packageRoot;
     for (const file of (await files(root)).filter((file) => !isGroovy(file))) {
       const relative = toPosix(path.relative(root, file));
-      // The converter names a MIDI file's MP3, which the package holds instead (owner decision 2026-10-05).
+      const extension = path.extname(file).toLowerCase();
+      // The converter names a MIDI file's MP3, which the package holds instead (owner decision 2026-10-05), and a
+      // video in a format browsers do not play as an MP4.
       const result = /\.midi?$/iu.test(file)
-        ? await renderMidi(file, path.join(packageRoot, relative.replace(/\.midi?$/iu, ".mp3")))
-        : await hardLink(file, path.join(packageRoot, relative));
+        ? await renderMidi(file, path.join(into, relative.replace(/\.midi?$/iu, ".mp3")))
+        : CONVERTED_VIDEO_EXTENSIONS.has(extension)
+          ? await renderVideo(file, path.join(into, `${relative.slice(0, -extension.length)}.mp4`))
+          : await hardLink(file, path.join(into, relative));
       if (result === "linked") linkedMedia += 1;
       else if (result === "taken") collisions.push(relative);
     }
@@ -403,12 +430,9 @@ async function linkMedia(
 
 /**
  * The importer's report of a unit's sources, with compiler checks and smoke runs, and with `finalPackage` checking
- * the package as written; on failure, the error instead.
+ * the package as written. A report that fails or is not a JSON object fails the unit.
  */
-async function unitReport(
-  unitRoot: string,
-  packageRoot: string,
-): Promise<{ json: Record<string, unknown>; ok: boolean }> {
+async function unitReport(unitRoot: string, packageRoot: string): Promise<Record<string, unknown>> {
   const { exitCode, stdout, stderr } = await run(process.execPath, [
     cliPath,
     "report",
@@ -417,16 +441,24 @@ async function unitReport(
     packageRoot,
     path.join(unitRoot, "scripts"),
   ]);
-  let report: Record<string, unknown> | null;
+  if (exitCode !== 0)
+    throw new Error(`the report failed: ${stderr.trim().split("\n").slice(-5).join("\n")}`);
+  let report: unknown;
   try {
-    const parsed: unknown = exitCode === 0 ? JSON.parse(stdout) : null;
-    report = isRecordValue(parsed) ? parsed : null;
-  } catch {
-    report = null;
+    report = JSON.parse(stdout);
+  } catch (error) {
+    throw new Error(`the report is not JSON: ${String(error)}`);
   }
-  return report === null
-    ? { json: { error: stderr.slice(-2000) || `exit ${exitCode}` }, ok: false }
-    : { json: report, ok: true };
+  if (!isRecordValue(report)) throw new Error("the report is not a JSON object");
+  return report;
+}
+
+/** The status the merged corpus records for a unit in its `unit.json`, or null. */
+async function unitStatus(corpusRoot: string, id: string): Promise<string | null> {
+  const text = await readFile(path.join(corpusRoot, id, "unit.json"), "utf8").catch(() => null);
+  if (text === null) return null;
+  const unit: unknown = JSON.parse(text);
+  return isRecordValue(unit) && typeof unit.status === "string" ? unit.status : null;
 }
 
 /** SHA-256 of each legacy script of a unit, by its path from the unit folder. */
@@ -528,6 +560,41 @@ async function renderMidi(source: string, target: string): Promise<"linked" | "t
   } finally {
     await rm(wave, { force: true });
   }
+}
+
+/** Converts a video to an MP4 (H.264 and AAC) at `target` with ffmpeg, like renderMidi. */
+async function renderVideo(source: string, target: string): Promise<"linked" | "taken" | "failed"> {
+  if ((await stat(target).catch(() => null)) !== null) return "taken";
+  await mkdir(path.dirname(target), { recursive: true });
+  const temporary = `${target}.tmp.mp4`;
+  const encoded = await run("ffmpeg", [
+    "-v",
+    "error",
+    "-y",
+    "-i",
+    source,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "26",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    "-movflags",
+    "+faststart",
+    temporary,
+  ]);
+  if (encoded.exitCode !== 0) {
+    await rm(temporary, { force: true });
+    return "failed";
+  }
+  await rename(temporary, target);
+  return "linked";
 }
 
 /** The last commit of the importer's conversion code, marked `-modified` when it has uncommitted changes. */

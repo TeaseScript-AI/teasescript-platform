@@ -130,6 +130,7 @@ export type {
   DeveloperWarningEvent,
   InterpreterEvent,
   OutputSpeaker,
+  PermanentButtonPressedEvent,
   RuntimeFailureEvent,
   SayEvent,
 } from "./runtime/events.js";
@@ -164,6 +165,15 @@ export {
   type MediaLoadReport,
   type MediaReportOutcome,
 } from "./runtime/operations/media-reports.js";
+export {
+  pressPermanentButton,
+  type PermanentButtonPressOutcome,
+} from "./runtime/operations/press-permanent-button.js";
+export {
+  permanentButtonProjection,
+  type PermanentButtonProjection,
+  type RuntimePermanentButtonSnapshot,
+} from "./runtime/permanent-buttons.js";
 export {
   mediaPlaybackProjection,
   stageProjection,

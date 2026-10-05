@@ -65,7 +65,9 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
   const pad = "  ".repeat(depth);
   switch (statement.kind) {
     case "say":
-      lines.push(`${pad}say ${emitExpression(statement.value)}`);
+      lines.push(
+        `${pad}say ${emitExpression(statement.value)}${statement.instant === true ? ", instant" : ""}`,
+      );
       return;
     case "wait": {
       const unit = statement.unit === "ms" ? " ms" : "";
@@ -83,6 +85,7 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
     case "permanentButton":
       lines.push(
         `${pad}${emitExpression(statement.target)} = showPermanentButton ${emitExpression(statement.label)} {`,
+        ...(statement.persist ? [`${pad}  persist: true`] : []),
         `${pad}}`,
       );
       return;
@@ -95,11 +98,12 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
     case "playAudio": {
       const file = emitExpression(statement.file);
       const handle = statement.handle === undefined ? "" : `let ${statement.handle} = `;
+      const play = statement.video === true ? "playVideo" : "playAudio";
       if (statement.repeatCount === null) {
-        lines.push(`${pad}${handle}playAudio${statement.async ? " async" : ""} ${file}`);
+        lines.push(`${pad}${handle}${play}${statement.async ? " async" : ""} ${file}`);
       } else {
         lines.push(
-          `${pad}${handle}playAudio(file: ${file}, async: ${statement.async}, repeat: ${emitExpression(statement.repeatCount)} times)`,
+          `${pad}${handle}${play}(file: ${file}, async: ${statement.async}, repeat: ${emitExpression(statement.repeatCount)} times)`,
         );
       }
       return;
@@ -302,6 +306,8 @@ export function emitExpression(expression: IrExpression): string {
       return expression.operator === "not"
         ? `not ${operand(expression.value, NOT)}`
         : `${expression.operator}${operand(expression.value, UNARY)}`;
+    case "typeTest":
+      return `${operand(expression.value, COMPARISON + 1)} is ${expression.type}`;
     case "binary": {
       const level = precedence(expression);
       // Left-associative operators need parentheses for an equal-precedence right operand, and comparisons
@@ -372,6 +378,8 @@ function precedence(expression: IrExpression): number {
       }
     case "unary":
       return expression.operator === "not" ? NOT : UNARY;
+    case "typeTest":
+      return COMPARISON;
     case "range":
       return RANGE;
     case "index":

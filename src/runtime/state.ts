@@ -87,6 +87,8 @@ import {
   type RuntimeMediaCueInvocationSnapshot,
   type RuntimeMediaSnapshot,
 } from "./media.js";
+import type { RuntimePermanentButtonInvocationSnapshot } from "./permanent-buttons.js";
+import { validatePermanentButtonState } from "./permanent-button-validation.js";
 import {
   instructionKilledTemporaries,
   requiredInstructionTemporaries,
@@ -99,7 +101,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 46;
+export const RUNTIME_SNAPSHOT_VERSION = 47;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -148,6 +150,7 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "settledMedia",
   "nextMediaId",
   "cameraView",
+  "nextPermanentButtonId",
   "maxCallDepth",
   "status",
   "failure",
@@ -260,6 +263,12 @@ export type RuntimeTimerInterruptionSnapshot =
   /** A media cue block owned by a media record instead of a timer. */
   | {
       readonly mediaId: number;
+      readonly dueAtMs: number;
+      readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
+    }
+  /** The block of a clicked permanent button, which may have been removed since. */
+  | {
+      readonly buttonId: number;
       readonly dueAtMs: number;
       readonly suspendedAction: RuntimeInterruptibleActionSnapshot | null;
     };
@@ -375,11 +384,13 @@ export interface RuntimeSnapshot {
   readonly settledTimers: RuntimeTimerSnapshot[];
   nextTimerId: number;
   /**
-   * Queued interrupt blocks: timer expiry blocks and media cue blocks. They run one at a time in due order; entries
-   * with equal due times keep their queue order.
+   * Queued interrupt blocks: timer expiry blocks, media cue blocks, and clicked permanent buttons. They run one at a
+   * time in due order; entries with equal due times keep their queue order.
    */
   readonly pendingTimerHandlers: (
-    RuntimeTimerHandlerInvocationSnapshot | RuntimeMediaCueInvocationSnapshot
+    | RuntimeTimerHandlerInvocationSnapshot
+    | RuntimeMediaCueInvocationSnapshot
+    | RuntimePermanentButtonInvocationSnapshot
   )[];
   /** The persistent Stage image reference, or `null` for an empty Stage. */
   stageImage: string | null;
@@ -397,6 +408,8 @@ export interface RuntimeSnapshot {
   nextMediaId: number;
   /** The default camera's view, or `null` before the first `showCamera`. */
   cameraView: RuntimeCameraViewSnapshot | null;
+  /** Shown permanent buttons are background actions; this issues their identifiers. */
+  nextPermanentButtonId: number;
   readonly maxCallDepth: number;
   status: RuntimeStatus;
   failure: RuntimeFailureSnapshot | null;
@@ -580,6 +593,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     settledMedia: [],
     nextMediaId: 1,
     cameraView: null,
+    nextPermanentButtonId: 1,
     maxCallDepth,
     status: "ready",
     failure: null,
@@ -675,6 +689,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     settledMedia: snapshot.settledMedia.map(cloneMedia),
     nextMediaId: snapshot.nextMediaId,
     cameraView: snapshot.cameraView === null ? null : { ...snapshot.cameraView },
+    nextPermanentButtonId: snapshot.nextPermanentButtonId,
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure:
@@ -747,7 +762,9 @@ function cloneInterruption(
       : cloneForegroundAction(interruption.suspendedAction);
   return "mediaId" in interruption
     ? { mediaId: interruption.mediaId, dueAtMs: interruption.dueAtMs, suspendedAction }
-    : { timerId: interruption.timerId, dueAtMs: interruption.dueAtMs, suspendedAction };
+    : "buttonId" in interruption
+      ? { buttonId: interruption.buttonId, dueAtMs: interruption.dueAtMs, suspendedAction }
+      : { timerId: interruption.timerId, dueAtMs: interruption.dueAtMs, suspendedAction };
 }
 
 function cloneInteractionResultHandoff(
@@ -787,6 +804,7 @@ function cloneForegroundAction<T extends RuntimeForegroundActionSnapshot>(action
 function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendingActionSnapshot {
   if (action.kind === "timer") return { ...action, timer: cloneTimer(action.timer) };
   if (action.kind === "media") return { ...action, media: cloneMedia(action.media) };
+  if (action.kind === "permanentButton") return { ...action, button: { ...action.button } };
   if (action.kind === "mediaPlayback") return { ...action };
   if (action.kind === "capture")
     return {
@@ -1203,6 +1221,7 @@ function validateCapturedRuntimeSnapshotDetails(
   validateTimerState(value, plan, handleIds.timer, errors);
   validateMediaState(value, plan, handleIds.media, errors);
   validateCameraView(value, handleIds.camera, errors);
+  validatePermanentButtonState(value, plan, handleIds.permanentButton, errors);
   if (value.stageImage !== null && typeof value.stageImage !== "string") {
     errors.push("Runtime stageImage must be a string or null.");
   }
@@ -2283,7 +2302,11 @@ function validateTimerHandlerFrame(
   errors: string[],
 ): void {
   const now = snapshotValue.currentSessionTimeMs;
-  const owner = Object.hasOwn(interruption, "mediaId") ? "mediaId" : "timerId";
+  const owner = Object.hasOwn(interruption, "mediaId")
+    ? "mediaId"
+    : Object.hasOwn(interruption, "buttonId")
+      ? "buttonId"
+      : "timerId";
   if (
     !hasExactKeys(interruption, [owner, "dueAtMs", "suspendedAction"]) ||
     !positiveSafeInteger(interruption[owner]) ||
@@ -3097,8 +3120,9 @@ const POSITION_HOLDERS = [
 /**
  * The start of `main.tease` sets up the globals and speakers once, before anything else runs (ADR 0022 §6). While the
  * next instruction is in it, a session holds nothing but the globals and speakers set up so far: no call, loop,
- * temporary, action, timer, media, queued block, settlement, prepared output, top-level variable, default speaker, or
- * Stage image, and no identity of those was ever allocated. Afterwards no saved position leads back into it.
+ * temporary, action, timer, media, queued block, permanent button, settlement, prepared output, top-level variable,
+ * default speaker, or Stage image, and no identity of those was ever allocated. Afterwards no saved position leads back
+ * into it.
  */
 function validateStartupPhase(
   snapshot: Record<string, unknown>,
@@ -3131,6 +3155,7 @@ function validateStartupPhase(
         snapshot.nextActionId,
         snapshot.nextTimerId,
         snapshot.nextMediaId,
+        snapshot.nextPermanentButtonId,
       ].some((counter) => counter !== 1)
     )
       errors.push(
@@ -3382,7 +3407,12 @@ function validateSpeakerReferences(
   callFrames: unknown,
   speakerIds: ReadonlySet<number>,
   errors: string[],
-): { readonly timer: Set<number>; readonly media: Set<number>; readonly camera: boolean } {
+): {
+  readonly timer: Set<number>;
+  readonly media: Set<number>;
+  readonly permanentButton: Set<number>;
+  readonly camera: boolean;
+} {
   const values: unknown[] = [];
   if (Array.isArray(frames)) {
     for (const frame of frames) {
@@ -3428,7 +3458,12 @@ function validateSpeakerReferences(
     }
   }
   const referencedIds = new Set<number>();
-  const handleIds = { timer: new Set<number>(), media: new Set<number>(), camera: false };
+  const handleIds = {
+    timer: new Set<number>(),
+    media: new Set<number>(),
+    permanentButton: new Set<number>(),
+    camera: false,
+  };
   for (const value of values) collectSpeakerReferenceIds(value, referencedIds, handleIds);
   for (const id of referencedIds) {
     if (!speakerIds.has(id)) {
@@ -3439,11 +3474,19 @@ function validateSpeakerReferences(
   return handleIds;
 }
 
-/** Collects speaker references and, in the same traversal, timer and media handle IDs and camera view handles. */
+/**
+ * Collects speaker references and, in the same traversal, timer, media, and permanent button IDs and camera view
+ * handles.
+ */
 function collectSpeakerReferenceIds(
   value: unknown,
   output: Set<number>,
-  handleIds: { readonly timer: Set<number>; readonly media: Set<number>; camera: boolean },
+  handleIds: {
+    readonly timer: Set<number>;
+    readonly media: Set<number>;
+    readonly permanentButton: Set<number>;
+    camera: boolean;
+  },
 ): void {
   const work: unknown[] = [value];
   while (work.length > 0) {
@@ -3459,6 +3502,10 @@ function collectSpeakerReferenceIds(
     }
     if (current.kind === "mediaHandle" && nonNegativeSafeInteger(current.mediaId)) {
       handleIds.media.add(current.mediaId);
+      continue;
+    }
+    if (current.kind === "permanentButtonHandle" && nonNegativeSafeInteger(current.buttonId)) {
+      handleIds.permanentButton.add(current.buttonId);
       continue;
     }
     if (current.kind === "cameraView") {
