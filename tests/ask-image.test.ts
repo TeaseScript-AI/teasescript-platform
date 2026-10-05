@@ -218,14 +218,20 @@ function answeredAgain(plan: InstructionPlan, snapshot: RuntimeSnapshot, actionI
   ).outcome.kind;
 }
 
-test("a timer expiry block may run while askImage waits, and the same request is answered after it", () => {
+test("a timer expiry block may interrupt askImage, also across a checkpoint, and the same request is answered after it", () => {
   const { plan, snapshot } = started(
-    'let ticks = 0\ntimer async 1 {\n  ticks = ticks + 1\n}\nlet pick = askImage("Add an image")\nexit',
+    'let ticks = 0\ntimer async 1 {\n  wait 1\n  ticks = ticks + 1\n}\nlet pick = askImage("Add an image")\nexit',
   );
   const id = pendingImage(snapshot).actionId;
-  const late = run(plan, observeTime(plan, snapshot, 2000).snapshot).snapshot;
+  // The expiry block waits while the request is suspended; the checkpoint keeps both.
+  const interrupted = run(plan, observeTime(plan, snapshot, 1500).snapshot).snapshot;
+  assert.equal(interrupted.foregroundAction?.kind, "delay");
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, interrupted)));
+  assert.deepEqual(restored.snapshot, interrupted);
+  const late = run(plan, observeTime(plan, restored.snapshot, 2500).snapshot).snapshot;
   assert.equal(binding(late, "ticks"), 1);
   assert.equal(pendingImage(late).actionId, id);
+  assert.equal(validateRuntimeSnapshot(late, plan).valid, true);
   const finished = runUntilExit(plan, answered(plan, late).snapshot).snapshot;
   assert.equal(binding(finished, "pick"), IMAGE);
 });

@@ -203,7 +203,6 @@ defineExpose({ focusInput });
             type="button"
             variant="ghost"
             size="icon-sm"
-            class="composer-attach"
             data-composer-attach
             :aria-label="attach.label"
             :title="attach.label"
@@ -318,10 +317,6 @@ defineExpose({ focusInput });
 }
 .composer-form:has(> [data-composer-attach]) {
   grid-template-columns: auto minmax(0, 1fr) auto;
-}
-.composer-attach {
-  align-self: center;
-  border-radius: 999px;
 }
 .conversation-glass[data-drop-active] {
   outline: 2px dashed var(--focus-ring);

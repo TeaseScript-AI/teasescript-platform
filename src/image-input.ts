@@ -15,12 +15,12 @@ export const IMAGE_REQUEST_OPTIONS: ReadonlySet<string> = new Set([
 export const IMAGE_ANSWER_TRANSCRIPT_TEXT = "Image";
 
 /** A file extension of `types:`, such as `".png"`. */
-export function isImageFileType(text: string): boolean {
+function isImageFileType(text: string): boolean {
   return /^\.[a-z0-9]+$/iu.test(text);
 }
 
 /** An image MIME type of `mime:`, such as `"image/png"`; `askImage` asks for images only. */
-export function isImageMimeType(text: string): boolean {
+function isImageMimeType(text: string): boolean {
   return /^image\/[a-z0-9][a-z0-9!#$&^_.+-]*$/iu.test(text);
 }
 
