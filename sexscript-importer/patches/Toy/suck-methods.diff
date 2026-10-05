@@ -1,0 +1,116 @@
+--- a/scripts/toy/humiliation.groovy
++++ b/scripts/toy/humiliation.groovy
+@@ -124,20 +124,23 @@
+ 		return pos;
+ 	}
+ 
+-	toy.metaClass.suckDildo { type, context="play" ->
+-		final playWait = { file, time ->
+-				playBackgroundSound(file);
+-				pause(time);
+-				playBackgroundSound(null);
+-		};
+-		final suck = { file, n, delay ->
+-			n.times {
+-				playWait(file, delay-0.1);
+-			};
+-		};
+-		final suckBeat = { beat, n ->
+-			suck("toy/${beat}bpm.mp3", n, 2 * (60 / beat));
++	toy.metaClass.suckPlayWait { file, time ->
++		playBackgroundSound(file);
++		pause(time);
++		playBackgroundSound(null);
++	};
++
++	toy.metaClass.suckRepeat { file, n, delay ->
++		n.times {
++			suckPlayWait(file, delay-0.1);
+ 		};
++	};
++
++	toy.metaClass.suckBeat { beat, n ->
++		suckRepeat("toy/${beat}bpm.mp3", n, 2 * (60 / beat));
++	};
++
++	toy.metaClass.suckDildo { type, context="play" ->
+ 		def completed = 0
+ 		def showrules = false
+ 		if (type == SUCK) completed = loadInteger("toy.deepthroat.completed");
+@@ -308,15 +311,15 @@
+ 			if (type == SUCK) {
+ 				deep = randRange(target / 4, target / 2);
+ 				present(null, [["Suck it deep!", "Go down!", "Down with it!", "Suck it bitch!"]]);
+-				suck("shortwhip.wav", deep, 2.5); // Deep
++				suckRepeat("shortwhip.wav", deep, 2.5); // Deep
+ 			}
+ 			if (type == HOLD) {
+ 				deep = randRange(10*target / 4, 10*target / 2) / 10;
+ 				if (target > 240) deep *= 240/target;
+ 				present(null, [["Hold it in!", "Go down and hold!", "Down with it!", "Down bitch!"]]);
+-				playWait("shortwhip.wav", deep); // Hold
++				suckPlayWait("shortwhip.wav", deep); // Hold
+ 				present(null, [["And up!", "Go up again!"]]);
+-				playWait("bell.wav", 2.5)
++				suckPlayWait("bell.wav", 2.5)
+ 			}
+ 			session += deep;
+ 			show(null);
+--- a/scripts/toy/humiliation__sha256_bb90afe2c977.groovy
++++ b/scripts/toy/humiliation__sha256_bb90afe2c977.groovy
+@@ -124,20 +124,23 @@
+ 		return pos;
+ 	}
+ 
+-	toy.metaClass.suckDildo { type, context="play" ->
+-		final playWait = { file, time ->
+-				playBackgroundSound(file);
+-				pause(time);
+-				playBackgroundSound(null);
+-		};
+-		final suck = { file, n, delay ->
+-			n.times {
+-				playWait(file, delay-0.1);
+-			};
+-		};
+-		final suckBeat = { beat, n ->
+-			suck("toy/${beat}bpm.mp3", n, 2 * (60 / beat));
++	toy.metaClass.suckPlayWait { file, time ->
++		playBackgroundSound(file);
++		pause(time);
++		playBackgroundSound(null);
++	};
++
++	toy.metaClass.suckRepeat { file, n, delay ->
++		n.times {
++			suckPlayWait(file, delay-0.1);
+ 		};
++	};
++
++	toy.metaClass.suckBeat { beat, n ->
++		suckRepeat("toy/${beat}bpm.mp3", n, 2 * (60 / beat));
++	};
++
++	toy.metaClass.suckDildo { type, context="play" ->
+ 		def completed = 0
+ 		def showrules = false
+ 		if (type == SUCK) completed = loadInteger("toy.deepthroat.completed");
+@@ -308,15 +311,15 @@
+ 			if (type == SUCK) {
+ 				deep = randRange(target / 4, target / 2);
+ 				present(null, [["Suck it deep!", "Go down!", "Down with it!", "Suck it bitch!"]]);
+-				suck("shortwhip.wav", deep, 2.5); // Deep
++				suckRepeat("shortwhip.wav", deep, 2.5); // Deep
+ 			}
+ 			if (type == HOLD) {
+ 				deep = randRange(10*target / 4, 10*target / 2) / 10;
+ 				if (target > 240) deep *= 240/target;
+ 				present(null, [["Hold it in!", "Go down and hold!", "Down with it!", "Down bitch!"]]);
+-				playWait("shortwhip.wav", deep); // Hold
++				suckPlayWait("shortwhip.wav", deep); // Hold
+ 				present(null, [["And up!", "Go up again!"]]);
+-				playWait("bell.wav", 2.5)
++				suckPlayWait("bell.wav", 2.5)
+ 			}
+ 			session += deep;
+ 			show(null);

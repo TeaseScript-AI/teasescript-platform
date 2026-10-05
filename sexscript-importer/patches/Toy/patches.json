@@ -60,7 +60,7 @@
       "id": "speech-ignored",
       "layer": "source",
       "category": "b",
-      "reason": "The script detected the operating system to speak texts with the Windows or macOS speech program (sayCommand(...).execute()); owner decision: speech output is ignored. Leave osName unset, so that canTalk() is false and the voice settings are not offered, and make say() do nothing.",
+      "reason": "The script detected the operating system to speak texts with the Windows or macOS speech program (sayCommand(...).execute()); owner decision: speech output is ignored. Leave osName unset, so that canTalk() is false and the voice settings are not offered, make say() do nothing, and let sayCommand() return an empty command instead of null for an unknown system, which only the unreachable voice test reads.",
       "diff": "speech-ignored.diff"
     },
     {
@@ -90,6 +90,90 @@
       "category": "b",
       "reason": "The image spec [nDRESSED, [TITS,PUSSY,ASS]] mixed a text and a list in one list, which TeaseScript rejects. Wrap the text in a one-element list; multiplexTags turns every element into a list ([]+t) before it combines them, so the images chosen are the same.",
       "diff": "image-spec-lists.diff"
+    },
+    {
+      "id": "bondage-count",
+      "layer": "source",
+      "category": "b",
+      "reason": "playBondage kept its game choice in one variable that held false or the number 1 or 2, which TeaseScript rejects because a variable keeps one type. Use 0 for no game: the variable is only tested for truth, compared with 1, and switched on 1 and 2, where 0 behaves as false did, and the random draws happen in the same order.",
+      "diff": "bondage-count.diff"
+    },
+    {
+      "id": "chastity-answer",
+      "layer": "source",
+      "category": "b",
+      "reason": "postChastity stored the index of a forced choice in its boolean answer variable sh, which TeaseScript rejects because a variable keeps one type; nothing reads sh after that choice, so ask without storing the result.",
+      "diff": "chastity-answer.diff"
+    },
+    {
+      "id": "recent-availability",
+      "layer": "source",
+      "category": "b",
+      "reason": "getRecentAvail summed a collected list with sum(), which Groovy defines as null for an empty list, so its result may be null and the comparisons of setupInitial do not compile. Every caller asks for at least one day, so add the days in a loop from 0, in the same order, with the same result.",
+      "diff": "recent-availability.diff"
+    },
+    {
+      "id": "soft-wait-time",
+      "layer": "source",
+      "category": "b",
+      "reason": "getSoft keeps a wait time only when timing is set and guarded each change with timing, which a type checker cannot connect with the nullable wait time. Guard the changes with waitTime != null, which is true exactly when timing was set.",
+      "diff": "soft-wait-time.diff"
+    },
+    {
+      "id": "toys-loops",
+      "layer": "source",
+      "category": "b",
+      "reason": "anyToys, backgroundRemoveAllToys, and removeAllToys filtered the toy map with key/value closures (any, findAll, collect), which do not convert, so anyToys returned null and worn toys were never removed. Use loops over the keys instead: anyToys stops at the first worn toy as any() did, and the other two first collect the worn toys and then act on them, in the same order.",
+      "diff": "toys-loops.diff"
+    },
+    {
+      "id": "domme-initial",
+      "layer": "source",
+      "category": "b",
+      "reason": "DOMME started as null until main() loads it, so every DOMME.id read was typed as possibly null. Start it as an empty map: main() loads the domme before anything reads it, so the value read never changes.",
+      "diff": "domme-initial.diff"
+    },
+    {
+      "id": "strokes-counter",
+      "layer": "source",
+      "category": "b",
+      "reason": "strokes counted its loop in it without a declaration, a script binding variable that the converter turns into a nullable global. No other code reads it, so count in a local variable instead; the case closure {it < 2} keeps its own parameter.",
+      "diff": "strokes-counter.diff"
+    },
+    {
+      "id": "sleep-locals",
+      "layer": "source",
+      "category": "b",
+      "reason": "bedtime and bedtimeCheck assigned imgSpec without a declaration, a script binding variable that the converter turns into a nullable global. Each sets it before reading it and no other code reads it, so declare it locally.",
+      "diff": "sleep-locals.diff"
+    },
+    {
+      "id": "plan-message",
+      "layer": "source",
+      "category": "e",
+      "reason": "beginPlan built its message as (hadtoys ? [...] : []) + naked ? [...] : [], where + binds before ?:, so the list plus a boolean was always true and the message was always only \"put your clothes back on.\" even when the toys had to come off. Group each choice as intended, so the message names the toys, the clothes, or both.",
+      "diff": "plan-message.diff"
+    },
+    {
+      "id": "suck-methods",
+      "layer": "source",
+      "category": "b",
+      "reason": "suckDildo kept its sound loops in local closures; suck and suckBeat capture other local closures, which TeaseScript cannot express, so those sounds were skipped, and a closure called with mixed text and number arguments does not convert either. Make the three closures toy methods (suckPlayWait, suckRepeat, suckBeat) with the same bodies, defined before suckDildo, and call them directly.",
+      "diff": "suck-methods.diff"
+    },
+    {
+      "id": "lines-compose",
+      "layer": "source",
+      "category": "b",
+      "reason": "writeLines capitalized the result of compose(), which may be null for an empty group list, so the call does not compile; compose() already capitalizes its result and the line groups are never empty, so use its result as it is.",
+      "diff": "lines-compose.diff"
+    },
+    {
+      "id": "perm-parameter",
+      "layer": "source",
+      "category": "e",
+      "reason": "perm(String i) passed it, which is not defined there, to can() instead of its parameter i; nothing calls perm, so pass i.",
+      "diff": "perm-parameter.diff"
     }
   ]
 }

@@ -9,7 +9,11 @@
  	// Notes
  	// toys.<name> ankle_cuffs, ballgag, blindfold, chastity_belt, clothespins, cockring, dog_collar, handcuffs, hood, nipple_clamps, ring_gag
  	final PLAY = "play", UPDATE = "update";
-@@ -359,7 +359,7 @@
+@@ -356,10 +356,11 @@
+ 					case "en-US": return "say -v Zoe '${cleantext.replaceAll("cum","com").replaceAll("Cum","Com")}'";
+ 					default: return "say -v Kate '${cleantext}'";
+ 				}
++			default: return "";
  		}
  	}
  	final say = { text ->
@@ -29,7 +33,11 @@
  	// Notes
  	// toys.<name> ankle_cuffs, ballgag, blindfold, chastity_belt, clothespins, cockring, dog_collar, handcuffs, hood, nipple_clamps, ring_gag
  	final PLAY = "play", UPDATE = "update";
-@@ -356,7 +356,7 @@
+@@ -353,10 +353,11 @@
+ 					case "en-US": return "say -v Samantha '${cleantext.replaceAll("cum","com").replaceAll("Cum","Com")}'";
+ 					default: return "say -v Kate '${cleantext}'";
+ 				}
++			default: return "";
  		}
  	}
  	final say = { text ->
