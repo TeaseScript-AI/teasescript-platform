@@ -1456,6 +1456,8 @@ function ownExpressions(statement: IrStatement): IrExpression[] {
       return statement.timeout === null ? [statement.label] : [statement.label, statement.timeout];
     case "showPopup":
       return [statement.message];
+    case "permanentButton":
+      return [statement.target, statement.label];
     case "showImage":
       return [statement.file];
     case "playAudio":
@@ -1540,6 +1542,8 @@ function mapOwnExpressions<T extends IrStatement>(
         };
       case "showPopup":
         return { ...item, message: map(item.message) };
+      case "permanentButton":
+        return { ...item, target: map(item.target), label: map(item.label) };
       case "showImage":
         return { ...item, file: map(item.file) };
       case "playAudio":

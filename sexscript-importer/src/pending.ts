@@ -16,6 +16,7 @@ const PENDING_CALLS = new Map<string, string>([
   ["askBooleans", "askBooleans()"],
   ["openUrl", "openUrl()"],
   ["chooseFile", "chooseFile()"],
+  ["removePermanentButton", "showPermanentButton"],
 ]);
 
 /** Calls that only a proposed language change defines, by the proposal (see proposals.ts). */
@@ -195,6 +196,16 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
         return [
           callStatement(call("showPopup", "showPopup", [expression(item.message)]), item.span),
         ];
+      case "permanentButton":
+        return [
+          {
+            kind: "assign",
+            target: item.target,
+            operator: "=",
+            value: call("showPermanentButton", "showPermanentButton", [expression(item.label)]),
+            span: item.span,
+          },
+        ];
       case "showButton":
         return [
           {
@@ -319,6 +330,8 @@ export function pendingHostFunctions(
       },
     ],
     ["showPopup", () => null],
+    ["showPermanentButton", () => "button"],
+    ["removePermanentButton", () => null],
     ["askBoolean", () => next("askBoolean", [true, false])],
     ["askBooleans", (_, named) => named.defaults ?? emptyList],
     ["openUrl", () => null],

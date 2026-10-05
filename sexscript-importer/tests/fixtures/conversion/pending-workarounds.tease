@@ -42,11 +42,10 @@ say "You knelt ${seconds} seconds"
 // NOTE SX_OPEN_URL_WORKAROUND line 10: Workaround for openUrl(), which main does not implement yet: the link in the chat, which the player can open, and a button to continue. Switch back to openUrl() when it is implemented.
 say "Open this link: https://example.com/rules"
 showButton "Continue"
-// getFile: as if the player cancelled the file chooser.
-// NOTE SX_CHOOSE_FILE_WORKAROUND line 12: Workaround for chooseFile(), which main does not implement yet: the script continues as if the player cancelled the file chooser, with null. Switch back to chooseFile() when it is implemented.
+// getFile asked for a photo of the player, which takePhoto() takes; it gives null as a cancelled chooser did.
+// NOTE SX_FILE_PHOTO line 12: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so the title is shown and takePhoto() takes the photo, or gives null as a cancelled chooser did.
 say "Pick a photo of yourself"
-say "(Choosing a file is not available here, so none was chosen.)"
-let photo = null
+let photo = takePhoto()
 if photo == null {
   say "No photo, then"
 }

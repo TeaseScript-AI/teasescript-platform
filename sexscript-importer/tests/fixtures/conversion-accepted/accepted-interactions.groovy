@@ -30,3 +30,5 @@ def kit = getBooleans("Which toys do you have?", ["Paddle", "Crop"], [true, fals
 if (kit[1] == true) show("Bring the crop")
 def picture = getFile("Pick a photo")
 if (picture == null) show("No photo")
+// A device switch program shows its state as a permanent button.
+"SwitchBox.exe 7 ein".execute()

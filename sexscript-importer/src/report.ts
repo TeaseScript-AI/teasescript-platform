@@ -74,6 +74,8 @@ export interface FeasibilityOptions {
   accepted?: ReadonlySet<AcceptedForm>;
   /** The package's images, which legacy image counts read at conversion time and proposed media tags at runtime. */
   media?: readonly MediaFile[];
+  /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
+  files?: readonly string[];
 }
 
 /** One smoke run of a package project. */
@@ -172,6 +174,7 @@ export function analyzeFeasibility(
     ...(options.proposals === undefined ? {} : { proposals: options.proposals }),
     ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
     ...(options.media === undefined ? {} : { media: options.media }),
+    ...(options.files === undefined ? {} : { files: options.files }),
   });
   const helpers = globals?.helpers ?? null;
   const isScriptBodyAt = (index: number): boolean =>

@@ -106,6 +106,7 @@ const OBJECT_METHOD_RESULT_TYPES = new Map<string, ValueType>([
   ["endsWith", BOOLEAN],
   ["equals", BOOLEAN],
   ["equalsIgnoreCase", BOOLEAN],
+  ["exists", BOOLEAN],
   ["indexOf", NUMBER],
   ["intValue", NUMBER],
   ["isEmpty", BOOLEAN],

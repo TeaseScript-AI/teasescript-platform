@@ -100,6 +100,8 @@ export interface LowerOptions {
   accepted?: ReadonlySet<AcceptedForm>;
   /** The package's images, which a legacy image count reads at conversion time. */
   media?: readonly MediaFile[];
+  /** Every file of the package's legacy data folder, relative to it, which a file existence test reads. */
+  files?: readonly string[];
   /** How the script and the modules it loads use their maps (packageMapUses); without it, the file decides. */
   mapUses?: MapUses;
   /** Legacy result types of the functions of the script and its modules (packageFunctionResults). */
@@ -196,6 +198,14 @@ interface LowerContext {
   elementRemovals: ReadonlySet<AstNode>;
   /** Null without the package's images. */
   media: readonly MediaFile[] | null;
+  /** The package's files as `packageFilePath` normalizes them; null without them. */
+  files: ReadonlySet<string> | null;
+  /** `new File(path)` values that only `.exists()` reads, which convert to their path (fileTests). */
+  fileValues: ReadonlySet<AstNode>;
+  /** Variables that hold such a path. */
+  fileVariables: ReadonlySet<string>;
+  /** The variable each such value is kept in. */
+  filePathOwners: ReadonlyMap<AstNode, string>;
   /**
    * Whether a read of a name nothing assigns is reported. Only with package context: a file converted alone, such
    * as a mixin module, reads names that other package files define.
@@ -221,6 +231,15 @@ const JAVA_REFLECTION_METHODS = new Set([
 ]);
 
 const TYPED_STORAGE_LOADS = new Set(["loadBoolean", "loadFloat", "loadInteger", "loadString"]);
+
+/** Reads of the legacy online service, which kept values on a server for every player and session. */
+const ONLINE_LOADS = new Set(["receive", "receiveBoolean", "receiveInteger", "receiveString"]);
+
+const ONLINE_STORAGE_NOTE =
+  "The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.";
+
+/** The storage key prefix under which a sent photo reference is kept, by its code (sendImage). */
+const SENT_IMAGE_PREFIX = "sexscript.image.";
 
 const DIRECT_STORAGE_LOADS = new Set([
   "load",
@@ -895,6 +914,10 @@ export function lowerParsedFile(
     accepted: options.accepted ?? new Set(),
     elementRemovals: new Set(),
     media: options.media ?? null,
+    files: options.files === undefined ? null : new Set(options.files.map(packageFilePath)),
+    fileValues: new Set(),
+    fileVariables: new Set(),
+    filePathOwners: new Map(),
     checksUndefinedVariables: options.packageFunctions !== undefined,
   };
   if (file.diagnostics.length > 0 || file.root === null) {
@@ -969,6 +992,7 @@ export function lowerParsedFile(
     context.mapUses =
       options.mapUses ?? mapUsesOf([{ body, types: context.types, keys: context.bindings }]);
     context.elementRemovals = elementRemovals(body);
+    Object.assign(context, fileTests(body));
     // A lookup reads the type of the dict's values, as an index reads a list's element type.
     const listElements = new Map(context.types.listElements ?? []);
     for (const [key, type] of context.mapUses.dictionaryValues) {
@@ -1353,6 +1377,8 @@ function lowerHelperMethod(
     accepted: baseContext.accepted,
     elementRemovals: elementRemovals(body),
     media: baseContext.media,
+    files: baseContext.files,
+    ...fileTests(body),
     checksUndefinedVariables: baseContext.checksUndefinedVariables,
     currentFunction: {
       name,
@@ -4139,6 +4165,11 @@ function lowerCallStatement(
       ];
     case "save":
       return lowerSave(args, node, span, context);
+    case "send":
+      addDiagnostic(context, "SX_ONLINE_STORAGE", "warning", ONLINE_STORAGE_NOTE, node.span);
+      return lowerSave(args, node, span, context);
+    case "useFile":
+      return useFileStatements(args, node, span, context);
     case "exit":
       if (args.length !== 0)
         return [
@@ -5719,6 +5750,10 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
     case "constructorCall":
       if (isCurrentDateConstructor(node)) {
         return { kind: "call", name: "getDateTime", positional: [], named: {} };
+      }
+      if (context.fileValues.has(node)) {
+        const pathNode = nodeArray(asNode(node.arguments)?.items)[0];
+        return pathNode === undefined ? null : lowerExpression(pathNode, context);
       }
       return unsupportedExpression(
         context,
@@ -7386,6 +7421,10 @@ function lowerObjectMethodCallExpression(
     );
     return { kind: "literal", value: "en" };
   }
+  if (name === "execute" && argumentsNodes.length === 0 && targetNode !== null) {
+    const switched = switchCommand(targetNode, node, context);
+    if (switched !== undefined) return switched;
+  }
   const receiverName = targetNode === null ? null : variableName(targetNode);
   const helperClass =
     receiverName === null ? undefined : context.legacyHelperClasses.get(receiverName);
@@ -7508,6 +7547,15 @@ function lowerObjectMethodCallExpression(
     (targetNode.kind === "constructorCall" || isCurrentDateConstructor(targetNode))
   ) {
     return dateFormat(node, targetNode, argumentsNodes, context);
+  }
+  if (name === "exists" && argumentsNodes.length === 0 && targetNode !== null) {
+    const pathNode = isFileConstructor(targetNode)
+      ? nodeArray(asNode(targetNode.arguments)?.items)[0]
+      : context.fileVariables.has(variableName(targetNode) ?? "")
+        ? targetNode
+        : undefined;
+    if (pathNode !== undefined && context.files !== null)
+      return fileExists(pathNode, node, context, context.files);
   }
   if (targetNode?.kind === "constructorCall") {
     return unsupportedExpression(
@@ -9623,7 +9671,9 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       `Unqualified Groovy helper call ${call.name}() is not assumed to be a SexScript host API.`,
     );
   }
-  if (DIRECT_STORAGE_LOADS.has(call.name)) {
+  if (DIRECT_STORAGE_LOADS.has(call.name) || ONLINE_LOADS.has(call.name)) {
+    if (ONLINE_LOADS.has(call.name))
+      addDiagnostic(context, "SX_ONLINE_STORAGE", "warning", ONLINE_STORAGE_NOTE, node.span);
     if (call.arguments.length !== 1) {
       return unsupportedExpression(
         context,
@@ -9634,7 +9684,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     }
     const key = lowerExpression(call.arguments[0]!, context);
     if (key === null) return null;
-    return call.name === "loadInteger"
+    return call.name === "loadInteger" || call.name === "receiveInteger"
       ? { kind: "load", key, integer: true }
       : { kind: "load", key };
   }
@@ -9846,25 +9896,66 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         );
         return { kind: "call", name: "chooseFile", positional: [], named: {} };
       }
-      // As when the player cancels the chooser: the legacy result was null.
+      // The corpus asks for files to get a photo of the player (owner decision 2026-10-05); chooseFile() is #604.
       addDiagnostic(
         context,
-        "SX_CHOOSE_FILE_WORKAROUND",
+        "SX_FILE_PHOTO",
         "warning",
-        "Workaround for chooseFile(), which main does not implement yet: the script continues as if the player cancelled the file chooser, with null. Switch back to chooseFile() when it is implemented.",
+        "getFile() let the player pick any file with this title; scripts use it for a photo of the player, so the title is shown and takePhoto() takes the photo, or gives null as a cancelled chooser did.",
         node.span,
       );
       if (!pushPrompt(context, node, call.arguments[0]!, args[0]!)) return null;
-      context.prelude.push({
-        kind: "say",
-        value: {
-          kind: "literal",
-          value: "(Choosing a file is not available here, so none was chosen.)",
-        },
-        span: node.span,
-      });
-      return { kind: "literal", value: null };
+      return { kind: "call", name: "takePhoto", positional: [], named: {} };
     }
+    case "getDataFolder":
+      if (args.length !== 0)
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_CALL_ARITY",
+          "getDataFolder() takes no arguments.",
+        );
+      addDiagnostic(
+        context,
+        "SX_DATA_FOLDER",
+        "warning",
+        "getDataFolder() was the legacy player's data folder on the player's computer; package paths start at the package root, so it is empty text here.",
+        node.span,
+      );
+      return { kind: "literal", value: "" };
+    case "isConnected":
+      if (args.length !== 0)
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_CALL_ARITY",
+          "isConnected() takes no arguments.",
+        );
+      addDiagnostic(context, "SX_ONLINE_STORAGE", "warning", ONLINE_STORAGE_NOTE, node.span);
+      return { kind: "literal", value: true };
+    case "sendImage":
+      if (args.length !== 1)
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_CALL_ARITY",
+          "sendImage() must have one argument.",
+        );
+      addDiagnostic(context, "SX_ONLINE_STORAGE", "warning", ONLINE_STORAGE_NOTE, node.span);
+      return useHelper(context, "sendImage", args);
+    case "receiveImage":
+      if (args.length !== 1)
+        return unsupportedExpression(
+          context,
+          node,
+          "SX_CALL_ARITY",
+          "receiveImage() must have one argument.",
+        );
+      addDiagnostic(context, "SX_ONLINE_STORAGE", "warning", ONLINE_STORAGE_NOTE, node.span);
+      return {
+        kind: "load",
+        key: { kind: "template", parts: [{ text: SENT_IMAGE_PREFIX }, { value: args[0]! }] },
+      };
     case "getString":
     case "getInteger":
     case "getFloat":
@@ -11203,6 +11294,239 @@ function actionCall(
     positional: [action, { kind: "list", items: args }],
     named: {},
   };
+}
+
+/**
+ * A path of the package's legacy data folder as file tests compare it: forward slashes, without a leading `./`, `/`,
+ * or `scripts/` (the folder of the scripts, which the package root holds), in lower case, as the legacy player's file
+ * systems ignored case.
+ */
+export function packageFilePath(path: string): string {
+  return path
+    .replaceAll("\\", "/")
+    .replace(/^(?:\.?\/)+/u, "")
+    .replace(/^scripts\//iu, "")
+    .toLowerCase();
+}
+
+function isFileConstructor(node: AstNode): boolean {
+  return (
+    node.kind === "constructorCall" &&
+    (node.type === "File" || node.type === "java.io.File") &&
+    nodeArray(asNode(node.arguments)?.items).length === 1
+  );
+}
+
+/**
+ * The `new File(path)` values whose only use is `.exists()`: directly as its receiver, or kept in a variable that
+ * nothing reads otherwise (LowerContext.fileValues, fileVariables).
+ */
+function fileTests(body: AstNode): {
+  fileValues: Set<AstNode>;
+  fileVariables: Set<string>;
+  filePathOwners: Map<AstNode, string>;
+} {
+  const assigned = new Map<string, AstNode[]>();
+  const otherUses = new Set<string>();
+  const existsReceivers = new Set<AstNode>();
+  const targets = new Set<AstNode>();
+  walkAst(body, (node) => {
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    const name = assigns ? variableName(node.left) : null;
+    const value = assigns ? asNode(node.right) : null;
+    if (assigns && asNode(node.left) !== null) targets.add(asNode(node.left)!);
+    if (name !== null && value !== null) {
+      if (isFileConstructor(value)) assigned.set(name, [...(assigned.get(name) ?? []), value]);
+      else if (!isEmptyGroovyExpression(value) && !isNullConstant(value)) otherUses.add(name);
+    }
+    if (node.kind === "methodCall" && constantString(node.method) === "exists") {
+      const receiver = asNode(node.object);
+      if (receiver !== null) existsReceivers.add(receiver);
+    }
+  });
+  walkAst(body, (node) => {
+    const name = node.kind === "variable" ? variableName(node) : null;
+    if (name === null || !assigned.has(name) || existsReceivers.has(node) || targets.has(node))
+      return;
+    otherUses.add(name);
+  });
+  for (const name of otherUses) assigned.delete(name);
+  return {
+    fileValues: new Set([...assigned.values()].flat()),
+    fileVariables: new Set(assigned.keys()),
+    filePathOwners: new Map(
+      [...assigned].flatMap(([name, values]) =>
+        values.map((value): [AstNode, string] => [value, name]),
+      ),
+    ),
+  };
+}
+
+/**
+ * `new File(path).exists()` checked against the package's files when it is converted: a literal path is `true` or
+ * `false`, and a computed path is looked up in the package files below the path's fixed beginning. A program
+ * (`.exe`) never exists, since a package cannot start one.
+ */
+function fileExists(
+  pathNode: AstNode,
+  node: AstNode,
+  context: LowerContext,
+  files: ReadonlySet<string>,
+): IrExpression | null {
+  const present = [...files].filter((file) => !file.endsWith(".exe"));
+  addDiagnostic(
+    context,
+    "SX_FILE_EXISTS",
+    "warning",
+    "The legacy script tested whether a file exists on the player's computer; the test reads the package's files as they were converted, and a program (.exe) never exists.",
+    node.span,
+  );
+  // A path of text and getDataFolder(), or a variable that only ever holds such paths, is known now.
+  const variable = variableName(pathNode);
+  const paths = context.fileVariables.has(variable ?? "")
+    ? [...context.filePathOwners]
+        .filter(([, owner]) => owner === variable)
+        .map(([value]) => staticPath(nodeArray(asNode(value.arguments)?.items)[0] ?? value))
+    : [staticPath(pathNode)];
+  const results = paths.every((path) => path.complete)
+    ? paths.map((path) => present.includes(packageFilePath(path.text)))
+    : [];
+  if (results.length > 0 && results.every((result) => result === results[0]))
+    return { kind: "literal", value: results[0]! };
+  const path = lowerExpression(pathNode, context);
+  if (path === null) return null;
+  const prefix = packageFilePath(staticPath(pathNode).text);
+  const candidates = present.filter((file) => file.startsWith(prefix)).sort();
+  if (candidates.length === 0) return { kind: "literal", value: false };
+  return {
+    kind: "methodCall",
+    target: {
+      kind: "list",
+      items: candidates.map((file) => ({ kind: "literal" as const, value: file })),
+    },
+    name: "contains",
+    arguments: [useHelper(context, "packagePath", [path])],
+  };
+}
+
+/**
+ * The fixed beginning of a path, its text up to the first computed part, with `getDataFolder()` as the package root;
+ * `complete` when nothing in it is computed.
+ */
+function staticPath(node: AstNode): { text: string; complete: boolean } {
+  const literal = constantString(node);
+  if (literal !== null) return { text: literal, complete: true };
+  if (node.kind === "methodCall" && constantString(node.method) === "getDataFolder")
+    return { text: "", complete: true };
+  if (node.kind === "gstring") {
+    const strings = Array.isArray(node.strings) ? node.strings : [];
+    const first: unknown = strings[0];
+    return {
+      text: typeof first === "string" ? first : "",
+      complete: nodeArray(node.values).length === 0,
+    };
+  }
+  if (node.kind === "binary" && node.operator === "+") {
+    const left = asNode(node.left);
+    const right = asNode(node.right);
+    if (left === null || right === null) return { text: "", complete: false };
+    const start = staticPath(left);
+    if (!start.complete) return start;
+    const rest = staticPath(right);
+    return { text: start.text + rest.text, complete: rest.complete };
+  }
+  return { text: "", complete: false };
+}
+
+/** Audio files the legacy useFile() opened in the system's player. */
+const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".m4a", ".mid", ".midi"]);
+
+/**
+ * `useFile(path)` opened a file with a program of the player's computer: an audio file plays in the session, and
+ * anything else, such as a device control program or an executable, cannot start from a package.
+ */
+function useFileStatements(
+  args: AstNode[],
+  node: AstNode,
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] {
+  const path = args.length === 1 ? constantString(args[0]) : null;
+  const extension = path === null ? "" : path.slice(path.lastIndexOf(".")).toLowerCase();
+  if (path === null || !AUDIO_EXTENSIONS.has(extension))
+    return [
+      unsupportedStatement(
+        context,
+        node,
+        "SX_EXTERNAL_PROGRAM",
+        "useFile() opened this file with a program of the player's computer, such as a device control program or an executable; a TeaseScript package cannot start programs.",
+      ),
+    ];
+  addDiagnostic(
+    context,
+    "SX_USE_FILE_AUDIO",
+    "warning",
+    "useFile() opened this audio file in the system's player; it plays in the session here, without waiting.",
+    node.span,
+  );
+  return [
+    {
+      kind: "playAudio",
+      file: { kind: "literal", value: path },
+      async: true,
+      repeatCount: null,
+      span,
+    },
+  ];
+}
+
+/**
+ * `command.execute()` started a program of the player's computer. A device switch program, whose command ends with
+ * on or off (also `ein`, `an`, `aus`), shows the switch state; it runs at runtime for a computed command.
+ */
+function switchCommand(
+  targetNode: AstNode,
+  node: AstNode,
+  context: LowerContext,
+): IrExpression | null | undefined {
+  // `command.toString().execute()` runs the command's text.
+  const commandNode =
+    targetNode.kind === "methodCall" &&
+    constantString(targetNode.method) === "toString" &&
+    nodeArray(asNode(targetNode.arguments)?.items).length === 0 &&
+    asNode(targetNode.object) !== null
+      ? asNode(targetNode.object)!
+      : targetNode;
+  const commandType = inferType(commandNode, context.types);
+  const literal = constantString(commandNode);
+  if (literal !== null && switchState(literal) === null) return undefined;
+  if (literal === null && commandNode.kind !== "gstring" && !onlyOf(commandType, STRING | NULL))
+    return undefined;
+  const command = lowerExpression(commandNode, context);
+  if (command === null) return null;
+  addDiagnostic(
+    context,
+    "SX_SWITCH_WORKAROUND",
+    "warning",
+    context.accepted.has("permanentButton")
+      ? "The legacy script ran a device switch program; the switch state is a permanent button, replaced when the state changes."
+      : "Workaround for a permanent switch button (showPermanentButton, which main does not implement yet): the legacy script ran a device switch program, which a package cannot start; the chat shows the switch state instead. Switch back to the permanent button when it is implemented.",
+    node.span,
+  );
+  return useHelper(
+    context,
+    context.accepted.has("permanentButton") ? "switchButton" : "switchState",
+    [command],
+  );
+}
+
+/** ON or OFF for a device switch command by its last word, or null for another command. */
+function switchState(command: string): "ON" | "OFF" | null {
+  const last = command.trim().split(/\s+/u).at(-1)?.toLowerCase() ?? "";
+  if (["on", "ein", "an"].includes(last)) return "ON";
+  if (["off", "aus"].includes(last)) return "OFF";
+  return null;
 }
 
 /** A popup, or its workaround while main does not implement showPopup: the message and an OK button. */

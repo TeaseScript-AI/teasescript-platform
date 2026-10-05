@@ -80,6 +80,12 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
     case "showPopup":
       lines.push(`${pad}showPopup ${emitExpression(statement.message)}`);
       return;
+    case "permanentButton":
+      lines.push(
+        `${pad}${emitExpression(statement.target)} = showPermanentButton ${emitExpression(statement.label)} {`,
+        `${pad}}`,
+      );
+      return;
     case "showImage":
       lines.push(`${pad}showImage ${emitExpression(statement.file)}`);
       return;

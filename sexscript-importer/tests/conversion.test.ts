@@ -188,6 +188,53 @@ test(
   },
 );
 
+// A legacy file test reads the package's files at conversion time: a literal path is true or false, a computed one is
+// looked up among the files below its fixed beginning, and a program never exists.
+test(
+  "tests whether a file exists against the package's files",
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
+  async () => {
+    if (!("compiler" in projectResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-files-"));
+    try {
+      const sourcePath = path.join(directory, "files.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          'def picture = new File("images/Room/bed.jpg")',
+          'if (picture.exists()) show("Bed")',
+          'if (!new File(getDataFolder() + "/tools/zap.exe").exists()) show("No zapper")',
+          "def n = 2",
+          'if (new File("images/Room/chair${n}.jpg").exists()) show("Chair")',
+          "",
+        ].join("\n"),
+      );
+      const files = [
+        "images/Room/bed.jpg",
+        "images/Room/chair2.jpg",
+        "images/Hall/door.jpg",
+        "tools/zap.exe",
+      ];
+      const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { files });
+      const source = emitTease(program!);
+      assert.match(source, /^let picture = "images\/Room\/bed\.jpg"$/mu);
+      assert.match(source, /^if true \{\n {2}say "Bed"/mu);
+      assert.match(source, /^if not false \{\n {2}say "No zapper"/mu);
+      assert.match(
+        source,
+        /\["images\/room\/chair2\.jpg"\]\.contains\(sexscriptLegacyPackagePath\("images\/Room\/chair\$\{n\}\.jpg"\)\)/u,
+      );
+      const result = projectResult.runner([{ path: "main.tease", source }], {});
+      assert.deepEqual(
+        { status: result.status, failure: result.failure },
+        { status: "halted", failure: null },
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 /** A fixture as the main.tease of a project, with a file that just ends for each file it transfers to. */
 function withTransferTargets(source: string): Array<{ path: string; source: string }> {
   const targets = [...source.matchAll(/^\s*goto "([^"]+)"/gmu)].map((match) => match[1]!);

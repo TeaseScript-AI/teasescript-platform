@@ -203,6 +203,12 @@ function renameStatement(
       };
     case "showPopup":
       return { ...statement, message: expression(statement.message) };
+    case "permanentButton":
+      return {
+        ...statement,
+        target: expression(statement.target),
+        label: expression(statement.label),
+      };
     case "showImage":
       return { ...statement, file: expression(statement.file) };
     case "playAudio": {

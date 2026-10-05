@@ -49,9 +49,11 @@ if (command === "inventory") {
   const options: FeasibilityOptions = { proposals, accepted };
   if (compileRequested) options.compiler = await loadRepositoryProjectCompiler();
   if (runRequested) options.runner = await loadRepositoryProjectRunner();
-  // A scripts folder's sibling images folder holds the media that proposed media tags count.
+  // A scripts folder's data folder holds the media that image counts read and the files that file tests read.
   if (args.length === 1 && (await stat(args[0]!)).isDirectory()) {
-    options.media = await packageMedia(path.join(args[0]!, "..", "images"));
+    const dataRoot = await legacyDataRoot(args[0]!);
+    options.media = await packageMedia(path.join(dataRoot, "images"));
+    options.files = await packageFiles(dataRoot);
   }
   const report = analyzeFeasibility(files, options);
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
@@ -111,9 +113,11 @@ async function convertPackage(
   const sourcePaths = await findGroovyFiles(sourceRoot);
   if (sourcePaths.length === 0) fail(`No .groovy files found under ${sourceRoot}`);
   const parsed = await parseGroovyFiles(sourcePaths);
-  // The images folder beside the scripts folder holds the media that legacy image counts read.
-  const media = await packageMedia(path.join(sourceRoot, "..", "images"));
-  const lowered = lowerPackage(parsed, { proposals, accepted, media });
+  // The legacy data folder holds the media that image counts read and the files that file tests read.
+  const dataRoot = await legacyDataRoot(sourceRoot);
+  const media = await packageMedia(path.join(dataRoot, "images"));
+  const files = await packageFiles(dataRoot);
+  const lowered = lowerPackage(parsed, { proposals, accepted, media, files });
   const programs = lowered.composed;
   // The package starts at main.tease (ADR 0022): its entry script, or a generated menu over the scripts it lists.
   const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;
@@ -171,6 +175,29 @@ async function convertPackage(
 }
 
 /** The images below `root`, each tagged with the lower-case names of the folders it is in. */
+/**
+ * The legacy data folder of a scripts folder: the folder itself when it holds the package's `images/` or `sounds/`
+ * (the merged corpus layout), otherwise its parent, where the legacy player kept `scripts/` beside them.
+ */
+async function legacyDataRoot(scriptsRoot: string): Promise<string> {
+  for (const folder of ["images", "sounds"]) {
+    const found = await stat(path.join(scriptsRoot, folder)).catch(() => null);
+    if (found?.isDirectory() === true) return scriptsRoot;
+  }
+  return path.join(scriptsRoot, "..");
+}
+
+/** Every file below the legacy data folder, relative to it with forward slashes. */
+async function packageFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { recursive: true, withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) =>
+      path.relative(root, path.join(entry.parentPath, entry.name)).split(path.sep).join("/"),
+    )
+    .sort();
+}
+
 async function packageMedia(root: string): Promise<MediaFile[]> {
   const imageExtensions = new Set([".gif", ".jpeg", ".jpg", ".png", ".webp"]);
   const files = await readdir(root, { recursive: true, withFileTypes: true }).catch(() => []);

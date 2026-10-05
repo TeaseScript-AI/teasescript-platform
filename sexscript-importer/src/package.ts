@@ -60,6 +60,8 @@ export interface PackageOptions {
   accepted?: ReadonlySet<AcceptedForm>;
   /** The package's images, which legacy image counts read at conversion time. */
   media?: readonly MediaFile[];
+  /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
+  files?: readonly string[];
   /**
    * A lone file converted on its own, without a package around it: it keeps its name, and a transfer names the
    * converted file of any legacy script name. Otherwise a package's only script becomes its main.tease.
@@ -284,6 +286,7 @@ export function lowerPackage(
       ...(options.proposals === undefined ? {} : { proposals: options.proposals }),
       ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
       ...(options.media === undefined ? {} : { media: options.media }),
+      ...(options.files === undefined ? {} : { files: options.files }),
     }),
   );
   const helperPrograms = lowered.filter(
