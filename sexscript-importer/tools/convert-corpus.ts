@@ -12,7 +12,8 @@
  * script packages that name their media folders (see `resourcePackTargets`). Links are hard links, never copies.
  */
 import { execFile } from "node:child_process";
-import { link, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -63,13 +64,15 @@ async function main(rawArgs: string[]): Promise<void> {
   const scriptPackages: Array<{ id: string; scripts: string[] }> = [];
   const resourcePacks: string[] = [];
   for (const id of await folders(corpusRoot)) {
-    const scripts = (await files(path.join(corpusRoot, id, "scripts"))).filter(isGroovy);
+    const scriptsRoot = path.join(corpusRoot, id, "scripts");
+    const mediaRoots = await Promise.all(
+      MEDIA_FOLDERS.map((media) => mediaRoot(corpusRoot, id, media)),
+    );
+    const scripts = (await files(scriptsRoot)).filter(
+      (file) => isGroovy(file) && !mediaRoots.some((root) => file.startsWith(`${root}${path.sep}`)),
+    );
     if (scripts.length > 0) scriptPackages.push({ id, scripts });
-    else if (
-      (await Promise.all(MEDIA_FOLDERS.map((m) => hasFiles(path.join(corpusRoot, id, m))))).some(
-        Boolean,
-      )
-    )
+    else if ((await Promise.all(mediaRoots.map((root) => hasFiles(root)))).some(Boolean))
       resourcePacks.push(id);
   }
   const sources = new Map<string, string>();
@@ -80,7 +83,7 @@ async function main(rawArgs: string[]): Promise<void> {
   const packFiles: Array<{ pack: string; source: string; relative: string }> = [];
   for (const pack of resourcePacks)
     for (const media of MEDIA_FOLDERS) {
-      const root = path.join(corpusRoot, pack, media);
+      const root = await mediaRoot(corpusRoot, pack, media);
       for (const file of (await files(root)).filter((file) => !isGroovy(file)))
         packFiles.push({ pack, source: file, relative: toPosix(path.relative(root, file)) });
     }
@@ -162,10 +165,13 @@ async function convertOne(
   const collisions: string[] = [];
   let linkedMedia = 0;
   for (const media of MEDIA_FOLDERS) {
-    const root = path.join(corpusRoot, id, media);
+    const root = await mediaRoot(corpusRoot, id, media);
     for (const file of (await files(root)).filter((file) => !isGroovy(file))) {
       const relative = toPosix(path.relative(root, file));
-      const result = await hardLink(file, path.join(packageRoot, relative));
+      // The converter names a MIDI file's MP3, which the package holds instead (owner decision 2026-10-05).
+      const result = /\.midi?$/iu.test(file)
+        ? await renderMidi(file, path.join(packageRoot, relative.replace(/\.midi?$/iu, ".mp3")))
+        : await hardLink(file, path.join(packageRoot, relative));
       if (result === "linked") linkedMedia += 1;
       else if (result === "taken") collisions.push(relative);
     }
@@ -215,6 +221,68 @@ async function reportOne(corpusRoot: string, outputRoot: string, id: string): Pr
   const result = report ?? { error: stderr.slice(-2000) || `exit ${exitCode}` };
   await writeFile(path.join(outputRoot, id, ".report.json"), `${JSON.stringify(result)}\n`);
   return report === null ? "failed" : "ok";
+}
+
+/**
+ * A package's media folder: `images/` or `sounds/` inside its scripts folder in the merged layout, where the scripts
+ * folder is the legacy data folder, and else beside it.
+ */
+async function mediaRoot(corpusRoot: string, id: string, media: string): Promise<string> {
+  const inside = path.join(corpusRoot, id, "scripts", media);
+  const found = await stat(inside).catch(() => null);
+  return found?.isDirectory() === true ? inside : path.join(corpusRoot, id, media);
+}
+
+/** The General MIDI soundfont that renders MIDI files (Debian `fluid-soundfont-gm`, else `timgm6mb-soundfont`). */
+const SOUNDFONTS = ["/usr/share/sounds/sf2/FluidR3_GM.sf2", "/usr/share/sounds/sf2/TimGM6mb.sf2"];
+
+/**
+ * Renders a MIDI file to an MP3 at `target` with fluidsynth and ffmpeg, unless the MP3 is there already; "taken"
+ * when another file holds the path, and "failed" when a tool is missing or fails.
+ */
+async function renderMidi(source: string, target: string): Promise<"linked" | "taken" | "failed"> {
+  if ((await stat(target).catch(() => null)) !== null) return "taken";
+  const soundfont = (
+    await Promise.all(
+      SOUNDFONTS.map(async (file) => ((await stat(file).catch(() => null)) === null ? null : file)),
+    )
+  ).find((file) => file !== null);
+  if (soundfont === undefined) return "failed";
+  await mkdir(path.dirname(target), { recursive: true });
+  const wave = path.join(tmpdir(), `sexscript-midi-${process.pid}-${Date.now()}.wav`);
+  try {
+    const rendered = await run("fluidsynth", [
+      "-ni",
+      "-q",
+      "-g",
+      "0.8",
+      "-F",
+      wave,
+      "-r",
+      "44100",
+      soundfont,
+      source,
+    ]);
+    if (rendered.exitCode !== 0) return "failed";
+    const temporary = `${target}.tmp.mp3`;
+    const encoded = await run("ffmpeg", [
+      "-v",
+      "error",
+      "-y",
+      "-i",
+      wave,
+      "-codec:a",
+      "libmp3lame",
+      "-qscale:a",
+      "4",
+      temporary,
+    ]);
+    if (encoded.exitCode !== 0) return "failed";
+    await rename(temporary, target);
+    return "linked";
+  } finally {
+    await rm(wave, { force: true });
+  }
 }
 
 /** The last commit of the importer's conversion code, marked `-modified` when it has uncommitted changes. */

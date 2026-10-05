@@ -213,11 +213,17 @@ async function packageMedia(root: string): Promise<MediaFile[]> {
     .sort((left, right) => left.path.localeCompare(right.path));
 }
 
-async function findGroovyFiles(directory: string): Promise<string[]> {
+/**
+ * The scripts below a scripts folder. When the folder is the legacy data folder (the merged corpus layout), its
+ * `images/` and `sounds/` hold data such as Groovy persona files, not scripts.
+ */
+async function findGroovyFiles(directory: string, top = true): Promise<string[]> {
   const result: string[] = [];
+  const dataFolder = top && (await legacyDataRoot(directory)) === directory;
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const filePath = path.join(directory, entry.name);
-    if (entry.isDirectory()) result.push(...(await findGroovyFiles(filePath)));
+    if (entry.isDirectory() && dataFolder && ["images", "sounds"].includes(entry.name)) continue;
+    if (entry.isDirectory()) result.push(...(await findGroovyFiles(filePath, false)));
     else if (entry.isFile() && entry.name.toLowerCase().endsWith(".groovy")) result.push(filePath);
   }
   return result.sort();
