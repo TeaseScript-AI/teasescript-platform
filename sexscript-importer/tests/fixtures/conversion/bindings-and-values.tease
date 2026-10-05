@@ -1,3 +1,12 @@
+function sexscriptLegacyItemAt(listValue, position) {
+  if position < 0 {
+    return listValue[listValue.length + position]
+  }
+  if position >= listValue.length {
+    return null
+  }
+  return listValue[position]
+}
 function randomIntegerValue(rangeValue) {
   return 99
 }
@@ -26,3 +35,12 @@ say "Pick"
 say "Picked ${pick((choose 0: "A", 1: "B"), 3)}"
 say "hello"
 exit // final return
+// A declaration of several variables takes each from its position in the values, null past the end.
+function tilePosition(index) {
+  return [index % 3, toInteger(index / 3)]
+}
+let values = tilePosition(5)
+let column = sexscriptLegacyItemAt(values, 0)
+let row = sexscriptLegacyItemAt(values, 1)
+say "Column ${column}, row ${row}"
+exit

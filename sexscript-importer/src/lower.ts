@@ -3247,6 +3247,31 @@ function lowerDeclaration(
 ): IrStatement[] {
   const name = variableName(node.left);
   const right = asNode(node.right);
+  // `def (x, y) = values` declares each variable with the element at its position, null past the end.
+  const targets =
+    asNode(node.left)?.kind === "arguments" ? nodeArray(asNode(node.left)!.items) : [];
+  if (
+    node.multipleAssignment === true &&
+    right !== null &&
+    targets.length > 0 &&
+    targets.every((target) => variableName(target) !== null)
+  ) {
+    const values = lowerExpression(right, context);
+    if (values === null) return [];
+    const list = freshName("values", context);
+    return [
+      { kind: "let", name: list, value: values, span },
+      ...targets.map((target, position): IrStatement => ({
+        kind: "let",
+        name: variableName(target)!,
+        value: useHelper(context, "itemAt", [
+          { kind: "variable", name: list },
+          { kind: "literal", value: position },
+        ]),
+        span,
+      })),
+    ];
+  }
   if (name === null || right === null) {
     return [
       unsupportedStatement(
