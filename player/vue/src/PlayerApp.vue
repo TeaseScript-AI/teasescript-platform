@@ -14,6 +14,7 @@ import PlayerToasts from "./PlayerToasts.vue";
 import PlayerToolsShell, { type PlayerTool } from "./PlayerToolsShell.vue";
 import PlayerTopBar from "./PlayerTopBar.vue";
 import { playerRuntimeMedia } from "../../runtime-adapter.js";
+import PermanentButtons from "./PermanentButtons.vue";
 import RuntimeInteraction from "./RuntimeInteraction.vue";
 import ScriptProblems, { type ScriptFailure } from "./ScriptProblems.vue";
 import SessionActivation from "./SessionActivation.vue";
@@ -215,11 +216,22 @@ async function toggleFullscreen() {
           />
         </template>
         <template #right-rail>
-          <!-- Runtime timers are runtime-owned content; the preview may add fixtures around them. -->
-          <slot name="right-rail" :timers="player.timers.value">
-            <StageRightRail v-if="player.timers.value.length">
-              <template #timers>
+          <!-- Runtime timers and buttons are runtime-owned content; the preview may add fixtures around them. -->
+          <slot
+            name="right-rail"
+            :timers="player.timers.value"
+            :buttons="player.permanentButtons.value"
+            :press="player.pressPermanentButton"
+          >
+            <StageRightRail v-if="player.timers.value.length || player.permanentButtons.value.length">
+              <template v-if="player.timers.value.length" #timers>
                 <TimerRegion :timers="player.timers.value" />
+              </template>
+              <template v-if="player.permanentButtons.value.length" #controls>
+                <PermanentButtons
+                  :buttons="player.permanentButtons.value"
+                  @press="player.pressPermanentButton"
+                />
               </template>
             </StageRightRail>
           </slot>

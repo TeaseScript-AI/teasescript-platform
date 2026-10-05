@@ -583,7 +583,10 @@ run, after which the next mount reclaims a replaced photo; denied, the script co
 reference in saved data shows no photo. The camera view scenario (`?scenario=viewfinder`) checks that the script's
 camera view plays the test card mirrored in its window, stays in place while the sidebar is hidden and shown, and stays
 when the script takes its unmirrored photo; that `view.placement = "stage"` moves it over the Stage, where the photo stays
-underneath and the Stage takes the camera's aspect; that `hideCamera` hides it; and that a denied camera shows none. Serving the fixture package root
+underneath and the Stage takes the camera's aspect; that `hideCamera` hides it; and that a denied camera shows none.
+The permanent buttons scenario (`?scenario=buttons`) checks that a clicked button stays in place, inactive and focused,
+until its block ends; that a block can remove its own button, passing focus to the next one; that a click interrupts
+the waiting question, which returns; and that a `goto` and `exit` remove the buttons. Serving the fixture package root
 `tests/fixtures/packages/`, it opens packages by URL in the Player, playground, and editor: a valid package starts at
 its `main.tease` with its own Stage image and plays its own sound, and one that does not compile lists its diagnostic
 with file and line. With a Windows user agent, the editor opens a package served only as a catalog whose file paths a
