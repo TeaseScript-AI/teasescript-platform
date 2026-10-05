@@ -632,10 +632,10 @@ td.description { min-width: 14rem; max-width: 26rem; }
 td.keywords { max-width: 12rem; font-size: 0.9em; }
 td.author, td.keywords, td.source, .meta { color: #666; }
 td.source { font-size: 0.9em; }
-table.summary { width: auto; margin-bottom: 0.3rem; }
-table.summary th { position: static; border: 0; font-weight: normal; color: #666; }
-table.summary td { border: 0; font-size: 1.3em; font-weight: 600; }
-.status { font-size: 0.8em; padding: 0 0.4em; border-radius: 0.3em; white-space: nowrap; background: #eee; color: #333; }
+dl.summary { display: flex; flex-wrap: wrap; gap: 0.3rem 1.4rem; margin: 0 0 0.3rem; }
+dl.summary dt { color: #666; font-size: 0.9em; }
+dl.summary dd { margin: 0; font-size: 1.3em; font-weight: 600; }
+.status { font-size: 0.8em; padding: 0 0.4em; border-radius: 0.3em; display: inline-block; max-width: 13rem; background: #eee; color: #333; }
 .status.plays { background: #ddf4dd; color: #1d5e1d; }
 .status.verified, .status.approved { background: #1d5e1d; color: #fff; }
 .status.stops, .status.partial { background: #fff1cc; color: #6b4e00; }
@@ -645,7 +645,7 @@ details summary { cursor: pointer; }
 td.status-cell details summary { list-style: none; }
 td.status-cell details p, td.source details p { margin: 0.2rem 0; font-size: 0.85em; color: #555; }
 button[data-pin] { font-size: 0.8em; }
-@media (max-width: 40rem) {
+@media (max-width: 60rem) {
   table.packages thead { display: none; }
   table.packages, table.packages tbody, table.packages tr, table.packages td { display: block; }
   table.packages tr { border-bottom: 1px solid #ddd; padding: 0.5rem 0; }
@@ -659,10 +659,7 @@ button[data-pin] { font-size: 0.8em; }
 <h1>Converted SexScript teases</h1>
 <p>Legacy SexScript packages converted by the TeaseScript importer. Each title opens its package in the TeaseScript
 Player; click a status for its details.</p>
-<table class="summary">
-<tr>${summary.map(([label]) => `<th>${label}</th>`).join("")}</tr>
-<tr>${summary.map(([, value]) => `<td>${value}</td>`).join("")}</tr>
-</table>
+<dl class="summary">${summary.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("")}</dl>
 <p class="meta">${measured}${measured === "" ? "" : ". "}"Play to the end" means that automated play in the real
 Player, on several paths through buttons, choices, and typed answers, with waits skipped, ended normally every time.
 "Verified" packages also passed a manual check and are served as frozen copies. MIDI music does not play.</p>
