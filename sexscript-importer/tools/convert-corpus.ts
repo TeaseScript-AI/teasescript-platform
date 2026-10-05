@@ -206,20 +206,69 @@ async function main(rawArgs: string[]): Promise<void> {
   const unattached = resourcePacks.filter(
     (pack) => !targets.some((target) => target.pack === pack && target.packages.length > 0),
   );
+  // A partial run counts the other units by the records and failures their last conversion left.
+  const counted: SummaryRecord[] = [...records.values()].map((record) => ({
+    converter: record.converter,
+    exitCode: record.exitCode,
+    collisions: record.collisions.length,
+    patched: record.patches.length > 0,
+  }));
+  const failed = new Map<string, unknown>(failures);
+  if (only !== null)
+    for (const { id } of scriptPackages) {
+      if (only.has(id)) continue;
+      const record = await summaryRecord(path.join(outputRoot, id, ".conversion.json"));
+      if (record !== null) counted.push(record);
+      const failure = await readFile(failurePath(outputRoot, id), "utf8").catch(() => null);
+      if (failure !== null) failed.set(id, JSON.parse(failure));
+    }
+  const converters = new Map<string, number>();
+  for (const record of counted)
+    converters.set(record.converter, (converters.get(record.converter) ?? 0) + 1);
   const summary = {
     importerCommit: importer,
+    ...(converters.size > 1 ? { converters: Object.fromEntries(converters) } : {}),
     measuredAt: new Date().toISOString(),
     scriptPackages: scriptPackages.length,
-    converted: records.size,
-    withConverterErrors: [...records.values()].filter((record) => record.exitCode !== 0).length,
+    converted: counted.length,
+    withConverterErrors: counted.filter((record) => record.exitCode !== 0).length,
     resourcePacks: resourcePacks.length,
     unattachedResourcePacks: unattached,
-    collisions: [...records.values()].reduce((sum, record) => sum + record.collisions.length, 0),
-    patched: [...records.values()].filter((record) => record.patches.length > 0).length,
-    failed: Object.fromEntries(failures),
+    collisions: counted.reduce((sum, record) => sum + record.collisions, 0),
+    patched: counted.filter((record) => record.patched).length,
+    failed: Object.fromEntries(failed),
   };
-  if (only === null) await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
+  await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
   process.stderr.write(`${JSON.stringify(summary, null, 2)}\n`);
+}
+
+/** What the summary counts of a unit's conversion record. */
+interface SummaryRecord {
+  readonly converter: string;
+  readonly exitCode: number;
+  readonly collisions: number;
+  readonly patched: boolean;
+}
+
+/** The counted fields of a `.conversion.json`, or null for a missing or malformed one. */
+async function summaryRecord(file: string): Promise<SummaryRecord | null> {
+  const text = await readFile(file, "utf8").catch(() => null);
+  if (text === null) return null;
+  const parsed: unknown = JSON.parse(text);
+  if (
+    !isRecordValue(parsed) ||
+    typeof parsed.converter !== "string" ||
+    typeof parsed.exitCode !== "number" ||
+    !Array.isArray(parsed.collisions) ||
+    !Array.isArray(parsed.patches)
+  )
+    return null;
+  return {
+    converter: parsed.converter,
+    exitCode: parsed.exitCode,
+    collisions: parsed.collisions.length,
+    patched: parsed.patches.length > 0,
+  };
 }
 
 /** Converts one unit in a staging folder and replaces its published output only when every step succeeded. */
