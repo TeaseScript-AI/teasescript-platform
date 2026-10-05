@@ -100,4 +100,11 @@ function checkPhoto(snapfile) {
 if checkPhoto(takePhoto()) {
   say "Nice photo"
 }
+// The system language, which TeaseScript cannot query yet, reads as English.
+// NOTE SX_LOCALE_WORKAROUND line 40: Workaround: TeaseScript has no query for the player's language yet (the localization question in COMPATIBILITY-GAPS.md), so the conversion assumes English, "en", where Groovy read the system language.
+if "en" == "de" {
+  say "Hallo"
+} else {
+  say "Hello"
+}
 exit

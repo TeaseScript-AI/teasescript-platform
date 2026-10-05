@@ -36,3 +36,5 @@ def checkPhoto = { snapfile ->
   return false
 }
 if (checkPhoto(getImage("Smile"))) show("Nice photo")
+// The system language, which TeaseScript cannot query yet, reads as English.
+if (System.getProperty("user.language") == "de") show("Hallo") else show("Hello")

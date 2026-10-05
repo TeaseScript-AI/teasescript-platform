@@ -8162,6 +8162,21 @@ function lowerObjectMethodCallExpression(
     );
     return { kind: "literal", value: "en" };
   }
+  if (
+    name === "getProperty" &&
+    variableName(targetNode) === "System" &&
+    argumentsNodes.length === 1 &&
+    constantString(argumentsNodes[0]) === "user.language"
+  ) {
+    addDiagnostic(
+      context,
+      "SX_LOCALE_WORKAROUND",
+      "warning",
+      'Workaround: TeaseScript has no query for the player\'s language yet (the localization question in COMPATIBILITY-GAPS.md), so the conversion assumes English, "en", where Groovy read the system language.',
+      node.span,
+    );
+    return { kind: "literal", value: "en" };
+  }
   if (name === "execute" && argumentsNodes.length === 0 && targetNode !== null) {
     const switched = switchCommand(targetNode, node, context);
     if (switched !== undefined) return switched;
