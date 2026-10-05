@@ -963,8 +963,9 @@ function materializeInteractionUi(
     const integer = prepared.kind === "number" && prepared.integer === true;
     if (prepared.prefillTemporary !== undefined) {
       const temporary = read(prepared.prefillTemporary);
-      prefill = interactionPrefill(integer ? "integer" : prepared.kind, temporary.value, span);
-      stagedWrites.push({ temporaryId: temporary.id, value: prefill });
+      if (!isEmptyDefault(temporary.value))
+        prefill = interactionPrefill(integer ? "integer" : prepared.kind, temporary.value, span);
+      stagedWrites.push({ temporaryId: temporary.id, value: prefill ?? null });
     }
     ui = {
       kind: prepared.kind,
@@ -978,8 +979,9 @@ function materializeInteractionUi(
     let prefill: string | undefined;
     if (prepared.prefillTemporary !== undefined) {
       const temporary = read(prepared.prefillTemporary);
-      prefill = temporalPrefill(prepared.temporalKind, temporary.value, span);
-      stagedWrites.push({ temporaryId: temporary.id, value: prefill });
+      if (!isEmptyDefault(temporary.value))
+        prefill = temporalPrefill(prepared.temporalKind, temporary.value, span);
+      stagedWrites.push({ temporaryId: temporary.id, value: prefill ?? null });
     }
     ui = {
       kind: "temporal",
@@ -1018,6 +1020,14 @@ function materializeInteractionUi(
   });
 }
 
+/**
+ * A default that is `null` or blank text when the field opens prefills nothing (V30 §20), such as a `load` of a key a
+ * first play has not saved yet. Its temporary then holds `null`, which checkpoint validation reads as no prefill.
+ */
+function isEmptyDefault(value: SerializableRuntimeValue): boolean {
+  return value === null || (typeof value === "string" && isBlankTextAnswer(value));
+}
+
 /** The prefill text of a default answer, which must be an answer the field accepts. */
 function interactionPrefill(
   kind: "text" | "number" | "integer",
@@ -1047,12 +1057,6 @@ function interactionPrefill(
     throw fault(
       "TSR052",
       "The default answer of askText must be text. Write the value as text with interpolation: 'default: \"${...}\"'.",
-      span,
-    );
-  if (isBlankTextAnswer(value))
-    throw fault(
-      "TSR052",
-      "The default answer of askText must contain a non-whitespace character. Ask without 'default:' when there is no answer to offer.",
       span,
     );
   return value;
