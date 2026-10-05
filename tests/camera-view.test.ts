@@ -4,6 +4,7 @@ import test from "node:test";
 import { compileSource } from "../src/compiler.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
+import { parse } from "../src/parser.js";
 import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
@@ -149,6 +150,13 @@ test("the compiler and runtime reject what a camera view cannot do", () => {
     ["showCamera(1)\nexit", "TSP035"],
   ] as const)
     assert.ok(codes(source).includes(code), `${source}: ${codes(source).join(", ")}`);
+  // The compiler follows the handle's type through aliases, function results, and collections.
+  for (const source of [
+    'let view = showCamera\nlet alias = view\nalias.placement = "nowhere"\nexit',
+    'function show {\n    return showCamera\n}\nshow().placement = "nowhere"\nexit',
+    'let views = [showCamera]\nviews[0].placement = "nowhere"\nexit',
+  ])
+    assert.deepEqual(codes(source), ["TSV059"], source);
   const computed = runValidSource(
     'let view = showCamera\nlet where = "nowhere"\nview.placement = where\nexit',
   ).snapshot;
@@ -188,4 +196,32 @@ test("restore rejects malformed camera view state and plans", () => {
   );
   instruction.placement = "floor";
   assert.equal(validateInstructionPlan(forged).valid, false);
+});
+
+test("a camera command inside a loop lets a waiting block change what the loop narrowed", () => {
+  // The command waits for pacing, so the timer may change v before the loop tests it again.
+  for (const command of ["showCamera", "hideCamera"]) {
+    const source = [
+      "let v: integer | string = 1",
+      'timer async hidden 1 {\n    v = "text"\n}',
+      'say "Waiting.", 2',
+      "if v is integer {",
+      "    while v < 3 {",
+      `        ${command}`,
+      "    }",
+      "}",
+      "exit",
+    ].join("\n");
+    assert.deepEqual(codes(source), ["TSV043"], command);
+  }
+});
+
+test("showCamera may start the line after a colon, and a broken call keeps the closing brace", () => {
+  assert.deepEqual(codes("let obj = { view:\n    showCamera\n}\nexit"), []);
+  const broken = parse('if true { showCamera( }\nsay "after"\nexit');
+  assert.deepEqual(
+    broken.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSP035"],
+  );
+  assert.equal(broken.program.statements.length, 3);
 });

@@ -94,12 +94,12 @@ export interface ParseResult {
 }
 
 // Commands that #parseStatement dispatches by name. A line that starts with one starts a statement; only `showButton`
-// and `showCamera` also have an expression form, used after `=`, an operator, or an opening delimiter.
+// also has an expression form, used after `=`, an operator, or an opening delimiter. `showCamera`, like `timer`, is
+// not listed, so its value form may start a line after `:`.
 const statementOnlyCommands: ReadonlySet<string> = new Set([
   "showButton",
   "showImage",
   "hideImage",
-  "showCamera",
   "hideCamera",
   "save",
   "delete",
@@ -1454,6 +1454,8 @@ class Parser {
     this.#reportToken(parserDiagnosticCode.invalidMediaForm, message, this.#peek());
     let depth = 0;
     while (!this.#check(TokenKind.Newline) && !this.#check(TokenKind.EndOfFile)) {
+      // An unclosed group never takes the closing brace of an enclosing block on the same line.
+      if (depth > 0 && this.#check(TokenKind.RightBrace)) break;
       const token = this.#advance();
       if (token.kind === TokenKind.LeftParenthesis) depth += 1;
       else if (token.kind === TokenKind.RightParenthesis && --depth === 0) break;

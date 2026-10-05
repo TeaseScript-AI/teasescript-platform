@@ -215,6 +215,7 @@ const typeCode = {
   invalidTagQueryFrom: "TST006",
   randomStartValue: "TSV055",
   closedLoop: "TSV058",
+  invalidCameraPlacement: "TSV059",
 } as const;
 
 /**
@@ -1271,6 +1272,23 @@ class TypeChecker {
     );
   }
 
+  /**
+   * A placement the compiler knows to be wrong, written to what can only be a camera view, also through an alias, a
+   * function result, or a collection element; a value it cannot know is checked at runtime (`TSR050`).
+   */
+  #checkCameraPlacement(object: StaticType, statement: AssignmentStatement): void {
+    const receivers = members(nonNullType(object));
+    if (receivers.length === 0 || !receivers.every((member) => resolved(member).kind === "camera"))
+      return;
+    const text = staticVisibleText(statement.value);
+    if (statement.operator !== "=" || (text !== undefined && text !== "window" && text !== "stage"))
+      this.#report(
+        typeCode.invalidCameraPlacement,
+        'Camera placement must be "window" or "stage".',
+        statement.value.span,
+      );
+  }
+
   *#assignmentTask(statement: AssignmentStatement, scope: Scope): CompileTask<void> {
     const target = statement.target;
     let place: Place | undefined;
@@ -1395,7 +1413,10 @@ class TypeChecker {
         // A media position, remaining time, or volume write, and a camera view's placement, first wait for the
         // previous message's pacing.
         if (MEDIA_PACED_PROPERTIES.has(name) && mayBe(object, "media")) this.#suspend();
-        if (name === "placement" && mayBe(object, "camera")) this.#suspend();
+        if (name === "placement" && mayBe(object, "camera")) {
+          this.#suspend();
+          this.#checkCameraPlacement(object, statement);
+        }
       }
     }
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
@@ -4826,6 +4847,8 @@ const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
   "playMediaStatement",
   "showImageStatement",
   "hideImageStatement",
+  "showCameraStatement",
+  "hideCameraStatement",
   "saveStatement",
   "deleteStatement",
   // Blocks of the caller keep running while a called file runs.
