@@ -18,3 +18,7 @@ if (hour > 22) System.exit(0)
 // Java date patterns: the ISO date is a machine format, other patterns are shown in the player's local form.
 def stamp = new Date().format("yyyy-MM-dd")
 show("Status of " + stamp + " at " + new Date().format("HH:mm") + ", day " + dayOfYear + " " + sameDay)
+// A date built from Unix seconds is the current moment minus the seconds since then, shown in the local date form.
+def lockedSince = loadInteger("training.lockedSince")
+if (lockedSince == null) lockedSince = 1790000000
+show("Locked since " + new Date((long) lockedSince * 1000).format("dd, MMM, yyyy"))

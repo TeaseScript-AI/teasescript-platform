@@ -10980,6 +10980,25 @@ function dateFormat(
   if (javaFormat !== null && javaFormat.length === 1)
     return dateFormat(node, argumentsNodes[0]!, javaFormat, context);
   const pattern = argumentsNodes.length === 1 ? constantString(argumentsNodes[0]) : null;
+  const fromNumber = unixDate(targetNode, context);
+  if (fromNumber !== null && pattern !== null) {
+    const kind = datePatternKind(pattern);
+    if (fromNumber !== undefined && kind !== null && kind !== "isoDate") {
+      addDiagnostic(
+        context,
+        "SX_DATE_FROM_SECONDS",
+        "warning",
+        `Workaround: TeaseScript builds no timestamp from a Unix number (#532), so the moment is the current timestamp minus the seconds since then; Java's pattern ${JSON.stringify(pattern)} becomes the player's local ${kind === "dateTime" ? "date and time" : kind} form.`,
+        node.span,
+      );
+      return {
+        kind: "methodCall",
+        target: fromNumber,
+        name: `format${kind === "date" ? "Date" : kind === "time" ? "Time" : "DateTime"}`,
+        arguments: [],
+      };
+    }
+  }
   if (!isCurrentDateConstructor(targetNode)) {
     return unsupportedExpression(
       context,
@@ -11017,6 +11036,58 @@ function dateFormat(
     target: { kind: "call", name: getter, positional: [], named: {} },
     name: method,
     arguments: [],
+  };
+}
+
+/**
+ * `new Date(milliseconds)` as a timestamp: the current timestamp minus the exact seconds since that moment, since
+ * TeaseScript builds no timestamp from a number (#532). Null for another receiver, undefined after a diagnostic.
+ */
+function unixDate(node: AstNode, context: LowerContext): IrExpression | null | undefined {
+  const args = nodeArray(asNode(node.arguments)?.items);
+  if (
+    node.kind !== "constructorCall" ||
+    !/(?:^|\.)Date$/u.test(text(node.type) ?? "") ||
+    args.length !== 1
+  )
+    return null;
+  // `(long) seconds * 1000`, the usual form, gives the seconds themselves.
+  let millis = args[0]!;
+  while (millis.kind === "cast" && asNode(millis.expression) !== null)
+    millis = asNode(millis.expression)!;
+  const right = asNode(millis.right);
+  let secondsNode: AstNode | null = null;
+  if (
+    millis.kind === "binary" &&
+    millis.operator === "*" &&
+    constantValue(right ?? undefined) === 1000
+  ) {
+    secondsNode = asNode(millis.left);
+    while (secondsNode?.kind === "cast" && asNode(secondsNode.expression) !== null)
+      secondsNode = asNode(secondsNode.expression);
+  }
+  const value = lowerExpression(secondsNode ?? millis, context);
+  if (value === null) return undefined;
+  const seconds: IrExpression =
+    secondsNode !== null
+      ? value
+      : { kind: "binary", operator: "/", left: value, right: { kind: "literal", value: 1000 } };
+  const now: IrExpression = { kind: "call", name: "getTimestamp", positional: [], named: {} };
+  return {
+    kind: "binary",
+    operator: "-",
+    left: now,
+    right: {
+      kind: "binary",
+      operator: "*",
+      left: {
+        kind: "binary",
+        operator: "-",
+        left: { kind: "methodCall", target: now, name: "toSeconds", arguments: [] },
+        right: seconds,
+      },
+      right: { kind: "duration", value: 1, unit: "s" },
+    },
   };
 }
 
