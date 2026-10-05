@@ -6,6 +6,90 @@
       "category": "e",
       "reason": "In this older toys module, backgroundRemoveAllToys filters the toy map with a key/value closure but then uses the whole Map.Entry (it) as the state name, so the release event name became \"…-key={…}\" and set() got an entry instead of the state key. The selected state is the key (the filter tests stateIs(s)); the newer toys.groovy also addresses it.key. Use it.key.",
       "diff": "remove-all-toys-entry-key.diff"
+    },
+    {
+      "id": "menu-conditions",
+      "layer": "source",
+      "category": "b",
+      "reason": "The main menu filtered its option and request records by calling the closure stored in each record (it.cond()), which the converter cannot lower inside findAll, so the menu came out empty. Filter in plain loops that call each condition through a local variable, in the same order; the request menu builds its label list in its own statement and adds '...nevermind' to a new list instead of the caller's list, which the caller rebuilds before each menu anyway.",
+      "diff": "menu-conditions.diff"
+    },
+    {
+      "id": "storage-props",
+      "layer": "source",
+      "category": "b",
+      "reason": "getProp read a storage key through a Java method reference (this.&loadBoolean and the like, called with f.apply), which the converter cannot lower, so every toy.* property read its default. Read the key with load(), which returns the stored value whatever its type, and keep loadB, loadI, and loadS as names so that no call site changes; each toy.* key is only ever saved with one type, so the typed filter of the legacy loaders made no difference.",
+      "diff": "storage-props.diff"
+    },
+    {
+      "id": "events-maps",
+      "layer": "source",
+      "category": "b",
+      "reason": "The scheduled events were Event and NamedEvent class instances, loaded with loadMap and collectEntries and found with a map each() loop, none of which converts, so no event was ever found and the main loop restarted the script forever. Keep each event as the plain map [time, func, arg] that was already saved, load it with load(), add it with put(), and find the next one in a loop over the keys, in the same order and with the same tie rule; the null checks of the result are written out as e != null.",
+      "diff": "events-maps.diff"
+    },
+    {
+      "id": "local-time",
+      "layer": "source",
+      "category": "b",
+      "reason": "localTimeOffset read the zone offset from java.time zone rules and getDayNum used Math.floorDiv, neither of which converts, so both returned null and every day and clock-time calculation failed. Take the offset from the local clock instead (local hour and minute minus the UTC time of day, rounded to the 15-minute steps that zone offsets use and folded into -12..+14 hours) and use intdiv, which equals floorDiv for the positive times involved.",
+      "diff": "local-time.diff"
+    },
+    {
+      "id": "session-random",
+      "layer": "source",
+      "category": "b",
+      "reason": "getRandomSession drew from a java.util.Random seeded with the session start, which has no TeaseScript equivalent, so it returned null and every list index built from it failed. Derive the number from the same seed with one Park-Miller step instead: it stays constant for the play session as before, but the numbers differ from Java's; a missing seed, where Java failed, gives 0.",
+      "diff": "session-random.diff"
+    },
+    {
+      "id": "text-helpers",
+      "layer": "source",
+      "category": "b",
+      "reason": "compose() built its sentence with a collect/join/capitalize chain and gagText() with String.toList() and a list sum(), which do not convert, so every composed line came out null. Pick one text per group in a loop and join the parts, write the consonant lists out, and join the gagged characters with join(\"\"), with the same results (an empty text gives \"\" where the legacy sum() gave \"null\").",
+      "diff": "text-helpers.diff"
+    },
+    {
+      "id": "trigger-handlers",
+      "layer": "source",
+      "category": "b",
+      "reason": "executeTrigger called each handler's closure as a record property inside forEach (th.func(...)), which does not convert, so no trigger handler ran (availability statistics and summon counters). Call each matching handler through a local variable in a loop, in the same order and with the same argument.",
+      "diff": "trigger-handlers.diff"
+    },
+    {
+      "id": "speech-ignored",
+      "layer": "source",
+      "category": "b",
+      "reason": "The script detected the operating system to speak texts with the Windows or macOS speech program (sayCommand(...).execute()); owner decision: speech output is ignored. Leave osName unset, so that canTalk() is false and the voice settings are not offered, and make say() do nothing.",
+      "diff": "speech-ignored.diff"
+    },
+    {
+      "id": "domme-data",
+      "layer": "source",
+      "category": "b",
+      "reason": "getDomme evaluated the Groovy data files images/toy/domme.groovy, images/toy/<domme>/person.groovy, and set.groovy at runtime (new File, Eval.me), which a package cannot do, so DOMME stayed null and every image lookup by DOMME.id failed. Write the title and the two person files out as a dict, with the id as before. The session plans in domme.groovy are left out: only sessionPlay reads them, and it evaluates their expression strings with Eval, which does not convert either.",
+      "diff": "domme-data.diff"
+    },
+    {
+      "id": "boolean-shuffle",
+      "layer": "source",
+      "category": "b",
+      "reason": "getBooleanG reused its boolean shuffle parameter for the number getRandom(2), which TeaseScript rejects because a variable keeps one type. Store getRandom(2) != 0, which is true exactly when the number was truthy.",
+      "diff": "boolean-shuffle.diff"
+    },
+    {
+      "id": "session-toy-count",
+      "layer": "source",
+      "category": "e",
+      "reason": "hasSessionToy returned false for a toy not yet fetched in the session and its count otherwise, but useSessionToy compared that with < and getRestraints subtracted it, which failed in Groovy for false. Return 0 for a missing toy (callers that test its truth see the same) and let getRestraints test for a missing toy with containsKey, which is what its == false meant.",
+      "diff": "session-toy-count.diff"
+    },
+    {
+      "id": "image-spec-lists",
+      "layer": "source",
+      "category": "b",
+      "reason": "The image spec [nDRESSED, [TITS,PUSSY,ASS]] mixed a text and a list in one list, which TeaseScript rejects. Wrap the text in a one-element list; multiplexTags turns every element into a list ([]+t) before it combines them, so the images chosen are the same.",
+      "diff": "image-spec-lists.diff"
     }
   ]
 }
