@@ -90,6 +90,11 @@ test("reads package text files that no script writes as converted", { skip }, as
       'def settings = new org.ini4j.Wini(new File("scripts/system/settings.ini"))',
       'def option = "Favourite02"',
       'show(settings.get("Favourites", "Favourite01") + "/" + settings.get("Favourites", option) + "/")',
+      // The lines are text, so remove() of one of them removes that value, not a position.
+      "def all = questions + answers",
+      "def asked = all[0]",
+      "all.remove(asked)",
+      'show("${all.size()} ${all[0]}")',
     ],
     {
       "Quiz/world_q.txt": "Capital of France?\r\nLargest ocean?\r\n",
@@ -107,7 +112,14 @@ test("reads package text files that no script writes as converted", { skip }, as
   assert.match(source, /^props = sexscriptLegacyProperties\(reader\)$/mu);
   assert.match(source, /NOTE SX_PACKAGE_TEXT_SNAPSHOT/u);
   assert.doesNotMatch(source, /TODO|reader\.close/u);
-  assert.deepEqual(run(source), ["2 Largest ocean? 3 .", "Hello world", "value! null", "Domme//"]);
+  assert.match(source, /^all\.remove\(asked\)$/mu);
+  assert.deepEqual(run(source), [
+    "2 Largest ocean? 3 .",
+    "Hello world",
+    "value! null",
+    "Domme//",
+    "4 Largest ocean?",
+  ]);
 });
 
 // A file that some script of the package writes is no fixed text: its reads stay manual work, which names the write.

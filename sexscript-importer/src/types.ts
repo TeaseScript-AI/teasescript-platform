@@ -526,6 +526,9 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
   const added = new Map<string, ValueType>();
   const unknown = new Set<string>();
   const aliases: Array<[string, string]> = [];
+  // `target = a + b + ...` of list literals and variables, and the names any assignment gives a value.
+  const sums: Array<[string, AstNode[]]> = [];
+  const assigned = new Set<string>();
   // `target += source` and `target.addAll(source)` copy the elements of a list variable one way.
   const appends: Array<[string, string]> = [];
   const add = (name: string | null, type: ValueType): void => {
@@ -572,6 +575,7 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
     }
     const name = variableName(left);
     if (name === null || value === null) return;
+    assigned.add(name);
     if (
       value.kind === "unsupportedExpression" ||
       (value.kind === "constant" && value.value === null) ||
@@ -601,6 +605,17 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
       else add(name, inferType(extension, environment));
       return;
     }
+    // Groovy readLines(), split(text), and tokenize() give lists of text.
+    if (value.kind === "methodCall" && textListCall(value)) {
+      elements.set(name, (elements.get(name) ?? 0) | STRING);
+      return;
+    }
+    // `a + b` of list variables and literals holds the elements of each, once every part is known to be a list.
+    const parts = listSumParts(value);
+    if (parts !== null && parts.length > 1) {
+      sums.push([name, parts]);
+      return;
+    }
     if (value.kind !== "list") {
       unknown.add(name);
       return;
@@ -623,6 +638,27 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
       elements.set(name, elements.get(name)! | type);
       changed = true;
     }
+    for (const [target, parts] of sums) {
+      if (unknown.has(target)) continue;
+      let type = 0;
+      let ready = true;
+      for (const part of parts) {
+        const source = variableName(part);
+        if (source === null) type |= itemsType(part);
+        else if (unknown.has(source) || !assigned.has(source)) ready = false;
+        else type |= elements.get(source) ?? 0;
+      }
+      if (!ready) {
+        unknown.add(target);
+        changed = true;
+      } else if (
+        type !== 0 &&
+        (elements.get(target) ?? 0) !== ((elements.get(target) ?? 0) | type)
+      ) {
+        elements.set(target, (elements.get(target) ?? 0) | type);
+        changed = true;
+      }
+    }
     for (const [target, source] of flows) {
       if (!elements.has(source) && !unknown.has(source)) continue;
       const merged = unknown.has(source)
@@ -635,8 +671,37 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
       }
     }
   }
+  // A sum whose parts never became lists is no list of known elements.
+  for (const [target, parts] of sums) {
+    if (parts.some((part) => part.kind === "variable" && !elements.has(variableName(part) ?? "")))
+      unknown.add(target);
+  }
   for (const name of unknown) elements.delete(name);
   return elements;
+}
+
+/** `text.readLines()`, `text.split(separator)`, and `text.tokenize(...)`, which give lists of text. */
+function textListCall(node: AstNode): boolean {
+  const method = constantString(node.method);
+  const args = asNode(node.arguments);
+  const items = Array.isArray(args?.items) ? args.items.filter(isAstNode) : [];
+  if (method === "readLines") return items.length === 0;
+  // A collection's split(closure) gives two lists instead.
+  if (method === "split") return items.length === 1 && items[0]!.kind !== "closure";
+  return method === "tokenize" && items.every((item) => item.kind !== "closure");
+}
+
+/** The operands of `a + b + ...` when each is a list literal or a variable, as Groovy joins lists. */
+function listSumParts(node: AstNode): AstNode[] | null {
+  if (node.kind === "list" || node.kind === "variable") return [node];
+  if (node.kind !== "binary" || node.operator !== "+") return null;
+  const left = asNode(node.left);
+  const right = asNode(node.right);
+  const leftParts = left === null ? null : listSumParts(left);
+  const rightParts = right === null ? null : listSumParts(right);
+  if (leftParts === null || rightParts === null) return null;
+  // At least one literal list or a sum of several parts: a single variable is an alias, handled above.
+  return [...leftParts, ...rightParts];
 }
 
 interface Assignment {
