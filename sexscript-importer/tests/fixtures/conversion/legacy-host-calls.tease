@@ -1,6 +1,6 @@
-// MIGRATION INCOMPLETE: 1 error diagnostic.
-// Review diagnostics before treating this file as behaviorally equivalent.
-
+speaker system {
+  title: "System"
+}
 function sexscriptLegacyAskText(prefill) {
   if prefill == null or "${prefill}".trim() == "" {
     return askText
@@ -57,8 +57,8 @@ if back != null {
 // useFile() plays an audio file; a program cannot start from a package.
 // NOTE SX_USE_FILE_AUDIO line 11: useFile() opened this audio file in the system's player; it plays in the session here, without waiting.
 playAudio async "bell.mp3"
-// TODO SX_EXTERNAL_PROGRAM line 12: useFile() opened this file with a program of the player's computer, such as a device control program or an executable; a TeaseScript package cannot start programs.
-// | useFile("tools/device.exe")
+// NOTE SX_EXTERNAL_PROGRAM_NOTICE line 12: useFile() started the program tools/device.exe on the player's computer, which a package cannot do; a system notice says so.
+say as system "The program device.exe that the original started is not available here."
 // A device switch program shows the switch state.
 let switchOn = "SwitchBox.exe 7 ein"
 // NOTE SX_SWITCH_BUTTON line 15: The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.

@@ -13726,6 +13726,9 @@ function deviceCommand(node: AstNode): { name: string; label: string; state: str
   return found;
 }
 
+/** Programs a package may hold, which useFile() started on the player's computer. */
+const PROGRAM_EXTENSIONS = new Set([".exe", ".bat", ".cmd", ".com", ".jar", ".msi"]);
+
 /** Audio files the legacy useFile() opened in the system's player. */
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".m4a", ".mid", ".midi"]);
 /** Video files a browser plays, and the formats the corpus driver converts to MP4 (H.264) at conversion time. */
@@ -13797,6 +13800,48 @@ function useFileStatements(
         repeatCount: null,
         span,
       },
+    ];
+  }
+  // A program the package holds, such as a puzzle, cannot start: a system notice says so (owner decision), and for a
+  // puzzle the player says whether it was solved, so the story continues.
+  if (path !== null && PROGRAM_EXTENSIONS.has(extension)) {
+    const name = path.replaceAll("\\", "/").split("/").at(-1)!;
+    const puzzle = /puzzle/iu.test(path);
+    addDiagnostic(
+      context,
+      "SX_EXTERNAL_PROGRAM_NOTICE",
+      "warning",
+      `useFile() started the program ${path} on the player's computer, which a package cannot do; a system notice says so${puzzle ? ", and the player says whether the puzzle was solved" : ""}.`,
+      node.span,
+    );
+    return [
+      systemSay(
+        {
+          kind: "literal",
+          value: puzzle
+            ? `The puzzle (${name}) is not available here. Solve it in your mind, or skip it.`
+            : `The program ${name} that the original started is not available here.`,
+        },
+        span,
+        context,
+      ),
+      ...(puzzle
+        ? [
+            {
+              kind: "let" as const,
+              name: freshName("puzzleSolved", context),
+              value: {
+                kind: "choice" as const,
+                options: [
+                  { kind: "literal" as const, value: "Puzzle solved" },
+                  { kind: "literal" as const, value: "Not solved" },
+                ],
+                labels: ["solved", "unsolved"],
+              },
+              span,
+            },
+          ]
+        : []),
     ];
   }
   if (path === null || !AUDIO_EXTENSIONS.has(extension))
