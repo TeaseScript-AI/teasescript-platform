@@ -4387,6 +4387,8 @@ function neverAssigned(target: unknown, context: LowerContext): boolean {
     name !== null &&
     key !== null &&
     context.checksUndefinedVariables &&
+    // The methods of a helper class also share its static fields, which no method assigns.
+    context.helperFunctions.size === 0 &&
     !context.assignedValues.has(key) &&
     !context.parameterBindings.has(key) &&
     !context.generatedNames.has(name) &&

@@ -217,6 +217,23 @@ test("keeps static helper fields as package variables and flags instance fields"
   const shared = lowerParsedFile(unit(helper, [field(true)]));
   assert.ok(!shared.diagnostics.some((diagnostic) => diagnostic.code === "SX_HELPER_SHARED_STATE"));
   assert.match(emitTease(shared), /^let counter = 0$/mu);
+  // A method updates the field that no method assigns; the class declares it.
+  const update = method(
+    "count",
+    [parameter("main")],
+    [
+      statement({
+        kind: "binary",
+        span,
+        operator: "+=",
+        left: variable("counter"),
+        right: constant(1),
+      }),
+    ],
+  );
+  const updated = lowerParsedFile(unit([update], [field(true)]), { packageFunctions: new Set() });
+  assert.ok(!updated.diagnostics.some((diagnostic) => diagnostic.code === "SX_UNDEFINED_VARIABLE"));
+  assert.match(emitTease(updated), /^ {2}counter \+= 1$/mu);
 
   const instance = lowerParsedFile(unit(helper, [field(false)]));
   assert.ok(
