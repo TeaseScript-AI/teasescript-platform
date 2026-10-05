@@ -129,7 +129,7 @@ export function useImageCapture(host: ImageCaptureHost) {
     const target: Capture = {
       generation: host.generation.value,
       actionId: request.actionId,
-      question: request.ui.hint ?? "Take a photo",
+      question: request.ui.question ?? "Take a photo",
       phase: "opening",
       reference: null,
       own: false,

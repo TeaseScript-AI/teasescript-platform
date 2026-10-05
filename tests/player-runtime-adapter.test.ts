@@ -729,7 +729,7 @@ test("the Player answers takePhoto() with a vouched reference or an unavailable 
 
 test("an image request is presented, survives a restore while it waits, and shows the chosen image", () => {
   const session = createPlayerRuntimeSession(
-    'say "Show me.", instant\nlet pick = askImage(message: "Add an image", types: [".png"])\nshowImage pick\nexit',
+    'let pick = askImage(message: "Show me.", hint: "Add an image", types: [".png"])\nshowImage pick\nexit',
   );
   const presented = playerRuntimeForeground(session);
   assert.deepEqual(presented, {

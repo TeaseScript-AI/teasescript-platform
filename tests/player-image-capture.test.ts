@@ -130,11 +130,12 @@ function harness(
 }
 
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
-const SELFIE = 'let pick = askImage("Smile for me")\nshowImage pick\nexit';
+const SELFIE = 'let pick = askImage("Smile for me", hint: "Attach a photo")\nshowImage pick\nexit';
 
 test("the camera opens by itself with the request, and a photo answers only when it is used", async () => {
   const { media, camera, session, capture } = harness(SELFIE);
   assert.equal(capture.view.value?.phase, "opening");
+  // The viewfinder shows the question, which the chat also shows; the hint only labels the composer.
   assert.equal(capture.view.value?.question, "Smile for me");
   await settled();
   assert.equal(capture.view.value?.phase, "live");
@@ -212,6 +213,11 @@ test("a photo that arrives after its request was answered is dropped", async () 
   await shot;
   assert.equal(capture.view.value, null);
   assert.equal(media.holds(camera.taken[0]!, "image"), false);
+});
+
+test("a request without a question shows the viewfinder's own question", async () => {
+  const { capture } = harness('let pick = askImage(hint: "Attach a photo")\nexit');
+  assert.equal(capture.view.value?.question, "Take a photo");
 });
 
 test("no capture opens for a request without the camera, or where no camera can be used", async () => {
