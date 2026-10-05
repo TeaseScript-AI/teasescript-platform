@@ -115,18 +115,21 @@ resolves the scenario's Stage images to the development illustrations and its ch
 surfaces, not Standard Player product tools or runtime/package/host APIs. Fixture timer/control values remain local;
 the opening scenario still uses the shared canonical runtime adapter.
 
-With the explicit `?dev` opt-in, also on the development server, the preview adds the Time Controls tool (#615) for
-testing long scripts. Its **Enable time controls** switch arms **Skip to next timed event**, which advances scene time
-to the next wait, timer expiry, pacing pause, button timeout, or audio cue or end (silent rounds of a repeating timer
-without an expiry block and passes of looping audio without cues are no stops), and **+10 s** and **+1 min**, which
-apply only while the script waits for player input. **Auto-skip** skips event after event while no input is pending and
-no media is loading, so a player's think time and the background timers running meanwhile stay real time. Jumps are
-ordinary observations (see [`docs/RUNTIME.md`](../docs/RUNTIME.md#timers-and-scene-time)), made in short tasks so the
-Player stays responsive and switching the controls off stops a long one; playing audio seeks along, and browser video
-seeking waits for video playback. While the controls are on, a badge over the Stage shows them and
-announces each jump ("⏩ 30 s skipped"), and the panel lists recent jumps; these markers are local UI state, never
-transcript entries, notices, or checkpoint data. `?dev&time=skip` starts with the controls and auto-skip on, plain
-`?dev` with both off; the switches change them during a session.
+With the explicit `?dev` opt-in, also on the development server, the preview adds the **Debug** tool for testing long
+scripts; its time controls (#615) are always active there. **Skip event** advances scene time to the next wait, timer
+expiry, pacing pause, button timeout, or audio cue or end (silent rounds of a repeating timer without an expiry block
+and passes of looping audio without cues are no stops), and **+10 s** and **+1 min** apply only while the script waits
+for player input. The **Auto-skip** switch skips event after event while no input is pending and no media is loading, so
+a player's think time and the background timers running meanwhile stay real time; a badge over the Stage shows it while
+it is on. `?dev&time=skip` starts with auto-skip on, plain `?dev` with it off. Jumps are ordinary observations (see
+[`docs/RUNTIME.md`](../docs/RUNTIME.md#timers-and-scene-time)), made in short tasks so the Player stays responsive;
+playing audio seeks along, and browser video seeking waits for video playback. Each jump adds a line to the panel's
+**Debug log** ("⏩ 30 s skipped", newest first), which an invisible live region also announces while the panel is
+closed; these lines are local UI state, never transcript entries, notices, or checkpoint data. The explanations of
+Auto-skip and the jumps open from their labels. Automation finds the controls by role and name (the Debug launcher, the
+`Auto-skip` switch, the `Skip event`, `+10 s` and `+1 min` buttons) or by `data-development-time-action`
+(`skip`, `advance-10s`, `advance-1min`), the log lines under `[data-debug-log]`, and the latest announcement in
+`[data-debug-announcement]`.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
 [`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's

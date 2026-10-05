@@ -281,9 +281,6 @@ test("after a jump the device plays from the jumped playhead and measures on fro
 
 // The composable, loaded through the build tool like the Player loads it.
 interface DevelopmentTimeHost {
-  readonly enabled: Ref<boolean>;
-  readonly canAdvance: Readonly<Ref<boolean>>;
-  readonly jumps: Readonly<Ref<readonly { readonly text: string }[]>>;
   advanceBy(milliseconds: number): Promise<void>;
 }
 interface SessionHost {
@@ -297,7 +294,8 @@ interface SessionHost {
 let usePlayerSession: (options: { scriptStorage?: ScriptStorageProvider }) => SessionHost;
 let useDevelopmentTime: (
   player: SessionHost,
-  initial: { enabled: boolean; autoSkip: boolean },
+  initial: { autoSkip: boolean },
+  log: (text: string) => void,
 ) => DevelopmentTimeHost;
 
 before(async () => {
@@ -352,14 +350,16 @@ function stubBrowser(context: TestContext) {
 async function mount(
   context: TestContext,
   source: string,
-  initial: { enabled: boolean; autoSkip: boolean },
+  initial: { autoSkip: boolean },
   scriptStorage?: ScriptStorageProvider,
 ) {
   stubBrowser(context);
   const scope = effectScope();
+  const logged: string[] = [];
   const mounted = scope.run(() => {
     const player = usePlayerSession(scriptStorage === undefined ? {} : { scriptStorage });
-    return { player, time: useDevelopmentTime(player, initial) };
+    const time = useDevelopmentTime(player, initial, (text) => logged.push(text));
+    return { player, time, logged, unmount: () => scope.stop() };
   });
   assert.ok(mounted);
   context.after(() => scope.stop());
@@ -375,10 +375,10 @@ const later = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 test("+10 s continues after the host stores a block's write, at the block's scene time", async (context) => {
   const writes: string[] = [];
-  const { player, time } = await mount(
+  const { player, time, logged } = await mount(
     context,
     'timer async 2 {\n  save 1 as "seen"\n  say "saved", instant\n}\nlet elapsed = showButton "Done"\nexit',
-    { enabled: true, autoSkip: false },
+    { autoSkip: false },
     {
       scope: "test",
       load: async () => [],
@@ -399,17 +399,14 @@ test("+10 s continues after the host stores a block's write, at the block's scen
     ),
     [2_000],
   );
-  assert.deepEqual(
-    time.jumps.value.map((jump) => jump.text),
-    ["⏩ 10 s skipped"],
-  );
+  assert.deepEqual(logged, ["⏩ 10 s skipped"]);
 });
 
 test("auto-skip completes waits but leaves the player's think time and background timers real", async (context) => {
   const { player } = await mount(
     context,
     'wait 30\nlet first = showButton "Done"\ntimer async 5 { say "timer", instant }\nlet second = showButton "Again"\nexit',
-    { enabled: true, autoSkip: true },
+    { autoSkip: true },
   );
   await later();
   let session = player.session.value!;
@@ -423,22 +420,21 @@ test("auto-skip completes waits but leaves the player's think time and backgroun
   assert.ok(session.snapshot.observedSessionTimeMs < skippedTo + 1_000);
 });
 
-test("a long jump yields between tasks, and switching the controls off stops it", async (context) => {
-  const { player, time } = await mount(
+test("a long jump yields between tasks, and unmounting the Player stops it", async (context) => {
+  const { player, time, logged, unmount } = await mount(
     context,
     'timer(duration: 1 ms, async: true, repeat: true) {\n  let x = 1\n}\nlet e = showButton "Done"\nexit',
-    { enabled: true, autoSkip: false },
+    { autoSkip: false },
   );
   const fromMs = player.session.value!.snapshot.observedSessionTimeMs;
   let yielded = false;
   setTimeout(() => {
     yielded = true;
-    time.enabled.value = false;
+    unmount();
   }, 0);
   await time.advanceBy(60_000);
   assert.ok(yielded, "the jump let other tasks run");
   const reachedMs = player.session.value!.snapshot.observedSessionTimeMs;
   assert.ok(reachedMs > fromMs && reachedMs < fromMs + 60_000, `${fromMs} → ${reachedMs}`);
-  assert.equal(time.jumps.value.length, 1, "the part that was jumped is reported");
-  assert.equal(time.canAdvance.value, false);
+  assert.equal(logged.length, 1, "the part that was jumped is logged");
 });
