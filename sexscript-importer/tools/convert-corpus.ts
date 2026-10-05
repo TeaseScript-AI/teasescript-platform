@@ -18,6 +18,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MEDIA_FOLDERS = ["images", "sounds"] as const;
+/** The General MIDI soundfont that renders MIDI files (Debian `fluid-soundfont-gm`, else `timgm6mb-soundfont`). */
+const SOUNDFONTS = ["/usr/share/sounds/sf2/FluidR3_GM.sf2", "/usr/share/sounds/sf2/TimGM6mb.sf2"];
 const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 
 /** One file of a resource pack, by its path from the pack's media folder, with the packages it is linked into. */
@@ -232,9 +234,6 @@ async function mediaRoot(corpusRoot: string, id: string, media: string): Promise
   const found = await stat(inside).catch(() => null);
   return found?.isDirectory() === true ? inside : path.join(corpusRoot, id, media);
 }
-
-/** The General MIDI soundfont that renders MIDI files (Debian `fluid-soundfont-gm`, else `timgm6mb-soundfont`). */
-const SOUNDFONTS = ["/usr/share/sounds/sf2/FluidR3_GM.sf2", "/usr/share/sounds/sf2/TimGM6mb.sf2"];
 
 /**
  * Renders a MIDI file to an MP3 at `target` with fluidsynth and ffmpeg, unless the MP3 is there already; "taken"
