@@ -9628,6 +9628,9 @@ function lowerObjectMethodCallExpression(
   context: LowerContext,
 ): IrExpression | null {
   const targetNode = asNode(node.object);
+  // Groovy asBoolean() is the Groovy truth of its receiver.
+  if (name === "asBoolean" && argumentsNodes.length === 0 && targetNode !== null)
+    return lowerCondition(targetNode, context);
   if (
     name === "getLanguage" &&
     argumentsNodes.length === 0 &&

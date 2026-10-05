@@ -970,6 +970,12 @@ function declaredType(type: unknown): ValueType | null {
   const name = type.replace(/<.*>$/u, "").replace(/^java\.(?:util|lang)\./u, "");
   if (name.endsWith("[]") || name === "List" || name === "ArrayList" || name === "LinkedList")
     return LIST;
+  // A primitive parameter holds its value; a boxed one may also be null.
+  if (["int", "long", "short", "byte", "double", "float"].includes(name)) return NUMBER;
+  if (["Integer", "Long", "Short", "Byte", "Double", "Float", "BigDecimal", "Number"].includes(name))
+    return NUMBER | NULL;
+  if (name === "boolean") return BOOLEAN;
+  if (name === "Boolean") return BOOLEAN | NULL;
   return name === "String" ? STRING : null;
 }
 

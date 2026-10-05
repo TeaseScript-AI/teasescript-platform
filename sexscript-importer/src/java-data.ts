@@ -46,6 +46,7 @@ import {
   textCall,
   textConstructor,
   textDeclaration,
+  powerOperation,
   textMatch,
   textProperty,
   textStatement,
@@ -1085,7 +1086,7 @@ export function javaProperty(
 
 /** Groovy operators on Java values, such as `date + days`. */
 export function javaBinary(node: AstNode, host: JavaRuleHost): IrExpression | null | undefined {
-  return temporalBinary(node, host) ?? textMatch(node, host);
+  return temporalBinary(node, host) ?? textMatch(node, host) ?? powerOperation(node, host);
 }
 
 /** Groovy assignments to parts of Java values, such as `buffer[1..2] = text`. */

@@ -529,6 +529,20 @@ function mathCall(
   return host.helper(entry.helper, lowered);
 }
 
+/** Groovy `base ** exponent`, the power that Java's Math.pow() also gives. */
+export function powerOperation(node: AstNode, host: JavaRuleHost): IrExpression | null | undefined {
+  if (node.operator !== "**") return undefined;
+  const operands = [asNode(node.left), asNode(node.right)];
+  if (operands.some((operand) => operand === null)) return undefined;
+  const lowered = lowerEach(
+    operands.filter((operand) => operand !== null),
+    host,
+  );
+  if (lowered === null) return null;
+  noteOnce(host, "SX_MATH_PRECISION", MATH_NOTE, node.span);
+  return host.helper("pow", lowered);
+}
+
 /** Every node lowered, or null when one could not be. */
 function lowerEach(nodes: readonly AstNode[], host: JavaRuleHost): IrExpression[] | null {
   const lowered: IrExpression[] = [];
