@@ -85,6 +85,14 @@ test("context, hover, and signature help select the compact command and its slot
   assert.equal(signature?.activeParameter, 1);
 });
 
+test("formatting reaches a command inside a computed call target", () => {
+  const document = createLanguageDocument(
+    "file:///main.tease",
+    'call script(askText   "Room?")\nexit',
+  );
+  assert.equal(formatLanguageDocument(document).text, 'call script(askText "Room?")\nexit');
+});
+
 test("editor help and formatting cover showButton used as a value with a timeout", () => {
   const source = 'let elapsed = showButton   as   mistress "Go", timeout: 5';
   const document = createLanguageDocument(

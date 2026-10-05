@@ -15,7 +15,10 @@ import type {
   FunctionDeclaration,
   GlobalStatement,
   FunctionParameter,
+  CallFileStatement,
+  FallbackStatement,
   GotoStatement,
+  TransferTarget,
   Identifier,
   IfStatement,
   LabelStatement,
@@ -97,6 +100,11 @@ const statementOnlyCommands: ReadonlySet<string> = new Set([
   "save",
   "delete",
   "switch",
+  "label",
+  "goto",
+  "call",
+  "fallback",
+  "end",
 ]);
 
 const parserDiagnosticCode = {
@@ -261,8 +269,15 @@ class Parser {
     if (this.#checkIdentifier("switch")) {
       return yield* parseChild(this.#parseSwitchStatement());
     }
-    if (this.#checkIdentifier("label") || this.#checkIdentifier("goto")) {
-      return this.#parseLabelOrGotoStatement();
+    if (this.#checkIdentifier("label")) {
+      return this.#parseLabelStatement();
+    }
+    if (
+      this.#checkIdentifier("goto") ||
+      this.#checkIdentifier("call") ||
+      this.#checkIdentifier("fallback")
+    ) {
+      return yield* parseChild(this.#parseTransferStatement());
     }
     if (this.#checkIdentifier("end")) {
       return Object.freeze({ kind: "endStatement", span: copySpan(this.#advance().span) });
@@ -734,21 +749,92 @@ class Parser {
     return speculative.#isSayStatementBoundary();
   }
 
-  #parseLabelOrGotoStatement(): LabelStatement | GotoStatement | null {
+  #parseLabelStatement(): LabelStatement | null {
     const keyword = this.#advance();
     if (!this.#check(TokenKind.Identifier)) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedLabelName,
-        `Expected a label name after '${keyword.lexeme}'.`,
+        "Expected a label name after 'label'.",
       );
       this.#synchronizeStatement();
       return null;
     }
     const name = this.#identifier(this.#advance());
-    const span = spanFrom(keyword.span, name.span);
-    return keyword.lexeme === "label"
-      ? Object.freeze({ kind: "labelStatement", name, span })
-      : Object.freeze({ kind: "gotoStatement", label: name, span });
+    return Object.freeze({ kind: "labelStatement", name, span: spanFrom(keyword.span, name.span) });
+  }
+
+  /** `goto`, `call`, or `fallback`, followed by a label, or by a quoted file path and an optional label. */
+  *#parseTransferStatement(): ParseTask<
+    GotoStatement | CallFileStatement | FallbackStatement | null
+  > {
+    const keyword = this.#advance();
+    if (keyword.lexeme === "fallback" && this.#checkIdentifier("none")) {
+      const none = this.#advance();
+      return Object.freeze({
+        kind: "fallbackStatement",
+        target: null,
+        span: spanFrom(keyword.span, none.span),
+      });
+    }
+    const target = yield* parseChild(this.#parseTransferTarget(keyword));
+    if (target === null) {
+      this.#synchronizeStatement();
+      return null;
+    }
+    const span = spanFrom(keyword.span, target.span);
+    switch (keyword.lexeme) {
+      case "goto":
+        return Object.freeze({ kind: "gotoStatement", target, span });
+      case "call":
+        return Object.freeze({ kind: "callFileStatement", target, span });
+      default:
+        return Object.freeze({ kind: "fallbackStatement", target, span });
+    }
+  }
+
+  *#parseTransferTarget(keyword: Token): ParseTask<TransferTarget | null> {
+    // A computed target is a `script(...)` call or a grouped expression, as in `goto (next)`.
+    if (
+      this.#check(TokenKind.LeftParenthesis) ||
+      (this.#checkIdentifier("script") && this.#peek(1).kind === TokenKind.LeftParenthesis)
+    ) {
+      const expression = this.#parseExpression();
+      if (expression === null) return null;
+      return Object.freeze({ kind: "scriptTarget", expression, span: copySpan(expression.span) });
+    }
+    if (this.#check(TokenKind.Identifier)) {
+      const label = this.#identifier(this.#advance());
+      return Object.freeze({ kind: "labelTarget", label, span: copySpan(label.span) });
+    }
+    const start = this.#peek();
+    if (!this.#match(TokenKind.StringStart)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedLabelName,
+        `Expected a label name or a quoted file path after '${keyword.lexeme}'.`,
+      );
+      return null;
+    }
+    const literal = yield* parseChild(this.#parseStringLiteral(start));
+    if (literal === null) return null;
+    if (literal.form !== "singleLine" || literal.parts.some((part) => part.kind !== "stringText")) {
+      this.#reportSpan(
+        parserDiagnosticCode.expectedLabelName,
+        "A file path is plain text in quotes. To build a path from values, use script(...).",
+        literal.span,
+      );
+      return null;
+    }
+    const path = literal.parts
+      .map((part) => (part.kind === "stringText" ? part.value : ""))
+      .join("");
+    const label = this.#check(TokenKind.Identifier) ? this.#identifier(this.#advance()) : null;
+    return Object.freeze({
+      kind: "fileTarget",
+      path,
+      pathSpan: copySpan(literal.span),
+      label,
+      span: spanFrom(literal.span, (label ?? literal).span),
+    });
   }
 
   #parseExitStatement(): Statement {
@@ -3743,6 +3829,7 @@ const IDENTIFIER_TYPE_NAMES: ReadonlyMap<string, TypeName> = new Map(
       "range",
       "timer",
       "media",
+      "script",
     ] as const
   ).map((name) => [name, name]),
 );

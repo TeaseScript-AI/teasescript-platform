@@ -379,15 +379,17 @@ test("a global function is callable from every file and sees only globals, its p
   const [lib] = plan.functions.filter((definition) => definition.name === "countdown");
   assert.equal(lib?.global, true);
 
-  // A goto in a global function means a label of its own file, which a session cannot enter until files can go to
-  // each other: it fails there, with a state that stays valid.
+  // A goto in a global function means a label of its own file, which it enters afresh, like `goto "lib.tease" top`.
   const jumping = compiledPlan([
     { path: "main.tease", source: "leave()\nexit" },
-    { path: "lib.tease", source: "label top\nexit\nglobal function leave {\n  goto top\n}" },
+    {
+      path: "lib.tease",
+      source: 'label top\nsay "in lib"\nexit\nglobal function leave {\n  goto top\n}',
+    },
   ]);
-  const failed = runToEnd(jumping).snapshot;
-  assert.deepEqual([failed.failure?.code, failed.failure?.path], ["TSR068", "lib.tease"]);
-  assert.equal(validateRuntimeSnapshot(failed, jumping).valid, true);
+  const jumped = runToEnd(jumping);
+  assert.deepEqual(said(jumped.events), ["in lib"]);
+  assert.equal(jumped.snapshot.status, "halted");
 
   assert.deepEqual(
     messages([
@@ -866,7 +868,11 @@ test("a snapshot keeps the startup a phase of its own, before anything else and 
   // while the main wait has settled, returns to.
   const interrupted = observeTime(plan, run(plan, expired).snapshot, 2000).snapshot;
   const frame = interrupted.callFrames[0];
-  assert.ok(frame?.timerInterruption !== null && frame?.timerInterruption.suspendedAction === null);
+  assert.ok(
+    frame?.kind === "function" &&
+      frame.timerInterruption !== null &&
+      frame.timerInterruption.suspendedAction === null,
+  );
   restorable(interrupted);
   for (let position = 0; position < prefixEnd; position += 1) {
     const back = mutableCopy(interrupted);
@@ -946,13 +952,17 @@ test("a call of another file's function that is not global cannot be restored", 
   ]);
   const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
   assert.equal(validateRuntimeSnapshot(waiting, plan).valid, true);
-  assert.equal(waiting.callFrames[0]?.functionName, "shared");
+  const first = waiting.callFrames[0];
+  assert.ok(first?.kind === "function");
+  assert.equal(first.functionName, "shared");
   const helper = plan.functions.find((definition) => definition.name === "helper")!;
   const shared = plan.functions.find((definition) => definition.name === "shared")!;
   const moved = mutableCopy(waiting);
   const offset = helper.entryInstruction - shared.entryInstruction;
-  moved.callFrames[0]!.functionId = helper.id;
-  moved.callFrames[0]!.functionName = "helper";
+  const movedFrame = moved.callFrames[0]!;
+  assert.ok(movedFrame.kind === "function");
+  movedFrame.functionId = helper.id;
+  movedFrame.functionName = "helper";
   moved.nextInstruction += offset;
   const action = moved.foregroundAction;
   assert.ok(action?.kind === "delay");

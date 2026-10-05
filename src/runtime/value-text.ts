@@ -17,6 +17,7 @@ import type {
   SerializableMediaHandle,
   SerializableRuntimeTemporal,
   SerializableRuntimeValue,
+  SerializableScriptReference,
   SerializableTimerHandle,
 } from "./serializable-values.js";
 import {
@@ -26,6 +27,7 @@ import {
   isMediaHandle,
   isObject,
   isRange,
+  isScriptReference,
   isSet,
   isSpeakerReference,
   isTemporal,
@@ -35,8 +37,9 @@ import {
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 /**
- * Scalar visible text: strings, finite numbers, booleans, `null`, durations, and date and time values. Dates and times
- * use the player's numeric presentation from `context`, and a timestamp shows as the local date and time it is.
+ * Scalar visible text: strings, finite numbers, booleans, `null`, durations, date and time values, and script
+ * references. Dates and times use the player's numeric presentation from `context`, and a timestamp shows as the local
+ * date and time it is.
  */
 export function visibleText(
   value: SerializableRuntimeValue,
@@ -91,7 +94,14 @@ function plainScalarText(value: SerializableRuntimeValue, span: SourceSpan): str
   if (typeof value === "boolean") return value ? "true" : "false";
   if (value === null) return "null";
   if (isDuration(value)) return formatDuration(durationParts(value));
+  if (isScriptReference(value)) return scriptNotation(value);
   throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
+}
+
+/** A script reference as the call that makes it: `script("rooms/hall.tease", label: "start")`. */
+function scriptNotation(value: SerializableScriptReference): string {
+  const label = value.label === null ? "" : `, label: ${quotedText(value.label)}`;
+  return `script(${quotedText(value.path)}${label})`;
 }
 
 /** Whether `visibleText` accepts the value. */
@@ -102,7 +112,8 @@ export function isVisibleScalar(value: SerializableRuntimeValue): boolean {
     typeof value === "boolean" ||
     value === null ||
     isDuration(value) ||
-    isTemporal(value)
+    isTemporal(value) ||
+    isScriptReference(value)
   );
 }
 

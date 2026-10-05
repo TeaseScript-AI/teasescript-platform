@@ -6,34 +6,66 @@ import {
   watchProject,
   type ProjectFileView,
 } from "../../monaco.js";
+import { loadDevelopmentPackage } from "../../../playground/package-catalog.js";
+import { MAIN_FILE_PATH } from "../../../src/project-paths.js";
+import type { ProjectImageFile } from "../../../src/image-catalog.js";
 import { sampleProject } from "./sample-project.js";
 
+// With `?package=<id>`, the editor opens that package of the playground server's development package root (#570)
+// instead of the sample project. Edits stay in this page.
+const packageId = new URLSearchParams(window.location.search).get("package");
 const container = ref<HTMLElement | null>(null);
 const files = shallowRef<readonly ProjectFileView[]>([]);
-const activePath = ref(sampleProject[0]!.path);
+const activePath = ref("");
 const ready = ref(false);
+const loadError = ref("");
 const diagnostics = computed(() => files.value.reduce((sum, file) => sum + file.markers.length, 0));
 let editor: monaco.editor.IStandaloneCodeEditor | null = null;
 let models: { readonly path: string; readonly model: monaco.editor.ITextModel }[] = [];
 let listener: monaco.IDisposable | null = null;
 
-onMounted(() => {
+onMounted(async () => {
   registerTeaseScriptLanguage();
-  models = sampleProject.map(({ path, text }) => ({
+  let project: readonly { readonly path: string; readonly text: string }[] = sampleProject;
+  let images: readonly ProjectImageFile[] | undefined;
+  if (packageId !== null) {
+    try {
+      const catalog = await loadDevelopmentPackage(packageId);
+      project = catalog.sources.map(({ path, source }) => ({ path, text: source }));
+      images = catalog.images;
+    } catch (error) {
+      loadError.value = error instanceof Error ? error.message : String(error);
+      project = [];
+    }
+  }
+  if (container.value === null) return;
+  models = project.map(({ path, text }) => ({
     path,
-    model: monaco.editor.createModel(text, "teasescript", monaco.Uri.parse(`file:///${path}`)),
+    // Distinct package paths need distinct model URIs. Uri.file turns a `\` into a folder separator on Windows, and
+    // Monaco lowercases a first folder that looks like a drive (`C:`), so the paths sit below a fixed first folder.
+    model: monaco.editor.createModel(
+      text,
+      "teasescript",
+      monaco.Uri.from({ scheme: "file", path: `/package/${path}` }),
+    ),
   }));
-  editor = monaco.editor.create(container.value!, {
-    model: models[0]!.model,
+  const first = models.find((file) => file.path === MAIN_FILE_PATH) ?? models[0];
+  activePath.value = first?.path ?? "";
+  editor = monaco.editor.create(container.value, {
+    model: first?.model ?? null,
     language: "teasescript",
     automaticLayout: true,
     minimap: { enabled: false },
     fontSize: 15,
     padding: { top: 16 },
   });
-  listener = watchProject(models, (overview) => {
-    files.value = overview;
-  });
+  listener = watchProject(
+    models,
+    (overview) => {
+      files.value = overview;
+    },
+    images === undefined ? {} : { images },
+  );
   ready.value = true;
 });
 onBeforeUnmount(() => {
@@ -61,9 +93,13 @@ function tagLabel(tag: { readonly name: string; readonly value: number | null })
       <div>
         <p class="eyebrow">TeaseScript</p>
         <h1>Browser editor</h1>
-        <p class="subtle">A focused Monaco surface for the implemented interaction language.</p>
+        <p v-if="packageId === null" class="subtle">
+          A focused Monaco surface for the implemented interaction language.
+        </p>
+        <p v-else class="subtle">Package {{ packageId }}</p>
       </div>
-      <span class="status">{{ diagnostics }} diagnostics</span>
+      <span v-if="loadError" class="status" role="alert">{{ loadError }}</span>
+      <span v-else class="status">{{ diagnostics }} diagnostics</span>
     </header>
     <div class="workspace">
       <nav class="files" aria-label="Project files">

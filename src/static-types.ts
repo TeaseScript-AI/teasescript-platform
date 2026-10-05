@@ -287,6 +287,7 @@ export const DATE_TYPE = scalar("date");
 export const TIME_TYPE = scalar("time");
 export const DATETIME_TYPE = scalar("datetime");
 export const TIMESTAMP_TYPE = scalar("timestamp");
+export const SCRIPT_TYPE = scalar("script");
 
 export function openType(): OpenType {
   return { kind: "open", resolved: null, resolvedAt: null, sawNull: false };
@@ -1373,6 +1374,7 @@ const SCALAR_DESCRIPTIONS: Readonly<Record<ScalarTypeName, string>> = {
   time: "a time",
   datetime: "a date and time",
   timestamp: "a timestamp",
+  script: "a script reference",
 };
 
 /** A plain-language description of a value of `type` for diagnostics. */

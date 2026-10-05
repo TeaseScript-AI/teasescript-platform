@@ -20,8 +20,10 @@ import type {
   TagQueryExpression,
   TagQueryStep,
   TimerParts,
+  TransferTarget,
   TypeAnnotation,
 } from "./ast.js";
+import { globMatches, MAIN_FILE_PATH } from "./project-paths.js";
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
@@ -38,7 +40,7 @@ import {
 import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
 import { isTakePhotoCall } from "./capture-call.js";
 import { evaluateTagSteps, passesTagList } from "./tag-query.js";
-import { normalizeTagName } from "./tags.js";
+import { addTag, normalizeTagName, readTagText, type Tag } from "./tags.js";
 import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
 import {
   builtinCallProblems,
@@ -118,6 +120,7 @@ import {
   STRING_TYPE,
   TIME_TYPE,
   TIMESTAMP_TYPE,
+  SCRIPT_TYPE,
   typeFromAnnotation,
   typeName,
   union,
@@ -139,13 +142,15 @@ import {
   type StaticType,
 } from "./static-types.js";
 import { typePlan } from "./type-plans.js";
-import { sessionDeclarations } from "./project-globals.js";
+import { runsOnItsOwn, sessionDeclarations } from "./project-globals.js";
 
 export interface TypeCheckOptions {
   readonly globals?: readonly string[];
   readonly builtins?: readonly string[];
   /** The package images that tag queries search, when the compilation was given them. */
   readonly imageCatalog?: readonly PlanImage[];
+  /** Whether some file of the project takes photos with tags, which join the catalog at runtime. */
+  readonly capturesTaggedPhotos?: boolean;
 }
 
 export interface TypeCheckResult {
@@ -192,6 +197,7 @@ const typeCode = {
   mixedTypes: "TSV044",
   impossibleCase: "TSV049",
   emptyTagQuery: "TST002",
+  invalidCaptureTag: "TST005",
   randomStartValue: "TSV055",
 } as const;
 
@@ -392,6 +398,8 @@ class TypeChecker {
   /** The tags of each package image, by name; `null` when the compilation was not given the images. */
   readonly #imageTags: readonly ReadonlyMap<string, number | null>[] | null;
 
+  readonly #capturesTaggedPhotos: boolean;
+
   /** The project's names: host globals, globals, speakers, and global functions. */
   readonly #project = new Scope(null);
 
@@ -435,7 +443,7 @@ class TypeChecker {
   #flow = new Flow();
 
   /** What functions, blocks, and loops may change, collected before checking: for the file, and for every loop. */
-  #effects: ProgramEffects = { shared: new Set(), loops: new Map() };
+  #effects: Pick<ProgramEffects, "shared" | "loops"> = { shared: new Set(), loops: new Map() };
 
   /** The globals that a function or a timer or media block of any file assigns. */
   #sharedGlobals: ReadonlySet<string> = new Set();
@@ -518,6 +526,7 @@ class TypeChecker {
   ) {
     this.fileDiagnostics = Array.from({ length: files }, () => []);
     this.#widened = widened;
+    this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
     this.#imageTags =
       options.imageCatalog?.map(
         (image) => new Map(image.tags.map((tag) => [tag.name, tag.value])),
@@ -569,6 +578,10 @@ class TypeChecker {
     const sharedGlobals = new Set<string>();
     for (const fileEffects of effects)
       for (const name of fileEffects.shared) sharedGlobals.add(name);
+    // While a `call` runs, any file's top level may run and assign globals (ADR 0022 §5, §6).
+    if (effects.some((fileEffects) => fileEffects.callsFiles))
+      for (const fileEffects of effects)
+        for (const name of fileEffects.rootAssigned) sharedGlobals.add(name);
     this.#sharedGlobals = sharedGlobals;
     const functionsByFile = programs.map(() => new Map<FunctionDeclaration, FunctionType>());
     for (const [file, program] of programs.entries())
@@ -586,8 +599,11 @@ class TypeChecker {
       runCompileTask(this.#startValueTask(declaration));
       this.#reportMixedLiterals();
     }
-    // main.tease runs right after the start values, so it starts with what they stored; other files start afresh.
-    const startupFlow = this.#flow;
+    // main.tease runs right after the start values, so it starts with what they stored, unless a transfer enters it
+    // again later; other files start afresh.
+    const startupFlow = effects.some((fileEffects) => fileEffects.entersMain)
+      ? new Flow()
+      : this.#flow;
     for (const [file, program] of programs.entries()) {
       this.#enterFile(file);
       this.#effects = { shared: effects[file]!.shared, loops };
@@ -1039,8 +1055,19 @@ class TypeChecker {
         if (this.#reachable) this.reachesExit = true;
         return false;
       case "endStatement":
-      case "gotoStatement":
         return false;
+      case "gotoStatement":
+        yield* compileChild(this.#targetTask(statement.target, "goto", scope));
+        return false;
+      case "callFileStatement":
+        yield* compileChild(this.#targetTask(statement.target, "call", scope));
+        // The called file runs until its end, like any suspension.
+        this.#suspend();
+        return true;
+      case "fallbackStatement":
+        if (statement.target !== null)
+          yield* compileChild(this.#targetTask(statement.target, "fallback", scope));
+        return true;
       case "labelStatement":
         // A goto from anywhere in the file may arrive here, so nothing narrowed before the label still holds.
         this.#flow = new Flow();
@@ -1051,6 +1078,26 @@ class TypeChecker {
       case "functionDeclaration":
         return true;
     }
+  }
+
+  /** A computed target, such as `goto (next)`, is a script reference; plain text is not a jump target (V30 §29). */
+  *#targetTask(
+    target: TransferTarget,
+    keyword: "goto" | "call" | "fallback",
+    scope: Scope,
+  ): CompileTask<void> {
+    if (target.kind !== "scriptTarget") return;
+    const type = yield* compileChild(this.#expressionTask(target.expression, scope));
+    this.#reportUnless(
+      type,
+      (member) => isScalar(member, "script"),
+      target.expression,
+      `${keyword} needs a script reference here`,
+      () =>
+        members(type).some((member) => isScalar(member, "string"))
+          ? ` Plain text is not a jump target: turn a path into one with script(...), as in ${keyword} script("rooms/hall.tease").`
+          : ` Make one with script(...), as in ${keyword} script("rooms/hall.tease").`,
+    );
   }
 
   /**
@@ -2431,12 +2478,44 @@ class TypeChecker {
     }
   }
 
+  /** Each written tag of a literal `takePhoto(tags: [...])` list is a tag, and no tag has two different numbers. */
+  #checkLiteralCaptureTags(tags: Expression): void {
+    const list = unwrapGrouping(tags);
+    if (list.kind !== "listLiteral") return;
+    const seen = new Map<string, Tag>();
+    for (const element of list.elements) {
+      if (
+        element.kind !== "stringLiteral" ||
+        element.parts.some((part) => part.kind !== "stringText")
+      )
+        continue;
+      const text = element.parts
+        .map((part) => (part.kind === "stringText" ? part.value : ""))
+        .join("");
+      const tag = readTagText(text);
+      if (tag === null) {
+        this.#report(
+          typeCode.invalidCaptureTag,
+          `'${text}' is not a tag: use lowercase letters a–z, digits, and hyphens, with an optional number, such as "punishment: 4".`,
+          element.span,
+        );
+      } else if (addTag(seen, tag) === "conflict") {
+        this.#report(
+          typeCode.invalidCaptureTag,
+          `The tag '${tag.name}' has two different numbers.`,
+          element.span,
+        );
+      }
+    }
+  }
+
   /**
    * A pick from the given images that no image can match by its tag tests and literal tag lists alone is an error
    * (ADR 0023). Comparisons and other values count as possibly true: this check does no value reasoning.
    */
   #checkTagQueryCanMatch(query: TagQueryExpression): void {
-    if (query.select !== "random" || this.#imageTags === null) return;
+    // A photo taken with tags may match at runtime, so only a project without them can be proven empty.
+    if (query.select !== "random" || this.#imageTags === null || this.#capturesTaggedPhotos) return;
     // Each literal tag list is read once for all images.
     const lists = new Map<TagQueryStep, readonly string[] | null>();
     for (const step of query.steps) {
@@ -2995,6 +3074,19 @@ class TypeChecker {
     let callee = expression.callee;
     while (callee.kind === "parenthesizedExpression") callee = callee.expression;
     if (isTakePhotoCall(expression)) {
+      const tags = expression.arguments[0]?.value;
+      if (tags !== undefined) {
+        const type = yield* compileChild(this.#expressionTask(tags, scope));
+        this.#reportUnless(
+          type,
+          (member) =>
+            (member.kind === "list" || member.kind === "set") &&
+            (!isKnown(member.element) || isScalar(member.element, "string")),
+          tags,
+          '\'tags:\' takes a list of tags, such as ["bedroom", "punishment: 4"]',
+        );
+        this.#checkLiteralCaptureTags(tags);
+      }
       // A capture waits for the Player like an interaction, and gives a photo reference, or null without a camera.
       this.#suspend();
       return optional(STRING_TYPE);
@@ -3424,6 +3516,36 @@ class TypeChecker {
             : name === "getDateTime"
               ? DATETIME_TYPE
               : TIMESTAMP_TYPE;
+      case "script": {
+        // `script(path)` or `script(path, label: name)`, both text (V30 §29).
+        const positional = expression.arguments.filter(
+          (item) => item.kind === "positionalArgument",
+        ).length;
+        if (positional !== 1)
+          this.#report(
+            typeCode.argumentCount,
+            `script(...) takes 1 argument (path), received ${positional}. Name a label with label:, as in script("rooms/hall.tease", label: "start").`,
+            expression.span,
+          );
+        for (const [index, item] of expression.arguments.entries()) {
+          if (item.kind === "namedArgument" && item.name.name !== "label")
+            this.#report(
+              typeCode.unknownNamedArgument,
+              `script(...) has no parameter '${item.name.name}'; its only named argument is label:.`,
+              item.name.span,
+            );
+          else if (item.kind === "namedArgument" || positional === 1)
+            this.#reportUnless(
+              values[index]!,
+              (member) => isScalar(member, "string"),
+              item.value,
+              item.kind === "namedArgument"
+                ? "label: takes the name of a label as text (string)"
+                : "script(...) takes the path of a file as text (string)",
+            );
+        }
+        return SCRIPT_TYPE;
+      }
       default:
         return UNKNOWN_TYPE;
     }
@@ -3674,7 +3796,7 @@ class TypeChecker {
         // The list or set is checked like any other: its elements share one type (ADR 0021 rule 1.3).
         yield* compileChild(this.#expressionTask(option.expression, scope));
         for (const element of content.elements) {
-          const value = this.#choiceEntry(element, this.#typeOf(element), true);
+          const value = this.#choiceEntry(element, this.#typeOf(element), true, written === null);
           if (written === null) add(value, buttonLiteral(element));
         }
         // An empty list or set gives no buttons, so its written value is never returned.
@@ -3690,11 +3812,13 @@ class TypeChecker {
         // elements give a known result type.
         // Every element of a computed list or set gives one button, so each must be a value or a choice object.
         const accepted =
-          this.#choiceEntry(option.expression, type, false) !== UNKNOWN_TYPE &&
+          this.#choiceEntry(option.expression, type, false, written === null) !== UNKNOWN_TYPE &&
           !this.#checkElements(
             option.expression,
             type,
-            (element) => isShowable(element) || resolved(element).kind === "object",
+            (element) =>
+              (written === null ? isChoiceValue(element) : isShowable(element)) ||
+              resolved(element).kind === "object",
             () =>
               this.#report(
                 typeCode.invalidInteractionChoice,
@@ -3725,7 +3849,12 @@ class TypeChecker {
       }
       if (isKnown(value)) buttons += 1;
       // The option is kept as it was evaluated: a later option may still change the place it was read from.
-      const entry = this.#choiceEntry(option.expression, this.#capture(option.expression), false);
+      const entry = this.#choiceEntry(
+        option.expression,
+        this.#capture(option.expression),
+        false,
+        written === null,
+      );
       add(written ?? entry, written === null ? buttonLiteral(option.expression) : writtenValue);
     }
     if (buttons > MAX_INTERACTION_OPTION_ENTRIES)
@@ -3768,15 +3897,18 @@ class TypeChecker {
 
   /**
    * Checks what gives one button: a value, or a choice object `{ value?, text, background? }` whose value, else its
-   * text, the button returns. Returns that value's type; a computed choice object's value is not known.
+   * text, the button returns, unless `returns` is false because the button returns the value written before `:`.
+   * Returns that value's type; a computed choice object's value is not known.
    */
-  #choiceEntry(entry: Expression, type: StaticType, inList: boolean): StaticType {
+  #choiceEntry(entry: Expression, type: StaticType, inList: boolean, returns: boolean): StaticType {
     const value = resolved(nonNullType(type));
     // A button comes from a value or a choice object; a list or set gives buttons only as a whole option.
     const accepted = (member: StaticType): boolean => {
       const kind = resolved(member).kind;
       return (
-        isShowable(member) || kind === "object" || (!inList && (kind === "list" || kind === "set"))
+        (returns ? isChoiceValue(member) : isShowable(member)) ||
+        kind === "object" ||
+        (!inList && (kind === "list" || kind === "set"))
       );
     };
     const rejected = this.#checkMembers(entry, type, accepted, (member) =>
@@ -3784,7 +3916,9 @@ class TypeChecker {
         typeCode.invalidInteractionChoice,
         inList && (member.kind === "list" || member.kind === "set")
           ? "A choice list element must be a value or a choice object { value?, text, background? }, not a list or set."
-          : "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
+          : isScalar(member, "script")
+            ? SCRIPT_CHOICE_MESSAGE
+            : "A choice option must be a value, a choice object { value?, text, background? }, a list, or a set.",
         entry.span,
       ),
     );
@@ -3802,10 +3936,24 @@ class TypeChecker {
       const propertyType = this.#typeOf(property.value);
       if (property.name.name === "text") {
         this.#checkShownText(property.value, propertyType, "the text of a choice option");
-        if (!literal.properties.some((other) => other.name.name === "value"))
+        if (!literal.properties.some((other) => other.name.name === "value")) {
           returned = propertyType;
+          // The button returns its text, so the text must be a choice value too.
+          if (returns)
+            this.#checkMembers(
+              property.value,
+              propertyType,
+              (member) => !isScalar(member, "script"),
+              () =>
+                this.#report(
+                  typeCode.invalidInteractionChoice,
+                  SCRIPT_CHOICE_MESSAGE,
+                  property.value.span,
+                ),
+            );
+        }
       } else if (property.name.name === "value") {
-        this.#checkMembers(property.value, propertyType, isShowable, () =>
+        this.#checkMembers(property.value, propertyType, isChoiceValue, () =>
           this.#report(
             typeCode.invalidInteractionChoice,
             "A choice value must be text, a number, true, false, null, a duration, or a date or time value.",
@@ -3847,7 +3995,7 @@ class TypeChecker {
             typeCode.unshowableValue,
             member.kind === "dict"
               ? `"\${...}" cannot show a dict. Select one value with ${expressionLabel(expression) ?? "dict"}[key], or show every value with ${expressionLabel(expression) ?? "dict"}.values.join().`
-              : `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, and date and time values, and selects one element of a list.`,
+              : `"\${...}" cannot show ${describeValue(member)}. It shows text, numbers, true, false, null, durations, date and time values, and script references, and selects one element of a list.`,
             expression.span,
           ),
       );
@@ -3855,7 +4003,7 @@ class TypeChecker {
         this.#checkElements(expression, type, isShowable, () =>
           this.#report(
             typeCode.unshowableValue,
-            "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
+            "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, and script references, because one element is shown as text.",
             expression.span,
           ),
         );
@@ -3871,7 +4019,7 @@ class TypeChecker {
       this.#checkMembers(element, this.#typeOf(element), isShowable, () =>
         this.#report(
           typeCode.unshowableValue,
-          "An interpolated list may contain only text, numbers, true, false, null, durations, and date and time values, because one element is shown as text.",
+          "An interpolated list may contain only text, numbers, true, false, null, durations, date and time values, and script references, because one element is shown as text.",
           element.span,
         ),
       );
@@ -4587,12 +4735,20 @@ const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
   "hideImageStatement",
   "saveStatement",
   "deleteStatement",
+  // Blocks of the caller keep running while a called file runs.
+  "callFileStatement",
 ]);
 
 /** What a program's loops and functions may change (ADR 0021 rule 5.5). */
 interface ProgramEffects {
   /** Names that function bodies and timer or media blocks assign. */
   readonly shared: ReadonlySet<string>;
+  /** Names that the file's top level assigns, which another file's `call` may run (ADR 0022 §5). */
+  readonly rootAssigned: ReadonlySet<string>;
+  /** Whether the file calls a file, so another file's top level may run during the call. */
+  readonly callsFiles: boolean;
+  /** Whether the file enters `main.tease` again at its top, after the start values have run. */
+  readonly entersMain: boolean;
   /** The effects of each loop, by its body; a `while` loop includes its condition. */
   readonly loops: ReadonlyMap<Block, LoopEffects>;
 }
@@ -4614,6 +4770,9 @@ type EffectWork =
  */
 function programEffects(program: Program): ProgramEffects {
   const shared = new Set<string>();
+  const rootAssigned = new Set<string>();
+  let callsFiles = false;
+  let entersMain = false;
   const nodes: LoopNode[] = [];
   const work: EffectWork[] = [];
   const enter = (
@@ -4656,6 +4815,7 @@ function programEffects(program: Program): ProgramEffects {
         const root = rootName(callee.object);
         if (root !== null) {
           if (inside) shared.add(root);
+          else rootAssigned.add(root);
           loop?.assigned.add(root);
         }
       }
@@ -4665,11 +4825,24 @@ function programEffects(program: Program): ProgramEffects {
     }
     const statement = item.statement;
     if (loop !== null && SUSPENDING_STATEMENTS.has(statement.kind)) loop.suspends = true;
+    if (statement.kind === "callFileStatement") callsFiles = true;
+    if (
+      (statement.kind === "gotoStatement" ||
+        statement.kind === "callFileStatement" ||
+        statement.kind === "fallbackStatement") &&
+      statement.target !== null &&
+      entersMainAtTop(statement.target)
+    )
+      entersMain = true;
+    // The `default:` form of a global assigns it where the declaration runs.
+    if (statement.kind === "globalStatement" && statement.assignment !== null)
+      (inside ? shared : rootAssigned).add(statement.name.name);
     if (statement.kind === "assignmentStatement") {
       // A store into an element or property changes the variable that holds it, too.
       const root = rootName(statement.target);
       if (root !== null) {
         if (inside) shared.add(root);
+        else rootAssigned.add(root);
         loop?.assigned.add(root);
       }
       // A timer or media property write may run a block at once.
@@ -4705,6 +4878,9 @@ function programEffects(program: Program): ProgramEffects {
   }
   return {
     shared,
+    rootAssigned,
+    callsFiles,
+    entersMain,
     loops: new Map(
       nodes.map((node) => [node.body, { assigned: node.assigned, suspends: node.suspends }]),
     ),
@@ -4854,6 +5030,10 @@ function statementExpressions(statement: Statement): readonly Expression[] {
       return [statement.iterable];
     case "returnStatement":
       return statement.value === null ? [] : [statement.value];
+    case "gotoStatement":
+    case "callFileStatement":
+    case "fallbackStatement":
+      return statement.target?.kind === "scriptTarget" ? [statement.target.expression] : [];
     default:
       return [];
   }
@@ -4881,6 +5061,30 @@ function timerOperands(timer: TimerParts): readonly Expression[] {
     timer.duration,
     ...(timer.label === null ? [] : [timer.label]),
   ];
+}
+
+/**
+ * Whether a target may enter main.tease at its top: a file target naming it or a glob that may pick it, and any computed
+ * target but a `script(...)` whose literal path names another file.
+ */
+function entersMainAtTop(target: TransferTarget): boolean {
+  if (target.kind === "labelTarget") return false;
+  if (target.kind === "fileTarget")
+    return target.label === null && globMatches(target.path, [MAIN_FILE_PATH]).length > 0;
+  const reference = unwrap(target.expression);
+  const path =
+    reference.kind === "callExpression" &&
+    reference.callee.kind === "identifier" &&
+    reference.callee.name === "script"
+      ? reference.arguments.find((argument) => argument.kind === "positionalArgument")?.value
+      : undefined;
+  const literal = path === undefined ? null : unwrap(path);
+  const text =
+    literal?.kind === "stringLiteral" && literal.parts.every((part) => part.kind === "stringText")
+      ? literal.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("")
+      : null;
+  // Only a literal path is known, and only one to another file stays out of main.tease.
+  return text === null || text === MAIN_FILE_PATH;
 }
 
 const PURE_BUILTINS: ReadonlySet<string> = new Set([
@@ -5546,6 +5750,14 @@ function isShowable(member: StaticType): boolean {
   return !UNSHOWABLE_KINDS.has(resolved(member).kind);
 }
 
+const SCRIPT_CHOICE_MESSAGE =
+  "A button cannot return a script reference. Give the buttons text or number values, and pick the script reference from the answer.";
+
+/** Whether a button may return a value of this member type: one that is shown, other than a script reference. */
+function isChoiceValue(member: StaticType): boolean {
+  return isShowable(member) && !isScalar(member, "script");
+}
+
 /** The result types of the built-ins that take fixed positional arguments. */
 const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([
   ["random", NUMBER_TYPE],
@@ -5968,13 +6180,6 @@ function scalarType(name: ScalarTypeName): StaticType {
  * Whether a top-level statement runs something on its own. A speaker or a `global` without `default:` only declares,
  * like a function, so a file of declarations needs no ending.
  */
-function runsOnItsOwn(statement: Statement): boolean {
-  return !(
-    statement.kind === "speakerDeclaration" ||
-    (statement.kind === "globalStatement" && statement.assignment === null)
-  );
-}
-
 function unwrapGrouping(expression: Expression): Expression {
   while (expression.kind === "parenthesizedExpression") expression = expression.expression;
   return expression;

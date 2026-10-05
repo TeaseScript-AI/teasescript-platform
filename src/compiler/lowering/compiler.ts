@@ -16,9 +16,13 @@ import type {
   SwitchStatement,
   TagQueryExpression,
   TypeTestExpression,
+  FileTarget,
+  LabelTarget,
+  TransferTarget,
 } from "../../ast.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { InstructionCompilationError } from "../errors.js";
+import { MAIN_FILE_PATH } from "../../project-paths.js";
 import type {
   AssignmentTargetPlan,
   CompiledFunctionDefinition,
@@ -59,6 +63,15 @@ import {
   showButtonOptions,
   tagQueryOperands,
 } from "../../expression-children.js";
+
+/** A transfer or fallback at `instruction` whose destination is a file, from its entry or at a label. */
+export interface PendingDestination {
+  readonly instruction: number;
+  /** The file, or for a glob the files to pick from. */
+  readonly paths: readonly string[];
+  readonly label: string | null;
+  readonly pick: boolean;
+}
 
 /** Plan-wide numbering shared by the compilers of a project's files: loop and temporary IDs are unique in a plan. */
 export interface LoweringCounters {
@@ -112,6 +125,53 @@ export class InstructionCompiler {
   /** Gotos whose target is set by {@link resolveGotos} once every label of the file has its instruction. */
   readonly #gotos: { readonly instruction: number; readonly label: string }[] = [];
 
+  /** Transfers and fallbacks naming a file or a label, resolved once every file of the project is compiled. */
+  readonly #destinations: PendingDestination[] = [];
+
+  /** The pending file destinations of this file's transfers and fallbacks. */
+  public get destinations(): readonly PendingDestination[] {
+    return this.#destinations;
+  }
+
+  #destinationOf(
+    target: LabelTarget | FileTarget,
+  ): Pick<PendingDestination, "paths" | "label" | "pick"> {
+    if (target.kind === "labelTarget") {
+      return { paths: [this.path], label: target.label.name, pick: false };
+    }
+    const picks = this.picks.get(target);
+    return {
+      paths: picks ?? [target.path],
+      label: target.label?.name ?? null,
+      pick: picks !== undefined,
+    };
+  }
+
+  #emitTransfer(mode: "goto" | "call", target: TransferTarget, span: SourceSpan): void {
+    if (target.kind === "scriptTarget") {
+      const lowered = this.#lowerExpression(target.expression);
+      this.instructions.push({
+        kind: "transfer",
+        mode,
+        destination: { value: lowered.plan },
+        span: copySpan(span),
+      });
+      // A call returns here with the temporaries of its target; a goto leaves them behind.
+      if (mode === "call") this.#emitTemporaryCleanup(lowered.temporaryIds, span);
+      return;
+    }
+    this.#destinations.push({
+      instruction: this.instructions.length,
+      ...this.#destinationOf(target),
+    });
+    this.instructions.push({
+      kind: "transfer",
+      mode,
+      destination: { file: -1, target: -1 },
+      span: copySpan(span),
+    });
+  }
+
   /** Functions of earlier files come first, so this file's IDs continue after theirs. */
   readonly #functionIdBase: number;
 
@@ -126,6 +186,10 @@ export class InstructionCompiler {
     public readonly functions: CompiledFunctionDefinition[] = [],
     private readonly counters: LoweringCounters = { nextLoopId: 1, nextTemporaryId: 1 },
     private readonly project: ProjectFunctions = { global: new Map(), foreignCalls: [] },
+    /** The file's path, which a label alone in a `call` or `fallback` names. */
+    private readonly path: string = MAIN_FILE_PATH,
+    /** The files each glob target may pick, from semantic validation. */
+    private readonly picks: ReadonlyMap<FileTarget, readonly string[]> = new Map(),
   ) {
     this.#functionIdBase = functions.length;
     const functionByName = new Map<
@@ -432,8 +496,49 @@ export class InstructionCompiler {
         this.labels.push({ name: statement.name.name, instruction: this.instructions.length });
         return;
       case "gotoStatement":
-        this.#gotos.push({ instruction: this.instructions.length, label: statement.label.name });
-        this.instructions.push({ kind: "goto", target: -1, span: copySpan(statement.span) });
+        // In a global function or its blocks, a label alone names that label of the function's file, entered
+        // afresh like `goto "file.tease" label` (ADR 0022 §3.5).
+        if (statement.target.kind === "labelTarget" && !this.#global) {
+          this.#gotos.push({
+            instruction: this.instructions.length,
+            label: statement.target.label.name,
+          });
+          this.instructions.push({ kind: "goto", target: -1, span: copySpan(statement.span) });
+          return;
+        }
+        this.#emitTransfer("goto", statement.target, statement.span);
+        return;
+      case "callFileStatement":
+        this.#emitTransfer("call", statement.target, statement.span);
+        return;
+      case "fallbackStatement":
+        if (statement.target === null) {
+          this.instructions.push({
+            kind: "setFallback",
+            destination: null,
+            span: copySpan(statement.span),
+          });
+          return;
+        }
+        if (statement.target.kind === "scriptTarget") {
+          const lowered = this.#lowerExpression(statement.target.expression);
+          this.instructions.push({
+            kind: "setFallback",
+            destination: { value: lowered.plan },
+            span: copySpan(statement.span),
+          });
+          this.#emitTemporaryCleanup(lowered.temporaryIds, statement.span);
+          return;
+        }
+        this.#destinations.push({
+          instruction: this.instructions.length,
+          ...this.#destinationOf(statement.target),
+        });
+        this.instructions.push({
+          kind: "setFallback",
+          destination: { file: -1, target: -1 },
+          span: copySpan(statement.span),
+        });
         return;
       case "letStatement": {
         const initializer = unwrapParentheses(statement.initializer);
@@ -1094,14 +1199,24 @@ export class InstructionCompiler {
       return lowered;
     }
     if (isTakePhotoCall(expression)) {
+      // `takePhoto(tags: …)`: the tags are evaluated first; the capture reads them before it asks the Player.
+      const tagsArgument =
+        expression.kind === "callExpression" ? expression.arguments[0] : undefined;
+      const tags =
+        tagsArgument === undefined
+          ? null
+          : yield* compileChild(this.#lowerExpressionTask(tagsArgument.value));
       const transientTemporary = this.#allocateTemporary();
       this.instructions.push({
         kind: "capture",
         capture: "photo",
+        tags: tags?.plan ?? null,
         destinationTemporary: transientTemporary,
         span: copySpan(expression.span),
       });
-      return this.#consumeInteractionResult(transientTemporary, expression.span);
+      const result = this.#consumeInteractionResult(transientTemporary, expression.span);
+      if (tags !== null) this.#emitTemporaryCleanup(tags.temporaryIds, expression.span);
+      return result;
     }
     if (
       expression.kind === "callExpression" &&

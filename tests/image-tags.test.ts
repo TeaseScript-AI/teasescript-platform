@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { compileProject, compileSource, type CompileOptions } from "../src/compiler.js";
 import type { ProjectImageFile } from "../src/image-catalog.js";
+import { parse } from "../src/parser.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
@@ -495,5 +496,13 @@ test("after an incomplete tagged query, a statement on the next line is kept", (
       [kept, "exitStatement"],
       source,
     );
+  }
+});
+
+test("after an incomplete tag query, a label, goto, call, fallback, or end on the next line is kept", () => {
+  for (const line of ["label next", "goto next", 'call "b.tease"', "fallback none", "end"]) {
+    const parsed = parse(`showImage tagged "bedroom",\n${line}\nexit`);
+    assert.equal(parsed.program.statements.length, 2, line);
+    assert.notEqual(parsed.program.statements[0]!.kind, "exitStatement", line);
   }
 });

@@ -4,6 +4,7 @@ import {
   registerTeaseScriptProviders,
 } from "../src/editor/monaco-providers.js";
 import { watchProjectDiagnostics, type ProjectFileView } from "../src/editor/model-diagnostics.js";
+import type { ProjectImageFile } from "../src/image-catalog.js";
 
 const TEASE_LANGUAGE_ID = "teasescript";
 
@@ -100,6 +101,8 @@ export function registerTeaseScriptLanguage(): void {
         "label",
         "goto",
         "tagged",
+        "call",
+        "fallback",
       ],
       types: [
         "string",
@@ -117,6 +120,7 @@ export function registerTeaseScriptLanguage(): void {
         "object",
         "range",
         "media",
+        "script",
       ],
       commands: [
         "showButton",
@@ -190,20 +194,29 @@ function registerProviders(): void {
   );
 }
 
-/** Marks every model's diagnostics after each edit and reports the project's file overview. */
+/**
+ * Marks every model's diagnostics after each edit and reports the project's file overview; tag queries search the
+ * package images when given.
+ */
 export function watchProject(
   files: readonly { readonly path: string; readonly model: monaco.editor.ITextModel }[],
   onOverview: (files: readonly ProjectFileView[]) => void,
+  options: { readonly images?: readonly ProjectImageFile[] } = {},
 ): monaco.IDisposable {
   const models = new Map(files.map((file) => [file.path, file.model]));
-  return watchProjectDiagnostics(files, monaco.MarkerSeverity, (overview) => {
-    for (const file of overview) {
-      const model = models.get(file.path);
-      if (model !== undefined)
-        monaco.editor.setModelMarkers(model, "teasescript", [...file.markers]);
-    }
-    onOverview(overview);
-  });
+  return watchProjectDiagnostics(
+    files,
+    monaco.MarkerSeverity,
+    (overview) => {
+      for (const file of overview) {
+        const model = models.get(file.path);
+        if (model !== undefined)
+          monaco.editor.setModelMarkers(model, "teasescript", [...file.markers]);
+      }
+      onOverview(overview);
+    },
+    options,
+  );
 }
 
 export { monaco, type ProjectFileView };

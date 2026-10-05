@@ -1,4 +1,4 @@
-import type { FunctionDeclaration, Program } from "../ast.js";
+import type { FileTarget, FunctionDeclaration, Program } from "../ast.js";
 import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
@@ -17,6 +17,7 @@ import type { RuntimeCheckSite } from "../type-checker.js";
 import {
   InstructionCompiler,
   type LoweringCounters,
+  type PendingDestination,
   type ProjectFunctions,
 } from "./lowering/compiler.js";
 import { sessionDeclarations } from "../project-globals.js";
@@ -28,6 +29,8 @@ export { InstructionCompilationError } from "./errors.js";
 export interface StableProjectFile {
   readonly path: string;
   readonly program: Program;
+  /** The files each glob target may pick, from semantic validation. */
+  readonly picks?: ReadonlyMap<FileTarget, readonly string[]>;
 }
 
 /** Lowers the AST of a single-file project, the `main.tease` of `program`. */
@@ -62,7 +65,8 @@ export function compileStableProject(
   const project: ProjectFunctions = { global: globalFunctions, foreignCalls: [] };
   const globalIds = new Map<string, number>();
   const files: PlanFile[] = [];
-  for (const [fileIndex, { path, program }] of projectFiles.entries()) {
+  const destinations: PendingDestination[] = [];
+  for (const [fileIndex, { path, program, picks }] of projectFiles.entries()) {
     const declarations = program.statements.filter(
       (statement): statement is FunctionDeclaration => statement.kind === "functionDeclaration",
     );
@@ -73,6 +77,8 @@ export function compileStableProject(
       functions,
       counters,
       project,
+      path,
+      picks,
     );
     const startInstruction = instructions.length;
     if (fileIndex === 0)
@@ -82,6 +88,8 @@ export function compileStableProject(
         onFile(file);
         compiler.compileStartValue(declaration, file);
       }
+    // A file is entered after the start values, which run once, at the start of the session.
+    const entryInstruction = instructions.length;
     onFile(fileIndex);
     compiler.compileStatements(
       program.statements.filter((statement) => statement.kind !== "functionDeclaration"),
@@ -95,10 +103,12 @@ export function compileStableProject(
     for (const declaration of declarations)
       if (declaration.global)
         globalIds.set(declaration.name.name, compiler.functionId(declaration));
+    for (const destination of compiler.destinations) destinations.push(destination);
     files.push({
       path,
       sourceSpan: sourceSpanToPlanLocation(program.span),
       startInstruction,
+      entryInstruction,
       rootEndInstruction,
       endInstruction: instructions.length,
       labels: compiler.labels,
@@ -109,6 +119,26 @@ export function compileStableProject(
     if (call?.kind !== "callFunction" || !globalIds.has(name))
       throw new TypeError("A call of a global function lost its target during compilation.");
     instructions[instruction] = { ...call, functionId: globalIds.get(name)! };
+  }
+  // Every file has its entry and labels now, so transfers and fallbacks can name any of them.
+  const fileIndexByPath = new Map(files.map((file, index) => [file.path, index]));
+  for (const { instruction, paths, label, pick } of destinations) {
+    const options = paths.map((path) => {
+      const file = fileIndexByPath.get(path) ?? -1;
+      const target =
+        label === null
+          ? files[file]?.entryInstruction
+          : files[file]?.labels.find((candidate) => candidate.name === label)?.instruction;
+      if (target === undefined) {
+        throw new TypeError("Semantically invalid transfer reached compilation.");
+      }
+      return { file, target };
+    });
+    const pending = instructions[instruction];
+    if (pending?.kind !== "transfer" && pending?.kind !== "setFallback") {
+      throw new TypeError("Semantically invalid transfer reached compilation.");
+    }
+    instructions[instruction] = { ...pending, destination: pick ? { pick: options } : options[0]! };
   }
   return freezeInstructionPlan({
     format: INSTRUCTION_PLAN_FORMAT,

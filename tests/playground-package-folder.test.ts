@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   chmod,
   copyFile,
+  cp,
   mkdir,
   mkdtemp,
   readFile,
@@ -17,13 +18,17 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { compilePlayerProject, createPlayerRuntimeSession } from "../player/runtime-adapter.js";
 import { createPlaygroundServer } from "../playground/server.js";
 import {
+  compileWorkspaceProject,
   compileWorkspaceSource,
   executeValidatedWorkspaceSnapshot,
 } from "../playground/workspace/controller.js";
 
 const fixtures = fileURLToPath(new URL("../../tests/fixtures/xmp/", import.meta.url));
+// house: two files, an image, and a sound; garden: its own image; broken: does not compile.
+const packages = fileURLToPath(new URL("../../tests/fixtures/packages/", import.meta.url));
 const keywords = ["bedroom", "Tom & Jerry <3", "Café", "punishment: 4"];
 
 test("the development package folder offers its images with their XMP keywords, and only those files", async (context) => {
@@ -124,6 +129,8 @@ test("the catalog follows edits that keep a file's size and time, and skips what
   assert.equal(response.status, 200);
   assert.deepEqual(JSON.parse(response.body.toString("utf8")), {
     images: [],
+    media: [],
+    sources: [],
     problems: [{ path: ".", message: "The folder cannot be read (ENOENT)." }],
   });
 });
@@ -140,6 +147,145 @@ test("the package folder serves only what its catalog lists: no hidden files or 
   assert.equal((await get(server, "/dev-package/files/room.jpg")).status, 200);
   assert.equal((await get(server, "/dev-package/files/.private/hidden.jpg")).status, 404);
   assert.equal((await get(server, "/dev-package/files/inside-link.jpg")).status, 404);
+});
+
+test("a root of packages offers each direct subfolder as a package, with only its own files", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "teasescript-packages-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await cp(packages, root, { recursive: true });
+  await mkdir(join(root, ".hidden"));
+  await writeFile(join(root, ".hidden/main.tease"), "exit\n");
+  await symlink(join(root, "house"), join(root, "linked"));
+  await writeFile(join(root, "loose.tease"), "exit\n");
+  // A link to the root itself still works.
+  const rootLink = `${root}-link`;
+  await symlink(root, rootLink);
+  context.after(() => rm(rootLink, { force: true }));
+  const server = await listening(createPlaygroundServer({ packagesRoot: rootLink }));
+  context.after(() => new Promise((resolve) => server.close(resolve)));
+  const catalog = async (id: string) =>
+    JSON.parse((await get(server, `/dev-package/${id}/catalog.json`)).body.toString("utf8"));
+
+  const house = await catalog("house");
+  assert.deepEqual(house, {
+    images: [{ path: "images/hall.svg", keywords: [] }],
+    media: ["sounds/chime.wav"],
+    sources: [
+      {
+        path: "helpers.tease",
+        source: await readFile(join(packages, "house/helpers.tease"), "utf8"),
+      },
+      { path: "main.tease", source: await readFile(join(packages, "house/main.tease"), "utf8") },
+    ],
+    problems: [],
+  });
+  const image = await get(server, "/dev-package/house/files/images/hall.svg");
+  assert.equal(image.status, 200);
+  assert.equal(image.contentType, "image/svg+xml");
+  assert.deepEqual(image.body, await readFile(join(packages, "house/images/hall.svg")));
+  assert.equal((await get(server, "/dev-package/garden/files/images/garden.svg")).status, 200);
+  const sound = await get(server, "/dev-package/house/files/sounds/chime.wav");
+  assert.equal(sound.status, 200);
+  assert.equal(sound.contentType, "audio/wav");
+  assert.deepEqual(sound.body, await readFile(join(packages, "house/sounds/chime.wav")));
+  // A package's media come only from that package, and its scripts are not served as files.
+  assert.equal((await get(server, "/dev-package/house/files/images/garden.svg")).status, 404);
+  assert.equal((await get(server, "/dev-package/garden/files/sounds/chime.wav")).status, 404);
+  assert.equal(
+    (await get(server, "/dev-package/house/files/%2E%2E/garden/images/garden.svg")).status,
+    400,
+  );
+  assert.equal((await get(server, "/dev-package/house/files/main.tease")).status, 404);
+  // A package is a direct subfolder by its name: not hidden, not a link, not a file, not absent.
+  for (const path of [
+    "/dev-package/.hidden/catalog.json",
+    "/dev-package/linked/catalog.json",
+    "/dev-package/linked/files/images/hall.svg",
+    "/dev-package/loose.tease/catalog.json",
+    "/dev-package/absent/catalog.json",
+    "/dev-package/catalog.json",
+    "/dev-package/house%2Fimages/catalog.json",
+  ]) {
+    assert.equal((await get(server, path)).status, 404, path);
+  }
+  assert.equal((await get(server, "/dev-package/%2E%2E/catalog.json")).status, 400);
+
+  // Both hosts compile a package as one project that starts at main.tease and shows the package's own images.
+  const project = { files: house.sources, images: house.images };
+  const compiled = compileWorkspaceProject(project.files, { images: project.images });
+  const ran = executeValidatedWorkspaceSnapshot(compiled.plan!, compiled.snapshot!, "run");
+  assert.equal(ran.snapshot!.stageImage, "images/hall.svg");
+  assert.deepEqual(
+    ran.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["Welcome to the house, guest."],
+  );
+  const session = createPlayerRuntimeSession(project);
+  assert.deepEqual(
+    session.transcriptEntries.map((entry) => entry.text),
+    ["Welcome to the house, guest."],
+  );
+
+  // A package that does not compile reports each diagnostic with its file.
+  const broken = await catalog("broken");
+  const failed = compileWorkspaceProject(broken.sources, { images: broken.images });
+  assert.equal(failed.status, "compileError");
+  assert.deepEqual(
+    failed.diagnostics.map(({ path, line, column, code }) => ({ path, line, column, code })),
+    [{ path: "rooms/cellar.tease", line: 3, column: 9, code: "TSV002" }],
+  );
+  assert.deepEqual(compilePlayerProject({ files: broken.sources }).diagnostics, [
+    {
+      path: "rooms/cellar.tease",
+      line: 3,
+      column: 9,
+      severity: "error",
+      code: "TSV002",
+      message: "Unknown variable 'candle'.",
+    },
+  ]);
+});
+
+test("a package lists every .tease file it can read, and the others as problems", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "teasescript-packages-"));
+  context.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(join(root, "odd/notes"), { recursive: true });
+  await writeFile(join(root, "odd/main.tease"), "exit\n");
+  await writeFile(join(root, "odd/latin1.tease"), Buffer.from([0x73, 0x61, 0x79, 0x20, 0xe9]));
+  await writeFile(join(root, "odd/notes/Upper.TEASE"), "exit\n");
+  const server = await listening(createPlaygroundServer({ packagesRoot: root }));
+  context.after(() => new Promise((resolve) => server.close(resolve)));
+  const catalog = async () =>
+    JSON.parse((await get(server, "/dev-package/odd/catalog.json")).body.toString("utf8"));
+
+  const listed = await catalog();
+  assert.deepEqual(
+    listed.sources.map((file: { path: string }) => file.path),
+    ["main.tease", "notes/Upper.TEASE"],
+  );
+  assert.deepEqual(listed.problems, [
+    { path: "latin1.tease", message: "Skipped: it is not UTF-8 text." },
+  ]);
+  // The scanner does not judge package paths; compiling the project does.
+  assert.deepEqual(
+    compileWorkspaceProject(listed.sources).diagnostics.map(({ path, code }) => [path, code]),
+    [["notes/Upper.TEASE", "TSC009"]],
+  );
+
+  if (process.getuid?.() !== 0) {
+    await writeFile(join(root, "odd/locked.tease"), "exit\n");
+    await chmod(join(root, "odd/locked.tease"), 0o000);
+    assert.deepEqual((await catalog()).problems, [
+      { path: "latin1.tease", message: "Skipped: it is not UTF-8 text." },
+      { path: "locked.tease", message: "Skipped: it cannot be read (EACCES)." },
+    ]);
+  }
+});
+
+test("a playground serves one package folder or a root of packages, not both", () => {
+  assert.throws(
+    () => createPlaygroundServer({ packageRoot: packages, packagesRoot: packages }),
+    /either one package folder or a root of packages/u,
+  );
 });
 
 test("without a development package folder, its routes are absent", async (context) => {

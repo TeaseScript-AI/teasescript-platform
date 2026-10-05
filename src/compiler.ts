@@ -1,4 +1,4 @@
-import type { Program } from "./ast.js";
+import type { FileTarget, Program } from "./ast.js";
 import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-validation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { compileStableProject, type InstructionPlan } from "./compiler/compile-program.js";
@@ -9,6 +9,7 @@ import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutabl
 import { planLocationToSourceSpan } from "./plan/source-location.js";
 import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
 import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
+import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import { validateProjectSemantics, type SemanticValidationOptions } from "./semantic.js";
@@ -23,6 +24,7 @@ export interface CompileOptions extends SemanticValidationOptions {
 /** What every file of a project is checked with: the options, the built-ins, and the image catalog when given. */
 interface ProjectCheckOptions extends CompileOptions {
   readonly imageCatalog?: readonly PlanImage[];
+  readonly capturesTaggedPhotos?: boolean;
 }
 
 export interface CompilationResult {
@@ -107,7 +109,10 @@ function compileProjectFiles(
   };
   const files = inventory.files.map(({ path, source }) => parseFile(path, source));
   let plan: InstructionPlan | null = null;
-  const checked = checkProject(files, validationOptions);
+  const checked = checkProject(files, {
+    ...validationOptions,
+    capturesTaggedPhotos: capturesTaggedPhotos(files.map((file) => file.result.program)),
+  });
   if (inventory.diagnostics.length === 0 && !hasErrors(catalog.diagnostics) && checked !== null) {
     if (checked.reachesExit) {
       plan = lowerProject(files, checked.typeChecks, catalog.images);
@@ -146,6 +151,8 @@ interface CompiledProjectFile {
   readonly source: string;
   /** `null` when parsing exhausted the call stack. */
   readonly parsed: ReturnType<typeof parse> | null;
+  /** The files each glob target may pick, once the names are checked. */
+  picks?: ReadonlyMap<FileTarget, readonly string[]>;
 }
 
 /** Valid, unique package paths in plan order, and a `TSC009` diagnostic for every other path or a missing main. */
@@ -200,6 +207,15 @@ function projectDiagnostic(path: string, message: string): ProjectDiagnostic {
   });
 }
 
+/** The labels of a file's outer scope. */
+function fileLabels(program: Program): ReadonlySet<string> {
+  return new Set(
+    program.statements.flatMap((statement) =>
+      statement.kind === "labelStatement" ? [statement.name.name] : [],
+    ),
+  );
+}
+
 function parseFile(path: string, source: string): CompiledProjectFile {
   let parsed: ReturnType<typeof parse>;
   try {
@@ -249,7 +265,10 @@ function checkProject(
       (index) => files[index]!.parsed !== null && !hasErrors(files[index]!.result.diagnostics),
       track,
     );
-    names.forEach((result, index) => addSemanticDiagnostics(files[index]!, result.diagnostics));
+    names.forEach((result, index) => {
+      addSemanticDiagnostics(files[index]!, result.diagnostics);
+      files[index]!.picks = result.picks;
+    });
     if (files.some((file) => file.parsed === null || hasErrors(file.result.diagnostics)))
       return null;
     // Types are checked once every name resolves, so a type message never repeats a name or structure error.
@@ -258,11 +277,36 @@ function checkProject(
       options,
       track,
     );
+    // A transfer or script reference that can run enters its label afresh, which has then run nothing of its file. As
+    // the source shows it, a computed path stands for every file and a computed label for every label.
+    const labels = new Map(
+      files.map((file) => [file.result.path, fileLabels(file.result.program)]),
+    );
+    const freshLabels = new Map<string, Set<string>>();
+    const marked = new Set<string>();
+    for (const result of names) {
+      for (const { path, label } of result.reachableEntries(types.flow)) {
+        // Many references mark the same labels; each mark is followed once.
+        const mark = JSON.stringify([path, label]);
+        if (label === null || marked.has(mark)) continue;
+        marked.add(mark);
+        for (const entered of path === null ? labels.keys() : [path]) {
+          const known = labels.get(entered) ?? new Set<string>();
+          const fresh = freshLabels.get(entered) ?? new Set<string>();
+          if (label === true) for (const name of known) fresh.add(name);
+          else if (known.has(label)) fresh.add(label);
+          freshLabels.set(entered, fresh);
+        }
+      }
+    }
     // The initialization check at labels follows the flow of the type check.
     types.diagnostics.forEach((diagnostics, index) =>
       addSemanticDiagnostics(files[index]!, [
         ...diagnostics,
-        ...names[index]!.checkInitialization(types.flow),
+        ...names[index]!.checkInitialization(
+          freshLabels.get(files[index]!.result.path) ?? new Set(),
+          types.flow,
+        ),
       ]),
     );
     return files.some((file) => hasErrors(file.result.diagnostics))
@@ -308,7 +352,11 @@ function lowerProject(
   let failure: ReturnType<typeof compiledPlanValidationDiagnostic>;
   try {
     const compiled = compileStableProject(
-      files.map((file) => ({ path: file.result.path, program: file.result.program })),
+      files.map((file) => ({
+        path: file.result.path,
+        program: file.result.program,
+        ...(file.picks === undefined ? {} : { picks: file.picks }),
+      })),
       typeChecks,
       (fileIndex) => {
         current = files[fileIndex]!;

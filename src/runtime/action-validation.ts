@@ -1,5 +1,4 @@
 import type { TemporalContext } from "../temporal.js";
-import type { RunnablePlan } from "./runnable-plan.js";
 import {
   temporalCaptureShownAt,
   temporalCapturesProblem,
@@ -16,6 +15,7 @@ import {
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
 import { isOneOf } from "../plan/validation-support.js";
+import { isCanonicalTagList } from "../tags.js";
 import { isMessagePresentation } from "../message-presentation.js";
 import {
   type Instruction,
@@ -23,6 +23,7 @@ import {
   type InteractionKind,
   type InteractionTemporalKind,
   type InteractionUiPayload,
+  type InstructionPlan,
   type PlanSourceLocation,
 } from "../plan/model.js";
 import {
@@ -40,10 +41,12 @@ import { recordValidationTestWork } from "../validation-testing.js";
 import { validMediaAction } from "./media-validation.js";
 import { validTimerAction } from "./timer-validation.js";
 import { validateScriptStorageEntries } from "./script-storage.js";
-
-interface ActionValidationAnalysis {
-  readonly functionIdsByInstruction: readonly (number | null)[];
-}
+import {
+  contextHoldsInstruction,
+  fileOfInstruction,
+  ownerFitsInstruction,
+  serializedTopContext,
+} from "./activation-validation.js";
 
 const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
 
@@ -108,8 +111,7 @@ function isCanonicalArrayIndexKey(key: string, length: number): boolean {
 
 export function validatePendingActionState(
   value: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
-  analysis: ActionValidationAnalysis | undefined,
+  plan: InstructionPlan | undefined,
   errors: string[],
 ): void {
   if (!validSessionTime(value.currentSessionTimeMs))
@@ -136,7 +138,7 @@ export function validatePendingActionState(
     errors.push("Runtime foreground action is malformed.");
   }
   const settlement = value.lastSettlement;
-  if (!validRetainedSettlement(settlement, value, plan, analysis)) {
+  if (!validRetainedSettlement(settlement, value, plan)) {
     errors.push("Runtime lastSettlement is malformed.");
   }
   if (!validActiveActionIdentityCoherence(value)) {
@@ -171,7 +173,7 @@ function validActiveActionCompletionCapacity(snapshot: Record<string, unknown>):
 
 function validBackgroundPacingActions(
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   const actions = snapshot.backgroundActions;
   if (!isCanonicalJsonArray(actions)) return false;
@@ -199,7 +201,7 @@ function validBackgroundPacingActions(
 function validForegroundActionKind(
   action: unknown,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
   delayTimesAreValid: boolean,
   allowDue: boolean,
 ): boolean {
@@ -238,7 +240,7 @@ function validForegroundActionKind(
   if (action.kind === "capture") {
     // A pending capture may still publish an unavailable-camera warning and its completion.
     return (
-      validCaptureAction(action, snapshot) &&
+      validCaptureAction(action, snapshot, plan) &&
       hasEventSequenceCapacity(snapshot.nextEventSequence, 2)
     );
   }
@@ -274,14 +276,23 @@ function validStorageWriteAction(
   );
 }
 
+/** A pending capture; it carries validated tags exactly when its capture instruction has `tags:`. */
 function validCaptureAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
+  plan: InstructionPlan | undefined,
 ): boolean {
+  const owner =
+    plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)
+      ? undefined
+      : plan.instructions[action.owningInstruction];
   return (
+    (action.tags === null || isCanonicalTagList(action.tags)) &&
+    (owner?.kind !== "capture" || (owner.tags === null) === (action.tags === null)) &&
     hasExactKeys(action, [
       "kind",
       "capture",
+      "tags",
       "actionId",
       "owningInstruction",
       "continuationInstruction",
@@ -303,19 +314,17 @@ function validCaptureAction(
 function validRetainedSettlement(
   settlement: unknown,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
-  analysis: ActionValidationAnalysis | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   if (!isPlainRecord(settlement)) return settlement === null;
-  if (!validSettlementShapeAndKind(settlement, snapshot, plan, analysis)) return false;
+  if (!validSettlementShapeAndKind(settlement, snapshot, plan)) return false;
   return validSettlementIdentityAndEventSequences(settlement, snapshot);
 }
 
 function validSettlementShapeAndKind(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
-  analysis: ActionValidationAnalysis | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   return (
     isOneOf(settlement.actionKind, [
@@ -333,7 +342,7 @@ function validSettlementShapeAndKind(
         settlement.settlementKind === "timedOut")) &&
     positiveSafeInteger(settlement.actionId) &&
     validSettlementProvenance(settlement, plan) &&
-    validSettlementKindData(settlement, snapshot, plan, analysis)
+    validSettlementKindData(settlement, snapshot, plan)
   );
 }
 
@@ -403,7 +412,7 @@ function validActiveActionIdentityCoherence(snapshot: Record<string, unknown>): 
 export function validForegroundActionState(
   action: unknown,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
   allowDue: boolean,
 ): boolean {
   const callIds = Array.isArray(snapshot.callFrames)
@@ -579,7 +588,7 @@ function validActionCreatedAfterSettlement(
 /** An async play's wait ends with its load result; a blocking play's wait ends with its media. */
 function validMediaWaitOutcome(
   settlement: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
   const owner = plan.instructions[settlement.owningInstruction];
@@ -669,7 +678,7 @@ function validForegroundActionBase(
 function validPacingGateAction(
   action: unknown,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
   foreground: boolean,
 ): boolean {
   if (!isPacingGateShape(action)) return false;
@@ -745,7 +754,7 @@ function validPacingGateTiming(
 function validPacingGateCreationProvenance(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   if (
     !positiveSafeInteger(action.scopeDepth) ||
@@ -767,27 +776,13 @@ function validPacingGateCreationProvenance(
     plan.instructions[owningInstruction]?.kind !== "say"
   )
     return false;
-  const owningFunction = plan.functions.find(
-    (definition) =>
-      definition !== undefined &&
-      owningInstruction >= definition.entryInstruction &&
-      owningInstruction < definition.endInstruction,
-  );
-  if (owningFunction === undefined) return action.ownerCallFrameId === null;
-  if (!positiveSafeInteger(action.ownerCallFrameId)) return false;
-
-  const liveOwner = Array.isArray(snapshot.callFrames)
-    ? snapshot.callFrames.find(
-        (frame) => isPlainRecord(frame) && frame.id === action.ownerCallFrameId,
-      )
-    : undefined;
-  return liveOwner === undefined || liveOwner.functionId === owningFunction.id;
+  return ownerFitsInstruction(plan, snapshot, action.ownerCallFrameId, owningInstruction);
 }
 
 export function validPreparedSayOutput(
   value: unknown,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   if (!isPreparedSayOutputShape(value)) return false;
   if (!validPreparedSayOutputDomain(value)) return false;
@@ -852,7 +847,7 @@ function validPreparedSaySpeaker(value: unknown): boolean {
 
 export function validTopLevelPreparedSayOutputRelationship(
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   const settlement = snapshot.lastSettlement;
   if (snapshot.preparedSayOutput === null) {
@@ -889,7 +884,7 @@ export function hasPacingExecutionHistory(settlement: unknown): boolean {
 function validReleasedPacingSettlementAfterPreparedOutputConsumption(
   snapshot: Record<string, unknown>,
   settlement: unknown,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   if (!isPlainRecord(settlement) || settlement.actionKind !== "chatPacingGate") return true;
   const releasedInstruction = settlement.releasedPreparedOutputInstruction;
@@ -907,7 +902,7 @@ function validReleasedPacingSettlementAfterPreparedOutputConsumption(
 
 export function isExplicitExitHaltState(
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   if (
     plan === undefined ||
@@ -932,8 +927,7 @@ function activePacingActions(snapshot: Record<string, unknown>): Record<string, 
 
 export function validateInteractionResultHandoffState(
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
-  analysis: ActionValidationAnalysis | undefined,
+  plan: InstructionPlan | undefined,
   errors: string[],
 ): void {
   const handoff = snapshot.interactionResultHandoff;
@@ -990,7 +984,7 @@ export function validateInteractionResultHandoffState(
   }
 
   if (
-    !validInteractionResultHandoffOwner(handoff, snapshot, analysis) ||
+    !validInteractionResultHandoffOwner(handoff, snapshot, plan) ||
     !Array.isArray(snapshot.temporaries)
   ) {
     errors.push("Runtime interaction result handoff has invalid ownership or state.");
@@ -1069,33 +1063,19 @@ export function validateInteractionResultHandoffState(
   }
 }
 
+/** The code that asked receives the result: the running context, at the asking instruction. */
 function validInteractionResultHandoffOwner(
   handoff: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  analysis: ActionValidationAnalysis | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
-  const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
-  const activeOwner = callFrames.at(-1);
-  const ownerCallFrameId = handoff.ownerCallFrameId;
-  if (ownerCallFrameId === null) {
-    if (callFrames.length !== 0) return false;
-    return (
-      analysis === undefined ||
-      (nonNegativeSafeInteger(handoff.owningInstruction) &&
-        analysis.functionIdsByInstruction[handoff.owningInstruction] === null)
-    );
-  }
-  if (
-    !positiveSafeInteger(ownerCallFrameId) ||
-    !isPlainRecord(activeOwner) ||
-    activeOwner.id !== ownerCallFrameId
-  )
-    return false;
-  if (analysis === undefined || !nonNegativeSafeInteger(handoff.owningInstruction)) {
-    return true;
-  }
-  const ownerFunctionId = analysis.functionIdsByInstruction[handoff.owningInstruction];
-  return ownerFunctionId !== null && activeOwner.functionId === ownerFunctionId;
+  const context = serializedTopContext(snapshot);
+  if (context === undefined || handoff.ownerCallFrameId !== context.ownerId) return false;
+  return (
+    plan === undefined ||
+    (nonNegativeSafeInteger(handoff.owningInstruction) &&
+      contextHoldsInstruction(plan, context, handoff.owningInstruction))
+  );
 }
 
 function validInteractionResultForInstruction(
@@ -1236,7 +1216,7 @@ function validInteractionTiming(
 function validInteractionAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
   allowDue: boolean,
 ): boolean {
   if (
@@ -1648,7 +1628,7 @@ function choiceOptionsEqual(
 function validCaptureSettlement(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   if (
     !hasExactKeys(settlement, [
@@ -1697,8 +1677,7 @@ function validCaptureSettlement(
 function validSettlementKindData(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
-  analysis: ActionValidationAnalysis | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   if (settlement.actionKind === "chatPacingGate")
     return validPacingGateSettlement(settlement, snapshot, plan);
@@ -1893,7 +1872,7 @@ function validSettlementKindData(
     return false;
   if (
     settlement.destinationTemporary !== instruction.destinationTemporary ||
-    !validInteractionSettlementOwner(settlement, snapshot, analysis)
+    !ownerFitsInstruction(plan, snapshot, settlement.ownerCallFrameId, settlement.owningInstruction)
   )
     return false;
   // Only a button written with a timeout can time out.
@@ -2010,7 +1989,7 @@ function buttonsFitWrittenValues(
 function validPacingGateSettlement(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan?: RunnablePlan,
+  plan?: InstructionPlan,
 ): boolean {
   if (
     !hasExactKeys(settlement, [
@@ -2054,7 +2033,7 @@ function pacingSettlementCanReleasePreparedOutput(
 
 function validPacingSettlementReleaseLineage(
   settlement: unknown,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): settlement is Record<string, unknown> & {
   readonly releasedPreparedOutputInstruction: number | null;
 } {
@@ -2082,25 +2061,6 @@ function validNonTimePacingSettlementChronology(
     validSessionTime(snapshot.currentSessionTimeMs) &&
     settlement.completedAtMs <= settlement.deadlineMs &&
     settlement.completedAtMs <= snapshot.currentSessionTimeMs
-  );
-}
-
-function validInteractionSettlementOwner(
-  settlement: Record<string, unknown>,
-  snapshot: Record<string, unknown>,
-  analysis: ActionValidationAnalysis | undefined,
-): boolean {
-  if (analysis === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
-  const ownerFunctionId = analysis.functionIdsByInstruction[settlement.owningInstruction] ?? null;
-  if (ownerFunctionId === null) return settlement.ownerCallFrameId === null;
-  if (!positiveSafeInteger(settlement.ownerCallFrameId)) return false;
-  const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
-  const activeOwner = callFrames.find(
-    (frame) => isPlainRecord(frame) && frame.id === settlement.ownerCallFrameId,
-  );
-  return (
-    activeOwner === undefined ||
-    (isPlainRecord(activeOwner) && activeOwner.functionId === ownerFunctionId)
   );
 }
 
@@ -2148,7 +2108,7 @@ function sameCanonicalSettlementResult(destination: unknown, result: unknown): b
 
 function validSettlementProvenance(
   settlement: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   const owningInstruction = settlement.owningInstruction;
   const continuationInstruction = settlement.continuationInstruction;
@@ -2180,14 +2140,15 @@ function validSettlementProvenance(
       owningInstruction < candidate.endInstruction,
   );
   return definition === undefined
-    ? continuationInstruction < plan.files[0]!.rootEndInstruction
+    ? continuationInstruction <
+        (plan.files[fileOfInstruction(plan, owningInstruction)]?.rootEndInstruction ?? 0)
     : continuationInstruction < definition.endInstruction;
 }
 
 function validForegroundActionOwnership(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan,
+  plan: InstructionPlan,
 ): boolean {
   const owningInstruction = action.owningInstruction;
   const continuationInstruction = action.continuationInstruction;
@@ -2236,25 +2197,12 @@ function validForegroundActionOwnership(
     return false;
   }
 
-  const definition = plan.functions.find(
-    (candidate) =>
-      candidate !== undefined &&
-      owningInstruction >= candidate.entryInstruction &&
-      owningInstruction < candidate.endInstruction,
-  );
-  const callFrames = Array.isArray(snapshot.callFrames) ? snapshot.callFrames : [];
-  const activeFrame = callFrames.at(-1);
-  if (definition === undefined) {
-    return (
-      continuationInstruction < plan.files[0]!.rootEndInstruction &&
-      action.ownerCallFrameId === null &&
-      callFrames.length === 0
-    );
-  }
-  if (continuationInstruction >= definition.endInstruction) return false;
+  // The waiting code is the running context, and continues within it.
+  const context = serializedTopContext(snapshot);
   return (
-    isPlainRecord(activeFrame) &&
-    activeFrame.id === action.ownerCallFrameId &&
-    activeFrame.functionId === definition.id
+    context !== undefined &&
+    context.ownerId === action.ownerCallFrameId &&
+    contextHoldsInstruction(plan, context, owningInstruction) &&
+    contextHoldsInstruction(plan, context, continuationInstruction)
   );
 }

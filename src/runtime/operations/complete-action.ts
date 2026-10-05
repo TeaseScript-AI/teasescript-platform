@@ -1,4 +1,5 @@
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
+import { interruptFrame } from "../activations.js";
 import { captureExternalData } from "../../external-data-capture.js";
 import {
   currentTemporalContext,
@@ -74,11 +75,7 @@ export function completeAction(
       ? current.foregroundAction
       : (current.backgroundActions.find((action) => action.actionId === actionId) ?? null);
   if (active === null) {
-    if (
-      current.callFrames.some(
-        (frame) => frame.timerInterruption?.suspendedAction?.actionId === actionId,
-      )
-    ) {
+    if (interruptFrame(current)?.timerInterruption?.suspendedAction?.actionId === actionId) {
       // An interrupted action is inert while a timer expiry block runs; it is not settled.
       return pendingResult(current, [], { kind: "suspendedAction" as const, actionId });
     }
@@ -290,8 +287,23 @@ function completeCapture(
   if (!resolved.ok) {
     return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });
   }
+  const reference = resolved.result;
+  if (
+    reference !== null &&
+    action.tags !== null &&
+    current.capturedImages.some((image) => image.reference === reference)
+  ) {
+    return pendingResult(current, [], {
+      kind: "invalidPayload",
+      message: "The captured photo is already in the image catalog.",
+    });
+  }
   assertEventSequenceCapacity(current, resolved.unavailableReason === null ? 1 : 2);
-  setTemporary(current.temporaries, action.destinationTemporary, resolved.result);
+  setTemporary(current.temporaries, action.destinationTemporary, reference);
+  // A photo taken with tags joins the image catalog, keyed by its reference, so tag queries find it too.
+  if (reference !== null && action.tags !== null) {
+    current.capturedImages.push({ reference, tags: action.tags.map((tag) => ({ ...tag })) });
+  }
   const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   const events: InterpreterEvent[] = [];
   let warningSequence: number | null = null;

@@ -1,4 +1,5 @@
 import { captureExternalData } from "../../external-data-capture.js";
+import { interruptFrame } from "../activations.js";
 import type { InstructionPlan } from "../../plan/model.js";
 import {
   frozenTemporalContext,
@@ -79,7 +80,7 @@ function neededCaptures(
   const kept = new Set([temporalCaptureAt(captures, snapshot.currentSessionTimeMs)]);
   for (const action of [
     snapshot.foregroundAction,
-    ...snapshot.callFrames.map((frame) => frame.timerInterruption?.suspendedAction ?? null),
+    interruptFrame(snapshot)?.timerInterruption?.suspendedAction ?? null,
   ])
     if (action?.kind === "interaction") {
       const shown = temporalCaptureShownAt(

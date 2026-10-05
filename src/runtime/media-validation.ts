@@ -1,4 +1,5 @@
-import type { RunnablePlan } from "./runnable-plan.js";
+import type { InstructionPlan } from "../plan/model.js";
+import { rootFitsFunction, serializedRootFiles } from "./activation-validation.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import {
   reachableMediaCursor,
@@ -21,6 +22,7 @@ const MEDIA_KEYS = [
   "repeat",
   "cues",
   "finishFunctionId",
+  "handlerRootScopeId",
   "segment",
   "committedProgressMs",
   "positionMs",
@@ -45,7 +47,7 @@ const MEDIA_ACTION_KEYS = [
 export function validMediaAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   const now = snapshot.currentSessionTimeMs;
   if (
@@ -90,7 +92,7 @@ function validMediaRecord(
   media: Record<string, unknown>,
   active: boolean,
   snapshot: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): boolean {
   if (
     !hasExactKeys(media, MEDIA_KEYS) ||
@@ -106,6 +108,10 @@ function validMediaRecord(
     !validRepeat(media.repeat) ||
     !validCues(media.cues, plan) ||
     !validHandlerId(media.finishFunctionId, plan, true) ||
+    // Cue and finish blocks see the top-level names of the activation that started the media.
+    (media.handlerRootScopeId === null) !==
+      (media.finishFunctionId === null && Array.isArray(media.cues) && media.cues.length === 0) ||
+    (media.handlerRootScopeId !== null && !nonNegativeSafeInteger(media.handlerRootScopeId)) ||
     !nonNegativeSafeInteger(media.segment) ||
     !validMilliseconds(media.committedProgressMs) ||
     !validMilliseconds(media.positionMs) ||
@@ -325,7 +331,7 @@ function validRepeat(value: unknown): value is RuntimeMediaRepeatSnapshot {
 
 function validCues(
   value: unknown,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
 ): value is RuntimeMediaCueSnapshot[] {
   return (
     isCanonicalJsonArray(value) &&
@@ -342,7 +348,7 @@ function validCues(
 
 function validHandlerId(
   value: unknown,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
   nullable: boolean,
 ): boolean {
   if (value === null) return nullable;
@@ -376,7 +382,7 @@ function validPoints(value: unknown, observedSessionTimeMs: unknown): boolean {
  */
 export function validateMediaState(
   value: Record<string, unknown>,
-  plan: RunnablePlan | undefined,
+  plan: InstructionPlan | undefined,
   handleIds: ReadonlySet<number>,
   errors: string[],
 ): void {
@@ -404,10 +410,22 @@ export function validateMediaState(
     }
   }
   let activeVideos = 0;
+  const roots = serializedRootFiles(value);
   if (Array.isArray(value.backgroundActions)) {
     for (const action of value.backgroundActions) {
       if (isPlainRecord(action) && action.kind === "media" && isPlainRecord(action.media)) {
         add(action.media);
+        const handler =
+          action.media.finishFunctionId ??
+          (Array.isArray(action.media.cues) && isPlainRecord(action.media.cues[0])
+            ? action.media.cues[0].functionId
+            : null);
+        if (
+          handler !== null &&
+          !rootFitsFunction(plan, roots, action.media.handlerRootScopeId, handler)
+        ) {
+          errors.push("Runtime media refer to an impossible activation.");
+        }
         if (action.media.media === "video") activeVideos += 1;
       }
     }
@@ -453,8 +471,16 @@ export function validateMediaState(
         ? records.get(invocation.mediaId)
         : undefined;
       if (
-        !hasExactKeys(invocation, ["mediaId", "handlerFunctionId", "dueAtMs", "count"]) ||
+        !hasExactKeys(invocation, [
+          "mediaId",
+          "handlerFunctionId",
+          "rootScopeId",
+          "dueAtMs",
+          "count",
+        ]) ||
         !positiveSafeInteger(invocation.count) ||
+        invocation.rootScopeId !== media?.handlerRootScopeId ||
+        !rootFitsFunction(plan, roots, invocation.rootScopeId, invocation.handlerFunctionId) ||
         media?.state === "stopped" ||
         !validOwner(media, invocation.handlerFunctionId, invocation.count)
       ) {
@@ -474,7 +500,10 @@ export function validateMediaState(
       const media = positiveSafeInteger(frame.timerInterruption.mediaId)
         ? records.get(frame.timerInterruption.mediaId)
         : undefined;
-      if (!validOwner(media, frame.functionId, 1)) {
+      if (
+        !validOwner(media, frame.functionId, 1) ||
+        frame.rootScopeId !== media?.handlerRootScopeId
+      ) {
         errors.push("Runtime media cue-block frame does not belong to its media.");
       }
     }

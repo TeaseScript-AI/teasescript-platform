@@ -20,6 +20,7 @@ import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runValidSource as runSource } from "./helpers/run-valid-source.js";
 import { runValidSourceUntilExit } from "./helpers/run-until-exit.js";
+import { assertRuntimeResumeEquivalent } from "./helpers/runtime-equivalence.js";
 import { sayTexts } from "./helpers/runtime-events.js";
 
 test("executes positional and named function calls with returned values", () => {
@@ -657,3 +658,19 @@ function objectProperty(object: SerializableRuntimeObject, name: string): Serial
   assert.ok(property !== undefined);
   return property.value;
 }
+
+test("a recursive call inside a loop runs its own instance of the loop (#587)", () => {
+  const source = [
+    "function visit(depth) {",
+    "    repeat 2 {",
+    '        say "visit ${depth}"',
+    "        if depth > 0 { visit(depth - 1) }",
+    "    }",
+    "}",
+    "visit(1)",
+    "exit",
+  ].join("\n");
+  const result = assertRuntimeResumeEquivalent(source);
+  const said = result.events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+  assert.deepEqual(said, ["visit 1", "visit 0", "visit 0", "visit 1", "visit 0", "visit 0"]);
+});

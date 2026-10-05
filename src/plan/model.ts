@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 47;
+export const INSTRUCTION_PLAN_VERSION = 51;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -41,6 +41,8 @@ export interface PlanFile {
   readonly path: string;
   readonly sourceSpan: PlanSourceLocation;
   readonly startInstruction: number;
+  /** Where a `goto` or `call` that names the file without a label starts it. */
+  readonly entryInstruction: number;
   /**
    * End of the root region, whose last instruction is the `end` that the compiler adds after the file's statements;
    * the file's functions and handlers follow up to {@link endInstruction}.
@@ -142,6 +144,8 @@ export type Instruction =
   | InteractionInstruction
   | CaptureInstruction
   | GotoInstruction
+  | TransferInstruction
+  | SetFallbackInstruction
   | EndInstruction
   | ExitInstruction;
 
@@ -610,6 +614,11 @@ export type InteractionInstruction = StaticInteractionInstruction | PreparedInte
 export interface CaptureInstruction extends InstructionBase {
   readonly kind: "capture";
   readonly capture: "photo";
+  /**
+   * `takePhoto(tags: …)`: the tags, evaluated and validated before the capture is requested; a captured photo joins
+   * the image catalog with them (ADR 0023). `null` without `tags:`.
+   */
+  readonly tags: ExpressionPlan | null;
   readonly destinationTemporary: number;
 }
 
@@ -624,6 +633,46 @@ export interface ExitInstruction extends InstructionBase {
 export interface GotoInstruction extends InstructionBase {
   readonly kind: "goto";
   readonly target: number;
+}
+
+/** A file and where it starts: its entry or one of its labels. */
+export interface PlanDestination {
+  readonly file: number;
+  readonly target: number;
+}
+
+/** A glob target: each time it runs, one draw from the session random generator picks one of `pick`. */
+export interface PlanPick {
+  readonly pick: readonly PlanDestination[];
+}
+
+export type PlanTransferDestination = PlanDestination | PlanPick;
+
+/**
+ * A computed target, such as `goto (next)`: each time it runs, `value` evaluates to a script reference, which names the
+ * destination by path and label.
+ */
+export interface PlanComputedDestination {
+  readonly value: ExpressionPlan;
+}
+
+/**
+ * `goto` or `call` naming a file, or `call label`: enters `destination` with fresh top-level variables. A `goto`
+ * leaves the current file like a `goto label`; a `call` continues after it once that file reaches `end`.
+ */
+export interface TransferInstruction extends InstructionBase {
+  readonly kind: "transfer";
+  readonly mode: "goto" | "call";
+  readonly destination: PlanTransferDestination | PlanComputedDestination;
+}
+
+/**
+ * `fallback target` sets where an `end` without a caller continues; `fallback none` clears it with `null`. A computed
+ * target is resolved when the statement runs, so the fallback it sets is a file and its entry or label.
+ */
+export interface SetFallbackInstruction extends InstructionBase {
+  readonly kind: "setFallback";
+  readonly destination: PlanTransferDestination | PlanComputedDestination | null;
 }
 
 /** `end`, and the end the compiler adds after the last statement of a file's root region. */
@@ -758,7 +807,8 @@ export type TypePlanName =
   | "range"
   | "speaker"
   | "timer"
-  | "media";
+  | "media"
+  | "script";
 
 export interface TypePropertyPlan {
   readonly name: string;

@@ -2,6 +2,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createPlaygroundServer } from "../dist/playground/server.js";
 import { findChromium } from "./find-chromium.mjs";
 
@@ -17,6 +18,20 @@ const TEST_CARD = [
 // A decoded captured photo, not merely an image element with a captured URL.
 const decodedPhoto = `[...document.querySelectorAll('img')].find((image) => image.src.startsWith('blob:') && image.complete && image.naturalWidth > 0)`;
 const capturedImages = `[...document.querySelectorAll('img')].filter((image) => image.src.startsWith('blob:') && image.complete && image.naturalWidth > 0).length`;
+// A package the smoke serves only as a catalog: paths that model URIs built from the path alone would merge.
+const MODEL_PATHS_CATALOG = {
+  images: [],
+  media: [],
+  sources: [
+    { path: "main.tease", source: 'goto "rooms/cellar.tease"\n' },
+    { path: "rooms/cellar.tease", source: 'say "cellar"\nexit\n' },
+    // Not a package path (TSC009), but the editor still opens it.
+    { path: "rooms\\cellar.tease", source: 'say "backslash"\nexit\n' },
+    { path: "C:/room.tease", source: 'say "upper"\nexit\n' },
+    { path: "c:/room.tease", source: 'say "lower"\nexit\n' },
+  ],
+  problems: [],
+};
 
 await main();
 
@@ -27,7 +42,19 @@ async function main() {
     return;
   }
 
-  const server = createPlaygroundServer();
+  // house compiles and starts at its main.tease; broken does not compile.
+  const server = createPlaygroundServer({
+    packagesRoot: fileURLToPath(new URL("../tests/fixtures/packages/", import.meta.url)),
+  });
+  // The model-paths package exists only as this catalog, so the smoke needs no file named with `\` or `C:` on disk.
+  const [handleRequest] = server.listeners("request");
+  server.removeAllListeners("request");
+  server.on("request", (request, response) => {
+    if (request.url !== "/dev-package/model-paths/catalog.json")
+      return handleRequest(request, response);
+    response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify(MODEL_PATHS_CATALOG));
+  });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", resolve);
@@ -78,10 +105,11 @@ async function main() {
       await narrowScenario(cdp);
       await scriptStorageScenario(cdp, origin);
       await demoScenario(cdp, origin);
+      await packageScenario(cdp, origin);
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, and the camera and viewfinder scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, and the camera and viewfinder scenarios",
       );
     } finally {
       cdp.close();
@@ -1025,6 +1053,126 @@ async function transcriptTexts(cdp) {
     cdp,
     `[...document.querySelectorAll('#transcript li')].map((item) => [...item.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join('').trim())`,
   );
+}
+
+/**
+ * `?package=<id>` opens a package of the server's package root as one project: in the Player and the playground a
+ * valid package starts at its main.tease, and one that does not compile shows each diagnostic with its file and line.
+ */
+async function packageScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const {
+    result: { identifier },
+  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `window.__played = [];
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function () {
+        if (!window.__played.includes(this)) window.__played.push(this);
+        return play.call(this);
+      };`,
+  });
+  try {
+    await navigate(cdp, `${origin}/player/?package=house`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await physicalClick(cdp, "[data-session-activation] button");
+    // main.tease shows the package's own image and calls the global function of helpers.tease.
+    await waitFor(
+      cdp,
+      `(() => {
+        const image = document.querySelector('.stage-media');
+        return !!image && image.complete && image.naturalWidth > 0 &&
+          image.getAttribute('src') === '/dev-package/house/files/images/hall.svg' &&
+          [...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Welcome to the house, guest.'));
+      })()`,
+      8_000,
+      "The house package did not start at main.tease with its own Stage image",
+    );
+    // Then it plays the package's own sound, audibly.
+    await waitFor(
+      cdp,
+      `window.__played.some((element) => element.src.endsWith('/dev-package/house/files/sounds/chime.wav') &&
+        (element.currentTime > 0 || element.ended) && !element.muted && element.volume > 0)`,
+      10_000,
+      "The house package did not play its own sound",
+    );
+  } finally {
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  }
+
+  await navigate(cdp, `${origin}/player/?package=broken`);
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-script-failure]')?.textContent.includes("rooms/cellar.tease, line 3, column 9") === true`,
+    8_000,
+    "The Player did not show the broken package's diagnostic",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('[data-script-failure]').textContent.includes("Unknown variable 'candle'.") && !document.querySelector('[data-session-activation]')`,
+    ),
+    true,
+    "The Player showed Start or no message for a package that does not compile",
+  );
+
+  await navigate(cdp, `${origin}/?package=house`);
+  await waitFor(
+    cdp,
+    `document.querySelector('#loaded-example-name')?.textContent === 'Package house' && document.querySelector('#file-select').value === 'main.tease' && !document.querySelector('#run').disabled`,
+    8_000,
+    "The playground did not open the house package at main.tease",
+  );
+  await click(cdp, "#run");
+  await waitFor(
+    cdp,
+    `document.querySelector('#transcript').textContent.includes('Welcome to the house, guest.')`,
+  );
+
+  await navigate(cdp, `${origin}/?package=broken`);
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('#diagnostics .diagnostic-button')].some((button) => button.textContent.includes('rooms/cellar.tease (3:9)'))`,
+    8_000,
+    "The playground did not list the broken package's diagnostic with its file",
+  );
+  // The diagnostic opens its file at the reported line.
+  await click(cdp, "#diagnostics .diagnostic-button");
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const source = document.querySelector('#source-code'); return document.querySelector('#file-select').value + ':' + source.value.slice(source.selectionStart, source.selectionEnd); })()`,
+    ),
+    "rooms/cellar.tease:candle",
+    "The playground diagnostic did not select its source",
+  );
+
+  await navigate(cdp, `${origin}/editor/?package=broken`);
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-monaco-ready="true"]') !== null && document.querySelector('[data-file-path="rooms/cellar.tease"] .file-problems')?.textContent.trim() === '1 diagnostics'`,
+    8_000,
+    "The editor did not open the broken package's files with their diagnostics",
+  );
+
+  // Package paths that a model URI built from the path alone would merge: on Windows `\` becomes a folder separator,
+  // and Monaco lowercases a first folder that looks like a drive. The editor must keep every file apart.
+  const userAgent = await value(cdp, "navigator.userAgent");
+  await cdp.call("Emulation.setUserAgentOverride", {
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36",
+    platform: "Win32",
+  });
+  try {
+    await navigate(cdp, `${origin}/editor/?package=model-paths`);
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-monaco-ready="true"]') !== null && document.querySelectorAll('[data-file-path]').length === ${MODEL_PATHS_CATALOG.sources.length} && [...document.querySelectorAll('[data-file-path]')].find((row) => row.getAttribute('data-file-path') === ${JSON.stringify("rooms\\cellar.tease")})?.querySelector('.file-problems')?.textContent.trim() === '1 diagnostics'`,
+      8_000,
+      "The editor did not keep the package files with `\\` and drive-like folders apart",
+    );
+  } finally {
+    await cdp.call("Emulation.setUserAgentOverride", { userAgent });
+  }
 }
 
 /**

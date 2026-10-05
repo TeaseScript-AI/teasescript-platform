@@ -57,6 +57,11 @@ export function requiredInstructionTemporaries(
         collectExpressionTemporaries(argument.value, output),
       );
       break;
+    case "transfer":
+    case "setFallback":
+      if (instruction.destination !== null && "value" in instruction.destination)
+        collect(instruction.destination.value);
+      break;
     case "setDefaultSpeaker":
     case "prepareInteractionSpeaker":
     case "enterScope":
@@ -95,6 +100,9 @@ export function requiredInstructionTemporaries(
       break;
     case "showImage":
       if (instruction.image !== null) collect(instruction.image);
+      break;
+    case "capture":
+      if (instruction.tags !== null) collect(instruction.tags);
       break;
     case "storageWrite":
       if (instruction.value !== null) collect(instruction.value);

@@ -17,6 +17,7 @@ import {
   tagQueryOperands,
 } from "./expression-children.js";
 import type { Diagnostic } from "./diagnostics.js";
+import type { ProjectImageFile } from "./image-catalog.js";
 import { lex } from "./lexer.js";
 import { compareProjectPaths } from "./project-paths.js";
 import { TEASESCRIPT_PROTECTED_NAMES } from "./protected-names.js";
@@ -162,11 +163,18 @@ export function languageDiagnostics(document: LanguageDocument): readonly Langua
   return compileSource(document.text).diagnostics;
 }
 
-/** Compiles the files as one project and describes each: `main.tease` first, then the others by path. */
+/**
+ * Compiles the files as one project, with the package images when given, and describes each file: `main.tease`
+ * first, then the others by path.
+ */
 export function languageProjectOverview(
   files: readonly LanguageProjectFile[],
+  options: { readonly images?: readonly ProjectImageFile[] } = {},
 ): readonly LanguageFileOverview[] {
-  const result = compileProject(files.map(({ path, text }) => ({ path, source: text })));
+  const result = compileProject(
+    files.map(({ path, text }) => ({ path, source: text })),
+    options.images === undefined ? {} : { images: options.images },
+  );
   const headers = new Map(result.files.map((file) => [file.path, file.header]));
   const diagnostics = new Map<string, LanguageDiagnostic[]>();
   for (const { path, ...diagnostic } of result.diagnostics) {
@@ -796,13 +804,18 @@ function visitStatement(statement: Statement, visitor: Visitor, children: VisitI
     case "deleteStatement":
       children.push({ kind: "expression", node: statement.key });
       return;
+    case "gotoStatement":
+    case "callFileStatement":
+    case "fallbackStatement":
+      if (statement.target?.kind === "scriptTarget")
+        children.push({ kind: "expression", node: statement.target.expression });
+      return;
     case "hideImageStatement":
     case "speakerSetterStatement":
     case "waitStatement":
     case "exitStatement":
     case "endStatement":
     case "labelStatement":
-    case "gotoStatement":
     case "breakStatement":
     case "continueStatement":
       return;

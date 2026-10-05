@@ -19,6 +19,7 @@ import {
 import type { SerializableRuntimeObject } from "../src/runtime/serializable-values.js";
 import { compileValidPlan as plan } from "./helpers/compile-valid-plan.js";
 import { runUntilExit } from "./helpers/run-until-exit.js";
+import { functionFrames } from "./helpers/runtime-equivalence.js";
 
 type Mutable<T> = T extends readonly [infer First, infer Second]
   ? [Mutable<First>, Mutable<Second>]
@@ -218,10 +219,10 @@ test("prepared say text retains caller temporaries through a suspended text call
 
   const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
   assert.equal(waiting.status, "waiting");
-  assert.equal(waiting.callFrames.at(-1)?.functionName, "textValue");
+  assert.equal(functionFrames(waiting).at(-1)?.functionName, "textValue");
   assert.equal(validateRuntimeSnapshot(waiting, compiled).valid, true);
 
-  const activeCall = waiting.callFrames.at(-1)!;
+  const activeCall = functionFrames(waiting).at(-1)!;
   const preparedTextTemporaryIds = textPreparation.value.parts.flatMap((part) =>
     part.kind === "expression" && part.expression.kind === "temporary"
       ? [part.expression.temporaryId]

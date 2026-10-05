@@ -22,6 +22,8 @@ export type Statement =
   | EndStatement
   | LabelStatement
   | GotoStatement
+  | CallFileStatement
+  | FallbackStatement
   | LetStatement
   | GlobalStatement
   | AssignmentStatement
@@ -283,10 +285,49 @@ export interface LabelStatement {
   readonly span: SourceSpan;
 }
 
-/** `goto name`: continues at a label of the same file. */
+/** `goto target`: continues at a label of this file, or enters a file (ADR 0022). */
 export interface GotoStatement {
   readonly kind: "gotoStatement";
+  readonly target: TransferTarget;
+  readonly span: SourceSpan;
+}
+
+/** `call target`: enters a file and continues after the call when that file reaches `end`. */
+export interface CallFileStatement {
+  readonly kind: "callFileStatement";
+  readonly target: TransferTarget;
+  readonly span: SourceSpan;
+}
+
+/** `fallback target` sets where an `end` without a caller continues; `fallback none` clears it. */
+export interface FallbackStatement {
+  readonly kind: "fallbackStatement";
+  readonly target: TransferTarget | null;
+  readonly span: SourceSpan;
+}
+
+/** Where a `goto`, `call`, or `fallback` continues: a label of this file, or a file from its top or at a label. */
+export type TransferTarget = LabelTarget | FileTarget | ScriptTarget;
+
+/** A target computed at runtime: a `script(...)` call or a grouped expression of type `script`, as in `goto (next)`. */
+export interface ScriptTarget {
+  readonly kind: "scriptTarget";
+  readonly expression: Expression;
+  readonly span: SourceSpan;
+}
+
+export interface LabelTarget {
+  readonly kind: "labelTarget";
   readonly label: Identifier;
+  readonly span: SourceSpan;
+}
+
+export interface FileTarget {
+  readonly kind: "fileTarget";
+  /** The quoted path, relative to the package root. */
+  readonly path: string;
+  readonly pathSpan: SourceSpan;
+  readonly label: Identifier | null;
   readonly span: SourceSpan;
 }
 
@@ -322,7 +363,8 @@ export type ScalarTypeName =
   | "time"
   | "datetime"
   | "timestamp"
-  | "duration";
+  | "duration"
+  | "script";
 
 /**
  * A type name: a scalar type, `null`, any `list`, `set`, `dict`, or `object`, or a program-control type (ADR 0021).

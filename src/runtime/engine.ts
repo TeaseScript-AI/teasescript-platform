@@ -10,10 +10,12 @@ import {
   type InteractionTemporalKind,
   type InteractionUiPayload,
   type PlanSourceLocation,
+  type PlanTag,
   type PreparedInteractionUiPayload,
   instructionSourcePath,
   mainSourceSpan,
 } from "../plan/model.js";
+import { addTag, readTagText, type Tag } from "../tags.js";
 import { parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
 import { isBlankTextAnswer, numberAnswerText, temporalAnswerText } from "../interaction-answers.js";
 import {
@@ -44,7 +46,13 @@ import {
   takeSequence,
 } from "./operations/support.js";
 import type { RuntimeOperationResult } from "./operations/model.js";
-import { executeEnd, executeGoto } from "./operations/transfers.js";
+import {
+  executeEnd,
+  executeGoto,
+  executeSetFallback,
+  executeTransfer,
+} from "./operations/transfers.js";
+import { activeFunctionFrame, contextRootId, interruptRunning } from "./activations.js";
 import { detachPreparedReferencesForMutation } from "./prepared-references.js";
 export type {
   ActionCompletionOutcome,
@@ -354,12 +362,12 @@ function executePlannedInstruction(
     }
     case "enterScope":
       assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
-      snapshot.frames.push({ id: snapshot.nextScopeId, bindings: [] });
+      snapshot.frames.push({ id: snapshot.nextScopeId, file: null, entry: null, bindings: [] });
       snapshot.nextScopeId += 1;
       advance(snapshot);
       return;
     case "leaveScope":
-      if (snapshot.frames.length === 1) {
+      if (currentFrame(snapshot).file !== null) {
         throw fault("TSR033", "Cannot leave the root lexical scope.", instruction.span);
       }
       snapshot.frames.pop();
@@ -379,11 +387,10 @@ function executePlannedInstruction(
       if (instruction.typeCheck !== undefined)
         assertValueType(value, instruction.typeCheck, instruction.value.span);
       if (rerun) {
-        const binding = snapshot.frames[0]!.bindings.find(
-          (item) => item.name === instruction.name,
-        )!;
+        const root = currentFrame(snapshot);
+        const binding = root.bindings.find((item) => item.name === instruction.name)!;
         detachPreparedReferencesForMutation(snapshot, {
-          rootFrameId: snapshot.frames[0]!.id,
+          rootFrameId: root.id,
           rootName: instruction.name,
           path: [],
         });
@@ -756,6 +763,11 @@ function executePlannedInstruction(
       return;
     }
     case "capture": {
+      // The tags are checked before the capture is requested, so a pending capture only holds valid ones.
+      const tags =
+        instruction.tags === null
+          ? null
+          : captureTags(evaluator.evaluate(instruction.tags), instruction.tags.span);
       if (
         snapshot.temporaries.some((temporary) => temporary.id === instruction.destinationTemporary)
       ) {
@@ -777,6 +789,7 @@ function executePlannedInstruction(
       const action: RuntimeCaptureActionSnapshot = Object.freeze({
         kind: "capture",
         capture: instruction.capture,
+        tags,
         actionId: snapshot.nextActionId,
         owningInstruction: snapshot.nextInstruction,
         continuationInstruction: snapshot.nextInstruction + 1,
@@ -822,6 +835,8 @@ function executePlannedInstruction(
       snapshot.frames.splice(1);
       snapshot.loopFrames.length = 0;
       snapshot.callFrames.length = 0;
+      snapshot.retainedScopes.length = 0;
+      snapshot.fallback = null;
       snapshot.temporaries.length = 0;
       snapshot.status = "halted";
       snapshot.nextInstruction += 1;
@@ -846,17 +861,17 @@ function executePlannedInstruction(
       startMedia(plan, instruction, snapshot, evaluator, events);
       return;
     case "goto":
-      // A global function of another file jumps to a label of its own file, which the session cannot enter yet.
-      if (instruction.target >= plan.files[0]!.rootEndInstruction)
-        throw fault(
-          "TSR068",
-          "This goto leads to a label of another file than main.tease, which a session cannot enter until files can go to each other.",
-          instruction.span,
-        );
-      executeGoto(instruction, snapshot, events);
+      executeGoto(instruction, snapshot, contextRootId(snapshot), events);
+      return;
+    case "transfer":
+      executeTransfer(plan, instruction, snapshot, evaluator, events);
       return;
     case "end":
-      return executeEnd(instruction);
+      executeEnd(instruction, snapshot, events);
+      return;
+    case "setFallback":
+      executeSetFallback(plan, instruction, snapshot, evaluator);
+      return;
   }
   instruction satisfies never;
 }
@@ -1129,7 +1144,10 @@ function enterFunction(
   assertCounterCanAdvance(snapshot.nextCallFrameId, "nextCallFrameId");
   assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
   const frame: RuntimeCallFrameSnapshot = {
+    kind: "function",
     id: snapshot.nextCallFrameId,
+    // A function sees the top-level names of the activation that calls it, which is always its own file's.
+    rootScopeId: contextRootId(snapshot),
     functionId: definition.id,
     functionName: definition.name,
     callSiteSpan: copySpan(instruction.span),
@@ -1150,7 +1168,7 @@ function enterFunction(
   snapshot.nextCallFrameId += 1;
   snapshot.callFrames.push(frame);
   snapshot.temporaries.length = 0;
-  snapshot.frames.push({ id: snapshot.nextScopeId, bindings: [] });
+  snapshot.frames.push({ id: snapshot.nextScopeId, file: null, entry: null, bindings: [] });
   snapshot.nextScopeId += 1;
   snapshot.nextInstruction = definition.entryInstruction;
 }
@@ -1312,7 +1330,7 @@ function activeFunction(
   readonly frame: RuntimeCallFrameSnapshot;
   readonly definition: InstructionPlan["functions"][number];
 } {
-  const frame = snapshot.callFrames.at(-1);
+  const frame = activeFunctionFrame(snapshot);
   if (frame === undefined) {
     throw fault("TSR051", "Function-only instruction executed without a call frame.", span);
   }
@@ -1349,9 +1367,15 @@ function executeLoopStart(
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
 ): void {
+  // A loop belongs to the call that runs it: the same loop of a recursive caller is another loop.
+  const owner = currentCallFrameId(snapshot);
   let frame = snapshot.loopFrames.at(-1);
-  if (frame?.loopId !== instruction.loopId) {
-    if (snapshot.loopFrames.some((item) => item.loopId === instruction.loopId)) {
+  if (frame?.loopId !== instruction.loopId || frame.callFrameId !== owner) {
+    if (
+      snapshot.loopFrames.some(
+        (item) => item.loopId === instruction.loopId && item.callFrameId === owner,
+      )
+    ) {
       throw fault(
         "TSR042",
         "Loop-frame nesting does not match the instruction plan.",
@@ -1489,7 +1513,7 @@ function executeLoopControl(
 
 function pushIterationScope(snapshot: RuntimeSnapshot, bindings: RuntimeBindingSnapshot[]): void {
   assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
-  snapshot.frames.push({ id: snapshot.nextScopeId, bindings });
+  snapshot.frames.push({ id: snapshot.nextScopeId, file: null, entry: null, bindings });
   snapshot.nextScopeId += 1;
 }
 
@@ -1637,13 +1661,10 @@ function currentFrame(snapshot: RuntimeSnapshot) {
   return snapshot.frames.at(-1)!;
 }
 
-/** Whether top-level code declares a name that the file's root scope already has, as after a goto back. */
+/** Whether top-level code declares a name that its activation's root already has, as after a goto back. */
 function rerunsTopLevelDeclaration(snapshot: RuntimeSnapshot, name: string): boolean {
-  return (
-    snapshot.frames.length === 1 &&
-    snapshot.callFrames.length === 0 &&
-    snapshot.frames[0]!.bindings.some((binding) => binding.name === name)
-  );
+  const frame = currentFrame(snapshot);
+  return frame.file !== null && frame.bindings.some((binding) => binding.name === name);
 }
 
 function advance(snapshot: RuntimeSnapshot): void {
@@ -2187,6 +2208,7 @@ function startTimer(
       repeat: instruction.repeat,
       persist: instruction.persist,
       handlerFunctionId: instruction.handlerFunctionId,
+      rootScopeId: contextRootId(snapshot),
       range:
         range === null ? null : { start: range.start, end: range.end, inclusive: range.inclusive },
       repeatDurationMs: instruction.repeat && range === null ? roundDurationMs : null,
@@ -2458,6 +2480,10 @@ function startMedia(
     requestEventSequence: mediaSequence,
     media: {
       mediaId,
+      handlerRootScopeId:
+        instruction.cues.length > 0 || instruction.finishFunctionId !== null
+          ? contextRootId(snapshot)
+          : null,
       media: instruction.media,
       source: file ?? "",
       state: "running",
@@ -2553,7 +2579,7 @@ function executePacingBarrier(
   );
   if (
     gate !== undefined &&
-    !snapshot.callFrames.some((frame) => frame.timerInterruption !== null) &&
+    !interruptRunning(snapshot) &&
     (instruction.receiver === null || isMediaHandle(evaluator.evaluate(instruction.receiver)))
   ) {
     snapshot.backgroundActions.splice(snapshot.backgroundActions.indexOf(gate), 1);
@@ -2571,4 +2597,39 @@ export function timerDisplay(value: SerializableRuntimeValue, span: SourceSpan):
 
 function fault(code: string, message: string, span: SourceSpan): RuntimeFault {
   return new RuntimeFault(code, message, copySpan(span));
+}
+
+/**
+ * The tags of `takePhoto(tags: …)`: a list or set of texts such as `"bedroom"` or `"punishment: 4"`, read as tags in name
+ * order. A repeated tag counts once, and its number wins; anything else fails before the capture is requested.
+ */
+function captureTags(value: SerializableRuntimeValue, span: SourceSpan): readonly PlanTag[] {
+  if (!isList(value) && !isSet(value)) {
+    throw fault(
+      "TSR083",
+      `takePhoto(tags:) takes a list of tags, but this is ${describeRuntimeValue(value)}.`,
+      span,
+    );
+  }
+  const tags = new Map<string, Tag>();
+  for (const item of value.items) {
+    const tag = typeof item === "string" ? readTagText(item) : null;
+    if (tag === null) {
+      throw fault(
+        "TSR083",
+        `takePhoto(tags:) takes tags such as "bedroom" or "punishment: 4", but it holds ${typeof item === "string" ? `'${item}'` : describeRuntimeValue(item)}.`,
+        span,
+      );
+    }
+    if (addTag(tags, tag) === "conflict") {
+      throw fault(
+        "TSR083",
+        `takePhoto(tags:) gives the tag '${tag.name}' two different numbers.`,
+        span,
+      );
+    }
+  }
+  return [...tags.values()]
+    .sort((left, right) => (left.name < right.name ? -1 : 1))
+    .map((tag) => Object.freeze({ name: tag.name, value: tag.value }));
 }

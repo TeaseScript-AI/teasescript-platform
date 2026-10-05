@@ -12,6 +12,7 @@ ADRs.
 For local inspection, run `npm run dev:player -- --host 0.0.0.0` and open `/player/`; the development server loads the
 development preview. The default build, served on `/player/` by `npm run playground`, plays the repository demo in
 [`examples/demo/`](../examples/demo/demo.tease) behind Start and loads preview fixtures only when `?dev` is selected.
+With a development package root, `?package=<id>` plays that package instead (see the repository `README.md`).
 This is a local inspection route, not the production cross-origin Player/host protocol.
 
 ## Implementation seams

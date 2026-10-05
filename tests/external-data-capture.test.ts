@@ -24,6 +24,7 @@ import { captureExternalData } from "../src/external-data-capture.js";
 import { SerializableValueError } from "../src/runtime/serializable-values.js";
 import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
+import { functionFrames } from "./helpers/runtime-equivalence.js";
 
 const FAILING_BEFORE_DEPTH = 20_000;
 
@@ -340,7 +341,7 @@ test("ordinary source compiles beyond the removed generic capture threshold", ()
 test("snapshot validation accepts a deeply nested supplied call argument", () => {
   const plan = compiledPlan("function echo(value) { return value }\necho(1)\nexit");
   const snapshot = activeCallSnapshot(plan);
-  const argument = snapshot.callFrames[0]!.arguments[0];
+  const argument = functionFrames(snapshot)[0]!.arguments[0];
   assert.ok(argument?.supplied);
   // EVIDENCE: the supplied call argument is intentionally replaced with a valid deeply nested runtime value.
   (argument as { value: SerializableRuntimeValue }).value = deepList(5_000);
