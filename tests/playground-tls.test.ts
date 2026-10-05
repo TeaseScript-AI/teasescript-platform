@@ -38,9 +38,12 @@ test("starts at the same time each get a matching pair, and one is kept for late
     assert.ok(new X509Certificate(pair.cert).checkPrivateKey(createPrivateKey(pair.key)));
   const kept = await playgroundCertificate(projectRoot, ["localhost"]);
   assert.ok(pairs.some((pair) => pair.cert === kept.cert));
-  // The kept file holds the private key, so only its owner may read it.
-  const mode = (await stat(join(projectRoot, ".playground-tls", "certificate.json"))).mode & 0o777;
-  assert.equal(mode, 0o600);
+  // The kept file holds the private key, so only its owner may read it; Windows has no such file modes.
+  if (process.platform !== "win32") {
+    const mode =
+      (await stat(join(projectRoot, ".playground-tls", "certificate.json"))).mode & 0o777;
+    assert.equal(mode, 0o600);
+  }
 });
 
 test("a certificate about to expire is made again", async (t) => {

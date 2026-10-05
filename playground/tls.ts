@@ -68,10 +68,14 @@ export async function playgroundCertificate(
       key: await readFile(files.key, "utf8"),
       cert: await readFile(files.cert, "utf8"),
     };
-    // The file holds the private key: readable only by its owner.
+    // The file holds the private key: readable only by its owner (on Windows, the folder's access rules apply).
     const staged = join(work, "certificate.json");
     await writeFile(staged, JSON.stringify({ names: wanted, ...made }), { mode: 0o600 });
     await rename(staged, kept);
+    // The earlier layout kept a loose key, certificate, and names file; none of them is used any longer.
+    await Promise.all(
+      ["key.pem", "cert.pem", "names"].map((name) => rm(join(folder, name), { force: true })),
+    );
     return made;
   } finally {
     await rm(work, { recursive: true, force: true });
