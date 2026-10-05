@@ -1536,7 +1536,7 @@ async function askImageScenario(cdp, origin, profile) {
   await navigate(cdp, `${origin}/player/?package=pictures`);
   await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
   assertEqual(
-    await value(cdp, `!!document.querySelector('[data-composer-attach], [data-composer-file]')`),
+    await value(cdp, `!!document.querySelector('[data-composer-attach]')`),
     false,
     "The composer offered a file input before the image request",
   );
@@ -1680,6 +1680,23 @@ async function askImageScenario(cdp, origin, profile) {
     `document.body.innerText.includes('Main image received.') && ${imageAnswers} === 2`,
     8_000,
     "The resumed main request was not answered",
+  );
+  // A file chosen for a request that a timer's wait suspended answers it once it resumes.
+  await waitFor(cdp, placeholder("Second image"), 8_000, "The second image request did not open");
+  await openPicker(cdp);
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-composer-attach]')`,
+    8_000,
+    "The timer did not suspend the second request",
+  );
+  await waitFor(cdp, placeholder("Second image"), 8_000, "The second request did not resume");
+  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('Second image received.') && ${imageAnswers} === 3`,
+    8_000,
+    "A file chosen before the second request was suspended did not answer it",
   );
 }
 

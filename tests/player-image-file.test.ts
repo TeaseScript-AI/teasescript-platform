@@ -29,6 +29,32 @@ test("the image type is read from a file's first bytes, never from its name or r
     // An AVIF image may name avif as a compatible brand only.
     [[0, 0, 0, 32, ...ascii("ftypmif1"), 0, 0, 0, 0, ...ascii("avifmif1miafMA1B")], "image/avif"],
     [[0, 0, 0, 24, ...ascii("ftypmif1"), 0, 0, 0, 0, ...ascii("mif1heic"), ...ascii("avif")], null],
+    // A box with a 64-bit size, and one that runs to the end of the file.
+    [
+      [
+        0,
+        0,
+        0,
+        1,
+        ...ascii("ftyp"),
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        32,
+        ...ascii("mif1"),
+        0,
+        0,
+        0,
+        0,
+        ...ascii("avif"),
+      ],
+      "image/avif",
+    ],
+    [[0, 0, 0, 0, ...ascii("ftypmif1"), 0, 0, 0, 0, ...ascii("miafavif")], "image/avif"],
     // Formats a browser cannot be relied on to show, scriptable SVG, and other files are not images here.
     [[0, 0, 0, 24, ...ascii("ftypheic")], null],
     [ascii("<svg xmlns="), null],

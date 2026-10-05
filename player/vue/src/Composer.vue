@@ -129,19 +129,20 @@ function allowSoftwareKeyboard(): void {
   if (input.value) input.value.inputMode = props.inputMode;
 }
 
+// The picker stays open while the script goes on, so its files are for the request it was opened for. Its input
+// stays mounted while requests come and go, so a choice made after a change still arrives.
 const filePicker = ref<HTMLInputElement | null>(null);
-// The picker stays open while the script goes on, so its files are for the request it was opened for.
 let pickerOpenedFor: { readonly request: Request } | null = null;
 function openPicker(): void {
   if (!props.attach) return;
   pickerOpenedFor = { request: props.attach.request };
   filePicker.value?.click();
 }
-function chooseFiles(): void {
-  const input = filePicker.value;
+function chooseFiles(event: Event): void {
+  const input = event.currentTarget;
   const opened = pickerOpenedFor;
   pickerOpenedFor = null;
-  if (!input?.files) return;
+  if (!(input instanceof HTMLInputElement) || !input.files) return;
   const files = [...input.files];
   // The same file may be chosen again after a refused attempt.
   input.value = "";
@@ -221,15 +222,15 @@ defineExpose({ focusInput });
           >
             <Paperclip aria-hidden="true" />
           </Button>
-          <input
-            ref="filePicker"
-            data-composer-file
-            type="file"
-            hidden
-            :accept="attach.accept"
-            @change="chooseFiles"
-          />
         </template>
+        <input
+          ref="filePicker"
+          data-composer-file
+          type="file"
+          hidden
+          :accept="attach?.accept"
+          @change="chooseFiles"
+        />
         <div v-if="inputType !== 'text'" class="composer-picker-field">
           <span v-if="placeholder" class="composer-hint" aria-hidden="true">{{ placeholder }}</span>
           <input

@@ -109,14 +109,28 @@ function filterProblem(name: string, mime: string, filters: ImageFileFilters): s
   return `That image is not valid. Choose an image of these types: ${accepted}.`;
 }
 
-/** An AVIF image names `avif` or `avis` as the major or a compatible brand of its leading `ftyp` box. */
+/**
+ * An AVIF image names `avif` or `avis` as the major or a compatible brand of its leading `ftyp` box. The box header is
+ * a 32-bit size and the type; size 1 adds a 64-bit size, and size 0 runs to the end of the file.
+ */
 function isAvif(header: Uint8Array): boolean {
   if (header.length < 12 || !ascii(header, 4, "ftyp")) return false;
-  const size = new DataView(header.buffer, header.byteOffset, 4).getUint32(0);
+  const view = new DataView(header.buffer, header.byteOffset, header.byteLength);
+  let size = view.getUint32(0);
+  let brandsAt = 8;
+  if (size === 1) {
+    if (header.length < 20) return false;
+    size = Number(view.getBigUint64(8));
+    brandsAt = 16;
+  } else if (size === 0) size = header.length;
   const end = Math.min(size, header.length);
-  const brands = [8];
-  for (let offset = 16; offset + 4 <= end; offset += 4) brands.push(offset);
-  return brands.some((offset) => ascii(header, offset, "avif") || ascii(header, offset, "avis"));
+  // The major brand, then the minor version, then the compatible brands.
+  const brands = [brandsAt];
+  for (let offset = brandsAt + 8; offset + 4 <= end; offset += 4) brands.push(offset);
+  return brands.some(
+    (offset) =>
+      offset + 4 <= end && (ascii(header, offset, "avif") || ascii(header, offset, "avis")),
+  );
 }
 
 function startsWith(header: Uint8Array, bytes: readonly number[]): boolean {
