@@ -151,6 +151,7 @@ const parserDiagnosticCode = {
   symbolicOperator: "TSP037",
   invalidSwitchForm: "TSP038",
   expectedLabelName: "TSP039",
+  invalidLoadForm: "TSP040",
   invalidTagQuery: "TST001",
 } as const;
 
@@ -1538,12 +1539,39 @@ class Parser {
   }
 
   /**
-   * `load <key>[, default: <value>]`; both operands are full expressions, so `(load "k") == null` needs parentheses.
-   * Like the default answer of an ask, the `, default:` binds to the nearest `load` before it. The default is
-   * evaluated only when the key is absent.
+   * `load(<key>[, default: <value>])`, or the compact `load <key>[, default: <value>]`, whose operands are full
+   * expressions, so `(load "k") == null` needs parentheses. Like the default answer of an ask, the compact `, default:`
+   * binds to the nearest `load` before it. The default is evaluated only when the key is absent.
    */
   *#parseLoadExpression(): ParseTask<LoadExpression | null> {
     const command = this.#advance();
+    // Whitespace does not matter: `load ("k")` is the bounded form too, so its `)` ends the load.
+    if (this.#check(TokenKind.LeftParenthesis)) {
+      const call = yield* parseChild(
+        this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
+      );
+      const parts = this.#boundedArguments(
+        command,
+        call,
+        ["default"],
+        parserDiagnosticCode.invalidLoadForm,
+      );
+      if (parts === null) return null;
+      if (parts.value === null) {
+        this.#reportSpan(
+          parserDiagnosticCode.expectedStorageKey,
+          "Expected a storage key in 'load(...)', such as 'load(\"name\")'.",
+          call.span,
+        );
+        return null;
+      }
+      return Object.freeze({
+        kind: "loadExpression",
+        key: parts.value,
+        defaultValue: parts.options.get("default") ?? null,
+        span: copySpan(call.span),
+      });
+    }
     // The key ends at a bare `default`, the earlier fallback form, so that the message below names the fix.
     const enclosing = this.#storageDelimiters;
     this.#storageDelimiters = new Set([...enclosing, "default"]);
@@ -1589,6 +1617,53 @@ class Parser {
       defaultValue,
       span: spanFrom(command.span, (defaultValue ?? key).span),
     });
+  }
+
+  /**
+   * The arguments of a bounded command form such as `load("k", default: 0)`: at most one unnamed value, which comes
+   * first, and each option of `names` at most once. `null` reports an already diagnosed failure.
+   */
+  #boundedArguments(
+    command: Token,
+    call: CallExpression,
+    names: readonly string[],
+    code: (typeof parserDiagnosticCode)[keyof typeof parserDiagnosticCode],
+  ): { value: Expression | null; options: ReadonlyMap<string, Expression> } | null {
+    let value: Expression | null = null;
+    const options = new Map<string, Expression>();
+    let valid = true;
+    let sawNamed = false;
+    for (const argument of call.arguments) {
+      if (argument.kind === "positionalArgument") {
+        // An unnamed value after a named one is already reported.
+        if (!sawNamed && value !== null) {
+          this.#reportSpan(
+            code,
+            `${command.lexeme}(...) takes one unnamed value; name the others, such as '${names[0]}:'.`,
+            argument.span,
+          );
+        }
+        if (sawNamed || value !== null) valid = false;
+        else value = argument.value;
+        continue;
+      }
+      sawNamed = true;
+      const name = argument.name.name;
+      if (!names.includes(name)) {
+        this.#reportSpan(
+          code,
+          `Unknown ${command.lexeme} option '${name}'; use ${names.map((known) => `'${known}:'`).join(" or ")}.`,
+          argument.name.span,
+        );
+        valid = false;
+      } else if (options.has(name)) {
+        this.#reportSpan(code, `Duplicate ${command.lexeme} option '${name}'.`, argument.name.span);
+        valid = false;
+      } else {
+        options.set(name, argument.value);
+      }
+    }
+    return valid ? { value, options } : null;
   }
 
   /** `showCamera [stage]`: the contextual word `stage` directly after the command places the view over the Stage. */

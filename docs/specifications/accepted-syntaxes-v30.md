@@ -2647,7 +2647,7 @@ for item in items {
 ```
 
 ## 25. Persistent storage and keys
-**Status:** Accepted
+**Status:** Accepted (bounded `load(...)`: Owner decision on #627, 2026-10-05)
 
 Save or overwrite a value:
 
@@ -2658,11 +2658,12 @@ save playerName as "player.name"
 `save value as key` evaluates the value first, then the key. It creates the key when absent and replaces its value
 when present. Saving `null` removes the key, like `delete`; stored top-level values are never `null`.
 
-The fallback `, default:` is optional:
+`load` has a bounded form and a compact form; the fallback `default:` is optional:
 
 ```text
-let playerName = load "player.name"              // null when the key is absent
-let score: number = load "player.score", default: 0
+let playerName = load("player.name")              // null when the key is absent
+let score: number = load("player.score", default: 0)
+let visits = load "visits", default: 0             // compact form
 ```
 
 `load` evaluates its key first. When the key exists, it returns the stored value with its stored TeaseScript type
@@ -2670,20 +2671,24 @@ without evaluating the default. When absent, it evaluates and returns the defaul
 `load` never writes: the default is not stored. Only `save` creates or changes a stored value. An explicit target
 type may determine the intended numeric type of a literal default, as in the `number` example above.
 
-Key, value, and default operands are full expressions. `as` ends the value of `save`. A `, default:` belongs to the
-nearest construct before it that takes one: a `load`, the default answer of an ask, or a labelled option of a compact
-`choose`. Group the inner construct to give the fallback to `load`, as in `load (askText "Key?"), default: "none"` or
-`load (choose a: "x", b: "y"), default: "z"`; without the parentheses, the choice gets a third option labelled
-`default`. Inside `()`, `[]`, and object literals, where a line break does not end an expression, the comma may also
-start the next line. Group a `load` before combining its result with another expression:
+The bounded form takes the key and an optional named `default:` inside `()`, where line breaks follow the rules of
+other arguments. Its `)` ends the `load`, also with a space before `(`, so the result combines directly with another
+expression:
 
 ```text
-(load "k") == null
-(load "a", default: 0) + 1
+load("k") == null
+load("a", default: 0) + 1
 ```
 
-Without parentheses, `load "k" == null` uses `"k" == null` as the key, which is not a string. Group a nested `load`
-used as a key too. A compact interaction inside a `save` value ends at the `as`, which belongs to `save`:
+The operands of `save` and of a compact `load` are full expressions. `as` ends the value of `save`. A `, default:`
+belongs to the nearest construct before it that takes one, also inside a bounded `load`: a compact `load`, the default
+answer of an ask, or a labelled option of a compact `choose`. Group the inner construct to give the fallback to `load`,
+as in `load((askText "Key?"), default: "none")` or `load((choose a: "x", b: "y"), default: "z")`; without the inner
+parentheses, the choice gets a third option labelled `default`. Inside `()`, `[]`, and object literals, where a line
+break does not end an expression, the comma may also start the next line. Group a compact `load`, as in
+`(load "k") == null`, before combining its result with another expression. Without parentheses, `load "k" == null`
+uses `"k" == null` as the key, which is not a string. Group a nested compact `load` used as a key too.
+A compact interaction inside a `save` value ends at the `as`, which belongs to `save`:
 `save askText as "name"` asks and stores the answer, while an interaction with its own speaker clause is grouped, as in
 `save (askText as mistress "Name?") as "name"`. A default may suspend, such as
 `load "name", default: askText "Your name?"`; it starts only when the key is absent and can resume across checkpoint
@@ -2719,7 +2724,7 @@ Rules:
 - Storage keys are plain strings.
 - After unwrapping parentheses, a recognizably non-string outer key expression is a compile error (`TSV038`). Other
   keys are checked at runtime and raise `TSR054` if non-string. For `load`, the diagnostic explains:
-  `Storage key must be a string. To compare the loaded value, write '(load "k") == null'.`
+  `Storage key must be a string. To compare the loaded value, write 'load("k") == null'.`
 - Dots and slashes inside a key are naming conventions only.
 - The complete string is treated as one key.
 
