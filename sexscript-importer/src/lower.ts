@@ -2854,6 +2854,20 @@ function lowerExpressionStatement(node: AstNode, context: LowerContext): IrState
     return [unsupportedStatement(context, node, "SX_MISSING_EXPRESSION", "Missing expression.")];
 
   if (expression.kind === "declaration") return lowerDeclaration(expression, node.span, context);
+  // `new File(path)` alone only made a path object, which nothing used.
+  if (
+    isFileConstructor(expression) &&
+    nodeArray(asNode(expression.arguments)?.items).every((argument) => isPure(argument, context))
+  ) {
+    addDiagnostic(
+      context,
+      "SX_DISCARDED_VALUE",
+      "warning",
+      "Groovy made a file path object here and discarded it, so the statement had no effect and is dropped.",
+      node.span,
+    );
+    return [];
+  }
   if (!isUncalledClosure(expression, context) && isPure(expression, context)) {
     addDiagnostic(
       context,
