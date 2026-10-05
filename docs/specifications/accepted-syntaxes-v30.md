@@ -1091,7 +1091,8 @@ if reward is integer {
 
 - `x is T` is true exactly when the value may be stored in a place of type `T`. `is number` is also true for integers,
   and `is integer` is true for any whole number, including `2.0`. A collection test with an element type checks every
-  element; `[] is integer[]` is true. `is date`, `is time`, and `is datetime` are false for every current value.
+  element; `[] is integer[]` is true. `is date`, `is time`, and `is datetime` test the date and time values of
+  [§35](#35-date-time-durations-and-timestamps).
 - A test works on every value, including untyped storage, host data, and parameters of unknown type. The operand is
   evaluated once, and the test has no side effects.
 - `x is "happy"` is a compile error: `is` checks a type, and `==` compares values.
@@ -4484,7 +4485,7 @@ for name in toys { ... }                // the keys
   object are never equal.
 - **Text:** `say` shows a dict as `dict{ "collar": "leather collar" }` ([§16](#lists-in-text)). `${toys}` is an error
   that names the fix: select one value with `toys[key]`, or show every value with `toys.values.join()`. A dict is not a
-  text field, a set element, or a `choose` option.
+  text field or a `choose` option; it may be a set member ([§16](#16-lists)).
 - **Copies and storage:** dicts are copied like lists ([ADR 0014](../decisions/0014-core-runtime-value-semantics.md)),
   and `keys` and `values` are new lists. Storage ([§25](#25-persistent-storage-and-keys)) and checkpoints keep a dict
   with its entry order.
@@ -4661,5 +4662,4 @@ Other open API and runtime decisions:
 - decide how scheduled chastity off-windows affect sentence duration in each account mode;
 - define exact current-state fields, detailed edge-event fields, duration-session fields, and reconnect/abandoned-session finalization rules;
 - define the standard and script-owned hygiene-pause APIs;
-- decide the technical fallback when a speaker has no `displayName` and all of `title`, `firstName`, and `lastName` are empty;
-- define the initial string-method library and future speaker-specific LLM context fields.
+- define future speaker-specific LLM context fields.
