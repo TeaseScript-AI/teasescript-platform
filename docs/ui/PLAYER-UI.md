@@ -678,10 +678,10 @@ which the player submits unchanged or edits first; a cleared composer stays empt
 composer shows the default again, and unsent edits are not kept.
 
 `askImage(...)` that allows files shows a paperclip before the composer's input, named "Attach an image", with the
-request's message as the input's hint. The paperclip opens the browser's native file picker for one image, with the
-request's `types` and `mime` as its `accept` hint. A file dragged over the composer marks it as a drop target ("Drop
-the image here") and answers when dropped; dragged text or links are not taken. Outside such a request there is no
-paperclip and no drop target. The Player identifies a file's image type from its first bytes (PNG, JPEG, GIF, WebP,
+request's `hint:` as the input's hint, or "Add an image…" without one. The paperclip opens the browser's native file
+picker for one image, with the request's `types` and `mime` as its `accept` hint. A file dragged over the composer
+marks it as a drop target ("Drop the image here") and answers when dropped; dragged text or links are not taken.
+Outside such a request there is no paperclip and no drop target. The Player identifies a file's image type from its first bytes (PNG, JPEG, GIF, WebP,
 AVIF, or BMP), requires the extension and the type to match `types` and `mime` when given, and has the browser decode
 it; a file that fails, more than one file, or typed text shows the composer notice and the request keeps waiting, as
 does a cancelled picker. A file chosen in a picker opened for a request that is no longer presented, for example
