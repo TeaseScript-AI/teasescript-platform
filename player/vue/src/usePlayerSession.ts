@@ -226,9 +226,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     },
   );
 
-  // The camera route of `askImage` uses the session camera while it is open. Otherwise the player's click on the camera
-  // button opens a camera of the capture's own, which only captures use and which is released when the capture ends,
-  // so it never serves `takePhoto()` or a script's camera view. Its problems show in the capture view itself.
+  // The camera route of `askImage` opens as the request asks and uses the session camera while it is open. Otherwise the
+  // request opens a camera of its own, which only captures use and which is released when the capture ends, so it never
+  // serves `takePhoto()` or a script's camera view. Its problems show in the viewfinder itself.
   const cameraOffered =
     options.capabilities?.camera === true ||
     (typeof navigator !== "undefined" &&

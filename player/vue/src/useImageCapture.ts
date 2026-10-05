@@ -42,8 +42,8 @@ export interface ImageCaptureHost {
   /** The session camera: a capture uses it while it is open, and never opens or releases it. */
   readonly sessionCamera: SessionCamera<MediaStreamTrack>;
   /**
-   * The camera a capture opens itself, from the player's click, while the session camera is not open. Only captures
-   * use it, so it never serves `takePhoto()` or a script's camera view, and it is released when the capture ends.
+   * The camera a capture opens itself as its request asks, while the session camera is not open. Only captures use it,
+   * so it never serves `takePhoto()` or a script's camera view, and it is released when the capture ends.
    */
   readonly captureCamera: SessionCamera<MediaStreamTrack>;
   /** Changes whenever a camera may have opened, failed, ended, or been released. */

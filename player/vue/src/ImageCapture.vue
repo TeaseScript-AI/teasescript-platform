@@ -66,8 +66,11 @@ function focusOut(event: FocusEvent) {
       data-image-capture-photo
     />
     <div v-else-if="!view.track" class="image-capture-cover" />
+    <!-- The free area above the question: why there is no picture, centred, and scrolling in a small viewfinder. -->
+    <div class="image-capture-message">
+      <p v-if="status" class="image-capture-status" role="status">{{ status }}</p>
+    </div>
     <p :id="questionId" class="image-capture-question">{{ view.question }}</p>
-    <p v-if="status" class="image-capture-status" role="status">{{ status }}</p>
     <!-- In a floating window, pressing a control does not start moving the window. -->
     <div class="image-capture-controls" @pointerdown.stop>
       <div v-if="view.phase === 'live' || view.phase === 'taking'" class="image-capture-shutter">
@@ -144,18 +147,26 @@ function focusOut(event: FocusEvent) {
   text-align: center;
   overflow-wrap: anywhere;
 }
-.image-capture-question {
-  font-weight: 700;
+/* The free area above the question and controls; its message is centred and scrolls when the viewfinder is small. */
+.image-capture-message {
+  position: relative;
+  flex: 1 1 auto;
+  min-block-size: 0;
+  inline-size: 100%;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
 }
-/* Why there is no picture, in the middle of the frame. */
 .image-capture-status {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  translate: -50% -50%;
-  inline-size: max-content;
-  max-inline-size: min(calc(100% - 16px), 28rem);
+  max-inline-size: min(100%, 28rem);
   font-size: 0.875rem;
+}
+/* The question keeps the controls in view: in a small viewfinder it takes at most a third of it and scrolls. */
+.image-capture-question {
+  flex: 0 1 auto;
+  max-block-size: 33cqh;
+  overflow-y: auto;
+  font-weight: 700;
 }
 .image-capture-controls {
   position: relative;
