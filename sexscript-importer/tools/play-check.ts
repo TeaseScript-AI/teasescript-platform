@@ -9,7 +9,10 @@
  * Each package opens at `<origin>/player/?package=<id>` (default `https://agents.home.arpa:4443`, see
  * `serve-catalog.ts`) in headless Chromium, one browser at a time. A run presses buttons, picks choices, and types
  * answers until the session halts, fails, hangs, or the step budget ends. Playwright's fake clock skips waits, timers,
- * and chat pacing, and media play at 16 times speed. Each run picks, at every choice, the option tried least often in
+ * and chat pacing, and media play at 16 times speed. A prompt that comes back three times in a row may wait for an
+ * answer that takes time, so the runner then lets 30 seconds pass before answering, and 120 seconds the next time,
+ * noted in the run's path as `[waited 30 s]`; this stands in for development time controls (#615). Each run picks, at
+ * every choice, the option tried least often in
  * earlier runs, so later runs take other branches; a package stops after a run that reached nothing new, or after a
  * run that hung or used up its steps, which other paths rarely change. A package whose `.tease` files are unchanged
  * since its last check is skipped unless `--again` is given. The session
@@ -406,6 +409,8 @@ async function playOnce(
   if (state.scriptFailure !== null) return finish("no-start", state.scriptFailure, 0);
   await page.click("[data-session-activation] button");
   const visits = new Map<string, number>();
+  // The prompt answered last, how often in a row, and how many waits that streak has had.
+  let repeated = { key: "", count: 0, waits: 0 };
   let unchanged = 0;
   let lastProgress = -1;
   let progressAt = Date.now();
@@ -458,6 +463,23 @@ async function playOnce(
       const kind = state.foreground.slice("interaction:".length);
       const visit = visits.get(state.site) ?? 0;
       visits.set(state.site, visit + 1);
+      // A script may time how long its prompt stays unanswered, as in "beg for at least 15 seconds". The same place
+      // with the same options and text counts as the same prompt; a loop over questions, such as toys, does not.
+      const key = `${state.site}\u0000${state.options.join("\u0000")}\u0000${state.lastText}`;
+      repeated =
+        key === repeated.key
+          ? { ...repeated, count: repeated.count + 1 }
+          : { key, count: 1, waits: 0 };
+      if (
+        repeated.count >= 3 &&
+        repeated.waits < 2 &&
+        (state.options.length > 0 || state.composer !== null)
+      ) {
+        const seconds = repeated.waits === 0 ? 30 : 120;
+        await page.clock.fastForward(seconds * 1_000);
+        taken.push(`[waited ${seconds} s]`);
+        repeated = { key, count: 0, waits: repeated.waits + 1 };
+      }
       if ((kind === "button" || kind === "choice") && state.options.length > 0) {
         const counts =
           track.tries.get(state.site) ?? new Array<number>(state.options.length).fill(0);
