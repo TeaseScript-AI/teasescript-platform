@@ -49,6 +49,7 @@ import {
   ownerFitsInstruction,
   serializedTopContext,
 } from "./activation-validation.js";
+import { functionHoldingInstruction } from "./snapshot-validation-analysis.js";
 
 const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
 
@@ -2216,12 +2217,7 @@ function validSettlementProvenance(
               ? "capture"
               : "say";
   if (plan.instructions[owningInstruction]?.kind !== expectedKind) return false;
-  const definition = plan.functions.find(
-    (candidate) =>
-      candidate !== undefined &&
-      owningInstruction >= candidate.entryInstruction &&
-      owningInstruction < candidate.endInstruction,
-  );
+  const definition = functionHoldingInstruction(plan, owningInstruction);
   return definition === undefined
     ? continuationInstruction <
         (plan.files[fileOfInstruction(plan, owningInstruction)]?.rootEndInstruction ?? 0)
