@@ -3598,12 +3598,15 @@ class TypeChecker {
   ): void {
     const target = targets.map(unwrap).find((node) => node.kind === "identifier");
     const name = target?.kind === "identifier" ? target.name : "values";
-    const written = typeName({ kind, element: union([own, other]) });
+    const mixed: StaticType = { kind, element: union([own, other]) };
+    const written = typeName(mixed);
     const property = misfitProperty(own, other);
     const fix =
       property !== undefined
         ? `give '${property.name}' one type in every element`
-        : `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`;
+        : containsType(mixed, (part) => part.kind === "camera")
+          ? UNNAMED_MIX_FIX
+          : `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`;
     this.#report(
       typeCode.mixedTypes,
       `${operation} would mix ${mixDescription(own, other)}. A ${kind} holds one type; ${fix}.`,
@@ -4736,14 +4739,17 @@ class TypeChecker {
         literal.kind === "setLiteral" ? "set" : literal.kind === "dictLiteral" ? "dict" : "list";
       const first = types[0]!;
       const other = types.find((type) => joinTypes([first, type]) === undefined) ?? types[1]!;
-      const written = typeName({ kind, element: union(types) });
+      const mixed: StaticType = { kind, element: union(types) };
+      const written = typeName(mixed);
       const name = this.#declaredBy.get(literal);
       const property = misfitProperty(first, other);
       // A property type has no written form, so objects that disagree need one type for that property.
       const fix =
         property !== undefined
           ? `give '${property.name}' one type in every element`
-          : `to keep both, declare a union type, as in '${name === undefined ? `let values: ${written}` : `${this.#keyword(name)} ${name}: ${written}`} = ...'`;
+          : containsType(mixed, (part) => part.kind === "camera")
+            ? UNNAMED_MIX_FIX
+            : `to keep both, declare a union type, as in '${name === undefined ? `let values: ${written}` : `${this.#keyword(name)} ${name}: ${written}`} = ...'`;
       this.#report(
         typeCode.mixedTypes,
         `This ${kind} mixes ${mixDescription(first, other)}. A ${kind} holds one type; ${fix}.`,
@@ -5978,6 +5984,10 @@ const ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set(["+", "-", "*", "/", "
 function declarationName(declaration: Declaration): string {
   return declaration.kind === "forStatement" ? declaration.variable.name : declaration.name.name;
 }
+
+/** The fix for a mix whose union type has no written form, because a camera view's type has no name. */
+const UNNAMED_MIX_FIX =
+  "a camera view's type cannot be declared, so keep camera views apart from other values";
 
 /** Value kinds that `${...}` cannot show. */
 const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
