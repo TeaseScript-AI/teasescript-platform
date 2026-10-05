@@ -74,6 +74,10 @@ show("Mood " + session.mood + ", aborted " + session.aborted)
 def exercises = [[kind: "counted", text: "Push-ups"], [kind: "posture", text: null]]
 def exercise = exercises[getRandom(2)]
 if (exercise.kind == "counted") show("Do " + exercise.text + " (" + exercise.text.length() + " letters)")
+// A record that leaves out a key the others have read it as null.
+def permissions = [[title: "Rest", chance: 75], [title: "Play", chance: 55, flag: "deny.play"]]
+def permission = permissions[getRandom(2)]
+if (permission.flag != null && loadInteger(permission.flag) != null) show("Not now")
 // A null test of a computed key of a dict without stored nulls asks for the key once.
 def skipped = [:]
 skipped["Random-Thong"] = true

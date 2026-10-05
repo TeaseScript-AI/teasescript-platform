@@ -128,9 +128,15 @@ let exercise = exercises[randomInteger(0..2)]
 if exercise.kind == "counted" {
   say "Do ${exercise.text} (${exercise.text.length} letters)"
 }
+// A record that leaves out a key the others have read it as null.
+let permissions: object[] = [{ title: "Rest", chance: 75, flag: null }, { title: "Play", chance: 55, flag: "deny.play" }]
+let permission = permissions[randomInteger(0..2)]
+if permission.flag != null and (load permission.flag) != null {
+  say "Not now"
+}
 // A null test of a computed key of a dict without stored nulls asks for the key once.
 let skipped = dict{}
-// NOTE SX_SHARED_MAP_WRITE line 79: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+// NOTE SX_SHARED_MAP_WRITE line 83: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
 skipped["Random-Thong"] = true
 let sections = ["Random-Thong", "Random-Panties"]
 let section = randomInteger(0..2)
