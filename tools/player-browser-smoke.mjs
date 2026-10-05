@@ -1239,7 +1239,8 @@ async function missingMediaScenario(cdp, origin) {
     `(() => {
       const image = document.querySelector('.stage-media');
       return !!image && image.complete && image.naturalWidth > 0 &&
-        image.getAttribute('src') === '/dev-package/missing-media/files/images/valid.svg';
+        image.getAttribute('src') === '/dev-package/missing-media/files/images/valid.svg' &&
+        getComputedStyle(image).display !== 'none';
     })()`,
     5_000,
     "The valid image did not restore the Stage",

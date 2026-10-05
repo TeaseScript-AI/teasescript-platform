@@ -293,9 +293,8 @@ test("a package image the Stage cannot load is reported while the Stage shows it
   const host = scope.run(() => usePlayerSession({ resolveAsset: (path) => `/files/${path}` }));
   assert.ok(host);
   context.after(() => scope.stop());
-  host.prepare(() =>
-    createPlayerRuntimeSession('showImage "images/corrupt.png"\nlet pick = askImage()\nexit'),
-  );
+  const script = 'showImage "images/corrupt.png"\nlet pick = askImage()\nexit';
+  host.prepare(() => createPlayerRuntimeSession(script));
   await host.activate();
   // A late failure of an image the Stage no longer shows is not reported.
   host.stageImageFailed("/files/images/replaced.png");
@@ -305,5 +304,14 @@ test("a package image the Stage cannot load is reported while the Stage shows it
   assert.deepEqual(
     host.notices.value.map((notice) => [notice.key, notice.message]),
     [["unusable-media:images/corrupt.png", "Image could not be loaded: images/corrupt.png"]],
+  );
+  // A new session showing it on the same Stage gets no new browser error, but is reported again.
+  host.dismissNotice("unusable-media:images/corrupt.png");
+  host.prepare(() => createPlayerRuntimeSession(script));
+  await host.activate();
+  await nextTick();
+  assert.deepEqual(
+    host.notices.value.map((notice) => notice.message),
+    ["Image could not be loaded: images/corrupt.png"],
   );
 });

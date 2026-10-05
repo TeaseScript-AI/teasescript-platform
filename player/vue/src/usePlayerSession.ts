@@ -218,10 +218,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const stageImage = computed(() =>
     session.value === null ? null : playerRuntimeMedia(session.value.snapshot).stage.image,
   );
+  // The Stage source the browser could not load. The Stage keeps it hidden while its source stays, also into a new
+  // session, which then gets no new browser error.
+  let failedStageSource: string | null = null;
   // A Stage image that is no package file; one that is but fails to load is reported by the Stage itself.
   watch([generation, stageImage], ([, image]) => {
-    if (image !== null && resolvePackageAsset(image) === null)
+    const source = image === null ? null : resolveAsset(image);
+    if (source !== failedStageSource) failedStageSource = null;
+    if (image === null) return;
+    if (resolvePackageAsset(image) === null)
       reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "missing"));
+    else if (source === failedStageSource)
+      reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "failed"));
   });
 
   watch(
@@ -587,8 +595,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
      */
     stageImageFailed(src: string) {
       const image = stageImage.value;
-      if (image !== null && resolveAsset(image) === src)
-        reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "failed"));
+      if (image === null || resolveAsset(image) !== src) return;
+      failedStageSource = src;
+      reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "failed"));
     },
     /** The session camera's live track while the script shows a camera view and the camera is available, else `null`. */
     viewfinder,
