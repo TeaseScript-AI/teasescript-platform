@@ -17,7 +17,7 @@ import {
   mainSourceSpan,
 } from "../plan/model.js";
 import { addTag, readTagText, type Tag } from "../tags.js";
-import { parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
+import { cloneMessageMarkup, parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
 import { isBlankTextAnswer, numberAnswerText, temporalAnswerText } from "../interaction-answers.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -1793,7 +1793,9 @@ function executeSayAtomically(
   evaluator: Evaluator,
   events: InterpreterEvent[],
 ): void {
-  const stagedSnapshot = stagingClone(snapshot);
+  const stagedSnapshot = sayEvaluatesNoExpression(instruction, snapshot)
+    ? expressionFreeSayStagingClone(snapshot)
+    : stagingClone(snapshot);
   const stagedEvents: InterpreterEvent[] = [];
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
 
@@ -1809,6 +1811,79 @@ function executeSayAtomically(
 function stagingClone(snapshot: RuntimeSnapshot): RuntimeSnapshot {
   const staged = cloneCapturedRuntimeSnapshot({ ...snapshot, lastSettlement: null });
   staged.lastSettlement = snapshot.lastSettlement;
+  return staged;
+}
+
+/**
+ * Whether `executeSay` evaluates no expression of this say: it releases prepared output, or its text is literal or
+ * prepared, without explicit presentation, at smart or instant pacing. Any expression, even a read, can change nested
+ * state before a later step rejects the say, so every other say keeps the deep staging clone.
+ */
+function sayEvaluatesNoExpression(
+  instruction: Extract<Instruction, { kind: "say" }>,
+  snapshot: RuntimeSnapshot,
+): boolean {
+  const prepared = snapshot.preparedSayOutput;
+  if (prepared !== null && prepared.owningInstruction === snapshot.nextInstruction) return true;
+  return (
+    (instruction.textTemporary !== undefined || instruction.value.kind === "literal") &&
+    instruction.presentation === null &&
+    (instruction.pacing === "smart" || instruction.pacing === "instant")
+  );
+}
+
+/**
+ * Staging for a say that evaluates no expression. Such a say replaces root fields and changes only the speaker
+ * warning list and the background actions in place, so it copies those and shares everything else read-only. Every
+ * field is listed so that a new snapshot field must be classified here.
+ */
+function expressionFreeSayStagingClone(snapshot: RuntimeSnapshot): RuntimeSnapshot {
+  const staged: Required<RuntimeSnapshot> = {
+    format: snapshot.format,
+    version: snapshot.version,
+    nextInstruction: snapshot.nextInstruction,
+    frames: snapshot.frames,
+    globals: snapshot.globals,
+    speakers: snapshot.speakers,
+    defaultSpeaker: snapshot.defaultSpeaker,
+    contextualSpeaker: snapshot.contextualSpeaker,
+    // No random draw is reachable; the copy is constant-size.
+    rng: { ...snapshot.rng },
+    warnedSpeakerIds: [...snapshot.warnedSpeakerIds],
+    loopFrames: snapshot.loopFrames,
+    temporaries: snapshot.temporaries,
+    callFrames: snapshot.callFrames,
+    retainedScopes: snapshot.retainedScopes,
+    fallback: snapshot.fallback,
+    nextEventSequence: snapshot.nextEventSequence,
+    nextScopeId: snapshot.nextScopeId,
+    nextSpeakerId: snapshot.nextSpeakerId,
+    nextCallFrameId: snapshot.nextCallFrameId,
+    currentSessionTimeMs: snapshot.currentSessionTimeMs,
+    observedSessionTimeMs: snapshot.observedSessionTimeMs,
+    chatPacingSettings: snapshot.chatPacingSettings,
+    temporalCaptures: snapshot.temporalCaptures,
+    foregroundAction: snapshot.foregroundAction,
+    backgroundActions: [...snapshot.backgroundActions],
+    nextActionId: snapshot.nextActionId,
+    lastSettlement: snapshot.lastSettlement,
+    interactionResultHandoff: snapshot.interactionResultHandoff,
+    preparedSayOutput: snapshot.preparedSayOutput,
+    settledTimers: snapshot.settledTimers,
+    nextTimerId: snapshot.nextTimerId,
+    pendingTimerHandlers: snapshot.pendingTimerHandlers,
+    stageImage: snapshot.stageImage,
+    capturedImages: snapshot.capturedImages,
+    scriptStorage: snapshot.scriptStorage,
+    scriptStoragePersistent: snapshot.scriptStoragePersistent,
+    settledMedia: snapshot.settledMedia,
+    nextMediaId: snapshot.nextMediaId,
+    cameraView: snapshot.cameraView,
+    nextPermanentButtonId: snapshot.nextPermanentButtonId,
+    maxCallDepth: snapshot.maxCallDepth,
+    status: snapshot.status,
+    failure: snapshot.failure,
+  };
   return staged;
 }
 
@@ -1843,7 +1918,8 @@ function executeSay(
       events,
       instruction.span,
       prepared.speaker,
-      prepared.content,
+      // Captured markup is mutable; output markup is frozen.
+      cloneMessageMarkup(prepared.content),
       prepared.text,
       prepared.presentation,
     );
