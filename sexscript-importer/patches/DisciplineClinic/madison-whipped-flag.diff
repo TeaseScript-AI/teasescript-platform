@@ -1,0 +1,11 @@
+--- a/scripts/DCAfterDark/Madison.groovy
++++ b/scripts/DCAfterDark/Madison.groovy
+@@ -523,7 +523,7 @@
+ 	scene1Paddling()
+ 	if(percentChance(50)){
+ 		scene1Whipping()
+-		whipped = true()
++		whipped = true
+ 	}
+ 	scene1NippleTorture1()
+ 	scene1DeepThroat()
