@@ -473,6 +473,8 @@ test("optional types keep their non-null type in operations, elements, and loops
   for (const source of [
     "function f(n: integer?, other) {\n    return n + other\n}\nexit",
     "function f(n: integer?) {\n    return n + n\n}\nexit",
+    // Text joins other text, so beside an operand of unknown type only null needs a check.
+    "function f(n: string?, other) {\n    return n + other\n}\nexit",
     "function f(n: range?) {\n    timer async n\n}\nexit",
   ])
     assert.deepEqual(
@@ -485,12 +487,12 @@ test("optional types keep their non-null type in operations, elements, and loops
   ]);
   // A member that no value could combine with is reported as it is, not as a missing check.
   assert.deepEqual(
-    mismatches("function f(n: string?, other) {\n    return n + other\n}\nexit")[0]?.[0],
+    mismatches("function f(n: boolean?, other) {\n    return n + other\n}\nexit")[0]?.[0],
     "TSV043",
   );
   assert.match(
-    mismatches("function f(n: string?, other) {\n    return n + other\n}\nexit")[0]?.[1] ?? "",
-    /does not join text/,
+    mismatches("function f(n: boolean?, other) {\n    return n + other\n}\nexit")[0]?.[1] ?? "",
+    /cannot combine true or false/,
   );
 });
 
@@ -871,8 +873,8 @@ test("only integers convert implicitly: division gives a number, and durations n
     "'title' is declared as string, so it cannot start as a whole number (integer). To show it as text, write \"${5}\".",
   );
   assert.deepEqual(
-    mismatches('let joined = "a" + "b"\nexit')[0]?.[1],
-    "'+' does not join text. Put the values in one text instead, such as \"${first}${second}\".",
+    mismatches('let joined = "Score: " + 5\nexit')[0]?.[1],
+    "'+' joins text only with other text, not with a whole number (integer). Put the value in the text instead, as in \"Score: ${5}\".",
   );
   assert.deepEqual(codes("let sum = true + 1\nexit"), [["TSV043", "true + 1"]]);
   // Bare numbers count as seconds in commands that expect a time.

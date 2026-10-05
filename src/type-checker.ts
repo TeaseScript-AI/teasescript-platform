@@ -1463,10 +1463,22 @@ class TypeChecker {
     const result = "type" in outcome ? outcome.type : undefined;
     if (result !== undefined && !isKnown(result)) return;
     if (result === undefined) {
+      const [first, second] = [resolved(kept), resolved(value)];
+      if (operator === "+" && first.kind === "list" && second.kind === "list") {
+        this.#reportMixedJoin(
+          "'+='",
+          "list",
+          first.element,
+          second.element,
+          [target],
+          statement.value.span,
+        );
+        return;
+      }
       const subject = place.subject;
       this.#report(
         typeCode.typeMismatch,
-        `${subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${operandFix(nonNullType(kept), statement.value)}`,
+        `${subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${operandFix(nonNullType(kept), value, statement)}`,
         statement.value.span,
       );
       return;
@@ -1479,7 +1491,14 @@ class TypeChecker {
         `${place.subject}, so '${statement.operator}' cannot make ${place.verb === "contain" ? "an element" : "it"} ${describeValue(result)}.${place.fix(result, null)}`,
         statement.value.span,
       );
-    else if (variable !== undefined) this.#assigned(variable, result);
+    else {
+      // A joined list decides an element type that no value decided yet, as a store does.
+      if (isCollection(resolved(result))) {
+        settle(place.type, result, statement.value.span);
+        if (place.widening !== undefined) this.#rewiden(place.widening.root);
+      }
+      if (variable !== undefined) this.#assigned(variable, result);
+    }
   }
 
   /**
@@ -2959,10 +2978,30 @@ class TypeChecker {
             : undefined,
         );
         return BOOLEAN_TYPE;
-      default:
+      default: {
+        // Two lists whose element types mix are reported as `union()` reports them (V30 §16).
+        const [first, second] = [resolved(left), resolved(right)];
+        if (
+          expression.operator === "+" &&
+          first.kind === "list" &&
+          second.kind === "list" &&
+          arithmeticType("+", first, second) === undefined
+        ) {
+          const operands = [expression.left, expression.right];
+          this.#reportMixedJoin(
+            "'+'",
+            "list",
+            first.element,
+            second.element,
+            operands,
+            expression.span,
+          );
+          return { kind: "list", element: UNKNOWN_TYPE };
+        }
         return this.#operation(expression.operator, [left, right], expression, (a, b) =>
           arithmeticType(expression.operator, a, b),
         );
+      }
     }
   }
 
@@ -3226,7 +3265,10 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const method = callee.property.name;
-    if ((method === "add" || method === "get") && unwrap(callee.object).kind !== "identifier")
+    if (
+      (method === "add" || method === "addAll" || method === "get") &&
+      unwrap(callee.object).kind !== "identifier"
+    )
       this.#relaxNarrowedRoot(callee.object, scope);
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
     const value = resolved(receiver);
@@ -3259,6 +3301,15 @@ class TypeChecker {
           elementStoreType(collection) ?? UNKNOWN_TYPE,
           elementLabel(expressionLabel(callee.object), kind),
           type,
+        );
+        return NULL_TYPE;
+      }
+    }
+    if (method === "addAll" && members(value).every(isList)) {
+      const argument = expression.arguments[0];
+      if (argument !== undefined && expression.arguments.length === 1) {
+        yield* compileChild(
+          this.#addAllTask(expression, callee.object, receiver, argument.value, scope),
         );
         return NULL_TYPE;
       }
@@ -3407,6 +3458,58 @@ class TypeChecker {
   }
 
   /**
+   * `list.addAll(other)` stores each element of the list `other` in the list as `add` does (V30 §16): the elements of a
+   * list literal one by one, and otherwise the element type of `other`, which the runtime checks for each element where
+   * it is unknown.
+   */
+  *#addAllTask(
+    call: CallExpression,
+    receiverExpression: Expression,
+    receiver: StaticType,
+    argument: Expression,
+    scope: Scope,
+  ): CompileTask<void> {
+    const type = yield* compileChild(this.#expressionTask(argument, scope));
+    this.#reportUnless(type, isList, argument, "addAll() needs a list", () =>
+      members(type).some((member) => resolved(member).kind === "set")
+        ? " Copy a set into a list with toList() first."
+        : "",
+    );
+    const list = isKnown(nonNullTypeForUse(type))
+      ? members(type).every(isList)
+        ? elementType(type)
+        : undefined
+      : UNKNOWN_TYPE;
+    // An element type that no value decided yet belongs to an empty list, which adds nothing.
+    if (list === undefined || resolved(list).kind === "open") return;
+    const collection = this.#elementReceiver(receiverExpression, scope, receiver, list);
+    const literal = unwrap(argument);
+    if (literal.kind === "listLiteral") {
+      // Each element is checked against the list it joins, so the literal itself need not hold one type.
+      this.#mixedLiterals.delete(literal);
+      for (const element of literal.elements)
+        yield* compileChild(
+          this.#storeElementTask(
+            collection,
+            receiverExpression,
+            element,
+            this.#typeOf(element),
+            scope,
+          ),
+        );
+    } else
+      yield* compileChild(
+        this.#storeElementTask(collection, receiverExpression, argument, list, scope),
+      );
+    this.#recordRuntimeCheck(
+      call,
+      elementStoreType(collection) ?? UNKNOWN_TYPE,
+      elementLabel(expressionLabel(receiverExpression), "list"),
+      list,
+    );
+  }
+
+  /**
    * Checks `sort`, `shuffle`, or a set operation on one list or set, as evaluated, and gives its result (V30 §16).
    */
   #collectionMethodType(
@@ -3459,25 +3562,41 @@ class TypeChecker {
     const element = joinTypes([own, ...others]);
     if (element === undefined) {
       if (reportMix) {
-        // As for a mixed literal, the fix declares the receiver with a union element type.
         const callee = unwrap(expression.callee);
-        const target = callee.kind === "propertyAccessExpression" ? unwrap(callee.object) : null;
-        const name = target?.kind === "identifier" ? target.name : "values";
-        const written = typeName({ kind: receiver.kind, element: union([own, other]) });
-        const property = misfitProperty(own, other);
-        const fix =
-          property !== undefined
-            ? `give '${property.name}' one type in every element`
-            : `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`;
-        this.#report(
-          typeCode.mixedTypes,
-          `union() would mix ${mixDescription(own, other)}. A ${receiver.kind} holds one type; ${fix}.`,
-          expression.span,
-        );
+        const target = callee.kind === "propertyAccessExpression" ? [callee.object] : [];
+        this.#reportMixedJoin("union()", receiver.kind, own, other, target, expression.span);
       }
       return { kind: receiver.kind, element: UNKNOWN_TYPE };
     }
     return { kind: receiver.kind, element };
+  }
+
+  /**
+   * Reports an operation that would give a list or set the elements of two collections whose types mix, such as
+   * `union()` or `+`. As for a mixed literal, the fix declares the first of `targets` that is a variable with a union
+   * element type.
+   */
+  #reportMixedJoin(
+    operation: string,
+    kind: "list" | "set",
+    own: StaticType,
+    other: StaticType,
+    targets: readonly Expression[],
+    span: SourceSpan,
+  ): void {
+    const target = targets.map(unwrap).find((node) => node.kind === "identifier");
+    const name = target?.kind === "identifier" ? target.name : "values";
+    const written = typeName({ kind, element: union([own, other]) });
+    const property = misfitProperty(own, other);
+    const fix =
+      property !== undefined
+        ? `give '${property.name}' one type in every element`
+        : `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`;
+    this.#report(
+      typeCode.mixedTypes,
+      `${operation} would mix ${mixDescription(own, other)}. A ${kind} holds one type; ${fix}.`,
+      span,
+    );
   }
 
   /** Argument and result types of the implemented built-ins; injected host functions return unknown values. */
@@ -5156,6 +5275,7 @@ const OPERAND_KINDS: readonly StaticType[] = [
   TIME_TYPE,
   DATETIME_TYPE,
   TIMESTAMP_TYPE,
+  { kind: "list", element: UNKNOWN_TYPE },
 ];
 
 /** Whether a variable of this type holds a list, set, or dict whose element type no value decided yet. */
@@ -5171,6 +5291,7 @@ const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear"
 
 const COLLECTION_CHANGES: ReadonlySet<string> = new Set([
   "add",
+  "addAll",
   "remove",
   "clear",
   "removeAt",
@@ -5638,6 +5759,8 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     case "remove":
     case "clear":
       return NULL_TYPE;
+    case "addAll":
+      return value.kind === "list" ? NULL_TYPE : undefined;
     case "removeAt":
     case "removeFirst":
     case "removeLast":
@@ -6142,7 +6265,6 @@ function operatorMessage(
   const [left, right] = operands;
   if (operands.length === 1)
     return `'${operator}' needs a number or a duration, but this is ${describeValue(left!)}.`;
-  const text = (type: StaticType): boolean => isScalar(type, "string");
   const duration = (type: StaticType): boolean => isScalar(type, "duration");
   if (["<", "<=", ">", ">="].includes(operator)) {
     const temporal = isTemporal(left!) ? left! : isTemporal(right!) ? right! : undefined;
@@ -6150,8 +6272,11 @@ function operatorMessage(
       return `'${operator}' compares ${describeValue(temporal)} only with another ${temporalNoun(temporal)}, not with ${describeValue(temporal === left ? right! : left!)}.${expression.kind === "binaryExpression" ? temporalPairFix(expression, operator, left!, right!) : ""}`;
     return `'${operator}' compares two numbers, two texts, or two durations, but these are ${describeValue(left!)} and ${describeValue(right!)}.`;
   }
-  if (operator === "+" && (text(left!) || text(right!)))
-    return `'+' does not join text. Put the values in one text instead, such as "\${first}\${second}".`;
+  const joined =
+    operator === "+" && expression.kind === "binaryExpression"
+      ? joinMessage(expression, left!, right!)
+      : undefined;
+  if (joined !== undefined) return joined;
   if ((duration(left!) && isNumeric(right!)) || (isNumeric(left!) && duration(right!))) {
     const number =
       expression.kind === "binaryExpression"
@@ -6182,6 +6307,67 @@ function operatorMessage(
       return `'+' cannot add ${describeValue(right!)} to a duration. Write it first, as in '${expressionLabel(expression.right) ?? "value"} + 1 h'.`;
   }
   return `'${operator}' cannot combine ${describeValue(left!)} and ${describeValue(right!)}.`;
+}
+
+/**
+ * Why `+` cannot join text or a list with a value of another kind, and what to write instead (V30 §4): the value in the
+ * text, `add` for one element, or a list of it. Nothing converts. The left operand's kind names what was meant.
+ */
+function joinMessage(
+  expression: Extract<Expression, { kind: "binaryExpression" }>,
+  left: StaticType,
+  right: StaticType,
+): string | undefined {
+  const list = (type: StaticType): boolean => resolved(type).kind === "list";
+  const set = (type: StaticType): boolean => resolved(type).kind === "set";
+  const text = (type: StaticType): boolean => isScalar(type, "string");
+  const value = (operand: Expression): string => operandLabel(operand) ?? "value";
+  const named = (operand: Expression, kind: string): string => expressionLabel(operand) ?? kind;
+  if ((set(left) || set(right)) && (list(left) || list(right) || (set(left) && set(right))))
+    return `'+' joins two texts or two lists, not ${describeValue(left)} and ${describeValue(right)}. ${SET_JOIN_FIX}`;
+  if (list(left) && !list(right)) {
+    const items = named(expression.left, "list");
+    return `'+' joins a list only with another list, not with ${describeValue(right)}. To add one element, use '${items}.add(${value(expression.right)})', or write '${items} + [${value(expression.right)}]' for a new list.`;
+  }
+  if (text(left) !== text(right) && (text(left) || !list(right))) {
+    const other = text(left) ? right : left;
+    const fix = isShowable(other)
+      ? ` Put the value in the text instead, as in ${interpolationFix(expression)}.`
+      : "";
+    return `'+' joins text only with other text, not with ${describeValue(other)}.${fix}`;
+  }
+  if (list(right) && !list(left))
+    return `'+' joins a list only with another list, not with ${describeValue(left)}. Write '[${value(expression.left)}] + ${named(expression.right, "list")}' for a new list.`;
+  return undefined;
+}
+
+const SET_JOIN_FIX = "Join sets with union(), or copy a set into a list with toList() first.";
+
+/** `"Score: ${5}"` for `"Score: " + 5`: plain text as it is written, and the other operand interpolated. */
+function interpolationFix(expression: Extract<Expression, { kind: "binaryExpression" }>): string {
+  const part = (operand: Expression): string =>
+    plainText(operand) ?? `\${${operandLabel(operand) ?? "value"}}`;
+  return `"${part(expression.left)}${part(expression.right)}"`;
+}
+
+/** The source spelling of a variable or property path, a number or boolean literal, or plain text in quotes. */
+function operandLabel(expression: Expression): string | null {
+  const text = plainText(expression);
+  return (
+    expressionLabel(expression) ?? literalText(expression) ?? (text === null ? null : `"${text}"`)
+  );
+}
+
+/** The text of a one-line string literal without interpolation, as it is written between its quotes. */
+function plainText(expression: Expression): string | null {
+  const literal = unwrap(expression);
+  if (literal.kind !== "stringLiteral" || literal.form !== "singleLine") return null;
+  let text = "";
+  for (const part of literal.parts) {
+    if (part.kind !== "stringText") return null;
+    text += part.raw;
+  }
+  return text;
 }
 
 /** What a date or time value is called after "another", such as `date and time`. */
@@ -6219,16 +6405,26 @@ function unitFix(number: Expression | null): string {
   return `Give the number a unit, such as '${label ?? "n"} * 1 s'.`;
 }
 
-/** How to make an operand fit `+=`/`-=` on a place of `operand` type. */
-function operandFix(operand: StaticType, value: Expression): string {
+/**
+ * How to make a value fit `+=`/`-=` on a place of `operand` type: text takes it inside the text, and a list takes one
+ * element with `add` (V30 §4).
+ */
+function operandFix(operand: StaticType, type: StaticType, statement: AssignmentStatement): string {
   if (isNumeric(operand)) return " Use a number instead.";
   // A timestamp or a date and time moves by a duration as well.
   if (isScalar(operand, "duration", "timestamp", "datetime")) {
-    const literal = unwrap(value);
+    const literal = unwrap(statement.value);
     return literal.kind === "numberLiteral"
       ? ` Give the number a unit, such as '${literal.raw} s'.`
       : " Use a duration such as '2 s' instead.";
   }
+  const target = expressionLabel(statement.target);
+  if (statement.operator !== "+=" || target === null) return "";
+  const value = operandLabel(statement.value) ?? "value";
+  if (isScalar(operand, "string") && isShowable(type))
+    return ` Put the value in the text instead, as in '${target} += "\${${value}}"'.`;
+  if (resolved(operand).kind === "list" && resolved(type).kind !== "set")
+    return ` To add one element, use '${target}.add(${value})'.`;
   return "";
 }
 

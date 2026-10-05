@@ -995,6 +995,7 @@ export class Evaluator {
             "sort",
             "shuffle",
             "add",
+            "addAll",
             "remove",
             "removeAt",
             "removeFirst",
@@ -1249,6 +1250,11 @@ export class Evaluator {
         (right.inclusive ? left <= right.end : left < right.end)
       );
     }
+    if (
+      expression.operator === "+" &&
+      (typeof left === "string" || typeof right === "string" || isList(left) || isList(right))
+    )
+      return this.#joined(expression, left, right);
     const temporal = temporalBinary(
       expression.operator,
       left,
@@ -1290,6 +1296,25 @@ export class Evaluator {
       default:
         throw fault("TSR035", "Unsupported binary operation.", expression.span);
     }
+  }
+
+  /**
+   * `+` on text or a list (V30 §4): two texts join, and two lists give a new list of copies of the left elements, then
+   * the right ones. Nothing converts, so any other operand fails with what to write instead.
+   */
+  #joined(
+    expression: BinaryExpressionPlan,
+    left: SerializableRuntimeValue,
+    right: SerializableRuntimeValue,
+  ): SerializableRuntimeValue {
+    if (typeof left === "string" && typeof right === "string") return left + right;
+    if (isList(left) && isList(right))
+      return createCapturedSerializableList(left.items.concat(right.items));
+    throw fault(
+      "TSR009",
+      `'+' joins two texts or two lists and adds numbers or durations, but these are ${describeRuntimeValue(left)} and ${describeRuntimeValue(right)}.${joinFix(left, right)}`,
+      expression.span,
+    );
   }
 
   /**
@@ -1495,7 +1520,7 @@ export class Evaluator {
         expression.span,
         expression.typeCheck === undefined
           ? null
-          : // Plan validation accepts a type check only on an `add` call with one argument here.
+          : // Plan validation accepts a type check only on an `add` or `addAll` call with one argument here.
             { check: expression.typeCheck, span: expression.arguments[0]!.value.span },
       );
     }
@@ -1578,6 +1603,22 @@ export class Evaluator {
           if (added !== null) assertValueType(positional[0]!, added.check, added.span);
           receiver.items.push(cloneCapturedSerializableValue(positional[0]!));
           return null;
+        case "addAll": {
+          expect(1);
+          const other = positional[0]!;
+          if (!isList(other))
+            throw fault(
+              "TSR060",
+              `addAll() needs a list, not ${describeRuntimeValue(other)}.${isSet(other) ? " Copy a set into a list with toList() first." : ""}`,
+              span,
+            );
+          // Every element is checked before any is added, and copies are taken first, so a list can add itself.
+          if (added !== null)
+            for (const item of other.items) assertValueType(item, added.check, added.span);
+          const items = other.items.map((item) => cloneCapturedSerializableValue(item));
+          for (const item of items) receiver.items.push(item);
+          return null;
+        }
         case "remove": {
           expect(1);
           const index = this.#findValue(receiver.items, positional[0]!);
@@ -2841,4 +2882,16 @@ function evaluationFrame(expression: ExpressionPlan, reference = false): Evaluat
     positional: expression.kind === "call" ? [] : null,
     named: expression.kind === "call" ? Object.create(null) : null,
   };
+}
+
+/** What to write instead of `+` on text or a list and a value of another kind; the left operand names what was meant. */
+function joinFix(left: SerializableRuntimeValue, right: SerializableRuntimeValue): string {
+  if (isSet(left) || isSet(right))
+    return " Join sets with union(), or copy a set into a list with toList() first.";
+  if (isList(left))
+    return " To add one element, use add(value), or write list + [value] for a new list.";
+  if (typeof left !== "string" && isList(right)) return " Write [value] + list for a new list.";
+  return isVisibleScalar(typeof left === "string" ? right : left)
+    ? ' Put the value in the text instead, as in "${first}${second}".'
+    : "";
 }

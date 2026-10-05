@@ -371,9 +371,18 @@ let shares: integer = 10 / 5          // compile error: a quotient is a number
 let shares: integer = floor(10 / 5)   // valid
 ```
 
-Arithmetic applies to numbers, and to durations as described in [§35](#35-date-time-durations-and-timestamps). It never
-converts text or booleans: `"a" + "b"` is a compile error, and text is joined with interpolation, as in
-`"${first}${second}"`.
+Arithmetic applies to numbers, and to durations as described in [§35](#35-date-time-durations-and-timestamps). `+` also
+joins two values of the same kind: two texts give one text, and two lists give a new list ([§16](#16-lists)); `+=` joins
+the same way. Nothing converts: text and another value, or a list and a single value, is a compile error that points to
+interpolation or to `add`, and a runtime error when the compiler cannot see the kinds:
+
+```text
+let name = "Mistress " + title     // text + text
+let menu = ["Back"] + options      // a new list, the left elements first
+name += "!"
+let line = "Score: " + 5           // compile error: write "Score: ${5}"
+let more = menu + "Exit"           // compile error: use menu.add("Exit"), or menu + ["Exit"]
+```
 
 A calculation whose result is too large to represent, or that divides by zero, has no result. When the compiler can
 see every operand of that step, as in `1e308 * 10` or `1e300 s * 1e10`, it is a compile error that names the step,
@@ -1330,6 +1339,7 @@ List methods:
 
 ```text
 items.add("sword")
+items.addAll(other)
 items.remove("key")
 items.removeAt(1)
 items.removeFirst()
@@ -1514,8 +1524,9 @@ Runtime behavior:
 - `removeAt(index)` removes the element at a zero-based index and moves later elements forward. An invalid index
   raises the same runtime error as indexing.
 - `removeFirst()` and `removeLast()` on an empty list raise a runtime error, like `.first` and `.last`.
-- `add(value)`, `remove(value)`, `clear()`, `sort()`, and `shuffle()` return `null`. Set `remove(value)` of an absent
-  value is a no-op: the set stays unchanged and execution continues without an error or warning.
+- `add(value)`, `addAll(other)`, `remove(value)`, `clear()`, `sort()`, and `shuffle()` return `null`. Set
+  `remove(value)` of an absent value is a no-op: the set stays unchanged and execution continues without an error or
+  warning.
 - Mutating methods change the existing list.
 - `sort()` orders a list in place, ascending and stable. Its elements must all be numbers (integers and numbers
   together), all text, all durations of one family, or all dates, all times, all datetimes, or all timestamps
@@ -1539,6 +1550,16 @@ let yours = ["cuffs", "collar", "rope"]
 mine.intersection(yours)  // ["collar", "cuffs"]
 mine.union(yours)         // ["collar", "gag", "cuffs", "rope"]
 mine.difference(yours)    // ["gag"]
+```
+
+- `a + b` on two lists returns a new list of copies of `a`'s elements followed by `b`'s, keeping duplicates (unlike
+  `union`), and leaves both unchanged; its element types join as for `union`, and `items += more` stores it in `items`.
+  `items.addAll(other)` appends copies of the elements of the list `other` to `items` itself, each as `add` would. To
+  join a set, use `union`, or copy it into a list with `toList()` first:
+
+```text
+let menu = ["Back"] + options     // a new list; options is unchanged
+queue.addAll(nextRound)           // queue itself grows
 ```
 
 - Recoverable index and empty-selection errors follow the runtime recovery rules described later in this document.
