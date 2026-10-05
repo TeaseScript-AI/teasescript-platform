@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { FastForward } from "@lucide/vue";
+import { Badge } from "@/components/ui/badge";
 import type { DebugLog } from "./useDebugLog";
 import type { DevelopmentTime } from "./useDevelopmentTime";
 
@@ -12,9 +13,12 @@ const latest = computed(() => props.log.lines.value[0] ?? null);
 </script>
 
 <template>
-  <div v-if="time.autoSkip.value" class="development-time-badge" data-development-time-badge>
-    <FastForward aria-hidden="true" class="size-3.5" />
-    Auto-skip
+  <!-- Below the top bar's controls and clear of the right rail; status only, so it never takes a click from the Stage. -->
+  <div v-if="time.autoSkip.value" class="debug-status-placement" data-development-time-badge>
+    <Badge>
+      <FastForward aria-hidden="true" />
+      Auto-skip
+    </Badge>
   </div>
   <span role="status" class="sr-only" data-debug-announcement>
     <template v-if="latest">Debug log {{ latest.id }}: {{ latest.text }}</template>
@@ -22,25 +26,11 @@ const latest = computed(() => props.log.lines.value[0] ?? null);
 </template>
 
 <style scoped>
-/* Below the top bar's controls and clear of the right rail; status only, so it never takes a click from the Stage. */
-.development-time-badge {
+.debug-status-placement {
   position: absolute;
   z-index: 20;
   inset-block-start: calc(var(--player-edge-space) * 2 + var(--player-top-control-size));
   inset-inline-start: var(--player-edge-space);
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  max-inline-size: calc(100% - var(--player-timer-rail-width) - 3 * var(--player-edge-space));
-  padding: 0.25rem 0.625rem;
-  border: 1px solid var(--media-border);
-  border-radius: 9999px;
-  background: var(--media-surface);
-  color: var(--media-text);
-  box-shadow: 0 1px 3px var(--media-shadow);
-  backdrop-filter: blur(3px);
-  font-size: 0.75rem;
-  font-weight: 600;
   pointer-events: none;
 }
 </style>

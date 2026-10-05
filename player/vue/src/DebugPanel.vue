@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ChevronDown } from "@lucide/vue";
+import { ChevronDown, ChevronUp } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
 import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
+import Switch from "@/components/ui/switch/Switch.vue";
 import type { DebugLog } from "./useDebugLog";
 import type { DevelopmentTime } from "./useDevelopmentTime";
 
@@ -17,27 +18,26 @@ defineProps<{ time: DevelopmentTime; log: DebugLog }>();
   <div class="grid gap-4 p-4 text-xs" data-debug-panel>
     <section aria-labelledby="debug-time" class="grid gap-2">
       <h3 id="debug-time" class="font-semibold">Time</h3>
-      <Collapsible class="grid gap-1">
+      <Collapsible v-slot="{ open }" class="grid gap-1">
         <div class="flex items-center justify-between gap-2">
-          <CollapsibleTrigger class="debug-explanation-trigger" aria-label="About auto-skip">
-            <span id="debug-auto-skip">Auto-skip</span>
-            <ChevronDown aria-hidden="true" class="size-3.5" />
+          <CollapsibleTrigger as-child>
+            <Button variant="ghost" size="xs" aria-label="About auto-skip">
+              Auto-skip
+              <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
+            </Button>
           </CollapsibleTrigger>
-          <input
-            v-model="time.autoSkip.value"
-            type="checkbox"
-            role="switch"
-            aria-labelledby="debug-auto-skip"
-          />
+          <Switch v-model="time.autoSkip.value" aria-label="Auto-skip" />
         </div>
         <CollapsibleContent class="text-muted-foreground">
           Waits, timers and pacing pauses complete at once; while the script waits for your input, time runs normally.
         </CollapsibleContent>
       </Collapsible>
-      <Collapsible class="grid gap-1">
-        <CollapsibleTrigger class="debug-explanation-trigger" aria-label="About time jumps">
-          <span>Jumps</span>
-          <ChevronDown aria-hidden="true" class="size-3.5" />
+      <Collapsible v-slot="{ open }" class="grid gap-1">
+        <CollapsibleTrigger as-child>
+          <Button variant="ghost" size="xs" class="justify-self-start" aria-label="About time jumps">
+            Jumps
+            <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
+          </Button>
         </CollapsibleTrigger>
         <CollapsibleContent class="text-muted-foreground">
           Skip event jumps to the next wait, timer, pacing pause, or audio cue or end. +10 s and +1 min advance time while
@@ -79,31 +79,17 @@ defineProps<{ time: DevelopmentTime; log: DebugLog }>();
     </section>
     <section aria-labelledby="debug-log" class="grid gap-2">
       <h3 id="debug-log" class="font-semibold">Debug log</h3>
-      <ScrollArea
-        class="h-32 rounded-md border"
-        :viewport-attrs="{ tabindex: 0, role: 'region', 'aria-labelledby': 'debug-log' }"
-      >
-        <ol class="grid gap-0.5 p-2 font-mono text-muted-foreground" data-debug-log>
-          <li v-for="line in log.lines.value" :key="line.id">{{ line.text }}</li>
-          <li v-if="!log.lines.value.length">No entries yet.</li>
-        </ol>
-      </ScrollArea>
+      <div class="h-32 rounded-md border">
+        <ScrollArea
+          class="size-full"
+          :viewport-attrs="{ tabindex: 0, role: 'region', 'aria-labelledby': 'debug-log' }"
+        >
+          <ol class="grid gap-0.5 p-2 font-mono text-muted-foreground" data-debug-log>
+            <li v-for="line in log.lines.value" :key="line.id">{{ line.text }}</li>
+            <li v-if="!log.lines.value.length">No entries yet.</li>
+          </ol>
+        </ScrollArea>
+      </div>
     </section>
   </div>
 </template>
-
-<style scoped>
-.debug-explanation-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  justify-self: start;
-  border-radius: 0.25rem;
-  font-weight: 500;
-}
-.debug-explanation-trigger > svg { transition: rotate 150ms ease; }
-.debug-explanation-trigger[data-state="open"] > svg { rotate: 180deg; }
-@media (prefers-reduced-motion: reduce) {
-  .debug-explanation-trigger > svg { transition: none; }
-}
-</style>
