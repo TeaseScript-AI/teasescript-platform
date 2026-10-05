@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { X509Certificate } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { createPrivateKey, X509Certificate } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { get } from "node:https";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -25,6 +26,61 @@ test("the playground's HTTPS certificate covers its names and is made again only
   const renamed = await playgroundCertificate(projectRoot, ["localhost", "lan.test"]);
   assert.notEqual(renamed.cert, first.cert);
   assert.ok(new X509Certificate(renamed.cert).subjectAltName?.includes("DNS:lan.test"));
+});
+
+test("starts at the same time each get a matching pair, and one is kept for later starts", async (t) => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "playground-tls-race-"));
+  t.after(() => rm(projectRoot, { recursive: true, force: true }));
+  const pairs = await Promise.all(
+    [1, 2, 3].map(() => playgroundCertificate(projectRoot, ["localhost"])),
+  );
+  for (const pair of pairs)
+    assert.ok(new X509Certificate(pair.cert).checkPrivateKey(createPrivateKey(pair.key)));
+  const kept = await playgroundCertificate(projectRoot, ["localhost"]);
+  assert.ok(pairs.some((pair) => pair.cert === kept.cert));
+  // The kept file holds the private key, so only its owner may read it; Windows has no such file modes.
+  if (process.platform !== "win32") {
+    const mode =
+      (await stat(join(projectRoot, ".playground-tls", "certificate.json"))).mode & 0o777;
+    assert.equal(mode, 0o600);
+  }
+});
+
+test("a certificate about to expire is made again", async (t) => {
+  const projectRoot = await mkdtemp(join(tmpdir(), "playground-tls-expiry-"));
+  t.after(() => rm(projectRoot, { recursive: true, force: true }));
+  const folder = join(projectRoot, ".playground-tls");
+  await mkdir(folder, { recursive: true });
+  execFileSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-days",
+      "1",
+      "-subj",
+      "/CN=old",
+      "-keyout",
+      join(folder, "old-key.pem"),
+      "-out",
+      join(folder, "old-cert.pem"),
+    ],
+    { stdio: "ignore" },
+  );
+  const old = {
+    names: "localhost",
+    key: await readFile(join(folder, "old-key.pem"), "utf8"),
+    cert: await readFile(join(folder, "old-cert.pem"), "utf8"),
+  };
+  await writeFile(join(folder, "certificate.json"), JSON.stringify(old));
+  const renewed = await playgroundCertificate(projectRoot, ["localhost"]);
+  assert.notEqual(renewed.cert, old.cert);
+  assert.ok(
+    Date.parse(new X509Certificate(renewed.cert).validTo) > Date.now() + 30 * 24 * 60 * 60 * 1000,
+  );
 });
 
 test("with https the playground serves over TLS with its certificate", async (t) => {
