@@ -200,6 +200,8 @@ interface LowerContext {
   media: readonly MediaFile[] | null;
   /** The package's files as `packageFilePath` normalizes them; null without them. */
   files: ReadonlySet<string> | null;
+  /** The package's files as they are named, relative to the legacy data folder. */
+  actualFiles: readonly string[];
   /** `new File(path)` values that only `.exists()` reads, which convert to their path (fileTests). */
   fileValues: ReadonlySet<AstNode>;
   /** Variables that hold such a path. */
@@ -915,6 +917,7 @@ export function lowerParsedFile(
     elementRemovals: new Set(),
     media: options.media ?? null,
     files: options.files === undefined ? null : new Set(options.files.map(packageFilePath)),
+    actualFiles: options.files ?? [],
     fileValues: new Set(),
     fileVariables: new Set(),
     filePathOwners: new Map(),
@@ -1378,6 +1381,7 @@ function lowerHelperMethod(
     elementRemovals: elementRemovals(body),
     media: baseContext.media,
     files: baseContext.files,
+    actualFiles: baseContext.actualFiles,
     ...fileTests(body),
     checksUndefinedVariables: baseContext.checksUndefinedVariables,
     currentFunction: {
@@ -4145,13 +4149,13 @@ function lowerCallStatement(
       if (isNullConstant(args[0])) return [{ kind: "hideImage", span }];
       return oneArgumentStatement(args, context, node, (file) => ({
         kind: "showImage",
-        file,
+        file: mediaFile(file, "images", node, context),
         span,
       }));
     case "playSound":
       return oneArgumentStatement(args, context, node, (file) => ({
         kind: "playAudio",
-        file,
+        file: mediaFile(file, "sounds", node, context),
         async: false,
         repeatCount: null,
         span,
@@ -4821,7 +4825,8 @@ function lowerBackgroundSound(
       ),
     ];
   }
-  const file = lowerExpression(args[0]!, context);
+  const lowered = lowerExpression(args[0]!, context);
+  const file = lowered === null ? null : mediaFile(lowered, "sounds", node, context);
   const repeatCount = args[1] === undefined ? null : lowerExpression(args[1], context);
   if (file === null || (args[1] !== undefined && repeatCount === null)) {
     return [
@@ -11592,6 +11597,70 @@ function neutralValue(type: number): IrExpression {
   return { kind: "literal", value: null };
 }
 
+/**
+ * A literal media path as the package names the file: the legacy player found `images/` and `sounds/` files ignoring
+ * letter case, around spaces, and below a repeated folder name, and a MIDI file is converted to MP3 with the package.
+ * Other paths stay as they are; a path that several files match apart from case gets a note.
+ */
+function mediaFile(
+  file: IrExpression,
+  folder: "images" | "sounds",
+  node: AstNode,
+  context: LowerContext,
+): IrExpression {
+  if (file.kind !== "literal" || typeof file.value !== "string" || context.files === null)
+    return file;
+  const prefix = `${folder}/`;
+  const available = context.actualFiles
+    .filter((actual) => actual.toLowerCase().startsWith(prefix))
+    .map((actual) => actual.slice(prefix.length));
+  const written = file.value;
+  const candidates = [
+    written,
+    written.trim(),
+    written.replace(new RegExp(`^${folder}/`, "iu"), ""),
+    written.replace(/^([^/]+)\/\1\//u, "$1/"),
+  ];
+  const midi = (path: string): string => path.replace(/\.midi?$/iu, ".mp3");
+  for (const candidate of candidates) {
+    if (available.includes(candidate)) {
+      if (candidate !== written)
+        addDiagnostic(
+          context,
+          "SX_MEDIA_PATH",
+          "warning",
+          `The legacy player found "${written}" as the file "${candidate}"; the path names that file.`,
+          node.span,
+        );
+      return { kind: "literal", value: midi(candidate) };
+    }
+  }
+  for (const candidate of candidates) {
+    const matches = available.filter((actual) => actual.toLowerCase() === candidate.toLowerCase());
+    if (matches.length === 1) {
+      addDiagnostic(
+        context,
+        "SX_MEDIA_PATH",
+        "warning",
+        `The legacy player found "${written}" as the file "${matches[0]}" regardless of letter case; the path names that file.`,
+        node.span,
+      );
+      return { kind: "literal", value: midi(matches[0]!) };
+    }
+    if (matches.length > 1) {
+      addDiagnostic(
+        context,
+        "SX_MEDIA_PATH_CASE",
+        "warning",
+        `Several files match "${written}" apart from letter case (${matches.join(", ")}); the legacy player's file system held only one of them, so check which one this is.`,
+        node.span,
+      );
+      return file;
+    }
+  }
+  return { kind: "literal", value: midi(written) };
+}
+
 /** Audio files the legacy useFile() opened in the system's player. */
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".m4a", ".mid", ".midi"]);
 
@@ -11626,7 +11695,12 @@ function useFileStatements(
   return [
     {
       kind: "playAudio",
-      file: { kind: "literal", value: path },
+      file: mediaFile(
+        { kind: "literal", value: path.replace(/^sounds\//iu, "") },
+        "sounds",
+        node,
+        context,
+      ),
       async: true,
       repeatCount: null,
       span,

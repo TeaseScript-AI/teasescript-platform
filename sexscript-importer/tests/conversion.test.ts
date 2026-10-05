@@ -235,6 +235,50 @@ test(
   },
 );
 
+// The legacy player found media files ignoring letter case, around spaces, and below a repeated folder name; the
+// converted path names the file, and a MIDI file names the MP3 the package converts it to.
+test("names media files as the package holds them", { skip: parserUnavailable }, async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "sexscript-media-"));
+  try {
+    const sourcePath = path.join(directory, "media.groovy");
+    writeFileSync(
+      sourcePath,
+      [
+        'setImage("Peach/One.JPG")',
+        'setImage("peach/two.jpg ")',
+        'setImage("images/peach/three.jpg")',
+        'setImage("peach/peach/four.jpg")',
+        'playSound("music/theme.mid")',
+        'setImage("room/bed.jpg")',
+        "",
+      ].join("\n"),
+    );
+    const files = [
+      "images/peach/one.jpg",
+      "images/peach/two.jpg",
+      "images/peach/three.jpg",
+      "images/peach/four.jpg",
+      "images/room/Bed.jpg",
+      "images/room/bed.JPG",
+      "sounds/music/theme.mid",
+    ];
+    const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { files });
+    const source = emitTease(program!);
+    for (const expected of [
+      'showImage "peach/one.jpg"',
+      'showImage "peach/two.jpg"',
+      'showImage "peach/three.jpg"',
+      'showImage "peach/four.jpg"',
+      'playAudio "music/theme.mp3"',
+      'showImage "room/bed.jpg"',
+    ])
+      assert.ok(source.includes(`\n${expected}\n`), expected);
+    assert.match(source, /NOTE SX_MEDIA_PATH_CASE line 6/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 /** A fixture as the main.tease of a project, with a file that just ends for each file it transfers to. */
 function withTransferTargets(source: string): Array<{ path: string; source: string }> {
   const targets = [...source.matchAll(/^\s*goto "([^"]+)"/gmu)].map((match) => match[1]!);

@@ -39,7 +39,7 @@ if back != null {
 }
 // useFile() plays an audio file; a program cannot start from a package.
 // NOTE SX_USE_FILE_AUDIO line 11: useFile() opened this audio file in the system's player; it plays in the session here, without waiting.
-playAudio async "sounds/bell.mp3"
+playAudio async "bell.mp3"
 // TODO SX_EXTERNAL_PROGRAM line 12: useFile() opened this file with a program of the player's computer, such as a device control program or an executable; a TeaseScript package cannot start programs.
 // | useFile("tools/device.exe")
 // A device switch program shows the switch state.
