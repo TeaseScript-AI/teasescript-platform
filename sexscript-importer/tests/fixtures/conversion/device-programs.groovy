@@ -12,3 +12,9 @@ useFile(path + "/" + arm_finish)
 // An open CD tray is a button; clicking it closes the tray.
 openCdTrays()
 show("Put the key in the tray")
+// A command variable named for the switch state it sets shows that state.
+def switchbox_on = 0, switchbox_off = 0
+switchbox_on = "usbcontrol.exe " + loadInteger("training.switchbox") + " on"
+switchbox_on.toString().execute()
+switchbox_off = 1
+switchbox_off.toString().execute()

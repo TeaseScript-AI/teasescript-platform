@@ -14470,6 +14470,18 @@ function switchCommand(
       : targetNode;
   const commandType = inferType(commandNode, context.types);
   const literal = constantString(commandNode);
+  // A variable named for the switch state it sets, `switchbox_on`, holds that state's command.
+  const named = /switch\w*?_(on|off)$/iu.exec(variableName(commandNode) ?? "")?.[1]?.toLowerCase();
+  if (named !== undefined) {
+    addDiagnostic(
+      context,
+      "SX_SWITCH_BUTTON",
+      "warning",
+      "The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.",
+      node.span,
+    );
+    return useHelper(context, "switchButton", [{ kind: "literal", value: `switch ${named}` }]);
+  }
   if (literal !== null && switchState(literal) === null) return undefined;
   if (literal === null && commandNode.kind !== "gstring" && !onlyOf(commandType, STRING | NULL))
     return undefined;
