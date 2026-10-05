@@ -1,0 +1,86 @@
+--- a/scripts/toy__sha256_0d24d6c78bca.groovy
++++ b/scripts/toy__sha256_0d24d6c78bca.groovy
+@@ -109,6 +109,16 @@
+ 				java.time.Instant.ofEpochSecond(s), java.time.ZoneId.systemDefault());
+ 	}
+ 
++	// The text of a time as soonFormatter wrote it: "Monday at 3:05PM".
++	String soonText(int s) {
++		final local = s + localTimeOffset();
++		final day = ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"][(int) (local / DAY) % 7];
++		final minutes = (int) ((local % DAY) / 60);
++		final hour = (int) (minutes / 60);
++		final minute = minutes % 60;
++		return "$day at ${(hour + 11) % 12 + 1}:${minute < 10 ? '0' : ''}$minute${hour < 12 ? 'AM' : 'PM'}";
++	}
++
+ 	float localTime() {
+ 		// A float between 4.0 (4am) and 28.0 (4am)
+ 		def wallclock = ((getTime() + localTimeOffset()) % DAY) / HOUR;
+@@ -560,7 +570,7 @@
+ 			}
+ 			else {
+ 				if (stateIs("DEBUG")) {
+-					def timeStr = localTimeOf(e.event.time).format(soonFormatter);
++					def timeStr = soonText(e.event.time);
+ 					show("$e.name: $timeStr -> ${e.event.func}(${e.event.arg})");
+ 				}
+ 				else {
+--- a/scripts/toy/debug__sha256_9834187fedf9.groovy
++++ b/scripts/toy/debug__sha256_9834187fedf9.groovy
+@@ -3,7 +3,7 @@
+ 		return;
+ 	}
+ 	toy.metaClass.setupShowState {
+-		def localTimeStr = localTimeOf(getTime()).format(soonFormatter);
++		def localTimeStr = soonText(getTime());
+ 		show("localTime: $localTimeStr\noffsetSet: ${localTimeOffset()}\ntime_t: ${getTime()}");
+ 		showButton("OK");
+ 		show(
+--- a/scripts/toy/social.groovy
++++ b/scripts/toy/social.groovy
+@@ -221,15 +221,16 @@
+ 
+ 	toy.metaClass.showCalendar {
+ 		final events = loadEvents();
+-		show(
+-				[GYM, LUNCH, SHOPPING, PARTY].collect {
+-					final event = events[it];
+-					if (!event) return "";
+-					def s = event.time;
+-					def f = event.arg.friendName;
+-					def timeStr = localTimeOf(s).format(soonFormatter);
+-					return "$it with $f on $timeStr.\n".capitalize();
+-				}.join());
++		def text = "";
++		for (plan in [GYM, LUNCH, SHOPPING, PARTY]) {
++			if (!events.containsKey(plan)) continue;
++			final event = events[plan];
++			def s = event.time;
++			def f = event.arg.friendName;
++			def timeStr = soonText(s);
++			text += "$plan with $f on $timeStr.\n".capitalize();
++		}
++		show(text);
+ 		showButton("OK");
+ 		return;
+ 	};
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -106,6 +106,16 @@
+ 				java.time.Instant.ofEpochSecond(s), java.time.ZoneId.systemDefault());
+ 	}
+ 
++	// The text of a time as soonFormatter wrote it: "Monday at 3:05PM".
++	String soonText(int s) {
++		final local = s + localTimeOffset();
++		final day = ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"][(int) (local / DAY) % 7];
++		final minutes = (int) ((local % DAY) / 60);
++		final hour = (int) (minutes / 60);
++		final minute = minutes % 60;
++		return "$day at ${(hour + 11) % 12 + 1}:${minute < 10 ? '0' : ''}$minute${hour < 12 ? 'AM' : 'PM'}";
++	}
++
+ 	float localTime() {
+ 		// A float between 4.0 (4am) and 28.0 (4am)
+ 		def wallclock = ((getTime() + localTimeOffset()) % DAY) / HOUR;
