@@ -303,7 +303,8 @@ test(
 );
 
 // The GregorianCalendar idiom shows seconds as a clock that wraps at midnight, File.getName() is the last part of a
-// path with either separator, and `record.action()` calls the closure the record's field holds.
+// path with either separator, and `record.action()` calls the closure the record's field holds, also where the field
+// has the name of a pure method.
 test("converts clock texts, file names, and closures kept in record fields", { skip }, async () => {
   const source = await convert([
     "def maxSessionTime = 3725",
@@ -316,6 +317,9 @@ test("converts clock texts, file names, and closures kept in record fields", { s
     "def strike = hardSlap",
     "strike.action()",
     "soft.action()",
+    // A field may have the name of a pure text method, which the call does not make pure.
+    'def tidy = [label: "tidy", trim: { count = count + 100 }]',
+    "tidy.trim()",
     'show("${clock} ${wrapped} ${shortName} ${count}")',
     "def rolledDice = [3, 1, 2]",
     "rolledDice = rolledDice.sort()",
@@ -329,7 +333,7 @@ test("converts clock texts, file names, and closures kept in record fields", { s
   assert.match(source, /^sexscriptLegacyCall\(strike\.action, \[\]\)$/mu);
   assert.doesNotMatch(source, /TODO/u);
   assert.match(source, /^times\.sort\(\)$/mu);
-  assert.deepEqual(run(source), ["01:02:05 01:00 bed.jpg 11", "3,2,1 cba 2,5,9 3"]);
+  assert.deepEqual(run(source), ["01:02:05 01:00 bed.jpg 111", "3,2,1 cba 2,5,9 3"]);
 });
 
 // Every way a script may change a file keeps its reads manual: through another variable, as a rename target, below a

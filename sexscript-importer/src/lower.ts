@@ -3086,11 +3086,16 @@ function isPure(node: AstNode, context: LowerContext): boolean {
     if (call === null) return false;
     const target = asNode(node.object);
     const mathCall = target !== null && variableName(target) === "Math";
+    // A record's field may hold a closure of the same name as a pure method, which `record.trim()` calls.
+    const recordAction =
+      target !== null &&
+      context.java.text.closureFields.has(call.name) &&
+      (inferType(target, context.types) & OBJECT) !== 0;
     const pureCall = call.inherited
       ? DIRECT_STORAGE_LOADS.has(legacyApiCall(node, context)?.name ?? "")
       : mathCall
         ? PURE_MATH_METHODS.has(call.name)
-        : PURE_OBJECT_METHODS.has(call.name);
+        : PURE_OBJECT_METHODS.has(call.name) && !recordAction;
     return (
       pureCall &&
       (call.inherited || mathCall || target === null || pure(target)) &&
@@ -8790,7 +8795,7 @@ function lowerObjectMethodCallExpression(
       name === "size" || name === "length"
         ? `Groovy ${name}() counted the entries of this map, which is an object with fixed properties here; objects have no length. Use the map as a dict (#536) if it is a lookup table.`
         : name === "count"
-          ? "Groovy count() counted every occurrence of a text, overlapping ones too; it converts only for a literal text whose occurrences cannot overlap."
+          ? "Groovy count() counted every occurrence of a text, overlapping ones too; it converts where the searched value and the counted one are both proven text, and here one of them is not."
           : `Groovy string method ${name}() has no TeaseScript text operation in this form: regular expressions and tokenize() need manual work (a future .ts text library).`,
     );
   }
