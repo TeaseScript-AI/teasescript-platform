@@ -201,9 +201,11 @@ function focusOut(event: FocusEvent) {
   backdrop-filter: blur(3px);
   overflow: hidden;
 }
+/* Above the question and the controls, so a small viewfinder still shows the whole number. */
 .image-capture-countdown {
   position: absolute;
   inset: 0;
+  z-index: 1;
   display: grid;
   place-items: center;
   font-size: min(85cqh, 70cqw);

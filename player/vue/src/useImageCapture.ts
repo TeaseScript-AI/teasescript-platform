@@ -147,8 +147,14 @@ export function useImageCapture(host: ImageCaptureHost) {
     if (next) void openCamera(next);
   }
 
+  // The countdown's waiting step, cleared when the Player unmounts so no step outlives it.
+  let stepTimer: ReturnType<typeof setTimeout> | undefined;
   const countdownStep =
-    host.countdownStep ?? (() => new Promise<void>((resolve) => setTimeout(resolve, 1_000)));
+    host.countdownStep ??
+    (() =>
+      new Promise<void>((resolve) => {
+        stepTimer = setTimeout(resolve, 1_000);
+      }));
 
   /** Counts down, then takes the photo the player framed; a capture that ends meanwhile takes none. */
   async function shutter(): Promise<void> {
@@ -214,7 +220,10 @@ export function useImageCapture(host: ImageCaptureHost) {
   });
 
   // When the Player unmounts, the capture ends: its photo is dropped and a camera it opened turns off.
-  onScopeDispose(() => set(null));
+  onScopeDispose(() => {
+    clearTimeout(stepTimer);
+    set(null);
+  });
 
   const view = computed<ImageCaptureView | null>(() => {
     const target = capture.value;
