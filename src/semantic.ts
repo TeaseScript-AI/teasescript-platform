@@ -772,8 +772,11 @@ class SemanticValidator {
   }
 
   /** The button text is checked like any shown text; the click action runs later, like a timer expiry block. */
-  #validatePermanentButton(button: ShowPermanentButtonParts, scope: SemanticScope): void {
-    this.#validateExpression(button.text, scope, null);
+  *#validatePermanentButtonTask(
+    button: ShowPermanentButtonParts,
+    scope: SemanticScope,
+  ): CompileTask<void> {
+    yield* compileChild(this.#validateExpressionTask(button.text, scope, null));
     this.#pendingHandlers.push({
       block: button.handler,
       owner: "button",
@@ -1227,7 +1230,7 @@ class SemanticValidator {
         this.#validateTimer(statement, scope, false);
         return;
       case "showPermanentButtonStatement":
-        this.#validatePermanentButton(statement, scope);
+        yield* compileChild(this.#validatePermanentButtonTask(statement, scope));
         return;
       case "playMediaStatement":
         yield* compileChild(this.#validateMediaTask(statement, scope, false, null));
@@ -1838,7 +1841,7 @@ class SemanticValidator {
         this.#validateTimer(expression, scope, true);
         return;
       case "showPermanentButtonExpression":
-        this.#validatePermanentButton(expression, scope);
+        yield* compileChild(this.#validatePermanentButtonTask(expression, scope));
         return;
       case "playMediaExpression":
         yield* compileChild(this.#validateMediaTask(expression, scope, true, null));

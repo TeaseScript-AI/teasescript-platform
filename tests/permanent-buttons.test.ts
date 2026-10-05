@@ -382,6 +382,49 @@ test("permanent buttons need a block, shown text, and their own identifier", () 
   assert.deepEqual(errorCodes(`${button}removePermanentButton(stop, stop)\nexit`), ["TSV020"]);
 });
 
+test("a parameter default shows its button only when the argument is left out", () => {
+  const result = assertRuntimeResumeEquivalent(
+    [
+      'let other = showPermanentButton "Other" {',
+      "}",
+      'function make(button = showPermanentButton "Made" {',
+      '    say "made"',
+      "}) {",
+      "    return button",
+      "}",
+      "let first = make()",
+      "let second = make(other)",
+      "say first",
+      "say second",
+      "wait 1",
+      "exit",
+    ].join("\n"),
+    {
+      press: (_snapshot, events) =>
+        events.some((event) => event.kind === "permanentButtonPressed") ? null : 2,
+    },
+  );
+  assert.deepEqual(
+    result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ['<permanent button "Made">', '<permanent button "Other">', "made"],
+  );
+});
+
+test("deeply nested button text is checked without exhausting the native stack", () => {
+  const depth = 2_000;
+  const source = `let b = ${"showPermanentButton (".repeat(depth)}"x"${") {\n}".repeat(depth)}\nexit`;
+  // Every label but the innermost is a button, which cannot be shown; the checks report that instead of failing.
+  assert.deepEqual([...new Set(errorCodes(source))], ["TSV042"]);
+});
+
+test("mixing permanent buttons with other values suggests no unwritable type", () => {
+  const messages = compileSource(
+    'let b = showPermanentButton "x" {\n}\nlet values = [b, 1]\nexit',
+  ).diagnostics.map((diagnostic) => diagnostic.message);
+  assert.equal(messages.length, 1);
+  assert.match(messages[0]!, /keep permanent buttons apart/u);
+});
+
 test("restore rejects button state the runtime cannot produce", () => {
   const session = new Session(
     'let a = showPermanentButton "A" {\n    wait 1\n}\nshowPermanentButton "B" {\n}\nwait 10\nexit',

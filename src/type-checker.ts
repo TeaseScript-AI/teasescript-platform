@@ -3613,9 +3613,8 @@ class TypeChecker {
     const fix =
       property !== undefined
         ? `give '${property.name}' one type in every element`
-        : containsType(mixed, (part) => part.kind === "camera")
-          ? UNNAMED_MIX_FIX
-          : `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`;
+        : (unnamedMixFix(mixed) ??
+          `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`);
     this.#report(
       typeCode.mixedTypes,
       `${operation} would mix ${mixDescription(own, other)}. A ${kind} holds one type; ${fix}.`,
@@ -4780,9 +4779,8 @@ class TypeChecker {
       const fix =
         property !== undefined
           ? `give '${property.name}' one type in every element`
-          : containsType(mixed, (part) => part.kind === "camera")
-            ? UNNAMED_MIX_FIX
-            : `to keep both, declare a union type, as in '${name === undefined ? `let values: ${written}` : `${this.#keyword(name)} ${name}: ${written}`} = ...'`;
+          : (unnamedMixFix(mixed) ??
+            `to keep both, declare a union type, as in '${name === undefined ? `let values: ${written}` : `${this.#keyword(name)} ${name}: ${written}`} = ...'`);
       this.#report(
         typeCode.mixedTypes,
         `This ${kind} mixes ${mixDescription(first, other)}. A ${kind} holds one type; ${fix}.`,
@@ -6023,9 +6021,17 @@ function declarationName(declaration: Declaration): string {
   return declaration.kind === "forStatement" ? declaration.variable.name : declaration.name.name;
 }
 
-/** The fix for a mix whose union type has no written form, because a camera view's type has no name. */
-const UNNAMED_MIX_FIX =
-  "a camera view's type cannot be declared, so keep camera views apart from other values";
+/**
+ * The fix for a mix whose union type has no written form, because a camera view's or permanent button's type has no
+ * name, or `undefined` when the union can be declared.
+ */
+function unnamedMixFix(mixed: StaticType): string | undefined {
+  if (containsType(mixed, (part) => part.kind === "camera"))
+    return "a camera view's type cannot be declared, so keep camera views apart from other values";
+  if (containsType(mixed, (part) => part.kind === "permanentButton"))
+    return "a permanent button's type cannot be declared, so keep permanent buttons apart from other values";
+  return undefined;
+}
 
 /** Value kinds that `${...}` cannot show. */
 const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([

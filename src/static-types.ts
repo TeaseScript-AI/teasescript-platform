@@ -1310,7 +1310,8 @@ export function elementStoreType(type: StaticType): StaticType | undefined {
 
 /**
  * Whether a type can be written as an annotation without losing what the compiler knows. Objects with known properties
- * cannot, because a property type has no written form, and neither can camera views, whose type has no name.
+ * cannot, because a property type has no written form, and neither can camera views or permanent buttons, whose types
+ * have no name.
  */
 export function isAnnotatable(type: StaticType): boolean {
   return (
@@ -1321,6 +1322,7 @@ export function isAnnotatable(type: StaticType): boolean {
         part.kind === "never" ||
         part.kind === "open" ||
         part.kind === "camera" ||
+        part.kind === "permanentButton" ||
         (part.kind === "object" && part.properties !== null),
     )
   );

@@ -1872,6 +1872,7 @@ function validateFunctionPrologue(
           "validateCallReceiver",
           "jumpIfFalse",
           "jump",
+          "showPermanentButton",
         ])
       ) {
         errors.push(
