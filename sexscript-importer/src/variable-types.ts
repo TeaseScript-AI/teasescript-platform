@@ -268,6 +268,7 @@ export function enforceVariableTypes(
   knownResults: ReadonlyMap<string, TeaseType> = new Map(),
 ): VariableTypeResult {
   const accepted = runRounds(statements, knownResults);
+  const addedRecords = recordAdds(statements);
   const {
     bindings,
     appends,
@@ -388,7 +389,10 @@ export function enforceVariableTypes(
           // An empty list needs its element type written.
           if (placeholder?.kind === "list" && written !== null && next.type === undefined)
             next = { ...next, type: written };
-          if (next.type === undefined && recordsWithOptionalFields(statement.value))
+          if (
+            next.type === undefined &&
+            recordsWithOptionalFields(statement.value, addedRecords.get(statement.name))
+          )
             next = { ...next, type: "object[]" };
           const rewritten = withIntegerIndexes(next, indexes);
           if (textIntegers.has(statement)) result.textIntegers.push(rewritten);
@@ -1157,14 +1161,50 @@ function bindingType(binding: Binding): TeaseType | undefined {
   return type;
 }
 
+/** The record literals each list variable gets with `add`, by the variable's name. */
+function recordAdds(statements: readonly IrStatement[]): Map<string, IrExpression[]> {
+  const result = new Map<string, IrExpression[]>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!isRecord(value)) return;
+    const target = value.target;
+    const args = value.arguments;
+    const record = Array.isArray(args) && args.length === 1 ? args[0] : undefined;
+    if (
+      value.kind === "methodCall" &&
+      value.name === "add" &&
+      isRecord(target) &&
+      target.kind === "variable" &&
+      typeof target.name === "string" &&
+      isObjectLiteral(record)
+    )
+      result.set(target.name, [...(result.get(target.name) ?? []), record]);
+    for (const child of Object.values(value)) visit(child);
+  };
+  visit(statements);
+  return result;
+}
+
+function isObjectLiteral(value: unknown): value is Extract<IrExpression, { kind: "object" }> {
+  return isRecord(value) && value.kind === "object" && Array.isArray(value.properties);
+}
+
 /**
  * A list of records in which a field holds null in some records and a value in others, such as a description that one
  * kind of record leaves out. Groovy read each record's own field; a list of such records is declared `object[]`, whose
  * fields the runtime checks where they are used, since the field's static type would be optional in every record.
  */
-function recordsWithOptionalFields(value: IrExpression): boolean {
-  if (value.kind !== "list" || value.items.length < 2) return false;
-  const records = value.items;
+function recordsWithOptionalFields(
+  value: IrExpression,
+  /** The records later added to the list, `opts.add([lbl: "Back", ID: null])`. */
+  added: readonly IrExpression[] = [],
+): boolean {
+  if (value.kind !== "list") return false;
+  const records = [...value.items, ...added];
+  if (records.length < 2) return false;
   if (!records.every((item) => item.kind === "object" && item.dict !== true)) return false;
   const nulls = new Set<string>();
   const values = new Set<string>();
