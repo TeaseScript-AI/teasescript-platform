@@ -23,6 +23,22 @@ function sexscriptLegacyItemAt(listValue, positionValue) {
   }
   return listValue[positionValue]
 }
+function sexscriptLegacyReplaceChars(text, chars, keep, replacement, runs) {
+  let result = ""
+  let inRun = false
+  for character in text.split("") {
+    if chars.contains(character) == keep {
+      result = "${result}${character}"
+      inRun = false
+    } else {
+      if not (runs and inRun) {
+        result = "${result}${replacement}"
+      }
+      inRun = true
+    }
+  }
+  return result
+}
 // equals() compares values like ==.
 let name = "Anna"
 if name == "Anna" {
@@ -76,4 +92,8 @@ let pick = sexscriptLegacyRandom(positions.length) + 1
 if sexscriptLegacyItemAt(positions, pick) == "otk" {
   say "Over my knee"
 }
+// Java replaceAll() with a regular expression that text operations express.
+let serial = "ab12-x|[y]"
+// NOTE SX_SAY_MARKUP line 42: This legacy plain text contains a line-start list/heading/quote marker or a backslash escape that TeaseScript say renders as message markup; use escapeMarkup() if it must stay literal.
+say "${sexscriptLegacyReplaceChars(serial, "0123456789", true, "", false)} ${serial.replace("[", "").replace("]", "")} ${serial.replace("|", "/")}"
 exit

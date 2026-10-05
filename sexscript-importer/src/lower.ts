@@ -24,6 +24,7 @@ import { renameConflictingIdentifiers } from "./naming.ts";
 import { enforceVariableTypes, functionResultTypes, type TeaseType } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
 import { legacyHtmlToMarkup, type TextPart } from "./markup.ts";
+import { javaReplacementText, parseRegexSubset } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
@@ -8831,13 +8832,45 @@ function textOperation(
       operation = name;
       break;
     case "replaceAll": {
-      // Java replaceAll() takes a regular expression and a replacement pattern; only plain text is covered.
+      // Java replaceAll() takes a regular expression and a replacement pattern; the regular expressions that text
+      // operations express (regex-subset.ts) convert, with a replacement of plain text or a computed text.
       const pattern = literalText(argumentsNodes[0]);
-      const replacement = literalText(argumentsNodes[1]);
-      if (argumentsNodes.length !== 2 || pattern === null || replacement === null) return undefined;
-      if (/[\\^$.|?*+()[\]{}]/u.test(pattern) || /[\\$]/u.test(replacement)) return undefined;
-      operation = "replace";
-      break;
+      const subset = pattern === null ? null : parseRegexSubset(pattern);
+      if (argumentsNodes.length !== 2 || subset === null) return undefined;
+      const replacementText = literalText(argumentsNodes[1]);
+      const plain = replacementText === null ? null : javaReplacementText(replacementText);
+      if (replacementText !== null && plain === null) return undefined;
+      const target = lowerExpression(targetNode, context);
+      const computed = plain === null ? lowerExpression(argumentsNodes[1]!, context) : null;
+      if (target === null || (plain === null && computed === null)) return null;
+      const replacement: IrExpression =
+        plain !== null
+          ? { kind: "literal", value: plain }
+          : onlyOf(inferType(argumentsNodes[1]!, context.types), STRING)
+            ? computed!
+            : { kind: "template", parts: [{ value: computed! }] };
+      if (subset.kind === "literal")
+        return member("replace", [{ kind: "literal", value: subset.text }, replacement], target);
+      if (subset.kind === "alternatives")
+        return subset.texts.reduce<IrExpression>(
+          (text, search) =>
+            member("replace", [{ kind: "literal", value: search }, replacement], text),
+          target,
+        );
+      addDiagnostic(
+        context,
+        "SX_REGEX_CHARACTERS",
+        "info",
+        "Java replaced the characters this character class matched; a helper replaces them character by character.",
+        node.span,
+      );
+      return useHelper(context, "replaceChars", [
+        target,
+        { kind: "literal", value: subset.chars },
+        { kind: "literal", value: subset.negated },
+        replacement,
+        { kind: "literal", value: subset.runs },
+      ]);
     }
     case "split": {
       // Java split() takes a regular expression and drops trailing empty parts.
