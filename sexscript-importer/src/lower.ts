@@ -5904,12 +5904,29 @@ function lowerCollectionAssignment(
     result === null ? null : lowerCondition(result.value, context);
   let initial: IrExpression;
   let body: IrStatement[];
+  // A closure value with a part that needs its own statement, such as a ternary inside a text, is computed into a
+  // temporary first.
+  const computed = (node: AstNode): { statements: IrStatement[]; value: IrExpression } | null => {
+    if (findDeferred(node, context) === null) {
+      const value = lowerExpression(node, context);
+      return value === null ? null : { statements: [], value };
+    }
+    const temporary = freshName("value", context);
+    const variables = new Map(context.types.variables);
+    variables.set(temporary, inferType(node, context.types));
+    context.types = { ...context.types, variables };
+    const statements = lowerStatement(
+      syntheticAssignment(true, syntheticVariable(temporary, span), node, span),
+      context,
+    );
+    return { statements, value: { kind: "variable", name: temporary } };
+  };
   switch (call.name) {
     case "collect": {
-      const value = lowerExpression(result!.value, context);
+      const value = computed(result!.value);
       if (value === null) return failed();
       initial = { kind: "list", items: [] };
-      body = [...prefix, add(value)];
+      body = [...prefix, ...value.statements, add(value.value)];
       break;
     }
     case "findAll": {

@@ -41,3 +41,7 @@ def describe = { given ->
 	show("Mood " + mood.length())
 }
 describe(null)
+// A collected value with a ternary inside its text computes the ternary first, in the loop.
+def amounts = [1, 3]
+def labels = amounts.collect { "${it} stroke${it > 1 ? "s" : ""}" }
+show(labels.join(", "))
