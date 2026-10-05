@@ -15,6 +15,7 @@ import type { SerializableRuntimeValue } from "../src/runtime/serializable-value
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
+import { pressPermanentButton } from "../src/runtime/operations/press-permanent-button.js";
 import {
   createFreshRuntimeSnapshot,
   validateRuntimeSnapshot,
@@ -233,6 +234,22 @@ test("a timer expiry block may interrupt askImage, also across a checkpoint, and
   assert.equal(pendingImage(late).actionId, id);
   assert.equal(validateRuntimeSnapshot(late, plan).valid, true);
   const finished = runUntilExit(plan, answered(plan, late).snapshot).snapshot;
+  assert.equal(binding(finished, "pick"), IMAGE);
+});
+
+test("a permanent button's block may interrupt askImage, and the same request is answered after it", () => {
+  const { plan, snapshot } = started(
+    'let presses = 0\nshowPermanentButton "Help" {\n  presses = presses + 1\n}\nlet pick = askImage("Add an image")\nexit',
+  );
+  const id = pendingImage(snapshot).actionId;
+  const pressed = pressPermanentButton(plan, snapshot, 1);
+  assert.equal(pressed.outcome.kind, "pressed");
+  const after = run(plan, pressed.snapshot).snapshot;
+  assert.equal(binding(after, "presses"), 1);
+  assert.equal(pendingImage(after).actionId, id);
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, after)));
+  assert.deepEqual(restored.snapshot, after);
+  const finished = runUntilExit(plan, answered(plan, restored.snapshot).snapshot).snapshot;
   assert.equal(binding(finished, "pick"), IMAGE);
 });
 
