@@ -59,6 +59,8 @@ interface IrBase {
 export interface IrFunctionParameter {
   name: string;
   defaultValue: IrExpression | null;
+  /** The declared type, where a call passes null for a parameter whose default gives it a type (V30 §17). */
+  type?: string;
 }
 
 export type IrStatement =

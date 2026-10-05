@@ -165,11 +165,13 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
           ...comment.split("\n").map((line, index) => (index === 0 ? `${pad}${line}` : line)),
         );
       }
-      const parameters = statement.parameters.map((parameter) =>
-        parameter.defaultValue === null
-          ? parameter.name
-          : `${parameter.name} = ${emitExpression(parameter.defaultValue)}`,
-      );
+      const parameters = statement.parameters.map((parameter) => {
+        const name =
+          parameter.type === undefined ? parameter.name : `${parameter.name}: ${parameter.type}`;
+        return parameter.defaultValue === null
+          ? name
+          : `${name} = ${emitExpression(parameter.defaultValue)}`;
+      });
       lines.push(
         `${pad}${statement.global === true ? "global " : ""}function ${statement.name}${parameters.length === 0 ? "" : `(${parameters.join(", ")})`}${statement.returnType === undefined ? "" : `: ${statement.returnType}`} {`,
       );

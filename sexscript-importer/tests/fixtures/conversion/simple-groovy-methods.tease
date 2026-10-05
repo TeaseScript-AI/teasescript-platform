@@ -35,6 +35,27 @@ function sexscriptLegacyItemAt(listValue, positionValue2) {
   }
   return listValue[positionValue2]
 }
+function sexscriptLegacyTruth(value) {
+  if value is boolean {
+    return value
+  }
+  if value is number {
+    return value != 0
+  }
+  if value is string {
+    return value != ""
+  }
+  if value is list or value is set {
+    return value.length > 0
+  }
+  if value is dict {
+    return value.length > 0
+  }
+  if value is object {
+    return value != {}
+  }
+  return value != null
+}
 function sexscriptLegacyReplaceChars(text, chars, keep, replacement, runs) {
   let result = ""
   let inRun = false
@@ -116,4 +137,13 @@ let roomList = rooms()
 say "Where to?"
 let room = choose sexscriptLegacyMenuOptions(roomList, 0)
 say "Going to ${roomList[room]}"
+// A call that passes null for a parameter whose default gives it a type: the parameter takes null too.
+function afterLock(pre: boolean? = false) {
+  if sexscriptLegacyTruth(pre) {
+    say "Before"
+  } else {
+    say "After"
+  }
+}
+afterLock(null)
 exit

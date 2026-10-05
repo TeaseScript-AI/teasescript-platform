@@ -692,8 +692,10 @@ export function lowerPackage(
   if (scripts === null || options.standalone === true) {
     // Files converted on their own keep everything they need; a lone script of a package also asks the profile.
     const entryIndex = scriptIndexes.length === 1 ? scriptIndexes[0]! : null;
-    const programs = withClasses.map((program, index) =>
-      index === entryIndex ? withProfile(program, withClasses, accepted) : program,
+    const programs = withNullableParameters(
+      withClasses.map((program, index) =>
+        index === entryIndex ? withProfile(program, withClasses, accepted) : program,
+      ),
     );
     return {
       lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
@@ -734,12 +736,16 @@ export function lowerPackage(
       new Set([...project].filter((name) => !own.has(name))),
     );
   };
-  const main = apart(shared.main, true);
-  const programs = withClasses.map((program, index) => {
-    if (index === legacyMain) return main;
+  const apartMain = apart(shared.main, true);
+  const apartPrograms = withClasses.map((program, index) => {
+    if (index === legacyMain) return apartMain;
     const position = outputIndexes.indexOf(index);
     return position < 0 ? program : apart(shared.programs[position]!, false);
   });
+  // Calls in any file may pass null for a parameter whose default gives it a type.
+  const nullable = withNullableParameters([apartMain, ...apartPrograms]);
+  const main = nullable[0]!;
+  const programs = nullable.slice(1);
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
     composed: programs,
@@ -962,6 +968,57 @@ function startValue(type: string | undefined, inferred: TeaseType): IrExpression
   if (type === "string") return { kind: "literal", value: "" };
   if (type === "boolean") return { kind: "literal", value: false };
   return { kind: "literal", value: 0 };
+}
+
+/**
+ * The programs with an optional type on each parameter that a call of the package passes null where its default gives
+ * it a type, `pre = false` called as `postChastity(null)`: TeaseScript types the parameter by its default, while Groovy
+ * took the null (V30 §17).
+ */
+export function withNullableParameters(programs: readonly MigrationProgram[]): MigrationProgram[] {
+  const nulls = new Map<string, Set<number>>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!isRecord(value)) return;
+    if (value.kind === "call" && typeof value.name === "string" && Array.isArray(value.positional))
+      value.positional.forEach((argument: unknown, position) => {
+        if (isRecord(argument) && argument.kind === "literal" && argument.value === null)
+          nulls.set(String(value.name), (nulls.get(String(value.name)) ?? new Set()).add(position));
+      });
+    for (const child of Object.values(value)) visit(child);
+  };
+  for (const program of programs) visit(program.statements);
+  const scalar = (value: IrExpression | null): string | null =>
+    value?.kind !== "literal"
+      ? null
+      : typeof value.value === "boolean"
+        ? "boolean"
+        : typeof value.value === "string"
+          ? "string"
+          : typeof value.value === "number"
+            ? Number.isInteger(value.value)
+              ? "integer"
+              : "number"
+            : null;
+  return programs.map((program) => ({
+    ...program,
+    statements: program.statements.map((statement) => {
+      const positions = statement.kind === "function" ? nulls.get(statement.name) : undefined;
+      if (statement.kind !== "function" || positions === undefined) return statement;
+      return {
+        ...statement,
+        parameters: statement.parameters.map((parameter, position) => {
+          const type = positions.has(position) ? scalar(parameter.defaultValue) : null;
+          return type === null || parameter.type !== undefined
+            ? parameter
+            : { ...parameter, type: `${type}?` };
+        }),
+      };
+    }),
+  }));
 }
 
 /**
