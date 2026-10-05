@@ -374,7 +374,7 @@ export function emitExpression(expression: IrExpression): string {
         expression.speaker === undefined
           ? expression.input
           : `${expression.input} as ${expression.speaker} `;
-      return `${asked}(${expression.defaultValue === undefined ? "" : `default: ${emitExpression(expression.defaultValue)}`})`;
+      return `${asked}(${askArguments(expression).join(", ")})`;
     }
     case "choice":
     case "listChoice":
@@ -666,9 +666,19 @@ function emitValue(expression: IrExpression): string {
 function compactInput(expression: Extract<IrExpression, { kind: "input" }>): string {
   const asked =
     expression.speaker === undefined ? expression.input : `${expression.input} as ${expression.speaker}`;
-  return expression.defaultValue === undefined
-    ? asked
-    : `${asked} default: ${emitExpression(expression.defaultValue)}`;
+  const args = askArguments(expression);
+  // Without a question, `askInteger default: 3` has no comma (V30 §20).
+  return args.length === 0 ? asked : `${asked} ${args.join(", ")}`;
+}
+
+/** An ask's question and its `default:`, in that order. */
+function askArguments(expression: Extract<IrExpression, { kind: "input" }>): string[] {
+  return [
+    ...(expression.question === undefined ? [] : [emitExpression(expression.question)]),
+    ...(expression.defaultValue === undefined
+      ? []
+      : [`default: ${emitExpression(expression.defaultValue)}`]),
+  ];
 }
 
 /** `load key, default: value` (#541). */

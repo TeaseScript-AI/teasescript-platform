@@ -3,8 +3,7 @@ speaker system {
 }
 function sexscriptLegacyAskOnce(key, question) {
   if load(key) == null {
-    say as system question
-    save (askText as system) as key
+    save (askText as system question) as key
   }
   return load key
 }

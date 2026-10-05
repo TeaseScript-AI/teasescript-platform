@@ -1,4 +1,5 @@
 import type { IrExpression, IrStatement, MigrationDiagnostic } from "./ir.ts";
+import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
 
 /**
  * The legacy player had one text display, and every show() and question replaced the text before it, so authors
@@ -392,4 +393,75 @@ export function withoutRepeatedChainText<
       ],
     };
   });
+}
+
+const ASKING_STATEMENTS = new Set(["let", "assign", "expression", "if", "switch", "return", "save"]);
+
+/**
+ * An ask's text is its question, which the Player says in the chat as the asking speaker before the field opens
+ * (#634): a `say` right before a statement that asks once, with only comments between them and the same speaker,
+ * becomes that ask's question. A loop condition asks again on every round, and an ask that a condition may skip is
+ * no sure next step, so neither takes the question.
+ */
+export function withAskQuestions(
+  statements: IrStatement[],
+  diagnostics: MigrationDiagnostic[],
+): IrStatement[] {
+  const block = (items: IrStatement[]): IrStatement[] => {
+    const result: IrStatement[] = [];
+    for (const item of items) {
+      const statement = withNestedBlocks(item, block);
+      let position = result.length - 1;
+      while (position >= 0 && result[position]!.kind === "comment") position -= 1;
+      const previous = result[position];
+      const merged =
+        previous?.kind === "say" && previous.prose !== true
+          ? withQuestion(statement, previous)
+          : null;
+      if (merged === null) {
+        result.push(statement);
+        continue;
+      }
+      result.splice(position, 1);
+      result.push(merged);
+      diagnostics.push({
+        code: "SX_ASK_QUESTION",
+        severity: "info",
+        message: "The text said right before this ask is its question, which the Player says before the field opens.",
+        span: statement.span,
+      });
+    }
+    return result;
+  };
+  return block(statements);
+}
+
+/** The statement with its one sure ask taking the text as its question; null where it has no such single ask. */
+function withQuestion(statement: IrStatement, say: SayStatement): IrStatement | null {
+  if (!ASKING_STATEMENTS.has(statement.kind)) return null;
+  let asks = 0;
+  let sure = true;
+  const count = (value: IrExpression, guarded: boolean): void => {
+    if (value.kind === "input") {
+      asks += 1;
+      if (guarded || value.question !== undefined || value.speaker !== say.speaker) sure = false;
+    }
+    if (value.kind === "binary" && (value.operator === "and" || value.operator === "or")) {
+      count(value.left, guarded);
+      count(value.right, true);
+      return;
+    }
+    mapChildren(value, (child) => {
+      count(child, guarded);
+      return child;
+    });
+  };
+  mapOwnExpressions(statement, (value) => {
+    count(value, false);
+    return value;
+  });
+  if (asks !== 1 || !sure) return null;
+  const ask = (value: IrExpression): IrExpression =>
+    value.kind === "input" ? { ...value, question: say.value } : mapChildren(value, ask);
+  return mapOwnExpressions(statement, ask);
 }

@@ -39,7 +39,7 @@ import {
   type PackageResources,
 } from "./java-data.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
-import { withoutRepeatedText } from "./repeated-text.ts";
+import { withAskQuestions, withoutRepeatedText } from "./repeated-text.ts";
 import {
   enforceVariableTypes,
   functionResultTypes,
@@ -1342,7 +1342,7 @@ export function lowerParsedFile(
   const statements = [
     ...helperStatements(context.syntheticHelpers),
     ...javaDataStatements(context.java),
-    ...withoutRepeatedText(typedStatements, context.diagnostics),
+    ...withAskQuestions(withoutRepeatedText(typedStatements, context.diagnostics), context.diagnostics),
   ];
   if (body?.kind !== "block") {
     addDiagnostic(

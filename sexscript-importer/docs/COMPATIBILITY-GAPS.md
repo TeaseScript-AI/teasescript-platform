@@ -118,7 +118,11 @@ implemented):
 The importer converts these with an inline `NOTE` or reports them when it cannot prove equivalence:
 
 - `show()` replaced the single text area; `say` appends to a transcript. `show(null)` only cleared the text, so it is
-  dropped. Input functions showed their text like `show()`; a `null` text kept the current text.
+  dropped. Input functions showed their text like `show()`; a `null` text kept the current text. A text input's text
+  becomes the question of its ask, which the Player says before the field opens (#634): `askInteger "How many?",
+  default: 3`, also inside an expression as `askInteger("How many?", default: 3)`, where the text is said right before
+  the ask with the ask's speaker; otherwise it stays a `say` before the statement (counted as `askQuestions` in the
+  report).
 - `say` text is message markup: legacy `*emphasis*` renders as formatting and URLs become links. Line-start list,
   heading, or quote markers and backslash escapes get a `NOTE` (`escapeMarkup()` keeps text literal).
 - Single-field input prefilled its field with the default, also when the default was null (the field showed "null")
@@ -129,7 +133,7 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   (`"${level}"`, null staying null), and a list becomes `"[${list.join(", ")}]"`, as Groovy printed
   it; a map default is reported (`SX_INPUT_PREFILL_VALUE`). A default
   computed with side effects stays manual work for text and number input (`SX_INPUT_PREFILL_EFFECT`): legacy computed
-  it before showing the question, and the converted question is a `say` before the input.
+  it before showing the question, which the converted ask says only after the default.
 - Groovy turned a list into text as `[a, b]`; TeaseScript `${list}` selects one element and `say list` shows a quoted
   notation (PR #515). A list of text, numbers, and booleans becomes `"[${list.join(", ")}]"`; other lists are reported
   (`SX_COLLECTION_TEXT`). Groovy printed a whole `double` as `2.0`, where `${...}` shows `2`. Groovy `join()` had no

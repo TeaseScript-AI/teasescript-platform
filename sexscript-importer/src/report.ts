@@ -163,6 +163,8 @@ export interface FeasibilityReport {
   repeatedText: { dropped: number; shortened: number; kept: number; acrossChain: number };
   /** Literal image and sound paths that no file of the package matches (`SX_MEDIA_MISSING`). */
   missingMedia: number;
+  /** Asks that took the text said right before them as their question (`SX_ASK_QUESTION`, #634). */
+  askQuestions: number;
   /**
    * The order check: in each script's output, the NOTE and TODO comments that name a legacy line more than 20 lines
    * before the one the previous such comment names, summed over the scripts (lineOrderJumps). The output follows the
@@ -291,6 +293,7 @@ export function analyzeFeasibility(
     rootDiagnosticsByCode: emptyCounts(),
     repeatedText: { dropped: 0, shortened: 0, kept: 0, acrossChain: 0 },
     missingMedia: 0,
+    askQuestions: 0,
     backwardLineJumps: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
@@ -393,6 +396,7 @@ export function analyzeFeasibility(
       else if (code === "SX_REPEATED_TEXT_SHORTENED") report.repeatedText.shortened += 1;
       else if (code === "SX_REPEATED_TEXT_KEPT") report.repeatedText.kept += 1;
       else if (code === "SX_MEDIA_MISSING") report.missingMedia += 1;
+      else if (code === "SX_ASK_QUESTION") report.askQuestions += 1;
     }
     for (const { code } of packageProgram.diagnostics)
       if (code === "SX_REPEATED_TEXT_ACROSS_CHAIN") report.repeatedText.acrossChain += 1;

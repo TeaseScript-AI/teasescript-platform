@@ -937,11 +937,15 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ["key", "question"],
         [
           ifS(bin("==", { kind: "load", key: v("key") }, lit(null)), [
-            { kind: "say", value: v("question"), speaker: SYSTEM_SPEAKER, span: null },
             {
               kind: "save",
               key: v("key"),
-              value: { kind: "input", input: "askText", speaker: SYSTEM_SPEAKER },
+              value: {
+                kind: "input",
+                input: "askText",
+                question: v("question"),
+                speaker: SYSTEM_SPEAKER,
+              },
               span: null,
             },
           ]),

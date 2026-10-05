@@ -339,9 +339,13 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
         ? { ...expression, value: renamer.functions.get(expression.value) ?? expression.value }
         : expression;
     case "input":
-      return expression.defaultValue === undefined
-        ? expression
-        : { ...expression, defaultValue: child(expression.defaultValue) };
+      return {
+        ...expression,
+        ...(expression.question === undefined ? {} : { question: child(expression.question) }),
+        ...(expression.defaultValue === undefined
+          ? {}
+          : { defaultValue: child(expression.defaultValue) }),
+      };
   }
 }
 

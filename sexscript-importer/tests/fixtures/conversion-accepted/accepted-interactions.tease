@@ -5,8 +5,7 @@ say "Are you ready?"
 let ready = (choose yes: "Yes", no: "No") == "yes"
 say "Really?"
 let sure = (choose yes: "Yes, Mistress", no: "No") == "yes"
-say "How many?"
-let count = askInteger default: 10
+let count = askInteger "How many?", default: 10
 showPopup "Session starts now"
 showButton "Quick!", timeout: 3
 // A zero timeout showed the button for its 10 ms safety margin and returned 0.

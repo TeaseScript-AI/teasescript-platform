@@ -1965,9 +1965,11 @@ export function mapChildren(
         ),
       };
     case "input":
-      return value.defaultValue === undefined
-        ? value
-        : { ...value, defaultValue: map(value.defaultValue) };
+      return {
+        ...value,
+        ...(value.question === undefined ? {} : { question: map(value.question) }),
+        ...(value.defaultValue === undefined ? {} : { defaultValue: map(value.defaultValue) }),
+      };
     case "range":
       return { ...value, from: map(value.from), to: map(value.to) };
     case "unary":

@@ -163,10 +163,10 @@ export function legacyProfilePrompt(
   if (asked.includes("intro.name"))
     body.push(
       ifMissing("intro.name", [
-        say("What is your name?"),
         save(lit("intro.name"), {
           kind: "input",
           input: "askText",
+          question: lit("What is your name?"),
           defaultValue: lit("Slave"),
           speaker: SYSTEM_SPEAKER,
         }),

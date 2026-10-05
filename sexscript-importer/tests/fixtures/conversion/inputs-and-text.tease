@@ -1,7 +1,5 @@
-say "What is your name?"
-let name = askText
-say "Your weight?"
-let weight = askNumber default: 0
+let name = askText "What is your name?"
+let weight = askNumber "Your weight?", default: 0
 say "Hello ${name}, you said ${weight}."
 say "Choose a task"
 let task = choose 0: "Kneel",
@@ -22,8 +20,7 @@ if name != "" {
 // The question of an endless loop's condition is asked again in every round.
 let roundValue = 0
 while true {
-  say "Round ${roundValue}"
-  let ignoredAnswer1 = askText
+  let ignoredAnswer1 = askText "Round ${roundValue}"
   roundValue += 1
   if roundValue == 2 {
     break

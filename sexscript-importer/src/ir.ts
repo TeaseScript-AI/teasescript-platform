@@ -249,12 +249,14 @@ export type IrExpression =
    */
   | { kind: "listChoice"; options: IrListChoiceOption[] }
   /**
-   * Compact single-field input whose prompt, if any, was emitted as a preceding `say`. `defaultValue` prefills the
-   * field, written `askText default: value` (V30 §20).
+   * Single-field input. `question` is said in the chat before the field opens (#634); a lowered prompt is a preceding
+   * `say` until withAskQuestions moves it here. `defaultValue` prefills the field, written
+   * `askText "Name?", default: value` (V30 §20).
    */
   | {
       kind: "input";
       input: "askText" | "askNumber" | "askInteger";
+      question?: IrExpression;
       defaultValue?: IrExpression;
       /** Asks `as` this speaker. */
       speaker?: string;

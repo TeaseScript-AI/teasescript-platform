@@ -11,11 +11,9 @@ if (choose yes: "Yes", no: "No") == "yes" {
 say "Deciding.", instant
 wait 3
 // A question that repeats the text before it asks without saying it again.
-say "How many days?"
-let days = askInteger default: 3
+let days = askInteger "How many days?", default: 3
 // Interpolations compare when they interpolate the same value; an image in between keeps the text.
-say "Your name?"
-let name = askText default: "pet"
+let name = askText "Your name?", default: "pet"
 say "Hello ${name}."
 showImage "kneel.jpg"
 say "Kneel."
