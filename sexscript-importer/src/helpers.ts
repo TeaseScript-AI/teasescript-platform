@@ -81,6 +81,8 @@ export type HelperName =
   | "deviceButtons"
   | "showDevice"
   | "openTray"
+  | "askOnce"
+  | "deviceId"
   | "askText"
   | "compare"
   | "replaceChars"
@@ -131,6 +133,7 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
   if (needed.has("switchButton")) needed.add("switchButtonId");
   if (needed.has("askBooleansSystem")) needed.add("systemSpeaker");
   if (needed.has("showDevice") || needed.has("openTray")) needed.add("deviceButtons");
+  if (needed.has("askOnce")) needed.add("systemSpeaker");
   if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
   if (needed.has("stopBackgroundSounds")) needed.add("backgroundSounds");
   for (const name of needed)
@@ -175,6 +178,8 @@ const HELPER_ORDER: readonly HelperName[] = [
   "deviceButtons",
   "showDevice",
   "openTray",
+  "askOnce",
+  "deviceId",
   "askText",
   "compare",
   "replaceChars",
@@ -809,6 +814,54 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ),
             span: null,
           },
+        ],
+      ),
+  },
+  // Information the legacy player's computer provided, asked once as the system speaker and saved (owner decision).
+  askOnce: {
+    name: "sexscriptLegacyAskOnce",
+    build: () =>
+      fn(
+        "sexscriptLegacyAskOnce",
+        ["key", "question"],
+        [
+          ifS(bin("==", { kind: "load", key: v("key") }, lit(null)), [
+            { kind: "say", value: v("question"), speaker: SYSTEM_SPEAKER, span: null },
+            {
+              kind: "save",
+              key: v("key"),
+              value: { kind: "input", input: "askText", speaker: SYSTEM_SPEAKER },
+              span: null,
+            },
+          ]),
+          ret({ kind: "load", key: v("key") }),
+        ],
+      ),
+  },
+  // A random ID made once and saved, where the legacy script used the computer's network hardware address.
+  deviceId: {
+    name: "sexscriptLegacyDeviceId",
+    build: () =>
+      fn(
+        "sexscriptLegacyDeviceId",
+        [],
+        [
+          ifS(bin("==", { kind: "load", key: lit("system.deviceId") }, lit(null)), [
+            {
+              kind: "save",
+              key: lit("system.deviceId"),
+              value: template({
+                kind: "call",
+                name: "randomInteger",
+                positional: [
+                  { kind: "range", from: lit(0), to: lit(2147483647), inclusive: false },
+                ],
+                named: {},
+              }),
+              span: null,
+            },
+          ]),
+          ret({ kind: "load", key: lit("system.deviceId") }),
         ],
       ),
   },

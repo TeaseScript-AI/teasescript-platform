@@ -17,6 +17,7 @@ import {
   helperCall,
   allHelperStatements,
   helperStatements,
+  SYSTEM_SPEAKER,
   withActionDispatcher,
   type HelperName,
 } from "./helpers.ts";
@@ -4872,6 +4873,50 @@ function lowerCallStatement(
       return lowerSave(args, node, span, context);
     case "useFile":
       return useFileStatements(args, node, span, context);
+    case "useEmailAddress": {
+      if (args.length !== 1)
+        return [
+          unsupportedStatement(
+            context,
+            node,
+            "SX_CALL_ARITY",
+            "useEmailAddress() must have one argument.",
+          ),
+        ];
+      const address = lowerExpression(args[0]!, context);
+      if (address === null) return [];
+      addDiagnostic(
+        context,
+        "SX_EMAIL",
+        "warning",
+        "useEmailAddress() opened the computer's email program with this address, which a browser package cannot do: the player's email address is asked once as the system speaker, and a system notice says that the email is not sent.",
+        node.span,
+      );
+      return [
+        {
+          kind: "expression",
+          expression: useHelper(context, "askOnce", [
+            { kind: "literal", value: "system.emailAddress" },
+            { kind: "literal", value: "What is your email address?" },
+          ]),
+          span,
+        },
+        {
+          kind: "say",
+          value: templateOrLiteral([
+            {
+              text: "Sending email is not available here. The original would have opened an email to ",
+            },
+            address.kind === "literal" && typeof address.value === "string"
+              ? { text: address.value }
+              : { value: address },
+            { text: " in your email program." },
+          ]),
+          speaker: SYSTEM_SPEAKER,
+          span,
+        },
+      ];
+    }
     case "openCdTrays":
       addDiagnostic(
         context,
@@ -8505,6 +8550,8 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
       "Dynamic Groovy property access is not lowered automatically.",
     );
   }
+  const folder = playerFolder(targetNode, property, node, context);
+  if (folder !== undefined) return folder;
   const java = javaProperty(node, property, javaHost(context));
   if (java !== undefined) return java;
   // Groovy on the legacy Java read a list's private `size` field, and an array's `length`; no other legacy value had
@@ -8582,6 +8629,45 @@ function lowerObjectMethodCallExpression(
       node.span,
     );
     return { kind: "literal", value: "en" };
+  }
+  const systemProperty =
+    name === "getProperty" && variableName(targetNode) === "System" && argumentsNodes.length === 1
+      ? constantString(argumentsNodes[0])
+      : null;
+  if (systemProperty === "user.name" || systemProperty === "user.home") {
+    const [key, question, what] =
+      systemProperty === "user.name"
+        ? ["intro.name", "What is your name?", "the player's account name"]
+        : ["system.homeFolder", "Which folder is your home folder?", "the player's home folder"];
+    addDiagnostic(
+      context,
+      "SX_OS_INFO",
+      "warning",
+      `System.getProperty("${systemProperty}") read ${what} from the computer, which a browser does not provide; the player is asked once, as the system speaker, and the answer is saved as "${key}".`,
+      node.span,
+    );
+    return useHelper(context, "askOnce", [
+      { kind: "literal", value: key },
+      { kind: "literal", value: question },
+    ]);
+  }
+  if (
+    (name === "getAbsolutePath" || name === "getCanonicalPath") &&
+    argumentsNodes.length === 0 &&
+    targetNode !== null
+  ) {
+    const folder = playerFolder(targetNode, name, node, context);
+    if (folder !== undefined) return folder;
+  }
+  if (name === "collect" && targetNode !== null && isNetworkInterfaces(targetNode)) {
+    addDiagnostic(
+      context,
+      "SX_OS_INFO",
+      "warning",
+      "The legacy script read the network hardware addresses of the computer as an ID, which a browser does not provide; a random ID, made once and saved, stands in for them.",
+      node.span,
+    );
+    return { kind: "list", items: [useHelper(context, "deviceId", [])] };
   }
   if (
     name === "getProperty" &&
@@ -12959,6 +13045,51 @@ function fileExists(
     name: "contains",
     arguments: [useHelper(context, "packagePath", [path])],
   };
+}
+
+/**
+ * The full path of the legacy player's folder, `new File(".").absolutePath`, which the computer provided: asked once as
+ * the system speaker (owner decision). Undefined for another receiver or property.
+ */
+function playerFolder(
+  receiver: AstNode,
+  property: string,
+  node: AstNode,
+  context: LowerContext,
+): IrExpression | undefined {
+  if (
+    !isFileConstructor(receiver) ||
+    constantString(nodeArray(asNode(receiver.arguments)?.items)[0]) !== "." ||
+    !["absolutePath", "canonicalPath", "getAbsolutePath", "getCanonicalPath"].includes(property)
+  )
+    return undefined;
+  addDiagnostic(
+    context,
+    "SX_OS_INFO",
+    "warning",
+    'The legacy script read the full path of the player\'s folder on the computer, which a browser does not provide; the player is asked once, as the system speaker, and the answer is saved as "system.playerFolder".',
+    node.span,
+  );
+  return useHelper(context, "askOnce", [
+    { kind: "literal", value: "system.playerFolder" },
+    { kind: "literal", value: "Which folder holds your SexScripts player?" },
+  ]);
+}
+
+/** `NetworkInterface.networkInterfaces` or `NetworkInterface.getNetworkInterfaces()`. */
+function isNetworkInterfaces(node: AstNode): boolean {
+  const owner = asNode(node.object);
+  const ownerName = variableName(owner) ?? (owner?.kind === "class" ? text(owner.type) : null);
+  const named = (name: string | null): boolean =>
+    name === "NetworkInterface" || name === "java.net.NetworkInterface";
+  return (
+    (node.kind === "property" &&
+      constantString(node.property) === "networkInterfaces" &&
+      named(ownerName)) ||
+    (node.kind === "methodCall" &&
+      constantString(node.method) === "getNetworkInterfaces" &&
+      named(ownerName))
+  );
 }
 
 /**
