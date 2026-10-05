@@ -2,10 +2,12 @@
  * Serves the catalog page and the Player on one HTTPS origin, so that the Player runs in a secure context on another
  * machine. `/` and `/source/...` come from the catalog folder (the page, and the Groovy and `.tease` files as UTF-8
  * plain text); every other GET goes to the playground server that offers the converted packages, which should listen
- * on loopback only. `--http-port` adds a plain-HTTP port that redirects to the HTTPS origin.
+ * on loopback only. `--http-port` adds a plain-HTTP port that redirects to the HTTPS origin. With `--verified-root`
+ * and `--verified-upstream`, a package that has a verified copy in that folder is served by the playground server
+ * that offers the verified copies instead.
  *
  * Usage: node tools/serve-catalog.ts --catalog <folder> --upstream <http://127.0.0.1:port> --cert <pem> --key <pem>
- *   --port <https-port> [--http-port <port>] [--host <address>]
+ *   --port <https-port> [--http-port <port>] [--host <address>] [--verified-root <dir> --verified-upstream <url>]
  */
 import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
@@ -30,6 +32,8 @@ const { values } = parseArgs({
     port: { type: "string" },
     "http-port": { type: "string" },
     host: { type: "string", default: "0.0.0.0" },
+    "verified-root": { type: "string" },
+    "verified-upstream": { type: "string" },
   },
 });
 if (
@@ -46,6 +50,10 @@ if (
 }
 const catalogRoot = path.resolve(values.catalog);
 const upstream = new URL(values.upstream);
+const verifiedRoot =
+  values["verified-root"] === undefined ? null : path.resolve(values["verified-root"]);
+const verifiedUpstream =
+  values["verified-upstream"] === undefined ? null : new URL(values["verified-upstream"]);
 const httpsPort = Number(values.port);
 const host = values.host;
 
@@ -89,13 +97,25 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     return serveFile(pathname === "/" ? "/index.html" : pathname, request, response);
   // The playground's workspace automation trusts loopback clients, which every proxied request would be.
   if (pathname.startsWith("/api/")) return send(response, 404);
+  // A package's files and catalog come from its verified copy when it has one.
+  const packageId = /^\/dev-package\/([^/]+)\//u.exec(pathname)?.[1];
+  const verified =
+    packageId !== undefined &&
+    !packageId.startsWith(".") &&
+    verifiedRoot !== null &&
+    verifiedUpstream !== null &&
+    (await stat(path.join(verifiedRoot, packageId)).then(
+      (information) => information.isDirectory(),
+      () => false,
+    ));
+  const target = verified ? verifiedUpstream! : upstream;
   const proxied = httpRequest(
     {
-      hostname: upstream.hostname,
-      port: upstream.port,
+      hostname: target.hostname,
+      port: target.port,
       method: request.method,
       path: request.url,
-      headers: { ...request.headers, host: upstream.host },
+      headers: { ...request.headers, host: target.host },
     },
     (upstreamResponse) => {
       response.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
