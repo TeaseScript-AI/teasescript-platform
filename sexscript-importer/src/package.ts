@@ -45,6 +45,8 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "getDateTime",
   "getTime",
   "getTimestamp",
+  "max",
+  "min",
   "openUrl",
   "random",
   "randomInteger",

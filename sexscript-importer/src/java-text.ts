@@ -89,7 +89,7 @@ const URL_ENCODER = new Set(["URLEncoder", "java.net.URLEncoder"]);
 const STRING_CLASSES = new Set(["String", "java.lang.String"]);
 
 const MATH_NOTE =
-  "Java computed this with its own floating-point library; the generated helper computes it with ordinary arithmetic, which can differ in the last digits, and stops the script where Java gave NaN or Infinity, which are no TeaseScript numbers.";
+  "Java computed this with its own floating-point library; the generated helper computes it with ordinary arithmetic, which can differ in the last digits (more for very large angles of cos and sin), and stops the script where Java gave NaN or Infinity, which are no TeaseScript numbers.";
 const ENCODE_NOTE =
   "Java encoded every character as UTF-8; the generated helper encodes printable ASCII and Latin-1 characters, tabs, and line breaks the same way and stops the script at any other character, such as another control character or an emoji.";
 const NUMBER_TEXT_NOTE =

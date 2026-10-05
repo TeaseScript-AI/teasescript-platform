@@ -223,6 +223,12 @@ function trigonometry(name: string, sine: boolean): IrStatement {
         ),
         "number",
       ),
+      // Beyond 2^26 turns a multiple of the first part is no longer exact; the remainder keeps the angle in range.
+      ifS(bin("or", bin(">", v("turns"), lit(2 ** 26)), bin("<", v("turns"), lit(-(2 ** 26)))), [
+        set("angle", bin("%", v("value"), lit(2 * Math.PI))),
+        ifS(bin(">", v("angle"), lit(Math.PI)), [set("angle", lit(2 * Math.PI), "-=")]),
+        ifS(bin("<", v("angle"), lit(-Math.PI)), [set("angle", lit(2 * Math.PI), "+=")]),
+      ]),
       letS("square", bin("*", v("angle"), v("angle")), "number"),
       letS("term", sine ? v("angle") : lit(1.0), "number"),
       letS("sum", v("term"), "number"),

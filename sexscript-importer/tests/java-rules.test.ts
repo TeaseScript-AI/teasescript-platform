@@ -209,6 +209,8 @@ test("converts Java text, number, random, and collection APIs", { skip }, async 
     'show(URLEncoder.encode("Zoë & Bob", "UTF-8") + " " + URLEncoder.encode("a+b c/d*~", "UTF-8"))',
     `show("\${${close("Math.sqrt(16)", "4")}} \${${close("Math.sqrt(2)", "1.4142135623730951")}} \${${close("Math.log(Math.E)", "1")}} \${${close("Math.log(8) / Math.log(2)", "3")}}")`,
     `show("\${Math.pow(2, 10)} \${${close("Math.pow(9, 0.5)", "3")}} \${Math.pow(2, -2)} \${${close("Math.cos(Math.PI)", "-1")}} \${${close("Math.sin(Math.PI / 2)", "1")}}")`,
+    // Large angles reduce without losing the fraction, and beyond 2^26 turns stay within -1 to 1.
+    `show("\${${close("Math.sin(1e6)", "-0.34999350217129294")}} \${${close("Math.cos(12345.678)", "0.7101193587160628")}} \${Math.abs(Math.sin(1e18)) <= 1}")`,
     "def rnd = new Random()",
     "def roll = rnd.nextInt(6)",
     'show("${roll >= 0 && roll < 6} ${rnd.nextFloat() < 1} ${rnd.nextGaussian() < 100} ${rnd.nextBoolean() || true} ${Math.random() < 1}")',
@@ -243,6 +245,7 @@ test("converts Java text, number, random, and collection APIs", { skip }, async 
     "Zo%C3%AB+%26+Bob a%2Bb+c%2Fd*%7E",
     "true true true true",
     "1024 true 0.25 true true",
+    "true true true",
     "true true true true true",
     "aXc",
     "true false true false false true",
@@ -294,7 +297,7 @@ test(
     assert.match(source, /^scripts = \["Back"\] \+ scripts$/mu);
     assert.match(source, /^let pack = true$/mu);
     assert.match(source, /^let missing = false$/mu);
-    assert.doesNotMatch(source, /TODO/u);
+    assert.doesNotMatch(source, /TODO|MIGRATION INCOMPLETE/u);
     assert.deepEqual(run(source), ["abx", "OXY59B x3 1 C Back,a,Mid,b a", "false false true"]);
   },
 );
@@ -343,6 +346,14 @@ test("keeps reads of files that any write of the package may change", { skip }, 
     ['("scripts/quiz.txt" as File).write("x")', "scripts/quiz.txt"],
     ['new File("scripts/quiz.txt").absoluteFile.text = "x"', "scripts/quiz.txt"],
     ['new File("scripts/quiz.txt").with { write("x") }', "scripts/quiz.txt"],
+    [
+      'def dir = "scripts/da"; dir += "ta"; new File(dir + "/quiz.txt").delete()',
+      "scripts/data/quiz.txt",
+    ],
+    [
+      'def f = new File("scripts/data/other.txt"); f.parentFile.eachFile { it.delete() }',
+      "scripts/data/quiz.txt",
+    ],
   ];
   for (const [write, read] of writes) {
     const source = await convert([write, `def lines = new File("${read}").readLines()`], files);

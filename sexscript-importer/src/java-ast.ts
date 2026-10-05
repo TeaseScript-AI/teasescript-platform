@@ -13,6 +13,8 @@ export interface Tree {
   calls: AstNode[];
   /** Names that a declaration (`def name`, `Type name`) introduces, as opposed to script binding variables. */
   declared: Set<string>;
+  /** Names that a compound assignment (`+=`, `<<=`, ...) or `++`/`--` changes in place. */
+  mutated: Set<string>;
 }
 
 export function buildTree(root: AstNode): Tree {
@@ -24,6 +26,7 @@ export function buildTree(root: AstNode): Tree {
     constructors: [],
     calls: [],
     declared: new Set(),
+    mutated: new Set(),
   };
   const targets = new Set<AstNode>();
   const visit = (value: unknown, parent: AstNode | null): void => {
@@ -49,6 +52,14 @@ export function buildTree(root: AstNode): Tree {
       tree.assignments.set(name, list);
     }
     if (value.kind === "declaration" && name !== null) tree.declared.add(name);
+    const compound =
+      value.kind === "binary" &&
+      typeof value.operator === "string" &&
+      /^(?:[-+*/%&|^]|<<|>>>?|\*\*)=$/u.test(value.operator);
+    if (compound || value.kind === "postfix" || value.kind === "prefix") {
+      const changed = variableName(compound ? value.left : value.value);
+      if (changed !== null) tree.mutated.add(changed);
+    }
     if (value.kind === "constructorCall") tree.constructors.push(value);
     if (Array.isArray(value.parameters)) {
       for (const parameter of value.parameters)

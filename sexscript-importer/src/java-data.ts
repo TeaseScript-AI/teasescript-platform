@@ -671,7 +671,8 @@ function writtenPaths(tree: Tree): FileWrites {
       if (seen.has(name)) return [];
       seen.add(name);
       const values = tree.assignments.get(name) ?? [];
-      if (tree.parameters.has(name) || values.length === 0) return [unknownPattern()];
+      if (tree.parameters.has(name) || tree.mutated.has(name) || values.length === 0)
+        return [unknownPattern()];
       return values.flatMap((value) =>
         value === null || isNullConstant(value) ? [] : pathsOf(value, seen),
       );
@@ -736,16 +737,19 @@ function writtenPaths(tree: Tree): FileWrites {
     const member = memberOf(node, tree);
     if (member !== null) {
       // Members that hand out the files of a folder or another File: any file below may be written through them.
-      if (LISTING_FILE_MEMBERS.has(member.name))
+      // The parent of a File holds its siblings too.
+      if (LISTING_FILE_MEMBERS.has(member.name)) {
+        const parent = member.name === "parentFile" || member.name === "getParentFile";
         at(
           writes.escaped,
           member.call,
           pathsOf(node, new Set()).map((path) => ({
-            prefix: path.prefix,
+            prefix: parent ? path.prefix.replace(/[^\\/]*$/u, "") : path.prefix,
             suffix: "",
             complete: false,
           })),
         );
+      }
       // A closure that runs with the File as its delegate, as `file.with { write(text) }`, may write it.
       if (DELEGATE_MEMBERS.has(member.name))
         at(writes.direct, member.call, pathsOf(node, new Set()));
@@ -852,7 +856,8 @@ function constantPaths(tree: Tree): Map<string, string> {
   for (let changed = true; changed;) {
     changed = false;
     for (const [name, values] of tree.assignments) {
-      if (constants.has(name) || tree.parameters.has(name) || values.length !== 1) continue;
+      if (constants.has(name) || tree.parameters.has(name) || tree.mutated.has(name)) continue;
+      if (values.length !== 1) continue;
       const value = values[0];
       if (value === null || value === undefined) continue;
       const pattern = pathPattern(value, constants);
