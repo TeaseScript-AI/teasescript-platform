@@ -2477,6 +2477,18 @@ function lowerStatementNode(node: AstNode, context: LowerContext): IrStatement[]
         ];
       }
       return [{ kind: node.kind, span: node.span }];
+    case "tryCatch": {
+      const kept = tryBody(node, context);
+      if (kept !== null) return kept;
+      return [
+        unsupportedStatement(
+          context,
+          node,
+          "SX_UNSUPPORTED_STATEMENT",
+          `Unsupported Groovy statement: ${node.kind}`,
+        ),
+      ];
+    }
     default:
       return [
         unsupportedStatement(
@@ -2487,6 +2499,82 @@ function lowerStatementNode(node: AstNode, context: LowerContext): IrStatement[]
         ),
       ];
   }
+}
+
+/** Calls and constructions whose failure a legacy catch handled: number parsing, files, network, and programs. */
+const FALLIBLE_CALLS = new Set([
+  "parseInt",
+  "parseDouble",
+  "parseFloat",
+  "parseLong",
+  "valueOf",
+  "toInteger",
+  "toDouble",
+  "toFloat",
+  "toLong",
+  "toBigDecimal",
+  "toURL",
+  "openConnection",
+  "openStream",
+  "readLines",
+  "getText",
+  "newReader",
+  "withReader",
+  "eachLine",
+  "execute",
+  "exitValue",
+  "waitFor",
+  "waitForOrKill",
+  "getBytes",
+  "decode",
+]);
+
+/**
+ * A try block whose body has nothing that fails on purpose, such as waits, sounds, or device states: TeaseScript has no
+ * exceptions, so the body runs in its own block without the catch, then the finally block, with a note. Null for a
+ * body that may throw what the catch handled, or that does not convert.
+ */
+function tryBody(node: AstNode, context: LowerContext): IrStatement[] | null {
+  const block = asNode(node.try);
+  const after = asNode(node.finally);
+  if (block?.kind !== "block") return null;
+  let fallible = false;
+  walkAst(block, (child) => {
+    if (child.kind === "throw" || child.kind === "cast") fallible = true;
+    if (child.kind === "methodCall" && FALLIBLE_CALLS.has(constantString(child.method) ?? ""))
+      fallible = true;
+    if (
+      child.kind === "constructorCall" &&
+      /URL|Reader|Stream|Socket|Process|File/u.test(String(child.type))
+    )
+      fallible = true;
+  });
+  if (fallible) return null;
+  const diagnostics = context.diagnostics.length;
+  const body = lowerBlock(block, context);
+  if (context.diagnostics.slice(diagnostics).some(({ severity }) => severity === "error")) {
+    context.diagnostics.length = diagnostics;
+    return null;
+  }
+  const last = after?.kind === "block" ? lowerBlock(after, context) : [];
+  addDiagnostic(
+    context,
+    "SX_TRY_WITHOUT_CATCH",
+    "warning",
+    "Legacy caught errors in this block; TeaseScript has no exceptions, so the block runs without its catch, and an error here stops the script.",
+    node.span,
+  );
+  // The block keeps its own scope, as Groovy's try block did.
+  return [
+    {
+      kind: "if",
+      condition: { kind: "literal", value: true },
+      then: body,
+      else: [],
+      span: node.span ?? null,
+    },
+    ...last,
+  ];
 }
 
 /**
