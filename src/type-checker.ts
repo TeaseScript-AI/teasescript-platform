@@ -2582,7 +2582,7 @@ class TypeChecker {
   }
 
   /**
-   * The message of `askImage` is shown text, the sources are booleans, and `types:` and `mime:` are lists of texts. Written
+   * The message (question) and hint of `askImage` are shown text, the sources are booleans, and `types:` and `mime:` are lists of texts. Written
    * values must be valid, and written sources must leave the player a way to answer.
    */
   *#askImageTask(expression: CallExpression, scope: Scope): CompileTask<void> {
@@ -2590,7 +2590,8 @@ class TypeChecker {
     for (const argument of expression.arguments) {
       const type = yield* compileChild(this.#expressionTask(argument.value, scope));
       const name = argument.kind === "namedArgument" ? argument.name.name : "message";
-      if (name === "message") this.#checkShownText(argument.value, type, "an input hint");
+      if (name === "message") this.#checkShownText(argument.value, type, "an ask question");
+      else if (name === "hint") this.#checkShownText(argument.value, type, "an input hint");
       else if (name === "allowCamera" || name === "allowFile") {
         this.#reportUnless(
           type,

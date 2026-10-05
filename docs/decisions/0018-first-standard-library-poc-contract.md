@@ -244,6 +244,8 @@ let day = askDate hint: "Pick a day"
 - The question is said once. A refused answer, a timer or button block that interrupts the field, and a restored
   checkpoint show the open field again without saying the question again. Running the ask again, as in a loop, asks
   again.
+- `askImage(...)` follows the same rule (Owner decision, 2026-10-05): its message, positional or `message:`, is the
+  question, which the Player also keeps on the camera viewfinder, and `hint:` is the composer's help text.
 - `hint:` keeps the field-text rules above: without it the field uses its localized default, and an explicit empty
   hint shows none while the control keeps its accessible name. Neither the question nor the hint becomes the
   accessible name.
