@@ -115,6 +115,7 @@ function focusOut(event: FocusEvent) {
   align-items: center;
   gap: 8px;
   padding: 8px;
+  overflow: hidden;
   color: var(--media-text);
   container: image-capture / size;
 }
@@ -168,10 +169,11 @@ function focusOut(event: FocusEvent) {
   overflow-y: auto;
   font-weight: 700;
 }
+/* One row, so the controls never push the question out of a small viewfinder. */
 .image-capture-controls {
   position: relative;
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: center;
   align-items: center;
   gap: 8px;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { before } from "node:test";
-import { ref, shallowRef, type Ref, type ShallowRef } from "vue";
+import { effectScope, ref, shallowRef, type Ref, type ShallowRef } from "vue";
 import { createServer } from "vite";
 
 import { CapturedMediaStore } from "../player/captured-media.js";
@@ -103,18 +103,22 @@ function harness(
   );
   const generation = ref(1);
   const cameraRevision = ref(0);
-  const capture = useImageCapture({
-    session,
-    generation,
-    sessionCamera,
-    captureCamera: camera,
-    cameraRevision,
-    media,
-    offered,
-    observe: () => session.value,
-    publish: (next: PlayerRuntimeSession) => (session.value = next),
-  });
-  return { media, camera, sessionCamera, session, generation, cameraRevision, capture };
+  // As in the Player, the capture lives in the session host's scope.
+  const scope = effectScope();
+  const capture = scope.run(() =>
+    useImageCapture({
+      session,
+      generation,
+      sessionCamera,
+      captureCamera: camera,
+      cameraRevision,
+      media,
+      offered,
+      observe: () => session.value,
+      publish: (next: PlayerRuntimeSession) => (session.value = next),
+    }),
+  )!;
+  return { media, camera, sessionCamera, session, generation, cameraRevision, capture, scope };
 }
 
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -248,4 +252,14 @@ test("a camera that ends while the player frames or reviews the photo offers Try
   cameraRevision.value++;
   capture.retake();
   assert.equal(capture.view.value?.phase, "unavailable");
+});
+
+test("unmounting the Player ends the capture: its photo is dropped and the camera it opened turns off", async () => {
+  const { media, camera, capture, scope } = harness(SELFIE);
+  await settled();
+  await capture.shutter();
+  assert.equal(capture.view.value?.phase, "review");
+  scope.stop();
+  assert.equal(camera.released, 1);
+  assert.equal(media.holds(camera.taken[0]!, "image"), false);
 });

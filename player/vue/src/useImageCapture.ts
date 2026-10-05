@@ -1,4 +1,4 @@
-import { computed, shallowRef, watch, type Ref, type ShallowRef } from "vue";
+import { computed, onScopeDispose, shallowRef, watch, type Ref, type ShallowRef } from "vue";
 import type { CapturedMediaStore } from "../../captured-media.js";
 import {
   activePlayerRuntimeInteraction,
@@ -189,6 +189,9 @@ export function useImageCapture(host: ImageCaptureHost) {
     if (target?.phase === "live" && !cameraOf(target).available)
       update(target, { phase: "unavailable" });
   });
+
+  // When the Player unmounts, the capture ends: its photo is dropped and a camera it opened turns off.
+  onScopeDispose(() => set(null));
 
   const view = computed<ImageCaptureView | null>(() => {
     const target = capture.value;
