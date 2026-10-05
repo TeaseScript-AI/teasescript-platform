@@ -3752,6 +3752,7 @@ function lowerClosureDeclaration(
 ): IrStatement[] {
   if (context.functionDepth !== 0) {
     // A closure stored in a local variable inside a function becomes an action ID called via the dispatcher.
+    // One that cannot convert stays declared without an action, so the code that uses it still compiles.
     const value = lowerClosureValue(closure, context, name);
     return value === null
       ? [
@@ -3761,6 +3762,7 @@ function lowerClosureDeclaration(
             "SX_NESTED_CLOSURE",
             "Nested Groovy closures are not lowered automatically.",
           ),
+          { kind: "let", name, value: { kind: "literal", value: null }, span },
         ]
       : [{ kind: "let", name, value, span }];
   }
