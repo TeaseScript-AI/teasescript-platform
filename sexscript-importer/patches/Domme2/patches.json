@@ -1,0 +1,25 @@
+{
+  "patches": [
+    {
+      "id": "sleep-punish-point",
+      "layer": "source",
+      "category": "e",
+      "reason": "\"You earned yourself a punish point.\" calls punish() without the count; Groovy passes null, and punish's 1..i loop fails on 1..null. Every other caller passes the points it announces; pass 1.",
+      "diff": "sleep-punish-point.diff"
+    },
+    {
+      "id": "inform-punish-closure",
+      "layer": "source",
+      "category": "e",
+      "reason": "inform awards \"5 punish points only for thinking about quitting\" with punish(5), but unlike its sibling scripts it never defines punish, and script-local closures are not shared, so Groovy failed there. Add the same punish closure that sleep.groovy defines.",
+      "diff": "inform-punish-closure.diff"
+    },
+    {
+      "id": "eat-ben-wa-chance",
+      "layer": "source",
+      "category": "e",
+      "reason": "eat's ben-wa-balls feedback raises or lowers chanceBenWaBalls and saves it as domme2.chanceBenWaBalls, but only chores declares and loads that variable, so Groovy failed on the first ++/--. Load it at the top of eat exactly as chores does.",
+      "diff": "eat-ben-wa-chance.diff"
+    }
+  ]
+}

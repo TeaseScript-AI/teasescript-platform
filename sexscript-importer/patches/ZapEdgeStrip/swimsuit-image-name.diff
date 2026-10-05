@@ -1,0 +1,11 @@
+--- a/scripts/ZapEdgeStrip.groovy
++++ b/scripts/ZapEdgeStrip.groovy
+@@ -78,7 +78,7 @@
+ 		return "shortsM.png"
+ 	if((name.count("sweat")>0&&name.count("pants")>0)||(name.count("track")>0&&
+ 		(name.count("bottom")>0||name.count("pants")>0)))return "sweatpantsM.png"
+-	if(loadBoolean("intro.female")&&name.count("swim")>0)return "swipsuitF.png"
++	if(loadBoolean("intro.female")&&name.count("swim")>0)return "swimsuitF.png"
+ 	if(loadBoolean("intro.female")&&name.count("thong")>0)return "thongF.png"
+ 	if(!loadBoolean("intro.female")&&name.count("thong")>0)return "thongM.png"
+ 	if(name.count("tie")>0)return "tieM.png"

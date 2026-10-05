@@ -1,0 +1,13 @@
+--- a/scripts/toy/toys__sha256_192375d76f46.groovy
++++ b/scripts/toy/toys__sha256_192375d76f46.groovy
+@@ -73,8 +73,8 @@
+ 	toy.metaClass.backgroundRemoveAllToys {
+ 		// Assume toy will release himself
+ 		toys.findAll { s, t -> stateIs(s) }.each {
+-			removeEvent("$RELEASEFROM-$it");
+-			set(it, false);
++			removeEvent("$RELEASEFROM-${it.key}");
++			set(it.key, false);
+ 		};
+ 	}
+ 

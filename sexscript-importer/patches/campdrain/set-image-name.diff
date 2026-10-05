@@ -1,0 +1,22 @@
+--- a/scripts/campdrain/day1.groovy
++++ b/scripts/campdrain/day1.groovy
+@@ -687,7 +687,7 @@
+ 					// PLAY STROKING ROUNDS AS SET ABOVE
+ 					ss.playBPMList(this, 10, 10, imgList, msgList, bpmList);
+ 					
+-					showImage("milovana/12017/290-7c088287baeabfe4c5334053f28d1d61f876c531.jpg");
++					setImage("milovana/12017/290-7c088287baeabfe4c5334053f28d1d61f876c531.jpg");
+ 					show("You can drain on my titties if you'd like but then your time here will be over!");
+ 					wait(10);
+ 					
+--- a/scripts/campdrain/day2.groovy
++++ b/scripts/campdrain/day2.groovy
+@@ -684,7 +684,7 @@
+ 					// PLAY STROKING ROUNDS AS SET ABOVE
+ 					ss.playBPMList(this, 10, 10, imgList, msgList, bpmList);
+ 					
+-					showImage("milovana/12017/290-7c088287baeabfe4c5334053f28d1d61f876c531.jpg");
++					setImage("milovana/12017/290-7c088287baeabfe4c5334053f28d1d61f876c531.jpg");
+ 					show("You can drain on my titties if you'd like but then your time here will be over!");
+ 					wait(10);
+ 					

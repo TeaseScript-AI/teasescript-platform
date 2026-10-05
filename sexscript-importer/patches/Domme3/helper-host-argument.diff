@@ -1,0 +1,48 @@
+--- a/scripts/Domme3/ask.groovy
++++ b/scripts/Domme3/ask.groovy
+@@ -148,7 +148,7 @@
+ 							show("You have done "+choresdone+" chores today.")
+ 							wait(7)
+ 							if(choresdone>3) {
+-								if(Domme3.percentChance(75)) {
++								if(Domme3.percentChance(this,75)) {
+ 									def text = ["Yes, you may have some fun.\n\nEnjoy your fun!\n\nChoose wisely.",
+ 												"Yes you may play as long as you want.\n\nBut remember to come back and keep asking all the things you have to ask!",]
+ 									show(text[getRandom(2)])		
+@@ -270,13 +270,13 @@
+ 						showButton("Have the brush, Miss.")
+ 						show("Bare your ass and bend over.")
+ 						showButton("Ready, Miss.")
+-						Domme3.spank("Alternate cheeks!",20,1)
++						Domme3.spank(this,"Alternate cheeks!",20,1)
+ 						show("Enjoying?")
+ 						wait(7)
+ 						show("Well it is about to get worse because I want you to pick up the paddle.")
+ 						wait(8)
+ 						showButton("Have the paddle, Miss.")
+-						Domme3.spank("Slap your ass, alternating cheeks",40,1)
++						Domme3.spank(this,"Slap your ass, alternating cheeks",40,1)
+ 						wait(2)
+ 						show("Now try sitting down and enjoy your break!")
+ 						wait(8)
+@@ -696,16 +696,16 @@
+ 							show("Hold your left hand flat and the ruler in your right hand.\n\n"+
+ 								 "You will smack your hand, hard!")
+ 							showButton("ready to smack, Miss.")	 
+-							Domme3.spank("Smack!",5,1)
++							Domme3.spank(this,"Smack!",5,1)
+ 							show("Switch hands.")
+ 							showButton("ready to smack, Miss.")	
+-							Domme3.spank("Smack!",5,1)
++							Domme3.spank(this,"Smack!",5,1)
+ 							show("Switch hands.")
+ 							showButton("ready to smack, Miss.")	
+-							Domme3.spank("Smack!",5,1)
++							Domme3.spank(this,"Smack!",5,1)
+ 							show("Switch hands.")
+ 							showButton("ready to smack, Miss.")	
+-							Domme3.spank("Smack!",5,1)
++							Domme3.spank(this,"Smack!",5,1)
+ 							show("This will teach you to wash your hands!")
+ 							showButton("Thank you, Miss.")	
+ 						}

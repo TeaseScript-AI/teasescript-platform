@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "photo-reference",
+      "layer": "source",
+      "category": "b",
+      "reason": "The mistress asks for a photo of the player's red bottom, copies the chosen file byte by byte into images/SpankingTime/ under its own file name, and shows it again a few steps later. A browser package cannot write into its image folder, and the converter already turns the file chooser into the Player's photo (takePhoto()). Keep the photo reference itself and show it, instead of the file copy and the rebuilt path.",
+      "diff": "photo-reference.diff"
+    }
+  ]
+}
