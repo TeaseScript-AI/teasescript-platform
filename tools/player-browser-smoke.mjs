@@ -1419,6 +1419,13 @@ async function viewfinderScenario(cdp, origin) {
     await waitFor(cdp, `${sidebarVisible} === ${JSON.stringify(expected)}`);
     assertEqual(await value(cdp, place), shown, "Toggling the sidebar moved the viewfinder");
   }
+  // The player's mirroring choice follows the view from the window to the Stage.
+  await click(cdp, "[data-floating-viewfinder] [data-viewfinder-mirror]");
+  assertEqual(
+    await value(cdp, `getComputedStyle(${video}).transform`),
+    "none",
+    "The flip button did not flip",
+  );
   // The script takes the photo from the same open camera; the view stays, and the photo is not mirrored.
   await takePhoto();
   await waitFor(cdp, `document.body.innerText.includes("There you are. I'll keep that one.")`);
@@ -1447,6 +1454,11 @@ async function viewfinderScenario(cdp, origin) {
     `Math.abs(${stageAspect} - ${video}.videoWidth / ${video}.videoHeight) < 0.01`,
     8_000,
     "The Stage did not take the camera's aspect",
+  );
+  assertEqual(
+    await value(cdp, `getComputedStyle(${video}).transform`),
+    "none",
+    "The Stage view lost the window's mirroring choice",
   );
   // Centred on the Stage like the image underneath, also where a narrow Stage cannot take the camera's aspect.
   await setViewport(cdp, 390, 844);
