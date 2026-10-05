@@ -72,3 +72,20 @@
  						if (reqs.size() > 0) opts.push([ lbl:"May I...", act:{r -> execRequestables(r)}, arg:reqs ])
  						opts.add([ lbl: "Nothing...", act: null ]);
  						stateIs("DEBUG") ? show(DOMME) : speak(compose([["Yes", "What is it,", "What's up"], ["toy?"]]));
+--- a/scripts/toy__sha256_bf0bc1679772.groovy
++++ b/scripts/toy__sha256_bf0bc1679772.groovy
+@@ -406,9 +406,11 @@
+ 				final waitTime = Math.min(cycleTime, e.event.time - getTime());
+ 				final clickTime = showButton("Please, ${dommeTitle()}?", waitTime);
+ 				if (clickTime < waitTime) {
+-					def opts = requestables.values().toList().findAll {
+-						it -> !it.cond || it.cond()
+-					};
++					def opts = [];
++					for (r in requestables.values()) {
++						def cond = r.cond;
++						if (!cond || cond()) opts.add(r);
++					}
+ 					opts.push([ lbl: "Back", act: null ]);
+ 					def opt = getSelectedValue(stateIs("DEBUG") ? DOMME : "Yes, toy?", opts.collect { it.lbl });
+ 					def act = opts[opt].act;

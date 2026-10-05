@@ -123,7 +123,7 @@
       "id": "toys-loops",
       "layer": "source",
       "category": "b",
-      "reason": "anyToys, backgroundRemoveAllToys, and removeAllToys filtered the toy map with key/value closures (any, findAll, collect), which do not convert, so anyToys returned null and worn toys were never removed. Use loops over the keys instead: anyToys stops at the first worn toy as any() did, and the other two first collect the worn toys and then act on them, in the same order.",
+      "reason": "anyToys, backgroundRemoveAllToys, and removeAllToys (the first two in the older Toy) filtered the toy map with key/value closures (any, findAll, collect), which do not convert, so anyToys returned null and worn toys were never removed. Use loops over the keys instead: anyToys stops at the first worn toy as any() did, and the other two first collect the worn toys and then act on them, in the same order.",
       "diff": "toys-loops.diff"
     },
     {
@@ -158,14 +158,14 @@
       "id": "suck-methods",
       "layer": "source",
       "category": "b",
-      "reason": "suckDildo kept its sound loops in local closures; suck and suckBeat capture other local closures, which TeaseScript cannot express, so those sounds were skipped, and a closure called with mixed text and number arguments does not convert either. Make the three closures toy methods (suckPlayWait, suckRepeat, suckBeat) with the same bodies, defined before suckDildo, and call them directly.",
+      "reason": "suckDildo (playSuck in the older Toy) kept its sound loops in local closures; suck and suckBeat capture other local closures, which TeaseScript cannot express, so those sounds were skipped, and a closure called with mixed text and number arguments does not convert either. Make the three closures toy methods (suckPlayWait, suckRepeat, suckBeat) with the same bodies, defined before it, and call them directly.",
       "diff": "suck-methods.diff"
     },
     {
       "id": "lines-compose",
       "layer": "source",
       "category": "b",
-      "reason": "writeLines capitalized the result of compose(), which may be null for an empty group list, so the call does not compile; compose() already capitalizes its result and the line groups are never empty, so use its result as it is.",
+      "reason": "writeLines capitalized the result of compose(), which may be null for an empty group list, so the call does not compile; compose() already capitalizes its result and the line groups are never empty, so use its result as it is, with an empty text for the null that never occurs.",
       "diff": "lines-compose.diff"
     },
     {

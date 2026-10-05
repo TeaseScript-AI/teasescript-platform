@@ -42,3 +42,33 @@
  		Collections.shuffle(toRemove);
  		if (toRemove.contains(PLUGGED)) toRemove = [PLUGGED] + (toRemove - [PLUGGED]);
  		toRemove.each { state ->
+--- a/scripts/toy/toys__sha256_192375d76f46.groovy
++++ b/scripts/toy/toys__sha256_192375d76f46.groovy
+@@ -67,15 +67,22 @@
+ 	};
+ 
+ 	toy.metaClass.anyToys {
+-		return toys.any { s, t -> stateIs(s) };
++		for (s in toys.keySet()) {
++			if (stateIs(s)) return true;
++		}
++		return false;
+ 	}
+ 
+ 	toy.metaClass.backgroundRemoveAllToys {
+ 		// Assume toy will release himself
+-		toys.findAll { s, t -> stateIs(s) }.each {
+-			removeEvent("$RELEASEFROM-${it.key}");
+-			set(it.key, false);
+-		};
++		def worn = [];
++		for (s in toys.keySet()) {
++			if (stateIs(s)) worn.add(s);
++		}
++		for (s in worn) {
++			removeEvent("$RELEASEFROM-${s}");
++			set(s, false);
++		}
+ 	}
+ 
+ 	toy.metaClass.removeAllToys { imageSpec, probKeep = 0 ->

@@ -32,3 +32,20 @@
  	};
  	
  	// Session
+--- a/scripts/toy__sha256_bf0bc1679772.groovy
++++ b/scripts/toy__sha256_bf0bc1679772.groovy
+@@ -293,9 +293,11 @@
+ 		];
+ 	};
+ 	final executeTrigger = { String triggerName, arg = null ->
+-		triggerHandlers
+-			.findAll { th -> th.triggerName == triggerName }
+-			.forEach { th -> th.func(arg ?: th.defaultArg) };
++		final handlers = triggerHandlers.findAll { th -> th.triggerName == triggerName };
++		for (th in handlers) {
++			final func = th.func;
++			func(arg ?: th.defaultArg);
++		}
+ 	};
+ 
+ 	// Session

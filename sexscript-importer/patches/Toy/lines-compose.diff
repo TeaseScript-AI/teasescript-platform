@@ -5,7 +5,7 @@
  	// 		line = "This is an exemplary line for ${dommeTitle()}";
  			while (linenr==lastline) linenr = getRandom(lines.size());
 -			line = compose(lines[linenr]).capitalize();
-+			line = compose(lines[linenr]);
++			line = compose(lines[linenr]) ?: "";
  			lastline = linenr;
  			cpm = writeLine([[nDRESSED], [TITS,PUSSY,ASS]], line);
  			if (Math.abs(cpm) > cpmGoal*2.5) {
@@ -16,7 +16,7 @@
  	// 		line = "This is an exemplary line for ${dommeTitle()}";
  			while (linenr==lastline) linenr = getRandom(lines.size());
 -			line = compose(lines[linenr]).capitalize();
-+			line = compose(lines[linenr]);
++			line = compose(lines[linenr]) ?: "";
  			lastline = linenr;
  			cpm = writeLine([[nDRESSED], [TITS,PUSSY,ASS]], line);
  			if (Math.abs(cpm) > cpmGoal*2.5) {
