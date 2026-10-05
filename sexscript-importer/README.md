@@ -39,29 +39,39 @@ source that is legally and technically appropriate.
 ## Usage
 
 ```sh
-node src/cli.ts convert /path/to/script.groovy > script.tease
-node src/cli.ts convert-package [--compile] /path/to/legacy/scripts /path/to/output
-node src/cli.ts report [--compile | --run] /path/to/legacy/scripts > report.json
+node src/cli.ts convert [--accepted[=forms]] /path/to/script.groovy > script.tease
+node src/cli.ts convert-package [--compile] [--accepted[=forms]] /path/to/legacy/scripts /path/to/output
+node src/cli.ts report [--compile | --run] [--accepted[=forms]] /path/to/legacy/scripts > report.json
 node src/cli.ts inventory /path/to/legacy/scripts > inventory.json
 ```
 
 `convert-package` writes text `.tease` files only; it never copies legacy media, JARs, or archives. The package starts
-at `main.tease` (ADR 0022): the only script in the package root becomes it, and a root with several scripts gets a
-generated menu over them. Functions several scripts share become `global function`s in a generated `helpers.tease`
+at `main.tease` (ADR 0022): the only script in the package root becomes it, also in a package with a single script, and
+a root with several scripts gets a generated menu over them. With `--compile`, the generated files compile as one
+project, so transfers and global functions resolve across files. Functions several scripts share become `global function`s in a generated `helpers.tease`
 (#570). Package-local
 auxiliary Groovy classes (such as `Domme3Class`) are migration input: their transitively used methods are embedded as
 ordinary TeaseScript functions so the result depends on neither Groovy nor the old runtime. `report` and `inventory`
 accept `.groovy` files, directories, or parser JSON; inputs of one invocation form one package.
 
-`report --run` also smoke-runs the compiler-clean output in the real runtime: from the package's `main.tease`,
-following file transfers with shared storage, then each runnable script no run reached in isolation (with empty
-storage, so a failure there can come from missing setup). Answers are deterministic: buttons are pressed, each
-visit of a choice takes the next option, text and number inputs cycle through fixed values, and time and media advance
-in simulation; the wall clock starts at 2026-10-02 12:00 UTC and follows that time. Pending capabilities use host
-stand-ins with the same answer rotation. A run proves one
-path executes; `stepLimit` is inconclusive (for example a loop that waits until the typed text matches), while
-`TSR037` means the work between two events exceeds the product's instruction budget, which fails in the Player too.
-With a single directory argument, that directory is the package root that script transfers are relative to.
+`report` compiles the package as one project (`compileProject`); a file is compiler-clean when the project reports no
+error for it. `report --run` also smoke-runs the project in the real runtime, which follows the transfers between files
+itself: from `main.tease`, then each runnable script no run reached in isolation (with empty storage, so a failure there
+can come from missing setup). A file that is not compiler-clean becomes a stub in the run's project, and a run that
+reaches it ends as `blocked`. Answers are deterministic: buttons are pressed, each visit of a choice takes the next
+option, text and number inputs cycle through fixed values, `takePhoto()` returns null as in a Player without a camera,
+and time and media advance in simulation; the wall clock starts at 2026-10-02 12:00 UTC and follows that time. Accepted
+forms selected with `--accepted` use host stand-ins with the same answer rotation. A run proves one path executes;
+`stepLimit` is inconclusive (for example a loop that waits until the typed text matches), while `TSR037` means the work
+between two events exceeds the product's instruction budget, which fails in the Player too.
+With a single directory argument, the sibling `images/` folder holds the package's images.
+
+Accepted TeaseScript that `main` does not implement yet becomes a workaround in implemented TeaseScript, marked with a
+`// NOTE` at every site, so that converted packages play natively: `askBooleans` a yes/no choice per item and a
+confirmation, `showPopup` the message and an OK button, `openUrl` the link in the chat and a button, legacy `getFile`
+a cancelled `chooseFile()`, and a legacy count of the images in a package folder the counts of the package's images at
+conversion time. `--accepted` (every form) or `--accepted=askBooleans,showPopup,openUrl,chooseFile` emits the accepted
+forms instead, for when `main` implements them; the report then compiles and runs them through host stand-ins.
 
 `--proposed` (every proposal) or `--proposed=media-tags` on `convert`, `convert-package`, and `report`
 emits a working syntax for proposed TeaseScript language changes instead of reporting the construct, to measure what
@@ -89,8 +99,9 @@ node --test tests/*.test.ts
 ```
 
 `tests/fixtures/conversion/` pairs real Groovy inputs with the expected `.tease` output; that output must compile with
-the TeaseScript compiler. `tests/fixtures/conversion-accepted/` holds output that uses accepted but not yet implemented
-TeaseScript, including owner-decided syntax whose implementation is still open (such as script transfers, `showPopup`,
-and `askBooleans`); it must compile once those capabilities are replaced by placeholder calls. Both groups must also run to the
+the TeaseScript compiler, as the `main.tease` of a project with a stub for each file it transfers to.
+`tests/fixtures/conversion-accepted/` holds output converted with `--accepted`, which uses accepted but not yet
+implemented TeaseScript (`showPopup`, `askBooleans`, `openUrl`, `chooseFile`); it must compile once those capabilities
+are replaced by placeholder calls. Both groups must also run to the
 end in the runtime smoke run. These tests skip with a stated reason when Java/Groovy or the repository build is
 unavailable.

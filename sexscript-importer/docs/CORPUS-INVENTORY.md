@@ -25,22 +25,30 @@ explicit unsupported nodes: `EmptyExpression` (29, a declaration without initial
 
 ## Feasibility snapshot
 
-Measured on 2026-10-04 at importer commit `1b2f8343`, after merging `main` at `df86064b` (since `337388d2`: `dict`
-#555, date and time #551, #554, #556, #561, and #563, element widening #538, and the conformance fixes #567; before
-that the type pass #526, runtime type checks #520, unions #530 and #535, text operations #518, `sort` #546,
-`min`/`max` #550, `askInteger` #548, `switch` #529 and #557, the `showButton` timeout #534, and `load` defaults
-#545; ADR 0022 on multi-file scripts, #571; project compilation, #573; operand checks for every consumer, #564; the
-`---` file header, #575), with `node src/cli.ts report --run <package scripts>` (default conversion,
-without proposals). Script chains follow ADR 0022: each package starts at `main.tease`, and scripts transfer with `goto`
-and end with `exit`; functions several scripts share are `global function`s in a generated `helpers.tease` (#570). Toy's 21 runtime-loaded modules are part of its
-single script `toy.groovy`, so Toy counts as one script whose statements include all module code.
+Measured on 2026-10-05 at importer commit `869fb51e`, after merging `main` at `19a93bee` (since `df86064b`: globals
+and global functions #576, labels and endings #582, file transfers with `goto`, `call`, and `fallback` #583, globs
+#585, `script(...)` references and computed targets #588, the camera #475, and image tags #580 and #586; before that
+the `---` file header #575, operand checks #564, project compilation #573, ADR 0022 on multi-file scripts #571, `dict`
+#555, date and time, the type pass #526, unions #530, and the other merges listed in earlier rounds), with
+`node src/cli.ts report --run <package scripts>` (default conversion: workarounds for the accepted forms `main` does
+not implement yet, no proposals). Each package compiles as one project (`compileProject`) and runs natively from its
+`main.tease`; the runtime follows `goto` between files, functions several scripts share are `global function`s in a
+generated `helpers.tease`, and files that are not compiler-clean are stubs that end a run as `blocked`. Toy's 21
+runtime-loaded modules are part of its single script `toy.groovy`, so Toy counts as one script whose statements include
+all module code.
 
-| Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Root errors | Placeholders |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Distribution | 14 | 12 | 12 | 12 | 8 | 8 |
-| Domme3 | 24 | 15 | 12 | 12 | 24 | 26 |
-| DisciplineClinic | 6 | 3 | 3 | 3 | 5 | 14 |
-| Toy expanded | 1 | 0 | 0 | 0 | 107 | 178 |
+| Package | Scripts | Lowered | Dependency-closed | Compiler-clean except pending | Compiler-clean as generated | Root errors | Placeholders |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Distribution | 14 | 12 | 12 | 12 | 12 | 8 | 8 |
+| Domme3 | 24 | 17 | 14 | 14 | 14 | 21 | 23 |
+| DisciplineClinic | 6 | 3 | 3 | 3 | 3 | 5 | 14 |
+| Toy expanded | 1 | 0 | 0 | 0 | 0 | 107 | 178 |
+
+The distribution compiles as one project as generated; Domme3, DisciplineClinic, and Toy compile except their
+unconverted files. Before this round (importer `3cb85783`, stand-ins for transfers, globals, and the accepted forms),
+Domme3 had 15 lowered and 12 compiler-clean scripts with 24 root errors, and only two files of all four packages
+compiled as generated. Domme3's gain comes from its image-pack counts (`new File("images/Domme3/Domme${pack}/")
+.listFiles().size()`), which now read the counts of the package's images at conversion time.
 
 Root errors count independent causes that need manual work; placeholders count unconverted statements. Converting a
 statement can expose more root causes inside it, so the two counts can rise while coverage improves. Toy's 107 come
@@ -71,20 +79,19 @@ The merge of `main` at `540b8f2e`, whose stricter operand checks (#564) reach ev
 name resolution, changes no count, compiler diagnostic, or smoke run either, and neither does writing the 23 legacy
 `setInfos()` calls as `---` file headers (#575), which every generated file compiles with.
 
-Runtime smoke runs of the compiler-clean scripts (placeholder copies with host stand-ins for what `main` does not
-implement yet; the wall clock starts at 2026-10-02 12:00 UTC and follows simulated time):
+Native smoke runs of the package projects (the wall clock starts at 2026-10-02 12:00 UTC and follows simulated time):
 
 - Distribution: all 12 runnable scripts run to the end. The flow starts at the generated `main.tease` menu, whose first
   option, the English introduction, passes through three other scripts; the German and French introductions do the
   same in isolated runs. The two remaining scripts are not converted (desktop font configuration with `try`/`catch`,
   and the adversarial `test.groovy`).
-- Domme3: the entry flow stops at the unconverted `introfirst`, which counts installed image packs by listing
-  directories. Isolated runs: `implements` and `inform` run to the end, `permission` reaches the step limit in a
-  line-writing loop (the typed text must match the shown line), `explain` returns to the entry flow, and seven scripts
+- Domme3: the entry flow now enters `introfirst`, whose image-pack counts convert, and reaches the step limit there
+  (inconclusive). Isolated runs: `implements` and `inform` run to the end, `permission` reaches the step limit in a
+  line-writing loop (the typed text must match the shown line), `explain` returns to `main.tease`, and eight scripts
   fail on settings that the introduction would have saved: `discipline`, `fun`, `sleep`, and `spanking` at the
   declaration of a Groovy `int` read from storage, which `main`'s runtime type check rejects when the key is missing
-  (Groovy's `int` rejected null too), `confess` and `maintenance` comparing a missing setting, and `task` calculating
-  with one (see the null-comparison difference in `COMPATIBILITY-GAPS.md`).
+  (Groovy's `int` rejected null too), `confess` and `maintenance` comparing a missing setting, and `intro` and `task`
+  calculating with one (see the null-comparison difference in `COMPATIBILITY-GAPS.md`).
 - DisciplineClinic: the entry flow stops at the unconverted `DisciplineClinicMain`, which now declares `dialog` as
   `string | list` (it holds text in most functions and one menu's option list) but keeps that menu unconverted
   (`SX_DYNAMIC_CHOICE_OPTIONS`). Its two test functions nothing references (class loading, never-assigned variables) no
@@ -96,22 +103,11 @@ Smoke runs found two importer defects before they reached a snapshot: `getRandom
 and range switch cases tested as lists. A third-round run into DisciplineClinic's main script found a write by
 position into a list that starts empty, which Groovy grew (see `SX_LIST_GROWTH` in `COMPATIBILITY-GAPS.md`).
 
-Two scripts compile as generated (two distribution examples; DisciplineClinic's `Exit` now calls global functions);
-file transfers are the main remaining gap. Scripts using each accepted-but-unimplemented capability, and how many otherwise compiler-clean scripts
-use it (capabilities used by fewer than three scripts are omitted):
-
-| Capability | Scripts using it | Otherwise compiler-clean scripts using it |
-| --- | ---: | ---: |
-| `goto` to a file (#570) | 39 | 22 |
-| `global function` and `global` (#570) | 28 | 13 |
-| `askBooleans()` | 10 | 8 |
-| `showPopup` | 10 | 4 |
-| `openUrl()` | 3 | 0 |
-
-Date and time (`getTimestamp().toSeconds()` in 18 scripts, `getDateTime()` in 14, `toISO()` and `formatTime()` in 3
-each), `dict`, `switch` (26), the conversions (20), the `showButton` timeout and elapsed result (14), `askInteger` (9),
-integer widening, `load "key", default:`, rounding, text operations, and `sort` were in this table before and are now
-compiled and run with `main`'s implementations.
+Every compiler-clean script now compiles as generated: file transfers, globals, and global functions are native, and
+the accepted forms `main` does not implement yet become marked workarounds. Script files per workaround: `askBooleans`
+10 (distribution 8, Domme3 1, Toy 1), `showPopup` 5 (distribution 1, Domme3 3, Toy 1), `openUrl` 3 (DisciplineClinic 2,
+Toy 1), and the image counts 3 (Domme3). Before, 22 otherwise compiler-clean scripts waited for file transfers, 13 for
+global functions, 8 for `askBooleans`, and 4 for `showPopup`.
 
 The proposal mode's measurements are in [`PROPOSED-LANGUAGE-CHANGES.md`](PROPOSED-LANGUAGE-CHANGES.md).
 
@@ -179,6 +175,16 @@ run of this round, at `3cb85783`, gave the "Before" column; the importer fixes i
 
 With the media-tags proposal (M1), 396 scripts lower and 362 are clean except pending; only 4 scripts use the proposal,
 2 of them otherwise clean.
+
+**Native projects (2026-10-05).** After the merge of `main` at `19a93bee` (#570 parts 3 to 7a), each package compiles as
+one project and runs from `main.tease` with the runtime's own transfers, and a package with a single script gets it as
+`main.tease` (importer `33772f2b`, before the workarounds for unimplemented accepted forms): 100 packages run end to end
+from their entry (68 with stand-ins), 149 compile as one project with placeholders only for `askBooleans`, `openUrl`,
+and `showPopup`, and 138 compile as generated. Scripts: 398 lowered, 384 compiler-clean except pending, 335
+compiler-clean as generated (118 before), 356 reached by a run, 8,486 root errors. Entry flows: 100 halted, 174
+blocked at an unconverted file, 8 failed, 7 at the step limit. New since the stand-ins: `guessthenumber` and
+`guessthenumberalt` exceed the runtime's default budget of 10,000 instructions per invocation (`TSR037`) while filling a
+10,000-element table, a provisional product limit (`RESOURCE-LIMITS.md`), not a defect.
 
 **Root causes.** The 15 most frequent root diagnostics (count, packages), with their class from
 [`COMPATIBILITY-GAPS.md`](COMPATIBILITY-GAPS.md):
