@@ -63,11 +63,13 @@ export type HelperName =
   | "abs"
   | "array"
   | "askBooleans"
+  | "fixed"
   | "packagePath"
   | "sendImage"
   | "switchButton"
   | "switchButtonId"
   | "switchState"
+  | "tokenize"
   | "backgroundSounds"
   | "concat"
   | "count"
@@ -132,7 +134,9 @@ const HELPER_ORDER: readonly HelperName[] = [
   "min",
   "abs",
   "askBooleans",
+  "fixed",
   "packagePath",
+  "tokenize",
   "sendImage",
   "switchButtonId",
   "switchButton",
@@ -406,6 +410,78 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             span: null,
           },
           ret(v("answers")),
+        ],
+      ),
+  },
+  // Java %.Nf: the number rounded to `digits` decimals, written with exactly that many.
+  fixed: {
+    name: "sexscriptLegacyFixed",
+    build: () =>
+      fn(
+        "sexscriptLegacyFixed",
+        ["value", "digits", "factor"],
+        [
+          letS("scaled", {
+            kind: "call",
+            name: "round",
+            positional: [bin("*", v("value"), v("factor"))],
+            named: {},
+          }),
+          letS("sign", lit("")),
+          ifS(bin("<", v("scaled"), lit(0)), [
+            set(v("sign"), lit("-")),
+            set(v("scaled"), { kind: "unary", operator: "-", value: v("scaled") }),
+          ]),
+          letS("whole", {
+            kind: "call",
+            name: "toInteger",
+            positional: [bin("/", v("scaled"), v("factor"))],
+            named: {},
+          }),
+          ifS(bin("==", v("digits"), lit(0)), [ret(template(v("sign"), v("whole")))]),
+          letS("fraction", bin("-", v("scaled"), bin("*", v("whole"), v("factor")))),
+          ret(
+            template(v("sign"), v("whole"), ".", {
+              kind: "methodCall",
+              target: { kind: "call", name: "toString", positional: [v("fraction")], named: {} },
+              name: "padStart",
+              arguments: [v("digits"), lit("0")],
+            }),
+          ),
+        ],
+      ),
+  },
+  // Groovy tokenize(): the parts between any of the delimiter characters, without empty parts.
+  tokenize: {
+    name: "sexscriptLegacyTokenize",
+    build: () =>
+      fn(
+        "sexscriptLegacyTokenize",
+        ["text", "delimiters"],
+        [
+          letS("tokens", { kind: "list", items: [] }),
+          letS("current", lit("")),
+          forS(
+            "character",
+            { kind: "methodCall", target: v("text"), name: "split", arguments: [lit("")] },
+            [
+              ifS(
+                {
+                  kind: "methodCall",
+                  target: v("delimiters"),
+                  name: "contains",
+                  arguments: [v("character")],
+                },
+                [
+                  ifS(bin("!=", v("current"), lit("")), [add("tokens", v("current"))]),
+                  set(v("current"), lit("")),
+                ],
+                [set(v("current"), template(v("current"), v("character")))],
+              ),
+            ],
+          ),
+          ifS(bin("!=", v("current"), lit("")), [add("tokens", v("current"))]),
+          ret(v("tokens")),
         ],
       ),
   },

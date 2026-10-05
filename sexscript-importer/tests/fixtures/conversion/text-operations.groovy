@@ -28,3 +28,7 @@ for (step in [1, 2]) {
 }
 trail += "!"
 show(trail)
+// tokenize() splits at any delimiter character and drops empty parts; String.format() pads and rounds.
+def fields = "a,b,,c;d".tokenize(",;")
+def stamp = String.format("%02d:%02d, %.1f%%", 7, 5, 12.345)
+show("${fields.size()} fields at ${stamp}")

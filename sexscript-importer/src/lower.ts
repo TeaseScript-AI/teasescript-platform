@@ -2581,10 +2581,11 @@ function isHoistable(
       }
     }
     if (hasOwnEffect(node, context)) effectsBefore = true;
-    // The implicit receiver and variables assigned only by their declaration cannot change.
+    // The implicit receiver, the Math class, and variables assigned only by their declaration cannot change.
     const name = node.kind === "variable" ? variableName(node) : null;
     const stable =
       name === "this" ||
+      name === "Math" ||
       (name !== null &&
         (context.types.singleAssignment?.has(name) === true || context.stableNames.has(name)));
     // A list element or a method's view of a value may change even when its variable cannot.
@@ -2841,6 +2842,7 @@ function lowerDeclaration(
       ? namedMapLiteral(asNode(node.left)!, right, context)
       : lowerExpression(right, context);
   if (value === null) {
+    // The variable stays declared with a neutral value of its type, so the code that uses it still compiles.
     return [
       unsupportedStatement(
         context,
@@ -2848,6 +2850,12 @@ function lowerDeclaration(
         "SX_UNSUPPORTED_DECLARATION_VALUE",
         `Cannot safely migrate initializer for ${name}.`,
       ),
+      {
+        kind: "let",
+        name,
+        value: neutralValue(context.types.variables.get(name) ?? UNKNOWN),
+        span,
+      },
     ];
   }
   const key = bindingKey(asNode(node.left), context.bindings);
@@ -5088,8 +5096,11 @@ function lowerCStyleFor(
   const [initialPrelude, initialStatements] = withStatementRoot(context, initial, () =>
     lowerForControlExpression(initial, context),
   );
+  // `for (;;)` has no condition, so it loops until a break.
   const [prelude, condition] = withStatementRoot(context, conditionNode, () =>
-    lowerCondition(conditionNode, context),
+    conditionNode.groovyType === "org.codehaus.groovy.ast.expr.EmptyExpression"
+      ? ({ kind: "literal", value: true } as const)
+      : lowerCondition(conditionNode, context),
   );
   const [updatePrelude, updateStatements] = withStatementRoot(context, update, () =>
     lowerForControlExpression(update, context),
@@ -5792,6 +5803,8 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       return lowerMethodCallExpression(node, context);
     case "postfix":
       return lowerPostfixValue(node, context);
+    case "prefix":
+      return lowerPrefixValue(node, context);
     case "readDefault":
       return lowerReadDefault(node, context);
     case "elvis":
@@ -5839,6 +5852,45 @@ function lowerPostfixValue(node: AstNode, context: LowerContext): IrExpression |
     );
   }
   context.postlude.push({
+    kind: "assign",
+    target: { kind: "variable", name },
+    operator,
+    value: { kind: "literal", value: 1 },
+    span: node.span,
+  });
+  return { kind: "variable", name };
+}
+
+/** `++x` and `--x` used as a value: the variable changes before the statement, which then reads it. */
+function lowerPrefixValue(node: AstNode, context: LowerContext): IrExpression | null {
+  const name = variableName(asNode(node.value));
+  const operator = node.operator === "++" ? "+=" : node.operator === "--" ? "-=" : null;
+  const root = context.statementRoot;
+  // The change may move before the statement when nothing else in it reads the variable or calls a local function.
+  let uses = 0;
+  let localCalls = false;
+  if (root !== null)
+    walkAst(root, (child) => {
+      if (variableName(child) === name && child.kind === "variable") uses += 1;
+      if (child.kind === "methodCall" && child.implicitThis === true)
+        localCalls ||= context.functions.has(constantString(child.method) ?? "");
+    });
+  if (
+    name === null ||
+    operator === null ||
+    root === null ||
+    uses !== 1 ||
+    localCalls ||
+    !isHoistable(root, node, context)
+  ) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_INCREMENT_POSITION",
+      "This ++/-- changes the variable where the change cannot simply come before the statement: the variable is used again in the statement, the change is guarded by && / || / ?:, or a function called in the statement could read the variable. Move the change to its own statement.",
+    );
+  }
+  context.prelude.push({
     kind: "assign",
     target: { kind: "variable", name },
     operator,
@@ -7466,6 +7518,20 @@ function lowerObjectMethodCallExpression(
     const action = lowerExpression(targetNode, context);
     const args = lowerArguments(argumentsNodes, context);
     return action === null || args === null ? null : actionCall(action, args, context);
+  }
+  // Groovy tokenize() exists only for text: the parts between any of the delimiter characters, without empty parts.
+  if (name === "tokenize" && argumentsNodes.length <= 1 && targetNode !== null) {
+    const text = lowerExpression(targetNode, context);
+    const delimiters =
+      argumentsNodes.length === 0
+        ? ({ kind: "literal", value: " \t\n\r\f" } as const)
+        : lowerExpression(argumentsNodes[0]!, context);
+    if (text === null || delimiters === null) return null;
+    return useHelper(context, "tokenize", [text, delimiters]);
+  }
+  if (name === "format" && receiverName === "String" && argumentsNodes.length >= 1) {
+    const formatted = formatText(argumentsNodes, node, context);
+    if (formatted !== undefined) return formatted;
   }
   if (name === "toString" && argumentsNodes.length === 0 && targetNode !== null) {
     const listParts = listText(targetNode, context);
@@ -11437,6 +11503,93 @@ function staticPath(node: AstNode): { text: string; complete: boolean } {
     return { text: start.text + rest.text, complete: rest.complete };
   }
   return { text: "", complete: false };
+}
+
+/**
+ * `String.format(pattern, values...)` with a literal pattern of `%s`, `%d`, `%f` conversions, an optional `0` flag, a
+ * width, and a precision for `%f`: interpolation, `padStart` for a width, and a fixed number of decimals through a
+ * helper. Returns undefined for other patterns.
+ */
+function formatText(
+  argumentsNodes: AstNode[],
+  node: AstNode,
+  context: LowerContext,
+): IrExpression | null | undefined {
+  const pattern = constantString(argumentsNodes[0]);
+  if (pattern === null) return undefined;
+  const specifiers = [...pattern.matchAll(/%(0?)(\d*)(?:\.(\d+))?([sdf%])|%/gu)];
+  if (specifiers.some((match) => match[4] === undefined)) return undefined;
+  const values = argumentsNodes.slice(1);
+  if (specifiers.filter((match) => match[4] !== "%").length !== values.length) return undefined;
+  const parts: Array<{ text: string } | { value: IrExpression }> = [];
+  let position = 0;
+  let next = 0;
+  for (const match of specifiers) {
+    if (match.index > position) parts.push({ text: pattern.slice(position, match.index) });
+    position = match.index + match[0].length;
+    const [, zero, width, precision, conversion] = match;
+    if (conversion === "%") {
+      parts.push({ text: "%" });
+      continue;
+    }
+    const lowered = lowerExpression(values[next++]!, context);
+    if (lowered === null) return null;
+    if (
+      lowered.kind === "literal" &&
+      ((conversion === "s" && typeof lowered.value === "string") ||
+        (conversion === "d" && Number.isInteger(lowered.value) && Number(lowered.value) >= 0))
+    ) {
+      parts.push({
+        text: String(lowered.value).padStart(Number(width || "0"), zero === "0" ? "0" : " "),
+      });
+      continue;
+    }
+    let value: IrExpression =
+      conversion === "f"
+        ? useHelper(context, "fixed", [
+            lowered,
+            { kind: "literal", value: Number(precision ?? "6") },
+            { kind: "literal", value: 10 ** Number(precision ?? "6") },
+          ])
+        : conversion === "d"
+          ? { kind: "call", name: "toInteger", positional: [lowered], named: {} }
+          : lowered;
+    if (width !== undefined && width !== "") {
+      const text: IrExpression =
+        conversion === "f"
+          ? value
+          : { kind: "call", name: "toString", positional: [value], named: {} };
+      value = {
+        kind: "methodCall",
+        target: text,
+        name: "padStart",
+        arguments: [
+          { kind: "literal", value: Number(width) },
+          { kind: "literal", value: zero === "0" ? "0" : " " },
+        ],
+      };
+    }
+    parts.push({ value });
+  }
+  if (position < pattern.length) parts.push({ text: pattern.slice(position) });
+  addDiagnostic(
+    context,
+    "SX_FORMAT",
+    "warning",
+    "Java String.format() wrote these values; the conversion pads and rounds them the same way for this pattern, but a negative number padded with zeros puts the zeros before the minus sign.",
+    node.span,
+  );
+  return templateOrLiteral(parts);
+}
+
+/** The empty value of a type, the start of a variable whose own initializer could not convert; null otherwise. */
+function neutralValue(type: number): IrExpression {
+  if (onlyOf(type, NUMBER | NULL) && (type & NUMBER) !== 0) return { kind: "literal", value: 0 };
+  if (onlyOf(type, STRING | NULL) && (type & STRING) !== 0) return { kind: "literal", value: "" };
+  if (onlyOf(type, BOOLEAN | NULL) && (type & BOOLEAN) !== 0)
+    return { kind: "literal", value: false };
+  if (onlyOf(type, LIST | NULL) && (type & LIST) !== 0) return { kind: "list", items: [] };
+  return { kind: "literal", value: null };
 }
 
 /** Audio files the legacy useFile() opened in the system's player. */

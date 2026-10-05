@@ -1,3 +1,35 @@
+function sexscriptLegacyFixed(value, digits, factor) {
+  let scaled = round(value * factor)
+  let sign = ""
+  if scaled < 0 {
+    sign = "-"
+    scaled = -scaled
+  }
+  let whole = toInteger(scaled / factor)
+  if digits == 0 {
+    return "${sign}${whole}"
+  }
+  let fraction = scaled - whole * factor
+  return "${sign}${whole}.${toString(fraction).padStart(digits, "0")}"
+}
+function sexscriptLegacyTokenize(text, delimiters) {
+  let tokens = []
+  let current = ""
+  for character in text.split("") {
+    if delimiters.contains(character) {
+      if current != "" {
+        tokens.add(current)
+      }
+      current = ""
+    } else {
+      current = "${current}${character}"
+    }
+  }
+  if current != "" {
+    tokens.add(current)
+  }
+  return tokens
+}
 // Text handling with text operations.
 let line = "  write this line  "
 let typed = line.trim()
@@ -34,4 +66,9 @@ for step in [1, 2] {
 }
 trail = "${trail}!"
 say trail
+// tokenize() splits at any delimiter character and drops empty parts; String.format() pads and rounds.
+let fields = sexscriptLegacyTokenize("a,b,,c;d", ",;")
+// NOTE SX_FORMAT line 33: Java String.format() wrote these values; the conversion pads and rounds them the same way for this pattern, but a negative number padded with zeros puts the zeros before the minus sign.
+let stamp = "07:05, ${sexscriptLegacyFixed(12.345, 1, 10)}%"
+say "${fields.length} fields at ${stamp}"
 exit
