@@ -1859,6 +1859,26 @@ function lowerStatementNode(node: AstNode, context: LowerContext): IrStatement[]
       return lowerFor(node, context);
     case "switch":
       return lowerSwitch(node, context);
+    // A labelled block statement, `Check: { ... }`, runs its statements in place; one that declares variables keeps
+    // them in a scope of their own, as `if true { ... }`.
+    case "block": {
+      const statements = lowerBlock(node, context);
+      const declares = nodeArray(node.statements).some(
+        (statement) =>
+          statement.kind === "declaration" || asNode(statement.expression)?.kind === "declaration",
+      );
+      return declares
+        ? [
+            {
+              kind: "if",
+              condition: { kind: "literal", value: true },
+              then: statements,
+              else: [],
+              span: node.span,
+            },
+          ]
+        : statements;
+    }
     case "return":
       return lowerReturnStatement(node, context);
     case "break":
@@ -6010,6 +6030,42 @@ function lowerPrefixValue(node: AstNode, context: LowerContext): IrExpression | 
   return { kind: "variable", name };
 }
 
+/**
+ * A compound assignment used as a value, `save("k", total -= 5)`: Groovy changed the variable and used its new value,
+ * so the change comes first, as its own statement, and the statement uses the variable. As for `++x`, this needs a
+ * statement that reads the variable nowhere else and calls no local function.
+ */
+function lowerCompoundValue(node: AstNode, context: LowerContext): IrExpression | null {
+  const name = variableName(asNode(node.left));
+  const root = context.statementRoot;
+  let uses = 0;
+  let localCalls = false;
+  if (root !== null)
+    walkAst(root, (child) => {
+      if (variableName(child) === name && child.kind === "variable") uses += 1;
+      if (child.kind === "methodCall" && child.implicitThis === true)
+        localCalls ||= context.functions.has(constantString(child.method) ?? "");
+    });
+  if (
+    name === null ||
+    root === null ||
+    uses !== 1 ||
+    localCalls ||
+    !isHoistable(root, node, context)
+  ) {
+    return unsupportedExpression(
+      context,
+      node,
+      "SX_ASSIGNMENT_VALUE",
+      "A compound assignment is used as a value where the change cannot simply come before the statement: the variable is used again in the statement, the change is guarded by && / || / ?:, or a function called in the statement could read the variable. Move the assignment to its own statement.",
+    );
+  }
+  const statements = lowerAssignment(node, node.span, context);
+  if (statements.some((statement) => statement.kind === "unsupported")) return null;
+  context.prelude.push(...statements);
+  return { kind: "variable", name };
+}
+
 function incrementsAfterStatement(
   root: AstNode,
   target: AstNode,
@@ -6394,6 +6450,8 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     return { kind: "binary", operator: operator === "&" ? "and" : "or", left, right };
   }
   const mapped = operator;
+  if (operator !== null && ["+=", "-=", "*=", "/=", "%="].includes(operator))
+    return lowerCompoundValue(node, context);
   if (operator === "=") {
     return unsupportedExpression(
       context,
@@ -7752,6 +7810,12 @@ function lowerObjectMethodCallExpression(
     const counted = imageCount(node, name, argumentsNodes, context, context.media);
     if (counted !== undefined) return counted;
   }
+  // Groovy `a.equals(b)` compares values as `==` does for text, numbers, lists, and maps.
+  if (name === "equals" && argumentsNodes.length === 1 && targetNode !== null) {
+    const left = lowerExpression(targetNode, context);
+    const right = lowerExpression(argumentsNodes[0]!, context);
+    return left === null || right === null ? null : { kind: "binary", operator: "==", left, right };
+  }
   if (targetNode !== null && isDictionary(targetNode, context)) {
     const operation = dictOperation(node, targetNode, name, argumentsNodes, context);
     if (operation !== undefined) return operation;
@@ -7844,7 +7908,10 @@ function lowerObjectMethodCallExpression(
       case "first":
       case "last":
         return { kind: "property", target, name };
+      // Lists copy on assignment, so a copy or an array of the elements is the list itself.
       case "toList":
+      case "clone":
+      case "toArray":
         return target;
       case "max":
         return useHelper(context, "listMax", [target]);
@@ -7875,6 +7942,9 @@ function lowerObjectMethodCallExpression(
     const separator = lowerExpression(argumentsNodes[0]!, context);
     return separator === null ? null : listJoin(target, separator);
   }
+  // `toArray(new String[0])` only names the array type.
+  if (name === "toArray" && argumentsNodes.length === 1 && isPure(argumentsNodes[0]!, context))
+    return target;
   return unsupportedExpression(
     context,
     node,
@@ -7949,7 +8019,18 @@ function unprovenReceiverOperation(
     arguments: args,
   });
   let changes = false;
+  let position = false;
   switch (name) {
+    // Lists copy on assignment, so a copy or an array of the elements is the list itself.
+    case "clone":
+    case "toArray":
+      if (!mayBeList || argumentsNodes.length > 1) return undefined;
+      if (
+        argumentsNodes.length === 1 &&
+        (name !== "toArray" || !isPure(argumentsNodes[0]!, context))
+      )
+        return undefined;
+      break;
     case "contains":
     case "indexOf":
       if (argumentsNodes.length !== 1 || !(mayBeList || mayBeText)) return undefined;
@@ -7983,9 +8064,12 @@ function unprovenReceiverOperation(
       changes = true;
       break;
     case "remove":
-      // Groovy remove(int) removes a position from a list, but the value from a set.
-      if (argumentsNodes.length !== 1 || !mayBeList || !whole) return undefined;
-      if (!onlyOf(argumentType, STRING | BOOLEAN | LIST | OBJECT)) return undefined;
+      // Groovy remove(int) removes a position from a list and returns the element, as removeAt does; with another
+      // value, it removes the value.
+      if (argumentsNodes.length !== 1 || !mayBeList) return undefined;
+      position = onlyOf(argumentType, NUMBER) && argumentType !== 0;
+      if (!position && (!whole || !onlyOf(argumentType, STRING | BOOLEAN | LIST | OBJECT)))
+        return undefined;
       changes = true;
       break;
     case "clear":
@@ -8023,6 +8107,11 @@ function unprovenReceiverOperation(
       return listJoin(target, args[0] ?? { kind: "literal", value: "" });
     case "pop":
       return call("removeFirst", [], target);
+    case "clone":
+    case "toArray":
+      return target;
+    case "remove":
+      return call(position ? "removeAt" : "remove", args, target);
     default:
       return call(name, args, target);
   }

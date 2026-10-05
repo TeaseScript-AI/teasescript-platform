@@ -1,0 +1,34 @@
+// equals() compares values like ==.
+let name = "Anna"
+if name == "Anna" {
+  say "Hello Anna"
+}
+// A list returned by a closure is not proven to be a list; clone() and toArray() give the list itself, since lists
+// copy on assignment, and remove() with a position removes and returns that element.
+function deal {
+  let cards = [3, 5, 7]
+  return cards
+}
+let hand = deal()
+let copy = hand
+let asArray = hand
+let position = 1
+let removed = hand.removeAt(position)
+// NOTE SX_LENGTH_RECEIVER line 15: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+// NOTE SX_LENGTH_RECEIVER line 15: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+say "Removed ${removed}, ${copy.length} copied, ${asArray.length} in the array"
+// A compound assignment used as a value changes the variable first.
+let points = 10
+points -= 3
+save points as "game.points"
+// A labelled block runs in place; one that declares a variable keeps it in its own scope.
+let ready = false
+if true {
+  say "Ready?"
+  let answer = (choose yes: "Yes", no: "No") == "yes"
+  if answer {
+    ready = true
+  }
+}
+say "Ready: ${ready}, points ${points}"
+exit
