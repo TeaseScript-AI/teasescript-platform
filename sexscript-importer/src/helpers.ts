@@ -88,6 +88,7 @@ export type HelperName =
   | "endsWithDigits"
   | "plainText"
   | "listPart"
+  | "repeatList"
   | "askText"
   | "compare"
   | "replaceChars"
@@ -193,6 +194,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "endsWithDigits",
   "plainText",
   "listPart",
+  "repeatList",
   "askText",
   "compare",
   "replaceChars",
@@ -1092,6 +1094,35 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         [
           ifS({ kind: "typeTest", value: v("value"), type: "list" }, [ret(v("value"))]),
           ret({ kind: "list", items: [v("value")] }),
+        ],
+      ),
+  },
+  // Groovy `list * n`: the list's elements, n times over.
+  repeatList: {
+    name: "sexscriptLegacyRepeatList",
+    build: () =>
+      fn(
+        "sexscriptLegacyRepeatList",
+        ["items", "times"],
+        [
+          { kind: "let", name: "result", value: { kind: "list", items: [] }, span: null },
+          { kind: "let", name: "round", value: lit(0), span: null },
+          {
+            kind: "while",
+            condition: bin("<", v("round"), v("times")),
+            body: [
+              {
+                kind: "assign",
+                target: v("result"),
+                operator: "+=",
+                value: v("items"),
+                span: null,
+              },
+              { kind: "assign", target: v("round"), operator: "+=", value: lit(1), span: null },
+            ],
+            span: null,
+          },
+          ret(v("result")),
         ],
       ),
   },

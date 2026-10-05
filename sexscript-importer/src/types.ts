@@ -244,6 +244,12 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
     const left = inferType(asNode(node.left), environment);
     if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
   }
+  if (operator === "*") {
+    // Groovy `text * n` and `list * n` repeat the text or the list's elements.
+    const left = inferType(asNode(node.left), environment);
+    if (onlyOf(left, STRING) && left !== 0) return STRING;
+    if (onlyOf(left, LIST) && left !== 0) return LIST;
+  }
   if (ARITHMETIC_OPERATORS.has(operator)) return NUMBER;
   if (operator === "=") return inferType(asNode(node.right), environment);
   if (operator === "==~") return BOOLEAN;

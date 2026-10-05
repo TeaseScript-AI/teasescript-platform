@@ -7837,6 +7837,30 @@ function isTeaseObjectPropertyName(value: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
 }
 
+/**
+ * Groovy `text * n` and `list * n`: the text, or the list's elements, `n` times over, with a fractional count cut to
+ * whole times as Groovy did. Undefined for other operands.
+ */
+function repetition(node: AstNode, context: LowerContext): IrExpression | null | undefined {
+  const leftNode = asNode(node.left);
+  const rightNode = asNode(node.right);
+  if (leftNode === null || rightNode === null) return undefined;
+  const left = inferType(leftNode, context.types);
+  const text = onlyOf(left, STRING) && left !== 0;
+  const list = onlyOf(left, LIST) && left !== 0;
+  const count = inferType(rightNode, context.types);
+  if ((!text && !list) || !onlyOf(count, NUMBER) || count === 0) return undefined;
+  const value = lowerExpression(leftNode, context);
+  const times = lowerExpression(rightNode, context);
+  if (value === null || times === null) return null;
+  const whole: IrExpression = mayBeFractional(rightNode, context)
+    ? { kind: "call", name: "toInteger", positional: [times], named: {} }
+    : times;
+  return text
+    ? { kind: "methodCall", target: value, name: "repeat", arguments: [whole] }
+    : useHelper(context, "repeatList", [value, whole]);
+}
+
 function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpression | null {
   const java = javaBinary(node, javaHost(context));
   if (java !== undefined) return java;
@@ -7844,6 +7868,10 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   if (operator === "==~") {
     const matched = tailMatch(node, context);
     if (matched !== undefined) return matched;
+  }
+  if (operator === "*") {
+    const repeated = repetition(node, context);
+    if (repeated !== undefined) return repeated;
   }
   if (operator === "==" || operator === "!=") {
     // A listing of a missing folder was null; the images of a folder (imageFolderListing) are an empty list then.

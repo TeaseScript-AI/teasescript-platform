@@ -25,3 +25,7 @@ show("Locked since " + new Date((long) lockedSince * 1000).format("dd, MMM, yyyy
 // A list + a value that may be a list or one element appends at runtime what Groovy appended.
 def pickAll = { impl -> ([] + impl).size() }
 show("Picked " + pickAll(["paddle", "cane"]) + " " + pickAll("belt"))
+// Groovy text * n and list * n repeat the text or the list's elements, a fractional n cut to whole times.
+def chant = ["toy"] * 2 + ["pet"]
+def laughs = 2.5
+show(chant.join(" ") + " " + "ha" * laughs)
