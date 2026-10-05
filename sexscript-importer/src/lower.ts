@@ -219,7 +219,7 @@ interface LowerContext {
   files: ReadonlySet<string> | null;
   /** The package's files as they are named, relative to the legacy data folder. */
   actualFiles: readonly string[];
-  /** `new File(path)` values that only `.exists()` reads, which convert to their path (fileTests). */
+  /** `new File(path)` values that only `.exists()` or `.listFiles()` reads, which convert to their path (fileTests). */
   fileValues: ReadonlySet<AstNode>;
   /** Variables that hold such a path. */
   fileVariables: ReadonlySet<string>;
@@ -6998,6 +6998,27 @@ function isTeaseObjectPropertyName(value: string): boolean {
 
 function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpression | null {
   const operator = text(node.operator);
+  if (operator === "==" || operator === "!=") {
+    // A listing of a missing folder was null; the images of a folder (imageFolderListing) are an empty list then.
+    const left = asNode(node.left);
+    const right = asNode(node.right);
+    const listing =
+      right !== null && isNullConstant(right)
+        ? left
+        : left !== null && isNullConstant(left)
+          ? right
+          : null;
+    if (listing !== null && holdsImageListing(listing, context)) {
+      const list = lowerExpression(listing, context);
+      if (list === null) return null;
+      return {
+        kind: "binary",
+        operator: operator === "==" ? "==" : ">",
+        left: { kind: "property", target: list, name: "length" },
+        right: { kind: "literal", value: 0 },
+      };
+    }
+  }
   if (operator === "[") {
     const targetNode = asNode(node.left);
     const indexNode = asNode(node.right);
@@ -8374,6 +8395,22 @@ function lowerObjectMethodCallExpression(
   }
   if (
     name === "getProperty" &&
+    targetNode !== null &&
+    argumentsNodes.length === 1 &&
+    constantString(argumentsNodes[0]) === "user.dir" &&
+    isDataFolder(node)
+  ) {
+    addDiagnostic(
+      context,
+      "SX_DATA_FOLDER",
+      "warning",
+      "System.getProperty(\"user.dir\") was the legacy player's folder on the player's computer; package paths start at the package root, so it is empty text here.",
+      node.span,
+    );
+    return { kind: "literal", value: "" };
+  }
+  if (
+    name === "getProperty" &&
     variableName(targetNode) === "System" &&
     argumentsNodes.length === 1 &&
     constantString(argumentsNodes[0]) === "user.language"
@@ -8532,6 +8569,15 @@ function lowerObjectMethodCallExpression(
     (targetNode.kind === "constructorCall" || isCurrentDateConstructor(targetNode))
   ) {
     return dateFormat(node, targetNode, argumentsNodes, context);
+  }
+  if (
+    name === "listFiles" &&
+    argumentsNodes.length === 0 &&
+    targetNode !== null &&
+    context.media !== null
+  ) {
+    const listed = imageFolderListing(targetNode, node, context);
+    if (listed !== undefined) return listed;
   }
   if (name === "exists" && argumentsNodes.length === 0 && targetNode !== null) {
     const pathNode = isFileConstructor(targetNode)
@@ -10205,6 +10251,87 @@ function isKnownListExpression(node: AstNode, context: LowerContext): boolean {
 function isKnownMapExpression(node: AstNode, context: LowerContext): boolean {
   const type = inferType(node, context.types);
   return onlyOf(type, OBJECT | NULL) && (type & OBJECT) !== 0;
+}
+
+/**
+ * The paths of the `new File(path)` values a listing receiver stands for: the constructor itself, or the values of a
+ * variable that only holds such files (fileTests); null when every path is not inside the package's images folder.
+ */
+function imageFolderPaths(receiver: AstNode, context: LowerContext): AstNode[] | null {
+  const variable = variableName(receiver);
+  const constructors = isFileConstructor(receiver)
+    ? [receiver]
+    : variable !== null && context.fileVariables.has(variable)
+      ? [...context.filePathOwners].flatMap(([value, owner]) => (owner === variable ? [value] : []))
+      : [];
+  const paths = constructors.flatMap((value) =>
+    nodeArray(asNode(value.arguments)?.items).slice(0, 1),
+  );
+  return paths.length > 0 &&
+    paths.length === constructors.length &&
+    paths.every((path) => /^\/?images\//iu.test(staticPath(path).text))
+    ? paths
+    : null;
+}
+
+/** Whether a value is an images folder listing (imageFolderListing), or a variable that only holds one. */
+function holdsImageListing(node: AstNode, context: LowerContext): boolean {
+  const isListing = (value: AstNode): boolean => {
+    const receiver = asNode(value.object);
+    return (
+      value.kind === "methodCall" &&
+      constantString(value.method) === "listFiles" &&
+      nodeArray(asNode(value.arguments)?.items).length === 0 &&
+      receiver !== null &&
+      imageFolderPaths(receiver, context) !== null
+    );
+  };
+  if (context.media === null) return false;
+  if (isListing(node)) return true;
+  const key = node.kind === "variable" ? bindingKey(node, context.bindings) : null;
+  const values = key === null ? undefined : context.assignedValues.get(key);
+  return values !== undefined && values.length > 0 && values.every(isListing);
+}
+
+/**
+ * A legacy listing of an images folder, `new File(folder).listFiles()` or the listing of a variable that only holds
+ * such a file, as the package paths of the folder's images (#572): each package image carries a generated tag for its
+ * full legacy folder path (image-tags.ts), so the images with the folder's tag are exactly its images; a computed
+ * folder gets its tag from the pathTag helper at runtime. The legacy listing also held subfolders and other files, and
+ * was null for a missing folder; the images are an empty list then. Undefined for a folder outside `images/`.
+ */
+function imageFolderListing(
+  receiver: AstNode,
+  node: AstNode,
+  context: LowerContext,
+): IrExpression | null | undefined {
+  const paths = imageFolderPaths(receiver, context);
+  if (paths === null) return undefined;
+  const fixed = isFileConstructor(receiver) ? staticPath(paths[0]!) : null;
+  let tag: IrExpression;
+  if (fixed?.complete === true) tag = { kind: "literal", value: pathTag(fixed.text) };
+  else {
+    // A variable holds the path itself (fileTests).
+    const path = lowerExpression(isFileConstructor(receiver) ? paths[0]! : receiver, context);
+    if (path === null) return null;
+    tag =
+      path.kind === "literal" && typeof path.value === "string"
+        ? { kind: "literal", value: pathTag(path.value) }
+        : useHelper(context, "pathTag", [path]);
+  }
+  addDiagnostic(
+    context,
+    "SX_IMAGE_TAGS",
+    "warning",
+    "The legacy script listed the files of an images folder; each package image carries a generated tag for its folder, so this lists the package paths of the folder's images by that tag, without subfolders and other files, and an empty list for a missing folder.",
+    node.span,
+  );
+  return {
+    kind: "call",
+    name: "findImages",
+    positional: [],
+    named: { all: { kind: "list", items: [tag] } },
+  };
 }
 
 /**
@@ -12474,8 +12601,8 @@ function isFileConstructor(node: AstNode): boolean {
 }
 
 /**
- * The `new File(path)` values whose only use is `.exists()`: directly as its receiver, or kept in a variable that
- * nothing reads otherwise (LowerContext.fileValues, fileVariables).
+ * The `new File(path)` values whose only use is `.exists()` or `.listFiles()`: directly as its receiver, or kept in a
+ * variable that nothing reads otherwise (LowerContext.fileValues, fileVariables).
  */
 function fileTests(body: AstNode): {
   fileValues: Set<AstNode>;
@@ -12496,7 +12623,11 @@ function fileTests(body: AstNode): {
       if (isFileConstructor(value)) assigned.set(name, [...(assigned.get(name) ?? []), value]);
       else if (!isEmptyGroovyExpression(value) && !isNullConstant(value)) otherUses.add(name);
     }
-    if (node.kind === "methodCall" && constantString(node.method) === "exists") {
+    const method = node.kind === "methodCall" ? constantString(node.method) : null;
+    if (
+      method === "exists" ||
+      (method === "listFiles" && nodeArray(asNode(node.arguments)?.items).length === 0)
+    ) {
       const receiver = asNode(node.object);
       if (receiver !== null) existsReceivers.add(receiver);
     }
@@ -12610,21 +12741,42 @@ function fileExists(
 }
 
 /**
+ * The legacy data folder, the package root: `getDataFolder()`, also with its separators replaced, or the player's
+ * working directory, `System.getProperty("user.dir")`.
+ */
+function isDataFolder(node: AstNode): boolean {
+  if (node.kind !== "methodCall") return false;
+  const method = constantString(node.method);
+  const receiver = asNode(node.object);
+  if (method === "getDataFolder") return nodeArray(asNode(node.arguments)?.items).length === 0;
+  if (method === "replaceAll" || method === "replace")
+    return receiver !== null && isDataFolder(receiver);
+  return (
+    method === "getProperty" &&
+    variableName(receiver) === "System" &&
+    constantString(nodeArray(asNode(node.arguments)?.items)[0]) === "user.dir"
+  );
+}
+
+/**
  * The fixed beginning of a path, its text up to the first computed part, with `getDataFolder()` as the package root;
  * `complete` when nothing in it is computed.
  */
 function staticPath(node: AstNode): { text: string; complete: boolean } {
   const literal = constantString(node);
   if (literal !== null) return { text: literal, complete: true };
-  if (node.kind === "methodCall" && constantString(node.method) === "getDataFolder")
-    return { text: "", complete: true };
+  if (isDataFolder(node)) return { text: "", complete: true };
   if (node.kind === "gstring") {
     const strings = Array.isArray(node.strings) ? node.strings : [];
-    const first: unknown = strings[0];
-    return {
-      text: typeof first === "string" ? first : "",
-      complete: nodeArray(node.values).length === 0,
-    };
+    const values = nodeArray(node.values);
+    let text = "";
+    for (let index = 0; index < strings.length; index += 1) {
+      const piece: unknown = strings[index];
+      if (typeof piece === "string") text += piece;
+      const value = values[index];
+      if (value !== undefined && !isDataFolder(value)) return { text, complete: false };
+    }
+    return { text, complete: true };
   }
   if (node.kind === "binary" && node.operator === "+") {
     const left = asNode(node.left);

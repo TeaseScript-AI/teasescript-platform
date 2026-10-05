@@ -196,6 +196,62 @@ test(
   },
 );
 
+// A legacy folder listing becomes the package paths of the folder's images, found by the tag of its path; a missing
+// folder, whose listing was null, has no images.
+test(
+  "lists an images folder as the package paths of its images",
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
+  async () => {
+    if (!("compiler" in projectResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-listing-"));
+    try {
+      const sourcePath = path.join(directory, "listing.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          "def pick = { name ->",
+          '  def folder = new File(System.getProperty("user.dir") + "/images/Mistress/" + name + "/")',
+          "  def files = folder.listFiles()",
+          '  if (files == null) return "none"',
+          "  return files[getRandom(files.length)].toString()",
+          "}",
+          'save("picked", pick("Pack 2"))',
+          'save("missing", pick("Pack 3"))',
+          'save("count", new File(getDataFolder() + "images/Mistress/Pack 1").listFiles().length)',
+          "",
+        ].join("\n"),
+      );
+      const media = ["Mistress/Pack 1/a.jpg", "Mistress/Pack 1/b.png", "Mistress/Pack 2/c.JPG"].map(
+        (file) => ({ path: file }),
+      );
+      const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { media });
+      const source = emitTease(program!);
+      assert.match(
+        source,
+        /^ {2}let files = findImages\(all: \[sexscriptLegacyPathTag\(folder\)\]\)$/mu,
+      );
+      assert.match(source, /^ {2}if files\.length == 0 \{$/mu);
+      const storage = new Map();
+      const result = projectResult.runner(
+        [{ path: "main.tease", source }],
+        {},
+        { images: imageCatalog(media), storage },
+      );
+      assert.deepEqual(
+        { status: result.status, failure: result.failure },
+        { status: "halted", failure: null },
+      );
+      assert.deepEqual(Object.fromEntries(storage), {
+        picked: "Mistress/Pack 2/c.JPG",
+        missing: "none",
+        count: 2,
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 // The pathTag helper gives a computed folder at runtime the tag that the sidecars carry from conversion.
 test(
   "the runtime path tag of a folder equals its conversion-time tag",
