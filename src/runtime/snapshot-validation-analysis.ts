@@ -11,6 +11,8 @@ import { recordValidationTestWork } from "../validation-testing.js";
 export interface PlannedLoop {
   readonly kind: "repeat" | "for" | "while";
   readonly variable?: string;
+  /** A pair loop's value variable. */
+  readonly valueVariable?: string;
   readonly start: number;
   readonly continueStart: number;
   readonly target: number;
@@ -110,7 +112,14 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     } else if (instruction?.kind === "loopStart") {
       loops.set(instruction.loopId, {
         kind: instruction.loopKind,
-        ...(instruction.loopKind === "for" ? { variable: instruction.variable } : {}),
+        ...(instruction.loopKind === "for"
+          ? {
+              variable: instruction.variable,
+              ...(instruction.valueVariable === undefined
+                ? {}
+                : { valueVariable: instruction.valueVariable }),
+            }
+          : {}),
         start: index,
         continueStart: instruction.continueTarget,
         target: instruction.target,

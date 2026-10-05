@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
+import { parse } from "../src/parser.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
 import { createCheckpoint, serializeCheckpoint } from "../src/runtime/checkpoint.js";
 import { run } from "../src/runtime/engine.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { SerializableRuntimeProperty } from "../src/runtime/serializable-values.js";
-import type { RuntimeSnapshot } from "../src/runtime/state.js";
+import type { RuntimeForLoopFrameSnapshot, RuntimeSnapshot } from "../src/runtime/state.js";
 import { assertCheckpointRejected } from "./helpers/checkpoint-rejection.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -188,6 +190,156 @@ test("a loop goes through the keys as they were when it started", () => {
   assert.deepEqual(codes("for key in dict{ a: 1 } {\n    let n: integer = key\n}\nexit"), [
     ["TSV041", "key"],
   ]);
+});
+
+test("for key, value goes through the entries as they were when it started, with a copy of each value", () => {
+  assert.deepEqual(
+    says(
+      [
+        "let toys = dict{ rope: { uses: 1 }, cuffs: { uses: 2 } }",
+        "let calls = 0",
+        "function source {",
+        "    calls += 1",
+        "    return toys",
+        "}",
+        "for key, value in source() {",
+        // Changing the copy, or the source's entries, changes neither the other nor a later entry.
+        "    value.uses += 10",
+        "    if toys.contains(key) {",
+        "        toys[key].uses += 100",
+        "    }",
+        '    toys["added"] = { uses: 0 }',
+        '    if toys.contains("cuffs") {',
+        '        toys.remove("cuffs")',
+        "    }",
+        '    say "${key} ${value.uses}"',
+        "}",
+        "say calls",
+        "say toys",
+        "for key, value in dict{} {",
+        '    say "never"',
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+    ["rope 11", "cuffs 12", "1", 'dict{ "rope": { uses: 101 }, "added": { uses: 0 } }'],
+  );
+  // break, continue, and nested pair loops.
+  assert.deepEqual(
+    says(
+      [
+        "let grid = dict{ a: dict{ x: 1, y: 2 }, b: dict{ x: 3 }, c: dict{ x: 4 } }",
+        "for row, cells in grid {",
+        '    if row == "c" {',
+        "        break",
+        "    }",
+        "    for column, n in cells {",
+        '        if column == "y" {',
+        "            continue",
+        "        }",
+        '        say "${row}${column}=${n}"',
+        "    }",
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+    ["ax=1", "bx=3"],
+  );
+});
+
+test("for key, value takes a dict, a text key, and the dict's value type, which assignments may widen", () => {
+  assert.deepEqual(
+    says("for key, value in dict{ a: 1 } {\n    value = 1.5\n    say value\n}\nexit"),
+    ["1.5"],
+  );
+  assert.deepEqual(codes("for key, value in dict{ a: 1 } {\n    let n: integer = key\n}\nexit"), [
+    ["TSV041", "key"],
+  ]);
+  assert.deepEqual(codes('for key, value in dict{ a: "x" } {\n    value = 1\n}\nexit'), [
+    ["TSV041", "1"],
+  ]);
+  assert.deepEqual(codes("for key, value in [1, 2] {\n}\nexit"), [["TSV043", "[1, 2]"]]);
+  assert.deepEqual(diagnostics("for key, value in 3 {\n}\nexit"), [
+    ["TSV012", "A for-loop with a key and a value goes through a dict.", "3"],
+  ]);
+  // A line may break after the comma, also with a blank line.
+  assert.deepEqual(says("for key,\n    value in dict{ a: 1 } {\n    say value\n}\nexit"), ["1"]);
+  assert.deepEqual(says("for key,\n\n    value in dict{ a: 1 } {\n    say value\n}\nexit"), ["1"]);
+  // Without a value name, the next line's closing brace or statement stays for recovery.
+  for (const source of [
+    'if true {\n    for key,\n}\nsay "after"\nexit',
+    'if true {\n    for key,\n\n}\nsay "after"\nexit',
+    'for key,\nsay "after"\nexit',
+  ]) {
+    const parsed = parse(source);
+    assert.deepEqual(
+      parsed.diagnostics.map((diagnostic) => diagnostic.code),
+      ["TSP013"],
+      source,
+    );
+    assert.deepEqual(
+      parsed.program.statements.map((statement) => statement.kind),
+      source.startsWith("if")
+        ? ["ifStatement", "sayStatement", "exitStatement"]
+        : ["sayStatement", "exitStatement"],
+      source,
+    );
+  }
+  assert.deepEqual(codes("for key, key in dict{ a: 1 } {\n}\nexit"), [["TSV001", "key"]]);
+  // The header error comes first; the unparsed block then recovers as on main.
+  assert.equal(codes("for key, in dict{ a: 1 } {\n}\nexit")[0]?.[0], "TSP013");
+  // A source the compiler cannot know is checked when the loop starts.
+  assert.deepEqual(failure(`${DYNAMIC}for key, value in dynamic([1]) {\n}\nexit`), [
+    "TSR044",
+    "for key, value requires a dict source.",
+  ]);
+});
+
+test("a pair loop resumes from a checkpoint at every step, and a checkpoint rejects a malformed pair loop", () => {
+  const source = [
+    "let toys = dict{ rope: [1], cuffs: [2] }",
+    "for key, value in toys {",
+    "    wait 1",
+    "    value.add(3)",
+    "    toys[key] = value",
+    '    say "${key} ${value.length}"',
+    "}",
+    "say toys",
+    "exit",
+  ].join("\n");
+  const result = assertRuntimeResumeEquivalent(source);
+  assert.deepEqual(
+    result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["rope 2", "cuffs 2", 'dict{ "rope": [1, 3], "cuffs": [2, 3] }'],
+  );
+
+  const plan = compileValidPlan(source);
+  const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  assert.equal(waiting.snapshot.status, "waiting");
+  const serialized = serializeCheckpoint(createCheckpoint(plan, waiting.snapshot));
+  const corrupt = (mutate: (frame: RuntimeForLoopFrameSnapshot) => void) => {
+    // EVIDENCE: fixture: the parsed checkpoint was serialized from a valid runtime snapshot just above.
+    const json = JSON.parse(serialized) as { snapshot: RuntimeSnapshot };
+    const frame = json.snapshot.loopFrames[0];
+    assert.ok(frame?.kind === "for" && frame.valueVariable === "value");
+    mutate(frame);
+    assertCheckpointRejected(json, "TSK002");
+  };
+  corrupt((frame) => Reflect.deleteProperty(frame, "valueVariable"));
+  corrupt((frame) => Object.assign(frame, { valueVariable: "other" }));
+  corrupt((frame) => Object.assign(frame, { valueVariable: "key" }));
+  corrupt((frame) => Object.assign(frame, { source: { kind: "list", items: ["rope", "cuffs"] } }));
+  corrupt((frame) => Object.assign(frame, { position: 3 }));
+
+  // A plan's pair loop needs two different names.
+  const forged = JSON.parse(JSON.stringify(plan));
+  const loop = forged.instructions.find(
+    (instruction: { kind: string }) => instruction.kind === "loopStart",
+  );
+  loop.valueVariable = loop.variable;
+  assert.equal(validateInstructionPlan(forged).valid, false);
+  loop.valueVariable = 7;
+  assert.equal(validateInstructionPlan(forged).valid, false);
 });
 
 test("dicts compare by keys and values in any order and are copied like other values", () => {

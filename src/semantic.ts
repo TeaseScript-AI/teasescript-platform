@@ -1330,7 +1330,9 @@ class SemanticValidator {
         if (isDefinitelyNonIterable(statement.iterable)) {
           this.#report(
             semanticCode.invalidLoopSource,
-            "A for-loop source must be a list, set, or integer range.",
+            statement.valueVariable === null
+              ? "A for-loop source must be a list, set, or integer range."
+              : "A for-loop with a key and a value goes through a dict.",
             statement.iterable.span,
           );
         }
@@ -1346,6 +1348,13 @@ class SemanticValidator {
         }
         const loopScope = new SemanticScope(scope);
         this.#declare(statement.variable.name, "variable", statement.variable.span, loopScope);
+        if (statement.valueVariable !== null)
+          this.#declare(
+            statement.valueVariable.name,
+            "variable",
+            statement.valueVariable.span,
+            loopScope,
+          );
         yield* compileChild(
           this.#validateStatements(statement.body.statements, loopScope, loopDepth + 1),
         );

@@ -63,6 +63,7 @@ import {
   validateCapturedSerializableValue,
   type SerializableRuntimeProperty,
   type SerializableRuntimeList,
+  type SerializableRuntimeDict,
   type SerializableRuntimeRange,
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
@@ -108,7 +109,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 50;
+export const RUNTIME_SNAPSHOT_VERSION = 51;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -228,7 +229,16 @@ export interface RuntimeRepeatLoopFrameSnapshot extends RuntimeLoopFrameBase {
 export interface RuntimeForLoopFrameSnapshot extends RuntimeLoopFrameBase {
   readonly kind: "for";
   readonly variable: string;
-  readonly source: SerializableRuntimeList | SerializableRuntimeSet | SerializableRuntimeRange;
+  /**
+   * `for key, value in dict`: the value variable. The source is then the dict as the loop started, whose entries give
+   * each key and a copy of its value; otherwise a dict source holds its keys as a list.
+   */
+  readonly valueVariable?: string;
+  readonly source:
+    | SerializableRuntimeList
+    | SerializableRuntimeSet
+    | SerializableRuntimeRange
+    | SerializableRuntimeDict;
   position: number;
 }
 
@@ -1308,12 +1318,20 @@ function validateLoopFrames(
       // While loops need no additional hidden state.
     } else if (frame.kind === "for") {
       const failure = validateCapturedSerializableValue(frame.source, "loop.source");
+      const pair = "valueVariable" in frame;
       if (
         typeof frame.variable !== "string" ||
         frame.variable.length === 0 ||
+        (pair &&
+          (typeof frame.valueVariable !== "string" ||
+            frame.valueVariable.length === 0 ||
+            frame.valueVariable === frame.variable)) ||
         failure !== null ||
         !isPlainRecord(frame.source) ||
-        !isOneOf(frame.source.kind, ["list", "set", "range"]) ||
+        // A pair loop goes through a dict; any other through a list, set, or range.
+        !(pair
+          ? frame.source.kind === "dict"
+          : isOneOf(frame.source.kind, ["list", "set", "range"])) ||
         !nonNegativeSafeInteger(frame.position) ||
         frame.position > iterationLength(frame.source)
       ) {
@@ -1412,7 +1430,8 @@ function validateLoopContexts(
       if (
         planned === undefined ||
         planned.kind !== frame.kind ||
-        (planned.kind === "for" && planned.variable !== frame.variable) ||
+        (planned.kind === "for" &&
+          (planned.variable !== frame.variable || planned.valueVariable !== frame.valueVariable)) ||
         context === undefined ||
         !contextHoldsInstruction(plan, context, planned.start) ||
         planned.start <= previousStart ||
@@ -1443,6 +1462,7 @@ function iterationLength(source: Record<string, unknown>): number {
   if ((source.kind === "list" || source.kind === "set") && Array.isArray(source.items)) {
     return source.items.length;
   }
+  if (source.kind === "dict" && Array.isArray(source.entries)) return source.entries.length;
   if (
     source.kind === "range" &&
     Number.isSafeInteger(source.start) &&

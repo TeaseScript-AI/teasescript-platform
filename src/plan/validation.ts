@@ -575,6 +575,7 @@ const FOR_LOOP_START_FIELDS = [
   "loopKind",
   "loopId",
   "variable",
+  "valueVariable",
   "expression",
   "continueTarget",
   "target",
@@ -704,7 +705,20 @@ function validateInstruction(
         errors.push(planError("TSC002", "Invalid loop kind.", `${path}.loopKind`));
       }
       requirePositiveSafeInteger(value.loopId, `${path}.loopId`, errors);
-      if (value.loopKind === "for") requireString(value.variable, `${path}.variable`, errors);
+      if (value.loopKind === "for") {
+        requireString(value.variable, `${path}.variable`, errors);
+        if ("valueVariable" in value) {
+          requireString(value.valueVariable, `${path}.valueVariable`, errors);
+          if (value.valueVariable === value.variable)
+            errors.push(
+              planError(
+                "TSC002",
+                "A for loop's key and value variables must differ.",
+                `${path}.valueVariable`,
+              ),
+            );
+        }
+      }
       validateExpression(value.expression, `${path}.expression`, errors, false, temporaryCount);
       validateJumpTarget(value.continueTarget, `${path}.continueTarget`, instructionCount, errors);
       validateJumpTarget(value.target, `${path}.target`, instructionCount, errors);

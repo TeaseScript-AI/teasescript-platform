@@ -1,6 +1,7 @@
 import type {
   ForStatement,
   FunctionParameter,
+  Identifier,
   GlobalStatement,
   LetStatement,
   ScalarTypeName,
@@ -107,9 +108,10 @@ export type Origin = Declaration | PartOrigin;
 
 /**
  * The declaration of a variable without a type annotation: `let`, `global`, a parameter with a default, or a loop
- * variable.
+ * variable: the `for` statement for its first variable, and the identifier of a pair loop's value variable.
  */
-export type Declaration = LetStatement | GlobalStatement | FunctionParameter | ForStatement;
+export type Declaration =
+  LetStatement | GlobalStatement | FunctionParameter | ForStatement | Identifier;
 
 /**
  * An element or property inside a variable without a type annotation, which a number may derive from: the variable and
