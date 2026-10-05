@@ -13,6 +13,8 @@ import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
 import { createFreshRuntimeSnapshot, type RuntimeSnapshot } from "../src/runtime/state.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
+import { withValidationTestStatistics } from "../src/validation-testing.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 import { AMSTERDAM } from "./helpers/temporal-fixtures.js";
@@ -233,4 +235,32 @@ test("hint: and default: each follow a comma once, and a mistake names its fix",
       ask,
     );
   }
+});
+
+test("a pending ask with a long question restores from its JSON checkpoint", () => {
+  // The question appears in its text preparation and in its say; restore compares the two without native recursion.
+  const plan = compileValidPlan(
+    `let q = "Q"\nlet answer = askText(${Array(8000).fill("q").join(" + ")})\nexit`,
+  );
+  const pending = run(plan, createImmediatePacingRuntimeSnapshot(plan));
+  assert.equal(pending.snapshot.foregroundAction?.kind, "interaction");
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(plan, pending.snapshot)),
+  );
+  assert.deepEqual(restored.snapshot, pending.snapshot);
+});
+
+test("validating nested asking defaults takes work in proportion to the plan", () => {
+  // Each question's preparation spans its nested defaults; the clear and bypass checks must not walk each span.
+  const work = (asks: number) => {
+    const plan = compileValidPlan(
+      `let answer = ${'askText("Q", default: '.repeat(asks - 1)}askText("Q")${")".repeat(asks - 1)}\nexit`,
+    );
+    return withValidationTestStatistics((finish) => {
+      assert.equal(validateInstructionPlan(JSON.parse(JSON.stringify(plan))).valid, true);
+      return finish().counts.preparedSayRangeSteps!;
+    });
+  };
+  // A scoped regression oracle for the indexed checks: doubling the nesting at most about doubles the steps.
+  assert.ok(work(400) <= 2.2 * work(200), `${work(400)} steps for 400 asks, ${work(200)} for 200`);
 });

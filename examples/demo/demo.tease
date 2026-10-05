@@ -27,12 +27,13 @@ if visits > 1 {
 }
 say as session "Some of her messages make you wait. Press Space or click an empty part of the Player to hurry the others along."
 
+say "First things first. Tell me what you call me."
 let patience = timer async hidden 12 s {
     say "Too slow. Stop typing and listen.", instant
     say "When I ask, you answer. Promptly."
     showButton "Yes, Mistress"
 }
-let answer = askText "First things first. Tell me what you call me.", hint: "What you call her"
+let answer = askText hint: "What you call her"
 patience.stop()
 say "${answer}. Good. Don't forget it."
 
