@@ -442,8 +442,7 @@ Reported for manual work and intentionally not reproduced: reflection and `Groov
 package helpers, `java.io.File` access and directory listing other than a recognized module loader,
 `System.getProperty`, OS processes (Toy's speech output), `openCdTrays`, `useEmailAddress`, `useFile`, the old online
 `send`/`receive` service, and `try`/`catch` around desktop APIs. The webcam `getImage` converts to `takePhoto()`,
-native since #475, and the file picker `getFile` to the workaround for `chooseFile()` (see Accepted but not
-implemented). `Locale.getDefault()` serves the localization question above.
+native since #475, and the file picker `getFile` to `askImage()` (#608), since scripts used it for a photo. `Locale.getDefault()` serves the localization question above.
 Scripts also contain plain legacy bugs the importer reports instead of repairing: calls to undefined functions, reads
 of variables that nothing assigns (10 sites, such as `save("domme3.spank", fun)`; SexScript failed with a missing
 property when they ran), helper calls with missing arguments, and closures referenced without `()` (which Groovy
@@ -485,8 +484,9 @@ loops, and only 6 read a literal base path. A clean mapping needs overlay positi
 pixel size, or an image-size query.
 
 `askBoolean` with custom labels already converts to a two-option `choose` compared with its first label. Legacy
-`getFile(title)` was used for a photo of the player, so it shows the title and takes the photo with `takePhoto()`
-(`SX_FILE_PHOTO`, owner decision 2026-10-05); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
+`getFile(title)` was used for a photo of the player, so it becomes `askImage(title)` (#608), which the player answers
+with an image file or the camera (`SX_FILE_PHOTO`, owner decision 2026-10-05; a cancelled chooser gave null, which
+askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 
 ### Universal conversions decided by the owner (2026-10-05)
 

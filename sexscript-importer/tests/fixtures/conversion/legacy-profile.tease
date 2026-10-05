@@ -25,7 +25,7 @@ function sexscriptLegacyAskBooleansSystem(message, texts, defaults) {
 }
 function sexscriptLegacyAskProfile {
   if (load "intro.name") == null {
-    say as system "What is your name, here ?"
+    say as system "What is your name?"
     save (askText as system default: "Slave") as "intro.name"
   }
   if (load "intro.female") == null {

@@ -346,12 +346,19 @@ function smokeRun(
       }
       if (action.kind === "interaction") {
         const visit = visits.get(action.owningInstruction) ?? 0;
-        const completion = api.call("completeAction", plan, snapshot, {
-          actionId: action.actionId,
-          actionKind: "interaction",
-          interactionKind: action.interactionKind,
-          payload: interactionAnswer(action, visit),
-        });
+        // An image request (askImage) is answered with one stored image that the harness vouches for.
+        const completion = api.call(
+          "completeAction",
+          plan,
+          snapshot,
+          {
+            actionId: action.actionId,
+            actionKind: "interaction",
+            interactionKind: action.interactionKind,
+            payload: interactionAnswer(action, visit),
+          },
+          { capturedMedia: { holds: (reference: string) => reference === SMOKE_IMAGE } },
+        );
         const outcome = isRecord(completion.outcome) ? completion.outcome : {};
         if (outcome.kind === "completed") {
           visits.set(action.owningInstruction, visit + 1);
@@ -394,7 +401,12 @@ function smokeRun(
 const TEXT_ANSWERS = ["answer", "yes", "no"];
 const NUMBER_ANSWERS = [1, 3, 10, 0];
 
+/** The stored image a smoke run answers image requests with. */
+const SMOKE_IMAGE = "smoke-image";
+
 function interactionAnswer(action: RuntimeData, visit: number) {
+  if (isRecord(action.ui) && action.ui.kind === "image")
+    return { kind: "image", reference: SMOKE_IMAGE };
   switch (action.interactionKind) {
     case "button":
       return { kind: "activate" };

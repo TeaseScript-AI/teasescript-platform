@@ -12623,17 +12623,16 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         );
         return { kind: "call", name: "chooseFile", positional: [], named: {} };
       }
-      // The corpus asks for files to get a photo of the player (owner decision 2026-10-05); chooseFile() is #604.
+      // The corpus asks for files to get a photo of the player (owner decision 2026-10-05): askImage() asks for an
+      // image with the same message, which the player answers with a file or the camera (#608).
       addDiagnostic(
         context,
         "SX_FILE_PHOTO",
         "warning",
-        "getFile() let the player pick any file with this title; scripts use it for a photo of the player, so the title is shown and takePhoto() takes the photo, or gives null as a cancelled chooser did.",
+        "getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.",
         node.span,
       );
-      if (args.length === 1 && !pushPrompt(context, node, call.arguments[0]!, args[0]!))
-        return null;
-      return { kind: "call", name: "takePhoto", positional: [], named: {} };
+      return { kind: "call", name: "askImage", positional: args, named: {} };
     }
     case "getDataFolder":
       if (args.length !== 0)

@@ -163,7 +163,7 @@ export function legacyProfilePrompt(
   if (asked.includes("intro.name"))
     body.push(
       ifMissing("intro.name", [
-        say("What is your name, here ?"),
+        say("What is your name?"),
         save(lit("intro.name"), {
           kind: "input",
           input: "askText",
