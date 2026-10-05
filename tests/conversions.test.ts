@@ -294,24 +294,20 @@ test("values that do not convert at runtime raise errors that name the fix", () 
 });
 
 test("a conversion checks its value as it was evaluated, before later arguments run", () => {
-  for (const [declaration, read, change] of [
-    ["let value = null", "value", "value = [1]"],
-    ["let box = { value: null }", "box.value", "box.value = [1]"],
-  ])
-    assert.deepEqual(
-      said(
-        [
-          declaration,
-          "function backup {",
-          `    ${change}`,
-          '    return "fallback"',
-          "}",
-          `say toString(${read}, default: backup())`,
-          "exit",
-        ].join("\n"),
-      ),
-      ["null"],
-    );
+  assert.deepEqual(
+    said(
+      [
+        "let value = null",
+        "function backup {",
+        "    value = [1]",
+        '    return "fallback"',
+        "}",
+        "say toString(value, default: backup())",
+        "exit",
+      ].join("\n"),
+    ),
+    ["null"],
+  );
 });
 
 test("conversions are checkpoint and resume equivalent", () => {

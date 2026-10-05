@@ -64,6 +64,20 @@ export interface OpenType {
   widens?: boolean;
   /** For the slot of a variable without a type annotation, that variable, which the deciding number derives from. */
   origins?: Origins;
+  /** For a copy of a slot that was still undecided, that slot, whose decision the copy shares (ADR 0021 rule 1.2). */
+  copiedFrom?: OpenType;
+  /** Whether a read or a copy saw the slot while it was undecided, so a later decision must reach that point too. */
+  observed?: boolean;
+  /** When a value decided the slot, counted in checking order, so the first of several decisions can be found. */
+  order?: number;
+}
+
+let decisions = 0;
+
+/** The next number in checking order for a slot that a value decides (see {@link OpenType.order}). */
+export function nextDecision(): number {
+  decisions += 1;
+  return decisions;
 }
 
 /**
@@ -644,6 +658,7 @@ function* settleTask(
     const value = target.origins === undefined ? widened : replacedOrigins(widened, target.origins);
     target.resolved = target.sawNull ? optional(value) : value;
     target.resolvedAt = at;
+    target.order = nextDecision();
     return;
   }
   if (target.kind === "union") {
@@ -685,8 +700,10 @@ function* copyTask(typeToCopy: StaticType): CompileTask<StaticType> {
   const type = resolved(typeToCopy);
   switch (type.kind) {
     case "open":
-      // A copy decides its type on its own, but keeps what the original saw: a first null stays a first null.
-      return { ...openType(), sawNull: type.sawNull };
+      // A copy keeps what the original saw: a first null stays a first null. It may hold what the original held when
+      // it was taken, so it takes the type that decides the original, also when a later check finds it.
+      type.observed = true;
+      return { ...openType(), sawNull: type.sawNull, copiedFrom: type };
     case "list":
     case "set":
     case "dict":
@@ -829,6 +846,87 @@ function* widenPathTask(
       type.properties.set(name, yield* compileChild(widenPathTask(kept, path, step + 1)));
   }
   return type;
+}
+
+/** Notes that a read saw the undecided slot that a place's type is, or that one of its members is. */
+export function observe(type: StaticType): void {
+  for (const member of members(type)) {
+    const value = resolved(member);
+    if (value.kind === "open") value.observed = true;
+  }
+}
+
+/** A slot in a place's type, decided or not, with its path there (see {@link widenPath}). */
+export interface PlacedSlot {
+  readonly slot: OpenType;
+  readonly path: readonly string[];
+}
+
+/** The slots in a place's type, also those decided since they were created, with their paths. */
+export function placedSlots(type: StaticType): PlacedSlot[] {
+  const slots: PlacedSlot[] = [];
+  runCompileTask(placedSlotsTask(type, [], slots));
+  return slots;
+}
+
+function* placedSlotsTask(
+  type: StaticType,
+  path: readonly string[],
+  slots: PlacedSlot[],
+): CompileTask<void> {
+  if (type.kind === "open") {
+    slots.push({ slot: type, path });
+    if (type.resolved !== null) yield* compileChild(placedSlotsTask(type.resolved, path, slots));
+  } else if (type.kind === "union")
+    for (const member of type.members) yield* compileChild(placedSlotsTask(member, path, slots));
+  else if (isCollection(type))
+    yield* compileChild(placedSlotsTask(type.element, [...path, "[]"], slots));
+  else if (type.kind === "object" && type.properties !== null)
+    for (const [name, value] of type.properties)
+      yield* compileChild(placedSlotsTask(value, [...path, name], slots));
+}
+
+/**
+ * Decides the undecided slot at `path` in a place's own type with `value`, as a store at `at` would, so that reads
+ * before that store, in the order the compiler checks, also see the decided type (ADR 0021 rule 1.2). Returns whether
+ * the type has that path yet: a property that a later store adds does not exist before it.
+ */
+export function decidePath(
+  type: StaticType,
+  path: readonly string[],
+  value: StaticType,
+  at: SourceSpan,
+): boolean {
+  return runCompileTask(decidePathTask(type, path, 0, value, at));
+}
+
+function* decidePathTask(
+  typeToDecide: StaticType,
+  path: readonly string[],
+  step: number,
+  value: StaticType,
+  at: SourceSpan,
+): CompileTask<boolean> {
+  const type = resolved(typeToDecide);
+  if (step === path.length) {
+    if (members(type).some((member) => resolved(member).kind === "open"))
+      yield* compileChild(settleTask(type, value, at));
+    return true;
+  }
+  if (type.kind === "union") {
+    let found = false;
+    for (const member of type.members)
+      if (yield* compileChild(decidePathTask(member, path, step, value, at))) found = true;
+    return found;
+  }
+  const name = path[step]!;
+  if (name === "[]" && isCollection(type))
+    return yield* compileChild(decidePathTask(type.element, path, step + 1, value, at));
+  if (type.kind !== "object" || type.properties === null) return false;
+  const kept = type.properties.get(name);
+  return (
+    kept !== undefined && (yield* compileChild(decidePathTask(kept, path, step + 1, value, at)))
+  );
 }
 
 /**
