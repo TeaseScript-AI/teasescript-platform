@@ -27,6 +27,7 @@ import {
 import { helperDefinitionOrder, withActionDispatcher } from "./helpers.ts";
 import { promoteGlobalFunctions, type GlobalPromotion } from "./globals.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
+import { legacyProfilePrompt } from "./profile.ts";
 import type { ProposalId } from "./proposals.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 
@@ -343,10 +344,32 @@ export function lowerPackage(
           scriptIndexes.map((index) => noted[index]!),
           scripts.root,
         );
-  const composedPrograms = noted.map((program, index) => {
+  const promotedPrograms = noted.map((program, index) => {
     const position = scriptIndexes.indexOf(index);
     return promotion === null || position < 0 ? program : promotion.programs[position]!;
   });
+  // The entry asks the legacy player's profile the package reads but never saves.
+  const accepted = options.accepted ?? new Set();
+  const entryIndex =
+    scripts?.entry ?? (scripts === null && scriptIndexes.length === 1 ? scriptIndexes[0]! : null);
+  const entryProgram = entryIndex === null ? null : promotedPrograms[entryIndex]!;
+  const profile =
+    entryProgram === null ? [] : legacyProfilePrompt(promotedPrograms, entryProgram, accepted);
+  // The prompt's helpers may meet names of the entry, which then get other names.
+  const project = new Set([
+    ...(promotion?.promoted.map(({ name }) => name) ?? []),
+    ...(promotion?.globals.map(({ name }) => name) ?? []),
+  ]);
+  const composedPrograms = promotedPrograms.map((program, index) =>
+    index === entryIndex && profile.length > 0
+      ? renameConflictingIdentifiers(
+          { ...program, statements: [...profile, ...program.statements] },
+          new Set(),
+          false,
+          project,
+        )
+      : program,
+  );
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
     composed: composedPrograms,
@@ -355,7 +378,7 @@ export function lowerPackage(
         ? null
         : scripts.entry !== null
           ? { file: scripts.entry }
-          : { menu: entryMenu(scripts, composedPrograms) },
+          : { menu: withProfile(entryMenu(scripts, composedPrograms), composedPrograms, accepted) },
     globals:
       promotion === null
         ? null
@@ -406,6 +429,22 @@ function packageStorageLiterals(
       ([key]) => !computed.has(key) && !computedPrefixes.some((prefix) => key.startsWith(prefix)),
     ),
   );
+}
+
+/** A generated entry menu that first asks the legacy player's profile the package reads but never saves. */
+function withProfile(
+  menu: MigrationProgram,
+  programs: readonly MigrationProgram[],
+  accepted: ReadonlySet<AcceptedForm>,
+): MigrationProgram {
+  const profile = legacyProfilePrompt(programs, menu, accepted);
+  return profile.length === 0
+    ? menu
+    : renameConflictingIdentifiers(
+        { ...menu, statements: [...profile, ...menu.statements] },
+        new Set(),
+        false,
+      );
 }
 
 /** The fixed beginning of a computed storage key: the text before its first computed part. */

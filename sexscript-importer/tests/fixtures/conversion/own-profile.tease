@@ -1,0 +1,5 @@
+// A script that asks the name itself and saves it needs no profile prompt.
+say "What is your name?"
+save askText default: "pet" as "intro.name"
+say "Hello, ${load "intro.name"}"
+exit
