@@ -32,6 +32,8 @@ if [[ ! -f "$class_file" || "$source_file" -nt "$class_file" ]]; then
     "$source_file"
 fi
 
+# One short-lived parse per JVM: a small serial heap and quick compilation keep many parallel parses light.
 exec java \
+  -XX:+UseSerialGC -XX:TieredStopAtLevel=1 -XX:CICompilerCount=1 -Xms32m -Xmx384m \
   -cp "$build_dir:$SEXSCRIPT_GROOVY_JAR:$SEXSCRIPT_GROOVY_JSON_JAR" \
   SexScriptAstExporter "$@"

@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseGroovySource, type GroovyParserRunner } from "../src/source-parser.ts";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import {
+  parseGroovySource,
+  runCachedGroovyParser,
+  type GroovyParserRunner,
+} from "../src/source-parser.ts";
 import { parseParsedGroovyFile, type ParsedGroovyFile } from "../src/ast.ts";
 
 function parsed(
@@ -80,4 +87,35 @@ test("rejects malformed parser-helper output instead of trusting its shape", () 
     () => parseParsedGroovyFile({ ...valid, diagnostics: [{ code: 1 }] }, "helper"),
     /diagnostic/,
   );
+});
+
+test("reuses cached parser output for the same content, also at another path", async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "sexscript-ast-cache-"));
+  const previous = process.env.SEXSCRIPT_AST_CACHE;
+  process.env.SEXSCRIPT_AST_CACHE = path.join(directory, "cache");
+  try {
+    const first = path.join(directory, "first.groovy");
+    const second = path.join(directory, "second.groovy");
+    writeFileSync(first, 'show("Kneel")\n');
+    writeFileSync(second, 'show("Kneel")\n');
+    const parsedPaths: string[] = [];
+    const runner: GroovyParserRunner = async (mode, sourcePath) => {
+      parsedPaths.push(sourcePath);
+      return { ...parsed(mode, [], null), sourceName: sourcePath };
+    };
+    await runCachedGroovyParser("script-body", first, runner);
+    await runCachedGroovyParser("script-body", first, runner);
+    const copy = await runCachedGroovyParser("script-body", second, runner);
+    assert.deepEqual(parsedPaths, [first]);
+    assert.equal(copy.sourceName, second);
+    // Changed content and another mode parse again.
+    writeFileSync(first, 'show("Stand")\n');
+    await runCachedGroovyParser("script-body", first, runner);
+    await runCachedGroovyParser("unit", second, runner);
+    assert.deepEqual(parsedPaths, [first, first, second]);
+  } finally {
+    if (previous === undefined) delete process.env.SEXSCRIPT_AST_CACHE;
+    else process.env.SEXSCRIPT_AST_CACHE = previous;
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

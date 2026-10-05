@@ -90,7 +90,7 @@ async function readReportInputs(inputs: string[]): Promise<ParsedGroovyFile[]> {
   return [...parsed, ...(await parseGroovyFiles(groovyPaths))];
 }
 
-/** Each parse starts a JVM, so bound the number of concurrent parser processes. */
+/** A parse not in the cache starts a JVM, so bound the number of concurrent parser processes. */
 async function parseGroovyFiles(sourcePaths: string[]): Promise<ParsedGroovyFile[]> {
   const result: ParsedGroovyFile[] = [];
   const concurrency = 4;

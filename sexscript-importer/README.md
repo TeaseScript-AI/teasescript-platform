@@ -36,6 +36,11 @@ source that is legally and technically appropriate.
 - For `--compile`, `--run`, and the compiler-checked fixtures: the repository build (`npm run build:typescript` in the
   repository root), which provides the real TeaseScript compiler and runtime under `dist/`.
 
+The parser output is cached per file content, parse mode, and parser version (the exporter source and the Groovy
+JARs), so only a new or changed file starts a JVM. The cache lives in `~/.cache/sexscript-importer/groovy-ast/`
+(`$XDG_CACHE_HOME` if set), shared by every checkout; `SEXSCRIPT_AST_CACHE=<dir>` moves it and
+`SEXSCRIPT_AST_CACHE=off` disables it. Each JVM runs with a small serial heap, so four parallel parses stay light.
+
 ## Usage
 
 ```sh
