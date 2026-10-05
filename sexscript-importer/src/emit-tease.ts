@@ -62,8 +62,9 @@ function emitStatements(statements: IrStatement[], lines: string[], depth: numbe
 }
 
 /**
- * The indentation of the statement being written, which a block string's closing delimiter takes (blockString); null
- * outside statements and inside an interpolation, where text stays single-line.
+ * The indentation of the line being written, from which a block string, a multiline menu, or a table continues one level
+ * deeper (blockString, menuOptions, laidOut); null outside statements and inside an interpolation, where text stays on
+ * one line.
  */
 let blockPad: string | null = null;
 

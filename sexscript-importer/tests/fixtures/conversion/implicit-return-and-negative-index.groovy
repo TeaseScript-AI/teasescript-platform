@@ -16,3 +16,7 @@ def lastPick = -1
 def pick = getRandom(3)
 if (kinds[pick] != kinds[lastPick]) show("Another kind")
 lastPick = pick
+// A menu choice minus one reads the last element when the player picks the first button, as Groovy counted it.
+def ratings = ["soft", "hard", "none"]
+def limit = getSelectedValue("Which limit?", ["Back", "Soft", "Hard"])
+show("Limit " + ratings[limit - 1])

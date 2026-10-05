@@ -6584,12 +6584,32 @@ function mayIndexPastEnd(node: AstNode, context: LowerContext, seen = new Set<st
 
 /** Whether a variable used as a list position is ever assigned a negative number, such as -1 for "none yet". */
 function mayIndexNegative(node: AstNode, context: LowerContext): boolean {
+  // `choice - 1` after a menu whose first button gave 0, such as a "Back" button.
+  if (node.kind === "binary" && node.operator === "-") {
+    const right = constantValue(asNode(node.right) ?? undefined);
+    const left = asNode(node.left);
+    return typeof right === "number" && right > 0 && left !== null && mayBeZero(left, context);
+  }
   if (node.kind !== "variable") return false;
   const key = bindingKey(node, context.bindings);
   return (
     key !== null &&
     (context.assignedValues.get(key) ?? []).some((value) => negativeConstantIndex(value) !== null)
   );
+}
+
+/** Whether a value may be 0: a menu selection or random draw, which start at 0, or a variable holding one or a 0. */
+function mayBeZero(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
+  if (constantValue(node) === 0) return true;
+  if (node.kind === "methodCall") {
+    const name = legacyApiCall(node, context)?.name ?? "";
+    return name === "getSelectedValue" || name === "getRandom";
+  }
+  if (node.kind !== "variable") return false;
+  const key = bindingKey(node, context.bindings);
+  if (key === null || seen.has(key)) return false;
+  seen.add(key);
+  return (context.assignedValues.get(key) ?? []).some((value) => mayBeZero(value, context, seen));
 }
 
 /**
