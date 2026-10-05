@@ -195,7 +195,7 @@ test("the default instruction budget finishes a long setup loop and still stops 
     [
       "failed",
       "TSR037",
-      "This loop ran 1,000,000 steps without waiting. Add a wait, or check the loop's condition.",
+      "The script reached its 1,000,000-step limit while running this loop. Add a wait, or check the loop's condition.",
     ],
   );
 });
@@ -216,9 +216,9 @@ test("instruction budget stops an infinite while loop and blames only a loop of 
     return [snapshot.failure?.code, snapshot.failure?.message, snapshot.failure?.span.start.line];
   };
   const blamesLoop = (steps: string) =>
-    `This loop ran ${steps} steps without waiting. Add a wait, or check the loop's condition.`;
+    `The script reached its ${steps}-step limit while running this loop. Add a wait, or check the loop's condition.`;
   const blamesScript = (steps: string) =>
-    `The script ran ${steps} steps without waiting. Add a wait, or check for code that repeats without end.`;
+    `The script reached its ${steps}-step limit. Add a wait, or check for code that repeats without end.`;
 
   // The exit is never taken; a script needs a reachable one. Lines are zero-based.
   assert.deepEqual(failure("let stop = false\nwhile true {\n  if stop { exit }\n}", 20), [
@@ -234,7 +234,12 @@ test("instruction budget stops an infinite while loop and blames only a loop of 
     ),
     ["TSR037", blamesScript("50"), 0],
   );
-  // Timer blocks that catch up while the loop waits are not the loop's steps.
+  // Waits that catch-up settles within the invocation leave the loop running, so the failure is still at the loop.
+  assert.deepEqual(
+    failure("let stop = false\nwhile true {\n  wait 1 ms\n  if stop { exit }\n}", 20, 100),
+    ["TSR037", blamesLoop("20"), 1],
+  );
+  // Timer blocks that catch up while the loop waits do not run the loop, so the failure is not at it.
   const [code, message] = failure(
     "let t = timer(duration: 1 ms, async: true, repeat: true) { return }\nt.repeatDuration = 1e-300 ms\nlet stop = false\nwhile true {\n  wait 2 ms\n  if stop { exit }\n}",
     1_000,

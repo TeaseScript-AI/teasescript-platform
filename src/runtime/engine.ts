@@ -2055,7 +2055,8 @@ function failSnapshot(
 
 /**
  * Fails at the innermost loop of the running call, the likely cause; otherwise, as while waiting between timer blocks,
- * at the next instruction.
+ * at the next instruction. The budget counts the whole invocation, including earlier loops and waits that catch-up
+ * settled, so the message names the limit rather than the work of that loop.
  */
 function failForBudget(
   plan: InstructionPlan,
@@ -2076,8 +2077,8 @@ function failForBudget(
   const steps = String(budget).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const message =
     loopStart === -1
-      ? `The script ran ${steps} steps without waiting. Add a wait, or check for code that repeats without end.`
-      : `This loop ran ${steps} steps without waiting. Add a wait, or check the loop's condition.`;
+      ? `The script reached its ${steps}-step limit. Add a wait, or check for code that repeats without end.`
+      : `The script reached its ${steps}-step limit while running this loop. Add a wait, or check the loop's condition.`;
   failSnapshot(
     snapshot,
     { code: "TSR037", message, span: copySpan(span) },
