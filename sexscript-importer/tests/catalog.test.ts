@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  approvedPackages,
   loadRepositoryCatalogTools,
+  packageContentHash,
   readCatalogEntries,
   renderCatalogPage,
   writeSourceViews,
@@ -29,57 +31,54 @@ test(
           typeof content === "string" ? content : JSON.stringify(content),
         );
       };
-      const run = (status: string) => ({
-        smokeRuns: [
-          {
-            entry: "main.tease",
-            isolated: false,
-            status,
-            failure: null,
-            blockedTarget: null,
-            steps: 3,
-          },
-        ],
+      const played = (source: string, verdict: string) => ({
+        contentHash: packageContentHash([{ path: "main.tease", source }]),
+        verdict,
+        checkedAt: "2026-10-05T03:00:00.000Z",
+        runs: [{ stop: { kind: "ended", detail: "the session reached its end" } }],
+        coverage: { files: ["main.tease"], fileCount: 1, sites: 2, siteCount: 2, choices: 3 },
+        missingImages: [],
+        missingMedia: [],
       });
+      const walk =
+        '---\ntitle: "Night <Walk> & Talk"\nauthor: "Ann"\ndescription: "A short walk."\nkeywords: "walk", "night"\n---\nsay "Hello"\nexit\n';
       await write("corpus/Night Walk/scripts/walk.groovy", 'show("Hello")\n');
       await write("converted/Night Walk/.conversion.json", {
         source: path.join(work, "corpus/Night Walk"),
       });
-      await write("converted/Night Walk/.report.json", run("halted"));
-      await write(
-        "converted/Night Walk/main.tease",
-        '---\ntitle: "Night <Walk> & Talk"\nauthor: "Ann"\ndescription: "A short walk."\nkeywords: "walk", "night"\n---\nsay "Hello"\nexit\n',
-      );
-      await write("converted/broken/.report.json", {
-        fileCount: 2,
-        migrationCleanFileCount: 1,
-        projectCompiles: false,
-        ...run("blocked"),
-      });
+      await write("converted/Night Walk/main.tease", walk);
+      await write("checks/Night Walk/result.json", played(walk, "plays"));
+      await write("converted/broken/.report.json", { fileCount: 2, migrationCleanFileCount: 1 });
       await write(
         "converted/broken/main.tease",
         '---\ntitle: "Broken"\n---\n// TODO CODE line 3: unsupported call\nsay missingName\nexit\n',
       );
-      // Only commands that are not built yet keep this one from compiling.
-      await write("converted/popup/.report.json", {
-        projectCompiles: true,
-        pendingCapabilityFileCounts: { showPopup: 1 },
-        ...run("halted"),
-      });
+      // A check of other contents than the current files is stale.
+      await write("checks/broken/result.json", played("say 1\nexit\n", "plays"));
       await write("converted/popup/main.tease", '---\ntitle: "Popup"\n---\nshowPopup "Hi"\nexit\n');
       await write("converted/menu/rooms/hall.tease", "say 1\nexit\n");
       await write("converted/.hidden/main.tease", 'say "not a package"\nexit\n');
+      await write("verified/garden/main.tease", '---\ntitle: "Garden"\n---\nsay "Green"\nexit\n');
+      await write("verified/garden/.verified.json", {
+        date: "2026-10-05",
+        importerCommit: "abc1234",
+      });
 
       // EVIDENCE: the test is skipped unless the tools loaded, so toolsResult holds them here.
       const tools = (toolsResult as { tools: CatalogTools }).tools;
-      const entries = await readCatalogEntries(path.join(work, "converted"), tools);
+      const entries = await readCatalogEntries(path.join(work, "converted"), tools, {
+        playChecks: path.join(work, "checks"),
+        verified: path.join(work, "verified"),
+        approved: approvedPackages("| Package | Date |\n| --- | --- |\n| `popup` | 2026-10-05 |\n"),
+      });
       assert.deepEqual(
         entries.map(({ id, status, partial }) => [id, status.label, partial?.label ?? null]),
         [
           ["broken", "does not compile", "partly converted (1/2, 1 TODO)"],
+          ["garden", "verified", null],
           ["menu", "no main.tease", null],
-          ["Night Walk", "runs to the end", null],
-          ["popup", "needs showPopup", null],
+          ["Night Walk", "plays to the end", null],
+          ["popup", "owner-approved", null],
         ],
       );
       assert.match(entries[0]!.status.detail, /^main\.tease:5:5 TSV002 /u);
@@ -96,13 +95,13 @@ test(
         page,
         /<a href="source\/Night%20Walk\/groovy\/walk\.groovy">Groovy<\/a> &middot; <a href="source\/Night%20Walk\/tease\/main\.tease">TeaseScript<\/a>/u,
       );
-      // Listed, convert fully, compile, run to the end, stop during the run, need unbuilt commands, do not compile.
-      assert.match(
-        page,
-        /<tr><td>4<\/td><td>3<\/td><td>1<\/td><td>1<\/td><td>0<\/td><td>1<\/td><td>2<\/td><\/tr>/u,
+      assert.ok(
+        page.includes(
+          '<dl class="summary"><div><dt>Listed</dt><dd>5</dd></div><div><dt>Convert fully</dt><dd>4</dd></div><div><dt>Compile</dt><dd>2</dd></div><div><dt>Play to the end</dt><dd>3</dd></div><div><dt>Stop during play</dt><dd>0</dd></div><div><dt>Do not start</dt><dd>2</dd></div><div><dt>Not played yet</dt><dd>0</dd></div><div><dt>Blocked by unbuilt commands</dt><dd>0</dd></div><div><dt>Verified</dt><dd>1</dd></div><div><dt>Owner-approved</dt><dd>1</dd></div></dl>',
+        ),
       );
       assert.match(page, /Measured 2026-10-05 with importer commit abc1234/u);
-      assert.equal(page.match(/<button type="button" data-pin=/gu)?.length, 4);
+      assert.equal(page.match(/<button type="button" data-pin=/gu)?.length, 5);
 
       await writeSourceViews(entries, path.join(work, "catalog"));
       assert.equal(
@@ -110,8 +109,8 @@ test(
         'show("Hello")\n',
       );
       assert.match(
-        await readFile(path.join(work, "catalog/source/Night Walk/tease/main.tease"), "utf8"),
-        /say "Hello"/u,
+        await readFile(path.join(work, "catalog/source/garden/tease/main.tease"), "utf8"),
+        /say "Green"/u,
       );
     } finally {
       await rm(work, { recursive: true, force: true });

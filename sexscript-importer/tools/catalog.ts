@@ -3,16 +3,22 @@
  * opening the package in the TeaseScript Player, and hard-links the packages' legacy Groovy and converted `.tease`
  * files next to it under `source/`, for `serve-catalog.ts` to show as plain text.
  *
- * Usage: node tools/catalog.ts [--player <origin>] <converted-root> <output.html>
+ * Usage: node tools/catalog.ts [--player <origin>] [--play-checks <dir>] [--verified <dir>] [--approved <file>]
+ *   <converted-root> <output.html>
  *
  * `--player https://host:port` makes the Player links absolute, for a page served from another origin than the
  * Player; without it they are `/player/?package=<id>`. A package is read and compiled as the Player does: the
  * playground server's package scan, then the real compiler's `compileProject` with the package images (repository
- * build required). The status also uses the importer's report in `.report.json`, written by `convert-corpus.ts`.
+ * build required). The status comes from, in this order: the owner-approved list (`--approved`, a Markdown table
+ * whose first column names the package), the frozen verified copies (`--verified`, which replace the converted
+ * package in the list), the Player checks of `play-check.ts` (`--play-checks`) for the package's current `.tease`
+ * files, and otherwise the compiler and the importer's report in `.report.json`.
  */
+import { createHash } from "node:crypto";
 import { copyFile, link, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
 import { isRecord } from "../src/ast.ts";
 
 export interface CatalogEntry {
@@ -22,6 +28,8 @@ export interface CatalogEntry {
   readonly description: string | null;
   readonly keywords: readonly string[];
   readonly compiles: boolean;
+  /** Where the listed package comes from: the converted root, or its frozen verified copy. */
+  readonly origin: "converted" | "verified";
   readonly status: Status;
   /** Set when the importer left parts unconverted. */
   readonly partial: Status | null;
@@ -33,7 +41,16 @@ export interface CatalogEntry {
 }
 
 export interface Status {
-  readonly kind: "runs" | "stops" | "unbuilt" | "compiles" | "error" | "partial";
+  readonly kind:
+    | "approved"
+    | "verified"
+    | "plays"
+    | "stops"
+    | "nostart"
+    | "unbuilt"
+    | "compiles"
+    | "error"
+    | "partial";
   /** A few words for the table. */
   readonly label: string;
   readonly detail: string;
@@ -100,6 +117,32 @@ interface ImporterReport {
   }>;
 }
 
+/** The fields of a `play-check.ts` result the status uses. */
+interface PlayCheck {
+  readonly contentHash: string;
+  readonly verdict: "plays" | "stops" | "no-start";
+  readonly checkedAt: string;
+  readonly runs: ReadonlyArray<{
+    readonly stop: { readonly kind: string; readonly detail: string };
+  }>;
+  readonly coverage: {
+    readonly files: readonly string[];
+    readonly fileCount: number;
+    readonly sites: number;
+    readonly siteCount: number;
+    readonly choices: number;
+  };
+  readonly missingImages: readonly string[];
+  readonly missingMedia: readonly string[];
+}
+
+/** Where the status beyond the compiler comes from; see the module comment. */
+export interface StatusSources {
+  readonly playChecks?: string;
+  readonly verified?: string;
+  readonly approved?: ReadonlySet<string>;
+}
+
 /** When and with which importer the converted root was measured, from `.conversion-summary.json`. */
 export interface Measurement {
   readonly importerCommit: string | null;
@@ -113,21 +156,36 @@ const PIN_STORAGE_KEY = "sexscript-catalog-pins";
 if (process.argv[1] === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));
 
 async function main(rawArgs: string[]): Promise<void> {
-  const playerIndex = rawArgs.indexOf("--player");
-  const playerOrigin = playerIndex < 0 ? "" : (rawArgs[playerIndex + 1] ?? "").replace(/\/+$/u, "");
-  const args =
-    playerIndex < 0
-      ? rawArgs
-      : rawArgs.filter((_, index) => index !== playerIndex && index !== playerIndex + 1);
-  if (args.length !== 2 || (playerIndex >= 0 && playerOrigin === "")) {
+  const { values, positionals } = parseArgs({
+    args: rawArgs,
+    allowPositionals: true,
+    options: {
+      player: { type: "string", default: "" },
+      "play-checks": { type: "string" },
+      verified: { type: "string" },
+      approved: { type: "string" },
+    },
+  });
+  if (positionals.length !== 2) {
     process.stderr.write(
-      "Usage: node tools/catalog.ts [--player <origin>] <converted-root> <output.html>\n",
+      "Usage: node tools/catalog.ts [--player <origin>] [--play-checks <dir>] [--verified <dir>] [--approved <file>] <converted-root> <output.html>\n",
     );
     process.exit(2);
   }
-  const root = path.resolve(args[0]!);
-  const output = path.resolve(args[1]!);
-  const entries = await readCatalogEntries(root, await loadRepositoryCatalogTools());
+  const playerOrigin = values.player.replace(/\/+$/u, "");
+  const root = path.resolve(positionals[0]!);
+  const output = path.resolve(positionals[1]!);
+  const approved =
+    values.approved === undefined
+      ? new Set<string>()
+      : approvedPackages(await readFile(values.approved, "utf8").catch(() => ""));
+  const entries = await readCatalogEntries(root, await loadRepositoryCatalogTools(), {
+    ...(values["play-checks"] === undefined
+      ? {}
+      : { playChecks: path.resolve(values["play-checks"]) }),
+    ...(values.verified === undefined ? {} : { verified: path.resolve(values.verified) }),
+    approved,
+  });
   const measurement = await readFile(path.join(root, ".conversion-summary.json"), "utf8").then(
     (text) => {
       // EVIDENCE: convert-corpus.ts writes .conversion-summary.json as one JSON object of counts.
@@ -142,13 +200,35 @@ async function main(rawArgs: string[]): Promise<void> {
   await mkdir(path.dirname(output), { recursive: true });
   await writeSourceViews(entries, path.dirname(output));
   await writeFile(output, renderCatalogPage(entries, { playerOrigin, measurement }), "utf8");
-  const count = (kind: Status["kind"]) =>
-    entries.filter((entry) => entry.status.kind === kind).length;
+  const counts = new Map<string, number>();
+  for (const entry of entries)
+    counts.set(entry.status.kind, (counts.get(entry.status.kind) ?? 0) + 1);
   process.stderr.write(
-    `Listed ${entries.length} packages in ${output}: ${entries.filter((entry) => entry.compiles).length} compile, ` +
-      `${count("runs")} run to the end, ${count("stops")} stop during the run, ${count("unbuilt")} need unbuilt ` +
-      `commands, ${count("error")} do not compile or start.\n`,
+    `Listed ${entries.length} packages in ${output}: ${[...counts].map(([kind, count]) => `${count} ${kind}`).join(", ")}.\n`,
   );
+}
+
+/** The first column of each data row of a Markdown table: the owner-approved packages. */
+export function approvedPackages(markdown: string): Set<string> {
+  const rows = markdown.split("\n").filter((line) => line.trim().startsWith("|"));
+  return new Set(
+    rows
+      .slice(2)
+      .map((row) => row.split("|")[1]?.trim().replace(/^`|`$/gu, "") ?? "")
+      .filter((id) => id !== ""),
+  );
+}
+
+/** A digest of a package's `.tease` files, by path and text; a Player check of other contents is stale. */
+export function packageContentHash(
+  sources: ReadonlyArray<{ readonly path: string; readonly source: string }>,
+): string {
+  const hash = createHash("sha256");
+  for (const { path: filePath, source } of [...sources].sort((left, right) =>
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
+  ))
+    hash.update(`${filePath}\0${source}\0`);
+  return hash.digest("hex");
 }
 
 /** Loads the playground server's package scan and the compiler from the repository build (`npm run build`). */
@@ -183,19 +263,37 @@ export async function loadRepositoryCatalogTools(): Promise<CatalogTools> {
   };
 }
 
-/** Every package folder of `root` (each non-hidden subfolder), by title. */
+/** Every package folder of `root` and of the verified copies (each non-hidden subfolder), by title. */
 export async function readCatalogEntries(
   root: string,
   tools: CatalogTools,
+  sources: StatusSources = {},
 ): Promise<CatalogEntry[]> {
-  const ids = (await readdir(root, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-    .map((entry) => entry.name);
+  const folders = async (folder: string | undefined) =>
+    folder === undefined
+      ? []
+      : (await readdir(folder, { withFileTypes: true }).catch(() => []))
+          .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+          .map((entry) => entry.name);
+  const verified = new Set(await folders(sources.verified));
+  const ids = [...new Set([...(await folders(root)), ...verified])];
   const entries: CatalogEntry[] = [];
   // Scanning reads every image for its XMP tags, so a few packages at a time.
   for (let start = 0; start < ids.length; start += 4)
     entries.push(
-      ...(await Promise.all(ids.slice(start, start + 4).map((id) => readEntry(root, id, tools)))),
+      ...(await Promise.all(
+        ids
+          .slice(start, start + 4)
+          .map((id) =>
+            readEntry(
+              verified.has(id) ? sources.verified! : root,
+              id,
+              tools,
+              sources,
+              verified.has(id),
+            ),
+          ),
+      )),
     );
   return entries.sort(
     (left, right) =>
@@ -204,7 +302,13 @@ export async function readCatalogEntries(
   );
 }
 
-async function readEntry(root: string, id: string, tools: CatalogTools): Promise<CatalogEntry> {
+async function readEntry(
+  root: string,
+  id: string,
+  tools: CatalogTools,
+  statusSources: StatusSources,
+  isVerified: boolean,
+): Promise<CatalogEntry> {
   const folder = path.join(root, id);
   const scan = await tools.scan(folder);
   const compilation = tools.compile(scan.sources, scan.images);
@@ -237,6 +341,43 @@ async function readEntry(root: string, id: string, tools: CatalogTools): Promise
               .join("/"),
           )
           .sort();
+  const play =
+    statusSources.playChecks === undefined
+      ? null
+      : ((await readFile(path.join(statusSources.playChecks, id, "result.json"), "utf8").then(
+          (text) => JSON.parse(text) as PlayCheck,
+          () => null,
+        )) as PlayCheck | null);
+  const current =
+    play !== null && play.contentHash === packageContentHash(scan.sources) ? play : null;
+  const verifiedRecord = isVerified ? await readJson(".verified.json") : null;
+  const compileStatus = packageStatus(
+    sources.some((file) => file.path === MAIN),
+    compilation.plan !== null,
+    compilation.diagnostics,
+    report,
+  );
+  let status: Status;
+  if (statusSources.approved?.has(id) === true)
+    status = {
+      kind: "approved",
+      label: "owner-approved",
+      detail: "The owner approved this package.",
+    };
+  else if (isVerified) {
+    // A Player check of a newer conversion is of other contents than the frozen copy.
+    const regression =
+      play !== null &&
+      play.contentHash !== packageContentHash(scan.sources) &&
+      play.verdict !== "plays"
+        ? ` A newer conversion does not play: ${playStatus(play, compileStatus).detail}`
+        : "";
+    status = {
+      kind: "verified",
+      label: regression === "" ? "verified" : "verified, newer conversion regresses",
+      detail: `Played and checked on ${String(verifiedRecord?.date ?? "?")} with importer commit ${String(verifiedRecord?.importerCommit ?? "?")}; this frozen copy is served.${regression}`,
+    };
+  } else status = current === null ? compileStatus : playStatus(current, compileStatus);
   const todos = sources.reduce(
     (sum, { source }) => sum + (source.match(/^\s*\/\/ TODO [A-Z0-9_]+ line \d+:/gmu)?.length ?? 0),
     0,
@@ -248,12 +389,8 @@ async function readEntry(root: string, id: string, tools: CatalogTools): Promise
     description: header?.description ?? null,
     keywords: [...(header?.tags.map((tag) => tag.name) ?? []), ...(header?.keywords ?? [])],
     compiles: compilation.plan !== null,
-    status: packageStatus(
-      sources.some((file) => file.path === MAIN),
-      compilation.plan !== null,
-      compilation.diagnostics,
-      report,
-    ),
+    origin: isVerified ? "verified" : "converted",
+    status,
     partial: partialConversion(report, sources.length, todos),
     groovy: { root: groovyRoot, paths: groovy },
     tease: { root: folder, paths: sources.map((file) => file.path).sort() },
@@ -308,32 +445,76 @@ function packageStatus(
   }
   const run = report?.smokeRuns?.find((item) => item.entry === MAIN && !item.isolated);
   if (run === undefined)
-    return { kind: "compiles", label: "compiles", detail: "The importer report has no smoke run." };
+    return {
+      kind: "compiles",
+      label: "compiles, not played yet",
+      detail: "Not played in the Player yet.",
+    };
   if (run.status === "halted")
     return {
-      kind: "runs",
-      label: "runs to the end",
+      kind: "compiles",
+      label: "not played; smoke run ends",
       detail: `The smoke run with fixed answers reached the end after ${run.steps} steps.`,
     };
   if (run.status === "failed" && run.failure !== null) {
     const at = `${run.failure.script}${run.failure.line === null ? "" : `:${run.failure.line}`}`;
     return {
-      kind: "stops",
-      label: `stops at ${at}`,
+      kind: "compiles",
+      label: `not played; smoke run stops at ${at}`,
       detail: `The smoke run failed at ${at}: ${run.failure.code} ${run.failure.message}`,
     };
   }
   if (run.status === "blocked")
     return {
-      kind: "stops",
-      label: `stops at ${run.blockedTarget ?? "a script"}`,
+      kind: "compiles",
+      label: `not played; smoke run stops at ${run.blockedTarget ?? "a script"}`,
       detail: `The smoke run reached ${run.blockedTarget ?? "a script"}, which has no runnable conversion.`,
     };
   return {
-    kind: "stops",
-    label: "run inconclusive",
+    kind: "compiles",
+    label: "not played; smoke run inconclusive",
     detail: `The smoke run ended with ${run.status} after ${run.steps} steps; it may wait for typed text that the fixed answers never give.`,
   };
+}
+
+/** The status from a Player check: how far the runs got, or why the package does not start. */
+function playStatus(play: PlayCheck, compileStatus: Status): Status {
+  const { files, fileCount, sites, siteCount, choices } = play.coverage;
+  const coverage = `${play.runs.length} runs reached ${files.length} of ${fileCount} files, ${sites} of ${siteCount} interactions, and ${choices} choices.`;
+  const missing = [...play.missingImages, ...play.missingMedia];
+  const media =
+    missing.length === 0
+      ? ""
+      : ` Missing media: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? `, and ${missing.length - 5} more` : ""}.`;
+  if (play.verdict === "no-start")
+    return {
+      kind: "nostart",
+      label: "does not start",
+      detail:
+        compileStatus.kind === "error" ? compileStatus.detail : (play.runs[0]?.stop.detail ?? ""),
+    };
+  if (play.verdict === "plays")
+    return {
+      kind: "plays",
+      label:
+        missing.length === 0
+          ? "plays to the end"
+          : `plays to the end, ${missing.length} media missing`,
+      detail: `Every run ended normally. ${coverage}${media}`,
+    };
+  const stop = play.runs.find((run) => run.stop.kind !== "ended")!.stop;
+  const at = /^(\S+?:\d+) ([A-Z]+\d+)\b/u.exec(stop.detail);
+  const label =
+    stop.kind === "error" && at !== null
+      ? `stops at ${at[1]} (${at[2]})`
+      : stop.kind === "early-end"
+        ? "ends at the start"
+        : stop.kind === "hang"
+          ? "hangs"
+          : stop.kind === "budget"
+            ? "no end in the step budget"
+            : `stops (${stop.kind})`;
+  return { kind: "stops", label, detail: `${stop.detail}. ${coverage}${media}` };
 }
 
 /** The importer's share of unconverted code: files with migration errors and the TODO markers it left. */
@@ -433,10 +614,13 @@ export function renderCatalogPage(
     ["Listed", entries.length],
     ["Convert fully", entries.filter((entry) => entry.partial === null).length],
     ["Compile", entries.filter((entry) => entry.compiles).length],
-    ["Run to the end", count("runs")],
-    ["Stop during the run", count("stops")],
-    ["Need unbuilt commands", count("unbuilt")],
-    ["Do not compile", count("error")],
+    ["Play to the end", count("plays") + count("verified") + count("approved")],
+    ["Stop during play", count("stops")],
+    ["Do not start", count("nostart") + count("error")],
+    ["Not played yet", count("compiles") + count("unbuilt")],
+    ["Blocked by unbuilt commands", count("unbuilt")],
+    ["Verified", count("verified")],
+    ["Owner-approved", count("approved")],
   ];
   const head =
     "<thead><tr><th>Pin</th><th>Title</th><th>Author</th><th>Keywords</th><th>Description</th><th>Status</th><th>Source</th></tr></thead>";
@@ -456,19 +640,20 @@ td.description { min-width: 14rem; max-width: 26rem; }
 td.keywords { max-width: 12rem; font-size: 0.9em; }
 td.author, td.keywords, td.source, .meta { color: #666; }
 td.source { font-size: 0.9em; }
-table.summary { width: auto; margin-bottom: 0.3rem; }
-table.summary th { position: static; border: 0; font-weight: normal; color: #666; }
-table.summary td { border: 0; font-size: 1.3em; font-weight: 600; }
-.status { font-size: 0.8em; padding: 0 0.4em; border-radius: 0.3em; white-space: nowrap; background: #eee; color: #333; }
-.status.runs { background: #ddf4dd; color: #1d5e1d; }
+dl.summary { display: flex; flex-wrap: wrap; gap: 0.3rem 1.4rem; margin: 0 0 0.3rem; }
+dl.summary dt { color: #666; font-size: 0.9em; }
+dl.summary dd { margin: 0; font-size: 1.3em; font-weight: 600; }
+.status { font-size: 0.8em; padding: 0 0.4em; border-radius: 0.3em; display: inline-block; max-width: 13rem; background: #eee; color: #333; }
+.status.plays { background: #ddf4dd; color: #1d5e1d; }
+.status.verified, .status.approved { background: #1d5e1d; color: #fff; }
 .status.stops, .status.partial { background: #fff1cc; color: #6b4e00; }
 .status.unbuilt { background: #e6e3fb; color: #3c2f86; }
-.status.error { background: #fde2e1; color: #8a1c1c; }
+.status.error, .status.nostart { background: #fde2e1; color: #8a1c1c; }
 details summary { cursor: pointer; }
 td.status-cell details summary { list-style: none; }
 td.status-cell details p, td.source details p { margin: 0.2rem 0; font-size: 0.85em; color: #555; }
 button[data-pin] { font-size: 0.8em; }
-@media (max-width: 40rem) {
+@media (max-width: 60rem) {
   table.packages thead { display: none; }
   table.packages, table.packages tbody, table.packages tr, table.packages td { display: block; }
   table.packages tr { border-bottom: 1px solid #ddd; padding: 0.5rem 0; }
@@ -482,12 +667,10 @@ button[data-pin] { font-size: 0.8em; }
 <h1>Converted SexScript teases</h1>
 <p>Legacy SexScript packages converted by the TeaseScript importer. Each title opens its package in the TeaseScript
 Player; click a status for its details.</p>
-<table class="summary">
-<tr>${summary.map(([label]) => `<th>${label}</th>`).join("")}</tr>
-<tr>${summary.map(([, value]) => `<td>${value}</td>`).join("")}</tr>
-</table>
-<p class="meta">${measured}${measured === "" ? "" : ". "}"Run to the end" means that the importer's smoke run from
-main.tease finished on one path, with fixed answers and simulated time. MIDI music does not play.</p>
+<dl class="summary">${summary.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("")}</dl>
+<p class="meta">${measured}${measured === "" ? "" : ". "}"Play to the end" means that automated play in the real
+Player, on several paths through buttons, choices, and typed answers, with waits skipped, ended normally every time.
+"Verified" packages also passed a manual check and are served as frozen copies. MIDI music does not play.</p>
 <h2>Pinned</h2>
 <p id="pinned-none" class="meta">Nothing pinned yet. Use a Pin button to keep a tease here.</p>
 <table class="packages" hidden>

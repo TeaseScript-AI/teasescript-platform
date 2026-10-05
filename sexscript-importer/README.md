@@ -99,15 +99,21 @@ Mapping decisions and their rationale are in [`docs/POC-SCOPE.md`](docs/POC-SCOP
 
 ## Corpus catalog
 
-A page that opens every converted package of a legacy corpus in the Player:
+A page that opens every converted package of a legacy corpus in the Player, with the status from playing it there:
 
 ```sh
 node tools/convert-corpus.ts [--jobs N] [--only id,id] [--report-only] /path/to/corpus external/converted
-node tools/catalog.ts [--player https://host:port] external/converted external/catalog/index.html
-# from the repository root, after npm run build:
+# from the repository root, after npm run build: the converted and the verified packages, then the HTTPS front
 HOST=127.0.0.1 PORT=4182 PLAYGROUND_PACKAGES=$PWD/sexscript-importer/external/converted node dist/playground/server.js
+HOST=127.0.0.1 PORT=4183 PLAYGROUND_PACKAGES=$PWD/sexscript-importer/external/verified node dist/playground/server.js
 node sexscript-importer/tools/serve-catalog.ts --catalog sexscript-importer/external/catalog \
-  --upstream http://127.0.0.1:4182 --cert cert.pem --key key.pem --port 4443 [--http-port 4180]
+  --upstream http://127.0.0.1:4182 --verified-root sexscript-importer/external/verified \
+  --verified-upstream http://127.0.0.1:4183 --cert cert.pem --key key.pem --port 4443 [--http-port 4180]
+# from sexscript-importer/:
+node tools/play-check.ts [--base https://host:4443] [--runs N] [--steps N] [--only id,id] external/converted external/play-checks
+node tools/verify-package.ts --checks external/play-checks --verified external/verified --manual "<note>" external/converted <id>
+node tools/catalog.ts [--player https://host:port] --play-checks external/play-checks --verified external/verified \
+  [--approved docs/APPROVED.md] external/converted external/catalog/index.html
 ```
 
 `convert-corpus` takes one corpus folder per package, each with `scripts/`, `images/`, and `sounds/`. It runs
@@ -115,23 +121,37 @@ node sexscript-importer/tools/serve-catalog.ts --catalog sexscript-importer/exte
 `.report.json`. Legacy scripts name media relative to `images/` and `sounds/`, and package paths start at the package
 root, so both trees are hard-linked into the package root. Media are never copied, so the corpus and the output must
 share one filesystem. A resource pack (a folder without scripts) is linked into each script package whose source names
-one of its top media folders, narrowed to the packages that name its subfolder when any do. Each package
-folder records the conversion in `.conversion.json` and `.conversion.log`; `.conversion-summary.json` in the root
-records the importer commit and the date.
-
-`catalog` writes one HTML page and reads each package as the Player does: the playground server's package scan, then
-`compileProject` with the package images. A summary table counts the packages that convert fully, compile, run to the
-end, stop during the run, need unbuilt commands, or do not compile. Each table row shows the `---` header of
-`main.tease`, or of the first script that a generated `main.tease` menu goes to: title (the Player link), author,
-keywords, and description. The status column shows what the Player does with the package and how the report's smoke run
-from `main.tease` ended, with a `partly converted` mark for unconverted code; click a status for details. The source
-column links the legacy Groovy and converted `.tease` files, which `catalog` hard-links under `source/` next to the
-page. A Pin button keeps favourites in `localStorage` and lists them at the top.
+one of its top media folders, narrowed to the packages that name its subfolder when any do. Each package folder records
+the conversion in `.conversion.json` and `.conversion.log`; `.conversion-summary.json` in the root records the importer
+commit and the date.
 
 The Player needs a secure context (HTTPS or localhost) on another machine, and the playground server serves its own
 page at `/`. `serve-catalog` therefore puts the catalog page and the Player on one HTTPS origin. It serves `/` and
 `/source/` itself, with the sources as UTF-8 plain text, and forwards the other GET requests to the playground server
-on loopback. A self-signed certificate works once its browser warning is accepted.
+on loopback, or, for a package with a verified copy, to the one that offers the verified copies. A self-signed
+certificate works once its browser warning is accepted.
+
+`play-check` plays each package in the real Player with Playwright (`PLAYWRIGHT_CORE` names the `playwright-core`
+folder), one browser at a time. A run presses buttons, picks choices, and types answers until the session halts,
+fails, hangs, or uses up its steps. Playwright's fake clock skips waits, timers, and chat pacing, and media play at 16
+times speed. Each run prefers the choices that earlier runs tried least, and a package stops after a run that reaches
+nothing new. The session state is read from the Player's Vue tree, because the Player shows no runtime failure. The
+result in `<out>/<id>/result.json` records each run's stop, the files and interactions reached, missing media, and a
+screenshot of each stop, for the package's current `.tease` files.
+
+`verify-package` freezes a package whose check plays to the end without missing media, after a manual check, into
+`external/verified/<id>/` and adds a row to [`docs/VERIFIED.md`](docs/VERIFIED.md). It never replaces a verified copy.
+
+`catalog` writes one HTML page and reads each package as the Player does: the playground server's package scan, then
+`compileProject` with the package images. A summary table counts the packages that convert fully, compile, play to the
+end, stop during play, do not start, are not played yet, are blocked by unbuilt commands, are verified, or are
+owner-approved. Each table row shows the `---` header of `main.tease`, or of the first script that a generated
+`main.tease` menu goes to: title (the Player link), author, keywords, and description. The status column takes, in
+this order, the owner-approved list (the first column of the Markdown table in `--approved`), the verified copy, the
+Player check of the current files, or else the compiler and the report's smoke run. A `partly converted` mark counts
+unconverted code; click a status for details. The source column links the legacy Groovy and converted `.tease` files,
+which `catalog` hard-links under `source/` next to the page. A Pin button keeps favourites in `localStorage` and lists
+them at the top.
 
 ## Tests
 
