@@ -28,3 +28,7 @@ if (given instanceof String) show("A text")
 def leashed = getBoolean("Leashed?")
 def gagged = getBoolean("Gagged?")
 show("Crawl to me" + (leashed ? " with the leash" : "") + (gagged ? "" : ", mouth open") + ".")
+// An update of one variable by a conditional value is written per branch.
+def dare = "Crawl. "
+dare += leashed ? "On the leash." : "Free, " + (gagged ? "quiet." : "speaking.")
+show(dare)

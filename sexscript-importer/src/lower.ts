@@ -2755,8 +2755,9 @@ function lowerConditionalStatement(node: AstNode, context: LowerContext): IrStat
 }
 
 /**
- * Whether repeating a statement per branch of its conditional stays small: a return or a call with one argument whose
- * other conditionals, if any, sit inside the branches, as in a chain `a ? x : b ? y : z`. A larger statement, such as a
+ * Whether repeating a statement per branch of its conditional stays small: a return, an update of one variable, or a
+ * call with one argument, whose other conditionals, if any, sit inside the branches, as in a chain `a ? x : b ? y : z`.
+ * A larger statement, such as a
  * dialogue call with several text fragments, computes its conditionals into temporaries instead, so its text is
  * written once (hoistDeferred).
  */
@@ -2770,7 +2771,11 @@ function repeatsLittle(
   const expression = statement.kind === "return" ? null : asNode(statement.expression);
   const small =
     statement.kind === "return" ||
-    (expression?.kind === "methodCall" && nodeArray(asNode(expression.arguments)?.items).length <= 1);
+    (expression?.kind === "methodCall" && nodeArray(asNode(expression.arguments)?.items).length <= 1) ||
+    // `text += c ? a : b` updates one variable.
+    (expression?.kind === "binary" &&
+      ["=", "+=", "-=", "*=", "/="].includes(text(expression.operator) ?? "") &&
+      variableName(expression.left) !== null);
   const inside = (branch: AstNode): boolean => {
     const rest = findDeferred(substituteNode(statement, deferred, branch), context);
     if (rest === null) return true;

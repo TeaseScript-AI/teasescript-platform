@@ -9,7 +9,8 @@ function sexscriptLegacyAskBooleansSystem(message, texts, defaults) {
     index += 1
   }
   say as system message
-  while true {
+  let done = false
+  while not done {
     let buttons = []
     index = 0
     for text in texts {
@@ -23,10 +24,12 @@ function sexscriptLegacyAskBooleansSystem(message, texts, defaults) {
     buttons.add({ value: texts.length, text: "Done" })
     let picked = choose buttons
     if picked == texts.length {
-      return selected
+      done = true
+    } else {
+      selected[picked] = not selected[picked]
     }
-    selected[picked] = not selected[picked]
   }
+  return selected
 }
 function sexscriptLegacyAskProfile {
   if load("intro.name") == null {

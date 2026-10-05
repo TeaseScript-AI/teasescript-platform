@@ -492,9 +492,11 @@ function askBooleansHelper(name: string, speaker?: string): IrStatement {
         set(v("index"), lit(1), "+="),
       ]),
       { kind: "say", value: v("message"), ...asSpeaker, span: null },
+      // The loop ends at "Done", and the function returns the answers last, so its result is always the list.
+      letS("done", lit(false)),
       {
         kind: "while",
-        condition: lit(true),
+        condition: { kind: "unary", operator: "not", value: v("done") },
         body: [
           letS("buttons", { kind: "list", items: [] }),
           set(v("index"), lit(0)),
@@ -524,15 +526,21 @@ function askBooleansHelper(name: string, speaker?: string): IrStatement {
             kind: "listChoice",
             options: [{ kind: "list", list: v("buttons"), records: true }],
           }),
-          ifS(bin("==", v("picked"), count), [ret(v("selected"))]),
-          set(at(v("selected"), v("picked")), {
-            kind: "unary",
-            operator: "not",
-            value: at(v("selected"), v("picked")),
-          }),
+          ifS(
+            bin("==", v("picked"), count),
+            [set(v("done"), lit(true))],
+            [
+              set(at(v("selected"), v("picked")), {
+                kind: "unary",
+                operator: "not",
+                value: at(v("selected"), v("picked")),
+              }),
+            ],
+          ),
         ],
         span: null,
       },
+      ret(v("selected")),
     ],
   );
 }

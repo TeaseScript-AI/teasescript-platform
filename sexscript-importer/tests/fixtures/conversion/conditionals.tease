@@ -84,4 +84,14 @@ if gagged {
   conditional2 = ""
 }
 say "Crawl to me${conditional}${conditional2}."
+// An update of one variable by a conditional value is written per branch.
+let dare = "Crawl. "
+if leashed {
+  dare += "On the leash."
+} else if gagged {
+  dare += "Free, quiet."
+} else {
+  dare += "Free, speaking."
+}
+say dare
 exit
