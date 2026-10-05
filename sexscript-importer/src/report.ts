@@ -488,7 +488,14 @@ function stub(path: string): string {
  * The shimmed source of a runnable file with a first statement that announces the file, since the runtime reports
  * no transfers itself; and the line of that statement, which later lines of the generated file follow by one.
  */
-function announced(path: string, shim: PendingShim): { source: string; line: number } {
+/**
+ * A runnable file that announces itself when it starts: its source, the probe's line, and how many lines the probe
+ * added, which can be two when the emitter keeps a paragraph break after it.
+ */
+function announced(
+  path: string,
+  shim: PendingShim,
+): { source: string; probe: { line: number; shift: number } } {
   const source = emitTease({
     ...shim.program,
     statements: [
@@ -505,8 +512,9 @@ function announced(path: string, shim: PendingShim): { source: string; line: num
       ...shim.program.statements,
     ],
   });
-  const line = source.split("\n").findIndex((text) => text.startsWith(`${ENTER}(`)) + 1;
-  return { source, line };
+  const lines = source.split("\n");
+  const line = lines.findIndex((text) => text.startsWith(`${ENTER}(`)) + 1;
+  return { source, probe: { line, shift: lines.length - shim.source.split("\n").length } };
 }
 
 /**
@@ -530,13 +538,13 @@ function runPackageProject(
   const caseCounts = new Map<string, number>();
   for (const { path } of entries)
     caseCounts.set(path.toLowerCase(), (caseCounts.get(path.toLowerCase()) ?? 0) + 1);
-  const probeLines = new Map<string, number>();
+  const probeLines = new Map<string, { line: number; shift: number }>();
   const sources = new Map(
     entries.map(({ path, shim, fileIndex }): [string, string] => {
       if (!runnable.has(path) || caseCounts.get(path.toLowerCase())! > 1) return [path, stub(path)];
       if (fileIndex === null && path !== MAIN) return [path, shim.source];
-      const { source, line } = announced(path, shim);
-      probeLines.set(path, line);
+      const { source, probe } = announced(path, shim);
+      probeLines.set(path, probe);
       return [path, source];
     }),
   );
@@ -572,12 +580,12 @@ function runPackageProject(
     hosts[START] = () => (started ? "" : ((started = true), entry));
     const result = runner(files, hosts, images === undefined ? {} : { images });
     const failure = blocked === null ? result.failure : null;
-    // The announcing statement moved the generated file's lines down by one.
+    // The announcing statement moved the generated file's lines after it down.
     const probe = failure?.path === null ? undefined : probeLines.get(failure?.path ?? "");
     const line =
-      failure === null || failure.line === null || probe === undefined || failure.line < probe
+      failure === null || failure.line === null || probe === undefined || failure.line < probe.line
         ? (failure?.line ?? null)
-        : failure.line - 1;
+        : failure.line - probe.shift;
     const flow: PackageRunResult = {
       entry,
       isolated,

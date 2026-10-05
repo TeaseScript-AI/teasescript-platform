@@ -287,6 +287,35 @@ test(
 
 // The legacy player found media files ignoring letter case, around spaces, and below a repeated folder name; the
 // converted path names the file, and a MIDI file names the MP3 the package converts it to.
+// The smoke run's probe line can add a paragraph break after it; failure lines still name the written file's line.
+test(
+  "reports a smoke-run failure at the line of the written file below a file header",
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
+  async () => {
+    if (!("compiler" in projectResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-lines-"));
+    try {
+      const sourcePath = path.join(directory, "start.groovy");
+      writeFileSync(
+        sourcePath,
+        'setInfos(4, "Lines", "A check.", "Me", "v1", 0xFFFFFF, "en", ["test"])\n\n// After a break.\ndef list = []\nshow(list[2])\n',
+      );
+      const files = [await parseGroovySource(sourcePath)];
+      const written = emitTease(lowerSelfContainedPackage(files)[0]!).split("\n");
+      const report = analyzeFeasibility(files, {
+        compiler: projectResult.compiler,
+        runner: projectResult.runner,
+      });
+      assert.equal(
+        report.smokeRuns[0]?.failure?.line,
+        written.findIndex((line) => line.startsWith("say listValue[2]")) + 1,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 test("names media files as the package holds them", { skip: parserUnavailable }, async () => {
   const directory = mkdtempSync(path.join(tmpdir(), "sexscript-media-"));
   try {
