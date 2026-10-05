@@ -38,9 +38,10 @@ const IMAGE_SIGNATURES: readonly {
   { mime: "image/gif", matches: (h) => ascii(h, 0, "GIF87a") || ascii(h, 0, "GIF89a") },
   { mime: "image/webp", matches: (h) => ascii(h, 0, "RIFF") && ascii(h, 8, "WEBPVP") },
   { mime: "image/bmp", matches: (h) => ascii(h, 0, "BM") },
-  { mime: "image/avif", matches: (h) => ascii(h, 4, "ftypavif") || ascii(h, 4, "ftypavis") },
+  { mime: "image/avif", matches: isAvif },
 ];
-const HEADER_BYTES = 16;
+// Enough for the file-type box of an AVIF image with its list of compatible brands.
+const HEADER_BYTES = 256;
 
 export const UNSUPPORTED_IMAGE_MESSAGE =
   "That image is not valid. Choose a PNG, JPEG, GIF, WebP, AVIF, or BMP image.";
@@ -106,6 +107,16 @@ function filterProblem(name: string, mime: string, filters: ImageFileFilters): s
     return null;
   const accepted = [...(filters.types ?? []), ...(filters.mime ?? [])].join(", ");
   return `That image is not valid. Choose an image of these types: ${accepted}.`;
+}
+
+/** An AVIF image names `avif` or `avis` as the major or a compatible brand of its leading `ftyp` box. */
+function isAvif(header: Uint8Array): boolean {
+  if (header.length < 12 || !ascii(header, 4, "ftyp")) return false;
+  const size = new DataView(header.buffer, header.byteOffset, 4).getUint32(0);
+  const end = Math.min(size, header.length);
+  const brands = [8];
+  for (let offset = 16; offset + 4 <= end; offset += 4) brands.push(offset);
+  return brands.some((offset) => ascii(header, offset, "avif") || ascii(header, offset, "avis"));
 }
 
 function startsWith(header: Uint8Array, bytes: readonly number[]): boolean {

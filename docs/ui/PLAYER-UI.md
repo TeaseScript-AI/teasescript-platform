@@ -682,9 +682,10 @@ the image here") and answers when dropped; dragged text or links are not taken. 
 paperclip and no drop target. The Player identifies a file's image type from its first bytes (PNG, JPEG, GIF, WebP,
 AVIF, or BMP), requires the extension and the type to match `types` and `mime` when given, and has the browser decode
 it; a file that fails, more than one file, or typed text shows the composer notice and the request keeps waiting, as
-does a cancelled picker. An accepted image is stored as session media and recorded in the transcript as the player
-message `Image`. Until the camera route exists, a request that allows only the camera cannot be answered, and a
-[player notice](#player-notices) says so.
+does a cancelled picker. A file chosen in a picker opened for a request that is no longer presented, for example
+because a timer's request replaced it meanwhile, answers nothing and shows the composer notice. An accepted image is
+stored as session media and recorded in the transcript as the player message `Image`. Until the camera route exists, a
+request that allows only the camera cannot be answered, and a [player notice](#player-notices) says so.
 
 `choose` and `showButton` keep the composer enabled rather than visually disabling it:
 

@@ -26,6 +26,9 @@ test("the image type is read from a file's first bytes, never from its name or r
     [[...ascii("RIFF"), 0, 0, 0, 0, ...ascii("WEBPVP8 ")], "image/webp"],
     [ascii("BM"), "image/bmp"],
     [[0, 0, 0, 28, ...ascii("ftypavif")], "image/avif"],
+    // An AVIF image may name avif as a compatible brand only.
+    [[0, 0, 0, 32, ...ascii("ftypmif1"), 0, 0, 0, 0, ...ascii("avifmif1miafMA1B")], "image/avif"],
+    [[0, 0, 0, 24, ...ascii("ftypmif1"), 0, 0, 0, 0, ...ascii("mif1heic"), ...ascii("avif")], null],
     // Formats a browser cannot be relied on to show, scriptable SVG, and other files are not images here.
     [[0, 0, 0, 24, ...ascii("ftypheic")], null],
     [ascii("<svg xmlns="), null],

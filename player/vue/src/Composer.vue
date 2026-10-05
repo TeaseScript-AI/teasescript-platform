@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup lang="ts" generic="Request">
 import { computed, nextTick, ref, useId, watch } from "vue";
 import { useTextareaAutosize } from "@vueuse/core";
 import { Paperclip } from "@lucide/vue";
@@ -21,9 +21,10 @@ const props = withDefaults(
     pacing?: boolean;
     /**
      * While an image request accepts a file: a paperclip opens the browser's file picker with this `accept` hint, and a
-     * file dropped onto the composer answers too. Without it there is neither.
+     * file dropped onto the composer answers too. Without it there is neither. `request` identifies the request the
+     * files are for.
      */
-    attach?: { readonly accept: string; readonly label: string } | null;
+    attach?: { readonly accept: string; readonly label: string; readonly request: Request } | null;
   }>(),
   {
     disabled: false,
@@ -42,8 +43,8 @@ const emit = defineEmits<{
   "update:modelValue": [value: string];
   submit: [source: "input" | "button"];
   skip: [];
-  /** Files the player chose or dropped while `attach` was offered. */
-  files: [files: readonly File[]];
+  /** Files the player chose or dropped, with the `attach.request` offered when the picker opened or at the drop. */
+  files: [files: readonly File[], request: Request];
 }>();
 
 const textarea = ref<InstanceType<typeof Textarea> | null>(null);
@@ -129,13 +130,22 @@ function allowSoftwareKeyboard(): void {
 }
 
 const filePicker = ref<HTMLInputElement | null>(null);
+// The picker stays open while the script goes on, so its files are for the request it was opened for.
+let pickerOpenedFor: { readonly request: Request } | null = null;
+function openPicker(): void {
+  if (!props.attach) return;
+  pickerOpenedFor = { request: props.attach.request };
+  filePicker.value?.click();
+}
 function chooseFiles(): void {
   const input = filePicker.value;
+  const opened = pickerOpenedFor;
+  pickerOpenedFor = null;
   if (!input?.files) return;
   const files = [...input.files];
   // The same file may be chosen again after a refused attempt.
   input.value = "";
-  if (files.length > 0) emit("files", files);
+  if (files.length > 0 && opened) emit("files", files, opened.request);
 }
 
 // A file dragged over the composer is a drop target only while `attach` is offered; dragged text and links are not.
@@ -160,9 +170,9 @@ function dragLeave(): void {
 }
 function drop(event: DragEvent): void {
   dropDepth.value = 0;
-  if (!carriesFiles(event)) return;
+  if (!props.attach || !carriesFiles(event)) return;
   event.preventDefault();
-  emit("files", [...(event.dataTransfer?.files ?? [])]);
+  emit("files", [...(event.dataTransfer?.files ?? [])], props.attach.request);
 }
 watch(
   () => props.attach,
@@ -207,7 +217,7 @@ defineExpose({ focusInput });
             :aria-label="attach.label"
             :title="attach.label"
             :disabled="disabled || submitting"
-            @click="filePicker?.click()"
+            @click="openPicker"
           >
             <Paperclip aria-hidden="true" />
           </Button>

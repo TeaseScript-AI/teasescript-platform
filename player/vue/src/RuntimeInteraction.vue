@@ -84,14 +84,34 @@ const pacing = computed(() => {
 const imageRequest = computed(() =>
   foreground.value?.kind === "ask-image" ? foreground.value : null,
 );
+// A request is one action of one session; its identity is fixed while frequent observations publish new sessions.
+const plan = computed(() => props.session?.plan);
 const attach = computed(() =>
-  imageRequest.value?.allowFile === true && props.images
-    ? { accept: imagePickerAccept(imageRequest.value), label: "Attach an image" }
+  imageRequest.value?.allowFile === true &&
+  props.images &&
+  plan.value !== undefined &&
+  actionId.value !== undefined
+    ? {
+        accept: imagePickerAccept(imageRequest.value),
+        label: "Attach an image",
+        request: { plan: plan.value, reset: props.reset, actionId: actionId.value },
+      }
     : null,
 );
+type ImageRequestIdentity = NonNullable<typeof attach.value>["request"];
+/** Whether the image request the files are for is the one presented now. */
+function presents(request: ImageRequestIdentity): boolean {
+  return (
+    imageRequest.value !== null &&
+    props.session?.plan === request.plan &&
+    props.reset === request.reset &&
+    activePlayerRuntimeInteraction(props.session.snapshot)?.actionId === request.actionId
+  );
+}
 const readingImage = ref(false);
 const root = ref<HTMLElement | null>(null);
-const composer = ref<InstanceType<typeof Composer> | null>(null);
+// Composer is generic over the image request it reports, so its instance type is named by what is used.
+const composer = ref<{ focusInput(): void } | null>(null);
 const draft = ref("");
 const feedback = ref("");
 const submitting = ref(false);
@@ -292,21 +312,23 @@ useEventListener(document, "pointerup", (event: PointerEvent) => {
 });
 
 /**
- * Answers the image request with one chosen or dropped file. The file is checked and stored first; when the request
- * ended or the session was replaced meanwhile, or the runtime did not take the image, the stored image is dropped.
+ * Answers the image request the files are for with one chosen or dropped file. Files for a request that is no longer
+ * presented, such as one a timer's request replaced while the picker was open, answer nothing. The file is checked and
+ * stored first; when the request ended or the session was replaced meanwhile, or the runtime did not take the image,
+ * the stored image is dropped.
  */
-async function submitImage(files: readonly File[]) {
-  const session = props.session;
+async function submitImage(files: readonly File[], target: ImageRequestIdentity) {
   const request = imageRequest.value;
   const images = props.images;
-  if (!session || !request || !images || !attach.value || submitting.value || readingImage.value)
+  if (!request || !images || submitting.value || readingImage.value) return;
+  if (!presents(target)) {
+    showFeedback("This interaction is no longer available.");
     return;
+  }
   if (files.length !== 1) {
     showFeedback("Choose one image.");
     return;
   }
-  const actionId = activePlayerRuntimeInteraction(session.snapshot)?.actionId;
-  const reset = props.reset;
   readingImage.value = true;
   let stored: Awaited<ReturnType<PlayerImageInput["store"]>>;
   try {
@@ -314,11 +336,7 @@ async function submitImage(files: readonly File[]) {
   } finally {
     readingImage.value = false;
   }
-  const current = props.session;
-  const same =
-    current?.plan === session.plan &&
-    props.reset === reset &&
-    activePlayerRuntimeInteraction(current.snapshot)?.actionId === actionId;
+  const same = presents(target);
   if ("message" in stored) {
     if (same) showFeedback(stored.message);
     return;
@@ -336,7 +354,7 @@ async function submitImage(files: readonly File[]) {
     },
     false,
     "interaction",
-    actionId,
+    target.actionId,
   );
   if (!accepted) images.discard(stored.reference);
 }

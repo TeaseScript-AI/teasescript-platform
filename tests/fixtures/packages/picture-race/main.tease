@@ -1,0 +1,10 @@
+timer async 2 {
+  let interrupted = askImage("Timer image")
+  showImage interrupted
+  say "Timer image received."
+}
+let picture = askImage("Main image")
+showImage picture
+say "Main image received."
+showButton "Done"
+exit

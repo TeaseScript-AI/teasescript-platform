@@ -1573,6 +1573,7 @@ async function askImageScenario(cdp, origin, profile) {
     true,
     "The refused file ended the request",
   );
+  await openPicker(cdp);
   await setInputFiles(cdp, "[data-composer-file]", [chosen]);
   await waitFor(
     cdp,
@@ -1644,6 +1645,51 @@ async function askImageScenario(cdp, origin, profile) {
     false,
     "The composer took a file outside an image request",
   );
+
+  // A file chosen in a picker opened for one request does not answer the timer's request that replaced it meanwhile.
+  const placeholder = (text) =>
+    `document.querySelector('[data-composer-input]')?.getAttribute('placeholder') === ${JSON.stringify(text)}`;
+  await navigate(cdp, `${origin}/player/?package=picture-race`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, placeholder("Main image"), 8_000, "The main image request did not open");
+  await openPicker(cdp);
+  await waitFor(cdp, placeholder("Timer image"), 8_000, "The timer's image request did not open");
+  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await waitFor(
+    cdp,
+    notice("This interaction is no longer available."),
+    8_000,
+    "A file chosen for the main request was not refused",
+  );
+  assertEqual(
+    await value(cdp, `${imageAnswers}`),
+    0,
+    "A stale choice answered the timer's request",
+  );
+  await drop([["timer.png", pngBase64]]);
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('Timer image received.') && ${placeholder("Main image")}`,
+    8_000,
+    "The timer's request was not answered, or the main request did not resume",
+  );
+  await drop([["main.png", pngBase64]]);
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('Main image received.') && ${imageAnswers} === 2`,
+    8_000,
+    "The resumed main request was not answered",
+  );
+}
+
+/** Opens the file picker with the paperclip; the native dialog itself is suppressed, and `setInputFiles` answers it. */
+async function openPicker(cdp) {
+  await evaluate(
+    cdp,
+    `document.querySelector('[data-composer-file]').addEventListener('click', (event) => event.preventDefault(), { once: true });`,
+  );
+  await physicalClick(cdp, "[data-composer-attach]");
 }
 
 /** Sets the files of a file input, as the native picker does, through the DevTools protocol. */

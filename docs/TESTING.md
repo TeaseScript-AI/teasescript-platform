@@ -591,7 +591,8 @@ the waiting question, which returns; and that a `goto` and `exit` remove the but
 its `main.tease` with its own Stage image and plays its own sound, and one that does not compile lists its diagnostic
 with file and line. Its `pictures` package checks `askImage(...)`: only while a request waits does the composer offer
 a paperclip, which opens the native picker, and a drop target; a chosen and a dropped image each answer and reach the
-Stage, while a text file, two files, or a file outside the request's filters are refused and the request keeps waiting.
+Stage, while a text file, two files, or a file outside the request's filters are refused and the request keeps waiting;
+its `picture-race` package checks that a file chosen for a request a timer's request replaced answers neither.
 With a Windows user agent, the editor opens a package served only as a catalog whose file paths a
 model URI could merge (a `\` in a name, `C:` and `c:` folders) and keeps every file apart. Development preview
 presentation is covered by the [Player browser verification route](#player-browser-and-visual-verification).

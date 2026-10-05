@@ -1192,7 +1192,9 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   if (ui.kind === "button") strings.push(ui.buttonLabel);
   else if (ui.kind === "image") {
     if (ui.hint !== null) strings.push(ui.hint);
-    strings.push(...(ui.types ?? []), ...(ui.mime ?? []));
+    // Item by item: a long computed filter must reach the limit below, not the native argument limit of a spread.
+    for (const text of ui.types ?? []) strings.push(text);
+    for (const text of ui.mime ?? []) strings.push(text);
   } else if (ui.kind !== "choice") {
     if (ui.hint !== null) strings.push(ui.hint);
     if (ui.prefill !== undefined) strings.push(ui.prefill);

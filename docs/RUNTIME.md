@@ -999,7 +999,8 @@ then `allowCamera:` and `allowFile:` (both `true` by default) and `types:` and `
 such as `".png"` and image MIME types such as `"image/png"`; `invalidMessage:` and `invalidLlmInstruction:` are not
 supported yet (`TSV022`). The compiler checks written values (`TSV043`, also for both sources written `false`).
 Computed arguments are evaluated once, in source order, into one prepared request that the runtime checks when the
-request opens; a value it cannot use, or both sources off, fails with `TSR052`. Plan validation rejects an unlowered
+request opens: a source or filter value it cannot use, or both sources off, fails with `TSR052`, and the message must be
+showable text like an input hint. Plan validation rejects an unlowered
 call.
 
 It is a mandatory `image` interaction with result domain `string`. Its UI carries `hint`, `allowCamera`, `allowFile`,

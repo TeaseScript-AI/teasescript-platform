@@ -283,6 +283,12 @@ test("a computed source or filter that the request cannot use fails before it as
   );
   assert.equal(snapshot.status, "failed");
   assert.match(snapshot.failure?.message ?? "", /needs allowCamera: or allowFile: to be true/u);
+  // A filter too long for an interaction fails at the interaction text limit, however long it is.
+  const long = started('let kinds = load "kinds"\nlet pick = askImage(types: kinds)\nexit', {
+    scriptStorage: [{ key: "kinds", value: { kind: "list", items: Array(150_000).fill(".png") } }],
+  }).snapshot;
+  assert.equal(long.failure?.code, "TSR052");
+  assert.match(long.failure?.message ?? "", /aggregate UTF-8 byte limit/u);
 });
 
 test("an external plan cannot call askImage as an ordinary function", () => {
