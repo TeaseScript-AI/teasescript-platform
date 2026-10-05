@@ -13,4 +13,6 @@ show("Visit " + (visits + 1))
 def greeting = "Mistress"
 greeting = load("training.greeting")
 show("Hello " + greeting)
+// Groovy ordered a missing storage value, null, below every value.
+if (loadInteger("training.level") < 3) show("Still a beginner")
 return null

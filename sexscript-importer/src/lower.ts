@@ -5303,6 +5303,19 @@ function mayIndexPastEnd(node: AstNode, context: LowerContext, seen = new Set<st
   return false;
 }
 
+/**
+ * Whether a value may be a missing storage value, which Groovy read as null: a storage read, or a variable that starts
+ * with one or with null.
+ */
+function mayReadNull(node: AstNode, context: LowerContext): boolean {
+  if (node.kind === "methodCall")
+    return DIRECT_STORAGE_LOADS.has(legacyApiCall(node, context)?.name ?? "");
+  if (node.kind !== "variable") return false;
+  const key = bindingKey(node, context.bindings);
+  const first = key === null ? undefined : context.assignedValues.get(key)?.[0];
+  return first !== undefined && (isNullConstant(first) || mayReadNull(first, context));
+}
+
 /** Methods whose results are whole numbers. */
 const WHOLE_NUMBER_METHODS = new Set([
   "size",
@@ -6673,6 +6686,30 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   }
   const leftNode = asNode(node.left);
   const rightNode = asNode(node.right);
+  // Groovy ordered null below every value, where TeaseScript stops at an ordering of null (TSR009).
+  if (
+    ["<", "<=", ">", ">="].includes(mapped) &&
+    leftNode !== null &&
+    rightNode !== null &&
+    (mayReadNull(leftNode, context) || mayReadNull(rightNode, context))
+  ) {
+    const left = lowerExpression(leftNode, context);
+    const right = lowerExpression(rightNode, context);
+    if (left === null || right === null) return null;
+    addDiagnostic(
+      context,
+      "SX_NULL_ORDER",
+      "info",
+      "A side of this comparison may be a storage value that is missing; Groovy ordered null below every value, so a helper compares the sides as Groovy did.",
+      node.span,
+    );
+    return {
+      kind: "binary",
+      operator: mapped,
+      left: useHelper(context, "compare", [left, right]),
+      right: { kind: "literal", value: 0 },
+    };
+  }
   if ((mapped === "==" || mapped === "!=") && leftNode !== null && rightNode !== null) {
     // Groovy read a missing key as null; a dict reports it, so the comparison tests the key.
     const [lookupNode, other] = isNullConstant(rightNode)

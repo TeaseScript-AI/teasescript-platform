@@ -69,6 +69,7 @@ export type HelperName =
   | "items"
   | "itemAt"
   | "askText"
+  | "compare"
   | "askInteger"
   | "askNumber"
   | "sendImage"
@@ -145,6 +146,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "items",
   "itemAt",
   "askText",
+  "compare",
   "askInteger",
   "askNumber",
   "tokenize",
@@ -534,6 +536,25 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ],
           ),
           ret(v("tag")),
+        ],
+      ),
+  },
+  // Groovy's ordering, with null below every value: -1, 0, or 1.
+  compare: {
+    name: "sexscriptLegacyCompare",
+    build: () =>
+      fn(
+        "sexscriptLegacyCompare",
+        ["left", "right"],
+        [
+          ifS(bin("==", v("left"), lit(null)), [
+            ifS(bin("==", v("right"), lit(null)), [ret(lit(0))]),
+            ret(lit(-1)),
+          ]),
+          ifS(bin("==", v("right"), lit(null)), [ret(lit(1))]),
+          ifS(bin("<", v("left"), v("right")), [ret(lit(-1))]),
+          ifS(bin(">", v("left"), v("right")), [ret(lit(1))]),
+          ret(lit(0)),
         ],
       ),
   },
