@@ -1,0 +1,17 @@
+say "Welcome."
+let pick = choose left: "Left", right: "Right", stay: "Stay"
+if pick == "left" {
+  say "You went left."
+  exit
+}
+if pick == "never" {
+  say "Never shown."
+}
+if pick == "right" {
+  let items = [1, 2]
+  say "Item ${items[5]}"
+}
+while true {
+  say "You are stuck."
+  showButton "Again"
+}
