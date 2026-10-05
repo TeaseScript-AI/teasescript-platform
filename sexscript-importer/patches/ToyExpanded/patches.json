@@ -207,7 +207,7 @@
       "id": "manual-cornertime",
       "layer": "source",
       "category": "b",
-      "reason": "Webcam corner time (owner decision 2026-10-05: manual instead): with the webcamcornertime toy, doCornertime wrote a base64 JSON task to a file for cornertime.github.io and parsed the base64 JSON report pasted back (File, decodeBase64, JsonSlurper, JsonOutput), none of which converts. Remove that path, its helpers, the configuration step that offered and tested it, and its 'Cornertime with webcam' choice, so that corner time always runs the manual flow the tease already had: the bell, the wait, and the player's own answer whether they moved; duration, punishment, and result are computed as before.",
+      "reason": "Webcam corner time (owner decision 2026-10-05: manual instead): with the webcornertime toy, doCornertime wrote a base64 JSON task to a file for cornertime.github.io and parsed the base64 JSON report pasted back (File, decodeBase64, JsonSlurper, JsonOutput), none of which converts. Remove that path, its helpers, the configuration step that offered and tested it, and its 'Cornertime with webcam' choice, so that corner time always runs the manual flow the tease already had: the bell, the wait, and the player's own answer whether they moved; duration, punishment, and result are computed as before.",
       "diff": "manual-cornertime.diff"
     }
   ]
