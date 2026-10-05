@@ -254,7 +254,7 @@ export function stepValidatedStateToEvent(
   let instructionsExecuted = 0;
   while (executionRunnable(snapshot) && context.events.length === 0) {
     if (instructionsExecuted >= budget) {
-      failForBudget(plan, snapshot, context.events);
+      failForBudget(plan, snapshot, context.events, budget);
       break;
     }
     instructionsExecuted += executeCapturedInstruction(plan, snapshot, context);
@@ -284,7 +284,7 @@ export function runValidatedState(
   let instructionsExecuted = 0;
   while (executionRunnable(snapshot)) {
     if (instructionsExecuted >= budget) {
-      failForBudget(plan, snapshot, context.events);
+      failForBudget(plan, snapshot, context.events, budget);
       break;
     }
     instructionsExecuted += executeCapturedInstruction(plan, snapshot, context);
@@ -2053,22 +2053,42 @@ function failSnapshot(
   );
 }
 
+/**
+ * Fails at the innermost loop of the running call, the likely cause; otherwise, as while waiting between timer blocks,
+ * at the next instruction. The budget counts the whole invocation, including earlier loops and waits that catch-up
+ * settled, so the message names the limit rather than the work of that loop.
+ */
 function failForBudget(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   events: InterpreterEvent[],
+  budget: number,
 ): void {
-  const span = plan.instructions[snapshot.nextInstruction]?.span ?? mainSourceSpan(plan);
+  const loop = snapshot.loopFrames.at(-1);
+  const loopStart =
+    snapshot.status === "running" && loop?.callFrameId === currentCallFrameId(snapshot)
+      ? plan.instructions.findIndex(
+          (instruction) => instruction.kind === "loopStart" && instruction.loopId === loop.loopId,
+        )
+      : -1;
+  const index = loopStart === -1 ? snapshot.nextInstruction : loopStart;
+  const span = plan.instructions[index]?.span ?? mainSourceSpan(plan);
+  // Thousands separators without the host locale keep the message deterministic.
+  const steps = String(budget).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const message =
+    loopStart === -1
+      ? `The script reached its ${steps}-step limit. Add a wait, or check for code that repeats without end.`
+      : `The script reached its ${steps}-step limit while running this loop. Add a wait, or check the loop's condition.`;
   failSnapshot(
     snapshot,
-    { code: "TSR037", message: "Runtime instruction budget exceeded.", span: copySpan(span) },
-    instructionSourcePath(plan, snapshot.nextInstruction),
+    { code: "TSR037", message, span: copySpan(span) },
+    instructionSourcePath(plan, index),
     events,
   );
 }
 
 function instructionBudget(value: number | undefined): number {
-  const budget = value ?? 10_000;
+  const budget = value ?? 1_000_000;
   if (!Number.isSafeInteger(budget) || budget < 1) {
     throw new RangeError("Instruction budget must be a positive safe integer.");
   }
