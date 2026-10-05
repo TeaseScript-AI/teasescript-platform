@@ -32,10 +32,9 @@ function sexscriptLegacyCompare(left, right) {
 }
 let visits = load "training.visits", default: 0
 save visits + 1 as "training.visits"
-let elvisValue = load "training.title"
-let title = "pet"
-if elvisValue != null and elvisValue != "" {
-  title = elvisValue
+let title = load "training.title"
+if title == null or title == "" {
+  title = "pet"
 }
 if (load "training.finished") == true {
   say "Welcome back, ${title}"

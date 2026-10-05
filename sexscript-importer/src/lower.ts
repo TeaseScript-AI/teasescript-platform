@@ -3190,9 +3190,10 @@ function lowerConditionalAssignment(
     const reassignsSelf = !declaration && variableName(value) === variableName(target);
     // With a plain fallback, the variable starts with it and takes the value only where that is true, tested through a
     // temporary, so the variable never holds the value's null: `let elvisValue = v`, `x = d`, then
-    // `if elvisValue != null and ... { x = elvisValue }`. A value that may be null needs it, since the variable keeps
-    // the fallback's type, and so does one of unknown type, whose truth goes through a helper that proves the variable
-    // non-null nowhere.
+    // `if elvisValue != null and ... { x = elvisValue }`. An assignment of a value that may be null needs it, since the
+    // variable has its own type, and so does a value of unknown type, whose truth goes through a helper that proves the
+    // variable non-null nowhere. A declaration of a value that may be null keeps that value's type, which later
+    // assignments may need.
     const plainTruth = truthiness(
       { kind: "variable", name: variableName(target)! },
       inferType(value, context.types),
@@ -3203,7 +3204,7 @@ function lowerConditionalAssignment(
     if (
       !reassignsSelf &&
       isSimpleValue(fallback) &&
-      (plainTruth?.kind === "call" || (inferType(value, context.types) & NULL) !== 0)
+      (plainTruth?.kind === "call" || (!declaration && (inferType(value, context.types) & NULL) !== 0))
     ) {
       const temporary = freshName("elvisValue", context);
       const valueType = inferType(value, context.types);
