@@ -91,6 +91,8 @@ interface PlayerState {
   media: Array<{ source: string; loaded: boolean }>;
   progress: number;
   lastText: string;
+  /** The last three shown texts, for a prompt that quotes what to type. */
+  recentText: string;
   scriptFailure: string | null;
   sites: number;
   /** Transcript entries shown so far. */
@@ -480,7 +482,21 @@ async function playOnce(
           state.composer.mode === "numeric" || state.composer.mode === "decimal"
             ? NUMBER_ANSWERS
             : TEXT_ANSWERS;
-        const answer = ISO_ANSWERS[state.composer.type] ?? answers[(run + visit) % answers.length]!;
+        // A prompt that quotes a sentence, as in a lines game ("Write 'I will obey' ten times"), gets that sentence.
+        // Or one that names it after "Type:" or "Write:" at the end of a line.
+        const quoted =
+          answers === TEXT_ANSWERS
+            ? ([...state.recentText.matchAll(/["'“„«]([^"'“”„«»\n]{3,200})["'”“»]/gu)].at(
+                -1,
+              )?.[1] ??
+              [
+                ...state.recentText.matchAll(
+                  /(?:^|\n)\s*(?:type|write|copy|schreibe|tippe)\s*:\s*([^\n]{3,200}?)\s*$/gimu,
+                ),
+              ].at(-1)?.[1])
+            : undefined;
+        const answer =
+          ISO_ANSWERS[state.composer.type] ?? quoted ?? answers[(run + visit) % answers.length]!;
         taken.push(`${state.site} → "${answer}"`);
         await page.fill("[data-composer-input]", answer, { timeout: 5_000 });
         await page.press("[data-composer-input]", "Enter", { timeout: 5_000 });
@@ -617,6 +633,9 @@ function readState(page: Page): Promise<PlayerState> {
       progress:
         (snapshot?.nextEventSequence ?? 0) * 1000 + (session?.transcriptEntries.length ?? 0),
       lastText: (session?.transcriptEntries.at(-1)?.text ?? "").slice(0, 200),
+      recentText: (session?.transcriptEntries.slice(-3) ?? [])
+        .map((entry) => entry.text ?? "")
+        .join("\n"),
       entries: session?.transcriptEntries.length ?? 0,
       markup: (() => {
         const pattern = /<[A-Za-z/][^>]*>|&(?:quot|amp|lt|gt|apos|nbsp|#\d+);?/u;
