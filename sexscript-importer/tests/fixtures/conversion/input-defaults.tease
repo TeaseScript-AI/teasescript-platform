@@ -21,7 +21,7 @@ let toys = ["plug", "clamps"]
 say "Which toys?"
 let wanted = askText default: "[${toys.join(", ")}]"
 // An integer input's default that may hold a fraction asks without it then; Groovy found no method for a fraction.
-let total = 0
+let total: number = 0
 total += level / 2
 // NOTE SX_INPUT_PREFILL line 13: getInteger() pre-filled its field with this value; a TeaseScript default must be a whole number, so a helper asks without the default when it is not.
 say "How many did you do?"

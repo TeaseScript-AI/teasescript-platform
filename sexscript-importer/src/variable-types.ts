@@ -314,7 +314,10 @@ export function enforceVariableTypes(
             // A list literal that mixes types needs its union element type written (ADR 0021 rule 1.3).
             (type !== undefined && hasUnion(type) && statement.value.kind === "list") ||
             binding.initial.kind === "optional" ||
-            (binding.widened && type !== undefined && nonNull(type).kind === "list");
+            // A whole number that later holds a fraction, also one a function returns, is declared a number.
+            (binding.widened &&
+              type !== undefined &&
+              (nonNull(type).kind === "list" || typeName(nonNull(type)) === "number"));
           if (needed && written !== null) {
             result.annotated += 1;
             next = { ...next, type: written };

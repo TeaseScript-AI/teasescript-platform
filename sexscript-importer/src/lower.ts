@@ -228,6 +228,8 @@ interface LowerContext {
   bindings: BindingKeys;
   /** Bindings declared with a Groovy integer type (`int`, `long`, ...), which store whole numbers. */
   integerVariables: ReadonlySet<string>;
+  /** Variables holding a Java array of whole numbers (`new Integer[n]`), whose element stores truncate. */
+  integerArrays: ReadonlySet<string>;
   /** Bindings declared with the Groovy type String, which converted every value stored in them to text. */
   textVariables: ReadonlySet<string>;
   /** Loop variables that hold the package path of an image of a listed folder (imageFolderWalk). */
@@ -1183,6 +1185,7 @@ export function lowerParsedFile(
     mapUses: mapUsesOf([]),
     bindings: new Map(),
     integerVariables: new Set(),
+    integerArrays: new Set(),
     textVariables: new Set(),
     imagePaths: new Set(),
     constantInitializers: new Map(),
@@ -1270,6 +1273,7 @@ export function lowerParsedFile(
     context.compoundValues = compoundValues(body, context.bindings);
     context.constantInitializers = declarationInitializers(body, context.types);
     context.integerVariables = integerVariables(body, context.bindings);
+    context.integerArrays = integerArrays(body, context.bindings);
     context.textVariables = textVariables(body, context.bindings);
     context.mapUses =
       options.mapUses ?? mapUsesOf([{ body, types: context.types, keys: context.bindings }]);
@@ -1948,6 +1952,7 @@ function lowerHelperMethod(
     mapUses: baseContext.mapUses,
     bindings: new Map(),
     integerVariables: new Set(),
+    integerArrays: new Set(),
     textVariables: new Set(),
     imagePaths: new Set(),
     constantInitializers: new Map(),
@@ -4716,8 +4721,17 @@ function lowerAssignment(
     operator === "=" &&
     context.integerVariables.has(bindingKey(targetNode, context.bindings) ?? "") &&
     mayBeText(right, context);
-  const stored =
-    operator === "=" && context.textVariables.has(bindingKey(targetNode, context.bindings) ?? "")
+  // A Java Integer[] truncated a number stored in it, as an int variable does.
+  const array =
+    targetNode.kind === "binary" && targetNode.operator === "[" ? asNode(targetNode.left) : null;
+  const truncates =
+    operator === "=" &&
+    array !== null &&
+    context.integerArrays.has(bindingKey(array, context.bindings) ?? "") &&
+    mayBeFractional(right, context);
+  const stored = truncates
+    ? ({ kind: "call", name: "toInteger", positional: [value], named: {} } satisfies IrExpression)
+    : operator === "=" && context.textVariables.has(bindingKey(targetNode, context.bindings) ?? "")
       ? asStoredText(value, right, context)
       : value;
   return [
@@ -6659,6 +6673,9 @@ function mayBeFractional(node: AstNode, context: LowerContext, seen = new Set<st
       const operator = text(node.operator) ?? "";
       const left = asNode(node.left);
       const right = asNode(node.right);
+      // An element of a Java array of whole numbers is whole.
+      if (operator === "[" && left !== null)
+        return !context.integerArrays.has(bindingKey(left, context.bindings) ?? "");
       if (!["+", "-", "*", "%"].includes(operator) || left === null || right === null) return true;
       return mayBeFractional(left, context, seen) || mayBeFractional(right, context, seen);
     }
@@ -11090,6 +11107,20 @@ function integerVariables(body: AstNode, keys: BindingKeys): Set<string> {
     const left = node.kind === "declaration" ? asNode(node.left) : null;
     const key = bindingKey(left, keys);
     if (key !== null && INTEGER_TYPES.has(text(left?.originType) ?? "")) names.add(key);
+  });
+  return names;
+}
+
+/** Variables assigned a Java array of whole numbers, `new Integer[n]` or `new int[n]`. */
+function integerArrays(body: AstNode, keys: BindingKeys): Set<string> {
+  const names = new Set<string>();
+  walkAst(body, (node) => {
+    const assigns =
+      node.kind === "declaration" || (node.kind === "binary" && node.operator === "=");
+    const value = assigns ? asNode(node.right) : null;
+    const key = assigns ? bindingKey(asNode(node.left), keys) : null;
+    const element = (text(value?.elementType) ?? "").replace(/^java\.lang\./u, "");
+    if (key !== null && value?.kind === "array" && INTEGER_TYPES.has(element)) names.add(key);
   });
   return names;
 }

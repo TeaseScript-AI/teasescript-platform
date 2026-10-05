@@ -5,9 +5,9 @@ function sexscriptLegacyText(value) {
   return "${value}"
 }
 // A variable that starts with a whole number and later holds fractions widens to a number by itself (#504 option B).
-let tempo = 1
+let tempo: number = 1
 tempo = 0.75
-let delay = 2
+let delay: number = 2
 delay = delay / 4
 let weights: number[] = [1, 2]
 weights.add(2.5)
@@ -37,13 +37,13 @@ save 2.5 as "x.ratio"
 let ratio = toInteger(load "x.ratio")
 say "Ratio ${ratio}"
 // A number that starts as null, and that nothing compares with null, starts at 0.
-let later = 0
+let later: number = 0
 later = 1
 later = 2.5
 say "Whole ${whole}, stored ${stored}, later ${later}"
 // A position that may hold a fraction truncates when it indexes a list, as Groovy did.
 let names = ["first", "second"]
-let position = 0
+let position: number = 0
 position += 0.5
 say names[toInteger(position)]
 // Groovy pairs of a name and a level: a list of lists whose elements are text or whole numbers.
