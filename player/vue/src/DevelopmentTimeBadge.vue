@@ -5,7 +5,7 @@ import type { DevelopmentTime } from "./useDevelopmentTime";
 
 // Keeps active development time controls visible over the Stage while their panel is closed, and announces each jump.
 const props = defineProps<{ time: DevelopmentTime }>();
-const latest = computed(() => props.time.jumps.value[0]?.text ?? "");
+const latest = computed(() => props.time.jumps.value[0] ?? null);
 </script>
 
 <template>
@@ -14,7 +14,13 @@ const latest = computed(() => props.time.jumps.value[0]?.text ?? "");
       <FastForward aria-hidden="true" class="size-3.5" />
       {{ time.autoSkip.value ? "Time controls · auto-skip" : "Time controls" }}
     </span>
-    <span role="status" data-development-time-marker>{{ latest }}</span>
+    <!-- The jump number makes equal jumps announce again. -->
+    <span role="status">
+      <template v-if="latest">
+        <span class="sr-only">Jump {{ latest.id }}: </span>
+        <span data-development-time-marker>{{ latest.text }}</span>
+      </template>
+    </span>
   </div>
 </template>
 

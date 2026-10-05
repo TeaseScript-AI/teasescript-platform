@@ -2260,6 +2260,8 @@ async function developmentTimeChecks(page) {
   // The 30 s timer falls inside +1 min and fires during the jump.
   await minute.click();
   await entry("Timer fired").waitFor({ timeout: 5_000 });
+  // The live region numbers jumps, so equal jumps are announced again.
+  await badge.locator('[role="status"]').filter({ hasText: "Jump 3: ⏩ 1 min skipped" }).waitFor();
   check(await outsideTranscript(), "A jump marker reached the transcript or a notice");
   await enable.click();
   await badge.waitFor({ state: "detached" });
