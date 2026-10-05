@@ -1,3 +1,3 @@
-save "chapters/last.tease" as "chapter.after"
+save "chapters/last" as "chapter.after"
 say "Chapter one."
 goto "chapters/second.tease"

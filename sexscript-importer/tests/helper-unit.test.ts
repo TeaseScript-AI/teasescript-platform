@@ -199,25 +199,28 @@ test("package-aware lowering reconnects proven legacy helper calls without choos
   assert.equal(emitTease(program), "helper(3)\nexit\n");
 });
 
-test("flags auxiliary helper fields instead of silently duplicating shared state", () => {
-  const program = lowerParsedFile(
-    unit(
-      [method("helper", [parameter("main")], [{ kind: "return", span, value: constant(1) }])],
-      [
-        {
-          kind: "field",
-          span,
-          name: "counter",
-          type: "java.lang.Integer",
-          modifiers: 9,
-          static: true,
-          final: false,
-          initialExpression: constant(0),
-        },
-      ],
-    ),
-  );
+test("keeps static helper fields as package variables and flags instance fields", () => {
+  const field = (isStatic: boolean) => ({
+    kind: "field",
+    span,
+    name: "counter",
+    type: "java.lang.Integer",
+    modifiers: isStatic ? 9 : 1,
+    static: isStatic,
+    final: false,
+    initialExpression: constant(0),
+  });
+  const helper = [
+    method("helper", [parameter("main")], [{ kind: "return", span, value: constant(1) }]),
+  ];
 
-  assert.ok(program.diagnostics.some((diagnostic) => diagnostic.code === "SX_HELPER_SHARED_STATE"));
-  assert.deepEqual(program.statements, []);
+  const shared = lowerParsedFile(unit(helper, [field(true)]));
+  assert.ok(!shared.diagnostics.some((diagnostic) => diagnostic.code === "SX_HELPER_SHARED_STATE"));
+  assert.match(emitTease(shared), /^let counter = 0$/mu);
+
+  const instance = lowerParsedFile(unit(helper, [field(false)]));
+  assert.ok(
+    instance.diagnostics.some((diagnostic) => diagnostic.code === "SX_HELPER_SHARED_STATE"),
+  );
+  assert.deepEqual(instance.statements, []);
 });

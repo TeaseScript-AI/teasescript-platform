@@ -37,6 +37,7 @@ import {
   onlyOf,
   STRING,
   type TypeEnvironment,
+  type ValueType,
   type VariableBindings,
   UNKNOWN,
 } from "./types.ts";
@@ -267,7 +268,10 @@ export function buildHelperRegistry(files: readonly ParsedGroovyFile[]): HelperR
     for (const helperClass of nodeArray(root.classes)) {
       const className = text(helperClass.name);
       if (helperClass.kind !== "class" || className === null) continue;
-      registry.set(className, collectHelperFunctionInfo(nodeArray(helperClass.methods)));
+      registry.set(
+        className,
+        collectHelperFunctionInfo(nodeArray(withScriptObject(helperClass).methods)),
+      );
     }
   }
   return registry;
@@ -1128,14 +1132,15 @@ function lowerHelperCompilationUnit(
       diagnostics: baseContext.diagnostics,
     };
   }
-  const helperClass = classes[0]!;
+  const helperClass = withScriptObject(classes[0]!);
+  // Static fields are package variables that the class's functions share; an instance field has no such meaning.
   const fields = nodeArray(helperClass.fields);
-  if (fields.length > 0) {
+  if (fields.some((field) => field.static !== true)) {
     addDiagnostic(
       baseContext,
       "SX_HELPER_SHARED_STATE",
       "error",
-      "Auxiliary Groovy helper classes with fields may carry shared or static state and require explicit migration.",
+      "Auxiliary Groovy helper classes with instance fields carry per-object state and require explicit migration.",
       helperClass.span,
     );
     return {
@@ -1145,6 +1150,35 @@ function lowerHelperCompilationUnit(
       diagnostics: baseContext.diagnostics,
     };
   }
+  const fieldStatements: IrStatement[] = fields.flatMap((field): IrStatement[] => {
+    const name = text(field.name);
+    if (name === null) return [];
+    const initial = asNode(field.initialExpression);
+    const value = initial === null ? null : lowerExpression(initial, baseContext);
+    // A field declared `int` or `long` truncates every number stored in it, as a script variable of that type does.
+    const integer = INTEGER_TYPES.has(text(field.type)?.replace(/^java\.lang\./u, "") ?? "");
+    return [
+      {
+        kind: "let",
+        name,
+        value: value ?? { kind: "literal", value: null },
+        span: field.span ?? null,
+        ...(integer ? { integer: true as const } : {}),
+      },
+    ];
+  });
+  const fieldTypes = new Map(
+    fields.flatMap((field): Array<[string, ValueType]> => {
+      const name = text(field.name);
+      const initial = asNode(field.initialExpression);
+      if (name === null) return [];
+      const type =
+        initial === null || isNullConstant(initial)
+          ? UNKNOWN
+          : inferType(initial, baseContext.types);
+      return [[name, type]];
+    }),
+  );
   const methods = nodeArray(helperClass.methods);
   const helperFunctions = collectHelperFunctionInfo(methods);
   const statements: IrStatement[] = [];
@@ -1152,19 +1186,97 @@ function lowerHelperCompilationUnit(
     const leadingComments = takeCommentsBefore(baseContext, method.span).map(
       (comment) => comment.text,
     );
-    const lowered = lowerHelperMethod(method, baseContext, helperFunctions);
+    const lowered = lowerHelperMethod(method, baseContext, helperFunctions, fieldTypes);
     if (lowered === null) continue;
     if (lowered.kind === "function" && leadingComments.length > 0)
       lowered.leadingComments = leadingComments;
     statements.push(lowered);
   }
-  const typedStatements = withEnforcedTypes(statements, baseContext);
+  const typedStatements = withEnforcedTypes([...fieldStatements, ...statements], baseContext);
   return {
     sourceName: file.sourceName,
     metadata: null,
     statements: [...helperStatements(baseContext.syntheticHelpers), ...typedStatements],
     diagnostics: baseContext.diagnostics,
+    ...(baseContext.actions.size === 0 ? {} : { actions: [...baseContext.actions] }),
   };
+}
+
+/** A method's own variable types with the class's static fields, which its own variables shadow. */
+function withFieldTypes(
+  types: TypeEnvironment,
+  fields: ReadonlyMap<string, ValueType>,
+): TypeEnvironment {
+  if (fields.size === 0) return types;
+  return { ...types, variables: new Map([...fields, ...types.variables]) };
+}
+
+const scriptObjectClasses = new WeakMap<AstNode, AstNode>();
+
+/**
+ * A helper class handed the script object (`Helper.run(this, ...)`) calls the SexScript API on its parameter, or on a
+ * static field that keeps the parameter: that parameter becomes `main`, which helper methods strip as the legacy
+ * host, the field's calls become `main.` calls, and the field and its assignment go. The class node is copied.
+ */
+function withScriptObject(helperClass: AstNode): AstNode {
+  const known = scriptObjectClasses.get(helperClass);
+  if (known !== undefined) return known;
+  const copy: AstNode = structuredClone(helperClass);
+  const methods = nodeArray(copy.methods);
+  const fieldNames = new Set(nodeArray(copy.fields).flatMap((field) => text(field.name) ?? []));
+  const aliases = new Set<string>();
+  const assignments = new Set<AstNode>();
+  const renamed: Array<Record<string, unknown>> = [];
+  for (const method of methods) {
+    const parameters: unknown = method.parameters;
+    const parameter: unknown = Array.isArray(parameters) ? parameters[0] : undefined;
+    const name = isRecord(parameter) && typeof parameter.name === "string" ? parameter.name : null;
+    if (!isRecord(parameter) || name === null || name === "main") continue;
+    const own = new Set([name]);
+    walkAst(method.body, (node) => {
+      if (node.kind !== "expressionStatement") return;
+      const assignment = asNode(node.expression);
+      const field =
+        assignment?.kind === "binary" && assignment.operator === "="
+          ? variableName(assignment.left)
+          : null;
+      if (field !== null && fieldNames.has(field) && variableName(assignment!.right) === name) {
+        own.add(field);
+        assignments.add(node);
+      }
+    });
+    let api = false;
+    for (const other of methods)
+      walkAst(other.body, (node) => {
+        if (node.kind === "methodCall" && own.has(variableName(node.object) ?? ""))
+          api ||= SEXSCRIPT_API_METHODS.has(constantString(node.method) ?? "");
+      });
+    if (!api) continue;
+    renamed.push(parameter);
+    for (const alias of own) aliases.add(alias);
+  }
+  if (aliases.size === 0) {
+    scriptObjectClasses.set(helperClass, helperClass);
+    return helperClass;
+  }
+  for (const parameter of renamed) parameter.name = "main";
+  const strip = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (let index = value.length - 1; index >= 0; index -= 1) {
+        const item: unknown = value[index];
+        if (isAstNode(item) && assignments.has(item)) value.splice(index, 1);
+        else strip(item);
+      }
+      return;
+    }
+    if (!isAstNode(value)) return;
+    if (value.kind === "variable" && aliases.has(variableName(value) ?? "")) value.name = "main";
+    for (const child of Object.values(value)) strip(child);
+  };
+  for (const method of methods) strip(method.body);
+  copy.fields = nodeArray(copy.fields).filter((field) => !aliases.has(text(field.name) ?? ""));
+  scriptObjectClasses.set(helperClass, copy);
+  return copy;
 }
 
 /** What the generated helpers return, computed once. */
@@ -1362,6 +1474,8 @@ function lowerHelperMethod(
   method: AstNode,
   baseContext: LowerContext,
   helperFunctions: Map<string, HelperFunctionInfo>,
+  /** The types of the class's static fields, which its methods read as package variables. */
+  fieldTypes: ReadonlyMap<string, ValueType> = new Map(),
 ): IrStatement | null {
   const name = text(method.name);
   if (method.kind !== "method" || name === null) {
@@ -1402,10 +1516,13 @@ function lowerHelperMethod(
     diagnostics: baseContext.diagnostics,
     metadata: baseContext.metadata,
     functions: collectClosureInfo(body),
-    types: inferVariableTypes(
-      body,
-      authoredRecords.map((parameter) => parameter.name),
-      helperFunctions.keys(),
+    types: withFieldTypes(
+      inferVariableTypes(
+        body,
+        authoredRecords.map((parameter) => parameter.name),
+        helperFunctions.keys(),
+      ),
+      fieldTypes,
     ),
     prelude: [],
     statementRoot: null,
@@ -4170,6 +4287,30 @@ function lowerCallStatement(
       ];
     }
   }
+  // Java `TimeUnit.SECONDS.sleep(n)` blocks the script thread like a hidden wait.
+  const unit = asNode(node.object);
+  const unitName = unit?.kind === "property" ? constantString(unit.property) : null;
+  if (
+    call !== null &&
+    call.name === "sleep" &&
+    call.arguments.length === 1 &&
+    unitName !== null &&
+    ["MILLISECONDS", "SECONDS", "MINUTES"].includes(unitName) &&
+    /(?:^|\.)TimeUnit$/u.test(
+      variableName(asNode(unit!.object)) ?? text(asNode(unit!.object)?.type) ?? "",
+    )
+  ) {
+    return oneArgumentStatement(call.arguments, context, node, (duration) => ({
+      kind: "wait",
+      duration:
+        unitName === "MINUTES"
+          ? { kind: "binary", operator: "*", left: duration, right: { kind: "literal", value: 60 } }
+          : duration,
+      visible: false,
+      unit: unitName === "MILLISECONDS" ? "ms" : "s",
+      span,
+    }));
+  }
   if (call === null || !call.inherited) {
     const expression = lowerExpression(node, context);
     return expression === null
@@ -6017,9 +6158,65 @@ function lowerReturnStatement(node: AstNode, context: LowerContext): IrStatement
     context,
     "SX_DYNAMIC_SCRIPT",
     "warning",
-    'Legacy chained to the script this value names, and ended the chain when the value was null or empty or named no file; its ".groovy" becomes ".tease" here, and script() fails at runtime for a name that is no file of the package.',
+    context.scriptPaths !== null
+      ? "Legacy chained to the script this value names, and ended the chain when the value was null or empty or named no file; the name is looked up among the package's scripts, and a name of no script ends the chain here too."
+      : 'Legacy chained to the script this value names, and ended the chain when the value was null or empty or named no file; its ".groovy" becomes ".tease" here, and script() fails at runtime for a name that is no file of the package.',
     node.span,
   );
+  // In a package, the name is looked up among its scripts, by the legacy name in lower case without ".groovy", and a
+  // name of no script ends the chain, as the legacy player did.
+  if (context.scriptPaths !== null) {
+    const next = freshName("nextScript", context);
+    const paths = [...context.scriptPaths].sort(([left], [right]) => left.localeCompare(right));
+    const key: IrExpression = {
+      kind: "methodCall",
+      target: { kind: "methodCall", target: script, name: "lowercase", arguments: [] },
+      name: "replace",
+      arguments: [
+        { kind: "literal", value: ".groovy" },
+        { kind: "literal", value: "" },
+      ],
+    };
+    return [
+      {
+        kind: "let",
+        name: next,
+        value: {
+          kind: "methodCall",
+          target: {
+            kind: "object",
+            dict: true,
+            properties: paths.map(([name, path]) => ({
+              name,
+              key: { kind: "literal", value: name },
+              value: { kind: "literal", value: path },
+            })),
+          },
+          name: "get",
+          arguments: [key, { kind: "literal", value: "" }],
+          dict: true,
+        },
+        span: node.span,
+      },
+      {
+        kind: "if",
+        condition: {
+          kind: "binary",
+          operator: "==",
+          left: { kind: "variable", name: next },
+          right: { kind: "literal", value: "" },
+        },
+        then: [ends],
+        else: [],
+        span: node.span,
+      },
+      {
+        kind: "goto",
+        target: { kind: "script", path: { kind: "variable", name: next } },
+        span: node.span,
+      },
+    ];
+  }
   // A legacy script name such as "rooms/hall.groovy" names the converted file "rooms/hall.tease".
   const path: IrExpression = {
     kind: "methodCall",
