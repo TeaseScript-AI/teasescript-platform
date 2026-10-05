@@ -3527,7 +3527,10 @@ function lowerClosureDeclaration(
   // A function body runs later, when keys known present here may be gone.
   const outerKeys = context.knownKeys.splice(0);
   try {
-    const composed = composedImage(body, context) ?? pixelCheck(body, closure, context);
+    const composed =
+      composedImage(body, context) ??
+      pixelCheck(body, closure, context) ??
+      downloadFunction(body, closure, context);
     const lowered =
       composed ??
       lowerBlock(
@@ -3581,6 +3584,65 @@ function pixelCheck(body: AstNode, node: AstNode, context: LowerContext): IrStat
     node.span,
   );
   return [{ kind: "return", value: { kind: "literal", value: false }, span: node.span }];
+}
+
+/**
+ * A function that downloads a web address into a file, reading `new URL(address).openStream()` into a
+ * FileOutputStream: a package cannot reach the service (owner decision), so the function shows the request as a system
+ * notice, with secret values hidden, and returns false, or null, as when the download failed. Null for any other body.
+ */
+function downloadFunction(
+  body: AstNode,
+  node: AstNode,
+  context: LowerContext,
+): IrStatement[] | null {
+  let address: AstNode | null = null;
+  let opens = false;
+  let writes = false;
+  let answers = true;
+  walkAst(body, (child) => {
+    if (
+      child.kind === "constructorCall" &&
+      (child.type === "URL" || child.type === "java.net.URL") &&
+      address === null
+    )
+      address = nodeArray(asNode(child.arguments)?.items)[0] ?? null;
+    if (child.kind === "methodCall" && constantString(child.method) === "openStream") opens = true;
+    if (
+      child.kind === "constructorCall" &&
+      ["FileOutputStream", "java.io.FileOutputStream"].includes(String(child.type))
+    )
+      writes = true;
+    if (child.kind === "return") {
+      const value = constantValue(asNode(child.value) ?? undefined);
+      if (typeof value !== "boolean") answers = false;
+    }
+  });
+  if (address === null || !opens || !writes) return null;
+  const url = lowerExpression(address, context);
+  if (url === null) return null;
+  addDiagnostic(
+    context,
+    "SX_ONLINE_REQUEST",
+    "warning",
+    "This function downloaded a web address into a file, which a package cannot do; a system notice shows the request, with secret values hidden, and the function returns as when the download failed.",
+    node.span,
+  );
+  const shown =
+    url.kind === "literal" && typeof url.value === "string"
+      ? { text: maskedUrl(url.value) }
+      : { value: useHelper(context, "maskUrl", [url]) };
+  return [
+    systemSay(
+      templateOrLiteral([
+        { text: "Online feature not available here. The original would have requested: GET " },
+        shown,
+      ]),
+      node.span,
+      context,
+    ),
+    { kind: "return", value: { kind: "literal", value: answers ? false : null }, span: node.span },
+  ];
 }
 
 const INPUT_CALLS = new Set([
@@ -4453,6 +4515,33 @@ function lowerCallStatement(
 ): IrStatement[] {
   const call = callParts(node);
   const receiver = asNode(node.object);
+  // A script manager lists the installed scripts to run, change, or delete them, which a package cannot do.
+  if (
+    call !== null &&
+    receiver !== null &&
+    ["eachFile", "eachFileRecurse", "eachDir", "eachFileMatch"].includes(call.name) &&
+    isInstalledScriptsFolder(receiver, context)
+  ) {
+    addDiagnostic(
+      context,
+      "SX_SCRIPT_MANAGER",
+      "warning",
+      `${call.name}() went through the installed scripts of the legacy player to manage them, which a package cannot do; a system notice says so, and the session ends.`,
+      node.span,
+    );
+    return [
+      systemSay(
+        {
+          kind: "literal",
+          value:
+            "Managing the installed scripts is not available here: scripts cannot be listed, changed, or removed from a package.",
+        },
+        span,
+        context,
+      ),
+      { kind: "exit", span },
+    ];
+  }
   // Settings of the Java network stack, such as TLS options or the HTTP user agent, mean nothing in a package.
   const property = call?.name === "setProperty" ? constantString(call.arguments[0]) : null;
   if (
@@ -13191,6 +13280,35 @@ export function maskedUrl(url: string): string {
       : pair;
   });
   return `${base}?${pairs.join("&")}`;
+}
+
+/**
+ * Whether a value is the legacy player's folder of installed scripts, `new File(getDataFolder() + "scripts/")`, also
+ * through variables that only ever hold it or its path.
+ */
+function isInstalledScriptsFolder(
+  node: AstNode,
+  context: LowerContext,
+  seen = new Set<string>(),
+): boolean {
+  const resolve = (value: AstNode): AstNode => {
+    const name = variableName(value);
+    const key = name === null ? null : bindingKey(value, context.bindings);
+    const values = key === null ? undefined : context.assignedValues.get(key);
+    if (name === null || key === null || seen.has(key) || values?.length !== 1) return value;
+    seen.add(key);
+    return resolve(values[0]!);
+  };
+  let value = resolve(node);
+  if (isFileConstructor(value)) value = resolve(nodeArray(asNode(value.arguments)?.items)[0]!);
+  if (
+    value.kind === "methodCall" &&
+    constantString(value.method) === "toString" &&
+    asNode(value.object) !== null
+  )
+    value = asNode(value.object)!;
+  const path = staticPath(value);
+  return path.complete && /^(?:\.?\/)*scripts\/?$/iu.test(path.text.replaceAll("\\", "/"));
 }
 
 /** `NetworkInterface.networkInterfaces` or `NetworkInterface.getNetworkInterfaces()`. */
