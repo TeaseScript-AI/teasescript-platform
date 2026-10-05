@@ -2170,6 +2170,132 @@ async function markupLinkChecks(page) {
   return "PASS authored HTML stays literal and links open an isolated browsing context";
 }
 
+// Development time controls (#615) exist only with `?dev`: their switches and buttons are reachable by role and
+// keyboard, a badge stays visible while they are on, each jump is reported outside the transcript and notices, and
+// `time=skip` only sets the initial state. This group replaces the development scenario with its own script.
+async function developmentTimeChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const source = [
+    'say "Before the wait", instant',
+    "wait 15 s",
+    'let elapsed = showButton "Done"',
+    'say "Waited ${elapsed}", instant',
+    'timer async 30 { say "Timer fired", instant }',
+    'let again = showButton "Again"',
+    "exit",
+  ].join("\n");
+  await page.route("**/src/runtimeScenario.ts*", (route) => {
+    // Plain string handling: the run-code sandbox that executes this check has no URL global.
+    const url = route.request().url();
+    if (/[?&]original(?:[=&]|$)/.test(url)) return route.continue();
+    const original = `${url}${url.includes("?") ? "&" : "?"}original=`;
+    return route.fulfill({
+      contentType: "text/javascript",
+      body: `export * from ${JSON.stringify(original)};\nexport const openingScenario = ${JSON.stringify(source)};`,
+    });
+  });
+  const base = page.url().split("?")[0];
+  const launcher = page.locator('[data-launcher] button[aria-label="Time Controls"]');
+  const badge = page.locator("[data-development-time-badge]");
+  const marker = page.locator("[data-development-time-marker]");
+  const enable = page.getByRole("switch", { name: "Enable time controls", exact: true });
+  const autoSkip = page.getByRole("switch", { name: "Auto-skip", exact: true });
+  const skip = page.getByRole("button", { name: "Skip to next timed event", exact: true });
+  const tenSeconds = page.getByRole("button", { name: "+10 s", exact: true });
+  const minute = page.getByRole("button", { name: "+1 min", exact: true });
+  const foreground = (name) =>
+    page.locator("[data-foreground-controls] button").filter({ hasText: name });
+  const entry = (text) => page.locator(".transcript-entry").filter({ hasText: text });
+  const outsideTranscript = async () => {
+    const texts = await page.locator(".transcript-entry").allInnerTexts();
+    const toasts = await page.locator("[data-sonner-toast]").allInnerTexts();
+    return ![...texts, ...toasts].some((text) => text.includes("⏩"));
+  };
+
+  // The development server opens the preview without `?dev`, but not the time controls.
+  await page.reload();
+  await page.locator("[data-launcher]").waitFor();
+  check(
+    (await launcher.count()) === 0 && (await badge.count()) === 0,
+    "Time controls exist without ?dev",
+  );
+
+  // `?dev` starts with the controls off; the keyboard switches them on, and Skip ends the wait at once.
+  await page.goto(`${base}?dev`);
+  await launcher.click();
+  await enable.waitFor();
+  check(
+    !(await enable.isChecked()) &&
+      !(await autoSkip.isChecked()) &&
+      (await autoSkip.isDisabled()) &&
+      (await skip.isDisabled()) &&
+      (await badge.count()) === 0,
+    "?dev must start with the time controls off",
+  );
+  await enable.focus();
+  await page.keyboard.press("Space");
+  await badge.waitFor();
+  await skip.click();
+  await foreground("Done").waitFor({ timeout: 5_000 });
+  // What really elapsed before Skip is not skipped.
+  await marker.filter({ hasText: /^⏩ 1[0-5] s skipped$/ }).waitFor();
+  check(
+    (await skip.isDisabled()) && (await tenSeconds.isEnabled()) && (await minute.isEnabled()),
+    "A waiting button must offer +10 s and +1 min, but nothing to skip",
+  );
+  await tenSeconds.click();
+  await page
+    .locator("[data-development-time-jumps] li")
+    .first()
+    .filter({ hasText: "⏩ 10 s skipped" })
+    .waitFor();
+  await foreground("Done").click();
+  const waited = await entry("Waited").innerText();
+  check(
+    /Waited 1\d(\.\d+)? s/.test(waited),
+    `+10 s did not reach the button's elapsed time: ${waited}`,
+  );
+  // The 30 s timer falls inside +1 min and fires during the jump.
+  await minute.click();
+  await entry("Timer fired").waitFor({ timeout: 5_000 });
+  check(await outsideTranscript(), "A jump marker reached the transcript or a notice");
+  await enable.click();
+  await badge.waitFor({ state: "detached" });
+  check(await minute.isDisabled(), "Switched-off controls must not jump");
+
+  // `time=skip` starts with auto-skip on: the wait ends by itself, but the player's think time stays real, and the
+  // background timer does not fire while Again waits.
+  await page.goto(`${base}?dev&time=skip`);
+  await foreground("Done").waitFor({ timeout: 5_000 });
+  await badge
+    .filter({ hasText: "auto-skip" })
+    .filter({ hasText: /⏩ 1[45] s skipped/ })
+    .waitFor();
+  await foreground("Done").click();
+  const thinkTime = await entry("Waited").innerText();
+  check(
+    /Waited (\d+(\.\d+)? ms|[0-4](\.\d+)? s)/.test(thinkTime),
+    `Auto-skip advanced time while a button waited: ${thinkTime}`,
+  );
+  await foreground("Again").waitFor();
+  await page.waitForTimeout(500);
+  check(
+    (await entry("Timer fired").count()) === 0,
+    "Auto-skip advanced a background timer during input",
+  );
+  await launcher.click();
+  check(
+    (await enable.isChecked()) && (await autoSkip.isChecked()),
+    "time=skip must switch the controls and auto-skip on",
+  );
+  await autoSkip.click();
+  await badge.filter({ hasNotText: "auto-skip" }).waitFor();
+  check(await outsideTranscript(), "A jump marker reached the transcript or a notice");
+  return "PASS time controls only with ?dev, switches, Skip, +10 s, +1 min, auto-skip at input, badge and markers";
+}
+
 const groups = [
   topBarChecks,
   tooltipClickFocusChecks,
@@ -2194,6 +2320,7 @@ const groups = [
   noticeChecks,
   directDemoLatestChecks,
   markupLinkChecks,
+  developmentTimeChecks,
   timerChecks,
   transcriptNativeWheelChecks,
   contentContainmentChecks,

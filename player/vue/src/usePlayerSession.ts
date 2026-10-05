@@ -402,6 +402,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function update(next: PlayerRuntimeSession) {
     session.value = next;
   }
+  /**
+   * Publishes a session that development time jumps (#615) advanced from the current one: playing media seek to the
+   * progress the jumps reported, and the scene clock continues from the new observed time.
+   */
+  function publishJump(next: PlayerRuntimeSession) {
+    session.value = next;
+    device.jumped(playerRuntimeMedia(next.snapshot).media);
+    clock.rebase();
+  }
   const permanentButtons = computed(() =>
     session.value === null ? [] : playerRuntimePermanentButtons(session.value.snapshot),
   );
@@ -528,6 +537,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     pressPermanentButton,
     /** Observes elapsed time and media progress, runs the session, and returns the published session. */
     observe: clock.observe,
+    publishJump,
     start,
     update,
     prepare,

@@ -1,0 +1,5 @@
+say "Before the wait", instant
+wait 15 s
+let elapsed = showButton "Done"
+say "Waited ${elapsed}", instant
+exit
