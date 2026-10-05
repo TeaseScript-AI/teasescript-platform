@@ -7,7 +7,9 @@ import { mapChildren, mapOwnExpressions } from "./variable-types.ts";
  * before it on the same straight path, with only waits, images, and sounds in between, says only what it adds, and
  * one that only repeats it goes. Texts compare with their whitespace and line breaks collapsed and without the final
  * punctuation of the earlier text; only literal text and interpolations of identical expressions compare. A nested
- * block, any other statement, and a call in an image or sound start over.
+ * block, any other statement, and a call in an image or sound start over. A text that adds only punctuation to the
+ * one before it, with only waits between them, is an animation, such as growing dots, and stays (owner decision
+ * 2026-10-06).
  */
 export function withoutRepeatedText(
   statements: IrStatement[],
@@ -18,6 +20,8 @@ export function withoutRepeatedText(
   };
   const block = (items: IrStatement[]): IrStatement[] => {
     let previous: { tokens: Token[]; say: Extract<IrStatement, { kind: "say" }> } | null = null;
+    // Whether only waits came after the previous text.
+    let onlyWaits = true;
     const result: IrStatement[] = [];
     // A wait that follows a wait across a dropped text joins it: `wait 1` five times between dots becomes `wait 5`.
     let joinsWait = false;
@@ -43,6 +47,16 @@ export function withoutRepeatedText(
           previous !== null && sameVoice(previous.say, statement)
             ? repeatedPart(previous.tokens, tokens, sameToken)
             : null;
+        if (repeat === "all" && onlyWaits && growsByMarks(previous!.tokens, tokens)) {
+          report(
+            "SX_REPEATED_TEXT_ANIMATION",
+            "Kept a text that adds only punctuation to the text before it, an animation such as growing dots.",
+            statement,
+          );
+          result.push(statement);
+          previous = { tokens, say: statement };
+          continue;
+        }
         if (repeat === "all") {
           report(
             "SX_REPEATED_TEXT_DROPPED",
@@ -73,9 +87,12 @@ export function withoutRepeatedText(
           result.push(statement);
         }
         previous = { tokens, say: statement };
+        onlyWaits = true;
         continue;
       }
       if (!keepsText(statement)) previous = null;
+      if (statement.kind !== "wait" && statement.kind !== "comment" && statement.kind !== "blank")
+        onlyWaits = false;
       result.push(statement);
     }
     return result;
@@ -130,6 +147,24 @@ function textValue(tokens: readonly Token[]): IrExpression {
   if (parts.every((part) => "text" in part))
     return { kind: "literal", value: parts.map((part) => ("text" in part ? part.text : "")).join("") };
   return { kind: "template", parts };
+}
+
+/** Whether `next` is `earlier` in full, whitespace runs alike, followed by punctuation and whitespace only. */
+function growsByMarks(earlier: readonly Token[], next: readonly Token[]): boolean {
+  const flat = (tokens: readonly Token[]): string =>
+    tokens
+      .map((token) => ("char" in token ? token.char : `\u0000${token.key}\u0000`))
+      .join("")
+      .replaceAll(/\s+/gu, " ")
+      .trim();
+  const before = flat(earlier);
+  const after = flat(next);
+  return (
+    before !== "" &&
+    after.length > before.length &&
+    after.startsWith(before) &&
+    /^[\s.!?,;:…]+$/u.test(after.slice(before.length))
+  );
 }
 
 const SPACE = /\s/u;
@@ -497,4 +532,104 @@ function withQuestion(statement: IrStatement, say: SayStatement): IrStatement | 
     return mapChildren(value, ask);
   };
   return mapOwnExpressions(statement, ask);
+}
+
+/**
+ * An empty legacy text only cleared the display, which a chat has no use for: a `say` of a blank literal, or of a
+ * variable that the program declares once with a blank literal and never assigns again, goes, and so does that
+ * variable's declaration where nothing reads it any more. Other text stays. `variables` is false for a module, whose
+ * variables other files may write.
+ */
+export function withoutBlankText(
+  statements: IrStatement[],
+  diagnostics: MigrationDiagnostic[],
+  variables = true,
+): IrStatement[] {
+  const writes = new Map<string, number>();
+  const blankStarts = new Set<string>();
+  const scan = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(scan);
+    if (typeof value !== "object" || value === null || !("kind" in value)) return;
+    if (value.kind === "let" && "name" in value && typeof value.name === "string") {
+      writes.set(value.name, (writes.get(value.name) ?? 0) + 1);
+      if ("value" in value && isBlank(value.value)) blankStarts.add(value.name);
+    }
+    if (
+      value.kind === "assign" &&
+      "target" in value &&
+      typeof value.target === "object" &&
+      value.target !== null &&
+      "kind" in value.target &&
+      value.target.kind === "variable" &&
+      "name" in value.target &&
+      typeof value.target.name === "string"
+    )
+      writes.set(value.target.name, (writes.get(value.target.name) ?? 0) + 2);
+    if (value.kind === "for" && "variable" in value && typeof value.variable === "string")
+      writes.set(value.variable, (writes.get(value.variable) ?? 0) + 2);
+    if (value.kind === "function" && "parameters" in value && Array.isArray(value.parameters))
+      for (const parameter of value.parameters)
+        if (typeof parameter === "object" && parameter !== null && "name" in parameter)
+          writes.set(String(parameter.name), (writes.get(String(parameter.name)) ?? 0) + 2);
+    Object.values(value).forEach(scan);
+  };
+  scan(statements);
+  const blank = (value: IrExpression): boolean =>
+    isBlank(value) ||
+    (variables &&
+      value.kind === "variable" &&
+      blankStarts.has(value.name) &&
+      writes.get(value.name) === 1);
+  let dropped = 0;
+  const drop = (items: IrStatement[]): IrStatement[] =>
+    items.flatMap((item): IrStatement[] => {
+      if (item.kind === "say" && blank(item.value)) {
+        dropped += 1;
+        diagnostics.push({
+          code: "SX_BLANK_TEXT",
+          severity: "info",
+          message: "Dropped an empty text, which only cleared the legacy display.",
+          span: item.span,
+        });
+        return [];
+      }
+      return [withNestedBlocks(item, drop)];
+    });
+  const kept = drop(statements);
+  if (dropped === 0) return kept;
+  // A blank variable that nothing reads now goes too.
+  const read = new Set<string>();
+  const reads = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(reads);
+    if (typeof value !== "object" || value === null) return;
+    if ("kind" in value && value.kind === "variable" && "name" in value) read.add(String(value.name));
+    Object.values(value).forEach(reads);
+  };
+  reads(kept);
+  const prune = (items: IrStatement[]): IrStatement[] =>
+    items
+      .filter(
+        (item) =>
+          !(
+            item.kind === "let" &&
+            blankStarts.has(item.name) &&
+            writes.get(item.name) === 1 &&
+            item.global !== true &&
+            !read.has(item.name)
+          ),
+      )
+      .map((item) => withNestedBlocks(item, prune));
+  return prune(kept);
+}
+
+function isBlank(value: unknown): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    value.kind === "literal" &&
+    "value" in value &&
+    typeof value.value === "string" &&
+    value.value.trim() === ""
+  );
 }

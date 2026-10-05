@@ -94,4 +94,10 @@ if leashed {
   dare += "Free, speaking."
 }
 say dare
+// A conditional used as a statement runs one call per branch.
+if leashed {
+  say "Leashed."
+} else {
+  showImage "free.jpg"
+}
 exit

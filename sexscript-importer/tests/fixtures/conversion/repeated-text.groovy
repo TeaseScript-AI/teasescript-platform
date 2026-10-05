@@ -5,7 +5,7 @@ show("I will decide when you get to cum from now on.")
 wait(5)
 if (getBoolean("I will decide when you get to cum from now on \n\n" +
     "Do you accept?")) show("Good.")
-// Growing dots say their text once, with the waits between them joined.
+// Growing dots, which only add punctuation between waits, are an animation and stay.
 show("Deciding.")
 wait(1)
 show("Deciding..")
@@ -29,3 +29,12 @@ show("Waiting for you, ${count} days")
 // A photo request whose title repeats the text before it says the title once, as its question.
 show("Show me how you kneel.")
 setImage(getFile("Show me how you kneel."))
+// An empty text only cleared the legacy display, so it is not said, also through a variable that stays empty.
+def promptText = ""
+def pickedColor = getSelectedValue(promptText, ["Red", "Blue"])
+show("Color " + pickedColor)
+// An exact repeat between waits goes, and the waits around it join.
+show("Processing.")
+wait(1)
+show("Processing.")
+wait(1)

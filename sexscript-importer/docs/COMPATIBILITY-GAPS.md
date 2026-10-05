@@ -520,7 +520,8 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 - Repeated text: every legacy `show()` and question replaced the one text display, so authors repeated a message to
   extend it, while the Player keeps earlier messages. A `say` that repeats the text just before it on the same straight
   path, with only waits, images, and sounds in between, says only what it adds, and one that only repeats it is
-  dropped, joining the waits around it (growing dots become one text and one wait). Texts compare with whitespace and line breaks collapsed and without the earlier text's final punctuation,
+  dropped, joining the waits around it; a text that adds only punctuation, with only waits between, is an animation
+  such as growing dots and stays (owner decision 2026-10-06, counted as `animation`). Texts compare with whitespace and line breaks collapsed and without the earlier text's final punctuation,
   the repeat ends at a word boundary, and only literal text and interpolations of identical expressions compare. Any
   other statement, a nested block, or a call in an image or sound starts over. The display also kept the last text
   across a chain to the next script: before a `goto` to a script whose start shows the same literal texts again, with

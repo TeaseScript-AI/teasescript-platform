@@ -7,9 +7,13 @@ say "Do you accept?"
 if (choose yes: "Yes", no: "No") == "yes" {
   say "Good."
 }
-// Growing dots say their text once, with the waits between them joined.
+// Growing dots, which only add punctuation between waits, are an animation and stay.
 say "Deciding.", instant
-wait 3
+wait 1
+say "Deciding..", instant
+wait 1
+say "Deciding...", instant
+wait 1
 // A question that repeats the text before it asks without saying it again.
 let days = askInteger "How many days?", default: 3
 // Interpolations compare when they interpolate the same value; an image in between keeps the text.
@@ -26,4 +30,10 @@ say "Waiting for you, ${count} days"
 // A photo request whose title repeats the text before it says the title once, as its question.
 // NOTE SX_FILE_PHOTO line 31: getFile() let the player pick any file with this title; scripts use it for a photo of the player, so askImage() asks for an image with this message, which the player answers with an image file or the camera; a chooser the player cancelled gave null, which askImage() does not.
 showImage askImage("Show me how you kneel.")
+// An empty text only cleared the legacy display, so it is not said, also through a variable that stays empty.
+let pickedColor = choose 0: "Red", 1: "Blue"
+say "Color ${pickedColor}"
+// An exact repeat between waits goes, and the waits around it join.
+say "Processing.", instant
+wait 2
 exit

@@ -39,7 +39,7 @@ import {
   type PackageResources,
 } from "./java-data.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
-import { withAskQuestions, withoutRepeatedText } from "./repeated-text.ts";
+import { withAskQuestions, withoutBlankText, withoutRepeatedText } from "./repeated-text.ts";
 import {
   enforceVariableTypes,
   functionResultTypes,
@@ -1342,7 +1342,13 @@ export function lowerParsedFile(
   const statements = [
     ...helperStatements(context.syntheticHelpers),
     ...javaDataStatements(context.java),
-    ...withAskQuestions(withoutRepeatedText(typedStatements, context.diagnostics), context.diagnostics),
+    ...withAskQuestions(
+      withoutRepeatedText(
+        withoutBlankText(typedStatements, context.diagnostics, mixin === null),
+        context.diagnostics,
+      ),
+      context.diagnostics,
+    ),
   ];
   if (body?.kind !== "block") {
     addDiagnostic(
@@ -2771,6 +2777,8 @@ function repeatsLittle(
   const expression = statement.kind === "return" ? null : asNode(statement.expression);
   const small =
     statement.kind === "return" ||
+    // `c ? show(a) : speak(b)` as a statement is an if with a call per branch.
+    expression === deferred ||
     (expression?.kind === "methodCall" && nodeArray(asNode(expression.arguments)?.items).length <= 1) ||
     // `text += c ? a : b` updates one variable.
     (expression?.kind === "binary" &&

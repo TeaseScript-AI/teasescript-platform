@@ -157,14 +157,22 @@ export interface FeasibilityReport {
   rootDiagnosticsByCode: Record<string, number>;
   /**
    * Texts that repeated the text just before them because the legacy display replaced it (repeated-text.ts): dropped,
-   * shortened to what they add, kept because their interpolated values differ, and dropped before a transfer to a
-   * script that shows them again first.
+   * shortened to what they add, kept because their interpolated values differ, dropped before a transfer to a script
+   * that shows them again first, and kept as an animation that only adds punctuation, such as growing dots.
    */
-  repeatedText: { dropped: number; shortened: number; kept: number; acrossChain: number };
+  repeatedText: {
+    dropped: number;
+    shortened: number;
+    kept: number;
+    acrossChain: number;
+    animation: number;
+  };
   /** Literal image and sound paths that no file of the package matches (`SX_MEDIA_MISSING`). */
   missingMedia: number;
   /** Asks that took the text said right before them as their question (`SX_ASK_QUESTION`, #634). */
   askQuestions: number;
+  /** Empty texts dropped, which only cleared the legacy display (`SX_BLANK_TEXT`). */
+  blankTexts: number;
   /**
    * The order check: in each script's output, the NOTE and TODO comments that name a legacy line more than 20 lines
    * before the one the previous such comment names, summed over the scripts (lineOrderJumps). The output follows the
@@ -291,9 +299,10 @@ export function analyzeFeasibility(
     rootMigrationErrors: 0,
     diagnosticsByCode: emptyCounts(),
     rootDiagnosticsByCode: emptyCounts(),
-    repeatedText: { dropped: 0, shortened: 0, kept: 0, acrossChain: 0 },
+    repeatedText: { dropped: 0, shortened: 0, kept: 0, acrossChain: 0, animation: 0 },
     missingMedia: 0,
     askQuestions: 0,
+    blankTexts: 0,
     backwardLineJumps: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
@@ -395,8 +404,10 @@ export function analyzeFeasibility(
       if (code === "SX_REPEATED_TEXT_DROPPED") report.repeatedText.dropped += 1;
       else if (code === "SX_REPEATED_TEXT_SHORTENED") report.repeatedText.shortened += 1;
       else if (code === "SX_REPEATED_TEXT_KEPT") report.repeatedText.kept += 1;
+      else if (code === "SX_REPEATED_TEXT_ANIMATION") report.repeatedText.animation += 1;
       else if (code === "SX_MEDIA_MISSING") report.missingMedia += 1;
       else if (code === "SX_ASK_QUESTION") report.askQuestions += 1;
+      else if (code === "SX_BLANK_TEXT") report.blankTexts += 1;
     }
     for (const { code } of packageProgram.diagnostics)
       if (code === "SX_REPEATED_TEXT_ACROSS_CHAIN") report.repeatedText.acrossChain += 1;

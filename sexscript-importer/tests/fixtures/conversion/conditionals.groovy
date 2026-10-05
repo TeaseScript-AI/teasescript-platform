@@ -32,3 +32,5 @@ show("Crawl to me" + (leashed ? " with the leash" : "") + (gagged ? "" : ", mout
 def dare = "Crawl. "
 dare += leashed ? "On the leash." : "Free, " + (gagged ? "quiet." : "speaking.")
 show(dare)
+// A conditional used as a statement runs one call per branch.
+leashed ? show("Leashed.") : setImage("free.jpg")
