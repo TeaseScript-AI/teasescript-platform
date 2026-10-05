@@ -45,13 +45,13 @@ const MEDIA_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".mp4", ".webm"]);
 
 /** The parts of Playwright the runner uses. */
 interface Page {
-  goto(url: string): Promise<unknown>;
-  waitForSelector(selector: string, options: { timeout: number }): Promise<unknown>;
+  goto(url: string): Promise<void>;
+  waitForSelector(selector: string, options: { timeout: number }): Promise<void>;
   click(selector: string, options?: { timeout: number }): Promise<void>;
   fill(selector: string, value: string, options?: { timeout: number }): Promise<void>;
   press(selector: string, key: string, options?: { timeout: number }): Promise<void>;
   evaluate<T>(fn: () => T): Promise<T>;
-  screenshot(options: { path: string }): Promise<unknown>;
+  screenshot(options: { path: string }): Promise<void>;
   addInitScript(fn: () => void): Promise<void>;
   clock: {
     install(): Promise<void>;
@@ -61,7 +61,10 @@ interface Page {
   on(event: "pageerror", listener: (error: Error) => void): void;
 }
 interface Browser {
-  newContext(options: object): Promise<{ newPage(): Promise<Page>; close(): Promise<void> }>;
+  newContext(options: {
+    ignoreHTTPSErrors: boolean;
+    viewport: { width: number; height: number };
+  }): Promise<{ newPage(): Promise<Page>; close(): Promise<void> }>;
   close(): Promise<void>;
 }
 
@@ -133,13 +136,16 @@ if (positionals.length !== 2) {
   );
   process.exit(2);
 }
-const [root, out] = positionals.map((item) => path.resolve(item)) as [string, string];
+const root = path.resolve(positionals[0]!);
+const out = path.resolve(positionals[1]!);
 const only = values.only === undefined ? null : new Set(values.only.split(","));
 const ids = (await readdir(root, { withFileTypes: true }))
   .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
   .map((entry) => entry.name)
   .filter((id) => only === null || only.has(id))
   .sort();
+// The interfaces above name the part of Playwright's API this runner calls.
+// EVIDENCE: playwright-core's main module exports `chromium`, whose launch() resolves to a Browser.
 const { chromium } = createRequire(import.meta.url)(PLAYWRIGHT_CORE) as {
   chromium: { launch(): Promise<Browser> };
 };
@@ -421,17 +427,15 @@ function readState(page: Page): Promise<PlayerState> {
       };
       transcriptEntries: Array<{ text?: string }>;
     };
-    const root = (
-      document.querySelector("#app") as unknown as {
-        _vnode?: {
-          component?: {
-            subTree?: {
-              component?: { props?: { player?: { session?: { value: Session | null } } } };
-            };
-          };
-        };
-      }
-    )?._vnode;
+    type MountedRoot = {
+      component?: {
+        subTree?: { component?: { props?: { player?: { session?: { value: Session | null } } } } };
+      };
+    };
+    // The Player's root renders PlayerApp, whose `player` prop is the session host with the published session.
+    // EVIDENCE: Vue's renderer keeps the mounted root vnode on its container element as `_vnode`.
+    const app = document.querySelector("#app") as (Element & { _vnode?: MountedRoot }) | null;
+    const root = app?._vnode;
     const session = root?.component?.subTree?.component?.props?.player?.session?.value ?? null;
     const snapshot = session?.snapshot;
     const fileOf = (instruction: number | undefined) =>

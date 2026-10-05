@@ -118,7 +118,7 @@ interface ImporterReport {
 }
 
 /** The fields of a `play-check.ts` result the status uses. */
-interface PlayCheck {
+export interface PlayCheck {
   readonly contentHash: string;
   readonly verdict: "plays" | "stops" | "no-start";
   readonly checkedAt: string;
@@ -344,10 +344,10 @@ async function readEntry(
   const play =
     statusSources.playChecks === undefined
       ? null
-      : ((await readFile(path.join(statusSources.playChecks, id, "result.json"), "utf8").then(
-          (text) => JSON.parse(text) as PlayCheck,
+      : await readFile(path.join(statusSources.playChecks, id, "result.json"), "utf8").then(
+          (text) => parsePlayCheck(JSON.parse(text)),
           () => null,
-        )) as PlayCheck | null);
+        );
   const current =
     play !== null && play.contentHash === packageContentHash(scan.sources) ? play : null;
   const verifiedRecord = isVerified ? await readJson(".verified.json") : null;
@@ -474,6 +474,40 @@ function packageStatus(
     kind: "compiles",
     label: "not played; smoke run inconclusive",
     detail: `The smoke run ended with ${run.status} after ${run.steps} steps; it may wait for typed text that the fixed answers never give.`,
+  };
+}
+
+/** A `play-check.ts` result, or `null` when the value does not have its shape. */
+export function parsePlayCheck(value: unknown): PlayCheck | null {
+  if (!isRecord(value) || typeof value.contentHash !== "string") return null;
+  const { verdict, checkedAt, runs, coverage } = value;
+  if (verdict !== "plays" && verdict !== "stops" && verdict !== "no-start") return null;
+  if (typeof checkedAt !== "string" || !Array.isArray(runs) || !isRecord(coverage)) return null;
+  const strings = (item: unknown): string[] =>
+    Array.isArray(item) ? item.filter((entry): entry is string => typeof entry === "string") : [];
+  const count = (item: unknown): number => (typeof item === "number" ? item : 0);
+  return {
+    contentHash: value.contentHash,
+    verdict,
+    checkedAt,
+    runs: runs.map((run) => {
+      const stop = isRecord(run) && isRecord(run.stop) ? run.stop : {};
+      return {
+        stop: {
+          kind: typeof stop.kind === "string" ? stop.kind : "harness",
+          detail: typeof stop.detail === "string" ? stop.detail : "",
+        },
+      };
+    }),
+    coverage: {
+      files: strings(coverage.files),
+      fileCount: count(coverage.fileCount),
+      sites: count(coverage.sites),
+      siteCount: count(coverage.siteCount),
+      choices: count(coverage.choices),
+    },
+    missingImages: strings(value.missingImages),
+    missingMedia: strings(value.missingMedia),
   };
 }
 
