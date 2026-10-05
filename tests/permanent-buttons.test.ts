@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProject, compileSource, type ProjectSourceFile } from "../src/compiler.js";
+import { parse } from "../src/parser.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import {
   createCheckpoint,
@@ -143,8 +144,7 @@ test("clicks run their button's block while the script waits, also from a checkp
     'showPermanentButton "Stop" {',
     "    goto stopped",
     "}",
-    'showPermanentButton "Pause" {',
-    "    persist: true",
+    'showPermanentButton "Pause", persist: true {',
     '    say "paused"',
     "    wait 2",
     '    say "resumed"',
@@ -330,9 +330,12 @@ test("a button belongs to the file entry that showed it unless it persists, and 
         "    }",
         "}",
         "offerHelp()",
-        'showPermanentButton "Kept" {',
-        "    persist: true",
+        'let kept = showPermanentButton "Kept",',
+        "    persist: true {",
         '    say "kept"',
+        "}",
+        'showPermanentButton "Dropped", persist: false {',
+        '    say "dropped"',
         "}",
         'call "room.tease"',
         "wait 1",
@@ -343,35 +346,28 @@ test("a button belongs to the file entry that showed it unless it persists, and 
     { path: "hall.tease", source: 'showPermanentButton "Quit" {\n    exit\n}\nwait 10\nexit' },
   ]);
   // A function's button belongs to its caller's entry, and a call keeps the caller's buttons.
-  assert.deepEqual(session.buttons(), ["Help", "Kept", "Room"]);
-  session.click(1).click(3);
+  assert.deepEqual(session.buttons(), ["Help", "Kept", "Dropped", "Room"]);
+  session.click(1).click(4);
   assert.deepEqual(session.said(), ["help", "room"]);
   // The end of the called file removes its own button.
   session.at(1000);
-  assert.deepEqual(session.buttons(), ["Help", "Kept"]);
-  // A goto leaves main's entry; only the persistent button stays.
+  assert.deepEqual(session.buttons(), ["Help", "Kept", "Dropped"]);
+  // A goto leaves main's entry; only the persistent button stays, and `persist: false` is the default.
   session.at(2000);
   assert.deepEqual(session.buttons(), ["Kept", "Quit"]);
   session.click(2);
   assert.deepEqual(session.said(), ["help", "room", "kept"]);
   // An exit in a block ends the session and removes every button.
-  session.click(4);
+  session.click(5);
   assert.equal(session.snapshot.status, "halted");
   assert.deepEqual(session.buttons(), []);
   // Leaving an entry settles its buttons; exit only clears the session.
-  assert.deepEqual(removed(session.events), [3, 1]);
+  assert.deepEqual(removed(session.events), [4, 1, 3]);
 });
 
 test("permanent buttons need a block, shown text, and their own identifier", () => {
   assert.deepEqual(errorCodes('showPermanentButton "Stop"\nexit'), ["TSP018"]);
   assert.deepEqual(errorCodes('showPermanentButton("Stop") {\n}\nexit'), ["TSP035"]);
-  assert.deepEqual(errorCodes('showPermanentButton "Stop" {\n    persist: false\n}\nexit'), [
-    "TSP012",
-  ]);
-  assert.deepEqual(
-    errorCodes('showPermanentButton "Stop" {\n    say "x"\n    persist: true\n}\nexit'),
-    ["TSP001"],
-  );
   assert.deepEqual(errorCodes('showPermanentButton ["a", "b"] {\n}\nexit'), ["TSV040"]);
   assert.deepEqual(errorCodes('showPermanentButton "Stop" {\n    return 1\n}\nexit'), ["TSV033"]);
   const button = 'let stop = showPermanentButton "Stop" {\n}\n';
@@ -380,6 +376,67 @@ test("permanent buttons need a block, shown text, and their own identifier", () 
   assert.deepEqual(errorCodes(`${button}say stop.text\nexit`), ["TSV043"]);
   assert.deepEqual(errorCodes('removePermanentButton("Stop")\nexit'), ["TSV043"]);
   assert.deepEqual(errorCodes(`${button}removePermanentButton(stop, stop)\nexit`), ["TSV020"]);
+});
+
+test("persist is a literal option of the command, and the block line it replaces names the fix", () => {
+  /** Each error as `code line:column message`; the trailing errors show that parsing recovered after the option. */
+  const errors = (source: string): string[] =>
+    compileSource(source)
+      .diagnostics.filter((diagnostic) => diagnostic.severity === "error")
+      .map(
+        (diagnostic) =>
+          `${diagnostic.code} ${diagnostic.span.start.line}:${diagnostic.span.start.column} ${diagnostic.message}`,
+      );
+  const after = "    let = 1\n}\nlet = 2\nexit";
+  const recovered = (line: number) => [
+    `TSP013 ${line}:8 Expected a variable identifier after 'let'.`,
+    `TSP013 ${line + 2}:4 Expected a variable identifier after 'let'.`,
+  ];
+  assert.deepEqual(errors(`showPermanentButton "Pause \${1 + 2}" {\n    persist: true\n${after}`), [
+    "TSP035 1:4 Write 'persist:' on the command instead of in the block: 'showPermanentButton \"Pause ${1 + 2}\", persist: true {'.",
+    ...recovered(2),
+  ]);
+  const cases: [option: string, error: string][] = [
+    [
+      "persist: yes",
+      "TSP035 0:37 showPermanentButton option 'persist' must be the literal true or false.",
+    ],
+    [
+      "persist: true, persist: false",
+      "TSP035 0:43 Duplicate showPermanentButton option 'persist'.",
+    ],
+    [
+      "color: true",
+      "TSP035 0:28 Unknown showPermanentButton option 'color'; the only option is 'persist'.",
+    ],
+    ["persist:", "TSP012 0:37 Expected true or false after 'persist:'."],
+  ];
+  for (const [option, error] of cases) {
+    assert.deepEqual(errors(`showPermanentButton "Stop", ${option} {\n${after}`), [
+      error,
+      ...recovered(1),
+    ]);
+  }
+  // A missing value also leaves a block on the next line to the button.
+  assert.deepEqual(errors(`showPermanentButton "Stop", persist:\n{\n${after}`), [
+    "TSP012 1:0 Expected true or false after 'persist:'.",
+    ...recovered(2),
+  ]);
+
+  // Text that would take the option as its own, such as a compact choice, is grouped in the replacement, which keeps
+  // the two choice options and makes the button persist.
+  const [replacement] = compileSource(
+    'showPermanentButton choose "A", "B" {\n    persist: true\n    say "clicked"\n}\nexit',
+  ).diagnostics.map(
+    (diagnostic) => /'(showPermanentButton .*) \{'\.$/u.exec(diagnostic.message)?.[1],
+  );
+  assert.equal(replacement, 'showPermanentButton (choose "A", "B"), persist: true');
+  const [statement] = parse(`${replacement} {\n    say "clicked"\n}\nexit`).program.statements;
+  assert.ok(statement?.kind === "showPermanentButtonStatement");
+  assert.equal(statement.persist, true);
+  assert.ok(statement.text.kind === "parenthesizedExpression");
+  assert.ok(statement.text.expression.kind === "interactionExpression");
+  assert.equal(statement.text.expression.options.length, 2);
 });
 
 test("a parameter default shows its button only when the argument is left out", () => {
