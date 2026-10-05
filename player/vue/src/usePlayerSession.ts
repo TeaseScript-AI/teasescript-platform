@@ -26,6 +26,7 @@ import {
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeCameraView,
   playerRuntimeMedia,
+  playerRuntimeMediaOrigin,
   playerRuntimePermanentButtons,
   pressPlayerRuntimePermanentButton,
   reportPlayerRuntimeMediaLoad,
@@ -158,6 +159,30 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const notices = new PlayerNotices();
   const noticeList = shallowRef<readonly PlayerNotice[]>([]);
   notices.subscribe((current) => (noticeList.value = current));
+  // A media file the script refers to but the Player cannot use is reported once per session and path, so a loop that
+  // shows it again does not repeat the notice. Captured media is no package file and is never reported.
+  let reportedMedia = new Set<string>();
+  function reportUnusableMedia(path: string, notice: PlayerNotice) {
+    if (isCapturedMediaReference(path) || reportedMedia.has(path)) return;
+    reportedMedia.add(path);
+    notices.publish(notice);
+  }
+  function reportFailedMedia(mediaId: number) {
+    const origin = session.value && playerRuntimeMediaOrigin(session.value, mediaId);
+    if (!origin) return;
+    const missing = resolvePackageAsset(origin.source) === null;
+    // The Player cannot play video yet, so a video file that exists is not the script's problem.
+    if (origin.media === "video" && !missing) return;
+    reportUnusableMedia(
+      origin.source,
+      playerNotices.unusableMedia(
+        origin.media,
+        origin.source,
+        missing ? "missing" : "failed",
+        origin.location,
+      ),
+    );
+  }
 
   const pendingLoadCount = ref(0);
   const loads = new MediaLoadQueue(
@@ -179,6 +204,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     releaseElement: (element) => audioElements.push(element),
     resolveSource: resolveAsset,
     reportLoad: (mediaId, report) => {
+      if (report.kind === "failed") reportFailedMedia(mediaId);
       loads.add(mediaId, report);
       pendingLoadCount.value = loads.size;
     },
@@ -189,6 +215,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         : notices.dismiss(playerNoticeKeys.audioBlocked),
   });
   const clock = useRuntimeSceneClock(session, () => device.sample());
+  const stageImage = computed(() =>
+    session.value === null ? null : playerRuntimeMedia(session.value.snapshot).stage.image,
+  );
+  // The Stage source the browser could not load, as the Stage reports it while it shows that source, or `null`. The
+  // Stage keeps that image hidden while its source stays, also into a new session, which then gets no new browser error.
+  let failedStageSource: string | null = null;
+  // A Stage image that is no package file, or one the Stage shows as failed when a session starts.
+  watch([generation, stageImage], ([, image]) => {
+    if (image === null) return;
+    if (resolvePackageAsset(image) === null)
+      reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "missing"));
+    else if (failedStageSource !== null && resolveAsset(image) === failedStageSource)
+      reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "failed"));
+  });
 
   watch(
     session,
@@ -420,6 +460,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function start(next: PlayerRuntimeSession) {
     // A failed write concerns the run it happened in.
     notices.dismiss(playerNoticeKeys.storageWriteFailed);
+    reportedMedia = new Set();
     device.reset();
     loads.clear();
     pendingLoadCount.value = 0;
@@ -544,6 +585,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     loadScriptStorage,
     scriptStorageOptions,
     resolveAsset,
+    /** The authored Stage image of the session, or `null` for an empty Stage. */
+    stageImage,
+    /**
+     * The Stage source the browser could not load or decode, or `null` once the Stage shows another source. A failure is
+     * reported only while `src` is still the session's Stage image.
+     */
+    stageImageFailure(src: string | null) {
+      failedStageSource = src;
+      const image = stageImage.value;
+      if (src === null || image === null || resolveAsset(image) !== src) return;
+      reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "failed"));
+    },
     /** The session camera's live track while the script shows a camera view and the camera is available, else `null`. */
     viewfinder,
     /** Where the script shows the camera view, `"window"` or `"stage"`, or `null` while it shows none. */

@@ -35,6 +35,9 @@ const MODEL_PATHS_CATALOG = {
 };
 
 const LAN_HOST = "player-lan.test";
+// The late-image scenario holds the first response for this image until the scenario releases it.
+const LATE_IMAGE_URL = "/dev-package/late-image/files/images/late.png";
+const lateImage = { hold: false, release: null };
 
 await main();
 
@@ -53,6 +56,11 @@ async function main() {
   const [handleRequest] = server.listeners("request");
   server.removeAllListeners("request");
   server.on("request", (request, response) => {
+    if (request.url === LATE_IMAGE_URL && lateImage.hold) {
+      lateImage.hold = false;
+      lateImage.release = () => handleRequest(request, response);
+      return;
+    }
     if (request.url !== "/dev-package/model-paths/catalog.json")
       return handleRequest(request, response);
     response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
@@ -114,12 +122,14 @@ async function main() {
       await packageScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
       await developmentTimeScenario(cdp, origin);
+      await missingMediaScenario(cdp, origin);
+      await lateImageScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, development time controls, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, development time controls, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -1202,6 +1212,108 @@ async function packageScenario(cdp, origin) {
   } finally {
     await cdp.call("Emulation.setUserAgentOverride", { userAgent });
   }
+}
+
+/**
+ * The `missing-media` package refers to an image and a sound the package lacks, and to an image and a sound that are no
+ * valid files. With auto-skip on, the failed loads end their waits as settled, so the session reaches its button and its
+ * end at once; each path is one warning, also when the script uses it again, and a valid image restores the Stage.
+ */
+async function missingMediaScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const button = (label) =>
+    `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === ${JSON.stringify(label)})`;
+  const notices = `[...document.querySelectorAll('[data-player-notice]')].map((notice) => notice.getAttribute('data-notice-level') + ' ' + notice.querySelector('p').textContent.trim())`;
+  await navigate(cdp, `${origin}/player/?dev&package=missing-media&time=skip`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  // Its 30 s wait and both failed blocking plays pass at once.
+  await waitFor(cdp, button("Next"), 5_000, "Failed media held the session before Next");
+  // The browser has tried the invalid image before the script replaces it, and the Stage stays empty.
+  await waitFor(
+    cdp,
+    `(() => {
+      const image = document.querySelector('.stage-media');
+      return !!image && image.complete && image.naturalWidth === 0 &&
+        image.getAttribute('src') === '/dev-package/missing-media/files/images/corrupt.png' &&
+        getComputedStyle(image).display === 'none';
+    })()`,
+    5_000,
+    "The invalid image did not leave the Stage empty",
+  );
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, button("Finish"), 5_000, "Failed media held the session before Finish");
+  await waitFor(
+    cdp,
+    `(() => {
+      const image = document.querySelector('.stage-media');
+      return !!image && image.complete && image.naturalWidth > 0 &&
+        image.getAttribute('src') === '/dev-package/missing-media/files/images/valid.svg' &&
+        getComputedStyle(image).display !== 'none';
+    })()`,
+    5_000,
+    "The valid image did not restore the Stage",
+  );
+  await physicalClick(cdp, "[data-notification-bell]");
+  await waitFor(cdp, `!!document.querySelector('[data-player-notification-panel]')`);
+  assertEqual(
+    JSON.stringify(await value(cdp, `${notices}.sort()`)),
+    JSON.stringify([
+      "warning Warning: Audio could not be loaded: sounds/corrupt.wav (main.tease, line 5)",
+      "warning Warning: Audio not found: sounds/missing.wav (main.tease, line 4)",
+      "warning Warning: Image could not be loaded: images/corrupt.png",
+      "warning Warning: Image not found: images/missing.png",
+    ]),
+    "The notifications did not list one warning per unusable path",
+  );
+}
+
+/**
+ * The `late-image` package shows an invalid image, hides it, then shows a valid one. The invalid image's response arrives
+ * only after that: its late failure belongs to an element no longer on the Stage, so the valid image stays and nothing
+ * is reported.
+ */
+async function lateImageScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const press = async (label) => {
+    const done = `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === ${JSON.stringify(label)})`;
+    await waitFor(cdp, done);
+    await physicalClick(cdp, "[data-foreground-controls] button");
+  };
+  const validShown = `(() => {
+    const image = document.querySelector('.stage-media');
+    return !!image && image.complete && image.naturalWidth > 0 && getComputedStyle(image).display !== 'none' &&
+      image.getAttribute('src') === '/dev-package/late-image/files/images/valid.svg';
+  })()`;
+  lateImage.hold = true;
+  await navigate(cdp, `${origin}/player/?package=late-image`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  // The Stage waits for the held response.
+  const deadline = Date.now() + 8_000;
+  while (lateImage.release === null) {
+    if (Date.now() > deadline) throw new Error("The Stage did not request the late image");
+    await delay(50);
+  }
+  await press("Hide");
+  await press("Show");
+  await waitFor(cdp, validShown, 5_000, "The valid image was not shown");
+  lateImage.release();
+  lateImage.release = null;
+  // Give the late response time to arrive and fail.
+  await delay(500);
+  assertEqual(
+    await value(cdp, validShown),
+    true,
+    "A late failure of a removed image hid the valid image",
+  );
+  await physicalClick(cdp, "[data-notification-bell]");
+  await waitFor(cdp, `!!document.querySelector('[data-player-notification-panel]')`);
+  assertEqual(
+    await value(cdp, `document.querySelectorAll('[data-player-notice]').length`),
+    0,
+    "A late failure of a removed image was reported",
+  );
 }
 
 /**

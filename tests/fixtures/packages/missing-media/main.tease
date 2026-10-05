@@ -1,0 +1,14 @@
+showImage "images/missing.png"
+say "One", instant
+wait 30 s
+playAudio "sounds/missing.wav"
+playAudio "sounds/corrupt.wav"
+showImage "images/corrupt.png"
+showButton "Next"
+showImage "images/missing.png"
+playAudio async "sounds/missing.wav"
+wait 30 s
+showImage "images/valid.svg"
+say "Done", instant
+showButton "Finish"
+exit

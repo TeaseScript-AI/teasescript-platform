@@ -60,6 +60,8 @@ export const playerNoticeKeys = {
   imageNeedsCamera: "image-needs-camera",
 } as const;
 
+const mediaNames = { image: "Image", audio: "Audio", video: "Video" } as const;
+
 /**
  * The Player's fixed wording for each condition it reports. To report a new condition, add an entry here and publish it
  * from the feature that detects the condition.
@@ -86,5 +88,21 @@ export const playerNotices = {
     key: playerNoticeKeys.imageNeedsCamera,
     level: "warning",
     message: "This image request needs a camera, which cannot be used here.",
+  }),
+  /**
+   * A media file the script refers to is not in the package (`missing`), or the browser cannot load or decode it
+   * (`failed`). The notice names the authored path, and the script file and line when the Player knows them.
+   */
+  unusableMedia: (
+    media: "image" | "audio" | "video",
+    path: string,
+    problem: "missing" | "failed",
+    location?: { readonly path: string; readonly line: number },
+  ): PlayerNotice => ({
+    key: `unusable-media:${path}`,
+    level: "warning",
+    message:
+      `${mediaNames[media]} ${problem === "missing" ? "not found" : "could not be loaded"}: ${path}` +
+      (location === undefined ? "" : ` (${location.path}, line ${location.line})`),
   }),
 } as const;
