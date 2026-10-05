@@ -1,0 +1,374 @@
+import { isRecord } from "./ast.ts";
+import { helperCall, helperStatements } from "./helpers.ts";
+import type { IrExpression, IrStatement, MigrationProgram } from "./ir.ts";
+import type { AcceptedForm } from "./workarounds.ts";
+
+/**
+ * The legacy desktop player's profile: the distribution's intro asked the player's name and gender once, and its
+ * `toys`, `womensclothes`, and `mensclothes` scripts which toys and clothes the player owns, and every script read
+ * them from storage. A converted package that reads such a key but never saves it asks it once, with the
+ * distribution's own questions, and saves the answer under the legacy key, so later packages and sessions reuse it
+ * (owner decision 2026-10-05).
+ */
+
+/** The distribution's toy names (`toys.groovy`), by item. */
+const TOYS = new Map<string, string>([
+  ["ankle_cuffs", "ankle cuffs"],
+  ["ballgag", "ballgag"],
+  ["ben_wa_balls", "ben wa balls"],
+  ["blindfold", "blindfold"],
+  ["buttplug", "buttplug"],
+  ["camera", "camera"],
+  ["candle", "candle"],
+  ["chastity_belt", "chastity belt"],
+  ["cigarette", "cigarette"],
+  ["clothespins", "clothespins"],
+  ["cockring", "cock ring/vibrating ring"],
+  ["crop", "crop / cane"],
+  ["doll", "doll"],
+  ["diaper", "diaper"],
+  ["dildo", "dildo"],
+  ["dog_collar", "dog collar"],
+  ["enema_kit", "enema kit"],
+  ["enema_bulb", "enema bulb"],
+  ["estim", "estim (electric stimulation devices)"],
+  ["handcuffs", "handcuffs"],
+  ["heat_rub", "heat rub (IcyHot, Tiger Balm...)"],
+  ["hood", "hood"],
+  ["husband", "husband (or male friend)"],
+  ["ice_tray", "ice tray"],
+  ["inflatable_buttplug", "inflatable buttplug"],
+  ["nipple_clamps", "nipple clamps"],
+  ["lube", "lube"],
+  ["paddle", "paddle"],
+  ["plants", "plants (various branchs, leaves...)"],
+  ["rubber_bands", "rubber bands"],
+  ["ring_gag", "ring gag"],
+  ["rope", "rope"],
+  ["shrinkwrap", "shrinkwrap"],
+  ["spreader_bar", "spreader bar"],
+  ["tampon", "tampon"],
+  ["vibrating_buttplug", "vibrating buttplug"],
+  ["vibrating_dildo", "vibrating dildo"],
+  ["vibrator", "vibrator"],
+  ["wife", "wife (or female friend)"],
+  ["whip", "whip"],
+]);
+
+/** The distribution's clothes names (`womensclothes.groovy` and `mensclothes.groovy`), by item. */
+const CLOTHES = new Map<string, string>([
+  ["bikini", "bikini / 2 pc swimsuit"],
+  ["blouse", "blouse"],
+  ["boots", "boots"],
+  ["bra", "bra"],
+  ["corset", "corset"],
+  ["dress", "dress"],
+  ["gloves", "gloves"],
+  ["handbag", "handbag"],
+  ["high_heels", "high heels"],
+  ["jewelry", "jewelry"],
+  ["leotard", "leotard / body stocking / catsuit"],
+  ["maid_attire", "maid attire"],
+  ["make_up", "make-up"],
+  ["monokini", "monokini / 1pc swimsuit"],
+  ["nightie", "nightie / baby doll"],
+  ["panties", "panties"],
+  ["pantyhose", "pantyhose"],
+  ["sandals", "sandals"],
+  ["scarf", "scarf"],
+  ["shirt", "shirt"],
+  ["shorts", "shorts"],
+  ["skirt", "skirt"],
+  ["socks", "socks"],
+  ["stockings", "stockings"],
+  ["suit", "suit"],
+  ["tanktop", "tanktop"],
+  ["thong", "thong"],
+  ["trousers", "trousers"],
+  ["briefs", "briefs"],
+  ["boxers", "boxers"],
+  ["shoes", "shoes"],
+  ["sneakers", "sneakers"],
+  ["jeans", "jeans"],
+  ["tshirt", "t-shirt"],
+  ["sweater", "sweater"],
+  ["tie", "tie"],
+  ["sweatpants", "sweatpants"],
+  ["swimsuit", "swimsuit"],
+  ["jacket", "jacket"],
+  ["vest", "vest"],
+  ["pajamas", "pajamas"],
+]);
+
+/** The intro's questions (`intro.groovy`), by key; `intro.likemale` follows `intro.likefemale` as in the intro. */
+const INTRO_QUESTIONS = new Map<string, string>([
+  ["intro.female", "Are you a woman ?"],
+  ["intro.likefemale", "Are you attracted to women ?"],
+]);
+
+const PROFILE_HELPER = "sexscriptLegacyAskProfile";
+
+const v = (name: string): IrExpression => ({ kind: "variable", name });
+const lit = (value: string | number | boolean | null): IrExpression => ({ kind: "literal", value });
+const load = (key: string): IrExpression => ({ kind: "load", key: lit(key) });
+const missing = (key: string): IrExpression => ({
+  kind: "binary",
+  operator: "==",
+  left: load(key),
+  right: lit(null),
+});
+const yesNo = (): IrExpression => ({
+  kind: "binary",
+  operator: "==",
+  left: { kind: "choice", options: [lit("Yes"), lit("No")], labels: ["yes", "no"] },
+  right: lit("yes"),
+});
+const say = (text: string): IrStatement => ({ kind: "say", value: lit(text), span: null });
+const save = (key: IrExpression, value: IrExpression): IrStatement => ({
+  kind: "save",
+  key,
+  value,
+  span: null,
+});
+const ifMissing = (key: string, body: IrStatement[]): IrStatement => ({
+  kind: "if",
+  condition: missing(key),
+  then: body,
+  else: [],
+  span: null,
+});
+
+/**
+ * The statements that start a package's `main.tease` when a script reads a profile key that no script saves: a
+ * helper that asks only the keys the package reads and the player has not answered yet, and its call. Empty when the
+ * package needs no prompt; `main` is the entry program, whose helpers are not repeated.
+ */
+export function legacyProfilePrompt(
+  programs: readonly MigrationProgram[],
+  main: MigrationProgram,
+  accepted: ReadonlySet<AcceptedForm>,
+): IrStatement[] {
+  const reads = new Set<string>();
+  const saves = new Set<string>();
+  for (const program of [...programs, main]) collectKeys(program.statements, reads, saves);
+  const asked = [...reads].filter((key) => !saves.has(key) && isProfileKey(key)).sort();
+  if (asked.length === 0) return [];
+  const body: IrStatement[] = [];
+  if (asked.includes("intro.name"))
+    body.push(
+      ifMissing("intro.name", [
+        say("What is your name, here ?"),
+        save(lit("intro.name"), { kind: "input", input: "askText", defaultValue: lit("Slave") }),
+      ]),
+    );
+  for (const [key, question] of INTRO_QUESTIONS) {
+    if (asked.includes(key)) body.push(ifMissing(key, [say(question), save(lit(key), yesNo())]));
+  }
+  if (asked.includes("intro.likemale"))
+    body.push(
+      ifMissing("intro.likemale", [
+        // The intro asked only someone attracted to women, and else took an attraction to men for granted.
+        {
+          kind: "if",
+          condition: {
+            kind: "binary",
+            operator: "==",
+            left: load("intro.likefemale"),
+            right: lit(true),
+          },
+          then: [say("Are you also attracted to men ?"), save(lit("intro.likemale"), yesNo())],
+          else: [save(lit("intro.likemale"), lit(true))],
+          span: null,
+        },
+      ]),
+    );
+  const ownedLists = [
+    ["toys", TOYS, "What do you have in your toy chest ?"],
+    ["clothes", CLOTHES, "What do you own ?"],
+  ] as const;
+  let needsBooleans = false;
+  for (const [group, names, question] of ownedLists) {
+    const keys = asked.filter((key) => key.startsWith(`${group}.`));
+    if (keys.length === 0) continue;
+    needsBooleans = true;
+    body.push(...ownedItems(keys, group, names, question, accepted));
+  }
+  const helpers =
+    needsBooleans &&
+    !accepted.has("askBooleans") &&
+    !main.statements.some(
+      (statement) =>
+        statement.kind === "function" && statement.name === "sexscriptLegacyAskBooleans",
+    )
+      ? helperStatements(new Set(["askBooleans"]))
+      : [];
+  return [
+    ...helpers,
+    { kind: "function", name: PROFILE_HELPER, parameters: [], body, span: null },
+    {
+      kind: "comment",
+      text: `// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (${asked.join(", ")}) once; this package asks what is missing here and saves it under the same keys, so other packages reuse the answers.`,
+      trailing: false,
+      span: null,
+    },
+    {
+      kind: "expression",
+      expression: { kind: "call", name: PROFILE_HELPER, positional: [], named: {}, local: true },
+      span: null,
+    },
+  ];
+}
+
+function isProfileKey(key: string): boolean {
+  if (key === "intro.name" || key === "intro.likemale" || INTRO_QUESTIONS.has(key)) return true;
+  if (key.startsWith("toys.")) return TOYS.has(key.slice("toys.".length));
+  if (key.startsWith("clothes.")) return CLOTHES.has(key.slice("clothes.".length));
+  return false;
+}
+
+/**
+ * The distribution's yes/no list for owned items, for the keys not answered yet: `askBooleans`, or its workaround,
+ * over the items' names, then each answer saved under its key.
+ */
+function ownedItems(
+  keys: readonly string[],
+  group: string,
+  names: ReadonlyMap<string, string>,
+  question: string,
+  accepted: ReadonlySet<AcceptedForm>,
+): IrStatement[] {
+  const list = (items: readonly string[]): IrExpression => ({
+    kind: "list",
+    items: items.map((item) => lit(item)),
+  });
+  const add = (target: string, value: IrExpression): IrStatement => ({
+    kind: "expression",
+    expression: { kind: "methodCall", target: v(target), name: "add", arguments: [value] },
+    span: null,
+  });
+  const name = (part: string): string =>
+    `profile${group[0]!.toUpperCase()}${group.slice(1)}${part}`;
+  const missingKeys = name("Keys");
+  const missingNames = name("Names");
+  const defaults = name("Defaults");
+  const position = name("Index");
+  const answers = name("Answers");
+  const key = name("Key");
+  const texts = keys.map((item) => names.get(item.slice(group.length + 1)) ?? item);
+  return [
+    {
+      kind: "let",
+      name: missingKeys,
+      value: { kind: "list", items: [] },
+      type: "string[]",
+      span: null,
+    },
+    {
+      kind: "let",
+      name: missingNames,
+      value: { kind: "list", items: [] },
+      type: "string[]",
+      span: null,
+    },
+    {
+      kind: "let",
+      name: defaults,
+      value: { kind: "list", items: [] },
+      type: "boolean[]",
+      span: null,
+    },
+    { kind: "let", name: position, value: lit(0), span: null },
+    {
+      kind: "for",
+      variable: key,
+      collection: list(keys),
+      body: [
+        {
+          kind: "if",
+          condition: {
+            kind: "binary",
+            operator: "==",
+            left: { kind: "load", key: v(key) },
+            right: lit(null),
+          },
+          then: [
+            add(missingKeys, v(key)),
+            add(missingNames, { kind: "index", target: list(texts), index: v(position) }),
+            add(defaults, lit(false)),
+          ],
+          else: [],
+          span: null,
+        },
+        { kind: "assign", target: v(position), operator: "+=", value: lit(1), span: null },
+      ],
+      span: null,
+    },
+    {
+      kind: "if",
+      condition: {
+        kind: "binary",
+        operator: ">",
+        left: { kind: "property", target: v(missingKeys), name: "length" },
+        right: lit(0),
+      },
+      then: [
+        {
+          kind: "let",
+          name: answers,
+          value: accepted.has("askBooleans")
+            ? {
+                kind: "call",
+                name: "askBooleans",
+                positional: [],
+                named: { message: lit(question), texts: v(missingNames), defaults: v(defaults) },
+              }
+            : helperCall("askBooleans", [lit(question), v(missingNames), v(defaults)]),
+          span: null,
+        },
+        { kind: "assign", target: v(position), operator: "=", value: lit(0), span: null },
+        {
+          kind: "for",
+          variable: key,
+          collection: v(missingKeys),
+          body: [
+            save(v(key), { kind: "index", target: v(answers), index: v(position) }),
+            { kind: "assign", target: v(position), operator: "+=", value: lit(1), span: null },
+          ],
+          span: null,
+        },
+      ],
+      else: [],
+      span: null,
+    },
+  ];
+}
+
+/** The literal storage keys statements read (`load`, `loadFirstTrue`) and save or delete. */
+function collectKeys(value: unknown, reads: Set<string>, saves: Set<string>): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectKeys(item, reads, saves);
+    return;
+  }
+  if (!isRecord(value)) return;
+  const literalKey = (key: unknown): string | null =>
+    isRecord(key) && key.kind === "literal" && typeof key.value === "string" ? key.value : null;
+  if (value.kind === "load") {
+    const key = literalKey(value.key);
+    if (key !== null) reads.add(key);
+  }
+  if (value.kind === "save" || value.kind === "delete") {
+    const key = literalKey(value.key);
+    if (key !== null) saves.add(key);
+  }
+  if (value.kind === "call" && value.name === "sexscriptLegacyLoadFirstTrue") {
+    for (const item of collectLiterals(value.positional)) reads.add(item);
+  }
+  for (const child of Object.values(value)) collectKeys(child, reads, saves);
+}
+
+function collectLiterals(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(collectLiterals);
+  if (!isRecord(value)) return [];
+  if (value.kind === "literal" && typeof value.value === "string") return [value.value];
+  return Object.values(value).flatMap(collectLiterals);
+}

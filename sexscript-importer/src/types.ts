@@ -2,6 +2,7 @@ import {
   constantString,
   groovyParameters,
   isAstNode,
+  isRecord,
   variableName,
   walkAst,
   type AstNode,
@@ -35,6 +36,26 @@ export interface TypeEnvironment {
   functionResults?: ReadonlyMap<string, ValueType>;
   /** Set while the list elements are not inferred yet, so an element read adds no type (inferVariableTypes). */
   elementsPending?: true;
+  /**
+   * Types of the variables a closure declares (its parameters and `def` locals), by binding key, apart from script
+   * variables of the same name; `variables` holds the union of every binding of a name.
+   */
+  bindingTypes?: ReadonlyMap<string, ValueType>;
+  /** The binding key a variable reference names (see `VariableBindings`). */
+  bindingOf?: (node: AstNode) => string | null;
+}
+
+/**
+ * How variable references resolve to bindings (`bindingKeys` in lower.ts): a closure's parameters and `def` locals
+ * are variables apart from script-level names of the same spelling. Without it, every name is one variable.
+ */
+export interface VariableBindings {
+  /** The key of a variable reference or declaration target; its name for a script-level variable. */
+  bindingOf: (node: AstNode) => string | null;
+  /** The key of a closure parameter. */
+  parameterKey: (closure: AstNode, name: string) => string;
+  /** The key of a `for` loop variable. */
+  loopKey: (loop: AstNode) => string;
 }
 
 /** True when every possible value has one of the `allowed` types. */
@@ -75,18 +96,22 @@ const OBJECT_METHOD_RESULT_TYPES = new Map<string, ValueType>([
   ["shuffle", LIST],
   ["sum", NUMBER],
   ["toList", LIST],
+  ["tokenize", LIST],
   ["unique", LIST],
   ["values", LIST],
   ["capitalize", STRING],
   ["contains", BOOLEAN],
   ["containsKey", BOOLEAN],
+  ["count", NUMBER],
   ["endsWith", BOOLEAN],
   ["equals", BOOLEAN],
   ["equalsIgnoreCase", BOOLEAN],
+  ["exists", BOOLEAN],
   ["indexOf", NUMBER],
   ["intValue", NUMBER],
   ["isEmpty", BOOLEAN],
   ["join", STRING],
+  ["lastIndexOf", NUMBER],
   ["length", NUMBER],
   ["matches", BOOLEAN],
   ["replace", STRING],
@@ -139,7 +164,10 @@ export function inferType(node: AstNode | null, environment: TypeEnvironment): V
       return OBJECT;
     case "variable": {
       const name = variableName(node);
-      return name === null ? UNKNOWN : (environment.variables.get(name) ?? UNKNOWN);
+      if (name === null) return UNKNOWN;
+      const key = environment.bindingOf?.(node) ?? name;
+      const scoped = key === name ? undefined : environment.bindingTypes?.get(key);
+      return scoped ?? environment.variables.get(name) ?? UNKNOWN;
     }
     case "not":
     case "boolean":
@@ -264,7 +292,8 @@ function methodCallType(node: AstNode, environment: TypeEnvironment): ValueType 
 
 /**
  * Computes the union of every value assigned to each variable in `body`, iterating to a fixed point so that
- * assignments from other variables propagate. Names without assignment evidence stay absent (unknown).
+ * assignments from other variables propagate. Names without assignment evidence stay absent (unknown). With
+ * `bindings`, a variable that a closure declares has a type apart from the other variables of its name.
  */
 export function inferVariableTypes(
   body: AstNode,
@@ -272,19 +301,27 @@ export function inferVariableTypes(
   localFunctionNames: Iterable<string> = [],
   /** Results of functions defined elsewhere in the package (packageFunctionResults). */
   knownResults: ReadonlyMap<string, ValueType> = new Map(),
+  bindings?: VariableBindings,
 ): TypeEnvironment {
-  const assignments: Array<{
-    name: string;
-    type: (environment: TypeEnvironment) => ValueType;
-    placeholder?: true;
-  }> = [];
-  // Incoming parameter values are unknown; later assignments do not describe them.
-  const unknownNames = new Set<string>(parameters);
+  const keys: VariableBindings = bindings ?? {
+    bindingOf: (node) => variableName(node),
+    parameterKey: (_closure, name) => name,
+    loopKey: (loop) => String(loop.variable),
+  };
+  const collector: AssignmentCollector = {
+    assignments: [],
+    // Incoming parameter values are unknown; later assignments do not describe them.
+    unknownKeys: new Set<string>(parameters),
+    declarations: new Map(),
+    iterationClosures: new Set(),
+    keys,
+  };
+  const { assignments, unknownKeys } = collector;
   const localFunctions = new Set<string>(localFunctionNames);
   // The values each closure kept in a variable returns, which calls of it produce.
   const returns: Array<{ name: string; values: AstNode[] }> = [];
   walkAst(body, (node) => {
-    collectAssignments(node, assignments, unknownNames);
+    collectAssignments(node, collector);
     const closure = node.kind === "declaration" ? asNode(node.right) : null;
     if (closure?.kind === "closure") {
       const name = variableName(node.left);
@@ -294,40 +331,67 @@ export function inferVariableTypes(
       }
     }
   });
+  // A variable declared with a list or text type holds only such values: Groovy converted any other value to text,
+  // or failed, when the variable received it. Every declaration of the binding must agree. It holds null only when
+  // an assignment shows it may; a value of unknown type is no such evidence, as for an undeclared variable.
+  const declared = new Map<string, ValueType>();
+  for (const [key, types] of collector.declarations) {
+    const [only] = types;
+    if (types.size === 1 && typeof only === "number" && !unknownKeys.has(key))
+      declared.set(key, only);
+  }
 
   // An empty-text placeholder (`def lines = ""`) adds no type when the variable is assigned elsewhere, since the type
   // pass starts it with the empty value of its later type.
   const placeholderNames = new Set(
-    assignments.filter((item) => item.placeholder === true).map((item) => item.name),
+    assignments.filter((item) => item.placeholder === true).map((item) => nameOf(item.key)),
   );
   for (const name of placeholderNames) {
-    if (assignments.some((item) => item.name === name && item.placeholder !== true)) {
+    if (assignments.some((item) => nameOf(item.key) === name && item.placeholder !== true)) {
       for (let index = assignments.length - 1; index >= 0; index -= 1)
-        if (assignments[index]!.name === name && assignments[index]!.placeholder === true)
+        if (nameOf(assignments[index]!.key) === name && assignments[index]!.placeholder === true)
           assignments.splice(index, 1);
     }
   }
-  const variables = new Map<string, ValueType>();
-  for (const { name } of assignments) variables.set(name, 0);
-  for (const name of unknownNames) variables.set(name, UNKNOWN);
+  // Every binding during the fixed point, by key; a script-level variable's key is its name.
+  const types = new Map<string, ValueType>();
+  for (const { key } of assignments) types.set(key, 0);
+  for (const key of unknownKeys) types.set(key, UNKNOWN);
+  for (const [key, type] of declared) types.set(key, type);
+  // The values assigned to each declared binding, which decide only whether it may hold null.
+  const assigned = new Map<string, ValueType>();
   // A function defined here gets its result from its own returns; others keep the package's.
   const functionResults = new Map<string, ValueType>(
     [...knownResults].filter(([name]) => !returns.some((item) => item.name === name)),
   );
+  const bindingOf = bindings?.bindingOf;
+  const scoped = bindingOf === undefined ? {} : { bindingTypes: types, bindingOf };
   let environment: TypeEnvironment = {
-    variables,
+    variables: types,
     localFunctions,
     functionResults,
     elementsPending: true,
+    ...scoped,
   };
   const settle = (): void => {
     for (let changed = true; changed;) {
       changed = false;
       for (const assignment of assignments) {
-        const current = variables.get(assignment.name) ?? 0;
+        const type = declared.get(assignment.key);
+        if (type !== undefined) {
+          const values = (assigned.get(assignment.key) ?? 0) | assignment.type(environment);
+          assigned.set(assignment.key, values);
+          const next = type | ((values & NULL) !== 0 && values !== UNKNOWN ? NULL : 0);
+          if (next !== types.get(assignment.key)) {
+            types.set(assignment.key, next);
+            changed = true;
+          }
+          continue;
+        }
+        const current = types.get(assignment.key) ?? 0;
         const next = current | assignment.type(environment);
         if (next !== current) {
-          variables.set(assignment.name, next);
+          types.set(assignment.key, next);
           changed = true;
         }
       }
@@ -352,18 +416,28 @@ export function inferVariableTypes(
       previous !== undefined &&
       listElements.size === previous.size &&
       [...listElements].every(([name, type]) => previous.get(name) === type);
-    environment = { variables, localFunctions, functionResults, listElements };
+    environment = { variables: types, localFunctions, functionResults, listElements, ...scoped };
     settle();
   }
   if (!settled) {
-    environment = { variables, localFunctions, functionResults };
+    environment = { variables: types, localFunctions, functionResults, ...scoped };
     settle();
   }
-  for (const [name, type] of variables) if (type === 0) variables.set(name, UNKNOWN);
+  for (const [key, type] of types) if (type === 0) types.set(key, UNKNOWN);
   for (const [name, type] of functionResults) if (type === 0) functionResults.set(name, UNKNOWN);
+  const listElements = inferListElements(body, environment);
+  // Code that sees names only gets the union of every binding of a name.
+  const variables = new Map<string, ValueType>();
+  const bindingTypes = new Map<string, ValueType>();
+  for (const [key, type] of types) {
+    const name = nameOf(key);
+    variables.set(name, (variables.get(name) ?? 0) | type);
+    if (key !== name) bindingTypes.set(key, type);
+  }
+  const unknownNames = new Set([...unknownKeys].map(nameOf));
   const assignmentCounts = new Map<string, number>();
-  for (const { name } of assignments)
-    assignmentCounts.set(name, (assignmentCounts.get(name) ?? 0) + 1);
+  for (const { key } of assignments)
+    assignmentCounts.set(nameOf(key), (assignmentCounts.get(nameOf(key)) ?? 0) + 1);
   const singleAssignment = new Set(
     [...assignmentCounts]
       .filter(([name, count]) => count === 1 && !unknownNames.has(name))
@@ -374,8 +448,14 @@ export function inferVariableTypes(
     localFunctions,
     singleAssignment,
     functionResults,
-    listElements: inferListElements(body, environment),
+    listElements,
+    ...(bindingOf === undefined ? {} : { bindingTypes, bindingOf }),
   };
+}
+
+/** The variable name of a binding key: `name@file:line:column` for a closure's variable, else the name itself. */
+function nameOf(key: string): string {
+  return key.split("@")[0]!;
 }
 
 /**
@@ -542,47 +622,80 @@ function inferListElements(body: AstNode, environment: TypeEnvironment): Map<str
   return elements;
 }
 
-function collectAssignments(
-  node: AstNode,
-  assignments: Array<{
-    name: string;
-    type: (environment: TypeEnvironment) => ValueType;
-    placeholder?: true;
-  }>,
-  unknownNames: Set<string>,
-): void {
+interface Assignment {
+  key: string;
+  type: (environment: TypeEnvironment) => ValueType;
+  placeholder?: true;
+}
+
+/** What collectAssignments records about the variables of a body, by binding key. */
+interface AssignmentCollector {
+  assignments: Assignment[];
+  /** Bindings whose values are unknown: parameters, loop variables over unknown values, destructured names. */
+  unknownKeys: Set<string>;
+  /** The declared type of each declaration of a binding, or "untyped" for one whose type admits other values. */
+  declarations: Map<string, Set<ValueType | "untyped">>;
+  /** Closures whose parameter receives the elements of a list (`list.each { item -> }`), as a loop variable. */
+  iterationClosures: Set<AstNode>;
+  keys: VariableBindings;
+}
+
+/** Groovy collection methods that call their closure with each element of the receiver. */
+const ITERATION_METHODS = new Set([
+  "any",
+  "collect",
+  "count",
+  "each",
+  "eachWithIndex",
+  "every",
+  "find",
+  "findAll",
+  "sum",
+]);
+
+function collectAssignments(node: AstNode, collector: AssignmentCollector): void {
+  const { assignments, unknownKeys, declarations, iterationClosures, keys } = collector;
+  const keyOf = (target: unknown): string | null => {
+    const name = variableName(target);
+    return name === null || !isAstNode(target) ? null : (keys.bindingOf(target) ?? name);
+  };
+  const declare = (key: string, type: ValueType | "untyped"): void => {
+    if (!declarations.has(key)) declarations.set(key, new Set());
+    declarations.get(key)!.add(type);
+  };
   if (node.kind === "declaration" || (node.kind === "binary" && node.operator === "=")) {
     const left = asNode(node.left);
     if (left?.kind === "arguments" && Array.isArray(left.items)) {
       // `def (a, b) = list` assigns each name an element whose type is not tracked.
       for (const item of left.items) {
-        const name = isAstNode(item) ? variableName(item) : null;
-        if (name !== null) unknownNames.add(name);
+        const key = keyOf(item);
+        if (key !== null) unknownKeys.add(key);
       }
       return;
     }
-    const name = variableName(node.left);
+    const key = keyOf(node.left);
     const value = asNode(node.right);
-    if (name === null || value === null) return;
+    if (key === null || value === null) return;
+    if (node.kind === "declaration") declare(key, declaredType(left?.originType) ?? "untyped");
     if (value.kind === "unsupportedExpression") {
       // A declaration without initializer starts as null in Groovy.
-      assignments.push({ name, type: () => NULL });
+      assignments.push({ key, type: () => NULL });
       return;
     }
     if (node.kind === "declaration" && value.kind === "constant" && value.value === "") {
-      assignments.push({ name, type: () => STRING, placeholder: true });
+      assignments.push({ key, type: () => STRING, placeholder: true });
       return;
     }
-    assignments.push({ name, type: (environment) => inferType(value, environment) });
+    assignments.push({ key, type: (environment) => inferType(value, environment) });
     return;
   }
   if (node.kind === "binary" && typeof node.operator === "string") {
-    const name = variableName(node.left);
-    if (name === null) return;
+    const key = keyOf(node.left);
+    if (key === null) return;
     if (node.operator === "+=") {
       const right = asNode(node.right);
       assignments.push({
-        name,
+        key,
         type: (environment) =>
           binaryType(
             { kind: "binary", span: null, operator: "+", left: node.left, right },
@@ -593,7 +706,7 @@ function collectAssignments(
       // Groovy list -= value keeps a list.
       const right = asNode(node.right);
       assignments.push({
-        name,
+        key,
         type: (environment) =>
           binaryType(
             { kind: "binary", span: null, operator: "-", left: node.left, right },
@@ -601,26 +714,95 @@ function collectAssignments(
           ),
       });
     } else if (["*=", "/=", "%="].includes(node.operator)) {
-      assignments.push({ name, type: () => NUMBER });
+      assignments.push({ key, type: () => NUMBER });
     }
     return;
   }
   if (node.kind === "postfix" || node.kind === "prefix") {
-    const name = variableName(node.value);
-    if (name !== null) assignments.push({ name, type: () => NUMBER });
+    const key = keyOf(node.value);
+    if (key !== null) assignments.push({ key, type: () => NUMBER });
+    return;
+  }
+  if (node.kind === "methodCall") {
+    // The parameter of `list.each { item -> }` takes each element, as a loop variable does; `eachWithIndex` also
+    // passes the position. A closure with other parameters, such as a map's `each { key, value -> }`, is not one.
+    const method = constantString(node.method);
+    const args = asNode(node.arguments);
+    const closure = Array.isArray(args?.items) ? asNode(args.items.at(-1)) : null;
+    const receiver = asNode(node.object);
+    if (method === null || !ITERATION_METHODS.has(method) || closure?.kind !== "closure") return;
+    if (receiver === null || node.implicitThis === true) return;
+    const names =
+      closure.parameterSpecified === true
+        ? (groovyParameters(closure.parameters) ?? []).map((parameter) => parameter.name)
+        : ["it"];
+    if (names.length !== (method === "eachWithIndex" ? 2 : 1)) return;
+    iterationClosures.add(closure);
+    assignments.push({
+      key: keys.parameterKey(closure, names[0]!),
+      type: (environment) => elementsOf(receiver, environment),
+    });
+    if (names.length === 2)
+      assignments.push({ key: keys.parameterKey(closure, names[1]!), type: () => NUMBER });
     return;
   }
   if (node.kind === "for" && typeof node.variable === "string") {
     const collection = asNode(node.collection);
-    if (collection?.kind === "range") assignments.push({ name: node.variable, type: () => NUMBER });
-    else unknownNames.add(node.variable);
+    const key = keys.loopKey(node);
+    if (collection?.kind === "range") assignments.push({ key, type: () => NUMBER });
+    // A classic `for (;;)` loop has a dummy variable whose collection holds its three parts.
+    else if (collection !== null && node.variable !== "forLoopDummyParameter")
+      assignments.push({ key, type: (environment) => elementsOf(collection, environment) });
+    else unknownKeys.add(key);
     return;
   }
   if (node.kind === "closure") {
-    for (const parameter of groovyParameters(node.parameters) ?? [])
-      unknownNames.add(parameter.name);
-    if (node.parameterSpecified !== true) unknownNames.add("it");
+    const iterated = iterationClosures.has(node);
+    for (const parameter of Array.isArray(node.parameters) ? node.parameters : []) {
+      if (!isRecord(parameter) || typeof parameter.name !== "string") continue;
+      const key = keys.parameterKey(node, parameter.name);
+      // A closure called with a value of another type than its declared parameter type failed in Groovy.
+      const type = declaredType(parameter.type);
+      if (type !== null) declare(key, type);
+      else if (!iterated) unknownKeys.add(key);
+    }
+    if (node.parameterSpecified !== true && !iterated)
+      unknownKeys.add(keys.parameterKey(node, "it"));
   }
+}
+
+/**
+ * The values a Groovy declared type admits, for the types that matter to list and text methods: a list type or
+ * Java array holds lists, and `String` holds text (or null). Null for other types, including `def` and `Object`.
+ */
+function declaredType(type: unknown): ValueType | null {
+  if (typeof type !== "string") return null;
+  const name = type.replace(/<.*>$/u, "").replace(/^java\.(?:util|lang)\./u, "");
+  if (name.endsWith("[]") || name === "List" || name === "ArrayList" || name === "LinkedList")
+    return LIST;
+  return name === "String" ? STRING : null;
+}
+
+/** The type of the elements a loop or an iteration closure takes from a value: a list's elements, or unknown. */
+function elementsOf(collection: AstNode, environment: TypeEnvironment): ValueType {
+  if (collection.kind === "range") return NUMBER;
+  if (collection.kind === "list")
+    return (Array.isArray(collection.items) ? collection.items : []).reduce(
+      (type: ValueType, item) => type | (isAstNode(item) ? inferType(item, environment) : UNKNOWN),
+      0,
+    );
+  const type = inferType(collection, environment);
+  if (!onlyOf(type, LIST | NULL) || (type & LIST) === 0) return UNKNOWN;
+  return binaryType(
+    {
+      kind: "binary",
+      span: null,
+      operator: "[",
+      left: collection,
+      right: { kind: "constant", span: null, value: 0 },
+    },
+    environment,
+  );
 }
 
 function isCalendarConstant(node: AstNode | null): boolean {

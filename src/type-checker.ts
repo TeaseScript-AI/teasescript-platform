@@ -23,7 +23,13 @@ import type {
   TransferTarget,
   TypeAnnotation,
 } from "./ast.js";
-import { globMatches, MAIN_FILE_PATH } from "./project-paths.js";
+import {
+  globMatches,
+  isPathGlob,
+  MAIN_FILE_PATH,
+  packageGlobProblem,
+  packagePathProblem,
+} from "./project-paths.js";
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
@@ -37,7 +43,7 @@ import {
   isValidInteractionPrefill,
   numberAnswerText,
 } from "./interaction-answers.js";
-import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
+import type { PlanImage, PlanTag, TypeCheckPlan } from "./plan/model.js";
 import { isTakePhotoCall } from "./capture-call.js";
 import { evaluateTagSteps, passesTagList } from "./tag-query.js";
 import { addTag, normalizeTagName, readTagText, type Tag } from "./tags.js";
@@ -74,7 +80,7 @@ import {
 } from "./static-evaluation.js";
 import { MAX_INTERACTION_OPTION_ENTRIES } from "./interaction-limits.js";
 import { caseValueText, impossibleCaseMessage, literalRange } from "./switch-cases.js";
-import type { SourceSpan } from "./source.js";
+import { createSourceSpan, type SourceSpan } from "./source.js";
 import { TEXT_MEMBERS, type TextMember } from "./text-operations.js";
 import {
   arithmeticType,
@@ -151,6 +157,14 @@ export interface TypeCheckOptions {
   readonly imageCatalog?: readonly PlanImage[];
   /** Whether some file of the project takes photos with tags, which join the catalog at runtime. */
   readonly capturesTaggedPhotos?: boolean;
+  /**
+   * The project's files with the tags of their headers, which script tag queries match; `null` tags for a file of
+   * declarations only, which is never picked or listed.
+   */
+  readonly scriptCatalog?: readonly {
+    readonly path: string;
+    readonly tags: readonly PlanTag[] | null;
+  }[];
 }
 
 export interface TypeCheckResult {
@@ -198,7 +212,10 @@ const typeCode = {
   impossibleCase: "TSV049",
   emptyTagQuery: "TST002",
   invalidCaptureTag: "TST005",
+  invalidTagQueryFrom: "TST006",
   randomStartValue: "TSV055",
+  closedLoop: "TSV058",
+  invalidCameraPlacement: "TSV059",
 } as const;
 
 /**
@@ -222,15 +239,19 @@ export function checkTypes(
   for (;;) {
     const checker = new TypeChecker(options, widened, programs.length, onFile, lines);
     checker.check(programs);
-    if (!checker.widenedMore)
+    if (!checker.widenedMore) {
+      const closedLoops = closedLoopWarnings(programs, checker.unreachable);
       return Object.freeze({
         diagnostics: Object.freeze(
-          checker.fileDiagnostics.map((diagnostics) => Object.freeze([...diagnostics])),
+          checker.fileDiagnostics.map((diagnostics, file) =>
+            Object.freeze([...diagnostics, ...closedLoops[file]!]),
+          ),
         ),
         runtimeChecks: checker.runtimeChecks(),
         reachesExit: checker.reachesExit,
         flow: Object.freeze({ unreachable: checker.unreachable, continuing: checker.continuing }),
       });
+    }
     checker.widenFollowers();
   }
 }
@@ -378,6 +399,8 @@ interface Place {
   readonly label: string | null;
   /** For the elements of a collection, the collection's spelling, so element properties can be named. */
   readonly elementOf?: string | null;
+  /** For the elements of a list stored at once, as by `addAll`: a test checks that whole list. */
+  readonly listed?: boolean;
   /** For example `'score' holds a whole number (integer)` or `'scores' holds integer values (integer[])`. */
   readonly subject: string;
   /** What the value would do: `start as`, `be set to`, `contain`, `take`, or `return`. */
@@ -399,6 +422,11 @@ class TypeChecker {
   readonly #imageTags: readonly ReadonlyMap<string, number | null>[] | null;
 
   readonly #capturesTaggedPhotos: boolean;
+
+  /** The project's files and their tags by name, `null` for declarations only; `null` when not given. */
+  readonly #scriptCatalog:
+    | readonly { readonly path: string; readonly tags: ReadonlyMap<string, number | null> | null }[]
+    | null;
 
   /** The project's names: host globals, globals, speakers, and global functions. */
   readonly #project = new Scope(null);
@@ -527,6 +555,11 @@ class TypeChecker {
     this.fileDiagnostics = Array.from({ length: files }, () => []);
     this.#widened = widened;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
+    this.#scriptCatalog =
+      options.scriptCatalog?.map((file) => ({
+        path: file.path,
+        tags: file.tags === null ? null : new Map(file.tags.map((tag) => [tag.name, tag.value])),
+      })) ?? null;
     this.#imageTags =
       options.imageCatalog?.map(
         (image) => new Map(image.tags.map((tag) => [tag.name, tag.value])),
@@ -826,14 +859,18 @@ class TypeChecker {
         this.#suspend();
         return true;
       case "hideImageStatement":
+      case "showCameraStatement":
+      case "hideCameraStatement":
         this.#suspend();
         return true;
       case "saveStatement": {
         const value = yield* compileChild(this.#expressionTask(statement.value, scope));
-        if (containsType(value, (part) => ["speaker", "timer", "media"].includes(part.kind)))
+        if (
+          containsType(value, (part) => ["speaker", "timer", "media", "camera"].includes(part.kind))
+        )
           this.#report(
             typeCode.invalidOperand,
-            `Speakers and timer or media handles cannot be saved, but this is ${describeValue(value)}.`,
+            `Speakers, camera views, and timer or media handles cannot be saved, but this is ${describeValue(value)}.`,
             statement.value.span,
           );
         yield* compileChild(this.#storageKeyTask(statement.key, scope));
@@ -1237,6 +1274,23 @@ class TypeChecker {
     );
   }
 
+  /**
+   * A placement the compiler knows to be wrong, written to what can only be a camera view, also through an alias, a
+   * function result, or a collection element; a value it cannot know is checked at runtime (`TSR050`).
+   */
+  #checkCameraPlacement(object: StaticType, statement: AssignmentStatement): void {
+    const receivers = members(nonNullType(object));
+    if (receivers.length === 0 || !receivers.every((member) => resolved(member).kind === "camera"))
+      return;
+    const text = staticVisibleText(statement.value);
+    if (statement.operator !== "=" || (text !== undefined && text !== "window" && text !== "stage"))
+      this.#report(
+        typeCode.invalidCameraPlacement,
+        'Camera placement must be "window" or "stage".',
+        statement.value.span,
+      );
+  }
+
   *#assignmentTask(statement: AssignmentStatement, scope: Scope): CompileTask<void> {
     const target = statement.target;
     let place: Place | undefined;
@@ -1357,9 +1411,14 @@ class TypeChecker {
         // A speaker shows its text property; any other receiver keeps the value as it is.
         untyped =
           place === undefined && this.diagnostics.length === before && speakers.includes(false);
-        handle = mayBe(object, "timer", "media");
-        // A media position, remaining time, or volume write first waits for the previous message's pacing.
+        handle = mayBe(object, "timer", "media", "camera");
+        // A media position, remaining time, or volume write, and a camera view's placement, first wait for the
+        // previous message's pacing.
         if (MEDIA_PACED_PROPERTIES.has(name) && mayBe(object, "media")) this.#suspend();
+        if (name === "placement" && mayBe(object, "camera")) {
+          this.#suspend();
+          this.#checkCameraPlacement(object, statement);
+        }
       }
     }
     const value = yield* compileChild(this.#expressionTask(statement.value, scope));
@@ -1406,10 +1465,22 @@ class TypeChecker {
     const result = "type" in outcome ? outcome.type : undefined;
     if (result !== undefined && !isKnown(result)) return;
     if (result === undefined) {
+      const [first, second] = [resolved(kept), resolved(value)];
+      if (operator === "+" && first.kind === "list" && second.kind === "list") {
+        this.#reportMixedJoin(
+          "'+='",
+          "list",
+          first.element,
+          second.element,
+          [target],
+          statement.value.span,
+        );
+        return;
+      }
       const subject = place.subject;
       this.#report(
         typeCode.typeMismatch,
-        `${subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${operandFix(nonNullType(kept), statement.value)}`,
+        `${subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${operandFix(nonNullType(kept), value, statement)}`,
         statement.value.span,
       );
       return;
@@ -1422,7 +1493,14 @@ class TypeChecker {
         `${place.subject}, so '${statement.operator}' cannot make ${place.verb === "contain" ? "an element" : "it"} ${describeValue(result)}.${place.fix(result, null)}`,
         statement.value.span,
       );
-    else if (variable !== undefined) this.#assigned(variable, result);
+    else {
+      // A joined list decides an element type that no value decided yet, as a store does.
+      if (isCollection(resolved(result))) {
+        settle(place.type, result, statement.value.span);
+        if (place.widening !== undefined) this.#rewiden(place.widening.root);
+      }
+      if (variable !== undefined) this.#assigned(variable, result);
+    }
   }
 
   /**
@@ -1549,7 +1627,7 @@ class TypeChecker {
     }
     this.#report(
       typeCode.typeMismatch,
-      `${place.subject}, so it cannot ${place.verb} ${describeValue(value)}.${this.#widenedNote(expression)}${checkFirstFix(place.type, value, expression) ?? place.fix(value, expression)}`,
+      `${place.subject}, so it cannot ${place.verb} ${describeValue(value)}.${this.#widenedNote(expression)}${checkFirstFix(place.type, value, expression, place.listed) ?? place.fix(value, expression)}`,
       expression.span,
     );
   }
@@ -1741,6 +1819,7 @@ class TypeChecker {
     value: StaticType,
     scope: Scope,
     verb?: string,
+    listed = false,
   ): CompileTask<void> {
     const collections = members(nonNullType(collection)).map(resolved);
     const label = expressionLabel(collectionExpression);
@@ -1756,6 +1835,7 @@ class TypeChecker {
             {
               ...elementPlace(member, label, nullable, this.#text, inferred, owner),
               ...(verb === undefined ? {} : { verb }),
+              listed,
             },
           ]
         : [],
@@ -2439,6 +2519,9 @@ class TypeChecker {
         return expression.async ? { kind: "timer" } : UNKNOWN_TYPE;
       case "playMediaExpression":
         return yield* compileChild(this.#mediaTask(expression, scope, null));
+      case "showCameraExpression":
+        this.#suspend();
+        return { kind: "camera" };
       case "loadExpression": {
         yield* compileChild(this.#storageKeyTask(expression.key, scope));
         if (expression.defaultValue === null) return UNKNOWN_TYPE;
@@ -2474,7 +2557,12 @@ class TypeChecker {
           }
         }
         this.#checkTagQueryCanMatch(expression);
-        return expression.select === "list" ? { kind: "list", element: STRING_TYPE } : STRING_TYPE;
+        // An image is its path; a file is a script reference to its top.
+        return expression.select === "list"
+          ? { kind: "list", element: expression.catalog === "scripts" ? SCRIPT_TYPE : STRING_TYPE }
+          : expression.catalog === "scripts"
+            ? SCRIPT_TYPE
+            : STRING_TYPE;
     }
   }
 
@@ -2514,9 +2602,18 @@ class TypeChecker {
    * (ADR 0023). Comparisons and other values count as possibly true: this check does no value reasoning.
    */
   #checkTagQueryCanMatch(query: TagQueryExpression): void {
-    // A photo taken with tags may match at runtime, so only a project without them can be proven empty.
-    if (query.select !== "random" || this.#imageTags === null || this.#capturesTaggedPhotos) return;
-    // Each literal tag list is read once for all images.
+    // A script query's from: is checked for lists too.
+    const scripts = query.catalog === "scripts" ? this.#scriptCandidates(query) : null;
+    if (query.select !== "random") return;
+    const candidates =
+      query.catalog === "scripts"
+        ? scripts
+        : // A photo taken with tags may match at runtime, so only a project without them can be proven empty.
+          this.#capturesTaggedPhotos
+          ? null
+          : this.#imageTags;
+    if (candidates === null) return;
+    // Each literal tag list is read once for all candidates.
     const lists = new Map<TagQueryStep, readonly string[] | null>();
     for (const step of query.steps) {
       if (step.kind === "tagList") lists.set(step, literalTagNames(step.value));
@@ -2528,18 +2625,58 @@ class TypeChecker {
       return names === null ? null : passesTagList(step.option, names, tags);
     };
     if (
-      this.#imageTags.some(
-        (tags) => evaluateTagSteps(query.steps, (step) => test(step, tags)) !== false,
-      )
+      candidates.some((tags) => evaluateTagSteps(query.steps, (step) => test(step, tags)) !== false)
     )
       return;
     this.#report(
       typeCode.emptyTagQuery,
-      this.#imageTags.length === 0
-        ? "The package has no images to pick from."
-        : "No image in the package has these tags.",
+      query.catalog === "scripts"
+        ? "No file in the project that runs something has these tags; a file of declarations only is never picked."
+        : candidates.length === 0
+          ? "The package has no images to pick from."
+          : "No image in the package has these tags.",
       query.span,
     );
+  }
+
+  /**
+   * The tags of the files a script query may pick or list: every file that runs something, or those its `from:` names.
+   * Reports a `from:` that is not a package path or glob, or names no file that runs something; `null` when the
+   * project's files are not known.
+   */
+  #scriptCandidates(query: TagQueryExpression): ReadonlyMap<string, number | null>[] | null {
+    if (this.#scriptCatalog === null) return null;
+    const runnable = (
+      files: readonly { readonly tags: ReadonlyMap<string, number | null> | null }[],
+    ) => files.flatMap((file) => (file.tags === null ? [] : [file.tags]));
+    const from = query.from;
+    if (from === null) return runnable(this.#scriptCatalog);
+    const problem = isPathGlob(from.pattern)
+      ? packageGlobProblem(from.pattern)
+      : packagePathProblem(from.pattern);
+    const matched =
+      problem === null
+        ? new Set(
+            globMatches(
+              from.pattern,
+              this.#scriptCatalog.map((file) => file.path),
+            ),
+          )
+        : new Set<string>();
+    const candidates = runnable(this.#scriptCatalog.filter((file) => matched.has(file.path)));
+    if (problem !== null || candidates.length === 0) {
+      this.#report(
+        typeCode.invalidTagQueryFrom,
+        problem !== null
+          ? `from: '${from.pattern}' is not a package file path or glob: ${problem}.`
+          : matched.size === 0
+            ? `from: '${from.pattern}' matches no file of the project.`
+            : `Every file matching '${from.pattern}' holds declarations only and runs nothing, so there is nothing to pick.`,
+        from.span,
+      );
+      return null;
+    }
+    return candidates;
   }
 
   /** The value of a test or logical expression used as a value: the flows of both outcomes join afterwards. */
@@ -2845,10 +2982,30 @@ class TypeChecker {
             : undefined,
         );
         return BOOLEAN_TYPE;
-      default:
+      default: {
+        // Two lists whose element types mix are reported as `union()` reports them (V30 §16).
+        const [first, second] = [resolved(left), resolved(right)];
+        if (
+          expression.operator === "+" &&
+          first.kind === "list" &&
+          second.kind === "list" &&
+          arithmeticType("+", first, second) === undefined
+        ) {
+          const operands = [expression.left, expression.right];
+          this.#reportMixedJoin(
+            "'+'",
+            "list",
+            first.element,
+            second.element,
+            operands,
+            expression.span,
+          );
+          return { kind: "list", element: UNKNOWN_TYPE };
+        }
         return this.#operation(expression.operator, [left, right], expression, (a, b) =>
           arithmeticType(expression.operator, a, b),
         );
+      }
     }
   }
 
@@ -3112,7 +3269,10 @@ class TypeChecker {
       return UNKNOWN_TYPE;
     }
     const method = callee.property.name;
-    if ((method === "add" || method === "get") && unwrap(callee.object).kind !== "identifier")
+    if (
+      (method === "add" || method === "addAll" || method === "get") &&
+      unwrap(callee.object).kind !== "identifier"
+    )
       this.#relaxNarrowedRoot(callee.object, scope);
     const receiver = yield* compileChild(this.#expressionTask(callee.object, scope));
     const value = resolved(receiver);
@@ -3145,6 +3305,15 @@ class TypeChecker {
           elementStoreType(collection) ?? UNKNOWN_TYPE,
           elementLabel(expressionLabel(callee.object), kind),
           type,
+        );
+        return NULL_TYPE;
+      }
+    }
+    if (method === "addAll" && members(value).every(isList)) {
+      const argument = expression.arguments[0];
+      if (argument !== undefined && expression.arguments.length === 1) {
+        yield* compileChild(
+          this.#addAllTask(expression, callee.object, receiver, argument.value, scope),
         );
         return NULL_TYPE;
       }
@@ -3284,12 +3453,72 @@ class TypeChecker {
             ? method === "add"
               ? "Dicts have no method 'add'; store a value by its key, as in dict[key] = value."
               : `Dicts have no method '${method}'; use contains, remove, clear, or get.`
-            : failing.kind === "timer" || failing.kind === "media"
+            : failing.kind === "timer" || failing.kind === "media" || failing.kind === "camera"
               ? handleMemberMessage(failing.kind, method, "call")
               : `${capitalize(describeValue(failing))} has no method '${method}'.`,
         callee.property.span,
       );
     return UNKNOWN_TYPE;
+  }
+
+  /**
+   * `list.addAll(other)` stores each element of the list `other` in the list as `add` does (V30 §16): the elements of a
+   * list literal one by one, and otherwise the element type of `other`, which the runtime checks for each element where
+   * it is unknown.
+   */
+  *#addAllTask(
+    call: CallExpression,
+    receiverExpression: Expression,
+    receiver: StaticType,
+    argument: Expression,
+    scope: Scope,
+  ): CompileTask<void> {
+    const type = yield* compileChild(this.#expressionTask(argument, scope));
+    this.#reportUnless(type, isList, argument, "addAll() needs a list", () =>
+      members(type).some((member) => resolved(member).kind === "set")
+        ? " Copy a set into a list with toList() first."
+        : "",
+    );
+    const list = isKnown(nonNullTypeForUse(type))
+      ? members(type).every(isList)
+        ? elementType(type)
+        : undefined
+      : UNKNOWN_TYPE;
+    // An element type that no value decided yet belongs to an empty list, which adds nothing.
+    if (list === undefined || resolved(list).kind === "open") return;
+    const collection = this.#elementReceiver(receiverExpression, scope, receiver, list);
+    const literal = unwrap(argument);
+    if (literal.kind === "listLiteral") {
+      // Each element is checked against the list it joins, so the literal itself need not hold one type.
+      this.#mixedLiterals.delete(literal);
+      for (const element of literal.elements)
+        yield* compileChild(
+          this.#storeElementTask(
+            collection,
+            receiverExpression,
+            element,
+            this.#typeOf(element),
+            scope,
+          ),
+        );
+    } else
+      yield* compileChild(
+        this.#storeElementTask(
+          collection,
+          receiverExpression,
+          argument,
+          list,
+          scope,
+          undefined,
+          true,
+        ),
+      );
+    this.#recordRuntimeCheck(
+      call,
+      elementStoreType(collection) ?? UNKNOWN_TYPE,
+      elementLabel(expressionLabel(receiverExpression), "list"),
+      list,
+    );
   }
 
   /**
@@ -3345,25 +3574,41 @@ class TypeChecker {
     const element = joinTypes([own, ...others]);
     if (element === undefined) {
       if (reportMix) {
-        // As for a mixed literal, the fix declares the receiver with a union element type.
         const callee = unwrap(expression.callee);
-        const target = callee.kind === "propertyAccessExpression" ? unwrap(callee.object) : null;
-        const name = target?.kind === "identifier" ? target.name : "values";
-        const written = typeName({ kind: receiver.kind, element: union([own, other]) });
-        const property = misfitProperty(own, other);
-        const fix =
-          property !== undefined
-            ? `give '${property.name}' one type in every element`
-            : `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`;
-        this.#report(
-          typeCode.mixedTypes,
-          `union() would mix ${mixDescription(own, other)}. A ${receiver.kind} holds one type; ${fix}.`,
-          expression.span,
-        );
+        const target = callee.kind === "propertyAccessExpression" ? [callee.object] : [];
+        this.#reportMixedJoin("union()", receiver.kind, own, other, target, expression.span);
       }
       return { kind: receiver.kind, element: UNKNOWN_TYPE };
     }
     return { kind: receiver.kind, element };
+  }
+
+  /**
+   * Reports an operation that would give a list or set the elements of two collections whose types mix, such as
+   * `union()` or `+`. As for a mixed literal, the fix declares the first of `targets` that is a variable with a union
+   * element type.
+   */
+  #reportMixedJoin(
+    operation: string,
+    kind: "list" | "set",
+    own: StaticType,
+    other: StaticType,
+    targets: readonly Expression[],
+    span: SourceSpan,
+  ): void {
+    const target = targets.map(unwrap).find((node) => node.kind === "identifier");
+    const name = target?.kind === "identifier" ? target.name : "values";
+    const written = typeName({ kind, element: union([own, other]) });
+    const property = misfitProperty(own, other);
+    const fix =
+      property !== undefined
+        ? `give '${property.name}' one type in every element`
+        : `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`;
+    this.#report(
+      typeCode.mixedTypes,
+      `${operation} would mix ${mixDescription(own, other)}. A ${kind} holds one type; ${fix}.`,
+      span,
+    );
   }
 
   /** Argument and result types of the implemented built-ins; injected host functions return unknown values. */
@@ -3612,7 +3857,7 @@ class TypeChecker {
         ? `${value.kind === "list" ? "Lists" : "Sets"} have no property '${name}'; use length, first, last, or random.`
         : value.kind === "dict"
           ? `Dicts have no property '${name}'; use length, keys, or values, or read a value by its key, as in ${expressionLabel(expression.object) ?? "dict"}[${JSON.stringify(name)}].`
-          : value.kind === "timer" || value.kind === "media"
+          : value.kind === "timer" || value.kind === "media" || value.kind === "camera"
             ? handleMemberMessage(value.kind, name, "read")
             : `${capitalize(describeValue(value))} has no property '${name}'.`,
       expression.property.span,
@@ -4733,6 +4978,8 @@ const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
   "playMediaStatement",
   "showImageStatement",
   "hideImageStatement",
+  "showCameraStatement",
+  "hideCameraStatement",
   "saveStatement",
   "deleteStatement",
   // Blocks of the caller keep running while a called file runs.
@@ -4803,6 +5050,7 @@ function programEffects(program: Program): ProgramEffects {
           expression.kind === "showButtonExpression" ||
           expression.kind === "timerExpression" ||
           expression.kind === "playMediaExpression" ||
+          expression.kind === "showCameraExpression" ||
           (expression.kind === "callExpression" && !isPureBuiltinCall(expression)))
       )
         loop.suspends = true;
@@ -4887,6 +5135,146 @@ function programEffects(program: Program): ProgramEffects {
   };
 }
 
+/** The statements that leave a loop or the session, or may: one of them is a way out of the loop it stands in. */
+const LOOP_EXITS: ReadonlySet<Statement["kind"]> = new Set([
+  "breakStatement",
+  "returnStatement",
+  "endStatement",
+  "exitStatement",
+  "gotoStatement",
+  "callFileStatement",
+]);
+
+/** The engine functions, which only compute a value; a call of any other function may leave a loop. */
+const ENGINE_FUNCTIONS: ReadonlySet<string> = new Set(CORE_RUNTIME_BUILTINS);
+
+/** A `while true` loop, and whether its body has a way out. */
+interface EndlessLoop {
+  readonly statement: Extract<Statement, { kind: "whileStatement" }>;
+  readonly parent: EndlessLoop | null;
+  exits: boolean;
+}
+
+/** A node to walk, with the innermost `while true` around it and whether it stands in a timer or media block. */
+type ExitWork = { readonly loop: EndlessLoop | null; readonly handler: boolean } & (
+  { readonly statement: Statement } | { readonly expression: Expression }
+);
+
+/**
+ * Warns about each loop with no way out once it starts (#578): a `while true`, and a top-level `goto` back to an earlier
+ * label of its file, whose loop is the statements between them. A `break`, `return`, `end`, `exit`, any other `goto`, a
+ * `call` of a file, or a call of a function other than an engine function is a way out wherever it stands in the loop,
+ * also in a branch that no value takes. A timer or media block may run during any loop, so when a block of the project
+ * has a way out, no loop is reported. Neither is a loop that never runs by the flow of the type check.
+ */
+function closedLoopWarnings(
+  programs: readonly Program[],
+  unreachable: ReadonlySet<Statement>,
+): readonly (readonly Diagnostic[])[] {
+  let blockExits = false;
+  const loops: { readonly file: number; readonly loop: EndlessLoop }[] = [];
+  const closed = programs.map((): SourceSpan[] => []);
+  /** Walks a top-level statement and returns whether it has a way out. */
+  const walk = (file: number, root: Statement): boolean => {
+    let found = false;
+    const work: ExitWork[] = [{ statement: root, loop: null, handler: false }];
+    const enter = (
+      statements: readonly Statement[],
+      loop: EndlessLoop | null,
+      handler: boolean,
+    ): void => {
+      for (let index = statements.length - 1; index >= 0; index -= 1)
+        work.push({ statement: statements[index]!, loop, handler });
+    };
+    const wayOut = (loop: EndlessLoop | null, handler: boolean): void => {
+      found = true;
+      blockExits ||= handler;
+      // A way out of an inner loop is one of the loops around it too.
+      for (let node = loop; node !== null && !node.exits; node = node.parent) node.exits = true;
+    };
+    while (work.length > 0) {
+      const item = work.pop()!;
+      const { loop, handler } = item;
+      // A timer or media block runs later, outside the loop that starts it.
+      for (const block of handlerBlocks("expression" in item ? item.expression : item.statement))
+        enter(block.statements, null, true);
+      if ("expression" in item) {
+        const expression = item.expression;
+        if (
+          expression.kind === "callExpression" &&
+          !(expression.callee.kind === "identifier" && ENGINE_FUNCTIONS.has(expression.callee.name))
+        )
+          wayOut(loop, handler);
+        for (const part of expressionParts(expression))
+          work.push({ expression: part, loop, handler });
+        continue;
+      }
+      const statement = item.statement;
+      if (LOOP_EXITS.has(statement.kind)) wayOut(loop, handler);
+      if (statement.kind === "functionDeclaration") {
+        enter(statement.body.statements, null, false);
+        for (const parameter of statement.parameters)
+          if (parameter.defaultValue !== null)
+            work.push({ expression: parameter.defaultValue, loop: null, handler: false });
+        continue;
+      }
+      let inner = loop;
+      if (isWhileTrue(statement)) {
+        inner = { statement, parent: loop, exits: false };
+        loops.push({ file, loop: inner });
+      }
+      enter(nestedStatements(statement), inner, handler);
+      for (const expression of statementExpressions(statement))
+        work.push({ expression, loop, handler });
+    }
+    return found;
+  };
+  for (const [file, program] of programs.entries()) {
+    // The number of top-level statements with a way out before each label.
+    const labels = new Map<string, number>();
+    let count = 0;
+    for (const statement of program.statements) {
+      if (statement.kind === "labelStatement") labels.set(statement.name.name, count);
+      else if (
+        statement.kind === "gotoStatement" &&
+        statement.target.kind === "labelTarget" &&
+        labels.get(statement.target.label.name) === count &&
+        !unreachable.has(statement)
+      )
+        closed[file]!.push(statement.span);
+      // A function runs where it is called, and a call is a way out.
+      if (walk(file, statement) && statement.kind !== "functionDeclaration") count += 1;
+    }
+  }
+  if (blockExits) return programs.map(() => []);
+  for (const { file, loop } of loops)
+    if (!loop.exits && !unreachable.has(loop.statement))
+      closed[file]!.push(
+        createSourceSpan(loop.statement.span.start, loop.statement.condition.span.end),
+      );
+  return closed.map((spans) =>
+    spans
+      .sort((left, right) => left.start.offset - right.start.offset)
+      .map((span) =>
+        createDiagnostic(
+          DiagnosticSeverity.Warning,
+          typeCode.closedLoop,
+          "If this loop starts, it has no way to stop. Add a condition with `break` to leave the loop, or use `exit` to finish the session.",
+          span,
+        ),
+      ),
+  );
+}
+
+/** Whether a statement is `while true`, with or without parentheses. */
+function isWhileTrue(
+  statement: Statement,
+): statement is Extract<Statement, { kind: "whileStatement" }> {
+  if (statement.kind !== "whileStatement") return false;
+  const condition = unwrap(statement.condition);
+  return condition.kind === "booleanLiteral" && condition.value;
+}
+
 /** Methods that change the list or set they are called on. */
 /** The value kinds an operand of unknown type might be, to tell whether a known operand could combine with any. */
 const OPERAND_KINDS: readonly StaticType[] = [
@@ -4899,6 +5287,7 @@ const OPERAND_KINDS: readonly StaticType[] = [
   TIME_TYPE,
   DATETIME_TYPE,
   TIMESTAMP_TYPE,
+  { kind: "list", element: UNKNOWN_TYPE },
 ];
 
 /** Whether a variable of this type holds a list, set, or dict whose element type no value decided yet. */
@@ -4914,6 +5303,7 @@ const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear"
 
 const COLLECTION_CHANGES: ReadonlySet<string> = new Set([
   "add",
+  "addAll",
   "remove",
   "clear",
   "removeAt",
@@ -5255,12 +5645,13 @@ function findDecidedSlot(type: StaticType): SourceSpan | null {
 
 // Types of new places --------------------------------------------------------------------------------------------------
 
-/** The value type of a timer or media handle property, or `undefined` when it cannot be read or assigned. */
+/** The value type of a timer, media, or camera view handle property, or `undefined` when it cannot be read or assigned. */
 function handlePropertyType(
-  handle: "timer" | "media",
+  handle: "timer" | "media" | "camera",
   name: string,
   use: "read" | "assign",
 ): StaticType | undefined {
+  if (handle === "camera") return name === "placement" ? STRING_TYPE : undefined;
   if (handle === "timer") {
     switch (name) {
       case "remaining":
@@ -5320,6 +5711,7 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
       return value.properties?.get(name) ?? UNKNOWN_TYPE;
     case "timer":
     case "media":
+    case "camera":
       return handlePropertyType(value.kind, name, "read");
     case "scalar":
       if (isScalar(value, "string")) return name === "length" ? INTEGER_TYPE : undefined;
@@ -5340,6 +5732,7 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
   const value = resolved(type);
   if (value.kind === "timer" || value.kind === "media")
     return ["pause", "resume", "stop"].includes(method) ? NULL_TYPE : undefined;
+  if (value.kind === "camera") return undefined;
   if (value.kind === "speaker" || value.kind === "unknown" || value.kind === "open")
     return UNKNOWN_TYPE;
   // Text operations (V30 §8).
@@ -5378,6 +5771,8 @@ function memberMethodType(type: StaticType, method: string): StaticType | undefi
     case "remove":
     case "clear":
       return NULL_TYPE;
+    case "addAll":
+      return value.kind === "list" ? NULL_TYPE : undefined;
     case "removeAt":
     case "removeFirst":
     case "removeLast":
@@ -5458,7 +5853,7 @@ function temporalMethodType(kind: ScalarTypeName, method: string): StaticType | 
 const MEDIA_PACED_PROPERTIES: ReadonlySet<string> = new Set(["position", "remaining", "volume"]);
 
 /** Whether a value of this type may be one of the given handles, including a value of unknown type. */
-function mayBe(type: StaticType, ...kinds: ("timer" | "media")[]): boolean {
+function mayBe(type: StaticType, ...kinds: ("timer" | "media" | "camera")[]): boolean {
   return members(type).some((member) => {
     const value = resolved(member);
     return (
@@ -5476,7 +5871,7 @@ function assignableProperty(
   name: string,
 ):
   { readonly type: StaticType | null } | { readonly problem: string; readonly receiver?: boolean } {
-  if (member.kind === "timer" || member.kind === "media") {
+  if (member.kind === "timer" || member.kind === "media" || member.kind === "camera") {
     const type = handlePropertyType(member.kind, name, "assign");
     return type === undefined
       ? { problem: handleMemberMessage(member.kind, name, "assign") }
@@ -5593,6 +5988,7 @@ const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
   "range",
   "timer",
   "media",
+  "camera",
   "speaker",
 ]);
 
@@ -5854,12 +6250,16 @@ function mixDescription(first: StaticType, other: StaticType): string {
   return `${describeValue(first)} and ${describeValue(other)}`;
 }
 
-/** The message for a timer or media handle member that does not exist or cannot be assigned. */
+/** The message for a timer, media, or camera view handle member that does not exist or cannot be assigned. */
 function handleMemberMessage(
-  handle: "timer" | "media",
+  handle: "timer" | "media" | "camera",
   name: string,
   use: "read" | "assign" | "call",
 ): string {
+  if (handle === "camera")
+    return use === "call"
+      ? `Camera views have no method '${name}'; hide them with hideCamera.`
+      : `Camera views have no property '${name}'; use placement.`;
   const kind = handle === "timer" ? "Timer" : "Media";
   if (use === "call")
     return `${kind} handles have no method '${name}'; use pause(), resume(), or stop().`;
@@ -5877,7 +6277,6 @@ function operatorMessage(
   const [left, right] = operands;
   if (operands.length === 1)
     return `'${operator}' needs a number or a duration, but this is ${describeValue(left!)}.`;
-  const text = (type: StaticType): boolean => isScalar(type, "string");
   const duration = (type: StaticType): boolean => isScalar(type, "duration");
   if (["<", "<=", ">", ">="].includes(operator)) {
     const temporal = isTemporal(left!) ? left! : isTemporal(right!) ? right! : undefined;
@@ -5885,8 +6284,11 @@ function operatorMessage(
       return `'${operator}' compares ${describeValue(temporal)} only with another ${temporalNoun(temporal)}, not with ${describeValue(temporal === left ? right! : left!)}.${expression.kind === "binaryExpression" ? temporalPairFix(expression, operator, left!, right!) : ""}`;
     return `'${operator}' compares two numbers, two texts, or two durations, but these are ${describeValue(left!)} and ${describeValue(right!)}.`;
   }
-  if (operator === "+" && (text(left!) || text(right!)))
-    return `'+' does not join text. Put the values in one text instead, such as "\${first}\${second}".`;
+  const joined =
+    operator === "+" && expression.kind === "binaryExpression"
+      ? joinMessage(expression, left!, right!)
+      : undefined;
+  if (joined !== undefined) return joined;
   if ((duration(left!) && isNumeric(right!)) || (isNumeric(left!) && duration(right!))) {
     const number =
       expression.kind === "binaryExpression"
@@ -5917,6 +6319,67 @@ function operatorMessage(
       return `'+' cannot add ${describeValue(right!)} to a duration. Write it first, as in '${expressionLabel(expression.right) ?? "value"} + 1 h'.`;
   }
   return `'${operator}' cannot combine ${describeValue(left!)} and ${describeValue(right!)}.`;
+}
+
+/**
+ * Why `+` cannot join text or a list with a value of another kind, and what to write instead (V30 §4): the value in the
+ * text, `add` for one element, or a list of it. Nothing converts. The left operand's kind names what was meant.
+ */
+function joinMessage(
+  expression: Extract<Expression, { kind: "binaryExpression" }>,
+  left: StaticType,
+  right: StaticType,
+): string | undefined {
+  const list = (type: StaticType): boolean => resolved(type).kind === "list";
+  const set = (type: StaticType): boolean => resolved(type).kind === "set";
+  const text = (type: StaticType): boolean => isScalar(type, "string");
+  const value = (operand: Expression): string => operandLabel(operand) ?? "value";
+  const named = (operand: Expression, kind: string): string => expressionLabel(operand) ?? kind;
+  if ((set(left) || set(right)) && (list(left) || list(right) || (set(left) && set(right))))
+    return `'+' joins two texts or two lists, not ${describeValue(left)} and ${describeValue(right)}. ${SET_JOIN_FIX}`;
+  if (list(left) && !list(right)) {
+    const items = named(expression.left, "list");
+    return `'+' joins a list only with another list, not with ${describeValue(right)}. To add one element, use '${items}.add(${value(expression.right)})', or write '${items} + [${value(expression.right)}]' for a new list.`;
+  }
+  if (text(left) !== text(right) && (text(left) || !list(right))) {
+    const other = text(left) ? right : left;
+    const fix = isShowable(other)
+      ? ` Put the value in the text instead, as in ${interpolationFix(expression)}.`
+      : "";
+    return `'+' joins text only with other text, not with ${describeValue(other)}.${fix}`;
+  }
+  if (list(right) && !list(left))
+    return `'+' joins a list only with another list, not with ${describeValue(left)}. Write '[${value(expression.left)}] + ${named(expression.right, "list")}' for a new list.`;
+  return undefined;
+}
+
+const SET_JOIN_FIX = "Join sets with union(), or copy a set into a list with toList() first.";
+
+/** `"Score: ${5}"` for `"Score: " + 5`: plain text as it is written, and the other operand interpolated. */
+function interpolationFix(expression: Extract<Expression, { kind: "binaryExpression" }>): string {
+  const part = (operand: Expression): string =>
+    plainText(operand) ?? `\${${operandLabel(operand) ?? "value"}}`;
+  return `"${part(expression.left)}${part(expression.right)}"`;
+}
+
+/** The source spelling of a variable or property path, a number or boolean literal, or plain text in quotes. */
+function operandLabel(expression: Expression): string | null {
+  const text = plainText(expression);
+  return (
+    expressionLabel(expression) ?? literalText(expression) ?? (text === null ? null : `"${text}"`)
+  );
+}
+
+/** The text of a one-line string literal without interpolation, as it is written between its quotes. */
+function plainText(expression: Expression): string | null {
+  const literal = unwrap(expression);
+  if (literal.kind !== "stringLiteral" || literal.form !== "singleLine") return null;
+  let text = "";
+  for (const part of literal.parts) {
+    if (part.kind !== "stringText") return null;
+    text += part.raw;
+  }
+  return text;
 }
 
 /** What a date or time value is called after "another", such as `date and time`. */
@@ -5954,16 +6417,26 @@ function unitFix(number: Expression | null): string {
   return `Give the number a unit, such as '${label ?? "n"} * 1 s'.`;
 }
 
-/** How to make an operand fit `+=`/`-=` on a place of `operand` type. */
-function operandFix(operand: StaticType, value: Expression): string {
+/**
+ * How to make a value fit `+=`/`-=` on a place of `operand` type: text takes it inside the text, and a list takes one
+ * element with `add` (V30 §4).
+ */
+function operandFix(operand: StaticType, type: StaticType, statement: AssignmentStatement): string {
   if (isNumeric(operand)) return " Use a number instead.";
   // A timestamp or a date and time moves by a duration as well.
   if (isScalar(operand, "duration", "timestamp", "datetime")) {
-    const literal = unwrap(value);
+    const literal = unwrap(statement.value);
     return literal.kind === "numberLiteral"
       ? ` Give the number a unit, such as '${literal.raw} s'.`
       : " Use a duration such as '2 s' instead.";
   }
+  const target = expressionLabel(statement.target);
+  if (statement.operator !== "+=" || target === null) return "";
+  const value = operandLabel(statement.value) ?? "value";
+  if (isScalar(operand, "string") && isShowable(type))
+    return ` Put the value in the text instead, as in '${target} += "\${${value}}"'.`;
+  if (resolved(operand).kind === "list" && resolved(type).kind !== "set")
+    return ` To add one element, use '${target}.add(${value})'.`;
   return "";
 }
 
@@ -6005,6 +6478,7 @@ function checkFirstFix(
   target: StaticType,
   value: StaticType,
   expression: Expression,
+  listed = false,
 ): string | undefined {
   const all = members(value);
   const passing = all.filter((member) => isAssignable(target, member));
@@ -6013,9 +6487,11 @@ function checkFirstFix(
   // a property or element is first kept in a variable.
   const node = unwrap(expression);
   const label = node.kind === "identifier" ? node.name : null;
-  const test = all.every((member) => passing.includes(member) || member.kind === "null")
-    ? "!= null"
-    : `is ${typeName(union(passing))}`;
+  // The elements of a list stored at once are tested as that list, such as `more is integer[]`.
+  const test =
+    !listed && all.every((member) => passing.includes(member) || member.kind === "null")
+      ? "!= null"
+      : `is ${typeName(listed ? { kind: "list", element: union(passing) } : union(passing))}`;
   return label === null
     ? ` Keep it in a variable and check it first, as in: if value ${test} { ... }`
     : ` Check it first: if ${label} ${test} { ... }`;
@@ -6186,10 +6662,13 @@ function unwrapGrouping(expression: Expression): Expression {
 }
 
 /** The tag names of a list literal of quoted names, or `null` for anything else, which only runtime knows. */
-function literalTagNames(value: Expression): readonly string[] | null {
+function literalTagNames(written: Expression): readonly string[] | null {
+  // Grouping changes nothing: `(["a"])` and `[("a")]` are literal lists too.
+  const value = unwrapGrouping(written);
   if (value.kind !== "listLiteral") return null;
   const names: string[] = [];
-  for (const element of value.elements) {
+  for (const item of value.elements) {
+    const element = unwrapGrouping(item);
     if (
       element.kind !== "stringLiteral" ||
       element.parts.some((part) => part.kind !== "stringText")

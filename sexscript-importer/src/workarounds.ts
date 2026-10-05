@@ -3,7 +3,13 @@
  * TeaseScript, marked with a NOTE at every site, so that converted packages play natively (owner decision 2026-10-05).
  * Selecting one emits its accepted form instead, for when `main` implements it.
  */
-export const ACCEPTED_FORMS = ["askBooleans", "showPopup", "openUrl", "chooseFile"] as const;
+export const ACCEPTED_FORMS = [
+  "askBooleans",
+  "showPopup",
+  "openUrl",
+  "chooseFile",
+  "permanentButton",
+] as const;
 
 export type AcceptedForm = (typeof ACCEPTED_FORMS)[number];
 

@@ -108,6 +108,25 @@ test("a list option gives one button per element, mixed with options with and wi
   assert.deepEqual(sayTexts(typed.finished), ['["spank"]']);
 });
 
+test("a list joined with + gives one button per element, in order", () => {
+  const source = [
+    'let options = ["Red", "Blue"]',
+    'let answer = choose ["Back"] + options',
+    "say [answer]",
+    "exit",
+  ].join("\n");
+  assert.deepEqual(buttons(start(source).pending.snapshot), [
+    { text: "Back", value: "Back" },
+    { text: "Red", value: "Red" },
+    { text: "Blue", value: "Blue" },
+  ]);
+  assertEachButtonResumes(source, [
+    ["Back", '["Back"]'],
+    ["Red", '["Red"]'],
+    ["Blue", '["Blue"]'],
+  ]);
+});
+
 test("buttons may return the same value, and each button completes as itself", () => {
   const source = [
     'let answer = choose win: "Open a door", lose: "Open a door", lose: "Open a door"',

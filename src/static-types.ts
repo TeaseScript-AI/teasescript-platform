@@ -38,7 +38,8 @@ export type StaticType =
   | { readonly kind: "list" | "set" | "dict"; readonly element: StaticType }
   | { readonly kind: "object"; readonly properties: PropertyTable | null }
   | { readonly kind: "union"; readonly members: readonly StaticType[] }
-  | { readonly kind: "range" | "timer" | "media" | "speaker" }
+  /** `camera` is the handle of a camera view (`let view = showCamera`); scripts cannot name it as a type. */
+  | { readonly kind: "range" | "timer" | "media" | "camera" | "speaker" }
   | OpenType;
 
 /** A list, set, or dict type. */
@@ -1404,6 +1405,8 @@ export function describeValue(type: StaticType): string {
       return "a timer handle";
     case "media":
       return "a media handle";
+    case "camera":
+      return "a camera view";
     default:
       return `a ${value.kind}`;
   }
@@ -1412,7 +1415,8 @@ export function describeValue(type: StaticType): string {
 /**
  * The result type of arithmetic on known operand types, or `undefined` when the operator does not support them.
  * Integer arithmetic stays integer except `/`, which always gives a number (ADR 0021 rule 2.2). A duration is added to
- * a timestamp or a date and time after it, not before it.
+ * a timestamp or a date and time after it, not before it. `+` also joins two texts, and two lists into a new list whose
+ * element types join as in a list literal of both; lists that would mix types give `undefined` (V30 §4).
  */
 export function arithmeticType(
   operator: string,
@@ -1421,7 +1425,13 @@ export function arithmeticType(
 ): StaticType | undefined {
   const left = resolved(leftType);
   const right = resolved(rightType);
+  if (operator === "+" && left.kind === "list" && right.kind === "list") {
+    const element = joinTypes([copyType(left.element), copyType(right.element)]);
+    return element === undefined ? undefined : { kind: "list", element };
+  }
   if (left.kind !== "scalar" || right.kind !== "scalar") return undefined;
+  if (left.name === "string" && right.name === "string")
+    return operator === "+" ? STRING_TYPE : undefined;
   const numeric = (name: ScalarTypeName): boolean => name === "integer" || name === "number";
   if (numeric(left.name) && numeric(right.name)) {
     // The result derives from what both operands derive from.

@@ -24,14 +24,16 @@ Importer progress is measured at package level rather than by requiring every ge
 2. **Lowered** — the script body has TeaseScript IR/output without direct migration errors.
 3. **Dependency-closed** — every generated function call resolves to generated package code or a known accepted
    TeaseScript/Standard-Library capability. This includes transitive helper dependencies.
-4. **Compiler-clean** — the generated script passes the real compiler. The report also compiles a copy in which
-   accepted-but-unimplemented TeaseScript (file transfers, `showPopup`, ...) is replaced by placeholder host calls that
-   keep the accepted result types; a file that is clean only in that copy is blocked by TeaseScript implementation
-   work, not by importer output.
+4. **Compiler-clean** — the package compiles as one project (`compileProject`, ADR 0022), and the project reports no
+   error for the script. By default the importer emits workarounds for accepted TeaseScript that `main` does not
+   implement yet (see Accepted but not implemented); with `--accepted`, the report compiles a copy in which those forms
+   become placeholder host calls that keep their accepted result types, and a file that is clean only in that copy is
+   blocked by TeaseScript implementation work, not by importer output.
 5. **Runnable/verified** — relevant execution paths have actually run without unresolved runtime behavior. The
-   report's smoke run (`report --run`) executes one deterministic path per package entry in the real runtime,
-   following script transfers with shared storage, and runs scripts no entry reached in isolation. It catches runtime
-   type errors the compiler cannot, but one path is evidence, not proof of equivalence.
+   report's smoke run (`report --run`) runs the package project in the real runtime from `main.tease`; the runtime
+   follows the transfers between files itself, and a file that is not compiler-clean is a stub that ends the run as
+   `blocked`. Scripts no run reached run in isolation, through a `main.tease` that transfers to them. It catches
+   runtime type errors the compiler cannot, but one path is evidence, not proof of equivalence.
 
 The POC embeds transitively required helper functions into each generated `.tease` file because package-library linkage
 is not yet available. That is a current migration strategy, not a language requirement. Auxiliary Groovy classes with
@@ -72,7 +74,7 @@ implemented):
 | `list.remove(index)`, `list.remove(value)` | `list.removeAt(index)`, also as a value; `list.remove(value)` with structural equality (#517) |
 | Groovy string methods (`size()`, `trim()`, `toUpperCase()`, `replace()`, `split()`, ...) | text operations (`text.length`, `trim()`, `uppercase()`, ...; #518) |
 | `list.join(separator)`, `"${list}"` | `list.join(separator)`; `"[${list.join(", ")}]"` (#518) |
-| `def x` / `int x` without initializer | `let x: string? = null`, and `0` or `false` for primitives; a list, also one declared `= null`, starts empty (`let lines: string[] = []`) unless code in its script or modules compares it with null or reads it with `?.`, where null and an empty list differ (owner decision); Groovy truth treats them alike |
+| `def x` / `int x` without initializer | `let x: string? = null`, and `0` or `false` for primitives; a list, also one declared `= null`, starts empty (`let lines: string[] = []`), and a number `0`, unless code in its script or modules compares it with null or reads it with `?.`, where null and an empty list or 0 differ (owner decisions); Groovy truth treats them alike. A note marks a number a text can show before its first value, which Groovy showed as `null` (`SX_NULL_START_NUMBER`) |
 | `def x = 0` that later holds a fraction | `let x = 0`, which widens to `number` by itself (#504 option B, #526) |
 | `def x = "a"` that is later set to `null`; `def x = null` | `let x: string? = "a"`; `let x = null`, which keeps the type of its first value (#504 decision 1a) |
 | a variable that receives a function result that may be absent, or a storage read that the script then tests for null; `def b = a` where `a` may be null | `let x: integer? = 7`, since a possibly null value fits only an optional place (ADR 0021 rule 1.9); `let b: string? = a`, since the compiler narrows `a` at the declaration. Other storage reads are checked at runtime when stored |
@@ -419,21 +421,22 @@ Converting the corpus's script chains to ADR 0022 surfaced:
   `Domme3/training`). The legacy player ended the chain quietly when it found no file; a path cannot leave the package
   (ADR 0022 §1), so these become `exit` with a note.
 - **Explicit endings** need an `exit` at the end of every converted script, since the legacy chain ended there.
-- **Project compilation (#573) does not change the gate yet.** `compileProject` checks the package's files together
-  but compiles each file on its own and builds the one plan only when every file compiles; transfers, globals, and
-  global functions come in parts 3 to 5. The gate therefore keeps compiling each file, with stand-ins for transfers and
-  a copy of the globals it reaches, and the smoke runner keeps following transfers between per-file plans, which also
-  lets the runnable scripts of a package with unconverted files run. Moving to `compileProject` pays off once the
-  runtime follows `goto` inside one plan (part 5).
+- **Native projects (#570 parts 3 to 7a).** With globals, global functions, `goto` to files, and `script(...)`
+  references in `main` (up to `19a93bee`), the gate compiles each package once with `compileProject`, and the smoke
+  run starts the one plan at `main.tease` and lets the runtime follow the transfers. A package with unconverted files
+  still runs: those files become stubs in the run's project, and the run ends as `blocked` when it reaches one. Native
+  transfers behaved like the earlier stand-ins on both corpora. A computed legacy script name such as
+  `"rooms/hall.groovy"` becomes `script(name.replace(".groovy", ".tease"))`, since `script()` needs the converted path.
+  A package with a single script now gets it as `main.tease` too, so the Player can open it.
 
 ## Legacy baggage
 
 Reported for manual work and intentionally not reproduced: reflection and `GroovyClassLoader` outside resolved
 package helpers, `java.io.File` access and directory listing other than a recognized module loader,
-`System.getProperty`, OS processes (Toy's speech output), the file picker `getFile` (no corpus site; accepted
-`chooseFile()` would be its counterpart), `openCdTrays`, `useEmailAddress`, `useFile`, the old online
-`send`/`receive` service, and `try`/`catch` around desktop APIs. The webcam `getImage` converts to `takePhoto()` (see
-above; the Player side is in draft PRs #475 and #516). `Locale.getDefault()` serves the localization question above.
+`System.getProperty`, OS processes (Toy's speech output), `openCdTrays`, `useEmailAddress`, `useFile`, the old online
+`send`/`receive` service, and `try`/`catch` around desktop APIs. The webcam `getImage` converts to `takePhoto()`,
+native since #475, and the file picker `getFile` to the workaround for `chooseFile()` (see Accepted but not
+implemented). `Locale.getDefault()` serves the localization question above.
 Scripts also contain plain legacy bugs the importer reports instead of repairing: calls to undefined functions, reads
 of variables that nothing assigns (10 sites, such as `save("domme3.spank", fun)`; SexScript failed with a missing
 property when they ran), helper calls with missing arguments, and closures referenced without `()` (which Groovy
@@ -448,20 +451,29 @@ Emily persona; the code's default owner `ancilla` is not included.
 
 ## Accepted but not implemented
 
-The importer emits these accepted forms although `main` does not implement them yet; the compiler gate replaces them
-with stand-ins that keep their accepted result types and counts them separately: `goto` to a file and `goto script(...)`
-(ADR 0022, #570), `global function` and `global` in `helpers.tease` (#570; the gate compiles each file with a copy of
-the ones it reaches), `showPopup`, `askBoolean`, `askBooleans`, `openUrl`, and `takePhoto()` (camera, #475). `dict` with `get(key, default:)` (#555), date
-and time (`getDateTime()`, `getDate()`, `getTime()`, `getTimestamp()`, `toSeconds()`, `toISO()`, the formats,
-`toDate()`, `.days`; #532), `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger`
-(#548), rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526),
-and `load "key", default:` (#545) are compiled and run as `main` implements them. File transfers dominate: they block
-22 otherwise compiler-clean corpus scripts.
+File transfers (`goto "file.tease"`, `goto script(...)`), `global function` and `global` in `helpers.tease` (ADR 0022,
+#570), and `takePhoto()` (#475, camera in the runtime and the Player) are native on `main` now, as are `dict` (#555),
+date and time (#532), `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger` (#548),
+rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526), and
+`load "key", default:` (#545).
+
+What remains accepted but unimplemented becomes a workaround in implemented TeaseScript, with a `// NOTE` naming it at
+every site (owner decision 2026-10-05), so converted packages play natively; `--accepted=<forms>` emits the accepted
+form instead once `main` implements it:
+
+| Accepted form | Workaround | What it loses |
+| --- | --- | --- |
+| `askBooleans(message:, texts:, defaults:)` | the message, one yes/no `choose` per item with the preset marked in its button, then "Confirm" or "Change answers", which starts over (`SX_ASK_BOOLEANS_WORKAROUND`) | one form with every option; changing a single answer |
+| `showPopup` | the message in the chat and an OK button (`SX_POPUP_WORKAROUND`) | the popup presentation |
+| `openUrl(url)` | "Open this link: …" in the chat, where message markup makes an `http(s)` address a link, and a Continue button (`SX_OPEN_URL_WORKAROUND`) | opening the page itself |
+| `chooseFile()` for legacy `getFile(title)` | the title, a line that no file can be chosen, and null, as when the player cancels (`SX_CHOOSE_FILE_WORKAROUND`) | choosing a file |
+| none: listing a package images folder | the counts of the package's images at conversion time, a number or a `dict` of the matching folders (`SX_IMAGE_COUNT_WORKAROUND`) | images added later; entries other than image files |
+
+`askBoolean` with custom labels already converts to a two-option `choose` compared with its first label.
 
 ## Remaining gaps by workaround class
 
-What still blocks conversion once the open tracker work lands (camera #475 and the other accepted forms above),
-ranked by whether current TeaseScript can express it. Counts are root errors or blocked scripts in default mode after
+What still blocks conversion, ranked by whether current TeaseScript can express it. Counts are root errors or blocked scripts in default mode after
 the merge of `main` at `242ada7a`; the column "Before" gives the count at the `dict` round.
 
 **Expressible in current TeaseScript (importer work).** The language already has a clean form.
@@ -485,9 +497,9 @@ accepted implementation is still wanted. Each workaround the importer emits carr
 
 | Gap | Corpus | Workaround | What the workaround loses |
 | --- | --- | --- | --- |
-| `askBooleans` | blocks 8 scripts | not emitted (accepted, waiting for its implementation): one yes/no `choose` per item, then a confirmation | one form with every option; changing an earlier answer |
-| `showPopup` | blocks 4 scripts | not emitted (accepted): `say` plus `showButton "OK"` | the popup presentation |
-| Media selected by tags (M1), including Toy's imagery folders with tag files | Domme3 3, Toy imagery | not emitted: a per-pack table of image counts fixed at conversion time | packs added after conversion |
+| `askBooleans` | blocked 8 scripts | emitted since 2026-10-05 (see Accepted but not implemented): one yes/no `choose` per item, then a confirmation | one form with every option; changing an earlier answer |
+| `showPopup` | blocked 4 scripts | emitted since 2026-10-05: `say` plus `showButton "OK"` | the popup presentation |
+| Media selected by tags (M1), including Toy's imagery folders with tag files | Domme3 3, Toy imagery | emitted since 2026-10-05 for counts of a listed images folder: the counts at conversion time | packs added after conversion |
 | Regular expressions | Toy 2 converted, `tokenize` and Java patterns left | emitted: a loop over the parts between spaces for `split(/\s+/)`, and one removing each `<...>` for `replaceAll(/<[^>]*>/, "")` | readability, and exactness for other whitespace and a leading space |
 | The player's language (`Locale.getDefault().getLanguage()`) | distribution 2 converted | emitted: English, `"en"` | the font configuration offer for other languages |
 
@@ -495,7 +507,6 @@ accepted implementation is still wanted. Each workaround the importer emits carr
 
 | Gap | Corpus | Why |
 | --- | --- | --- |
-| File transfers `goto "file"` and `goto script(...)` (ADR 0022) | blocks 22 scripts (distribution 8, Domme3 12, DisciplineClinic 2) | Accepted and emitted; they wait for #570 parts 4, 5, and 7. Imitating them in one file would merge the whole package into a dispatcher loop. The 23rd script before, a distribution example, only ended its chain, which `exit` now does. |
 | Desktop and Java APIs: `java.time` formatting and zones (5), files (4), `java.util.Random` (4), JSON and Base64 (2), `Eval.me`, `java.util.function.Function`, `System.getProperty`, OS processes (1 each), Java objects, the Cornertime exchange | Toy 19 of its 53 dynamic calls and 8 constructors, distribution | Outside the product boundary by design (see Legacy baggage). `Random.nextInt(n)` alone could become `randomInteger()`, without the seed. |
 | Legacy bugs (variables nothing assigns, helpers without the script host) | Domme3 3 and 7, DisciplineClinic 1 | Need an author's repair; reporting them is correct. Six more sit in functions nothing calls and are notes now. |
 

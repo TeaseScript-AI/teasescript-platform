@@ -105,6 +105,8 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "animateOverlay",
   "hideOverlay",
   "hideImage",
+  "showCamera",
+  "hideCamera",
   "showBlur",
   "hideBlur",
   "drawRectangle",
@@ -120,6 +122,7 @@ const TEASESCRIPT_PROTECTED_ENGINE_NAMES = Object.freeze([
   "getScriptMetadata",
   "getPlayerHistory",
   "findImages",
+  "findScripts",
 ] as const);
 
 export const CORE_RUNTIME_BUILTINS = Object.freeze([

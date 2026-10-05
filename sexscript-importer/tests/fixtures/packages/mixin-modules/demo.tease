@@ -1,6 +1,3 @@
-// MIGRATION INCOMPLETE: 1 error diagnostic.
-// Review diagnostics before treating this file as behaviorally equivalent.
-
 // Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
 function sexscriptLegacyCall(action, args) {
   if action == "pauseCycle" {
@@ -68,8 +65,8 @@ function pause {
   wait sexscriptLegacyRandom(rounds - 2) + 1
   sexscriptLegacyStopBackgroundSounds()
 }
-// TODO SX_UNSUPPORTED_SEXSCRIPT_EXPRESSION line 2: Unsupported SexScript expression call: getDataFolder
-// | final DATAFOLDER = getDataFolder();
+// NOTE SX_DATA_FOLDER line 2: getDataFolder() was the legacy player's data folder on the player's computer; package paths start at the package root, so it is empty text here.
+let DATAFOLDER = ""
 function loadModules {
   // NOTE SX_MODULE_LOADER line 3: Replaced runtime loading of scripts/demo/*.groovy (directory listing and Groovy evaluation) with direct calls to its 3 modules in file-name order, the order Windows lists them.
   loadGreetingModule()

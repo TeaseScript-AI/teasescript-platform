@@ -8,6 +8,6 @@ def seconds = showPopup("Kneel until you close this")
 show("You knelt ${seconds} seconds")
 // useUrl: the link in the chat and a button to continue.
 useUrl("https://example.com/rules")
-// getFile: as if the player cancelled the file chooser.
+// getFile asked for a photo of the player, which takePhoto() takes; it gives null as a cancelled chooser did.
 def photo = getFile("Pick a photo of yourself")
 if (photo == null) show("No photo, then")

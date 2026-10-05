@@ -15,19 +15,22 @@ import type { SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
-interface CameraStorageHost {
+interface CameraHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly canClearScriptStorage: Readonly<Ref<boolean>>;
+  readonly viewfinder: Readonly<Ref<FakeTrack | null>>;
+  readonly viewfinderPlacement: Readonly<Ref<"window" | "stage" | null>>;
   loadScriptStorage(): Promise<void>;
   clearScriptStorage(): Promise<boolean>;
+  prepare(create: () => PlayerRuntimeSession): void;
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): Promise<void>;
 }
 let usePlayerSession: (options: {
-  scriptStorage: ScriptStorageProvider;
+  scriptStorage?: ScriptStorageProvider;
   capabilities: { camera: boolean };
-  capturedMedia: { repository: FakeMediaRepository };
-}) => CameraStorageHost;
+  capturedMedia?: { repository: FakeMediaRepository };
+}) => CameraHost;
 
 before(async () => {
   const server = await createServer({
@@ -58,10 +61,12 @@ class FakeTrack extends EventTarget {
   }
 }
 
-// The browser surface the session camera and audio priming use; getUserMedia answers when the test grants it.
+// The browser surface the session camera and audio priming use; getUserMedia answers when the test grants it, with a
+// new camera track each time.
 function stubBrowser(context: TestContext) {
   let grant!: () => void;
   const granted = new Promise<void>((resolve) => (grant = resolve));
+  const tracks: FakeTrack[] = [];
   const values = {
     document: new EventTarget(),
     window: new EventTarget(),
@@ -69,7 +74,9 @@ function stubBrowser(context: TestContext) {
       mediaDevices: {
         getUserMedia: async () => {
           await granted;
-          return { getTracks: () => [new FakeTrack()] };
+          const track = new FakeTrack();
+          tracks.push(track);
+          return { getTracks: () => [track] };
         },
       },
     },
@@ -89,11 +96,19 @@ function stubBrowser(context: TestContext) {
       else Reflect.deleteProperty(globalThis, name);
     });
   }
-  return grant;
+  return { grant, tracks };
+}
+
+function mount(context: TestContext, options: Parameters<typeof usePlayerSession>[0]): CameraHost {
+  const scope = effectScope();
+  const host = scope.run(() => usePlayerSession(options));
+  assert.ok(host);
+  context.after(() => scope.stop());
+  return host;
 }
 
 test("saved data cannot be cleared while a restored session waits for the camera", async (context) => {
-  const grant = stubBrowser(context);
+  const { grant } = stubBrowser(context);
   const entries = new Map<string, SerializableRuntimeValue>([["first", 0]]);
   const provider: ScriptStorageProvider = {
     scope: "test",
@@ -107,16 +122,11 @@ test("saved data cannot be cleared while a restored session waits for the camera
     persistentScriptStorage: true,
   });
   assert.ok(pendingPlayerRuntimeStorageWrite(pending.snapshot));
-  const scope = effectScope();
-  const host = scope.run(() =>
-    usePlayerSession({
-      scriptStorage: provider,
-      capabilities: { camera: true },
-      capturedMedia: { repository: new FakeMediaRepository() },
-    }),
-  );
-  assert.ok(host);
-  context.after(() => scope.stop());
+  const host = mount(context, {
+    scriptStorage: provider,
+    capabilities: { camera: true },
+    capturedMedia: { repository: new FakeMediaRepository() },
+  });
   await host.loadScriptStorage();
   host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(pending)));
 
@@ -137,4 +147,37 @@ test("saved data cannot be cleared while a restored session waits for the camera
   }
   assert.deepEqual([...entries], [["first", 1]]);
   assert.equal(host.canClearScriptStorage.value, true);
+});
+
+test("the script's camera view previews the session camera where it places it, also after a restore", async (context) => {
+  const { grant, tracks } = stubBrowser(context);
+  grant();
+  const host = mount(context, { capabilities: { camera: true } });
+  const shown = 'let view = showCamera stage\nshowButton "Hide"\nexit';
+  host.prepare(() => createPlayerRuntimeSession(shown));
+  await host.activate();
+  const [camera] = tracks;
+  assert.ok(camera);
+  assert.equal(host.viewfinderPlacement.value, "stage");
+  assert.equal(host.viewfinder.value, camera);
+  const showing = host.session.value;
+  assert.ok(showing);
+  const saved = createPlayerRuntimeRestorePoint(showing);
+  // An ended camera has nothing to preview; the script's placement stays.
+  camera.dispatchEvent(new Event("ended"));
+  assert.equal(host.viewfinder.value, null);
+  assert.equal(host.viewfinderPlacement.value, "stage");
+
+  // Hiding the view keeps the camera open for `takePhoto()`.
+  host.prepare(() => createPlayerRuntimeSession('showCamera\nhideCamera\nshowButton "Done"\nexit'));
+  await host.activate();
+  assert.equal(host.viewfinderPlacement.value, null);
+  assert.equal(host.viewfinder.value, null);
+  assert.equal(tracks[1]?.readyState, "live");
+
+  // A restored session shows the view where it was, with the camera Continue opens.
+  host.prepareRestore(restorePlayerRuntimeSession(saved));
+  await host.activate();
+  assert.equal(host.viewfinderPlacement.value, "stage");
+  assert.equal(host.viewfinder.value, tracks[2]);
 });

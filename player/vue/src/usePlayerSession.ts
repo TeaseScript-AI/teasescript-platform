@@ -17,6 +17,7 @@ import {
   continuePlayerRuntimeSession,
   playerTemporalContext,
   pendingPlayerRuntimeStorageWrite,
+  playerRuntimeCameraView,
   playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
@@ -95,10 +96,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       ? capturedMediaStorage(options.scriptStorage, capturedMedia, browserCapturedMediaLocks())
       : undefined;
   const scriptStorage = capturedMediaPersistence ?? options.scriptStorage;
+  // Changes whenever the session camera may have opened, failed, ended, or been released.
+  const cameraRevision = ref(0);
   const camera: SessionCamera<MediaStreamTrack> = new SessionCamera(
     new CaptureDevice(
       createBrowserCaptureHost((kind, state) => {
-        if (kind === "camera" && state.status === "ended") camera.revoked();
+        if (kind !== "camera") return;
+        if (state.status === "ended") camera.revoked();
+        cameraRevision.value++;
       }),
       capturedMedia,
     ),
@@ -118,6 +123,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const interactionReset = ref(0);
   const activation = shallowRef<Activation | null>(null);
   const audioBlocked = ref(false);
+  // The script places the camera view with `showCamera [stage]` and hides it with `hideCamera`; the view only previews
+  // the session camera, which stays open for `takePhoto()`. Without an available camera there is nothing to show.
+  const viewfinderPlacement = computed(() => {
+    const current = session.value;
+    return current === null ? null : playerRuntimeCameraView(current.snapshot);
+  });
+  const viewfinder = computed(() => {
+    void cameraRevision.value;
+    return viewfinderPlacement.value === null ? null : camera.previewTrack;
+  });
 
   const pendingLoadCount = ref(0);
   const loads = new MediaLoadQueue(
@@ -403,6 +418,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     loadScriptStorage,
     scriptStorageOptions,
     resolveAsset,
+    /** The session camera's live track while the script shows a camera view and the camera is available, else `null`. */
+    viewfinder,
+    /** Where the script shows the camera view, `"window"` or `"stage"`, or `null` while it shows none. */
+    viewfinderPlacement,
     /** Bounded developer diagnostics, for example an unavailable session camera. */
     diagnostics: computed(() => diagnostics.value),
     /** Presented runtime timers; hidden timers have no entry. */

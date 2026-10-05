@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 51;
+export const INSTRUCTION_PLAN_VERSION = 54;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -51,6 +51,12 @@ export interface PlanFile {
   readonly endInstruction: number;
   /** The labels of the file's outer scope, in source order, each at the root instruction where it stands. */
   readonly labels: readonly PlanLabel[];
+  /**
+   * The tags of the file's header, each name once, in name order, which script tag queries match (ADR 0023); `null`
+   * for a file of declarations only, which runs nothing on its own, so no script tag query picks or lists it, as no
+   * glob does (ADR 0022 §4.3).
+   */
+  readonly tags: readonly PlanTag[] | null;
 }
 
 export interface PlanLabel {
@@ -139,6 +145,8 @@ export type Instruction =
   | StartTimerInstruction
   | PacingBarrierInstruction
   | ShowImageInstruction
+  | ShowCameraInstruction
+  | HideCameraInstruction
   | StorageWriteInstruction
   | PlayMediaInstruction
   | InteractionInstruction
@@ -417,7 +425,7 @@ export interface StartTimerInstruction extends InstructionBase {
 
 /**
  * Waits for the previous message's pacing before main-story media presentation. With a `receiver`, it waits only
- * when that side-effect-free expression evaluates to a media handle.
+ * when that side-effect-free expression evaluates to a media handle or a camera view.
  */
 export interface PacingBarrierInstruction extends InstructionBase {
   readonly kind: "pacingBarrier";
@@ -428,6 +436,21 @@ export interface PacingBarrierInstruction extends InstructionBase {
 export interface ShowImageInstruction extends InstructionBase {
   readonly kind: "showImage";
   readonly image: ExpressionPlan | null;
+}
+
+/**
+ * `showCamera [stage]`: shows the default camera's view at `placement`, or moves the view already shown there. Its
+ * handle goes to `destinationTemporary` when the command is used as a value.
+ */
+export interface ShowCameraInstruction extends InstructionBase {
+  readonly kind: "showCamera";
+  readonly placement: "window" | "stage";
+  readonly destinationTemporary: number | null;
+}
+
+/** `hideCamera`: hides every camera view. */
+export interface HideCameraInstruction extends InstructionBase {
+  readonly kind: "hideCamera";
 }
 
 /** `save <value> as <key>`, or `delete <key>` when `value` is `null`; evaluates the value, then the key. */
@@ -755,7 +778,10 @@ export interface StorageLoadExpressionPlan extends ExpressionPlanBase {
  */
 export interface TagQueryExpressionPlan extends ExpressionPlanBase {
   readonly kind: "tagQuery";
-  readonly catalog: "images";
+  /** Images give their paths; scripts give script references to the files, entered at their top. */
+  readonly catalog: "images" | "scripts";
+  /** A script query's `from:` path or glob, which limits the candidate files; `null` for all of them. */
+  readonly from: string | null;
   readonly select: "random" | "list";
   readonly operands: readonly ExpressionPlan[];
   /** The query in postfix order; without steps every image matches. */
@@ -808,6 +834,7 @@ export type TypePlanName =
   | "speaker"
   | "timer"
   | "media"
+  | "camera"
   | "script";
 
 export interface TypePropertyPlan {

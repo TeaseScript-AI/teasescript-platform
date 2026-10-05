@@ -69,9 +69,11 @@ export interface VariableTypeResult {
   truncated: number;
   /**
    * `list += value` statements, emitted as numeric `+=` because the list was not proven while lowering, that now
-   * append with the concatenation helper.
+   * append through TeaseScript's list `+=`.
    */
   appended: IrStatement[];
+  /** Those of them that append a range, through the concatenation helper. */
+  rangeAppended: IrStatement[];
   /** `text += value` statements, emitted as numeric `+=` because the text was not proven while lowering. */
   textAppended: IrStatement[];
 }
@@ -139,7 +141,7 @@ export function functionResultTypes(statements: IrStatement[]): Map<string, Teas
 interface Rounds {
   bindings: Map<BindingKey, Binding>;
   conflicts: Conflict[];
-  appends: Map<IrStatement, boolean>;
+  appends: Map<IrStatement, "list" | "range" | "value">;
   textAppends: Set<IrStatement>;
   unguarded: Set<IrStatement>;
   /** Statements whose stored number truncates to an integer. */
@@ -236,6 +238,7 @@ export function enforceVariableTypes(
     annotated: 0,
     truncated: 0,
     appended: [],
+    rangeAppended: [],
     textAppended: [],
   };
   for (const [declaration, items] of declarationConflicts) {
@@ -342,17 +345,26 @@ export function enforceVariableTypes(
               },
             };
           }
-          const appendsList = appends.get(statement);
-          if (appendsList !== undefined) {
+          const appended = appends.get(statement);
+          if (appended !== undefined) {
             result.appended.push(statement);
-            const value = appendsList
-              ? statement.value
-              : { kind: "list" as const, items: [statement.value] };
-            return {
-              ...statement,
-              operator: "=",
-              value: helperCall("concat", [{ kind: "list", items: [statement.target, value] }]),
-            };
+            // A range is no list for TeaseScript `+`, so the concatenation helper appends its numbers.
+            if (appended === "range") {
+              result.rangeAppended.push(statement);
+              return {
+                ...statement,
+                operator: "=",
+                value: helperCall("concat", [
+                  { kind: "list", items: [statement.target, statement.value] },
+                ]),
+              };
+            }
+            // TeaseScript `+=` appends the elements of a list (#609).
+            const value =
+              appended === "list"
+                ? statement.value
+                : { kind: "list" as const, items: [statement.value] };
+            return { ...statement, operator: "+=", value };
           }
           if (!truncations.has(statement)) return withIntegerIndexes(statement, indexes);
           if (statement.operator === "=") {
@@ -439,7 +451,7 @@ interface Analysis {
   /** List indexes, and `removeAt` calls, whose position may hold a fraction. */
   indexes: Set<IrExpression>;
   /** `list += value` statements, and whether the value is a list whose elements are appended. */
-  appends: Map<IrStatement, boolean>;
+  appends: Map<IrStatement, "list" | "range" | "value">;
   /** `text += value` statements on a variable that holds text. */
   textAppends: Set<IrStatement>;
   /** The importer's null tests of input questions on variables that can never hold null. */
@@ -704,7 +716,10 @@ function analyse(
             );
             return;
           }
-          analysis.appends.set(item, appended.kind === "list" || appended.kind === "range");
+          analysis.appends.set(
+            item,
+            appended.kind === "list" ? "list" : appended.kind === "range" ? "range" : "value",
+          );
           return;
         }
         // Groovy `text += value` appended the value's text, whatever its type.
@@ -1456,6 +1471,8 @@ function ownExpressions(statement: IrStatement): IrExpression[] {
       return statement.timeout === null ? [statement.label] : [statement.label, statement.timeout];
     case "showPopup":
       return [statement.message];
+    case "permanentButton":
+      return [statement.target, statement.label];
     case "showImage":
       return [statement.file];
     case "playAudio":
@@ -1540,6 +1557,8 @@ function mapOwnExpressions<T extends IrStatement>(
         };
       case "showPopup":
         return { ...item, message: map(item.message) };
+      case "permanentButton":
+        return { ...item, target: map(item.target), label: map(item.label) };
       case "showImage":
         return { ...item, file: map(item.file) };
       case "playAudio":

@@ -1,4 +1,12 @@
-import { isRecord, type ParsedGroovyFile, type SourceSpan } from "./ast.ts";
+import {
+  constantString,
+  isAstNode,
+  isRecord,
+  walkAst,
+  type AstNode,
+  type ParsedGroovyFile,
+  type SourceSpan,
+} from "./ast.ts";
 import type { IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
 import {
   buildHelperRegistry,
@@ -19,6 +27,7 @@ import {
 import { helperDefinitionOrder, withActionDispatcher } from "./helpers.ts";
 import { promoteGlobalFunctions, type GlobalPromotion } from "./globals.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
+import { legacyProfilePrompt } from "./profile.ts";
 import type { ProposalId } from "./proposals.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 
@@ -60,6 +69,8 @@ export interface PackageOptions {
   accepted?: ReadonlySet<AcceptedForm>;
   /** The package's images, which legacy image counts read at conversion time. */
   media?: readonly MediaFile[];
+  /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
+  files?: readonly string[];
   /**
    * A lone file converted on its own, without a package around it: it keeps its name, and a transfer names the
    * converted file of any legacy script name. Otherwise a package's only script becomes its main.tease.
@@ -254,6 +265,7 @@ export function lowerPackage(
   const helperRegistry = buildHelperRegistry(files);
   const mixinModules = files.flatMap((file) => describeMixinModule(file) ?? []);
   const stableNames = packageStableNames(files);
+  const storageLiterals = packageStorageLiterals(files);
   // Function names and object field types are shared only by a script and the mixin modules it loads.
   const groups = compositionGroups(files);
   const stopsBackgroundSounds = packageStopsBackgroundSounds(files);
@@ -275,6 +287,7 @@ export function lowerPackage(
       mixinModules,
       packageFunctions: packageFunctionNames(groups[index]!),
       stableNames,
+      storageLiterals,
       globalTypes: packageGlobalTypes(groups[index]!),
       stopsBackgroundSounds,
       resultUses,
@@ -284,6 +297,7 @@ export function lowerPackage(
       ...(options.proposals === undefined ? {} : { proposals: options.proposals }),
       ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
       ...(options.media === undefined ? {} : { media: options.media }),
+      ...(options.files === undefined ? {} : { files: options.files }),
     }),
   );
   const helperPrograms = lowered.filter(
@@ -330,10 +344,32 @@ export function lowerPackage(
           scriptIndexes.map((index) => noted[index]!),
           scripts.root,
         );
-  const composedPrograms = noted.map((program, index) => {
+  const promotedPrograms = noted.map((program, index) => {
     const position = scriptIndexes.indexOf(index);
     return promotion === null || position < 0 ? program : promotion.programs[position]!;
   });
+  // The entry asks the legacy player's profile the package reads but never saves.
+  const accepted = options.accepted ?? new Set();
+  const entryIndex =
+    scripts?.entry ?? (scripts === null && scriptIndexes.length === 1 ? scriptIndexes[0]! : null);
+  const entryProgram = entryIndex === null ? null : promotedPrograms[entryIndex]!;
+  const profile =
+    entryProgram === null ? [] : legacyProfilePrompt(promotedPrograms, entryProgram, accepted);
+  // The prompt's helpers may meet names of the entry, which then get other names.
+  const project = new Set([
+    ...(promotion?.promoted.map(({ name }) => name) ?? []),
+    ...(promotion?.globals.map(({ name }) => name) ?? []),
+  ]);
+  const composedPrograms = promotedPrograms.map((program, index) =>
+    index === entryIndex && profile.length > 0
+      ? renameConflictingIdentifiers(
+          { ...program, statements: [...profile, ...program.statements] },
+          new Set(),
+          false,
+          project,
+        )
+      : program,
+  );
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
     composed: composedPrograms,
@@ -342,7 +378,7 @@ export function lowerPackage(
         ? null
         : scripts.entry !== null
           ? { file: scripts.entry }
-          : { menu: entryMenu(scripts, composedPrograms) },
+          : { menu: withProfile(entryMenu(scripts, composedPrograms), composedPrograms, accepted) },
     globals:
       promotion === null
         ? null
@@ -354,6 +390,77 @@ export function lowerPackage(
           },
     paths: files.map((_, index) => scripts?.pathOf.get(index) ?? null),
   };
+}
+
+/**
+ * The literal values the package stores under each storage key that only ever receives literals: a key with any
+ * computed value, or one that a save with a computed key could name (its fixed beginning matches), is left out, and
+ * so is a key the package never stores.
+ */
+function packageStorageLiterals(
+  files: readonly ParsedGroovyFile[],
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const literals = new Map<string, Set<string>>();
+  const computed = new Set<string>();
+  const computedPrefixes: string[] = [];
+  for (const file of files) {
+    walkAst(file.root, (node) => {
+      if (node.kind !== "methodCall" || node.implicitThis !== true) return;
+      const name = constantString(node.method);
+      if (name !== "save" && name !== "send") return;
+      const argumentList = isAstNode(node.arguments) ? node.arguments.items : undefined;
+      const [keyNode, valueNode]: Array<AstNode | undefined> = Array.isArray(argumentList)
+        ? argumentList.filter(isAstNode)
+        : [];
+      if (keyNode === undefined || valueNode === undefined) return;
+      const key = constantString(keyNode);
+      if (key === null) {
+        const prefix = keyPrefix(keyNode);
+        computedPrefixes.push(prefix);
+        return;
+      }
+      const value = constantString(valueNode);
+      if (value === null) computed.add(key);
+      else literals.set(key, (literals.get(key) ?? new Set()).add(value));
+    });
+  }
+  return new Map(
+    [...literals].filter(
+      ([key]) => !computed.has(key) && !computedPrefixes.some((prefix) => key.startsWith(prefix)),
+    ),
+  );
+}
+
+/** A generated entry menu that first asks the legacy player's profile the package reads but never saves. */
+function withProfile(
+  menu: MigrationProgram,
+  programs: readonly MigrationProgram[],
+  accepted: ReadonlySet<AcceptedForm>,
+): MigrationProgram {
+  const profile = legacyProfilePrompt(programs, menu, accepted);
+  return profile.length === 0
+    ? menu
+    : renameConflictingIdentifiers(
+        { ...menu, statements: [...profile, ...menu.statements] },
+        new Set(),
+        false,
+      );
+}
+
+/** The fixed beginning of a computed storage key: the text before its first computed part. */
+function keyPrefix(node: AstNode): string {
+  const literal = constantString(node);
+  if (literal !== null) return literal;
+  if (node.kind === "gstring") {
+    const first: unknown = Array.isArray(node.strings) ? node.strings[0] : undefined;
+    return typeof first === "string" ? first : "";
+  }
+  if (node.kind === "binary" && node.operator === "+" && isAstNode(node.left)) {
+    const left = constantString(node.left);
+    if (left !== null && isAstNode(node.right)) return left + keyPrefix(node.right);
+    return keyPrefix(node.left);
+  }
+  return "";
 }
 
 /**

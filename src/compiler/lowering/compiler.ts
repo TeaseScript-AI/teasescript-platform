@@ -462,6 +462,13 @@ export class InstructionCompiler {
         this.#emitPacingBarrier(null, statement.span);
         this.instructions.push({ kind: "showImage", image: null, span: copySpan(statement.span) });
         return;
+      case "showCameraStatement":
+        this.#lowerShowCamera(statement.placement, false, statement.span);
+        return;
+      case "hideCameraStatement":
+        this.#emitPacingBarrier(null, statement.span);
+        this.instructions.push({ kind: "hideCamera", span: copySpan(statement.span) });
+        return;
       case "saveStatement": {
         const [value, key] = runCompileTask(
           this.#lowerOrderedExpressionsTask([statement.value, statement.key]),
@@ -558,8 +565,8 @@ export class InstructionCompiler {
       }
       case "assignmentStatement": {
         const target = this.#lowerAssignmentTarget(statement.target);
-        // The target object is already prepared once; the barrier waits when it holds a media handle.
-        if (target.plan.kind === "property" && MEDIA_ASSIGNABLE_PROPERTIES.has(target.plan.name)) {
+        // The target object is already prepared once; the barrier waits when it holds a media handle or camera view.
+        if (target.plan.kind === "property" && PACED_HANDLE_PROPERTIES.has(target.plan.name)) {
           this.#emitPacingBarrier(target.plan.object, statement.span);
         }
         if (target.plan.kind !== "identifier") {
@@ -1042,9 +1049,31 @@ export class InstructionCompiler {
         };
   }
 
+  /** `showCamera [stage]` waits for the previous message's pacing like the Stage image, then shows the camera view. */
+  #lowerShowCamera(
+    placement: "window" | "stage",
+    value: boolean,
+    span: SourceSpan,
+  ): LoweredExpression | null {
+    this.#emitPacingBarrier(null, span);
+    const destinationTemporary = value ? this.#allocateTemporary() : null;
+    this.instructions.push({
+      kind: "showCamera",
+      placement,
+      destinationTemporary,
+      span: copySpan(span),
+    });
+    return destinationTemporary === null
+      ? null
+      : {
+          plan: { kind: "temporary", temporaryId: destinationTemporary, span: copySpan(span) },
+          temporaryIds: [destinationTemporary],
+        };
+  }
+
   /**
    * Main-story media presentation waits for the previous message's pacing. A handle operation passes its already
-   * evaluated receiver; the barrier then waits only for a media handle.
+   * evaluated receiver; the barrier then waits only for a media handle or a camera view.
    */
   #emitPacingBarrier(receiver: ExpressionPlan | null, span: SourceSpan): void {
     this.instructions.push({ kind: "pacingBarrier", receiver, span: copySpan(span) });
@@ -1196,6 +1225,11 @@ export class InstructionCompiler {
     if (expression.kind === "playMediaExpression") {
       const lowered = yield* compileChild(this.#lowerMediaTask(expression, true));
       if (lowered === null) throw new TypeError("Blocking media reached value lowering.");
+      return lowered;
+    }
+    if (expression.kind === "showCameraExpression") {
+      const lowered = this.#lowerShowCamera(expression.placement, true, expression.span);
+      if (lowered === null) throw new TypeError("A camera view lowered without a handle.");
       return lowered;
     }
     if (isTakePhotoCall(expression)) {
@@ -2167,7 +2201,8 @@ export class InstructionCompiler {
         current.expression.kind === "interactionExpression" ||
         current.expression.kind === "showButtonExpression" ||
         current.expression.kind === "timerExpression" ||
-        current.expression.kind === "playMediaExpression"
+        current.expression.kind === "playMediaExpression" ||
+        current.expression.kind === "showCameraExpression"
       ) {
         this.#instructionEmissionByExpression.set(current.expression, true);
         continue;
@@ -2387,10 +2422,12 @@ function copySpan(span: SourceSpan): PlanSourceLocation {
 }
 
 const MEDIA_CONTROL_METHODS: ReadonlySet<string> = new Set(["pause", "resume", "stop"]);
-const MEDIA_ASSIGNABLE_PROPERTIES: ReadonlySet<string> = new Set([
+/** Handle properties whose write waits for the previous message's pacing: media playback and camera placement. */
+const PACED_HANDLE_PROPERTIES: ReadonlySet<string> = new Set([
   "position",
   "remaining",
   "volume",
+  "placement",
 ]);
 
 function assembleExpression(
@@ -2541,8 +2578,9 @@ function assembleExpression(
     case "showButtonExpression":
     case "timerExpression":
     case "playMediaExpression":
+    case "showCameraExpression":
       throw new TypeError(
-        "Interactions, timers, and media must be lowered before expression-plan compilation.",
+        "Interactions, timers, media, and camera views must be lowered before expression-plan compilation.",
       );
     case "typeTestExpression":
       return typeTestPlan(expression, child(expression.value));
@@ -2556,6 +2594,7 @@ function tagQueryPlan(
   return {
     kind: "tagQuery",
     catalog: expression.catalog,
+    from: expression.from?.pattern ?? null,
     select: expression.select,
     operands: [...operands],
     steps: expression.steps.map((step) =>

@@ -113,6 +113,27 @@ test("a save stores its photo durably before the value is persisted", async () =
   assert.deepEqual(persistedBefore, [1, 2]);
 });
 
+test("a store works without crypto.randomUUID, which plain-HTTP pages lack", async () => {
+  // Browsers offer crypto.randomUUID only in secure contexts; a Player served over plain HTTP on a local network must
+  // still start and keep its photos.
+  const original = Object.getOwnPropertyDescriptor(crypto, "randomUUID");
+  Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true });
+  try {
+    const repository = new FakeMediaRepository();
+    const media = new CapturedMediaStore(repository, urls, "package");
+    const photo = media.add("image", png("photo")).reference;
+    assert.match(
+      photo,
+      /^captured-media:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}:1$/u,
+    );
+    await withCapturedMedia(new FakeProvider(), media).write("photo", photo);
+    assert.equal(repository.size, 1);
+  } finally {
+    if (original) Object.defineProperty(crypto, "randomUUID", original);
+    else Reflect.deleteProperty(crypto, "randomUUID");
+  }
+});
+
 test("a save whose photo cannot be stored is not persisted and keeps the previous value", async () => {
   const repository = new FakeMediaRepository();
   const media = new CapturedMediaStore(repository, urls, "package");

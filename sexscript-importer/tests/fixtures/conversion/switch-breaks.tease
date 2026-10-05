@@ -1,3 +1,49 @@
+function sexscriptLegacyAskBooleans(message, texts, defaults) {
+  let answers = []
+  let confirmed = false
+  while not confirmed {
+    answers = []
+    say message
+    let index = 0
+    for text in texts {
+      let yes = "Yes"
+      let no = "No (preset)"
+      if index < defaults.length and defaults[index] == true {
+        yes = "Yes (preset)"
+        no = "No"
+      }
+      say text
+      answers.add((choose yes: yes, no: no) == "yes")
+      index += 1
+    }
+    confirmed = (choose confirm: "Confirm", change: "Change answers") == "confirm"
+  }
+  return answers
+}
+function sexscriptLegacyAskProfile {
+  let profileToysKeys: string[] = []
+  let profileToysNames: string[] = []
+  let profileToysDefaults: boolean[] = []
+  let profileToysIndex = 0
+  for profileToysKey in ["toys.crop", "toys.paddle"] {
+    if (load profileToysKey) == null {
+      profileToysKeys.add(profileToysKey)
+      profileToysNames.add(["crop / cane", "paddle"][profileToysIndex])
+      profileToysDefaults.add(false)
+    }
+    profileToysIndex += 1
+  }
+  if profileToysKeys.length > 0 {
+    let profileToysAnswers = sexscriptLegacyAskBooleans("What do you have in your toy chest ?", profileToysNames, profileToysDefaults)
+    profileToysIndex = 0
+    for profileToysKey in profileToysKeys {
+      save profileToysAnswers[profileToysIndex] as profileToysKey
+      profileToysIndex += 1
+    }
+  }
+}
+// NOTE SX_LEGACY_PROFILE: The legacy desktop player's intro and options asked the player's profile (toys.crop, toys.paddle) once; this package asks what is missing here and saves it under the same keys, so other packages reuse the answers.
+sexscriptLegacyAskProfile()
 let n = randomInteger(0..3)
 let days = load "x.days"
 switch n {

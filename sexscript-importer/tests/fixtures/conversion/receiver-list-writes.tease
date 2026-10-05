@@ -1,0 +1,23 @@
+// A function result and list elements are not proven to be lists; Groovy has these changes only on lists and sets.
+function pick(a, b) {
+  say "First deck?"
+  if (choose yes: "Yes", no: "No") == "yes" {
+    return a
+  } else {
+    return b
+  }
+}
+let deck = pick(["ace", "king", "queen"], ["king", "ten"])
+deck.add("jack")
+deck.remove("king")
+deck.sort()
+let drawn = deck.removeFirst()
+// NOTE SX_LEFT_SHIFT_RECEIVER line 8: Groovy << appended to a list, but this receiver is not proven to be one; on text, a number, or a map, << meant something else there (a text buffer, a bit shift, adding entries), and add() stops the script.
+deck.add("nine")
+let piles = [pick([1], [2]), [3]]
+piles[0].add(5)
+let hand = piles[1]
+// NOTE SX_SHARED_LIST_WRITE line 12: Groovy shared the list in hand with the variable, list element, or field it was assigned from, so this change affected that place too; in TeaseScript hand holds a separate copy (ADR 0014).
+hand.add(7)
+say "Drew ${drawn}, next ${deck[0]}, piles end with ${piles[0][1]} and ${hand[1]}"
+exit

@@ -1,18 +1,9 @@
-function sexscriptLegacyConcat(lists) {
-  let combined = []
-  for part in lists {
-    for item in part {
-      combined.add(item)
-    }
-  }
-  return combined
-}
 let text = "Start"
 text = "${text} and more"
 let menu = ["Back"]
 let extra = ["One", "Two"]
-menu = sexscriptLegacyConcat([["Back"], extra, ["Last"]])
-menu = sexscriptLegacyConcat([menu, extra])
+menu = ["Back"] + extra + ["Last"]
+menu += extra
 menu.add("Tail")
 let n = 1
 n += 2

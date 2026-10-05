@@ -188,6 +188,97 @@ test(
   },
 );
 
+// A legacy file test reads the package's files at conversion time: a literal path is true or false, a computed one is
+// looked up among the files below its fixed beginning, and a program never exists.
+test(
+  "tests whether a file exists against the package's files",
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
+  async () => {
+    if (!("compiler" in projectResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-files-"));
+    try {
+      const sourcePath = path.join(directory, "files.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          'def picture = new File("images/Room/bed.jpg")',
+          'if (picture.exists()) show("Bed")',
+          'if (!new File(getDataFolder() + "/tools/zap.exe").exists()) show("No zapper")',
+          "def n = 2",
+          'if (new File("images/Room/chair${n}.jpg").exists()) show("Chair")',
+          "",
+        ].join("\n"),
+      );
+      const files = [
+        "images/Room/bed.jpg",
+        "images/Room/chair2.jpg",
+        "images/Hall/door.jpg",
+        "tools/zap.exe",
+      ];
+      const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { files });
+      const source = emitTease(program!);
+      assert.match(source, /^let picture = "images\/Room\/bed\.jpg"$/mu);
+      assert.match(source, /^if true \{\n {2}say "Bed"/mu);
+      assert.match(source, /^if not false \{\n {2}say "No zapper"/mu);
+      assert.match(
+        source,
+        /\["images\/room\/chair2\.jpg"\]\.contains\(sexscriptLegacyPackagePath\("images\/Room\/chair\$\{n\}\.jpg"\)\)/u,
+      );
+      const result = projectResult.runner([{ path: "main.tease", source }], {});
+      assert.deepEqual(
+        { status: result.status, failure: result.failure },
+        { status: "halted", failure: null },
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+// The legacy player found media files ignoring letter case, around spaces, and below a repeated folder name; the
+// converted path names the file, and a MIDI file names the MP3 the package converts it to.
+test("names media files as the package holds them", { skip: parserUnavailable }, async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "sexscript-media-"));
+  try {
+    const sourcePath = path.join(directory, "media.groovy");
+    writeFileSync(
+      sourcePath,
+      [
+        'setImage("Peach/One.JPG")',
+        'setImage("peach/two.jpg ")',
+        'setImage("images/peach/three.jpg")',
+        'setImage("peach/peach/four.jpg")',
+        'playSound("music/theme.mid")',
+        'setImage("room/bed.jpg")',
+        "",
+      ].join("\n"),
+    );
+    const files = [
+      "images/peach/one.jpg",
+      "images/peach/two.jpg",
+      "images/peach/three.jpg",
+      "images/peach/four.jpg",
+      "images/room/Bed.jpg",
+      "images/room/bed.JPG",
+      "sounds/music/theme.mid",
+    ];
+    const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { files });
+    const source = emitTease(program!);
+    for (const expected of [
+      'showImage "peach/one.jpg"',
+      'showImage "peach/two.jpg"',
+      'showImage "peach/three.jpg"',
+      'showImage "peach/four.jpg"',
+      'playAudio "music/theme.mp3"',
+      'showImage "room/bed.jpg"',
+    ])
+      assert.ok(source.includes(`\n${expected}\n`), expected);
+    assert.match(source, /NOTE SX_MEDIA_PATH_CASE line 6/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 /** A fixture as the main.tease of a project, with a file that just ends for each file it transfers to. */
 function withTransferTargets(source: string): Array<{ path: string; source: string }> {
   const targets = [...source.matchAll(/^\s*goto "([^"]+)"/gmu)].map((match) => match[1]!);
@@ -373,6 +464,8 @@ test(
           "def ws = zs",
           "ws.add([1, 2])",
           'show(ws.join("|"))',
+          // A function nothing calls only notes its problems.
+          "build(5)",
           "",
         ].join("\n"),
       );
@@ -382,7 +475,7 @@ test(
       assert.match(output, /^ {2}items = sexscriptLegacyConcat\(\[items, 1\.\.=3\]\)$/mu);
       // A value that may be a list or one element is reported; a function result is a list.
       assert.match(output, /^ {2}\/\/ TODO SX_LIST_CONCATENATION line 5: /mu);
-      assert.match(output, /^ {2}items = sexscriptLegacyConcat\(\[items, extra\(\)\]\)$/mu);
+      assert.match(output, /^ {2}items \+= extra\(\)$/mu);
       // A list literal is checked element by element, as the compiler does; mixed elements need a union.
       assert.match(output, /^let weights: \(integer \| string\)\[\] = \[1, 2\]$/mu);
       // A list case holding a range keeps Groovy's membership test.
@@ -467,7 +560,13 @@ test(
   { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
   async () => {
     if (!("compiler" in projectResult)) return;
-    for (const name of ["script-chain", "single-entry", "shared-helpers", "lone-script"]) {
+    for (const name of [
+      "script-chain",
+      "single-entry",
+      "shared-helpers",
+      "lone-script",
+      "branches",
+    ]) {
       const directory = fileURLToPath(new URL(`./fixtures/packages/${name}/`, import.meta.url));
       const scripts = path.join(directory, "scripts");
       const sources = readdirSync(scripts, { recursive: true, encoding: "utf8" })

@@ -99,7 +99,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 45;
+export const RUNTIME_SNAPSHOT_VERSION = 46;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -147,12 +147,22 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "scriptStoragePersistent",
   "settledMedia",
   "nextMediaId",
+  "cameraView",
   "maxCallDepth",
   "status",
   "failure",
 ] as const;
 
 export type RuntimeStatus = "ready" | "running" | "waiting" | "halted" | "failed";
+
+/**
+ * The default camera's view: where it is shown, and whether it is shown now. It exists from the first `showCamera` on,
+ * so camera view handles stay readable after `hideCamera`; whether the Player has a camera to show is not part of it.
+ */
+export interface RuntimeCameraViewSnapshot {
+  placement: "window" | "stage";
+  shown: boolean;
+}
 
 /** A captured photo in the image catalog: its opaque reference, which only the host store resolves, and its tags. */
 export interface RuntimeCapturedImageSnapshot {
@@ -385,6 +395,8 @@ export interface RuntimeSnapshot {
   /** Finished or stopped media, retained so their handles stay readable. Active media are background actions. */
   readonly settledMedia: RuntimeMediaSnapshot[];
   nextMediaId: number;
+  /** The default camera's view, or `null` before the first `showCamera`. */
+  cameraView: RuntimeCameraViewSnapshot | null;
   readonly maxCallDepth: number;
   status: RuntimeStatus;
   failure: RuntimeFailureSnapshot | null;
@@ -567,6 +579,7 @@ export function createFreshRuntimeSnapshotWithValidatedPlan(
     scriptStoragePersistent: persistentScriptStorage,
     settledMedia: [],
     nextMediaId: 1,
+    cameraView: null,
     maxCallDepth,
     status: "ready",
     failure: null,
@@ -661,6 +674,7 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
     scriptStoragePersistent: snapshot.scriptStoragePersistent,
     settledMedia: snapshot.settledMedia.map(cloneMedia),
     nextMediaId: snapshot.nextMediaId,
+    cameraView: snapshot.cameraView === null ? null : { ...snapshot.cameraView },
     maxCallDepth: snapshot.maxCallDepth,
     status: snapshot.status,
     failure:
@@ -1188,6 +1202,7 @@ function validateCapturedRuntimeSnapshotDetails(
   validatePendingActionState(value, plan, errors);
   validateTimerState(value, plan, handleIds.timer, errors);
   validateMediaState(value, plan, handleIds.media, errors);
+  validateCameraView(value, handleIds.camera, errors);
   if (value.stageImage !== null && typeof value.stageImage !== "string") {
     errors.push("Runtime stageImage must be a string or null.");
   }
@@ -2363,6 +2378,33 @@ function validateSelfHandleBinding(
   }
 }
 
+/**
+ * The camera view is `null` or `{ placement, shown }`; a camera view handle needs the view, and a halted session shows
+ * no camera.
+ */
+function validateCameraView(
+  snapshot: Record<string, unknown>,
+  handleReferenced: boolean,
+  errors: string[],
+): void {
+  const view = snapshot.cameraView;
+  if (view === null) {
+    if (handleReferenced) errors.push("Runtime camera view handle refers to no camera view.");
+    return;
+  }
+  if (
+    !isPlainRecord(view) ||
+    !hasExactKeys(view, ["placement", "shown"]) ||
+    !isOneOf(view.placement, ["window", "stage"]) ||
+    typeof view.shown !== "boolean"
+  ) {
+    errors.push("Runtime cameraView is malformed.");
+    return;
+  }
+  if (view.shown && snapshot.status === "halted")
+    errors.push("A halted runtime session cannot show a camera view.");
+}
+
 function validateCallArgumentSupply(
   argumentsValue: unknown,
   callInstruction: Instruction | undefined,
@@ -3081,6 +3123,7 @@ function validateStartupPhase(
       !empty(frames[0].bindings) ||
       snapshot.defaultSpeaker !== null ||
       snapshot.stageImage !== null ||
+      snapshot.cameraView !== null ||
       !empty(snapshot.capturedImages) ||
       [
         snapshot.nextScopeId,
@@ -3339,7 +3382,7 @@ function validateSpeakerReferences(
   callFrames: unknown,
   speakerIds: ReadonlySet<number>,
   errors: string[],
-): { readonly timer: Set<number>; readonly media: Set<number> } {
+): { readonly timer: Set<number>; readonly media: Set<number>; readonly camera: boolean } {
   const values: unknown[] = [];
   if (Array.isArray(frames)) {
     for (const frame of frames) {
@@ -3385,7 +3428,7 @@ function validateSpeakerReferences(
     }
   }
   const referencedIds = new Set<number>();
-  const handleIds = { timer: new Set<number>(), media: new Set<number>() };
+  const handleIds = { timer: new Set<number>(), media: new Set<number>(), camera: false };
   for (const value of values) collectSpeakerReferenceIds(value, referencedIds, handleIds);
   for (const id of referencedIds) {
     if (!speakerIds.has(id)) {
@@ -3396,11 +3439,11 @@ function validateSpeakerReferences(
   return handleIds;
 }
 
-/** Collects speaker references and, in the same traversal, timer and media handle IDs. */
+/** Collects speaker references and, in the same traversal, timer and media handle IDs and camera view handles. */
 function collectSpeakerReferenceIds(
   value: unknown,
   output: Set<number>,
-  handleIds: { readonly timer: Set<number>; readonly media: Set<number> },
+  handleIds: { readonly timer: Set<number>; readonly media: Set<number>; camera: boolean },
 ): void {
   const work: unknown[] = [value];
   while (work.length > 0) {
@@ -3416,6 +3459,10 @@ function collectSpeakerReferenceIds(
     }
     if (current.kind === "mediaHandle" && nonNegativeSafeInteger(current.mediaId)) {
       handleIds.media.add(current.mediaId);
+      continue;
+    }
+    if (current.kind === "cameraView") {
+      handleIds.camera = true;
       continue;
     }
     if ((current.kind === "list" || current.kind === "set") && Array.isArray(current.items)) {

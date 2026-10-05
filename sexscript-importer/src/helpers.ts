@@ -63,8 +63,16 @@ export type HelperName =
   | "abs"
   | "array"
   | "askBooleans"
+  | "fixed"
+  | "packagePath"
+  | "sendImage"
+  | "switchButton"
+  | "switchButtonId"
+  | "switchState"
+  | "tokenize"
   | "backgroundSounds"
   | "concat"
+  | "count"
   | "indexOf"
   | "listMax"
   | "listMin"
@@ -95,6 +103,7 @@ export function helperDefinitionOrder(statement: IrStatement): number {
 /** Helper functions in a stable order, so generated files do not depend on discovery order. */
 export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] {
   const needed = new Set(names);
+  if (needed.has("switchButton")) needed.add("switchButtonId");
   if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
   if (needed.has("stopBackgroundSounds")) needed.add("backgroundSounds");
   return HELPER_ORDER.filter((name) => needed.has(name)).map((name) => HELPERS[name].build());
@@ -112,6 +121,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "random",
   "loadFirstTrue",
   "indexOf",
+  "count",
   "concat",
   "array",
   "shuffled",
@@ -124,6 +134,13 @@ const HELPER_ORDER: readonly HelperName[] = [
   "min",
   "abs",
   "askBooleans",
+  "fixed",
+  "packagePath",
+  "tokenize",
+  "sendImage",
+  "switchButtonId",
+  "switchButton",
+  "switchState",
 ];
 
 const v = (name: string): IrExpression => ({ kind: "variable", name });
@@ -190,6 +207,46 @@ const template = (...parts: Array<string | IrExpression>): IrExpression => ({
   kind: "template",
   parts: parts.map((part) => (typeof part === "string" ? { text: part } : { value: part })),
 });
+
+/**
+ * The body of a switch-state helper: ON or OFF by the command's last word (`on`, `ein`, `an`, `off`, `aus`), shown by
+ * `show`; another command changes nothing.
+ */
+function switchStateBody([show]: [(state: "ON" | "OFF") => IrStatement[]]): IrStatement[] {
+  const words = (...items: string[]): IrExpression => ({
+    kind: "list",
+    items: items.map((item) => lit(item)),
+  });
+  return [
+    letS("last", {
+      kind: "methodCall",
+      target: prop(
+        {
+          kind: "methodCall",
+          target: { kind: "methodCall", target: v("command"), name: "trim", arguments: [] },
+          name: "split",
+          arguments: [lit(" ")],
+        },
+        "last",
+      ),
+      name: "lowercase",
+      arguments: [],
+    }),
+    ifS(
+      {
+        kind: "methodCall",
+        target: words("on", "ein", "an"),
+        name: "contains",
+        arguments: [v("last")],
+      },
+      show("ON"),
+    ),
+    ifS(
+      { kind: "methodCall", target: words("off", "aus"), name: "contains", arguments: [v("last")] },
+      show("OFF"),
+    ),
+  ];
+}
 
 /** Picks the larger or smaller element; Groovy max()/min() return null for an empty list. */
 function extremum(name: string, operator: ">" | "<"): IrStatement {
@@ -356,6 +413,194 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
+  // Java %.Nf: the number rounded to `digits` decimals, written with exactly that many.
+  fixed: {
+    name: "sexscriptLegacyFixed",
+    build: () =>
+      fn(
+        "sexscriptLegacyFixed",
+        ["value", "digits", "factor"],
+        [
+          letS("scaled", {
+            kind: "call",
+            name: "round",
+            positional: [bin("*", v("value"), v("factor"))],
+            named: {},
+          }),
+          letS("sign", lit("")),
+          ifS(bin("<", v("scaled"), lit(0)), [
+            set(v("sign"), lit("-")),
+            set(v("scaled"), { kind: "unary", operator: "-", value: v("scaled") }),
+          ]),
+          letS("whole", {
+            kind: "call",
+            name: "toInteger",
+            positional: [bin("/", v("scaled"), v("factor"))],
+            named: {},
+          }),
+          ifS(bin("==", v("digits"), lit(0)), [ret(template(v("sign"), v("whole")))]),
+          letS("fraction", bin("-", v("scaled"), bin("*", v("whole"), v("factor")))),
+          ret(
+            template(v("sign"), v("whole"), ".", {
+              kind: "methodCall",
+              target: { kind: "call", name: "toString", positional: [v("fraction")], named: {} },
+              name: "padStart",
+              arguments: [v("digits"), lit("0")],
+            }),
+          ),
+        ],
+      ),
+  },
+  // Groovy tokenize(): the parts between any of the delimiter characters, without empty parts.
+  tokenize: {
+    name: "sexscriptLegacyTokenize",
+    build: () =>
+      fn(
+        "sexscriptLegacyTokenize",
+        ["text", "delimiters"],
+        [
+          letS("tokens", { kind: "list", items: [] }),
+          letS("current", lit("")),
+          forS(
+            "character",
+            { kind: "methodCall", target: v("text"), name: "split", arguments: [lit("")] },
+            [
+              ifS(
+                {
+                  kind: "methodCall",
+                  target: v("delimiters"),
+                  name: "contains",
+                  arguments: [v("character")],
+                },
+                [
+                  ifS(bin("!=", v("current"), lit("")), [add("tokens", v("current"))]),
+                  set(v("current"), lit("")),
+                ],
+                [set(v("current"), template(v("current"), v("character")))],
+              ),
+            ],
+          ),
+          ifS(bin("!=", v("current"), lit("")), [add("tokens", v("current"))]),
+          ret(v("tokens")),
+        ],
+      ),
+  },
+  // A path of the package as file tests compare it (packageFilePath in lower.ts).
+  packagePath: {
+    name: "sexscriptLegacyPackagePath",
+    build: () => {
+      const path = v("path");
+      const startsWith = (text: string): IrExpression => ({
+        kind: "methodCall",
+        target: path,
+        name: "startsWith",
+        arguments: [lit(text)],
+      });
+      const drop = (length: number): IrStatement =>
+        set(path, {
+          kind: "methodCall",
+          target: path,
+          name: "substring",
+          arguments: [lit(length)],
+        });
+      return fn(
+        "sexscriptLegacyPackagePath",
+        ["path"],
+        [
+          set(path, {
+            kind: "methodCall",
+            target: {
+              kind: "methodCall",
+              target: path,
+              name: "replace",
+              arguments: [lit("\\"), lit("/")],
+            },
+            name: "lowercase",
+            arguments: [],
+          }),
+          { kind: "while", condition: startsWith("/"), body: [drop(1)], span: null },
+          ifS(startsWith("./"), [drop(2)]),
+          ifS(startsWith("scripts/"), [drop(8)]),
+          ret(path),
+        ],
+      );
+    },
+  },
+  // The legacy online service kept a sent image and gave back a code to receive it with; the package's storage keeps
+  // the photo reference under its code instead (owner decision 2026-10-05).
+  sendImage: {
+    name: "sexscriptLegacySendImage",
+    build: () =>
+      fn(
+        "sexscriptLegacySendImage",
+        ["reference"],
+        [
+          letS(
+            "code",
+            template("image-", {
+              kind: "call",
+              name: "randomInteger",
+              positional: [range(lit(1000000000))],
+              named: {},
+            }),
+          ),
+          {
+            kind: "save",
+            key: template("sexscript.image.", v("code")),
+            value: v("reference"),
+            span: null,
+          },
+          ret(v("code")),
+        ],
+      ),
+  },
+  // Workaround for a permanent switch button: the switch state of a device command in the chat.
+  switchState: {
+    name: "sexscriptLegacySwitchState",
+    build: () =>
+      fn(
+        "sexscriptLegacySwitchState",
+        ["command"],
+        switchStateBody([
+          (state) => [{ kind: "say", value: lit(`Power switch: ${state}`), span: null }],
+        ]),
+      ),
+  },
+  // The accepted form: a permanent button that shows the switch state and replaces the previous one.
+  switchButtonId: {
+    name: "sexscriptLegacySwitchButton",
+    build: () => letS("sexscriptLegacySwitchButton", lit(null)),
+  },
+  switchButton: {
+    name: "sexscriptLegacyShowSwitch",
+    build: () =>
+      fn(
+        "sexscriptLegacyShowSwitch",
+        ["command"],
+        switchStateBody([
+          (state) => [
+            ifS(bin("!=", v("sexscriptLegacySwitchButton"), lit(null)), [
+              {
+                kind: "expression",
+                expression: {
+                  kind: "call",
+                  name: "removePermanentButton",
+                  positional: [v("sexscriptLegacySwitchButton")],
+                  named: {},
+                },
+                span: null,
+              },
+            ]),
+            {
+              kind: "permanentButton",
+              target: v("sexscriptLegacySwitchButton"),
+              label: lit(`Power: ${state}`),
+              span: null,
+            },
+          ],
+        ]),
+      ),
+  },
   loadFirstTrue: {
     name: "sexscriptLegacyLoadFirstTrue",
     build: () =>
@@ -384,6 +629,22 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             set(v("index"), lit(1), "+="),
           ]),
           ret(lit(-1)),
+        ],
+      ),
+  },
+  // Groovy count(value) on a list counts the elements equal to the value.
+  count: {
+    name: "sexscriptLegacyCount",
+    build: () =>
+      fn(
+        "sexscriptLegacyCount",
+        ["items", "value"],
+        [
+          letS("matches", lit(0)),
+          forS("item", v("items"), [
+            ifS(bin("==", v("item"), v("value")), [set(v("matches"), lit(1), "+=")]),
+          ]),
+          ret(v("matches")),
         ],
       ),
   },

@@ -1204,7 +1204,8 @@ function producedTemporaryId(instruction: Record<string, unknown>): number | nul
     instruction.kind === "interaction" ||
     instruction.kind === "capture" ||
     instruction.kind === "startTimer" ||
-    instruction.kind === "playMedia"
+    instruction.kind === "playMedia" ||
+    instruction.kind === "showCamera"
   ) {
     value = instruction.destinationTemporary;
   }
