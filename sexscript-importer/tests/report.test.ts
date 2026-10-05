@@ -293,15 +293,18 @@ test("reports recognized, lowered, and dependency-closed script stages separatel
             message: "x",
             line: 1,
             column: 1,
-            path: "main.tease",
+            path: "clean.tease",
           },
         ],
       };
     },
   });
-  // A single script is the main.tease of its project, compiled with pending-capability placeholders (none are needed
-  // here) and as generated.
-  const project = [{ path: "main.tease", source: 'say "hello"\nexit\n' }];
+  // A single script keeps its name beside a generated main.tease that goes to it, compiled with pending-capability
+  // placeholders (none are needed here) and as generated.
+  const project = [
+    { path: "clean.tease", source: 'say "hello"\nexit\n' },
+    { path: "main.tease", source: 'goto "clean.tease"\n' },
+  ];
   assert.deepEqual(compiledProjects, [project, project]);
   assert.equal(rejecting.compilerCleanScriptFileCount, 0);
   assert.equal(rejecting.compilerCleanExceptPendingScriptFileCount, 0);

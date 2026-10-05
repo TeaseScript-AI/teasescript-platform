@@ -50,13 +50,16 @@ node src/cli.ts report [--compile | --run] [--accepted[=forms]] /path/to/legacy/
 node src/cli.ts inventory /path/to/legacy/scripts > inventory.json
 ```
 
-`convert-package` writes text `.tease` files only; it never copies legacy media, JARs, or archives. The package starts
-at `main.tease` (ADR 0022): the only script in the package root becomes it, also in a package with a single script, and
-a root with several scripts gets a generated menu over them. With `--compile`, the generated files compile as one
-project, so transfers and global functions resolve across files. Functions several scripts share become `global function`s in a generated `helpers.tease`
-(#570). Package-local
-auxiliary Groovy classes (such as `Domme3Class`) are migration input: their transitively used methods are embedded as
-ordinary TeaseScript functions so the result depends on neither Groovy nor the old runtime. `report` and `inventory`
+`convert-package` writes text `.tease` files only; it never copies legacy media, JARs, or archives. The converted
+package keeps the legacy architecture (owner decision 2026-10-05): each `scripts/X.groovy` becomes `X.tease` and
+`scripts/X/sub.groovy` becomes `X/sub.tease`, and functions copied between scripts stay in each file. The package starts
+at a generated `main.tease` (ADR 0022) that asks the legacy profile and goes to the main script, the top-level script of
+`scripts/`; a package with several top-level scripts gets a menu over them, and a legacy `main.groovy` is `main.tease`
+itself. The importer's generated helpers are `global function`s in `main.tease`. The methods of a package-local helper
+class (such as `Domme3Class`) that other files call are `global function`s in the class's own file; a method that cannot
+be global is copied into each script that calls it, so the result depends on neither Groovy nor the old runtime. Mixin
+modules that a script loads at runtime stay composed into that script. With `--compile`, the generated files compile as
+one project, so transfers and global functions resolve across files. `report` and `inventory`
 accept `.groovy` files, directories, or parser JSON; inputs of one invocation form one package.
 
 `report` compiles the package as one project (`compileProject`); a file is compiler-clean when the project reports no

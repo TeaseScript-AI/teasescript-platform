@@ -142,12 +142,12 @@ async function convertPackage(
     ...(versions.length === 0 ? {} : { releases: versions }),
   });
   const programs = lowered.composed;
-  // The package starts at main.tease (ADR 0022): its entry script, or a generated menu over the scripts it lists.
+  // Each file keeps its legacy folder and name (lowerPackage paths); the package starts at main.tease (ADR 0022): a
+  // legacy main.groovy, or a generated file that goes to the main script.
   const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;
   const outputs = programs.map((program, index) => ({
     program,
     index,
-    // Transfers name paths relative to the scripts' common folder, which lowerPackage gives.
     relative:
       lowered.paths[index] ??
       (index === entry
@@ -156,9 +156,6 @@ async function convertPackage(
   }));
   if (lowered.main !== null && "menu" in lowered.main)
     outputs.push({ program: lowered.main.menu, index: -1, relative: "main.tease" });
-  // The functions the scripts share, as global functions (#570).
-  if (lowered.globals?.helpers != null)
-    outputs.push({ program: lowered.globals.helpers, index: -1, relative: "helpers.tease" });
   let errors = 0;
   let written = 0;
   const project: Array<{ path: string; source: string; outputPath: string }> = [];
@@ -166,7 +163,12 @@ async function convertPackage(
     const file = index < 0 ? null : parsed[index]!;
     // A file that does not parse produces no output but reports its parser errors.
     if (file !== null && file.root === null) errors += reportDiagnostics(program);
-    if (file !== null && (file.root?.kind !== "scriptBody" || program.module !== undefined))
+    // A helper class writes its own file where it has global functions, which gives it a path.
+    if (
+      file !== null &&
+      (program.module !== undefined ||
+        (file.root?.kind !== "scriptBody" && lowered.paths[index] === null))
+    )
       continue;
     const outputPath = path.join(outputRoot, relative);
     await mkdir(path.dirname(outputPath), { recursive: true });

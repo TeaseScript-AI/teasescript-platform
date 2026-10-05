@@ -87,8 +87,10 @@ implemented):
 | a script-level `return "name"`, the next script of the legacy chain | `goto "path.tease"`, with the path from the package root (ADR 0022); a name the package has no script for ended the legacy chain quietly, so it becomes `exit` with a note (`SX_MISSING_SCRIPT`, 8 sites) |
 | `return name` with a computed name | `goto script(name)` (#570), after `exit` when the name is null or empty (`SX_DYNAMIC_SCRIPT`, DisciplineClinic's `returnPoint`) |
 | `return null`, `return`, or the end of a script | `exit`: every file ends with a transfer or `exit` (ADR 0022 §4); parameters and return points passed through storage stay `save` and `load` |
-| the scripts the legacy player listed | one entry, `main.tease`: the only script in the package root (Domme3, DisciplineClinic, Toy), or a generated menu that goes to each script no other script chains to (the distribution, `SX_ENTRY_MENU`) |
-| a function several scripts define with the same converted body, such as the embedded `Domme3Class` methods, the importer's own helpers, and functions authors copied between scripts | one `global function` in a generated `helpers.tease` (#570); a file-level value it reads becomes a `global`: a constant table nothing changes is declared there with its value, and any other value is declared there once and assigned where each script declared its own; a same-named function with another body stays in its file as `nameLocal` |
+| the scripts the legacy player listed | a generated `main.tease` that asks the legacy profile and goes to the main script, the top-level script of `scripts/` (Domme3, DisciplineClinic); a menu that goes to each top-level script no other script chains to where there are several (`SX_ENTRY_MENU`); a legacy `main.groovy` is `main.tease` itself. Every other file keeps its legacy folder and name (owner decision 2026-10-05) |
+| a function several scripts define, as authors copied it between scripts | a function in each file, as in the legacy package (owner decision 2026-10-05) |
+| the methods of a package-local helper class, such as `Domme3Class` | `global function`s in the class's own file (`Domme3/Domme3Class.tease`), with its static fields of literal values as `global`s, where other files call them; a method that reads other state or dispatches closure values is copied into each script that calls it |
+| the importer's own generated helpers (`sexscriptLegacy*`) and the system speaker | one `global function` each in `main.tease`, with the state they share across files, such as the switch button's ID, as a `global`; the background-sound helpers stay in each file, since the legacy player stopped a script's sounds when it ended |
 | `int t = showPopup(m)` (seconds until closed) | `getTimestamp().toSeconds()` before and after `showPopup m`, in whole seconds |
 | `showButton(text, s)` used as a value (seconds until the click) | `(showButton text, timeout: s) / 1 s` (#531) |
 | `showButton(text, 0)` (the button stayed for its 10 ms safety margin; the result was 0) | `showButton text, timeout: 10 ms`, with a note, also for a timeout known before the run (`def t = 0`, `1 - 1`); a used result is `0` |
@@ -402,17 +404,17 @@ Converting the corpus's script chains to ADR 0022 surfaced:
   `test`, ...) and the importer's two background-sound helpers, whose list of sound handles stays with its file because
   the legacy player stopped each script's sounds when it ended. The distribution shares no functions, and Toy is one
   script.
-- **Friction.** Unique global names reach every file: a variant with another body must be renamed, and any file-level
-  variable of a global's name must become an assignment to it. A global's initializer may not call a function (ADR 0022
-  §6.4), so a value a script computes at its start becomes a global with an empty start value and an assignment in each
-  script. A file that only declares global functions and globals needs no `exit` (ADR 0022 §4.3), so `helpers.tease`
-  ends with its declarations. The warning for
+- **Package structure (owner decision 2026-10-05).** The measurements above used a generated `helpers.tease` that
+  merged identical copies; the converted package now keeps the legacy files instead: copies stay in each file, a helper
+  class's methods are global functions in its own file, and the importer's generated helpers are global functions in
+  `main.tease`.
+- **Friction.** Unique global names reach every file: any other name of a global gets another name in its file. A
+  global's initializer may not call a function (ADR 0022 §6.4). A file that only declares global functions and globals
+  needs no `exit` (ADR 0022 §4.3), so a helper class's file ends with its declarations. The warning for
   impossible null tests also reaches the importer's null test of an input question right after the question was set
   to text, which main's narrowing proves non-null; the importer leaves that test out too (59 of 64 such sites in
   DisciplineClinic's `Punish`, which does not reach the type pass yet; the other 5 follow the assignment in an outer
-  block). 13 otherwise
-  compiler-clean scripts use `helpers.tease`, all of them also blocked by file transfers, and DisciplineClinic's `Exit`
-  no longer compiles as generated because it calls the shared helpers.
+  block).
 - **Localized variants are chosen by language.** The legacy player looked for `name_<language>_<country>` and
   `name_<language>` before `name`. ADR 0022 selects no file by language, so the converted chains follow the English
   scripts, the distribution's 4 localized targets (`mensclothes_de`, `toys_de`, `toys_fr`, `womensclothes_de`) are not
@@ -453,8 +455,7 @@ Emily persona; the code's default owner `ancilla` is not included.
 
 ## Accepted but not implemented
 
-File transfers (`goto "file.tease"`, `goto script(...)`), `global function` and `global` in `helpers.tease` (ADR 0022,
-#570), and `takePhoto()` (#475, camera in the runtime and the Player) are native on `main` now, as are `dict` (#555),
+File transfers (`goto "file.tease"`, `goto script(...)`), `global function` and `global` (ADR 0022, #570), and `takePhoto()` (#475, camera in the runtime and the Player) are native on `main` now, as are `dict` (#555),
 date and time (#532), `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger` (#548),
 rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526),
 `load "key", default:` (#545), permanent buttons (#612), and image tags with `findImages` (#572): a legacy count of
@@ -497,7 +498,7 @@ pixel size, or an image-size query.
   file, such as a device control program, stays reported as a program a package cannot start (`SX_EXTERNAL_PROGRAM`).
   A device switch program (`"SwitchBox.exe 7 ein".execute()`, a command ending with `on`, `ein`, `an`, `off`, or
   `aus`) becomes a persistent permanent button, "Power: ON" or "Power: OFF", which replaces the previous one; the
-  button ID is a `global` in `helpers.tease` when several scripts switch (`SX_SWITCH_BUTTON`).
+  button ID is a `global` in `main.tease` (`SX_SWITCH_BUTTON`).
 - Media paths: a literal image or sound path names the file the package holds when the legacy player found it ignoring
   letter case, around spaces, or below a repeated folder name (`SX_MEDIA_PATH`); several files that match apart from
   case get a note (`SX_MEDIA_PATH_CASE`). A MIDI file becomes an MP3 rendered at conversion (fluidsynth with a General
@@ -524,7 +525,7 @@ pixel size, or an image-size query.
   returns a list as it is and wraps any other value, also null, as Groovy appended it (63 corpus sites, 26 in Toy).
 
 - Actions a browser cannot do (owner decision 2026-10-05): questions and notices that the importer adds come from a
-  global speaker `system` (title "System"), declared once in `helpers.tease` or in a lone script. Device commands kept
+  global speaker `system` (title "System"), declared once in `main.tease` or in a lone script. Device commands kept
   in variables such as `estim_start` or `lock_finish`, and `switchbox_on`, become persistent permanent buttons with the
   device's state (`Estim: RUNNING`, `Lock: LOCKED`, `Power: ON`); `openCdTrays()` shows `CD tray: OPEN` until clicked
   (`SX_DEVICE_STATE`, `SX_SWITCH_BUTTON`). `System.getProperty("user.name")`, `"user.home"`, and the player's folder are

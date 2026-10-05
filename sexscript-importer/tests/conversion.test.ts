@@ -23,7 +23,12 @@ import {
 } from "../src/compile-check.ts";
 import { emitTease } from "../src/emit-tease.ts";
 import type { IrExpression, IrStatement, MigrationProgram } from "../src/ir.ts";
-import { lowerPackage, lowerSelfContainedPackage, type PackageOptions } from "../src/package.ts";
+import {
+  lowerPackage,
+  lowerSelfContainedPackage,
+  packageOutputs,
+  type PackageOptions,
+} from "../src/package.ts";
 import { helperStatements } from "../src/helpers.ts";
 import { imageCatalog, pathTag } from "../src/image-tags.ts";
 import { pendingHostFunctions, shimPendingCapabilities } from "../src/pending.ts";
@@ -438,7 +443,7 @@ test(
       assert.equal(report.loweredScriptFileCount, 0);
       assert.deepEqual(
         report.smokeRuns.map(({ status, visited }) => ({ status, visited })),
-        [{ status: "halted", visited: ["main.tease"] }],
+        [{ status: "halted", visited: ["main.tease", "start.tease"] }],
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -838,26 +843,11 @@ test(
         sources.map((file) => parseGroovySource(path.join(scripts, file))),
       );
       const lowered = lowerPackage(files);
-      const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;
-      // Paths start at the scripts' common folder, as convert-package writes them.
-      // A helper class writes no file of its own, as in convert-package.
-      const outputs = lowered.composed.flatMap(
-        (program, index): Array<[string, MigrationProgram]> =>
-          files[index]!.root?.kind === "scriptBody"
-            ? [
-                [
-                  index === entry
-                    ? "main.tease"
-                    : (lowered.paths[index] ?? sources[index]!.replace(/\.groovy$/u, ".tease")),
-                  program,
-                ],
-              ]
-            : [],
+      // Each file keeps its legacy path from the scripts folder, beside a generated main.tease, as convert-package
+      // writes them.
+      const outputs = packageOutputs(lowered).map(
+        ({ path: file, program }): [string, MigrationProgram] => [file, program],
       );
-      if (lowered.main !== null && "menu" in lowered.main)
-        outputs.push(["main.tease", lowered.main.menu]);
-      const helpers = lowered.globals?.helpers ?? null;
-      if (helpers !== null) outputs.push(["helpers.tease", helpers]);
       const expected = readdirSync(path.join(directory, "expected"), {
         recursive: true,
         encoding: "utf8",
@@ -887,7 +877,7 @@ test(
         // An assembled unit's internal script, such as an add-on, is no entry: the package starts at the story.
         const unit = lowerPackage(files, { internalScripts: ["Story/addon.groovy"] });
         assert.ok(unit.main !== null && "menu" in unit.main);
-        assert.match(emitTease(unit.main.menu), /\ngoto "start\.tease"\n$/u);
+        assert.match(emitTease(unit.main.menu), /\ngoto "Story\/start\.tease"\n$/u);
       }
       if (name === "helper-class") {
         // The scripts call the class's static closures as functions, in both scripts.
@@ -921,21 +911,6 @@ test(
               ],
             },
           ],
-        );
-        assert.deepEqual(
-          {
-            promoted: report.globalFunctions?.promoted,
-            copiesReplaced: report.globalFunctions?.copiesReplaced,
-            globals: report.globalFunctions?.globals,
-          },
-          {
-            promoted: 3,
-            copiesReplaced: 7,
-            globals: [
-              { name: "phrases", kind: "table" },
-              { name: "mistress", kind: "reassigned" },
-            ],
-          },
         );
         continue;
       }
@@ -999,8 +974,13 @@ test(
           visited,
         })),
         [
-          // The one script in the package root is the entry, main.tease (ADR 0022).
-          { entry: "main.tease", isolated: false, status: "halted", visited: ["main.tease"] },
+          // The one script in the package root is the main script, which main.tease goes to (ADR 0022).
+          {
+            entry: "main.tease",
+            isolated: false,
+            status: "halted",
+            visited: ["main.tease", "helper.tease"],
+          },
           {
             entry: "sub/start.tease",
             isolated: true,
@@ -1205,16 +1185,9 @@ test(
     );
     const convert = (releases: string[][], compiles: boolean): Map<string, string> => {
       const lowered = lowerPackage(files, { releases });
-      const outputs = lowered.composed.flatMap(
-        (program, index): Array<[string, MigrationProgram]> =>
-          program.module === undefined
-            ? [[lowered.paths[index] ?? sources[index]!.replace(/\.groovy$/u, ".tease"), program]]
-            : [],
+      const outputs = packageOutputs(lowered).map(
+        ({ path: file, program }): [string, MigrationProgram] => [file, program],
       );
-      if (lowered.main !== null && "menu" in lowered.main)
-        outputs.push(["main.tease", lowered.main.menu]);
-      const helpers = lowered.globals?.helpers ?? null;
-      if (helpers !== null) outputs.push(["helpers.tease", helpers]);
       const shims = outputs.map(([file, program]) => ({
         path: file,
         shim: shimPendingCapabilities(program),

@@ -3,9 +3,9 @@ say "Which script do you want to start?"
 let picked = choose background: "background", sound: "sound"
 switch picked {
   case "background" {
-    goto "background.tease"
+    goto "System/background.tease"
   }
   default {
-    goto "sound.tease"
+    goto "System/sound.tease"
   }
 }

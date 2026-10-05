@@ -1,2 +1,2 @@
 say "The middle part."
-goto "end.tease"
+goto "Story/end.tease"

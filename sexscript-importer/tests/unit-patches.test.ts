@@ -109,7 +109,7 @@ test(
     try {
       await writePatches(work, [SOURCE_PATCH]);
       converted(await convertUnit(options));
-      const main = path.join(options.outputRoot, "Walk/main.tease");
+      const main = path.join(options.outputRoot, "Walk/start.tease");
       const generated = await readFile(main, "utf8");
       assert.match(generated, /say "Hello", instant\nwait 1\nsay "Bye"\nexit/u);
 
@@ -117,7 +117,7 @@ test(
         id: "farewell",
         layer: "output",
         reason: "The ending says goodbye.",
-        file: "main.tease",
+        file: "start.tease",
         baseHash: sha256(generated),
         edits: [
           {
@@ -160,7 +160,10 @@ test(
       assert.ok(typeof written === "object" && written !== null && "finalPackage" in written);
       assert.equal("migrationCleanFileCount" in written && written.migrationCleanFileCount, 1);
       assert.deepEqual(written.finalPackage, {
-        files: [{ path: "main.tease", sha256: sha256(final) }],
+        files: [
+          { path: "main.tease", sha256: sha256('goto "start.tease"\n') },
+          { path: "start.tease", sha256: sha256(final) },
+        ],
         imageCount: 1,
         problems: [],
         compiles: true,
@@ -207,8 +210,8 @@ test(
           id: "farewell",
           layer: "output",
           reason: "The ending says goodbye.",
-          file: "main.tease",
-          baseHash: sha256("an older main.tease"),
+          file: "start.tease",
+          baseHash: sha256("an older start.tease"),
           edits: [{ find: 'say "Bye"', replace: 'say "Goodbye"', count: 1 }],
         },
       ]);
@@ -259,8 +262,8 @@ test(
           id: "farewell",
           layer: "output",
           reason: "The ending says goodbye.",
-          file: "main.tease",
-          baseHash: sha256(await readFile(path.join(published, "main.tease"), "utf8")),
+          file: "start.tease",
+          baseHash: sha256(await readFile(path.join(published, "start.tease"), "utf8")),
           edits: [{ find: 'say "Bye"', replace: 'say "Goodbye"', count: 2 }],
         },
       ]);
@@ -298,7 +301,7 @@ test("patch manifests are checked before anything is applied", async () => {
       id: "note",
       layer: "output",
       reason: "r",
-      file: "main.tease",
+      file: "start.tease",
       baseHash: sha256(""),
     };
     await rejected(

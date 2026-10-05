@@ -3,9 +3,9 @@ say "Which script do you want to start?"
 let picked = choose addon: "addon", start: "start"
 switch picked {
   case "addon" {
-    goto "addon.tease"
+    goto "Story/addon.tease"
   }
   default {
-    goto "start.tease"
+    goto "Story/start.tease"
   }
 }

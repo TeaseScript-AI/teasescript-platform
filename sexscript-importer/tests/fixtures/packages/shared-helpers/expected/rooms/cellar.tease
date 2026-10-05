@@ -1,6 +1,6 @@
 // A script that does not use the shared greeting keeps its own mistress, a list of names and levels, apart from the
 // global the greeting reads.
-let mistressValue: (string | integer)[][] = []
-mistressValue = [["Vera", 2]]
-say "The cellar belongs to ${mistressValue[0][0]}"
+let mistress: (string | integer)[][] = []
+mistress = [["Vera", 2]]
+say "The cellar belongs to ${mistress[0][0]}"
 exit

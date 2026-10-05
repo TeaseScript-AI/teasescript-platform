@@ -1,6 +1,15 @@
 // Each script repeats the same table, reads the mistress from storage, and defines the same helpers.
-// mistress is a global of helpers.tease; this script starts it with its own value.
-mistress = load "mistress"
+let phrases = ["Kneel.", "Wait."]
+let mistress = load "mistress"
+function image {
+  showImage "room.jpg"
+}
+function taunt {
+  say phrases.random
+}
+function greet {
+  say "Welcome to ${mistress}'s house."
+}
 function enter {
   image()
   say "Come in."

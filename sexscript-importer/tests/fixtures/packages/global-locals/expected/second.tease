@@ -1,5 +1,11 @@
-// lastTime is a global of helpers.tease; this script starts it with its own value.
-lastTime = getTimestamp().toSeconds()
+let lastTime = getTimestamp().toSeconds()
+function elapsed {
+  return getTimestamp().toSeconds() - lastTime
+}
+function remember {
+  let lastTimeValue = getTimestamp().toSeconds()
+  save lastTimeValue as "demo.lastTime"
+}
 remember()
 say "Elapsed ${elapsed()}"
 exit
