@@ -1,6 +1,6 @@
 --- a/scripts/toy__sha256_0d24d6c78bca.groovy
 +++ b/scripts/toy__sha256_0d24d6c78bca.groovy
-@@ -420,9 +420,11 @@
+@@ -425,9 +425,11 @@
  		];
  	};
  	final executeTrigger = { String triggerName, arg = null ->
@@ -17,7 +17,7 @@
  	// Session
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -417,9 +417,11 @@
+@@ -422,9 +422,11 @@
  		];
  	};
  	final executeTrigger = { String triggerName, arg = null ->
@@ -34,7 +34,7 @@
  	// Session
 --- a/scripts/toy__sha256_bf0bc1679772.groovy
 +++ b/scripts/toy__sha256_bf0bc1679772.groovy
-@@ -294,9 +294,11 @@
+@@ -299,9 +299,11 @@
  		];
  	};
  	final executeTrigger = { String triggerName, arg = null ->

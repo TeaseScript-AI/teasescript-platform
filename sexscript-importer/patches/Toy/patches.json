@@ -25,7 +25,7 @@
       "id": "events-maps",
       "layer": "source",
       "category": "b",
-      "reason": "The scheduled events were Event and NamedEvent class instances, loaded with loadMap and collectEntries and found with a map each() loop, none of which converts, so no event was ever found and the main loop restarted the script forever. Keep each event as the plain map [time, func, arg] that was already saved, load it with load(), add it with put(), and find the next one in a loop over the keys, in the same order and with the same tie rule; the null checks of the result are written out as e != null.",
+      "reason": "The scheduled events were Event and NamedEvent class instances, loaded with loadMap and collectEntries and found with a map each() loop, none of which converts, so no event was ever found and the main loop restarted the script forever. Keep each event as the plain map [time, func, arg] that was already saved, load it with load() into a new map, add it with put(), and find the next one in a loop over the keys, in the same order and with the same tie rule; the null checks of the result are written out as e != null.",
       "diff": "events-maps.diff"
     },
     {
@@ -188,6 +188,13 @@
       "category": "b",
       "reason": "The menus pass opts[opt].arg and reqs[req].arg to the chosen action, but only the \"May I...\" record has an arg; Groovy read the missing key as null, while a TeaseScript record has fixed properties, so choosing any other entry stopped the script. Give the option and request records arg: null, the value Groovy read.",
       "diff": "menu-record-args.diff"
+    },
+    {
+      "id": "training-last-play",
+      "layer": "source",
+      "category": "b",
+      "reason": "requestTraining compared the last play time with < while it may be missing; Groovy ordered null below every number, but TeaseScript stops at an ordering of null, and the converter guards only direct storage loads. Read it with the default 0, which compares the same way against the current time.",
+      "diff": "training-last-play.diff"
     }
   ]
 }

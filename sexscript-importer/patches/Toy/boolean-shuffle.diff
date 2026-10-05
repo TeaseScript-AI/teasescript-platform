@@ -1,6 +1,6 @@
 --- a/scripts/toy__sha256_0d24d6c78bca.groovy
 +++ b/scripts/toy__sha256_0d24d6c78bca.groovy
-@@ -390,7 +390,7 @@
+@@ -395,7 +395,7 @@
  	final getBooleanG = { msg, yes=null, no=null, shuffle=false ->
  		def yesText = yes?:gagText("Yes, ${dommeTitle()}", "yes");
  		def noText = no?:gagText("No, ${dommeTitle()}", "no");
@@ -11,7 +11,7 @@
  			speak(compose([["What was that?", "What?", "What did you say?", "Huh?", "Speak clearly!"]]));
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -387,7 +387,7 @@
+@@ -392,7 +392,7 @@
  	final getBooleanG = { msg, yes=null, no=null, shuffle=false ->
  		def yesText = yes?:gagText("Yes, ${dommeTitle()}", "yes");
  		def noText = no?:gagText("No, ${dommeTitle()}", "no");

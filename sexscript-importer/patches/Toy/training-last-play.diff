@@ -1,0 +1,11 @@
+--- a/scripts/toy/training.groovy
++++ b/scripts/toy/training.groovy
+@@ -29,7 +29,7 @@
+ 			executeTrigger("talkEnded");
+ 			showLounge(true);
+ 		}
+-		else if (getProp("lastPlay", loadI) < getTime()-(10+getRandomSession(11))*60) {
++		else if (getProp("lastPlay", loadI, 0) < getTime()-(10+getRandomSession(11))*60) {
+ 			if (getProp("${TRAINING}.last", loadI) == getDayNum()) {
+ 				present([DRESSED,nTEASE], [["Again?", "Really?", "Once more?"], ["I already trained you today!", "Can't get enough training?"]]);
+ 				adjustPunish(10);

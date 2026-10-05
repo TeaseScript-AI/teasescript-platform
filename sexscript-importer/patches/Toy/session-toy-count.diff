@@ -1,6 +1,6 @@
 --- a/scripts/toy__sha256_0d24d6c78bca.groovy
 +++ b/scripts/toy__sha256_0d24d6c78bca.groovy
-@@ -301,7 +301,7 @@
+@@ -306,7 +306,7 @@
  	}
  	
  	final hasSessionToy = { String name ->
@@ -11,7 +11,7 @@
  
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -298,7 +298,7 @@
+@@ -303,7 +303,7 @@
  	}
  	
  	final hasSessionToy = { String name ->
