@@ -8931,13 +8931,14 @@ function truthiness(
       ),
     };
   if (isDictionary(node, context)) {
-    // A dict is false when it is empty, as a Groovy map was.
-    return {
+    // A dict is false when it is empty, as a Groovy map was, and also when it may be null, as a missing stored map.
+    const filled: IrExpression = {
       kind: "binary",
       operator: ">",
       left: { kind: "property", target: value, name: "length", dict: true },
       right: { kind: "literal", value: 0 },
     };
+    return repeatable && (type & NULL) !== 0 ? and(notNull, filled) : filled;
   }
   if ((type & OBJECT) !== 0 && onlyOf(type, OBJECT | NULL)) {
     // Groovy treats an empty map as false; objects compare structurally (#517), so `{}` is the empty map.
