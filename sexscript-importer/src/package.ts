@@ -81,6 +81,13 @@ export interface PackageOptions {
    */
   internalScripts?: readonly string[];
   /**
+   * Releases of the package that a corpus merge put side by side, each the files of one release by their paths from
+   * the legacy scripts folder, such as an older version of a script with its own module versions
+   * (`toy__sha256_<hash>.groovy` with `toy/misc__sha256_<hash>.groovy`): a file of a release loads only that release's
+   * modules, and any other file only the modules that are no other version (moduleVisibility).
+   */
+  releases?: ReadonlyArray<readonly string[]>;
+  /**
    * A lone file converted on its own, without a package around it: it keeps its name, and a transfer names the
    * converted file of any legacy script name. Otherwise a package's only script becomes its main.tease.
    */
@@ -483,7 +490,9 @@ export function lowerPackage(
   // Questions inside short circuits are asked at their own moment (withGuardedInputs).
   const files = parsedFiles.map(withGuardedInputs);
   const helperRegistry = buildHelperRegistry(files);
-  const mixinModules = files.flatMap((file) => describeMixinModule(file) ?? []);
+  const visible = moduleVisibility(files, options.releases ?? []);
+  const moduleInfos = files.map((file) => describeMixinModule(file));
+  const mixinModules = moduleInfos.flatMap((info) => info ?? []);
   const stableNames = packageStableNames(files);
   const storageLiterals = packageStorageLiterals(files);
   const copiedImages = new Set(
@@ -497,14 +506,19 @@ export function lowerPackage(
     }),
   );
   // Function names and object field types are shared only by a script and the mixin modules it loads.
-  const groups = compositionGroups(files);
+  const groups = compositionGroups(files, visible);
   const stopsBackgroundSounds = packageStopsBackgroundSounds(files);
   const resultUses = packageResultUses(files);
-  const directoryFiles = new Map<string, string[]>();
-  for (const file of files) {
-    const directory = file.sourceName.split(/[\\/]/u).at(-2) ?? "";
-    directoryFiles.set(directory, [...(directoryFiles.get(directory) ?? []), file.sourceName]);
-  }
+  // The files of each folder, as each file sees them (moduleVisibility).
+  const directoryFiles = files.map((_, index) => {
+    const listing = new Map<string, string[]>();
+    files.forEach((file, other) => {
+      if (!visible(index, other)) return;
+      const directory = file.sourceName.split(/[\\/]/u).at(-2) ?? "";
+      listing.set(directory, [...(listing.get(directory) ?? []), file.sourceName]);
+    });
+    return listing;
+  });
   // Map uses are shared within a composition group, like function names and field types.
   const scripts = packageScripts(files, options.standalone === true);
   const functionResults = files.map((_, index) => packageFunctionResults(groups[index]!));
@@ -518,7 +532,9 @@ export function lowerPackage(
       mapUses: mapUses[index]!,
       functionResults: functionResults[index]!,
       helperRegistry,
-      mixinModules,
+      mixinModules: moduleInfos.flatMap((info, other) =>
+        info !== null && visible(index, other) ? [info] : [],
+      ),
       packageFunctions: packageFunctionNames(groups[index]!),
       stableNames,
       storageLiterals,
@@ -526,7 +542,7 @@ export function lowerPackage(
       globalTypes: packageGlobalTypes(groups[index]!),
       stopsBackgroundSounds,
       resultUses,
-      directoryFiles,
+      directoryFiles: directoryFiles[index]!,
       ...(scripts === null ? {} : { scriptPaths: scripts.paths }),
       renameIdentifiers: false,
       ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
@@ -539,7 +555,6 @@ export function lowerPackage(
     (_, index) => files[index]?.root?.kind === "compilationUnit",
   );
   const functionCatalog = buildFunctionCatalog(helperPrograms);
-  const modulePrograms = lowered.filter((program) => program.module !== undefined);
 
   // What a function nothing references cannot convert becomes a note, in the file and in the composed script.
   const uncalled: MigrationDiagnostic[][] = files.map(() => []);
@@ -547,7 +562,13 @@ export function lowerPackage(
   const composed = lowered.map((program, index) => {
     if (files[index]?.root?.kind !== "scriptBody" || program.module !== undefined) return program;
     const script = withLaunchMarkers(
-      composeProgram(withLoadedModules(program, modulePrograms), functionCatalog),
+      composeProgram(
+        withLoadedModules(
+          program,
+          lowered.filter((module, other) => module.module !== undefined && visible(index, other)),
+        ),
+        functionCatalog,
+      ),
       launchKey(files[index]!.sourceName),
       texts,
     );
@@ -783,7 +804,46 @@ function keyPrefix(node: AstNode): string {
  * already taken are renamed inside their module first.
  */
 /** For each file, the files whose names it shares: a script with the modules it loads, and those modules. */
-function compositionGroups(files: readonly ParsedGroovyFile[]): ParsedGroovyFile[][] {
+/**
+ * Which files a file sees as modules (PackageOptions.releases): a file of a release sees the files of that release and
+ * the files of no release; every file skips the files of no release that are another version of a file the folder
+ * holds (`name__sha256_<hash>`).
+ */
+function moduleVisibility(
+  files: readonly ParsedGroovyFile[],
+  releases: ReadonlyArray<readonly string[]>,
+): (viewer: number, other: number) => boolean {
+  const path = (file: ParsedGroovyFile): string =>
+    file.sourceName.replaceAll("\\", "/").toLowerCase();
+  const sets = releases.map(
+    (paths) =>
+      new Set(
+        files.flatMap((file, index) =>
+          paths.some((item) => path(file).endsWith(`/${item.replaceAll("\\", "/").toLowerCase()}`))
+            ? [index]
+            : [],
+        ),
+      ),
+  );
+  const names = new Set(files.map(path));
+  const otherVersion = files.map((file) => {
+    const base = path(file).replace(/__sha256_[0-9a-f]+(?=\.groovy$)/u, "");
+    return base !== path(file) && names.has(base);
+  });
+  return (viewer, other) => {
+    if (viewer === other) return true;
+    if (sets.some((set) => set.has(viewer) && set.has(other))) return true;
+    return (
+      !otherVersion[other] &&
+      (!sets.some((set) => set.has(viewer)) || !sets.some((set) => set.has(other)))
+    );
+  };
+}
+
+function compositionGroups(
+  files: readonly ParsedGroovyFile[],
+  visible: (viewer: number, other: number) => boolean,
+): ParsedGroovyFile[][] {
   const moduleDirectory = files.map((file) => describeMixinModule(file)?.directory ?? null);
   const loads = files.map((file) => new Set(loadedModuleDirectories(file)));
   return files.map((file, index) => {
@@ -793,6 +853,7 @@ function compositionGroups(files: readonly ParsedGroovyFile[]): ParsedGroovyFile
     if (directories.size === 0) return [file];
     return files.filter((_, other) => {
       const directory = moduleDirectory[other];
+      if (!visible(index, other)) return false;
       return (
         other === index ||
         (directory !== null && directory !== undefined && directories.has(directory)) ||

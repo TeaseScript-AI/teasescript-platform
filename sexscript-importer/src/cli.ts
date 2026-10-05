@@ -67,6 +67,8 @@ if (command === "inventory") {
     options.readFile = packageFileReader(dataRoot);
     const internal = await internalScripts(args[0]!);
     if (internal !== null) options.internalScripts = internal;
+    const versions = await releases(args[0]!);
+    if (versions.length > 0) options.releases = versions;
   }
   if (finalPackageDir !== null) options.finalPackage = await finalPackage(finalPackageDir);
   const report = analyzeFeasibility(files, options);
@@ -130,12 +132,14 @@ async function convertPackage(
   const media = await packageMedia(path.join(dataRoot, "images"));
   const files = await packageFiles(dataRoot);
   const internal = await internalScripts(sourceRoot);
+  const versions = await releases(sourceRoot);
   const lowered = lowerPackage(parsed, {
     accepted,
     media,
     files,
     readFile: packageFileReader(dataRoot),
     ...(internal === null ? {} : { internalScripts: internal }),
+    ...(versions.length === 0 ? {} : { releases: versions }),
   });
   const programs = lowered.composed;
   // The package starts at main.tease (ADR 0022): its entry script, or a generated menu over the scripts it lists.
@@ -254,6 +258,27 @@ async function internalScripts(scriptsRoot: string): Promise<string[] | null> {
   )
     fail(`${path.join(scriptsRoot, "..", "unit.json")} needs an "internalScripts" list of paths.`);
   return unit.internalScripts;
+}
+
+/**
+ * The releases that a corpus merge put side by side in a unit, from its `unit.json` (`releases`, lists of paths from
+ * the scripts folder, PackageOptions.releases); empty without them.
+ */
+async function releases(scriptsRoot: string): Promise<string[][]> {
+  const text = await readFile(path.join(scriptsRoot, "..", "unit.json"), "utf8").catch(() => null);
+  if (text === null) return [];
+  const unit: unknown = JSON.parse(text);
+  if (typeof unit !== "object" || unit === null || !("releases" in unit)) return [];
+  const list = unit.releases;
+  if (
+    !Array.isArray(list) ||
+    !list.every(
+      (release): release is string[] =>
+        Array.isArray(release) && release.every((item): item is string => typeof item === "string"),
+    )
+  )
+    fail(`${path.join(scriptsRoot, "..", "unit.json")} needs "releases" as lists of paths.`);
+  return list;
 }
 
 /** Every file below the legacy data folder, relative to it with forward slashes. */

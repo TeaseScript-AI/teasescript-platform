@@ -7362,7 +7362,7 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
         if (value === null) return null;
         items.push(value);
       }
-      return { kind: "list", items };
+      return { kind: "list", items: withAllRecordFields(items) };
     }
     case "map":
       return lowerMapExpression(node, context);
@@ -9238,6 +9238,37 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
     );
   }
   return { kind: "property", target, name: property };
+}
+
+/**
+ * The records of a list literal, each with every field that another record of the list has: Groovy read a key that a
+ * map left out as null, such as a `notifflag` that only some permissions set, so a record gets each field it leaves
+ * out as null. Other lists are returned as they are.
+ */
+function withAllRecordFields(items: IrExpression[]): IrExpression[] {
+  const records = items.flatMap((item) =>
+    item.kind === "object" &&
+    item.dict !== true &&
+    item.properties.every((field) => field.key === undefined)
+      ? [item]
+      : [],
+  );
+  if (records.length < 2 || records.length !== items.length) return items;
+  const names = [
+    ...new Set(records.flatMap((record) => record.properties.map((field) => field.name))),
+  ];
+  return records.map((record) => {
+    const missing = names.filter((name) => !record.properties.some((field) => field.name === name));
+    return missing.length === 0
+      ? record
+      : {
+          ...record,
+          properties: [
+            ...record.properties,
+            ...missing.map((name) => ({ name, value: { kind: "literal" as const, value: null } })),
+          ],
+        };
+  });
 }
 
 /**
