@@ -37,4 +37,11 @@ function reveal(message) {
   }
 }
 reveal("You may **not** touch")
+// A variable that starts as text joins every later part as text, also where a part's type is not proven.
+let dialog = ""
+let counts = [3, 5]
+// NOTE SX_LOAD_KEEPS_VALUE line 22: Groovy stored null in 'dialog' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+dialog = load "training.greeting", default: dialog
+dialog = "${dialog}${counts[1]} swats\n"
+say dialog
 exit

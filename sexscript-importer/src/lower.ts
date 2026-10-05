@@ -8946,7 +8946,11 @@ function concatenationParts(node: AstNode, context: LowerContext): TemplatePart[
   if (node.kind === "binary" && node.operator === "+") {
     const leftNode = asNode(node.left);
     const rightNode = asNode(node.right);
-    if (leftNode !== null && rightNode !== null && onlyOf(inferType(node, context.types), STRING)) {
+    if (
+      leftNode !== null &&
+      rightNode !== null &&
+      (onlyOf(inferType(node, context.types), STRING) || startsWithText(node, context))
+    ) {
       const left = concatenationParts(leftNode, context);
       const right = concatenationParts(rightNode, context);
       return left === null || right === null ? null : [...left, ...right];
@@ -8959,6 +8963,25 @@ function concatenationParts(node: AstNode, context: LowerContext): TemplatePart[
   if (value.kind === "literal" && typeof value.value === "string") return [{ text: value.value }];
   if (value.kind === "template") return value.parts;
   return [{ value }];
+}
+
+/**
+ * Whether a `+` chain inside a text join starts with a variable that holds text: one the script starts with text, as
+ * `def dialog = ""`, and never gives a number, so Groovy joined every later part to it as text.
+ */
+function startsWithText(node: AstNode, context: LowerContext): boolean {
+  let first = node;
+  while (first.kind === "binary" && first.operator === "+" && asNode(first.left) !== null)
+    first = asNode(first.left)!;
+  const key = first.kind === "variable" ? bindingKey(first, context.bindings) : null;
+  const values = key === null ? undefined : context.assignedValues.get(key);
+  if (values === undefined || values.length === 0) return false;
+  const text = (value: AstNode): boolean =>
+    value.kind === "gstring" || (value.kind === "constant" && typeof value.value === "string");
+  const number = (value: AstNode): boolean =>
+    (value.kind === "constant" && typeof value.value === "number") ||
+    onlyOf(inferType(value, context.types), NUMBER);
+  return values.some(text) && !values.some(number);
 }
 
 /**

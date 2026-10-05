@@ -16,3 +16,9 @@ def reveal = { message ->
   }
 }
 reveal("You may <b>not</b> touch")
+// A variable that starts as text joins every later part as text, also where a part's type is not proven.
+def dialog = ""
+def counts = [3, 5]
+dialog = loadString("training.greeting")
+dialog = dialog + counts[1] + " swats" + "\n"
+show(dialog)
