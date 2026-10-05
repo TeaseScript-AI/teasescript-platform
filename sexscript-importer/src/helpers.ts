@@ -85,6 +85,7 @@ export type HelperName =
   | "deviceId"
   | "maskUrl"
   | "textLines"
+  | "endsWithDigits"
   | "askText"
   | "compare"
   | "replaceChars"
@@ -187,6 +188,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "deviceId",
   "maskUrl",
   "textLines",
+  "endsWithDigits",
   "askText",
   "compare",
   "replaceChars",
@@ -950,6 +952,46 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             },
           ]),
           ret(v("lines")),
+        ],
+      );
+    },
+  },
+  // Whether a text ends with digits and then `tail`, as a whole match of `.*\d+tail` (regex-subset parseTailPattern).
+  endsWithDigits: {
+    name: "sexscriptLegacyEndsWithDigits",
+    build: () => {
+      const method = (
+        target: IrExpression,
+        name: string,
+        ...args: IrExpression[]
+      ): IrExpression => ({ kind: "methodCall", target, name, arguments: args });
+      return fn(
+        "sexscriptLegacyEndsWithDigits",
+        ["text", "tail"],
+        [
+          ifS({ kind: "unary", operator: "not", value: method(v("text"), "endsWith", v("tail")) }, [
+            ret(lit(false)),
+          ]),
+          letS(
+            "head",
+            method(
+              v("text"),
+              "substring",
+              lit(0),
+              bin("-", prop(v("text"), "length"), prop(v("tail"), "length")),
+            ),
+          ),
+          ret(
+            bin(
+              "and",
+              bin(">", prop(v("head"), "length"), lit(0)),
+              method(
+                lit("0123456789"),
+                "contains",
+                method(v("head"), "substring", bin("-", prop(v("head"), "length"), lit(1))),
+              ),
+            ),
+          ),
         ],
       );
     },

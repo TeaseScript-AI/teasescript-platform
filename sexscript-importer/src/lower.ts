@@ -47,7 +47,7 @@ import {
 } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
 import { legacyHtmlToMarkup, type TextPart } from "./markup.ts";
-import { javaReplacementText, parseRegexSubset } from "./regex-subset.ts";
+import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
@@ -230,6 +230,8 @@ interface LowerContext {
   integerVariables: ReadonlySet<string>;
   /** Bindings declared with the Groovy type String, which converted every value stored in them to text. */
   textVariables: ReadonlySet<string>;
+  /** Loop variables that hold the package path of an image of a listed folder (imageFolderWalk). */
+  imagePaths: Set<string>;
   /** Initializers of variables assigned once, by their declaration (staticNumber). */
   constantInitializers: ReadonlyMap<string, AstNode>;
   /** Dict keys known present where the lowering is (presenceFact), from surrounding tests. */
@@ -981,6 +983,7 @@ export function lowerParsedFile(
     bindings: new Map(),
     integerVariables: new Set(),
     textVariables: new Set(),
+    imagePaths: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -1743,6 +1746,7 @@ function lowerHelperMethod(
     bindings: new Map(),
     integerVariables: new Set(),
     textVariables: new Set(),
+    imagePaths: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -4547,6 +4551,17 @@ function lowerCallStatement(
       ),
       { kind: "exit", span },
     ];
+  }
+  // Going through the files of an images folder goes through the folder's images (imageFolderWalk).
+  if (
+    call?.name === "eachFile" &&
+    receiver !== null &&
+    context.media !== null &&
+    call.arguments.length === 1 &&
+    call.arguments[0]!.kind === "closure"
+  ) {
+    const walk = imageFolderWalk(node, receiver, call.arguments[0]!, span, context);
+    if (walk !== undefined) return walk;
   }
   // Looking through the player's pictures on the computer becomes asking for a photo (owner decision).
   if (
@@ -7394,6 +7409,10 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   const java = javaBinary(node, javaHost(context));
   if (java !== undefined) return java;
   const operator = text(node.operator);
+  if (operator === "==~") {
+    const matched = tailMatch(node, context);
+    if (matched !== undefined) return matched;
+  }
   if (operator === "==" || operator === "!=") {
     // A listing of a missing folder was null; the images of a folder (imageFolderListing) are an empty list then.
     const left = asNode(node.left);
@@ -8225,7 +8244,8 @@ function truthiness(
   node: AstNode,
   context: LowerContext,
 ): IrExpression | null {
-  if (onlyOf(type, BOOLEAN)) return value;
+  if (onlyOf(type, BOOLEAN) || (value.kind === "literal" && typeof value.value === "boolean"))
+    return value;
   const compare = (operator: string, right: IrExpression): IrExpression => ({
     kind: "binary",
     operator,
@@ -8734,6 +8754,8 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
   }
   const folder = playerFolder(targetNode, property, node, context);
   if (folder !== undefined) return folder;
+  const image = listedImageMember(targetNode, property, context);
+  if (image !== undefined) return image;
   if (property === "text") {
     const request = onlineRequest(targetNode, node, context);
     if (request !== undefined) return request;
@@ -8836,6 +8858,10 @@ function lowerObjectMethodCallExpression(
       { kind: "literal", value: key },
       { kind: "literal", value: question },
     ]);
+  }
+  if (targetNode !== null && argumentsNodes.length === 0) {
+    const image = listedImageMember(targetNode, name, context);
+    if (image !== undefined) return image;
   }
   if (
     (name === "getAbsolutePath" || name === "getCanonicalPath") &&
@@ -13362,6 +13388,96 @@ export function maskedUrl(url: string): string {
       : pair;
   });
   return `${base}?${pairs.join("&")}`;
+}
+
+/**
+ * `text ==~ /.*\d+\.jpg/`, Groovy's whole match of a pattern that a text matches by its end (parseTailPattern), as
+ * text operations; undefined for another pattern.
+ */
+function tailMatch(node: AstNode, context: LowerContext): IrExpression | null | undefined {
+  const leftNode = asNode(node.left);
+  const pattern = constantString(node.right);
+  const tail = pattern === null ? null : parseTailPattern(pattern);
+  // Groovy matched the text of the value; a proven number or list stays manual.
+  const type = leftNode === null ? 0 : inferType(leftNode, context.types);
+  if (leftNode === null || tail === null || (type & STRING) === 0) return undefined;
+  const value = lowerExpression(leftNode, context);
+  if (value === null) return null;
+  const text: IrExpression = tail.insensitive
+    ? {
+        kind: "methodCall",
+        target: templateOrLiteral([{ value }]),
+        name: "lowercase",
+        arguments: [],
+      }
+    : templateOrLiteral([{ value }]);
+  const ending: IrExpression = {
+    kind: "literal",
+    value: tail.insensitive ? tail.tail.toLowerCase() : tail.tail,
+  };
+  return tail.digits
+    ? useHelper(context, "endsWithDigits", [text, ending])
+    : { kind: "methodCall", target: text, name: "endsWith", arguments: [ending] };
+}
+
+/**
+ * `new File(imagesFolder).eachFile { file -> ... }`: a loop over the package paths of the folder's images, found by the
+ * tag of the folder's path (imageFolderListing); the loop variable answers what the closure asked of each File
+ * (listedImageMember). The legacy walk also visited subfolders and other files. Undefined for another receiver.
+ */
+function imageFolderWalk(
+  node: AstNode,
+  receiver: AstNode,
+  closure: AstNode,
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] | undefined {
+  const body = asNode(closure.body);
+  const parameters = groovyParameters(closure.parameters);
+  if (body?.kind !== "block" || parameters === null || parameters.length > 1) return undefined;
+  if (imageFolderPaths(receiver, context) === null) return undefined;
+  const returns = closureReturns(body);
+  if (returns.some(({ insideLoop, value }) => insideLoop || value !== null)) return undefined;
+  const images = imageFolderListing(receiver, node, context);
+  if (images === undefined || images === null) return images === null ? [] : undefined;
+  const variable = closure.parameterSpecified === true ? parameters[0]!.name : "it";
+  const known = context.imagePaths.has(variable);
+  context.imagePaths.add(variable);
+  try {
+    if (returns.length > 0) noteReturnAsContinue(returns[0]!.node, context);
+    const loopBody = lowerBlock(body, context);
+    return [
+      {
+        kind: "for",
+        variable,
+        collection: images,
+        body: returns.length > 0 ? withoutFinalContinue(returnsAsContinue(loopBody)) : loopBody,
+        span,
+      },
+    ];
+  } finally {
+    if (!known) context.imagePaths.delete(variable);
+  }
+}
+
+/**
+ * What a folder walk asked of a File that is an image of the folder (imageFolderWalk): its name, its path, and whether
+ * it is a file. Undefined for another receiver or member.
+ */
+function listedImageMember(
+  receiver: AstNode,
+  member: string,
+  context: LowerContext,
+): IrExpression | undefined {
+  const variable = variableName(receiver);
+  if (variable === null || !context.imagePaths.has(variable)) return undefined;
+  const path: IrExpression = { kind: "variable", name: variable };
+  if (member === "name" || member === "getName") return useHelper(context, "fileName", [path]);
+  if (["path", "getPath", "absolutePath", "getAbsolutePath", "toString"].includes(member))
+    return path;
+  if (member === "isFile" || member === "file") return { kind: "literal", value: true };
+  if (member === "isDirectory" || member === "directory") return { kind: "literal", value: false };
+  return undefined;
 }
 
 /** Whether a path names a folder of the player's home, `System.getProperty("user.home") + "/Downloads"`. */

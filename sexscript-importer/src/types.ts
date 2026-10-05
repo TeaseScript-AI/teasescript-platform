@@ -241,6 +241,7 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   }
   if (ARITHMETIC_OPERATORS.has(operator)) return NUMBER;
   if (operator === "=") return inferType(asNode(node.right), environment);
+  if (operator === "==~") return BOOLEAN;
   if (operator === "&" || operator === "|" || operator === "^") {
     // Groovy's & | ^ are logical on booleans and bitwise on numbers.
     const left = inferType(asNode(node.left), environment);
