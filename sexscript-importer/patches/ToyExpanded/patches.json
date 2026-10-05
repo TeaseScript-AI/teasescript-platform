@@ -209,6 +209,13 @@
       "category": "b",
       "reason": "Webcam corner time (owner decision 2026-10-05: manual instead): with the webcornertime toy, doCornertime wrote a base64 JSON task to a file for cornertime.github.io and parsed the base64 JSON report pasted back (File, decodeBase64, JsonSlurper, JsonOutput), none of which converts. Remove that path, its helpers, the configuration step that offered and tested it, and its 'Cornertime with webcam' choice, so that corner time always runs the manual flow the tease already had: the bell, the wait, and the player's own answer whether they moved; duration, punishment, and result are computed as before.",
       "diff": "manual-cornertime.diff"
+    },
+    {
+      "id": "tease-nipples-spec",
+      "layer": "source",
+      "category": "b",
+      "reason": "preTeaseNipples passed its image spec as teaseNipples(imgSpec=[DRESSED, TEASE]), a Groovy assignment to a script binding variable used as the argument, which the converter drops and declares as a top-level variable that makes toy/tease.tease fail to compile (TSV052). Pass the spec directly; nothing else reads that binding variable.",
+      "diff": "tease-nipples-spec.diff"
     }
   ]
 }
