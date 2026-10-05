@@ -681,7 +681,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
-  // A list element as Groovy read it: null past the end.
+  // A list element as Groovy read it: null past the end, and a negative position counted from the end.
   itemAt: {
     name: "sexscriptLegacyItemAt",
     build: () =>
@@ -689,6 +689,9 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         "sexscriptLegacyItemAt",
         ["list", "position"],
         [
+          ifS(bin("<", v("position"), lit(0)), [
+            ret(at(v("list"), bin("+", prop(v("list"), "length"), v("position")))),
+          ]),
           ifS(bin(">=", v("position"), prop(v("list"), "length")), [ret(lit(null))]),
           ret(at(v("list"), v("position"))),
         ],

@@ -27,6 +27,9 @@ function sexscriptLegacyItems(value) {
   return value
 }
 function sexscriptLegacyItemAt(listValue, positionValue2) {
+  if positionValue2 < 0 {
+    return listValue[listValue.length + positionValue2]
+  }
   if positionValue2 >= listValue.length {
     return null
   }

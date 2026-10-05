@@ -128,4 +128,13 @@ let exercise = exercises[randomInteger(0..2)]
 if exercise.kind == "counted" {
   say "Do ${exercise.text} (${exercise.text.length} letters)"
 }
+// A null test of a computed key of a dict without stored nulls asks for the key once.
+let skipped = dict{}
+// NOTE SX_SHARED_MAP_WRITE line 79: Groovy maps are shared by reference; if this map came from a list, a parameter, or another variable, the TeaseScript write changes only this copy (ADR 0014).
+skipped["Random-Thong"] = true
+let sections = ["Random-Thong", "Random-Panties"]
+let section = randomInteger(0..2)
+if not skipped.contains(sections[section]) {
+  say "Section ${sections[section]}"
+}
 exit

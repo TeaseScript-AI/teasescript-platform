@@ -1,3 +1,12 @@
+function sexscriptLegacyItemAt(listValue, position) {
+  if position < 0 {
+    return listValue[listValue.length + position]
+  }
+  if position >= listValue.length {
+    return null
+  }
+  return listValue[position]
+}
 let scores = [3, 5, 8]
 say "Last ${scores.last}, second last ${scores[scores.length - 2]}"
 function twice(x) {
@@ -24,4 +33,13 @@ function greet {
   bump()
 }
 greet()
+// A position variable that may hold -1 counts from the end, as Groovy did.
+let kinds = ["counted", "posture", "counted"]
+let lastPick = -1
+let pick = randomInteger(0..3)
+// NOTE SX_NEGATIVE_INDEX line 17: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+if kinds[pick] != sexscriptLegacyItemAt(kinds, lastPick) {
+  say "Another kind"
+}
+lastPick = pick
 exit

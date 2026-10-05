@@ -5849,6 +5849,16 @@ function mayIndexPastEnd(node: AstNode, context: LowerContext, seen = new Set<st
   return false;
 }
 
+/** Whether a variable used as a list position is ever assigned a negative number, such as -1 for "none yet". */
+function mayIndexNegative(node: AstNode, context: LowerContext): boolean {
+  if (node.kind !== "variable") return false;
+  const key = bindingKey(node, context.bindings);
+  return (
+    key !== null &&
+    (context.assignedValues.get(key) ?? []).some((value) => negativeConstantIndex(value) !== null)
+  );
+}
+
 /**
  * Whether a value may be a missing storage value, which Groovy read as null: a storage read, or a variable that starts
  * with one or with null.
@@ -7273,6 +7283,22 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       );
       return useHelper(context, "itemAt", [target, index]);
     }
+    // A variable that may hold a negative position, such as a -1 for "none yet": Groovy counted it from the end.
+    if (
+      !context.writeTargets.has(node) &&
+      targetNode !== null &&
+      isKnownListExpression(targetNode, context) &&
+      mayIndexNegative(indexNode, context)
+    ) {
+      addDiagnostic(
+        context,
+        "SX_NEGATIVE_INDEX",
+        "warning",
+        "This position can be negative, where Groovy counted from the end of the list; a helper does that too.",
+        node.span,
+      );
+      return useHelper(context, "itemAt", [target, index]);
+    }
     return { kind: "index", target, index };
   }
   if (operator === "&&" || operator === "||") {
@@ -7353,7 +7379,12 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     const [lookupNode, other] = isNullConstant(rightNode)
       ? [leftNode, rightNode]
       : [rightNode, leftNode];
-    const lookup = isNullConstant(other) ? dictLookup(lookupNode, context) : undefined;
+    // Without stored nulls the test only asks for the key, so any key expression is evaluated once.
+    const tested = isNullConstant(other) ? dictLookupParts(lookupNode, context) : null;
+    const once =
+      tested !== null &&
+      !context.mapUses.nullableValues.has(bindingKey(tested.receiver, context.bindings) ?? "");
+    const lookup = isNullConstant(other) ? dictLookup(lookupNode, context, once) : undefined;
     if (lookup === null) return null;
     if (lookup !== undefined) {
       const missing: IrExpression = { kind: "unary", operator: "not", value: lookup };
@@ -7697,11 +7728,15 @@ function noteMissingKey(node: AstNode, parts: DictLookupParts, context: LowerCon
 
 /**
  * `dict.contains(key)` for a Groovy lookup `map[key]`, `map.key`, or `map.get(key)` on a dict with a key that may be
- * evaluated twice; undefined for any other expression.
+ * evaluated twice, or any key where the caller evaluates it only `once`; undefined for any other expression.
  */
-function dictLookup(node: AstNode, context: LowerContext): IrExpression | null | undefined {
+function dictLookup(
+  node: AstNode,
+  context: LowerContext,
+  once = false,
+): IrExpression | null | undefined {
   const parts = dictLookupParts(node, context);
-  if (parts === null || (parts.key !== null && !isRepeatableExpression(parts.key)))
+  if (parts === null || (!once && parts.key !== null && !isRepeatableExpression(parts.key)))
     return undefined;
   const dict = lowerExpression(parts.receiver, context);
   const key: IrExpression | null =

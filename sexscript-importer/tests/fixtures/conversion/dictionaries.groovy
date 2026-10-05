@@ -74,3 +74,9 @@ show("Mood " + session.mood + ", aborted " + session.aborted)
 def exercises = [[kind: "counted", text: "Push-ups"], [kind: "posture", text: null]]
 def exercise = exercises[getRandom(2)]
 if (exercise.kind == "counted") show("Do " + exercise.text + " (" + exercise.text.length() + " letters)")
+// A null test of a computed key of a dict without stored nulls asks for the key once.
+def skipped = [:]
+skipped["Random-Thong"] = true
+def sections = ["Random-Thong", "Random-Panties"]
+def section = getRandom(2)
+if (skipped[sections[section]] == null) show("Section " + sections[section])

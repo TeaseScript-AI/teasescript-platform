@@ -10,3 +10,9 @@ show("Count " + bump())
 // No caller uses this result, so the last expression stays a statement.
 def greet = { -> show("Hi"); bump() }
 greet()
+// A position variable that may hold -1 counts from the end, as Groovy did.
+def kinds = ["counted", "posture", "counted"]
+def lastPick = -1
+def pick = getRandom(3)
+if (kinds[pick] != kinds[lastPick]) show("Another kind")
+lastPick = pick
