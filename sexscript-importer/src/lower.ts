@@ -15152,6 +15152,15 @@ function mediaFile(
       return file;
     }
   }
+  // An empty path clears the image, and a URL is no package file.
+  if (written.trim() !== "" && !/^[a-z]+:\/\//iu.test(written))
+    addDiagnostic(
+      context,
+      "SX_MEDIA_MISSING",
+      "warning",
+      `No file in the package matches "${written}"; the legacy player showed nothing here either.`,
+      node.span,
+    );
   return { kind: "literal", value: midi(written) };
 }
 

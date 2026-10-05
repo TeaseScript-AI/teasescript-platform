@@ -505,7 +505,8 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   button ID is a `global` in `main.tease` (`SX_SWITCH_BUTTON`).
 - Media paths: a literal image or sound path names the file the package holds when the legacy player found it ignoring
   letter case, around spaces, or below a repeated folder name (`SX_MEDIA_PATH`); several files that match apart from
-  case get a note (`SX_MEDIA_PATH_CASE`). A MIDI file becomes an MP3 rendered at conversion (fluidsynth with a General
+  case get a note (`SX_MEDIA_PATH_CASE`), and a path that no file matches stays as written with a note, since the
+  legacy player showed nothing there either (`SX_MEDIA_MISSING`, counted as `missingMedia` in the report). A MIDI file becomes an MP3 rendered at conversion (fluidsynth with a General
   MIDI soundfont, then ffmpeg).
 - Pacing: legacy `show()` displayed its text at once and a `wait()` right after it set the timing, so text shown
   directly before a wait becomes `say …, instant`; other text keeps TeaseScript's reading time (converter owner,

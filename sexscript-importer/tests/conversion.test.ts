@@ -464,6 +464,8 @@ test("names media files as the package holds them", { skip: parserUnavailable },
         'setImage("peach/peach/four.jpg")',
         'playSound("music/theme.mid")',
         'setImage("room/bed.jpg")',
+        'setImage("Domme/Domme43.jpg")',
+        'setImage("")',
         "",
       ].join("\n"),
     );
@@ -485,9 +487,13 @@ test("names media files as the package holds them", { skip: parserUnavailable },
       'showImage "peach/four.jpg"',
       'playAudio "music/theme.mp3"',
       'showImage "room/bed.jpg"',
+      // A path that no file matches stays as written, with a note; the legacy player found nothing either.
+      'showImage "Domme/Domme43.jpg"',
     ])
       assert.ok(source.includes(`\n${expected}\n`), expected);
     assert.match(source, /NOTE SX_MEDIA_PATH_CASE line 6/u);
+    assert.match(source, /NOTE SX_MEDIA_MISSING line 7: No file in the package matches "Domme\/Domme43.jpg"/u);
+    assert.equal(source.match(/SX_MEDIA_MISSING/gu)?.length, 1);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

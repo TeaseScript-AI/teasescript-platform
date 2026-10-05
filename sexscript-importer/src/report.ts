@@ -158,6 +158,8 @@ export interface FeasibilityReport {
    * shortened to what they add, and kept because their interpolated values differ.
    */
   repeatedText: { dropped: number; shortened: number; kept: number };
+  /** Literal image and sound paths that no file of the package matches (`SX_MEDIA_MISSING`). */
+  missingMedia: number;
   /**
    * Compiler diagnostics that remain after pending-capability placeholders, grouped by code and message.
    * These point at importer output rather than at known TeaseScript implementation gaps.
@@ -279,6 +281,7 @@ export function analyzeFeasibility(
     diagnosticsByCode: emptyCounts(),
     rootDiagnosticsByCode: emptyCounts(),
     repeatedText: { dropped: 0, shortened: 0, kept: 0 },
+    missingMedia: 0,
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
     blockingPendingCapabilityFileCounts: emptyCounts(),
@@ -377,6 +380,7 @@ export function analyzeFeasibility(
       if (code === "SX_REPEATED_TEXT_DROPPED") report.repeatedText.dropped += 1;
       else if (code === "SX_REPEATED_TEXT_SHORTENED") report.repeatedText.shortened += 1;
       else if (code === "SX_REPEATED_TEXT_KEPT") report.repeatedText.kept += 1;
+      else if (code === "SX_MEDIA_MISSING") report.missingMedia += 1;
     }
 
     report.files.push({
