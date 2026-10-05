@@ -4901,9 +4901,8 @@ function lowerCallStatement(
           ]),
           span,
         },
-        {
-          kind: "say",
-          value: templateOrLiteral([
+        systemSay(
+          templateOrLiteral([
             {
               text: "Sending email is not available here. The original would have opened an email to ",
             },
@@ -4912,9 +4911,9 @@ function lowerCallStatement(
               : { value: address },
             { text: " in your email program." },
           ]),
-          speaker: SYSTEM_SPEAKER,
           span,
-        },
+          context,
+        ),
       ];
     }
     case "openCdTrays":
@@ -13917,14 +13916,13 @@ function urlStatements(
     span,
   );
   return [
-    {
-      kind: "say",
-      value:
-        url.kind === "literal" && typeof url.value === "string"
-          ? { kind: "literal", value: `Open this link: ${url.value}` }
-          : { kind: "template", parts: [{ text: "Open this link: " }, { value: url }] },
+    systemSay(
+      url.kind === "literal" && typeof url.value === "string"
+        ? { kind: "literal", value: `Open this link: ${url.value}` }
+        : { kind: "template", parts: [{ text: "Open this link: " }, { value: url }] },
       span,
-    },
+      context,
+    ),
     { kind: "showButton", label: { kind: "literal", value: "Continue" }, timeout: null, span },
   ];
 }
@@ -13952,6 +13950,20 @@ function javaHost(context: LowerContext): JavaRuleHost {
     isPhoto: (node) => context.photoVariables.has(variableName(node) ?? ""),
     state: context.java,
   };
+}
+
+/**
+ * Text the importer adds, which the legacy author never wrote, said as the system speaker (owner decision); `prose`
+ * shows text the player only reads, such as a file's content, as prose.
+ */
+function systemSay(
+  value: IrExpression,
+  span: SourceSpan | null,
+  context: LowerContext,
+  prose = false,
+): IrStatement {
+  context.syntheticHelpers.add("systemSpeaker");
+  return { kind: "say", value, speaker: SYSTEM_SPEAKER, ...(prose ? { prose: true } : {}), span };
 }
 
 function useHelper(context: LowerContext, name: HelperName, args: IrExpression[]): IrExpression {
