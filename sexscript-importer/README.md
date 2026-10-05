@@ -100,8 +100,7 @@ node sexscript-importer/tools/serve-catalog.ts --catalog sexscript-importer/exte
 `.report.json`. Legacy scripts name media relative to `images/` and `sounds/`, and package paths start at the package
 root, so both trees are hard-linked into the package root. Media are never copied, so the corpus and the output must
 share one filesystem. A resource pack (a folder without scripts) is linked into each script package whose source names
-one of its top media folders, narrowed to the packages that name its subfolder when any do. A package with one script
-gets that script as `main.tease`, because `convert-package` writes none for a single-file package yet. Each package
+one of its top media folders, narrowed to the packages that name its subfolder when any do. Each package
 folder records the conversion in `.conversion.json` and `.conversion.log`; `.conversion-summary.json` in the root
 records the importer commit and the date.
 

@@ -12,7 +12,7 @@
  * script packages that name their media folders (see `resourcePackTargets`). Links are hard links, never copies.
  */
 import { execFile } from "node:child_process";
-import { link, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { link, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,8 +31,6 @@ export interface ResourceFileTarget {
 interface ConversionRecord {
   readonly source: string;
   readonly exitCode: number;
-  /** The lone script was renamed to `main.tease`: convert-package writes none for a one-file package. */
-  readonly mainRenamed: string | null;
   readonly linkedMedia: number;
   readonly linkedResourceMedia: number;
   /** Media paths another file already took; the package's own file, or the first pack's, wins. */
@@ -134,7 +132,6 @@ async function main(rawArgs: string[]): Promise<void> {
     scriptPackages: scriptPackages.length,
     converted: records.size,
     withConverterErrors: [...records.values()].filter((record) => record.exitCode !== 0).length,
-    mainRenamed: [...records.values()].filter((record) => record.mainRenamed !== null).length,
     resourcePacks: resourcePacks.length,
     unattachedResourcePacks: unattached,
     collisions: [...records.values()].reduce((sum, record) => sum + record.collisions.length, 0),
@@ -161,13 +158,6 @@ async function convertOne(
   ]);
   await writeFile(path.join(packageRoot, ".conversion.log"), stderr);
 
-  let mainRenamed: string | null = null;
-  const tease = (await files(packageRoot)).filter((file) => file.endsWith(".tease"));
-  if (tease.length === 1 && path.basename(tease[0]!) !== "main.tease") {
-    mainRenamed = toPosix(path.relative(packageRoot, tease[0]!));
-    await rename(tease[0]!, path.join(packageRoot, "main.tease"));
-  }
-
   const collisions: string[] = [];
   let linkedMedia = 0;
   for (const media of MEDIA_FOLDERS) {
@@ -191,7 +181,6 @@ async function convertOne(
   const record: ConversionRecord = {
     source: path.join(corpusRoot, id),
     exitCode,
-    mainRenamed,
     linkedMedia,
     linkedResourceMedia,
     collisions,
