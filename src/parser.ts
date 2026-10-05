@@ -3422,33 +3422,51 @@ class Parser {
     }
 
     if (interactionKind !== "choice") {
-      const hint =
+      const question =
         isExpressionStart(this.#peek()) &&
         !(this.#blockEndsCompactInteraction && this.#check(TokenKind.LeftBrace)) &&
         !this.#atStorageDelimiter() &&
-        !this.#atInteractionDefault(0)
+        this.#askOptionAt(0) === null
           ? yield* parseChild(this.#parseOr())
           : null;
-      let defaultValue: Expression | null = null;
-      let defaultOffset = hint === null ? 0 : this.#offsetAfterComma();
-      if (defaultOffset === null && this.#atInteractionDefault(0)) {
-        this.#reportInsertion(
-          parserDiagnosticCode.expectedDelimiter,
-          "Expected ',' between the hint and 'default:'.",
-        );
-        defaultOffset = 0;
-      }
-      if (defaultOffset !== null && this.#atInteractionDefault(defaultOffset)) {
-        for (let skipped = 0; skipped < defaultOffset + 2; skipped += 1) this.#advance();
-        defaultValue = yield* parseChild(this.#parseColonValueTask(false));
-        if (defaultValue === null) {
+      // `hint:` and `default:` follow in either order, each after a comma, or first without a question.
+      const named = new Map<string, Expression>();
+      let end = question?.span ?? speaker?.span ?? command.span;
+      let offset = question === null ? 0 : this.#offsetAfterComma();
+      for (;;) {
+        if (offset === null && this.#askOptionAt(0) !== null) {
+          this.#reportInsertion(
+            parserDiagnosticCode.expectedDelimiter,
+            `Expected ',' before '${this.#peek().lexeme}:'.`,
+          );
+          offset = 0;
+        }
+        const option = offset === null ? null : this.#askOptionAt(offset);
+        if (option === null) break;
+        for (let skipped = 0; skipped < offset!; skipped += 1) this.#advance();
+        const name = this.#advance();
+        this.#advance();
+        const value = yield* parseChild(this.#parseColonValueTask(false));
+        if (value === null) {
           this.#reportInsertion(
             parserDiagnosticCode.expectedInteractionText,
-            "Expected a default answer after 'default:'.",
+            option === "default"
+              ? "Expected a default answer after 'default:'."
+              : "Expected hint text after 'hint:'.",
           );
           if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
             this.#recoveredAtStatementBoundary = true;
+          break;
         }
+        if (named.has(option)) {
+          this.#reportSpan(
+            parserDiagnosticCode.unsupportedInteractionForm,
+            `Duplicate ${command.lexeme} option '${option}'.`,
+            name.span,
+          );
+        } else named.set(option, value);
+        end = value.span;
+        offset = this.#offsetAfterComma();
       }
       if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
         this.#reportSpan(
@@ -3458,15 +3476,15 @@ class Parser {
         );
         this.#synchronizeStatement();
       }
-      const end = defaultValue?.span ?? hint?.span ?? speaker?.span ?? command.span;
       return Object.freeze({
         kind: "interactionExpression",
         interactionKind,
         commandSpan: copySpan(command.span),
         asSpan,
         speaker,
-        hint,
-        defaultValue,
+        question,
+        hint: named.get("hint") ?? null,
+        defaultValue: named.get("default") ?? null,
         options: Object.freeze([]),
         span: spanFrom(command.span, end),
       });
@@ -3565,6 +3583,7 @@ class Parser {
       commandSpan: copySpan(command.span),
       asSpan,
       speaker,
+      question: null,
       hint: null,
       defaultValue: null,
       options: Object.freeze(options),
@@ -3573,8 +3592,8 @@ class Parser {
   }
 
   /**
-   * `askText [as speaker] ([hint][, default: value])` and the other basic asks: the parentheses hold the arguments of
-   * the compact form, so `)` ends the ask and both forms give the same interaction.
+   * `askText [as speaker] ([question][, hint: text][, default: value])` and the other basic asks: the parentheses hold
+   * the arguments of the compact form, so `)` ends the ask and both forms give the same interaction.
    */
   *#parseBoundedAsk(
     command: Token,
@@ -3588,7 +3607,7 @@ class Parser {
     const parts = this.#boundedArguments(
       command,
       call,
-      ["default"],
+      ["hint", "default"],
       parserDiagnosticCode.unsupportedInteractionForm,
     );
     if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
@@ -3606,7 +3625,8 @@ class Parser {
       commandSpan: copySpan(command.span),
       asSpan,
       speaker,
-      hint: parts.value,
+      question: parts.value,
+      hint: parts.options.get("hint") ?? null,
       defaultValue: parts.options.get("default") ?? null,
       options: Object.freeze([]),
       span: spanFrom(command.span, call.span),
@@ -3623,6 +3643,14 @@ class Parser {
       this.#check(TokenKind.InterpolationEnd) ||
       this.#atStorageDelimiter()
     );
+  }
+
+  /** The named option of a basic ask, `hint:` or `default:`, at `offset` tokens ahead, or `null`. */
+  #askOptionAt(offset: number): "hint" | "default" | null {
+    const token = this.#peek(offset);
+    if (token.kind !== TokenKind.Identifier || this.#peek(offset + 1).kind !== TokenKind.Colon)
+      return null;
+    return token.lexeme === "hint" || token.lexeme === "default" ? token.lexeme : null;
   }
 
   /** `default:` at `offset` tokens ahead, the named default answer of `askText` or `askNumber`. */

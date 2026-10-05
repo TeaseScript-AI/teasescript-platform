@@ -59,6 +59,7 @@ import { typeFromAnnotation } from "../../static-types.js";
 import { typePlan } from "../../type-plans.js";
 import { runCompileTask, compileChild, type CompileTask } from "../continuation.js";
 import {
+  askOperands,
   expressionChildren as instructionEmissionChildren,
   mediaOperands,
   showButtonOptions,
@@ -1635,13 +1636,16 @@ export class InstructionCompiler {
     return lowered;
   }
 
+  /**
+   * A basic ask says its question, then opens its field; `choose` opens its buttons. The question, the hint, and the
+   * default are evaluated once, in that written order, before the question is said, so a default that asks itself
+   * comes first. The question is said by the requesting speaker, captured before any operand.
+   */
   *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
     const values =
       expression.interactionKind === "choice"
         ? expression.options.map((option) => option.expression)
-        : expression.hint === null
-          ? []
-          : [expression.hint];
+        : [];
     const expectedResult =
       expression.interactionKind === "choice"
         ? ("choice" as const)
@@ -1652,7 +1656,25 @@ export class InstructionCompiler {
             : ("temporal" as const);
 
     const ui = staticInteractionUi(expression);
-    if (ui !== undefined) {
+    const staticQuestion =
+      expression.question === null ? null : staticVisibleText(expression.question);
+    if (ui !== undefined && staticQuestion !== undefined) {
+      if (staticQuestion !== null) {
+        // Said and asked by the same speaker: nothing runs between the two instructions.
+        this.instructions.push({
+          kind: "say",
+          presentation: null,
+          speaker: expression.speaker?.name ?? null,
+          value: {
+            kind: "literal",
+            value: staticQuestion,
+            span: copySpan(expression.question!.span),
+          },
+          skipPolicy: null,
+          pacing: "smart",
+          span: copySpan(expression.span),
+        });
+      }
       return this.#emitResultInteraction(
         {
           interactionKind: planInteractionKind(expression),
@@ -1673,27 +1695,56 @@ export class InstructionCompiler {
     let preparedUi: PreparedInteractionUiPayload;
     const preparedTemporaryIds: number[] = [speakerTemporary];
 
+    let question: Extract<Instruction, { kind: "say" }> | null = null;
     if (expression.interactionKind !== "choice") {
-      const hint =
-        expression.hint === null
-          ? null
-          : this.#materializeDedicatedInteractionValue(
-              yield* compileChild(
-                this.#lowerInteractionPayloadTask(expression.hint, speakerTemporary),
-              ),
-              expression.hint.span,
-            );
-      if (hint !== null) preparedTemporaryIds.push(hint.temporaryId);
-      const prefill =
-        expression.defaultValue === null
-          ? null
-          : this.#materializeDedicatedInteractionValue(
-              yield* compileChild(
-                this.#lowerInteractionPayloadTask(expression.defaultValue, speakerTemporary),
-              ),
-              expression.defaultValue.span,
-            );
-      if (prefill !== null) preparedTemporaryIds.push(prefill.temporaryId);
+      let questionTemporaryIds: number[] = [];
+      if (expression.question !== null) {
+        const sayTemporaries = this.#prepareQuestionSpeaker(expression);
+        const lowered = yield* compileChild(
+          this.#lowerInteractionPayloadTask(expression.question, speakerTemporary),
+        );
+        const textTemporary = this.#allocateTemporary();
+        this.instructions.push({
+          kind: "prepareSayText",
+          value: lowered.plan,
+          destinationTemporary: textTemporary,
+          field: true,
+          span: copySpan(expression.question.span),
+        });
+        this.#emitTemporaryCleanup(lowered.temporaryIds, expression.question.span);
+        question = {
+          kind: "say",
+          presentation: null,
+          speaker: expression.speaker?.name ?? null,
+          value: lowered.plan,
+          ...sayTemporaries,
+          textTemporary,
+          skipPolicy: null,
+          pacing: "smart",
+          span: copySpan(expression.span),
+        };
+        questionTemporaryIds = [
+          sayTemporaries.speakerTemporary,
+          sayTemporaries.contextualSpeakerTemporary,
+          textTemporary,
+        ];
+      }
+      let hint: { readonly temporaryId: number } | null = null;
+      let prefill: { readonly temporaryId: number } | null = null;
+      for (const operand of askOperands(expression)) {
+        if (operand === expression.question) continue;
+        const materialized = this.#materializeDedicatedInteractionValue(
+          yield* compileChild(this.#lowerInteractionPayloadTask(operand, speakerTemporary)),
+          operand.span,
+        );
+        preparedTemporaryIds.push(materialized.temporaryId);
+        if (operand === expression.hint) hint = materialized;
+        else prefill = materialized;
+      }
+      if (question !== null) {
+        this.instructions.push(question);
+        this.#emitTemporaryCleanup(questionTemporaryIds, expression.span);
+      }
       preparedUi =
         expression.interactionKind === "text"
           ? {
@@ -1863,6 +1914,32 @@ export class InstructionCompiler {
       plan: { kind: "temporary", temporaryId: ordinaryTemporary, span: copySpan(span) },
       temporaryIds: [ordinaryTemporary],
     };
+  }
+
+  /**
+   * The output speaker of an ask question, captured right after the requesting speaker, which it therefore matches:
+   * both are the named speaker or else the default one.
+   */
+  #prepareQuestionSpeaker(expression: InteractionExpression): {
+    readonly speakerTemporary: number;
+    readonly contextualSpeakerTemporary: number;
+  } {
+    const span = expression.asSpan ?? expression.commandSpan;
+    const speakerTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "prepareSaySpeaker",
+      speaker: expression.speaker?.name ?? null,
+      destinationTemporary: speakerTemporary,
+      span: copySpan(span),
+    });
+    const contextualSpeakerTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "prepareSayContextualSpeaker",
+      speakerTemporary,
+      destinationTemporary: contextualSpeakerTemporary,
+      span: copySpan(span),
+    });
+    return { speakerTemporary, contextualSpeakerTemporary };
   }
 
   #prepareInteractionSpeaker(speaker: string | null, span: SourceSpan): number {
@@ -2464,7 +2541,7 @@ function planInteractionKind(expression: InteractionExpression): InteractionKind
   }
 }
 
-/** The UI of an interaction whose text, values, and default answer are all known at compile time. */
+/** The UI of an interaction whose hint, values, and default answer are all known at compile time. */
 function staticInteractionUi(expression: InteractionExpression): InteractionUiPayload | undefined {
   if (expression.interactionKind !== "choice") {
     const hint = expression.hint === null ? null : staticVisibleText(expression.hint);

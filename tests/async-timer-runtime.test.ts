@@ -527,7 +527,8 @@ test("an expiry block interrupts an unanswered ask and the prompt returns afterw
   session.at(7_000);
   assert.deepEqual(session.snapshot.foregroundAction, prompt, "the same prompt is re-presented");
   assert.equal(session.answer("Ada"), "completed");
-  assert.deepEqual(session.said(), ["Hurry up.", "Still waiting.", "Hello Ada"]);
+  // The question is said once; the returning field does not say it again.
+  assert.deepEqual(session.said(), ["Name?", "Hurry up.", "Still waiting.", "Hello Ada"]);
   assert.equal(session.snapshot.status, "halted");
 });
 
@@ -546,7 +547,7 @@ test("exit in an expiry block cancels the interrupted ask without assigning it",
   const prompt = session.snapshot.foregroundAction;
   assert.ok(prompt?.kind === "interaction");
   session.at(5_000);
-  assert.deepEqual(session.said(), ["Too slow."]);
+  assert.deepEqual(session.said(), ["Name?", "Too slow."]);
   assert.equal(session.snapshot.status, "halted");
   assert.equal(session.events.at(-1)?.kind, "exit");
   const late = completeAction(session.plan, session.snapshot, {
@@ -682,7 +683,7 @@ test("paced output from an expiry block does not break the restored prompt or wa
   ask.at(2_000);
   assert.equal(ask.snapshot.foregroundAction?.kind, "interaction");
   assert.equal(ask.answer("Bo"), "completed");
-  assert.deepEqual(ask.said(), ["Think faster, please.", "Hello Bo"]);
+  assert.deepEqual(ask.said(), ["Name?", "Think faster, please.", "Hello Bo"]);
 
   const wait = new Session(
     [
@@ -1045,7 +1046,7 @@ test("late observations replay the script at scene time and reject an unexplaine
 
 test("catch-up holds for a queued block behind a commit window and timer settlements record scene time", () => {
   const source =
-    'let t = timer async 3 { say "too late", 0 }\ntimer async 1 { t.stop() }\nsay "first", 2\nsay "second", 1\nlet name = askText "Hold"\nexit';
+    'let t = timer async 3 { say "too late", 0 }\ntimer async 1 { t.stop() }\nsay "first", 2\nsay "second", 1\nlet name = askText hint: "Hold"\nexit';
   const onTime = new Session(source, { pacing: true });
   for (const nowMs of [1_000, 2_000, 3_000, 5_000]) onTime.at(nowMs);
   const late = new Session(source, { pacing: true }).at(5_000);
@@ -1091,9 +1092,10 @@ test("catch-up holds for a queued block behind a commit window and timer settlem
 });
 
 test("pacing consumed or skipped during catch-up and terminal completions keep queued blocks valid", () => {
-  const paced = new Session('timer async 1 { say "handler", 2 }\nlet name = askText "Name"\nexit', {
-    pacing: true,
-  }).at(5_000);
+  const paced = new Session(
+    'timer async 1 { say "handler", 2 }\nlet name = askText hint: "Name"\nexit',
+    { pacing: true },
+  ).at(5_000);
   assert.deepEqual(paced.said(), ["handler"]);
   assert.equal(paced.snapshot.lastSettlement?.settlementKind, "consumedByForegroundInteraction");
 

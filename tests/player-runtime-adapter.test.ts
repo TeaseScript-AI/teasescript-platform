@@ -181,8 +181,8 @@ speaker guide {
 }
 say as guide "**Ready?**", instant
 showButton as guide "Continue"
-let text = askText as guide "Text"
-let amount = askNumber as guide "Number"
+let text = askText as guide hint: "Text"
+let amount = askNumber as guide hint: "Number"
 let choice = choose as guide first: "Same", second: "Same"
 say as guide "${"${text}"} / ${"${amount}"} / ${"${choice}"}", instant
 exit
@@ -483,7 +483,7 @@ exit
 
 test("response presentation distinguishes choices and buttons from typed answers after restore", () => {
   let session = createPlayerRuntimeSession(`
-let reply = askText "Reply"
+let reply = askText hint: "Reply"
 let answer = choose left: "Left", right: "Right"
 showButton "Continue"
 exit

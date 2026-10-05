@@ -1450,12 +1450,12 @@ its state: the time left (after `paused,` when paused), `stopped`, or `finished`
 the button's text, `<permanent button "Stop">`, or `<permanent button, removed>`. Handles show the state at the moment
 `say` runs. Message markup is not applied to the notation.
 
-Other text fields, such as a button label, an input hint, the `text` of a choice object, a timer label, or a speaker's
-name or title, do not select from a list. A list there is a compile error when the compiler can see it, such as a list
-literal or a variable that holds a list, and a runtime error otherwise; the message points to `"${list}"` and
-`list.random`. Another value a text field cannot show, such as an object or a range, is likewise a compile error when
-the compiler can see it. A list as a whole `choose` option instead gives
-one button per element ([§19](#19-choices)).
+Other text fields, such as a button label, an ask question, an input hint, the `text` of a choice object, a timer label,
+or a speaker's name or title, do not select from a list. A list there is a compile error when the compiler can see it,
+such as a list literal or a variable that holds a list, and a runtime error otherwise; the message points to `"${list}"`
+and `list.random`. Another value a text field cannot show, such as an object or a range, is likewise a compile error
+when the compiler can see it. A list as a whole `choose` option instead gives one button per element
+([§19](#19-choices)).
 
 To choose a specific element, use its index:
 
@@ -1714,15 +1714,28 @@ Rules:
 - `choose` does not return a result object.
 
 ## 20. Input functions
-**Status:** Accepted (parenthesized basic asks implemented: Owner decision on #627, 2026-10-05)
+**Status:** Accepted (parenthesized basic asks implemented, and their text is the question: Owner decisions on #627,
+2026-10-05)
 
 `askText`, `askNumber`, `askInteger`, `askDate`, `askTime`, and `askDateTime` are implemented in this parenthesized
 form with the arguments of their compact form
-([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)): an optional text and
-an optional `default:`. Both forms mean the same: `askText()` is `askText`, and
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)): an optional question,
+an optional `hint:`, and an optional `default:`. Both forms mean the same: `askText()` is `askText`, and
 `askText as mistress ("Name?", default: "Ada")` is `askText as mistress "Name?", default: "Ada"`. The speaker clause
 comes before the parentheses, and the `)` ends the ask, so `askInteger("How many?") + 1` adds to the answer. Their
 other options in this section, such as `message:` and `invalidMessage:`, are not implemented yet.
+
+The question is said in the chat by the asking speaker, as by `say`, right before the field opens; `hint:` is help
+text shown in the field only
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)):
+
+```text
+let name = askText "What is your name?", hint: "Type your name", default: "Slave"
+```
+
+The question, `hint:`, and `default:` are evaluated once, in the order they are written, before the question is said.
+The question is said once: a refused answer, an interrupting block, or a restored checkpoint does not say it again. It
+accepts what a field text accepts, so a list is an error. Without a question nothing is said.
 
 ### Text input
 
@@ -1818,9 +1831,9 @@ let count = askInteger("Enter a whole number")
 ```
 
 `askInteger(...)` only completes when a valid whole number has been entered and returns `integer`. The compact form
-`askInteger [as speaker] [hint] [, default: integer]` is implemented as the whole-number counterpart of `askNumber`
-([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askinteger)): an answer is an optional sign and
-digits within the safe integer range.
+`askInteger [as speaker] [question] [, hint: text] [, default: integer]` is implemented as the whole-number counterpart
+of `askNumber` ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askinteger)): an answer is an
+optional sign and digits within the safe integer range.
 
 ### Multiple integer inputs
 
@@ -1894,12 +1907,13 @@ askDateTime(...)  // datetime
 
 These inputs use structured date and time controls and do not return unparsed free text. Like the other blocking `ask...` functions, they only complete with a valid value.
 
-The compact forms `askDate`, `askTime`, and `askDateTime [as speaker] [hint] [, default: value]` are implemented
-([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)). The control
-submits strict ISO text ([§35](#35-date-time-durations-and-timestamps)); a local time that the player's zone skips is a
-valid answer. The transcript shows the answer in the player's presentation. The Player's date and date-and-time
-controls cover the years 0001 through 9999, as the browser's native controls do; a default in year 0000 is shown and
-edited as ISO text instead. The value domain stays 0000 through 9999 for conversions, defaults, and text answers.
+The compact forms `askDate`, `askTime`, and `askDateTime [as speaker] [question] [, hint: text] [, default: value]` are
+implemented ([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#askdate-asktime-and-askdatetime)). The
+control submits strict ISO text ([§35](#35-date-time-durations-and-timestamps)); a local time that the player's zone
+skips is a valid answer. The transcript shows the answer in the player's presentation. The Player's date and
+date-and-time controls cover the years 0001 through 9999, as the browser's native controls do; a default in year 0000 is
+shown and edited as ISO text instead. The value domain stays 0000 through 9999 for conversions, defaults, and text
+answers.
 
 ### Default answers
 

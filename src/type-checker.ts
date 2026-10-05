@@ -34,6 +34,7 @@ import {
 import { compileChild, runCompileTask, type CompileTask } from "./compiler/continuation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import {
+  askOperands,
   expressionChildren,
   mediaHandlerBlocks,
   mediaOperands,
@@ -4084,16 +4085,17 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "interactionExpression" }>,
     scope: Scope,
   ): CompileTask<StaticType> {
-    if (expression.hint !== null)
-      this.#checkShownText(
-        expression.hint,
-        yield* compileChild(this.#expressionTask(expression.hint, scope)),
-        "an input hint",
-      );
     if (expression.interactionKind !== "choice") {
-      if (expression.defaultValue !== null) {
-        const type = yield* compileChild(this.#expressionTask(expression.defaultValue, scope));
-        this.#checkInteractionDefault(expression.interactionKind, expression.defaultValue, type);
+      for (const operand of askOperands(expression)) {
+        const type = yield* compileChild(this.#expressionTask(operand, scope));
+        if (operand === expression.defaultValue)
+          this.#checkInteractionDefault(expression.interactionKind, operand, type);
+        else
+          this.#checkShownText(
+            operand,
+            type,
+            operand === expression.hint ? "an input hint" : "an ask question",
+          );
       }
       return interactionResultType(expression.interactionKind);
     }
@@ -5545,11 +5547,7 @@ function statementExpressions(statement: Statement): readonly Expression[] {
 /** The direct subexpressions of an expression, including interaction operands. */
 function expressionParts(expression: Expression): readonly Expression[] {
   if (expression.kind === "interactionExpression")
-    return [
-      ...(expression.hint === null ? [] : [expression.hint]),
-      ...(expression.defaultValue === null ? [] : [expression.defaultValue]),
-      ...expression.options.map((option) => option.expression),
-    ];
+    return [...askOperands(expression), ...expression.options.map((option) => option.expression)];
   if (expression.kind === "showButtonExpression") return showButtonOperands(expression);
   return expressionChildren(expression);
 }

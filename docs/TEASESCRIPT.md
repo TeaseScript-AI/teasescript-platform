@@ -94,11 +94,11 @@ showButton as mistress "Ready"
 let elapsed = showButton "Continue", timeout: 30 s
 
 let text = askText
-let text = askText as mistress "Type your answer"
-let name = askText "Your name?", default: "Ada"
+let text = askText as mistress "What do you say?"
+let name = askText "Your name?", hint: "Type your name", default: "Ada"
 
 let amount = askNumber
-let amount = askNumber as mistress "Enter a number"
+let amount = askNumber as mistress "How many?"
 let minutes = askNumber default: 10
 let count = askInteger "How many?", default: 3
 
@@ -114,10 +114,11 @@ The basic asks also take their arguments in parentheses, with the same meaning; 
 expression, and `as speaker` comes before the parentheses
 ([ADR 0018](decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)).
 
-For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional string is Standard UI field text or a hint. It is not automatically spoken
-into the transcript. The normal question is a preceding `say`. An optional `default:` answer prefills the field; the
-player still submits it, and a cleared field does not fall back to it. See
-[default answers](specifications/accepted-syntaxes-v30.md#default-answers).
+For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional text is the question: the asking
+speaker says it in the chat, as by `say`, once, right before the field opens. `hint:` is help text shown in the field
+only ([questions and hints](decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). An
+optional `default:` answer prefills the field; the player still submits it, and a cleared field does not fall back to
+it. See [default answers](specifications/accepted-syntaxes-v30.md#default-answers).
 
 All basic interactions are mandatory and blocking, with no cancellation result. `askText` returns `string`;
 `askNumber` returns `number`; `askInteger` returns `integer` and accepts only whole numbers; `askDate`, `askTime`, and
