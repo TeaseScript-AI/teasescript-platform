@@ -167,6 +167,57 @@ function withLaunchMarkers(
   };
 }
 
+/** Names of the languages that legacy file names mark with a suffix such as `_de`. */
+const LANGUAGES: Readonly<Record<string, string>> = {
+  de: "Deutsch",
+  en: "English",
+  es: "Español",
+  fr: "Français",
+  it: "Italiano",
+  nl: "Nederlands",
+  pl: "Polski",
+  pt: "Português",
+  ru: "Русский",
+};
+
+/**
+ * The menu label of each offered script: its title from setInfos, or else its file name made readable, with the
+ * language of a `_de`-style variant; a label several scripts share also names the file.
+ */
+function menuLabels(
+  paths: readonly string[],
+  scripts: PackageScripts,
+  programs: readonly MigrationProgram[],
+): Map<string, string> {
+  const indexOf = new Map([...scripts.pathOf].map(([index, path]) => [path, index]));
+  const base = (path: string): string => path.replace(/^.*\//u, "").replace(/\.tease$/u, "");
+  const labels = new Map(
+    paths.map((path) => {
+      const title = programs[indexOf.get(path) ?? -1]?.metadata?.title?.trim() ?? "";
+      const language = /_([a-z]{2})$/u.exec(base(path))?.[1];
+      const readable = base(path)
+        .replace(/_([a-z]{2})$/u, (suffix, code: string) =>
+          LANGUAGES[code] === undefined ? suffix : "",
+        )
+        .replace(/[_-]+/gu, " ")
+        .trim();
+      const label = title !== "" ? title : readable !== "" ? readable : base(path);
+      const named =
+        language !== undefined && LANGUAGES[language] !== undefined
+          ? `${label} (${LANGUAGES[language]})`
+          : label;
+      return [path, named] as const;
+    }),
+  );
+  const counts = new Map<string, number>();
+  for (const label of labels.values()) counts.set(label, (counts.get(label) ?? 0) + 1);
+  return new Map(
+    [...labels].map(([path, label]) =>
+      counts.get(label)! > 1 ? [path, `${label} (${base(path)})`] : [path, label],
+    ),
+  );
+}
+
 /** The indexes of the files that `internal` names by their paths from the legacy scripts folder. */
 function internalScripts(
   files: readonly ParsedGroovyFile[],
@@ -328,7 +379,7 @@ function entryMenu(
     (variants.length === 0
       ? ""
       : ` The legacy player also chose a localized variant of a script by the system language, which the converted scripts do not, so these variants are not reached: ${variants.join(", ")}.`);
-  const name = (path: string): string => path.replace(/\.tease$/u, "");
+  const name = menuLabels(choices, scripts, programs);
   // With one script to offer, the package starts there.
   const question: IrStatement[] =
     choices.length === 1
@@ -344,7 +395,7 @@ function entryMenu(
             name: "picked",
             value: {
               kind: "choice",
-              options: choices.map((path) => ({ kind: "literal", value: name(path) })),
+              options: choices.map((path) => ({ kind: "literal", value: name.get(path)! })),
             },
             span: null,
           },
