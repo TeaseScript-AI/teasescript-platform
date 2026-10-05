@@ -45,7 +45,12 @@ import {
   numberAnswerText,
 } from "./interaction-answers.js";
 import type { PlanImage, PlanTag, TypeCheckPlan } from "./plan/model.js";
-import { isTakePhotoCall } from "./capture-call.js";
+import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
+import {
+  emptyImageFilterMessage,
+  IMAGE_NO_SOURCE_MESSAGE,
+  imageFilterTextProblem,
+} from "./image-input.js";
 import { evaluateTagSteps, passesTagList } from "./tag-query.js";
 import { addTag, normalizeTagName, readTagText, type Tag } from "./tags.js";
 import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
@@ -2575,6 +2580,66 @@ class TypeChecker {
     }
   }
 
+  /**
+   * The message of `askImage` is shown text, the sources are booleans, and `types:` and `mime:` are lists of texts. Written
+   * values must be valid, and written sources must leave the player a way to answer.
+   */
+  *#askImageTask(expression: CallExpression, scope: Scope): CompileTask<void> {
+    const sources: boolean[] = [];
+    for (const argument of expression.arguments) {
+      const type = yield* compileChild(this.#expressionTask(argument.value, scope));
+      const name = argument.kind === "namedArgument" ? argument.name.name : "message";
+      if (name === "message") this.#checkShownText(argument.value, type, "an input hint");
+      else if (name === "allowCamera" || name === "allowFile") {
+        this.#reportUnless(
+          type,
+          (member) => isScalar(member, "boolean"),
+          argument.value,
+          `'${name}:' takes true or false`,
+        );
+        const written = unwrapGrouping(argument.value);
+        if (written.kind === "booleanLiteral") sources.push(written.value);
+      } else if (name === "types" || name === "mime") {
+        this.#reportUnless(
+          type,
+          (member) =>
+            member.kind === "list" &&
+            (!isKnown(member.element) || isScalar(member.element, "string")),
+          argument.value,
+          name === "types"
+            ? `'types:' takes a list of file extensions, such as [".png"]`
+            : `'mime:' takes a list of image MIME types, such as ["image/png"]`,
+        );
+        this.#checkLiteralImageFilter(name, argument.value);
+      }
+    }
+    // Only both sources written as false leave no way to answer; an omitted source is allowed.
+    if (sources.length === 2 && !sources[0] && !sources[1])
+      this.#report(typeCode.invalidOperand, IMAGE_NO_SOURCE_MESSAGE, expression.span);
+  }
+
+  /** A written `types:` or `mime:` list holds at least one entry, and each written text is valid. */
+  #checkLiteralImageFilter(option: "types" | "mime", written: Expression): void {
+    const list = unwrapGrouping(written);
+    if (list.kind !== "listLiteral") return;
+    if (list.elements.length === 0) {
+      this.#report(typeCode.invalidOperand, emptyImageFilterMessage(option), list.span);
+      return;
+    }
+    for (const element of list.elements) {
+      if (
+        element.kind !== "stringLiteral" ||
+        element.parts.some((part) => part.kind !== "stringText")
+      )
+        continue;
+      const text = element.parts
+        .map((part) => (part.kind === "stringText" ? part.value : ""))
+        .join("");
+      const problem = imageFilterTextProblem(option, text);
+      if (problem !== null) this.#report(typeCode.invalidOperand, problem, element.span);
+    }
+  }
+
   /** Each written tag of a literal `takePhoto(tags: [...])` list is a tag, and no tag has two different numbers. */
   #checkLiteralCaptureTags(tags: Expression): void {
     const list = unwrapGrouping(tags);
@@ -3256,6 +3321,12 @@ class TypeChecker {
       // A capture waits for the Player like an interaction, and gives a photo reference, or null without a camera.
       this.#suspend();
       return optional(STRING_TYPE);
+    }
+    if (isAskImageCall(expression)) {
+      yield* compileChild(this.#askImageTask(expression, scope));
+      // Like an interaction, it waits for the player, and its answer is always an image reference.
+      this.#suspend();
+      return STRING_TYPE;
     }
     if (callee.kind === "identifier") {
       const entry = scope.resolve(callee.name);

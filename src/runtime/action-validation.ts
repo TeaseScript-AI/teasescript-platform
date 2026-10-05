@@ -36,7 +36,8 @@ import {
 import { isMessageMarkup } from "../message-markup.js";
 import type { RuntimeChatPacingGateSettlementSnapshot } from "./actions/model.js";
 import { CAPTURE_UNAVAILABLE_REASONS, requiredActionCompletionEvents } from "./actions/model.js";
-import { buttonTimeoutMilliseconds } from "./actions/interaction.js";
+import { buttonTimeoutMilliseconds, imageRequestValue } from "./actions/interaction.js";
+import { IMAGE_ANSWER_TRANSCRIPT_TEXT, validImageRequestFields } from "../image-input.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import { validMediaAction } from "./media-validation.js";
 import { validPermanentButtonAction } from "./permanent-button-validation.js";
@@ -1142,6 +1143,8 @@ function validInteractionResultForInstruction(
       isTemporalAnswer(result, ui.temporalKind)
     );
   }
+  if (instruction.interactionKind === "image")
+    return instruction.expectedResult === "string" && isImageReference(result);
   return (
     instruction.expectedResult === "string" &&
     instruction.interactionKind === "text" &&
@@ -1450,6 +1453,20 @@ function preparedInteractionUiMatchesAction(
       prefill === actual.prefill
     );
   }
+  if (prepared.kind === "image") {
+    // The open request keeps what it shows in its request temporary.
+    const request = runtimeTemporaryValue(temporaries, prepared.requestTemporary);
+    const fields = imageRequestFields(actual);
+    return (
+      fields !== null &&
+      validateCapturedSerializableValue(request) === null &&
+      serializableEquals(
+        // EVIDENCE: validation: validateCapturedSerializableValue accepted the captured request above.
+        request as SerializableRuntimeValue,
+        imageRequestValue(fields),
+      )
+    );
+  }
   const options = preparedChoiceOptions(prepared, temporaries, context, span);
   return options !== undefined && choiceOptionsEqual(options, actual.options);
 }
@@ -1489,7 +1506,9 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
             ...(kind === "number" && "integer" in value ? ["integer"] : []),
             ...(kind === "temporal" ? ["temporalKind"] : []),
           ]
-        : ["kind", "options", "accessibleName"];
+        : kind === "image"
+          ? ["kind", "hint", "accessibleName", "allowCamera", "allowFile", "types", "mime"]
+          : ["kind", "options", "accessibleName"];
   if (
     !hasExactKeys(value, expectedUiKeys) ||
     ("integer" in value && value.integer !== true) ||
@@ -1544,6 +1563,12 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
       (!("background" in value) || isNormalizedOpaqueColor(value.background))
     );
   }
+  if (kind === "image")
+    return (
+      (value.hint === null || count(value.hint)) &&
+      validImageRequestFields(value, count) &&
+      !measurementExhausted
+    );
   if (kind === "text" || kind === "number" || kind === "temporal") {
     const answerKind = isTemporalAnswerKind(value.temporalKind)
       ? value.temporalKind
@@ -1608,7 +1633,49 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
       actual.hint === expected.hint &&
       actual.prefill === expected.prefill
     );
+  if (expected.kind === "image")
+    return (
+      actual.hint === expected.hint &&
+      actual.allowCamera === expected.allowCamera &&
+      actual.allowFile === expected.allowFile &&
+      textsEqual(expected.types, actual.types) &&
+      textsEqual(expected.mime, actual.mime)
+    );
   return choiceOptionsEqual(expected.options, actual.options);
+}
+
+/** The request fields of an image UI, read without assuming their types; `null` when one is malformed. */
+function imageRequestFields(
+  ui: Record<string, unknown>,
+): Parameters<typeof imageRequestValue>[0] | null {
+  const { hint, allowCamera, allowFile } = ui;
+  const types = textList(ui.types);
+  const mime = textList(ui.mime);
+  if (
+    (hint !== null && typeof hint !== "string") ||
+    typeof allowCamera !== "boolean" ||
+    typeof allowFile !== "boolean" ||
+    types === undefined ||
+    mime === undefined
+  )
+    return null;
+  return { hint, allowCamera, allowFile, types, mime };
+}
+
+function textList(value: unknown): readonly string[] | null | undefined {
+  if (value === null) return null;
+  return Array.isArray(value) && value.every((text): text is string => typeof text === "string")
+    ? value
+    : undefined;
+}
+
+function textsEqual(expected: readonly string[] | null, actual: unknown): boolean {
+  if (expected === null) return actual === null;
+  return (
+    Array.isArray(actual) &&
+    actual.length === expected.length &&
+    expected.every((text, index) => actual[index] === text)
+  );
 }
 
 /** Whether `actual` holds the same buttons, in order: text, value, and background. */
@@ -1810,6 +1877,10 @@ function validSettlementKindData(
       typeof settlement.result === "number" &&
       Number.isFinite(settlement.result) &&
       !Object.is(settlement.result, -0);
+  } else if (settlement.interactionKind === "image") {
+    resultValid =
+      isImageReference(settlement.result) &&
+      settlement.transcriptText === IMAGE_ANSWER_TRANSCRIPT_TEXT;
   } else if (settlement.interactionKind === "temporal") {
     // The transcript shows the answer in the presentation in force then, which is not derived again here.
     resultValid =
@@ -1895,7 +1966,12 @@ function validSettlementKindData(
 }
 
 function isInteractionKind(value: unknown): value is InteractionKind {
-  return isOneOf(value, ["button", "text", "number", "choice", "temporal"]);
+  return isOneOf(value, ["button", "text", "number", "choice", "temporal", "image"]);
+}
+
+/** An image answer: the reference of a stored image, which only the host that stored it resolves. */
+function isImageReference(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && interactionStringFits(value);
 }
 
 function isTemporalAnswerKind(value: unknown): value is InteractionTemporalKind {
@@ -1968,6 +2044,8 @@ function preparedUiFitsPresentedUi(
       (ui.hint === null) === (prepared.hintTemporary === null) &&
       (!("prefill" in ui) || prepared.prefillTemporary !== undefined)
     );
+  // The request temporary is cleared after completion; the recorded request was checked by its shape.
+  if (prepared.kind === "image") return true;
   return Array.isArray(ui.options) && buttonsFitWrittenValues(prepared.values, ui.options);
 }
 

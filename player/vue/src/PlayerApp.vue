@@ -245,6 +245,7 @@ async function toggleFullscreen() {
           :speakers="transcript.speakers"
           :revision="transcript.revision"
           :observe-time="player.observe"
+          :images="player.images"
           @update:session="player.update"
         />
       </PlayerComposition>

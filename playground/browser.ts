@@ -703,6 +703,12 @@ function renderPlayerControls(presentation: WorkspacePlayerPresentation): void {
     return;
   }
 
+  // An image is chosen in the Player, which stores it; the playground has no image input.
+  if (interaction.ui.kind === "image") {
+    elements.composerHelp.textContent = "Answer this image request in the Player.";
+    return;
+  }
+
   renderChoiceControls(interaction.actionId, accessibleName, interaction.ui);
   elements.composerHelp.textContent = "Type one exact visible option or select a rendered control.";
   focusNewInteraction(interaction.actionId, elements.composerInput);

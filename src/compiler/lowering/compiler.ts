@@ -50,7 +50,7 @@ import type {
   TagQueryExpressionPlan,
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
-import { isTakePhotoCall } from "../../capture-call.js";
+import { isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralParts, storedDuration } from "../../duration.js";
@@ -1279,6 +1279,9 @@ export class InstructionCompiler {
         throw new TypeError("A permanent button lowered without an identifier.");
       return lowered;
     }
+    if (isAskImageCall(expression) && expression.kind === "callExpression") {
+      return yield* compileChild(this.#lowerAskImageTask(expression));
+    }
     if (isTakePhotoCall(expression)) {
       // `takePhoto(tags: …)`: the tags are evaluated first; the capture reads them before it asks the Player.
       const tagsArgument =
@@ -1753,6 +1756,52 @@ export class InstructionCompiler {
       expression.span,
     );
     this.#emitTemporaryCleanup(preparedTemporaryIds, expression.span);
+    return lowered;
+  }
+
+  /**
+   * `askImage(...)`: the written arguments are evaluated once, in source order, into one object, which the interaction
+   * reads when it opens. It is always prepared: its request is checked then.
+   */
+  *#lowerAskImageTask(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+  ): CompileTask<LoweredExpression> {
+    const speakerTemporary = this.#prepareInteractionSpeaker(null, expression.span);
+    const values = yield* compileChild(
+      this.#lowerOrderedExpressionsTask(expression.arguments.map((argument) => argument.value)),
+    );
+    const requestTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: requestTemporary,
+      value: {
+        kind: "object",
+        properties: expression.arguments.map((argument, index) => ({
+          name: argument.kind === "namedArgument" ? argument.name.name : "message",
+          value: values[index]!.plan,
+          span: copySpan(argument.span),
+        })),
+        span: copySpan(expression.span),
+      },
+      expectBoolean: false,
+      span: copySpan(expression.span),
+    });
+    this.#emitTemporaryCleanup(
+      values.flatMap((value) => value.temporaryIds),
+      expression.span,
+    );
+    const lowered = this.#emitPreparedResultInteraction(
+      "image",
+      "string",
+      speakerTemporary,
+      {
+        kind: "image",
+        requestTemporary,
+        accessibleName: { kind: "localizedDefault", key: "answer" },
+      },
+      expression.span,
+    );
+    this.#emitTemporaryCleanup([speakerTemporary, requestTemporary], expression.span);
     return lowered;
   }
 
@@ -2257,6 +2306,7 @@ export class InstructionCompiler {
       }
       if (
         isTakePhotoCall(current.expression) ||
+        isAskImageCall(current.expression) ||
         (current.expression.kind === "callExpression" &&
           current.expression.callee.kind === "identifier" &&
           this.#functionByName.has(current.expression.callee.name))
@@ -2568,6 +2618,8 @@ function assembleExpression(
     case "callExpression":
       if (isTakePhotoCall(expression))
         throw new TypeError("takePhoto() reached pure expression assembly.");
+      if (isAskImageCall(expression))
+        throw new TypeError("askImage() reached pure expression assembly.");
       return {
         kind: "call",
         callee: child(expression.callee),

@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 56;
+export const INSTRUCTION_PLAN_VERSION = 57;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -507,7 +507,7 @@ export interface PlayMediaInstruction extends InstructionBase {
   readonly destinationTemporary: number | null;
 }
 
-export type InteractionKind = "button" | "text" | "number" | "choice" | "temporal";
+export type InteractionKind = "button" | "text" | "number" | "choice" | "temporal" | "image";
 /**
  * `choice` is the value of the selected choice option; a button used as a value yields a `duration`; `temporal` is the
  * date, time, or date and time the UI asks for.
@@ -574,7 +574,23 @@ export type InteractionUiPayload =
       readonly kind: "choice";
       readonly options: readonly InteractionChoiceOption[];
       readonly accessibleName: InteractionAccessibleName;
-    };
+    }
+  | ({
+      readonly kind: "image";
+      readonly hint: string | null;
+      readonly accessibleName: InteractionAccessibleName;
+    } & ImageRequest);
+
+/**
+ * How the player may answer `askImage` (V30 §20): from the camera, from a file, or both, and which file extensions and
+ * image MIME types a file needs; `null` accepts any image.
+ */
+export interface ImageRequest {
+  readonly allowCamera: boolean;
+  readonly allowFile: boolean;
+  readonly types: readonly string[] | null;
+  readonly mime: readonly string[] | null;
+}
 
 /** An authored choice value before `:`: an identifier is a string, a numeric literal a number. */
 export type PreparedInteractionChoiceValue = string | number;
@@ -617,6 +633,15 @@ export type PreparedInteractionUiPayload =
       readonly optionsTemporary: number;
       /** The authored value of each option, or `null`. Its length is the authored option count. */
       readonly values: readonly (PreparedInteractionChoiceValue | null)[];
+      readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "image";
+      /**
+       * An object holding the written arguments of `askImage`, by name and in source order, with the message as
+       * `message`. When the request opens, it holds every argument, with the message as text or `null`.
+       */
+      readonly requestTemporary: number;
       readonly accessibleName: InteractionAccessibleName;
     };
 

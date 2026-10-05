@@ -79,7 +79,9 @@ ADR 0018 selects direct Standard Library names with no import and no first-POC o
 
 The current compiler implements the compact interaction forms in this section through explicit versioned
 interaction instructions and the canonical resumable runtime. The broader parenthesized V30 APIs and their advanced
-parameters remain deferred; this slice does not treat compact syntax as a runtime library call. A parenthesized
+parameters remain deferred, except `askImage(...)`, which is implemented in its V30 call form
+(`let picture = askImage("Add an image")`; see [Image input](RUNTIME.md#image-input)); this slice does not treat
+compact syntax as a runtime library call. A parenthesized
 interaction-call spelling is never interpreted as compact syntax; until those APIs are implemented, the parser reports
 it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the same diagnostic.
 

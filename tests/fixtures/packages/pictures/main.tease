@@ -1,0 +1,12 @@
+---
+title: "Your pictures"
+---
+say "Show me a picture of yourself."
+let picture: string = askImage("Add an image")
+showImage picture
+say "Now one more, as a PNG file."
+let second: string = askImage(message: "Add a PNG image", types: [".png"], mime: ["image/png"])
+showImage second
+say "Thank you."
+showButton "Done"
+exit

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId, watch } from "vue";
 import { useTextareaAutosize } from "@vueuse/core";
+import { Paperclip } from "@lucide/vue";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { usePlayerConditions } from "./usePlayerConditions";
@@ -18,6 +19,11 @@ const props = withDefaults(
     feedback?: string;
     /** A skippable pacing gate is waiting; Space in the empty input settles it. */
     pacing?: boolean;
+    /**
+     * While an image request accepts a file: a paperclip opens the browser's file picker with this `accept` hint, and a
+     * file dropped onto the composer answers too. Without it there is neither.
+     */
+    attach?: { readonly accept: string; readonly label: string } | null;
   }>(),
   {
     disabled: false,
@@ -28,6 +34,7 @@ const props = withDefaults(
     inputType: "text",
     feedback: "",
     pacing: false,
+    attach: null,
   },
 );
 
@@ -35,6 +42,8 @@ const emit = defineEmits<{
   "update:modelValue": [value: string];
   submit: [source: "input" | "button"];
   skip: [];
+  /** Files the player chose or dropped while `attach` was offered. */
+  files: [files: readonly File[]];
 }>();
 
 const textarea = ref<InstanceType<typeof Textarea> | null>(null);
@@ -119,6 +128,49 @@ function allowSoftwareKeyboard(): void {
   if (input.value) input.value.inputMode = props.inputMode;
 }
 
+const filePicker = ref<HTMLInputElement | null>(null);
+function chooseFiles(): void {
+  const input = filePicker.value;
+  if (!input?.files) return;
+  const files = [...input.files];
+  // The same file may be chosen again after a refused attempt.
+  input.value = "";
+  if (files.length > 0) emit("files", files);
+}
+
+// A file dragged over the composer is a drop target only while `attach` is offered; dragged text and links are not.
+// Entering and leaving child elements is counted, so the highlight stays while the file is over the composer.
+const dropDepth = ref(0);
+const dropActive = computed(() => dropDepth.value > 0);
+function carriesFiles(event: DragEvent): boolean {
+  return props.attach !== null && event.dataTransfer?.types.includes("Files") === true;
+}
+function dragEnter(event: DragEvent): void {
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  dropDepth.value++;
+}
+function dragOver(event: DragEvent): void {
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+}
+function dragLeave(): void {
+  if (dropDepth.value > 0) dropDepth.value--;
+}
+function drop(event: DragEvent): void {
+  dropDepth.value = 0;
+  if (!carriesFiles(event)) return;
+  event.preventDefault();
+  emit("files", [...(event.dataTransfer?.files ?? [])]);
+}
+watch(
+  () => props.attach,
+  (attach) => {
+    if (attach === null) dropDepth.value = 0;
+  },
+);
+
 defineExpose({ focusInput });
 </script>
 
@@ -128,13 +180,47 @@ defineExpose({ focusInput });
       {{ feedback }}
     </p>
     <span v-if="feedback" class="composer-notice-arrow" aria-hidden="true" />
-    <div class="conversation-glass" data-composer-shell>
+    <div
+      class="conversation-glass"
+      data-composer-shell
+      :data-drop-active="dropActive ? true : undefined"
+      @dragenter="dragEnter"
+      @dragover="dragOver"
+      @dragleave="dragLeave"
+      @drop="drop"
+    >
+      <span v-if="dropActive" class="composer-drop-hint" aria-hidden="true">
+        Drop the image here
+      </span>
       <form
         class="composer-form"
         data-composer-form
         data-runtime-composer
         @submit.prevent="emit('submit', 'button')"
       >
+        <template v-if="attach">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            class="composer-attach"
+            data-composer-attach
+            :aria-label="attach.label"
+            :title="attach.label"
+            :disabled="disabled || submitting"
+            @click="filePicker?.click()"
+          >
+            <Paperclip aria-hidden="true" />
+          </Button>
+          <input
+            ref="filePicker"
+            data-composer-file
+            type="file"
+            hidden
+            :accept="attach.accept"
+            @change="chooseFiles"
+          />
+        </template>
         <div v-if="inputType !== 'text'" class="composer-picker-field">
           <span v-if="placeholder" class="composer-hint" aria-hidden="true">{{ placeholder }}</span>
           <input
@@ -203,6 +289,7 @@ defineExpose({ focusInput });
   --composer-notice-text: #ffd4d1;
 }
 .conversation-glass {
+  position: relative;
   pointer-events: auto;
   border: 1px solid var(--border);
   border-radius: 24px;
@@ -228,6 +315,30 @@ defineExpose({ focusInput });
   align-items: end;
   gap: 8px;
   font-size: var(--player-reading-font-size, 1rem);
+}
+.composer-form:has(> [data-composer-attach]) {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.composer-attach {
+  align-self: center;
+  border-radius: 999px;
+}
+.conversation-glass[data-drop-active] {
+  outline: 2px dashed var(--focus-ring);
+  outline-offset: var(--player-focus-offset);
+}
+.composer-drop-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background: var(--surface-component);
+  color: var(--foreground);
+  font-size: 0.875rem;
+  font-weight: 700;
+  pointer-events: none;
 }
 .composer-form .composer-input {
   min-block-size: calc(1em + var(--player-reading-line-gap, 8px) + 12px);

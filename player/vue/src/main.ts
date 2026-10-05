@@ -24,17 +24,18 @@ const host =
         load: async () => ({ project: demoSource, problems: [] }),
       }
     : developmentPackageHost(packageId);
+// Durable captured and chosen media; when IndexedDB is unavailable, it stays session media.
+const capturedMediaRepository = await openIndexedDbMediaRepository().catch(() => null);
 const app = developmentPreview
-  ? createApp((await import("./DevelopmentPreview.vue")).default, {
-      // Durable captured media; when IndexedDB is unavailable, captures stay session media.
-      capturedMediaRepository: await openIndexedDbMediaRepository().catch(() => null),
-    })
+  ? createApp((await import("./DevelopmentPreview.vue")).default, { capturedMediaRepository })
   : // The session host lives in a component scope, so unmounting stops its media, clock and listeners.
     createApp({
       setup: () => {
         const player = usePlayerSession({
           resolveAsset: host.resolveAsset,
           scriptStorage: createLocalScriptStorage(browserStorage(), host.storageScope),
+          // An image the script saves a reference to stays in this browser for later runs.
+          capturedMedia: { repository: capturedMediaRepository },
         });
         const failure = shallowRef<ScriptFailure | null>(null);
         // The script compiles, without running, before Start: one that does not compile shows its diagnostics.

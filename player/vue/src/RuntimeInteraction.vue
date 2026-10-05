@@ -5,6 +5,7 @@ import { useEventListener } from "@vueuse/core";
 import {
   activePlayerRuntimeInteraction,
   activatePlayerRuntimeButton,
+  answerPlayerRuntimeImage,
   playerRuntimeForeground,
   playerRuntimePacingGate,
   selectPlayerRuntimeChoice,
@@ -18,6 +19,20 @@ import ConversationSurface from "./ConversationSurface.vue";
 import Transcript from "./Transcript.vue";
 import { usePlayerConditions } from "./usePlayerConditions";
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../model.js";
+import { imagePickerAccept, type ImageFileFilters } from "../../image-file.js";
+import type { CapturedMediaAdmission } from "../../../src/index.js";
+
+/** How the host stores an image file the player chose for `askImage`, and vouches for it. */
+export interface PlayerImageInput {
+  store(
+    file: File,
+    filters: ImageFileFilters,
+  ): Promise<{ readonly reference: string } | { readonly message: string }>;
+  readonly admission: CapturedMediaAdmission;
+  discard(reference: string): void;
+}
+
+const IMAGE_TEXT_FEEDBACK = "Attach an image with the paperclip, or drop it onto the message field.";
 
 const props = defineProps<{
   session: PlayerRuntimeSession | null;
@@ -28,6 +43,8 @@ const props = defineProps<{
   transcriptKey: string;
   /** Brings scene time up to date before input and returns the published session. */
   observeTime?: () => PlayerRuntimeSession | null;
+  /** Answers `askImage` with a chosen file; without it an image request offers no file input. */
+  images?: PlayerImageInput;
 }>();
 const emit = defineEmits<{
   "update:session": [session: PlayerRuntimeSession];
@@ -63,6 +80,16 @@ const pacing = computed(() => {
   const gate = props.session ? playerRuntimePacingGate(props.session) : null;
   return gate?.skippable ? gate : null;
 });
+// An image request accepts a file through the paperclip or a drop only while it allows files.
+const imageRequest = computed(() =>
+  foreground.value?.kind === "ask-image" ? foreground.value : null,
+);
+const attach = computed(() =>
+  imageRequest.value?.allowFile === true && props.images
+    ? { accept: imagePickerAccept(imageRequest.value), label: "Attach an image" }
+    : null,
+);
+const readingImage = ref(false);
 const root = ref<HTMLElement | null>(null);
 const composer = ref<InstanceType<typeof Composer> | null>(null);
 const draft = ref("");
@@ -177,7 +204,9 @@ async function complete(
       showFeedback(
         foreground.value?.kind === "show-button"
           ? "Type the exact button text or activate it above."
-          : "",
+          : attach.value
+            ? IMAGE_TEXT_FEEDBACK
+            : "",
       );
       if (refocusInput) focusInput();
       return;
@@ -262,6 +291,56 @@ useEventListener(document, "pointerup", (event: PointerEvent) => {
     skipPacing(false, gesture.actionId);
 });
 
+/**
+ * Answers the image request with one chosen or dropped file. The file is checked and stored first; when the request
+ * ended or the session was replaced meanwhile, or the runtime did not take the image, the stored image is dropped.
+ */
+async function submitImage(files: readonly File[]) {
+  const session = props.session;
+  const request = imageRequest.value;
+  const images = props.images;
+  if (!session || !request || !images || !attach.value || submitting.value || readingImage.value)
+    return;
+  if (files.length !== 1) {
+    showFeedback("Choose one image.");
+    return;
+  }
+  const actionId = activePlayerRuntimeInteraction(session.snapshot)?.actionId;
+  const reset = props.reset;
+  readingImage.value = true;
+  let stored: Awaited<ReturnType<PlayerImageInput["store"]>>;
+  try {
+    stored = await images.store(files[0]!, request);
+  } finally {
+    readingImage.value = false;
+  }
+  const current = props.session;
+  const same =
+    current?.plan === session.plan &&
+    props.reset === reset &&
+    activePlayerRuntimeInteraction(current.snapshot)?.actionId === actionId;
+  if ("message" in stored) {
+    if (same) showFeedback(stored.message);
+    return;
+  }
+  if (!same) {
+    images.discard(stored.reference);
+    return;
+  }
+  let accepted = false;
+  await complete(
+    (latest) => {
+      const result = answerPlayerRuntimeImage(latest, stored.reference, images.admission);
+      accepted = result?.outcome.kind === "completed";
+      return result;
+    },
+    false,
+    "interaction",
+    actionId,
+  );
+  if (!accepted) images.discard(stored.reference);
+}
+
 function submit(source: "input" | "button") {
   void complete((session) => submitPlayerRuntimeComposer(session, draft.value), source === "input");
 }
@@ -301,10 +380,15 @@ function submit(source: "input" | "button") {
           v-model="draft"
           :disabled="!foreground && !pacing"
           :pacing="!foreground && !!pacing"
-          :submitting="submitting"
+          :submitting="submitting || readingImage"
           :placeholder="
-            foreground && 'hint' in foreground ? foreground.hint : 'Type your response…'
+            imageRequest
+              ? imageRequest.hint || 'Add an image…'
+              : foreground && 'hint' in foreground
+                ? foreground.hint
+                : 'Type your response…'
           "
+          :attach="attach"
           :accessible-name="foreground?.accessibleName ?? 'Response'"
           :input-mode="
             foreground?.kind !== 'ask-number' ? 'text' : foreground.integer ? 'numeric' : 'decimal'
@@ -323,6 +407,7 @@ function submit(source: "input" | "button") {
           :feedback="feedback"
           @submit="submit"
           @skip="skipPacing(true)"
+          @files="submitImage"
         />
       </template>
     </ConversationSurface>

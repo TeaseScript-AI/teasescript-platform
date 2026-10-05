@@ -84,4 +84,15 @@ export type PlayerForegroundPresentation =
        * date control has no year 0000.
        */
       readonly isoText?: true;
+    }
+  | {
+      /** `askImage`: the player answers with an image file, through the file picker or by dropping it. */
+      readonly kind: "ask-image";
+      readonly accessibleName: string;
+      readonly hint: string;
+      /** Whether an image file may answer; a camera-only request cannot be answered in this Player yet. */
+      readonly allowFile: boolean;
+      /** The file extensions and image MIME types a file needs; `null` accepts any image. */
+      readonly types: readonly string[] | null;
+      readonly mime: readonly string[] | null;
     };
