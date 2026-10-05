@@ -504,7 +504,7 @@ async function playOnce(
       } else if (kind !== "button" && kind !== "choice" && unchanged > 3) {
         return finish("unsupported", `no control for the ${kind} interaction`, step);
       }
-      await page.clock.runFor(300);
+      await page.clock.fastForward(300);
     } else if (state.foreground === "delay" && state.delayMs !== null) {
       // Jumping fires each due timer once, instead of every animation frame on the way.
       await page.clock.fastForward(Math.max(50, state.delayMs + 50));
@@ -512,7 +512,7 @@ async function playOnce(
       // Media play in real time; everything else waits on the fake clock.
       if (state.foreground === "media") await new Promise((resolve) => setTimeout(resolve, 250));
       if (unchanged > 2) await page.clock.fastForward(20_000);
-      else await page.clock.runFor(1_000);
+      else await page.clock.fastForward(1_000);
     }
   }
   return finish(
