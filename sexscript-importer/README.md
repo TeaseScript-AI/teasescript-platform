@@ -124,8 +124,12 @@ the images and their tags), compiles the `.tease` files as written, and runs the
 root, so both trees are hard-linked into the package root. Media are never copied, so the corpus and the output must
 share one filesystem. A resource pack (a folder without scripts) is linked into each script package whose source names
 one of its top media folders, narrowed to the packages that name its subfolder when any do. Each package folder records
-the conversion in `.conversion.json` (the converter commit, the SHA-256 of each legacy script, and the patches
-applied) and `.conversion.log`; `.conversion-summary.json` in the root records the importer commit and the date.
+the conversion in `.conversion.json` (the converter commit, the SHA-256 of each legacy script, the patches applied,
+and the unit's status) and `.conversion.log`; `.conversion-summary.json` in the root records the importer commit and
+the date. A merged unit's `unit.json`, beside its `scripts/`, gives its status, such as `unfinished-content-stub`, and
+its `internalScripts`: scripts of expansions, story chapters, resource scripts, or hub games that are no entries of
+their own, which `convert-package` and `report` leave out of a generated entry menu. A menu with one script left
+starts there directly.
 
 Each unit is converted in `<converted-root>/.staging/<unit>/` and replaces its published folder only when every step
 succeeded. When a patch does not apply, or the converter, the report, or the driver fails, the previous output stays,
@@ -163,7 +167,9 @@ Script-specific fixes stay out of the converter (owner decision 2026-10-05). The
 
 - Source patches are the default layer: a unified diff of legacy files with paths from the unit folder, applied with
   `patch -p1 --fuzz=0` to a staged copy before conversion, so the report and the package both come from the patched
-  sources. Edit a copy, never the corpus file, and keep its line endings, which `patch` matches exactly:
+  sources. Edit a copy, never the corpus file, and keep its line endings, which `patch` matches exactly. `patch` reads
+  a path with spaces only when a tab and a timestamp follow it in the `---`/`+++` header, so give such a label one:
+  `--label $'a/scripts/My file.groovy\t2026-10-05 00:00:00'`.
 
   ```sh
   cd external/corpus2-merged/<unit>

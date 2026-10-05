@@ -70,6 +70,8 @@ export interface ConversionRecord {
   readonly inputs: Readonly<Record<string, string>>;
   /** The manual patches applied, in order, with the SHA-256 of each diff file or output-patch entry. */
   readonly patches: ReadonlyArray<{ id: string; layer: "source" | "output"; sha256: string }>;
+  /** The unit's status from the merged corpus's `unit.json`, such as `unfinished-content-stub`; null for none. */
+  readonly unitStatus: string | null;
   readonly exitCode: number;
   readonly linkedMedia: number;
   readonly linkedResourceMedia: number;
@@ -270,6 +272,7 @@ export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
               layer,
               sha256: patches.hashes.get(patchId)!,
             })),
+      unitStatus: await unitStatus(corpusRoot, id),
       exitCode,
       ...media,
     };
@@ -441,6 +444,14 @@ async function unitReport(unitRoot: string, packageRoot: string): Promise<Record
   }
   if (!isRecordValue(report)) throw new Error("the report is not a JSON object");
   return report;
+}
+
+/** The status the merged corpus records for a unit in its `unit.json`, or null. */
+async function unitStatus(corpusRoot: string, id: string): Promise<string | null> {
+  const text = await readFile(path.join(corpusRoot, id, "unit.json"), "utf8").catch(() => null);
+  if (text === null) return null;
+  const unit: unknown = JSON.parse(text);
+  return isRecordValue(unit) && typeof unit.status === "string" ? unit.status : null;
 }
 
 /** SHA-256 of each legacy script of a unit, by its path from the unit folder. */
