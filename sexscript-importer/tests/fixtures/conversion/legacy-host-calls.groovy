@@ -38,3 +38,5 @@ def checkPhoto = { snapfile ->
 if (checkPhoto(getImage("Smile"))) show("Nice photo")
 // The system language, which TeaseScript cannot query yet, reads as English.
 if (System.getProperty("user.language") == "de") show("Hallo") else show("Hello")
+// Java SimpleDateFormat of the current moment shows the local time.
+show("You report at " + new java.text.SimpleDateFormat("HH:mm").format(new java.util.Date()) + ".")

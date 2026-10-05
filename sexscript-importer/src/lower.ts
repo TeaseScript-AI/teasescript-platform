@@ -9732,6 +9732,17 @@ function dateFormat(
   argumentsNodes: AstNode[],
   context: LowerContext,
 ): IrExpression | null {
+  // Java `new SimpleDateFormat(pattern).format(new Date())` formats the current moment like Groovy's
+  // `new Date().format(pattern)`.
+  const javaFormat =
+    targetNode.kind === "constructorCall" &&
+    /(?:^|\.)SimpleDateFormat$/u.test(text(targetNode.type) ?? "") &&
+    argumentsNodes.length === 1 &&
+    isCurrentDateConstructor(argumentsNodes[0]!)
+      ? nodeArray(asNode(targetNode.arguments)?.items)
+      : null;
+  if (javaFormat !== null && javaFormat.length === 1)
+    return dateFormat(node, argumentsNodes[0]!, javaFormat, context);
   const pattern = argumentsNodes.length === 1 ? constantString(argumentsNodes[0]) : null;
   if (!isCurrentDateConstructor(targetNode)) {
     return unsupportedExpression(

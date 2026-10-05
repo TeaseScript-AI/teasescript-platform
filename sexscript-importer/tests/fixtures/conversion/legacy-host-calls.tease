@@ -107,4 +107,7 @@ if "en" == "de" {
 } else {
   say "Hello"
 }
+// Java SimpleDateFormat of the current moment shows the local time.
+// NOTE SX_DATE_FORMAT line 42: Java formatted the current time with the pattern "HH:mm"; formatTime() shows the player's local form instead (#532).
+say "You report at ${getTime().formatTime()}."
 exit
