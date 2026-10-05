@@ -1,0 +1,10 @@
+---
+title: "Hero"
+author: "Anna"
+description: "A quest"
+keywords: "game"
+---
+// Legacy setInfos(): API version 9, status "working", color 0x000000, language "EN"
+
+say "The dungeon"
+exit

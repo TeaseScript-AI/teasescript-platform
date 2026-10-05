@@ -219,9 +219,24 @@ function menuLabels(
   for (const label of labels.values()) counts.set(label, (counts.get(label) ?? 0) + 1);
   return new Map(
     [...labels].map(([path, label]) =>
-      counts.get(label)! > 1 ? [path, `${label} (${base(path)})`] : [path, label],
+      counts.get(label)! > 1
+        ? [
+            path,
+            isOtherVersion(path)
+              ? `${label} (alternate version of ${base(path.replace(SHA_VERSION, ""))}, ${/__sha256_([0-9a-f]+)/iu.exec(path)![1]!.slice(0, 6)})`
+              : `${label} (${base(path)})`,
+          ]
+        : [path, label],
     ),
   );
+}
+
+/** The suffix by which the corpus merge kept another version of a script beside it: `name__sha256_<hash>`. */
+const SHA_VERSION = /__sha256_[0-9a-f]+(?=\.tease$)/iu;
+
+/** Whether a script is another version of a script, which the corpus merge kept beside it. */
+function isOtherVersion(path: string): boolean {
+  return SHA_VERSION.test(path);
 }
 
 /** The indexes of the files that `internal` names by their paths from the legacy scripts folder. */
@@ -368,10 +383,21 @@ function entryMenu(
   const targeted = (path: string): boolean =>
     targets.has(path.toLowerCase()) || targets.has(base(path).toLowerCase());
   const listed = scripts.rootScripts.filter((index) => !internal.has(index));
+  // Other versions of a script, which the corpus merge kept beside it as `name__sha256_<hash>`, come after the scripts.
   const offered = listed
     .map((index) => scripts.pathOf.get(index)!)
     .filter((path) => !targeted(path))
-    .sort();
+    .sort((first, second) =>
+      isOtherVersion(first) === isOtherVersion(second)
+        ? first < second
+          ? -1
+          : first > second
+            ? 1
+            : 0
+        : isOtherVersion(first)
+          ? 1
+          : -1,
+    );
   const choices =
     offered.length > 0
       ? offered
