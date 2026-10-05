@@ -1,0 +1,526 @@
+/// <reference lib="dom" />
+/**
+ * Plays converted packages in the real Player through its UI, on several paths per package, and records how far each
+ * run got and why it stopped.
+ *
+ * Usage: node tools/play-check.ts [--base <origin>] [--runs N] [--steps N] [--only id,id] <converted-root> <out-dir>
+ *
+ * Each package opens at `<origin>/player/?package=<id>` (default `https://agents.home.arpa:4443`, see
+ * `serve-catalog.ts`) in headless Chromium, one browser at a time. A run presses buttons, picks choices, and types
+ * answers until the session halts, fails, hangs, or the step budget ends. Playwright's fake clock skips waits, timers,
+ * and chat pacing, and media play at 16 times speed. Each run picks, at every choice, the option tried least often in
+ * earlier runs, so later runs take other branches; a package stops after a run that reached nothing new. The session
+ * state is read from the Player's mounted Vue tree (read-only), as the Player shows no runtime failure itself.
+ *
+ * Writes `<out-dir>/<id>/result.json` and a screenshot of where each run stopped.
+ * Needs Playwright: `PLAYWRIGHT_CORE` names the `playwright-core` package folder (default: the agent stack's
+ * Playwright CLI install).
+ */
+import { createHash } from "node:crypto";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import path from "node:path";
+import { parseArgs } from "node:util";
+
+const PLAYWRIGHT_CORE =
+  process.env.PLAYWRIGHT_CORE ?? "/opt/agent-stack/playwright-cli/node_modules/playwright-core";
+const NUMBER_ANSWERS = ["1", "3", "0", "10", "5", "2"];
+const TEXT_ANSWERS = ["yes", "no", "Mistress", "1", "ok", "slave"];
+const ISO_ANSWERS: Readonly<Record<string, string>> = {
+  date: "2026-10-05",
+  time: "12:00",
+  "datetime-local": "2026-10-05T12:00",
+};
+const IMAGE_EXTENSIONS = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".webp",
+  ".svg",
+  ".tif",
+  ".tiff",
+]);
+const MEDIA_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".mp4", ".webm"]);
+
+/** The parts of Playwright the runner uses. */
+interface Page {
+  goto(url: string): Promise<unknown>;
+  waitForSelector(selector: string, options: { timeout: number }): Promise<unknown>;
+  click(selector: string, options?: { timeout: number }): Promise<void>;
+  fill(selector: string, value: string, options?: { timeout: number }): Promise<void>;
+  press(selector: string, key: string, options?: { timeout: number }): Promise<void>;
+  evaluate<T>(fn: () => T): Promise<T>;
+  screenshot(options: { path: string }): Promise<unknown>;
+  addInitScript(fn: () => void): Promise<void>;
+  clock: {
+    install(): Promise<void>;
+    runFor(ms: number): Promise<void>;
+    fastForward(ms: number): Promise<void>;
+  };
+  on(event: "pageerror", listener: (error: Error) => void): void;
+}
+interface Browser {
+  newContext(options: object): Promise<{ newPage(): Promise<Page>; close(): Promise<void> }>;
+  close(): Promise<void>;
+}
+
+/** What one look at the Player shows. */
+interface PlayerState {
+  status: string | null;
+  failure: { code: string; message: string; path: string | null; line: number | null } | null;
+  /** `interaction:<kind>`, `delay`, `chatPacingGate`, ... */
+  foreground: string | null;
+  site: string | null;
+  delayMs: number | null;
+  options: string[];
+  composer: { type: string; mode: string } | null;
+  file: string | null;
+  stageImage: string | null;
+  stageShown: boolean;
+  media: Array<{ source: string; loaded: boolean }>;
+  progress: number;
+  lastText: string;
+  scriptFailure: string | null;
+  sites: number;
+}
+
+export interface RunResult {
+  readonly run: number;
+  readonly stop: {
+    readonly kind:
+      "ended" | "early-end" | "error" | "hang" | "budget" | "no-start" | "unsupported" | "harness";
+    readonly detail: string;
+  };
+  readonly steps: number;
+  readonly files: readonly string[];
+  readonly lastText: string;
+  readonly screenshot: string | null;
+}
+
+export interface PlayCheckResult {
+  readonly id: string;
+  readonly checkedAt: string;
+  readonly base: string;
+  /** Of the package's `.tease` files; a result for other contents is stale. */
+  readonly contentHash: string;
+  readonly verdict: "plays" | "stops" | "no-start";
+  readonly summary: string;
+  readonly runs: readonly RunResult[];
+  readonly coverage: {
+    readonly files: readonly string[];
+    readonly fileCount: number;
+    readonly sites: number;
+    readonly siteCount: number;
+    readonly choices: number;
+  };
+  readonly missingImages: readonly string[];
+  readonly missingMedia: readonly string[];
+}
+
+const { values, positionals } = parseArgs({
+  allowPositionals: true,
+  options: {
+    base: { type: "string", default: "https://agents.home.arpa:4443" },
+    runs: { type: "string", default: "6" },
+    steps: { type: "string", default: "300" },
+    only: { type: "string" },
+  },
+});
+if (positionals.length !== 2) {
+  process.stderr.write(
+    "Usage: node tools/play-check.ts [--base <origin>] [--runs N] [--steps N] [--only id,id] <converted-root> <out-dir>\n",
+  );
+  process.exit(2);
+}
+const [root, out] = positionals.map((item) => path.resolve(item)) as [string, string];
+const only = values.only === undefined ? null : new Set(values.only.split(","));
+const ids = (await readdir(root, { withFileTypes: true }))
+  .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+  .map((entry) => entry.name)
+  .filter((id) => only === null || only.has(id))
+  .sort();
+const { chromium } = createRequire(import.meta.url)(PLAYWRIGHT_CORE) as {
+  chromium: { launch(): Promise<Browser> };
+};
+const browser = await chromium.launch();
+try {
+  for (const [index, id] of ids.entries()) {
+    const result = await checkPackage(browser, id);
+    process.stderr.write(
+      `${index + 1}/${ids.length} ${id}: ${result.verdict} - ${result.summary}\n`,
+    );
+  }
+} finally {
+  await browser.close();
+}
+
+async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResult> {
+  const folder = path.join(root, id);
+  const files = await packageFiles(folder);
+  const hash = createHash("sha256");
+  for (const file of files.filter((item) => item.endsWith(".tease")))
+    hash.update(`${file}\0${await readFile(path.join(folder, file), "utf8")}\0`);
+  const present = new Set(files);
+  const outFolder = path.join(out, id);
+  await rm(outFolder, { recursive: true, force: true });
+  await mkdir(outFolder, { recursive: true });
+
+  const tries = new Map<string, number[]>();
+  const coveredFiles = new Set<string>();
+  const coveredSites = new Set<string>();
+  const coveredChoices = new Set<string>();
+  const missingImages = new Set<string>();
+  const missingMedia = new Set<string>();
+  const runs: RunResult[] = [];
+  let siteCount = 0;
+  let fileCount = files.filter((item) => item.endsWith(".tease")).length;
+  for (let run = 0; run < Number(values.runs); run += 1) {
+    const before = coveredFiles.size + coveredSites.size + coveredChoices.size;
+    const context = await browser.newContext({
+      ignoreHTTPSErrors: true,
+      viewport: { width: 1280, height: 900 },
+    });
+    let result: RunResult;
+    try {
+      const page = await context.newPage();
+      result = await playOnce(page, id, run, outFolder, {
+        tries,
+        seen: (state) => {
+          siteCount = Math.max(siteCount, state.sites);
+          if (state.file !== null) coveredFiles.add(state.file);
+          if (state.site !== null) coveredSites.add(state.site);
+          if (state.stageImage !== null && !state.stageShown && !present.has(state.stageImage))
+            missingImages.add(state.stageImage);
+          for (const media of state.media)
+            if (!present.has(media.source)) missingMedia.add(media.source);
+        },
+        chose: (site, option) => coveredChoices.add(`${site}#${option}`),
+      });
+    } catch (error) {
+      result = {
+        run,
+        stop: {
+          kind: "harness",
+          detail: error instanceof Error ? error.message.split("\n")[0]! : String(error),
+        },
+        steps: 0,
+        files: [],
+        lastText: "",
+        screenshot: null,
+      };
+    } finally {
+      await context.close();
+    }
+    runs.push(result);
+    if (result.stop.kind === "no-start") break;
+    if (run > 0 && coveredFiles.size + coveredSites.size + coveredChoices.size === before) break;
+  }
+  fileCount = Math.max(fileCount, coveredFiles.size);
+  const notEnded = runs.find((item) => item.stop.kind !== "ended");
+  const verdict =
+    runs[0]?.stop.kind === "no-start" ? "no-start" : notEnded === undefined ? "plays" : "stops";
+  const media = [
+    ...(missingImages.size > 0 ? [`${missingImages.size} missing images`] : []),
+    ...(missingMedia.size > 0 ? [`${missingMedia.size} missing audio/video`] : []),
+  ];
+  const summary =
+    (verdict === "plays"
+      ? `plays to the end in ${runs.length} runs`
+      : `run ${notEnded!.run + 1}: ${notEnded!.stop.kind}: ${notEnded!.stop.detail}`) +
+    (media.length > 0 ? `; ${media.join(", ")}` : "");
+  const result: PlayCheckResult = {
+    id,
+    checkedAt: new Date().toISOString(),
+    base: values.base,
+    contentHash: hash.digest("hex"),
+    verdict,
+    summary,
+    runs,
+    coverage: {
+      files: [...coveredFiles].sort(),
+      fileCount,
+      sites: coveredSites.size,
+      siteCount,
+      choices: coveredChoices.size,
+    },
+    missingImages: [...missingImages].sort(),
+    missingMedia: [...missingMedia].sort(),
+  };
+  await writeFile(path.join(outFolder, "result.json"), `${JSON.stringify(result, null, 2)}\n`);
+  return result;
+}
+
+async function playOnce(
+  page: Page,
+  id: string,
+  run: number,
+  outFolder: string,
+  track: {
+    tries: Map<string, number[]>;
+    seen(state: PlayerState): void;
+    chose(site: string, option: number): void;
+  },
+): Promise<RunResult> {
+  const files = new Set<string>();
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.addInitScript(() => {
+    // Media play at 16 times speed, so a script that waits for a sound does not wait in real time.
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+      this.playbackRate = 16;
+      return play.call(this);
+    };
+  });
+  await page.clock.install();
+  await page.goto(`${values.base}/player/?package=${encodeURIComponent(id)}`);
+  await page.waitForSelector("[data-session-activation] button, [data-script-failure]", {
+    timeout: 30_000,
+  });
+  let state = await readState(page);
+  const finish = async (kind: RunResult["stop"]["kind"], detail: string, steps: number) => {
+    const screenshot = `run-${run + 1}.png`;
+    await page.screenshot({ path: path.join(outFolder, screenshot) });
+    return {
+      run,
+      stop: { kind, detail },
+      steps,
+      files: [...files].sort(),
+      lastText: state.lastText,
+      screenshot,
+    };
+  };
+  if (state.scriptFailure !== null) return finish("no-start", state.scriptFailure, 0);
+  await page.click("[data-session-activation] button");
+  const visits = new Map<string, number>();
+  let unchanged = 0;
+  let lastProgress = -1;
+  let progressAt = Date.now();
+  for (let step = 0; step < Number(values.steps);) {
+    state = await readState(page);
+    track.seen(state);
+    if (state.file !== null) files.add(state.file);
+    if (state.status === "halted") {
+      if (state.progress === 0 && state.lastText === "" && state.stageImage === null)
+        return finish("error", "the session ended without showing anything", step);
+      // For example a script that needs legacy settings, such as owned toys, that a fresh player does not have.
+      if (step === 0 && state.sites > 0)
+        return finish("early-end", `ended before its first interaction: "${state.lastText}"`, step);
+      return finish("ended", "the session reached its end", step);
+    }
+    if (state.status === "failed" || state.failure !== null) {
+      const failure = state.failure;
+      return finish(
+        "error",
+        failure === null
+          ? "the session failed"
+          : `${failure.path ?? ""}${failure.line === null ? "" : `:${failure.line}`} ${failure.code} ${failure.message}`.trim(),
+        step,
+      );
+    }
+    if (pageErrors.length > 0) return finish("error", `page error: ${pageErrors[0]}`, step);
+    if (state.progress === lastProgress) unchanged += 1;
+    else {
+      unchanged = 0;
+      progressAt = Date.now();
+    }
+    lastProgress = state.progress;
+    // About 20 minutes of skipped time and half a minute of real time, for media, without any new event.
+    if (unchanged > 60 && Date.now() - progressAt > 30_000)
+      return finish(
+        "hang",
+        `nothing happens while waiting for ${state.foreground ?? "nothing"}`,
+        step,
+      );
+    if (state.foreground?.startsWith("interaction:") === true && state.site !== null) {
+      const kind = state.foreground.slice("interaction:".length);
+      const visit = visits.get(state.site) ?? 0;
+      visits.set(state.site, visit + 1);
+      if ((kind === "button" || kind === "choice") && state.options.length > 0) {
+        const counts =
+          track.tries.get(state.site) ?? new Array<number>(state.options.length).fill(0);
+        track.tries.set(state.site, counts);
+        // The option tried least often so far; among equals, a run- and visit-dependent one, so loops vary too.
+        const order = state.options.map((_, index) => index);
+        const offset = (run + visit) % state.options.length;
+        order.sort(
+          (left, right) =>
+            (counts[left] ?? 0) - (counts[right] ?? 0) ||
+            ((left - offset + order.length) % order.length) -
+              ((right - offset + order.length) % order.length),
+        );
+        const option = order[0]!;
+        counts[option] = (counts[option] ?? 0) + 1;
+        track.chose(state.site, option);
+        await page.click(`[data-foreground-controls] button >> nth=${option}`, { timeout: 5_000 });
+        step += 1;
+      } else if (state.composer !== null) {
+        const answers =
+          state.composer.mode === "numeric" || state.composer.mode === "decimal"
+            ? NUMBER_ANSWERS
+            : TEXT_ANSWERS;
+        const answer = ISO_ANSWERS[state.composer.type] ?? answers[(run + visit) % answers.length]!;
+        await page.fill("[data-composer-input]", answer, { timeout: 5_000 });
+        await page.press("[data-composer-input]", "Enter", { timeout: 5_000 });
+        step += 1;
+      } else if (kind !== "button" && kind !== "choice" && unchanged > 3) {
+        return finish("unsupported", `no control for the ${kind} interaction`, step);
+      }
+      await page.clock.runFor(300);
+    } else if (state.foreground === "delay" && state.delayMs !== null) {
+      // Jumping fires each due timer once, instead of every animation frame on the way.
+      await page.clock.fastForward(Math.max(50, state.delayMs + 50));
+    } else {
+      // Media play in real time; everything else waits on the fake clock.
+      if (state.foreground === "media") await new Promise((resolve) => setTimeout(resolve, 250));
+      if (unchanged > 2) await page.clock.fastForward(20_000);
+      else await page.clock.runFor(1_000);
+    }
+  }
+  return finish(
+    "budget",
+    `${values.steps} interactions without reaching the end`,
+    Number(values.steps),
+  );
+}
+
+/** Reads the session from the Player's mounted Vue tree and the controls from the page. */
+function readState(page: Page): Promise<PlayerState> {
+  return page.evaluate(() => {
+    type Session = {
+      plan: {
+        files: Array<{ path: string; startInstruction: number; endInstruction: number }>;
+        instructions: Array<{ kind: string; span?: { sl: number } }>;
+      };
+      snapshot: {
+        status: string;
+        failure: {
+          code: string;
+          message: string;
+          path?: string;
+          span?: { start?: { line: number } };
+        } | null;
+        foregroundAction: {
+          kind: string;
+          interactionKind?: string;
+          owningInstruction?: number;
+          deadlineMs?: number;
+        } | null;
+        currentSessionTimeMs: number;
+        nextEventSequence: number;
+        frames: Array<{ file: number }> | { file: number };
+        stageImage: unknown;
+        settledMedia: Array<{ source: string; loaded: boolean }>;
+        backgroundActions: Array<{ media?: { source: string; loaded: boolean } }>;
+      };
+      transcriptEntries: Array<{ text?: string }>;
+    };
+    const root = (
+      document.querySelector("#app") as unknown as {
+        _vnode?: {
+          component?: {
+            subTree?: {
+              component?: { props?: { player?: { session?: { value: Session | null } } } };
+            };
+          };
+        };
+      }
+    )?._vnode;
+    const session = root?.component?.subTree?.component?.props?.player?.session?.value ?? null;
+    const snapshot = session?.snapshot;
+    const fileOf = (instruction: number | undefined) =>
+      instruction === undefined
+        ? null
+        : (session?.plan.files.find(
+            (file) => instruction >= file.startInstruction && instruction <= file.endInstruction,
+          )?.path ?? null);
+    const action = snapshot?.foregroundAction ?? null;
+    const site =
+      action?.kind !== "interaction" || action.owningInstruction === undefined
+        ? null
+        : `${fileOf(action.owningInstruction)}:${(session?.plan.instructions[action.owningInstruction]?.span?.sl ?? -1) + 1}`;
+    const composer = document.querySelector<HTMLTextAreaElement | HTMLInputElement>(
+      "[data-composer-input]",
+    );
+    const stage = document.querySelector<HTMLImageElement>(".stage-media");
+    const stageImage = typeof snapshot?.stageImage === "string" ? snapshot.stageImage : null;
+    const media = [
+      ...(snapshot?.settledMedia ?? []),
+      ...(snapshot?.backgroundActions ?? []).flatMap((item) =>
+        item.media === undefined ? [] : [item.media],
+      ),
+    ].map((item) => ({ source: item.source, loaded: item.loaded }));
+    const frames = snapshot?.frames;
+    const frame = Array.isArray(frames) ? frames.at(-1) : frames;
+    const frameFile = frame === undefined ? null : (session?.plan.files[frame.file]?.path ?? null);
+    return {
+      status: snapshot?.status ?? null,
+      failure:
+        snapshot?.failure == null
+          ? null
+          : {
+              code: snapshot.failure.code,
+              message: snapshot.failure.message,
+              path: snapshot.failure.path ?? null,
+              line:
+                snapshot.failure.span?.start === undefined
+                  ? null
+                  : snapshot.failure.span.start.line + 1,
+            },
+      foreground:
+        action === null
+          ? null
+          : action.kind === "interaction"
+            ? `interaction:${action.interactionKind}`
+            : action.kind,
+      site,
+      delayMs:
+        action?.kind === "delay" && action.deadlineMs !== undefined && snapshot !== undefined
+          ? action.deadlineMs - snapshot.currentSessionTimeMs
+          : null,
+      options: [...document.querySelectorAll("[data-foreground-controls] button")].map(
+        (button) => button.textContent?.trim() ?? "",
+      ),
+      composer:
+        composer === null ||
+        composer.disabled ||
+        document.querySelector("[data-foreground-controls]") !== null
+          ? null
+          : {
+              type: composer.getAttribute("type") ?? "text",
+              mode: composer.getAttribute("inputmode") ?? "text",
+            },
+      file: frameFile ?? fileOf(action?.owningInstruction),
+      stageImage,
+      stageShown: stage !== null && stage.complete && stage.naturalWidth > 0,
+      media,
+      progress:
+        (snapshot?.nextEventSequence ?? 0) * 1000 + (session?.transcriptEntries.length ?? 0),
+      lastText: (session?.transcriptEntries.at(-1)?.text ?? "").slice(0, 200),
+      scriptFailure:
+        document.querySelector("[data-script-failure]")?.textContent?.trim().slice(0, 500) ?? null,
+      sites:
+        session?.plan.instructions.filter((instruction) => instruction.kind === "interaction")
+          .length ?? 0,
+    };
+  });
+}
+
+/** The regular, non-hidden files below `folder`, by `/`-separated relative path. */
+async function packageFiles(folder: string): Promise<string[]> {
+  const entries = await readdir(folder, { recursive: true, withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile() && !entry.name.startsWith("."))
+    .map((entry) =>
+      path.relative(folder, path.join(entry.parentPath, entry.name)).split(path.sep).join("/"),
+    )
+    .filter((file) => {
+      const extension = path.extname(file).toLowerCase();
+      return (
+        file.endsWith(".tease") ||
+        IMAGE_EXTENSIONS.has(extension) ||
+        MEDIA_EXTENSIONS.has(extension)
+      );
+    });
+}
