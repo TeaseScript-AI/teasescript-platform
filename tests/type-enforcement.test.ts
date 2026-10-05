@@ -694,6 +694,18 @@ test("a variable that starts as null takes the type of its first non-null value 
     ),
     [["TSV041", '"x"']],
   );
+  // A decided part brings what later stores widen in it, also for a copy taken before.
+  assert.deepEqual(
+    codes(
+      "let a = []\nfunction f {\n    let b = a\n    if b.length > 0 {\n        let k: integer = b[0].n\n        say k\n    }\n}\nf()\na.add({ n: 1 })\na[0].n = 0.5\nf()\nexit",
+    ),
+    [["TSV041", "b[0].n"]],
+  );
+  // A place that holds itself is never decided further, so the check ends.
+  assert.deepEqual(
+    codes("let a = []\na.add(a)\nlet b = { n: null }\nlet c = b.n\nb.n = b\nexit"),
+    [],
+  );
 });
 
 test("an empty list or set takes its element type from the first element, and null elements make it optional", () => {
@@ -1149,7 +1161,7 @@ test("a function result, a body, or a copy never changes the types another place
     for (const stores of ['a.add(1)\nb.add("x")', 'b.add("x")\na.add(1)'])
       assert.deepEqual(
         mismatches(`let a = ${empty}\nlet b = a.${convert}()\n${stores}\nexit`).map(
-          ([code, message, text]) => [code, message.includes("'b' started as a copy of 'a'"), text],
+          ([code, message, text]) => [code, message.includes("'b' was copied from 'a'"), text],
         ),
         [["TSV041", true, '"x"']],
         stores,
@@ -1172,6 +1184,32 @@ test("a function result, a body, or a copy never changes the types another place
   assert.deepEqual(
     codes('let a = []\ntimer async 1 { a.add(1) }\nwait 2\nlet b = a.toSet()\nb.add("x")\nexit'),
     [["TSV041", '"x"']],
+  );
+  // A mismatch names the variable a copy was taken from, however it was copied, but not for a copy that its own first
+  // value decided. Around a cycle of copies, the first value in checking order decides.
+  const copyNotes = (source: string) =>
+    mismatches(source).map(([code, message, text]) => [
+      code,
+      /'\w+' was copied from '(\w+)'/u.exec(message)?.[1] ?? null,
+      text,
+    ]);
+  for (const copy of ["let b = a[0]", "let b = first()", "let b = { n: a[0] }.n"])
+    assert.deepEqual(
+      copyNotes(
+        `let a = [[]]\nfunction first {\n    return a[0]\n}\n${copy}\na[0].add(1)\nb.add("x")\nexit`,
+      ),
+      [["TSV041", "a", '"x"']],
+      copy,
+    );
+  assert.deepEqual(copyNotes('let a = 1\nlet b = a\nb = 0.5\nb = "x"\nexit'), [
+    ["TSV041", null, '"x"'],
+  ]);
+  assert.deepEqual(
+    copyNotes('let a = []\nlet b = a\na = b\na.add(1)\nb.add("x")\na.add(true)\nexit'),
+    [
+      ["TSV041", "a", '"x"'],
+      ["TSV041", null, "true"],
+    ],
   );
   // A return is the value as it was evaluated: a later statement of the body changes only the place it was read from.
   for (const [setup, read, write] of [

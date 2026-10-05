@@ -68,6 +68,16 @@ export interface OpenType {
   copiedFrom?: OpenType;
   /** Whether a read or a copy saw the slot while it was undecided, so a later decision must reach that point too. */
   observed?: boolean;
+  /** When a value decided the slot, counted in checking order, so the first of several decisions can be found. */
+  order?: number;
+}
+
+let decisions = 0;
+
+/** The next number in checking order for a slot that a value decides (see {@link OpenType.order}). */
+export function nextDecision(): number {
+  decisions += 1;
+  return decisions;
 }
 
 /**
@@ -648,6 +658,7 @@ function* settleTask(
     const value = target.origins === undefined ? widened : replacedOrigins(widened, target.origins);
     target.resolved = target.sawNull ? optional(value) : value;
     target.resolvedAt = at;
+    target.order = nextDecision();
     return;
   }
   if (target.kind === "union") {
@@ -845,34 +856,34 @@ export function observe(type: StaticType): void {
   }
 }
 
-/** A slot in a place's type that a read or copy saw undecided, with its path there (see {@link widenPath}). */
-export interface ObservedSlot {
+/** A slot in a place's type, decided or not, with its path there (see {@link widenPath}). */
+export interface PlacedSlot {
   readonly slot: OpenType;
   readonly path: readonly string[];
 }
 
-/** The slots in a place's type that a read or copy saw undecided, also those decided since, with their paths. */
-export function observedSlots(type: StaticType): ObservedSlot[] {
-  const slots: ObservedSlot[] = [];
-  runCompileTask(observedSlotsTask(type, [], slots));
+/** The slots in a place's type, also those decided since they were created, with their paths. */
+export function placedSlots(type: StaticType): PlacedSlot[] {
+  const slots: PlacedSlot[] = [];
+  runCompileTask(placedSlotsTask(type, [], slots));
   return slots;
 }
 
-function* observedSlotsTask(
+function* placedSlotsTask(
   type: StaticType,
   path: readonly string[],
-  slots: ObservedSlot[],
+  slots: PlacedSlot[],
 ): CompileTask<void> {
   if (type.kind === "open") {
-    if (type.observed === true) slots.push({ slot: type, path });
-    if (type.resolved !== null) yield* compileChild(observedSlotsTask(type.resolved, path, slots));
+    slots.push({ slot: type, path });
+    if (type.resolved !== null) yield* compileChild(placedSlotsTask(type.resolved, path, slots));
   } else if (type.kind === "union")
-    for (const member of type.members) yield* compileChild(observedSlotsTask(member, path, slots));
+    for (const member of type.members) yield* compileChild(placedSlotsTask(member, path, slots));
   else if (isCollection(type))
-    yield* compileChild(observedSlotsTask(type.element, [...path, "[]"], slots));
+    yield* compileChild(placedSlotsTask(type.element, [...path, "[]"], slots));
   else if (type.kind === "object" && type.properties !== null)
     for (const [name, value] of type.properties)
-      yield* compileChild(observedSlotsTask(value, [...path, name], slots));
+      yield* compileChild(placedSlotsTask(value, [...path, name], slots));
 }
 
 /**
