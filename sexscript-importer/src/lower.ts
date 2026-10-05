@@ -4946,6 +4946,44 @@ function lowerCallStatement(
     const dictionary = dictStatement(receiver, call, span, context);
     if (dictionary !== null) return dictionary;
   }
+  // Groovy remove() of a key or value the map or list may not hold did nothing; TeaseScript reports a missing one, so
+  // a receiver that is not proven a list tests it first, as it does for a dict.
+  const removed = call?.arguments.length === 1 ? call.arguments[0]! : null;
+  if (
+    call !== null &&
+    !call.inherited &&
+    call.name === "remove" &&
+    receiver !== null &&
+    removed !== null &&
+    variableName(receiver) !== null &&
+    isRepeatableExpression(removed) &&
+    !isKnownListExpression(receiver, context) &&
+    !onlyOf(inferType(removed, context.types), NUMBER)
+  ) {
+    const collection = lowerExpression(receiver, context);
+    const value = lowerExpression(removed, context);
+    if (collection === null || value === null) return [];
+    return [
+      {
+        kind: "if",
+        condition: { kind: "methodCall", target: collection, name: "contains", arguments: [value] },
+        then: [
+          {
+            kind: "expression",
+            expression: {
+              kind: "methodCall",
+              target: collection,
+              name: "remove",
+              arguments: [value],
+            },
+            span,
+          },
+        ],
+        else: [],
+        span,
+      },
+    ];
+  }
   if (call !== null && !call.inherited) {
     const java = javaCallStatement(node, call.name, call.arguments, span, javaHost(context));
     if (java !== null) return java;
@@ -5600,10 +5638,23 @@ function lowerCollectionAssignment(
   // A loop body that reads the target sees its old value only through a separate result variable.
   // The loop reads the receiver and runs the closure after the result starts; when either may read the
   // destination, a separate variable collects the result, which the destination gets last.
+  // A sum that may be of no element, null in Groovy, adds up in a separate whole number, so the additions need no
+  // null test.
+  const nullableSum =
+    call.name === "sum" &&
+    !(
+      (receiver.kind === "list" && nodeArray(receiver.items).length > 0) ||
+      (receiver.kind === "range" &&
+        constantValue(asNode(receiver.from) ?? undefined) !== undefined &&
+        constantValue(asNode(receiver.to) ?? undefined) !== undefined)
+    );
   const readsTarget =
+    nullableSum ||
     mayReadDestination(receiver, destination, context) ||
     (argument !== null && mayReadDestination(argument.closure, destination, context));
-  const accumulator = readsTarget ? freshName(`${call.name}Result`, context) : target;
+  const accumulator = readsTarget
+    ? freshName(nullableSum ? "sumTotal" : `${call.name}Result`, context)
+    : target;
   const targetVariable: IrExpression = { kind: "variable", name: accumulator };
   const item: IrExpression = { kind: "variable", name: variable };
   const prefix = result === null ? [] : lowerStatementList(result.statements, null, context);
@@ -5681,7 +5732,15 @@ function lowerCollectionAssignment(
               left: { kind: "property", target: collection, name: "length" },
               right: { kind: "literal", value: 0 },
             },
-            then: [assign({ kind: "literal", value: null })],
+            then: [
+              {
+                kind: "assign",
+                target: { kind: "variable", name: target },
+                operator: "=",
+                value: { kind: "literal", value: null },
+                span,
+              },
+            ],
             else: [],
             span,
           },
@@ -5698,7 +5757,7 @@ function lowerCollectionAssignment(
         value: accumulated,
         span,
       };
-  return [start, loop, ...empty, store];
+  return [start, loop, store, ...empty];
 }
 
 /** A generated variable name that no variable of the file and no earlier generated name uses. */
