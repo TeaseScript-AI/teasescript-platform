@@ -43,6 +43,7 @@ import {
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import { runValidatedState } from "../src/runtime/engine.js";
+import { nextMediaEvent, type RuntimeMediaSnapshot } from "../src/runtime/media.js";
 import type {
   PlayerForegroundPresentation,
   PlayerPermanentButtonPresentation,
@@ -564,6 +565,89 @@ export function observePlayerRuntimeTime(
     ),
     outcome: operation.outcome,
   });
+}
+
+/**
+ * The scene time of the session's next timed event: the earliest of `playerRuntimeDeadlines` and the next timeline
+ * event of running loaded media, which play on at 1× from their last reported sample. An event that is already due,
+ * such as one of media that stalled, gives the next whole millisecond, so time moves on. `null` when nothing is
+ * scheduled, for example while only player input, loading media, or paused timers remain.
+ */
+export function nextPlayerRuntimeEventMs(snapshot: RuntimeSnapshot): number | null {
+  const times = [...playerRuntimeDeadlines(snapshot)];
+  if (snapshot.status !== "failed") {
+    for (const action of snapshot.backgroundActions) {
+      const atMs = action.kind === "media" ? nextMediaEventMs(action.media) : null;
+      if (atMs !== null) times.push(atMs);
+    }
+  }
+  if (times.length === 0) return null;
+  const nextMs = Math.min(...times);
+  const observedMs = snapshot.observedSessionTimeMs;
+  return nextMs > observedMs ? nextMs : Math.floor(observedMs) + 1;
+}
+
+/** When the next event of media playing at 1× is due; a departure needs progress after the sample it leaves. */
+function nextMediaEventMs(media: RuntimeMediaSnapshot): number | null {
+  const event = nextMediaEvent(media);
+  if (event === null || event.dueAtMs !== null) return event?.dueAtMs ?? null;
+  const last = media.points.at(-1)!;
+  return event.kind === "departure"
+    ? Math.floor(last.atMs) + 1
+    : Math.ceil(last.atMs + event.progressMs - last.progressMs);
+}
+
+/**
+ * Whether time cannot advance before the host answers: catch-up holds for a queued block behind a pending write, or a
+ * `save`, `delete` or `takePhoto()` waits for the host.
+ */
+export function playerRuntimeAwaitsHost(snapshot: RuntimeSnapshot): boolean {
+  const pending = snapshot.foregroundAction?.kind;
+  return (
+    snapshot.currentSessionTimeMs < snapshot.observedSessionTimeMs ||
+    pending === "storageWrite" ||
+    pending === "capture"
+  );
+}
+
+/**
+ * Development time jump (#615): advances scene time to `targetMs` through ordinary observations, one at each timed
+ * event as `nextPlayerRuntimeEventMs` finds it, with running loaded media playing on at 1×. Blocks, timeouts and
+ * continuations therefore run in scene-time order, and a block's change to playback or its request to the host applies
+ * before later events, exactly as when the Player observes each event on time; a session with jumps is a normal session.
+ * The jump stops early while `playerRuntimeAwaitsHost`; call it again once the host answered.
+ */
+export function advancePlayerRuntimeTime(
+  session: PlayerRuntimeSession,
+  targetMs: number,
+): PlayerRuntimeSession {
+  let current = session;
+  for (;;) {
+    const { snapshot } = current;
+    if (snapshot.observedSessionTimeMs >= targetMs || playerRuntimeAwaitsHost(snapshot))
+      return current;
+    const stepMs = Math.min(targetMs, nextPlayerRuntimeEventMs(snapshot) ?? targetMs);
+    const result = observePlayerRuntimeTime(current, stepMs, playingMediaReports(snapshot, stepMs));
+    if (result.outcome.kind !== "observed") return current;
+    current = result.session;
+  }
+}
+
+/** Progress of every running loaded media at scene time `atMs`, playing on at 1× from its last sample. */
+function playingMediaReports(snapshot: RuntimeSnapshot, atMs: number): MediaProgressReport[] {
+  const reports: MediaProgressReport[] = [];
+  for (const action of snapshot.backgroundActions) {
+    if (action.kind !== "media" || action.media.state !== "running" || !action.media.loaded)
+      continue;
+    const last = action.media.points.at(-1)!;
+    if (atMs > last.atMs)
+      reports.push({
+        mediaId: action.media.mediaId,
+        segment: action.media.segment,
+        progressMs: last.progressMs + (atMs - last.atMs),
+      });
+  }
+  return reports;
 }
 
 /** Reports whether the Player could load a media source, and its duration when it could. */
