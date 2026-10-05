@@ -45,3 +45,6 @@ def proof = getFile("Upload the picture?")
 new File("images/proof/photo.jpg").delete()
 new File("images/proof/photo.jpg") << new File(proof).getBytes()
 setImage("proof/photo.jpg")
+// getImage() and getFile() without a message take the photo without a title.
+def bare = getImage()
+if (bare != null) setImage(bare)

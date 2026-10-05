@@ -10817,7 +10817,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       return { kind: "literal", value: null };
     }
     case "getFile": {
-      if (args.length !== 1)
+      // Without a title, Groovy passed null, and the chooser had no title.
+      if (args.length > 1)
         return unsupportedExpression(
           context,
           node,
@@ -10842,7 +10843,8 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         "getFile() let the player pick any file with this title; scripts use it for a photo of the player, so the title is shown and takePhoto() takes the photo, or gives null as a cancelled chooser did.",
         node.span,
       );
-      if (!pushPrompt(context, node, call.arguments[0]!, args[0]!)) return null;
+      if (args.length === 1 && !pushPrompt(context, node, call.arguments[0]!, args[0]!))
+        return null;
       return { kind: "call", name: "takePhoto", positional: [], named: {} };
     }
     case "getDataFolder":
@@ -10901,14 +10903,16 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     case "getImage":
       // Legacy took a webcam picture without asking and returned its path, or null when it failed; without a webcam
       // it opened a file chooser titled with the message. takePhoto() returns a photo reference or null (V30 §33).
-      if (args.length !== 1) {
+      // Without a message, Groovy passed null: the webcam picture without a chooser title.
+      if (args.length > 1) {
         return unsupportedExpression(
           context,
           node,
           "SX_CALL_ARITY",
-          "getImage() must have one argument.",
+          "getImage() must have at most one argument.",
         );
       }
+      if (args.length === 0) return { kind: "call", name: "takePhoto", positional: [], named: {} };
       if (!isPure(call.arguments[0]!, context)) {
         return unsupportedExpression(
           context,

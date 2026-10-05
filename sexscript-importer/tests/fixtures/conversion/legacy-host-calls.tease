@@ -119,4 +119,9 @@ delete "sexscript.image.images/proof/photo.jpg"
 save proof as "sexscript.image.images/proof/photo.jpg"
 // NOTE SX_PHOTO_COPY line 47: A script copied the player's photo to images/proof/photo.jpg; showing the path shows that photo.
 showImage (load "sexscript.image.images/proof/photo.jpg", default: "proof/photo.jpg")
+// getImage() and getFile() without a message take the photo without a title.
+let bare = takePhoto()
+if bare != null {
+  showImage bare
+}
 exit
