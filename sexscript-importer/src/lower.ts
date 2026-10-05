@@ -61,7 +61,13 @@ interface ClosureInfo {
 }
 
 export interface HelperFunctionInfo {
+  /**
+   * The arguments up to the last parameter without a default; a default before it stays out of the function, since
+   * TeaseScript defaults come last, so a call that leaves such a parameter out needs migration.
+   */
   minArgs: number;
+  /** The parameters without a default, which Groovy required. */
+  requiredArgs: number;
   maxArgs: number;
   stripsMain: boolean;
 }
@@ -1234,6 +1240,7 @@ function withScriptObject(helperClass: AstNode): AstNode {
   const known = scriptObjectClasses.get(helperClass);
   if (known !== undefined) return known;
   const copy: AstNode = structuredClone(helperClass);
+  const closureMethods = withClosureMethods(copy);
   const methods = nodeArray(copy.methods);
   const fieldNames = new Set(nodeArray(copy.fields).flatMap((field) => text(field.name) ?? []));
   const aliases = new Set<string>();
@@ -1268,8 +1275,9 @@ function withScriptObject(helperClass: AstNode): AstNode {
     for (const alias of own) aliases.add(alias);
   }
   if (aliases.size === 0) {
-    scriptObjectClasses.set(helperClass, helperClass);
-    return helperClass;
+    const result = closureMethods ? copy : helperClass;
+    scriptObjectClasses.set(helperClass, result);
+    return result;
   }
   for (const parameter of renamed) parameter.name = "main";
   const strip = (value: unknown): void => {
@@ -1289,6 +1297,82 @@ function withScriptObject(helperClass: AstNode): AstNode {
   copy.fields = nodeArray(copy.fields).filter((field) => !aliases.has(text(field.name) ?? ""));
   scriptObjectClasses.set(helperClass, copy);
   return copy;
+}
+
+/**
+ * A static field that holds a closure literal, is never assigned again, and is only ever called works as a method of
+ * the class: `def static showWait = { main, msg -> ... }` called as `Helper.showWait(this, "Wait")`. Such fields become
+ * methods of the class node, in source order; whether the copied class changed.
+ */
+function withClosureMethods(helperClass: AstNode): boolean {
+  const fields = nodeArray(helperClass.fields);
+  const bodies = [
+    ...nodeArray(helperClass.methods).map((method) => method.body),
+    ...fields.map((field) => field.initialExpression),
+  ];
+  // Names that are assigned or used as a value anywhere in the class; a call names its method without a variable.
+  const used = new Set<string>();
+  for (const body of bodies)
+    walkAst(body, (node) => {
+      const name =
+        node.kind === "variable"
+          ? variableName(node)
+          : node.kind === "binary" &&
+              node.operator === "=" &&
+              asNode(node.left)?.kind === "property"
+            ? constantString(asNode(node.left)!.property)
+            : null;
+      if (name !== null) used.add(name);
+    });
+  const converted = new Set<AstNode>();
+  const methods: AstNode[] = [];
+  for (const field of fields) {
+    const name = text(field.name);
+    const closure = asNode(field.initialExpression);
+    if (field.static !== true || name === null || used.has(name) || closure?.kind !== "closure")
+      continue;
+    const body = asNode(closure.body);
+    if (body?.kind !== "block") continue;
+    let implicit = false;
+    if (closure.parameterSpecified !== true)
+      walkAst(body, (node) => {
+        implicit ||= variableName(node) === "it";
+      });
+    // Parameters are plain records, not nodes.
+    const records =
+      closure.parameterSpecified === true && Array.isArray(closure.parameters)
+        ? closure.parameters.filter(isRecord)
+        : [];
+    const parameters = implicit
+      ? [
+          {
+            name: "it",
+            hasInitialExpression: true,
+            initialExpression: { kind: "constant", value: null },
+          },
+        ]
+      : records.map((record) => ({
+          name: record.name,
+          hasInitialExpression: isAstNode(record.default),
+          initialExpression: isAstNode(record.default) ? record.default : null,
+        }));
+    converted.add(field);
+    methods.push({
+      kind: "method",
+      span: field.span,
+      name,
+      modifiers: field.modifiers,
+      parameters,
+      body,
+    });
+  }
+  if (converted.size === 0) return false;
+  const line = (node: AstNode): number => node.span?.line ?? 0;
+  helperClass.fields = fields.filter((field) => !converted.has(field));
+  helperClass.methods = [...nodeArray(helperClass.methods), ...methods].sort(
+    (first, second) => line(first) - line(second),
+  );
+  return true;
 }
 
 /** What the generated helpers return, computed once. */
@@ -1476,8 +1560,9 @@ function collectHelperFunctionInfo(methods: AstNode[]): Map<string, HelperFuncti
     const parameters = groovyParameters(method.parameters) ?? [];
     const stripsMain = parameters[0]?.name === "main";
     const authored = stripsMain ? parameters.slice(1) : parameters;
-    const minArgs = authored.filter((parameter) => parameter.defaultValue === null).length;
-    result.set(name, { minArgs, maxArgs: authored.length, stripsMain });
+    const requiredArgs = authored.filter((parameter) => parameter.defaultValue === null).length;
+    const minArgs = authored.findLastIndex((parameter) => parameter.defaultValue === null) + 1;
+    result.set(name, { minArgs, requiredArgs, maxArgs: authored.length, stripsMain });
   }
   return result;
 }
@@ -1599,9 +1684,13 @@ function lowerHelperMethod(
     generatedNames: new Set(),
   };
   const parameters: IrFunctionParameter[] = [];
-  for (const parameter of authoredRecords) {
+  const lastRequired = authoredRecords.findLastIndex(
+    (parameter) => parameter.defaultValue === null,
+  );
+  for (const [position, parameter] of authoredRecords.entries()) {
     const parameterName = parameter.name;
-    const initial = parameter.defaultValue;
+    // A default before a required parameter only applied to calls that left the parameter out (see minArgs).
+    const initial = position < lastRequired ? null : parameter.defaultValue;
     const defaultValue = initial === null ? null : lowerExpression(initial, context);
     if (initial !== null && defaultValue === null) {
       addDiagnostic(
@@ -3688,6 +3777,16 @@ function visibleLocals(
     return null;
   };
   return search(body, new Set(parameters));
+}
+
+/** A call that leaves out a parameter whose default precedes a parameter without one (see HelperFunctionInfo). */
+function defaultOrderCall(context: LowerContext, node: AstNode): null {
+  return unsupportedExpression(
+    context,
+    node,
+    "SX_PARAMETER_DEFAULT_ORDER",
+    "This call leaves out a parameter that has a default before a parameter without one; Groovy then filled the required parameters first, which TeaseScript parameters cannot express. Pass every argument up to the last required parameter.",
+  );
 }
 
 function defaultBeforeRequired(
@@ -8300,6 +8399,11 @@ function lowerObjectMethodCallExpression(
       }
       argumentNodes = argumentNodes.slice(1);
     }
+    if (
+      argumentNodes.length >= helperInfo.requiredArgs &&
+      argumentNodes.length < helperInfo.minArgs
+    )
+      return defaultOrderCall(context, node);
     if (argumentNodes.length < helperInfo.minArgs || argumentNodes.length > helperInfo.maxArgs) {
       return unsupportedExpression(
         context,
@@ -10570,6 +10674,11 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
       }
       argumentNodes = argumentNodes.slice(1);
     }
+    if (
+      argumentNodes.length >= helperInfo.requiredArgs &&
+      argumentNodes.length < helperInfo.minArgs
+    )
+      return defaultOrderCall(context, node);
     if (argumentNodes.length < helperInfo.minArgs || argumentNodes.length > helperInfo.maxArgs) {
       return unsupportedExpression(
         context,
