@@ -1,0 +1,48 @@
+--- a/scripts/toy__sha256_0d24d6c78bca.groovy
++++ b/scripts/toy__sha256_0d24d6c78bca.groovy
+@@ -20,7 +20,7 @@
+ 	final DAY = 86400;
+ 	final HOUR = 3600.0;
+ 	final soonFormatter = java.time.format.DateTimeFormatter.ofPattern("EEEE 'at' h:mma");
+-	final osName = ['windows', 'mac'].find { os -> System.properties['os.name'].toLowerCase(Locale.ENGLISH).contains(os) }
++	final osName = null
+ 	// Notes
+ 	// toys.<name> ankle_cuffs, ballgag, blindfold, chastity_belt, clothespins, cockring, dog_collar, handcuffs, hood, nipple_clamps, ring_gag
+ 	final PLAY = "play", UPDATE = "update";
+@@ -357,10 +357,11 @@
+ 					case "en-US": return "say -v Zoe '${cleantext.replaceAll("cum","com").replaceAll("Cum","Com")}'";
+ 					default: return "say -v Kate '${cleantext}'";
+ 				}
++			default: return "";
+ 		}
+ 	}
+ 	final say = { text ->
+-		if (text && loadBoolean("toy.voice")) sayCommand(text).execute();
++
+ 	};
+ 	final speak = { text ->
+ 		show(text);
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -17,7 +17,7 @@
+ 	final DAY = 86400;
+ 	final HOUR = 3600.0;
+ 	final soonFormatter = java.time.format.DateTimeFormatter.ofPattern("EEEE 'at' h:mma");
+-	final osName = ['windows', 'mac'].find { os -> System.properties['os.name'].toLowerCase(Locale.ENGLISH).contains(os) }
++	final osName = null
+ 	// Notes
+ 	// toys.<name> ankle_cuffs, ballgag, blindfold, chastity_belt, clothespins, cockring, dog_collar, handcuffs, hood, nipple_clamps, ring_gag
+ 	final PLAY = "play", UPDATE = "update";
+@@ -354,10 +354,11 @@
+ 					case "en-US": return "say -v Samantha '${cleantext.replaceAll("cum","com").replaceAll("Cum","Com")}'";
+ 					default: return "say -v Kate '${cleantext}'";
+ 				}
++			default: return "";
+ 		}
+ 	}
+ 	final say = { text ->
+-		if (text && loadBoolean("toy.voice")) sayCommand(text).execute();
++
+ 	};
+ 	final speak = { text ->
+ 		show(text);

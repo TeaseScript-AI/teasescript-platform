@@ -28,7 +28,6 @@ import {
   withGuardedInputs,
 } from "./lower.ts";
 import { helperDefinitionOrder, SYSTEM_SPEAKER, withActionDispatcher } from "./helpers.ts";
-import { promoteGlobalFunctions, type GlobalPromotion } from "./globals.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { legacyProfilePrompt } from "./profile.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
@@ -81,8 +80,15 @@ export interface PackageOptions {
    */
   internalScripts?: readonly string[];
   /**
+   * Releases of the package that a corpus merge put side by side, each the files of one release by their paths from
+   * the legacy scripts folder, such as an older version of a script with its own module versions
+   * (`toy__sha256_<hash>.groovy` with `toy/misc__sha256_<hash>.groovy`): a file of a release loads only that release's
+   * modules, and any other file only the modules that are no other version (moduleVisibility).
+   */
+  releases?: ReadonlyArray<readonly string[]>;
+  /**
    * A lone file converted on its own, without a package around it: it keeps its name, and a transfer names the
-   * converted file of any legacy script name. Otherwise a package's only script becomes its main.tease.
+   * converted file of any legacy script name. Otherwise each script keeps its legacy path beside a main.tease.
    */
   standalone?: boolean;
 }
@@ -254,6 +260,29 @@ function internalScripts(
   );
 }
 
+/**
+ * The files a converted package writes (ADR 0022): each script, and each helper class file with global functions, at
+ * its legacy path from the scripts folder, and main.tease. Empty for a file converted on its own.
+ */
+export function packageOutputs(
+  lowered: LoweredPackage,
+): Array<{ path: string; program: MigrationProgram; fileIndex: number | null }> {
+  const outputs = lowered.composed.flatMap(
+    (
+      program,
+      index,
+    ): Array<{ path: string; program: MigrationProgram; fileIndex: number | null }> => {
+      const path = lowered.paths[index];
+      return path === null || path === undefined || program.module !== undefined
+        ? []
+        : [{ path, program, fileIndex: index }];
+    },
+  );
+  if (lowered.main !== null && "menu" in lowered.main)
+    outputs.push({ path: "main.tease", program: lowered.main.menu, fileIndex: null });
+  return outputs;
+}
+
 export function lowerSelfContainedPackage(
   files: readonly ParsedGroovyFile[],
   options: PackageOptions = {},
@@ -264,21 +293,20 @@ export function lowerSelfContainedPackage(
 export interface LoweredPackage {
   /** Each file lowered with package context, before helper composition. */
   lowered: MigrationProgram[];
-  /** Scripts with their package helpers and loaded modules embedded; other files as lowered. */
+  /**
+   * Scripts with their package helpers and loaded modules embedded, a helper class with global functions as its own
+   * file, and other files as lowered.
+   */
   composed: MigrationProgram[];
   /**
-   * The package's entry, `main.tease` (ADR 0022 §1): the index of the script that becomes it, or a generated menu over
-   * the scripts the legacy player listed. Null for a lone file converted on its own, which keeps its name.
+   * The package's entry, `main.tease` (ADR 0022 §1): a legacy `main.groovy` by its index, or a generated file (`menu`)
+   * that goes to the main script or offers the scripts the legacy player listed. Null for files converted on their
+   * own, which keep their names.
    */
   main: { file: number } | { menu: MigrationProgram } | null;
   /**
-   * The functions several scripts share as `global function`s (#570), with the globals they read, in a generated
-   * `helpers.tease`; null without package context.
-   */
-  globals: Omit<GlobalPromotion, "programs"> | null;
-  /**
-   * The TeaseScript path of each file relative to the package root, `main.tease` for the entry script; null for files
-   * that are no scripts and for a single script without package context.
+   * The TeaseScript path of each file relative to the package root, its legacy path from the scripts folder; null for
+   * files that write no file of their own and for files converted on their own.
    */
   paths: Array<string | null>;
 }
@@ -287,7 +315,7 @@ export interface LoweredPackage {
 interface PackageScripts {
   /** The legacy name of each script (its path without `.groovy`, in lower case) to its TeaseScript path. */
   paths: Map<string, string>;
-  /** The script that becomes `main.tease`, or null when several scripts share the package root. */
+  /** The main script, which main.tease goes to (or is, as `main.groovy`); null with several top-level scripts. */
   entry: number | null;
   /** The scripts in the package root, which the legacy player listed. */
   rootScripts: number[];
@@ -298,8 +326,8 @@ interface PackageScripts {
 }
 
 /**
- * The scripts of a package, with their paths from the package root, the common directory of the scripts. A single
- * script in the root is the entry and becomes `main.tease`, as is one named `main.groovy`.
+ * The scripts of a package, with their paths from the legacy scripts folder. A single top-level script is the main
+ * script, as is one named `main.groovy` among several.
  */
 function packageScripts(
   files: readonly ParsedGroovyFile[],
@@ -308,28 +336,30 @@ function packageScripts(
   const scripts = files.flatMap((file, index) =>
     file.root?.kind === "scriptBody" && describeMixinModule(file) === null ? [index] : [],
   );
-  // A file converted alone has no package around it; a package's only script is its main.tease (ADR 0022 §1).
+  // A file converted alone has no package around it.
   if (scripts.length === 0 || (standalone && files.length < 2)) return null;
   const segments = new Map(
     scripts.map((index) => [index, files[index]!.sourceName.replaceAll("\\", "/").split("/")]),
   );
   const directories = scripts.map((index) => segments.get(index)!.slice(0, -1));
-  const root = directories.reduce((common, directory) => {
+  const common = directories.reduce((shared, directory) => {
     let length = 0;
-    while (length < common.length && common[length] === directory[length]) length += 1;
-    return common.slice(0, length);
+    while (length < shared.length && shared[length] === directory[length]) length += 1;
+    return shared.slice(0, length);
   }, directories[0]!);
+  // Paths start at the legacy scripts folder, so the files keep the original folders and names; without one, at the
+  // scripts' common folder.
+  const scriptsAt = common.map((segment) => segment.toLowerCase()).lastIndexOf("scripts");
+  const root = scriptsAt < 0 ? common : common.slice(0, scriptsAt + 1);
   const relative = (index: number): string => segments.get(index)!.slice(root.length).join("/");
   const rootScripts = scripts.filter((index) => !relative(index).includes("/"));
   const entry =
     rootScripts.length === 1
       ? rootScripts[0]!
       : (rootScripts.find((index) => relative(index).toLowerCase() === "main.groovy") ?? null);
+  // Each script keeps its name; only a legacy `main.groovy` is the package's main.tease itself.
   const pathOf = new Map(
-    scripts.map((index) => [
-      index,
-      index === entry ? "main.tease" : relative(index).replace(/\.groovy$/iu, ".tease"),
-    ]),
+    scripts.map((index) => [index, relative(index).replace(/\.groovy$/iu, ".tease")]),
   );
   // A legacy script name is a path from the legacy scripts folder, which may be an ancestor of the scripts' common
   // directory (`TheProgram/002TherapistA` when every script is in `TheProgram/`), so the name also resolves with the
@@ -406,7 +436,9 @@ function entryMenu(
           scripts.pathOf.get(index)!,
         );
   // A package whose scripts are all in folders, such as System/, offers the scripts nothing chains to, or every script.
-  const everyScript = [...scripts.pathOf.values()].sort();
+  const everyScript = [...scripts.pathOf]
+    .flatMap(([index, path]) => (internal.has(index) ? [] : [path]))
+    .sort();
   const choices =
     rooted.length > 0
       ? rooted
@@ -424,6 +456,8 @@ function entryMenu(
       ? ""
       : ` The legacy player also chose a localized variant of a script by the system language, which the converted scripts do not, so these variants are not reached: ${variants.join(", ")}.`);
   const name = menuLabels(choices, scripts, programs);
+  // Each button returns an identifier named after its script, which a switch sends to that script.
+  const id = menuIds(choices);
   // With one script to offer, the package starts there.
   const question: IrStatement[] =
     choices.length === 1
@@ -440,30 +474,34 @@ function entryMenu(
             value: {
               kind: "choice",
               options: choices.map((path) => ({ kind: "literal", value: name.get(path)! })),
+              labels: choices.map((path) => id.get(path)!),
             },
             span: null,
           },
         ];
-  const picked = { kind: "variable" as const, name: "picked" };
-  let chain: IrStatement[] = [
-    { kind: "goto", target: { kind: "file", path: choices.at(-1)! }, span: null },
-  ];
-  for (let index = choices.length - 2; index >= 0; index -= 1) {
-    chain = [
-      {
-        kind: "if",
-        condition: {
-          kind: "binary",
-          operator: "==",
-          left: picked,
-          right: { kind: "literal", value: index },
-        },
-        then: [{ kind: "goto", target: { kind: "file", path: choices[index]! }, span: null }],
-        else: chain,
-        span: null,
-      },
-    ];
-  }
+  const goto = (path: string): IrStatement => ({
+    kind: "goto",
+    target: { kind: "file", path },
+    span: null,
+  });
+  const chain: IrStatement[] =
+    choices.length === 1
+      ? [goto(choices[0]!)]
+      : [
+          {
+            kind: "switch",
+            value: { kind: "variable", name: "picked" },
+            cases: choices
+              .slice(0, -1)
+              .map((path) => ({
+                matches: [{ kind: "literal", value: id.get(path)! }],
+                body: [goto(path)],
+                span: null,
+              })),
+            default: [goto(choices.at(-1)!)],
+            span: null,
+          },
+        ];
   return {
     sourceName: `${scripts.root}/main.tease`,
     metadata: null,
@@ -483,7 +521,9 @@ export function lowerPackage(
   // Questions inside short circuits are asked at their own moment (withGuardedInputs).
   const files = parsedFiles.map(withGuardedInputs);
   const helperRegistry = buildHelperRegistry(files);
-  const mixinModules = files.flatMap((file) => describeMixinModule(file) ?? []);
+  const visible = moduleVisibility(files, options.releases ?? []);
+  const moduleInfos = files.map((file) => describeMixinModule(file));
+  const mixinModules = moduleInfos.flatMap((info) => info ?? []);
   const stableNames = packageStableNames(files);
   const storageLiterals = packageStorageLiterals(files);
   const copiedImages = new Set(
@@ -497,14 +537,19 @@ export function lowerPackage(
     }),
   );
   // Function names and object field types are shared only by a script and the mixin modules it loads.
-  const groups = compositionGroups(files);
+  const groups = compositionGroups(files, visible);
   const stopsBackgroundSounds = packageStopsBackgroundSounds(files);
   const resultUses = packageResultUses(files);
-  const directoryFiles = new Map<string, string[]>();
-  for (const file of files) {
-    const directory = file.sourceName.split(/[\\/]/u).at(-2) ?? "";
-    directoryFiles.set(directory, [...(directoryFiles.get(directory) ?? []), file.sourceName]);
-  }
+  // The files of each folder, as each file sees them (moduleVisibility).
+  const directoryFiles = files.map((_, index) => {
+    const listing = new Map<string, string[]>();
+    files.forEach((file, other) => {
+      if (!visible(index, other)) return;
+      const directory = file.sourceName.split(/[\\/]/u).at(-2) ?? "";
+      listing.set(directory, [...(listing.get(directory) ?? []), file.sourceName]);
+    });
+    return listing;
+  });
   // Map uses are shared within a composition group, like function names and field types.
   const scripts = packageScripts(files, options.standalone === true);
   const functionResults = files.map((_, index) => packageFunctionResults(groups[index]!));
@@ -518,7 +563,9 @@ export function lowerPackage(
       mapUses: mapUses[index]!,
       functionResults: functionResults[index]!,
       helperRegistry,
-      mixinModules,
+      mixinModules: moduleInfos.flatMap((info, other) =>
+        info !== null && visible(index, other) ? [info] : [],
+      ),
       packageFunctions: packageFunctionNames(groups[index]!),
       stableNames,
       storageLiterals,
@@ -526,7 +573,7 @@ export function lowerPackage(
       globalTypes: packageGlobalTypes(groups[index]!),
       stopsBackgroundSounds,
       resultUses,
-      directoryFiles,
+      directoryFiles: directoryFiles[index]!,
       ...(scripts === null ? {} : { scriptPaths: scripts.paths }),
       renameIdentifiers: false,
       ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
@@ -539,7 +586,17 @@ export function lowerPackage(
     (_, index) => files[index]?.root?.kind === "compilationUnit",
   );
   const functionCatalog = buildFunctionCatalog(helperPrograms);
-  const modulePrograms = lowered.filter((program) => program.module !== undefined);
+  // In a package, the methods of a legacy helper class live in the class's own file as global functions where they
+  // can (classGlobals); the others are copied into each script that calls them.
+  const classOutputs =
+    options.standalone === true ? new Map<number, MigrationProgram>() : classFiles(files, lowered);
+  const classFunctions = new Set(
+    [...classOutputs.values()].flatMap((program) =>
+      program.statements.flatMap((statement) =>
+        statement.kind === "function" ? [statement.name] : [],
+      ),
+    ),
+  );
 
   // What a function nothing references cannot convert becomes a note, in the file and in the composed script.
   const uncalled: MigrationDiagnostic[][] = files.map(() => []);
@@ -547,7 +604,14 @@ export function lowerPackage(
   const composed = lowered.map((program, index) => {
     if (files[index]?.root?.kind !== "scriptBody" || program.module !== undefined) return program;
     const script = withLaunchMarkers(
-      composeProgram(withLoadedModules(program, modulePrograms), functionCatalog),
+      composeProgram(
+        withLoadedModules(
+          program,
+          lowered.filter((module, other) => module.module !== undefined && visible(index, other)),
+        ),
+        functionCatalog,
+        classFunctions,
+      ),
       launchKey(files[index]!.sourceName),
       texts,
     );
@@ -573,137 +637,316 @@ export function lowerPackage(
   const noted = composed.map((program, index) =>
     program.module === undefined ? program : withUncalledNotes(program, notes(program, index)),
   );
-  // Functions several scripts share become global functions in one helpers.tease (#570).
   const scriptIndexes = noted.flatMap((program, index) =>
     files[index]?.root?.kind === "scriptBody" && program.module === undefined ? [index] : [],
   );
-  const promotion =
-    scripts === null
-      ? null
-      : promoteGlobalFunctions(
-          scriptIndexes.map((index) => noted[index]!),
-          scripts.root,
-        );
-  const promotedPrograms = noted.map((program, index) => {
-    const position = scriptIndexes.indexOf(index);
-    return promotion === null || position < 0 ? program : promotion.programs[position]!;
-  });
-  // The entry asks the legacy player's profile the package reads but never saves.
   const accepted = options.accepted ?? new Set();
-  const entryIndex =
-    scripts?.entry ?? (scripts === null && scriptIndexes.length === 1 ? scriptIndexes[0]! : null);
-  const entryProgram = entryIndex === null ? null : promotedPrograms[entryIndex]!;
-  const profile =
-    entryProgram === null ? [] : legacyProfilePrompt(promotedPrograms, entryProgram, accepted);
-  // The prompt's helpers may meet names of the entry, which then get other names.
-  const project = new Set([
-    ...(promotion?.promoted.map(({ name }) => name) ?? []),
-    ...(promotion?.globals.map(({ name }) => name) ?? []),
-  ]);
-  const composedPrograms = promotedPrograms.map((program, index) =>
-    index === entryIndex && profile.length > 0
-      ? renameConflictingIdentifiers(
-          { ...program, statements: [...profile, ...program.statements] },
-          new Set(),
-          false,
-          project,
-        )
-      : program,
-  );
-  const menu =
-    scripts === null || scripts.entry !== null
+  const withClasses = noted.map((program, index) => classOutputs.get(index) ?? program);
+  if (scripts === null || options.standalone === true) {
+    // Files converted on their own keep everything they need; a lone script of a package also asks the profile.
+    const entryIndex = scriptIndexes.length === 1 ? scriptIndexes[0]! : null;
+    const programs = withClasses.map((program, index) =>
+      index === entryIndex ? withProfile(program, withClasses, accepted) : program,
+    );
+    return {
+      lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
+      composed: programs,
+      main: null,
+      paths: files.map(() => null),
+    };
+  }
+  // main.tease (ADR 0022 §1): a legacy `main.groovy`, or a generated file that asks the legacy profile and goes to the
+  // package's main script, or offers its scripts where it has several.
+  const entry = scripts.entry;
+  const legacyMain =
+    entry !== null && scripts.pathOf.get(entry)!.toLowerCase() === "main.tease" ? entry : null;
+  const generated: MigrationProgram | null =
+    legacyMain !== null
       ? null
-      : withProfile(
-          entryMenu(scripts, composedPrograms, internalScripts(files, options.internalScripts)),
-          composedPrograms,
-          accepted,
-        );
-  const shared =
-    scripts === null
-      ? { programs: composedPrograms, menu, helpers: promotion?.helpers ?? null }
-      : withSharedSpeaker(
-          composedPrograms,
-          scriptIndexes,
-          menu,
-          promotion?.helpers ?? null,
-          scripts.root,
-        );
+      : entry !== null
+        ? {
+            sourceName: `${scripts.root}/main.tease`,
+            metadata: null,
+            statements: [
+              {
+                kind: "goto",
+                target: { kind: "file", path: scripts.pathOf.get(entry)! },
+                span: null,
+              },
+            ],
+            diagnostics: [],
+          }
+        : entryMenu(scripts, withClasses, internalScripts(files, options.internalScripts));
+  const mainProgram = withProfile(generated ?? withClasses[legacyMain!]!, withClasses, accepted);
+  const outputIndexes = [...scriptIndexes, ...classOutputs.keys()].filter(
+    (index) => index !== legacyMain,
+  );
+  const shared = withMainHelpers(
+    outputIndexes.map((index) => withClasses[index]!),
+    mainProgram,
+  );
+  // Globals and global functions reach every file (V30 §11): any other name of one of them gets another name there.
+  const globalNames = (program: MigrationProgram): string[] =>
+    program.statements.flatMap((statement) =>
+      (statement.kind === "function" || statement.kind === "let") && statement.global === true
+        ? [statement.name]
+        : [],
+    );
+  const project = new Set([shared.main, ...shared.programs].flatMap(globalNames));
+  const apart = (program: MigrationProgram, renameProtected: boolean): MigrationProgram => {
+    const own = new Set(globalNames(program));
+    return renameConflictingIdentifiers(
+      program,
+      new Set(),
+      renameProtected,
+      new Set([...project].filter((name) => !own.has(name))),
+    );
+  };
+  const main = apart(shared.main, true);
+  const programs = withClasses.map((program, index) => {
+    if (index === legacyMain) return main;
+    const position = outputIndexes.indexOf(index);
+    return position < 0 ? program : apart(shared.programs[position]!, false);
+  });
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
-    composed: shared.programs,
-    main:
-      scripts === null
-        ? null
-        : scripts.entry !== null
-          ? { file: scripts.entry }
-          : { menu: shared.menu! },
-    globals:
-      promotion === null && shared.helpers === null
-        ? null
-        : {
-            helpers: shared.helpers,
-            promoted: promotion?.promoted ?? [],
-            globals: promotion?.globals ?? [],
-            kept: promotion?.kept ?? [],
-          },
-    paths: files.map((_, index) => scripts?.pathOf.get(index) ?? null),
+    composed: programs,
+    main: legacyMain !== null ? { file: legacyMain } : { menu: main },
+    paths: files.map(
+      (file, index) =>
+        scripts.pathOf.get(index) ??
+        (classOutputs.has(index) ? packagePath(file.sourceName, scripts.root) : null),
+    ),
   };
 }
 
 /**
- * The system speaker (helpers.ts `systemSpeaker`) is global and declared once: in a package of several files in
- * helpers.tease, which holds what the files share, created for it where needed; a lone script keeps its own.
+ * The generated parts that the files of a package share move to main.tease (ADR 0022 §1), which is generated anyway:
+ * the system speaker (helpers.ts `systemSpeaker`), declared once, and each generated helper (helpers.ts) as one
+ * `global function`, where it reads no file-level value and calls only built-ins and other such helpers, such as the
+ * helpers that keep a file's background sounds (globalFunctionNames).
  */
-function withSharedSpeaker(
-  programs: MigrationProgram[],
-  scriptIndexes: readonly number[],
-  menu: MigrationProgram | null,
-  helpers: MigrationProgram | null,
-  root: string,
-): {
-  programs: MigrationProgram[];
-  menu: MigrationProgram | null;
-  helpers: MigrationProgram | null;
-} {
+function withMainHelpers(
+  programs: readonly MigrationProgram[],
+  main: MigrationProgram,
+): { programs: MigrationProgram[]; main: MigrationProgram } {
+  const all = [main, ...programs];
+  const helpers = new Map<string, FunctionStatement>();
+  for (const program of all)
+    for (const statement of program.statements)
+      if (
+        statement.kind === "function" &&
+        helperDefinitionOrder(statement) >= 0 &&
+        !helpers.has(statement.name)
+      )
+        helpers.set(statement.name, statement);
+  const functions = all.flatMap((program) =>
+    program.statements.flatMap((statement) => (statement.kind === "function" ? [statement] : [])),
+  );
+  // Generated state that spans files, such as the switch button's ID, becomes a global; a file's background sounds,
+  // which the legacy player stopped when the script ended, stay with the file.
+  const states = new Map<string, LetStatement>();
+  for (const program of all)
+    for (const statement of program.statements)
+      if (
+        statement.kind === "let" &&
+        helperDefinitionOrder(statement) >= 0 &&
+        statement.name !== BACKGROUND_SOUNDS &&
+        isLiteralValue(statement.value)
+      )
+        states.set(statement.name, statement);
+  const global = globalFunctionNames(
+    [...helpers.values()],
+    new Set(states.keys()),
+    new Set(functions.map(({ name }) => name)),
+  );
+  // A state moves only with a helper that uses it.
+  for (const name of [...states.keys()])
+    if (
+      ![...helpers.values()].some(
+        (helper) => global.has(helper.name) && freeNames(helper).variables.has(name),
+      )
+    )
+      states.delete(name);
   const isSpeaker = (statement: IrStatement): boolean =>
     statement.kind === "speaker" && statement.name === SYSTEM_SPEAKER;
-  const outputs = [
-    ...scriptIndexes.map((index) => programs[index]!),
-    ...(menu === null ? [] : [menu]),
-  ];
-  const declaration = outputs.flatMap((program) => program.statements).find(isSpeaker);
-  if (declaration === undefined || outputs.length + (helpers === null ? 0 : 1) < 2)
-    return { programs, menu, helpers };
+  const speaker = all.flatMap((program) => program.statements).find(isSpeaker);
+  const moves = (statement: IrStatement): boolean =>
+    isSpeaker(statement) ||
+    (statement.kind === "function" && global.has(statement.name)) ||
+    (statement.kind === "let" && states.has(statement.name));
   const without = (program: MigrationProgram): MigrationProgram => ({
     ...program,
-    statements: program.statements.filter((statement) => !isSpeaker(statement)),
+    statements: program.statements.filter((statement) => !moves(statement)),
   });
-  const shared: MigrationProgram = helpers ?? {
-    sourceName: `${root}/helpers.tease`,
-    metadata: null,
-    statements: [
-      {
-        kind: "comment",
-        text: "// Functions and values the package's scripts share (#570). Nothing transfers to this file.",
-        trailing: false,
-        span: null,
-      },
-      { kind: "exit", span: null },
-    ],
-    diagnostics: [],
-  };
-  const [header, ...rest] = shared.statements;
+  const shared: IrStatement[] = [
+    ...(speaker === undefined ? [] : [speaker]),
+    ...[...states.values()].map((statement): IrStatement => ({ ...statement, global: true })),
+    ...[...helpers.values()]
+      .filter(({ name }) => global.has(name))
+      .sort((left, right) => helperDefinitionOrder(left) - helperDefinitionOrder(right))
+      .map((statement): IrStatement => ({ ...statement, global: true })),
+  ];
+  const own = without(main).statements;
+  // A comment that opens the file, such as the entry menu's note, stays first.
+  const lead = own.findIndex((statement) => statement.kind !== "comment");
+  const at = lead < 0 ? own.length : lead;
   return {
     programs: programs.map(without),
-    menu: menu === null ? null : without(menu),
-    helpers: {
-      ...shared,
-      statements:
-        header?.kind === "comment"
-          ? [header, declaration, ...rest]
-          : [declaration, ...shared.statements],
-    },
+    main: { ...main, statements: [...own.slice(0, at), ...shared, ...own.slice(at)] },
   };
+}
+
+/**
+ * The functions that can be `global function`s (V30 §11): a global function reads only globals, its parameters, and
+ * its locals, and calls only global functions and built-ins. `variables` are the globals it may read, and `defined`
+ * every function name of the package, so a call to one that cannot be global keeps the caller local too.
+ */
+function globalFunctionNames(
+  candidates: readonly FunctionStatement[],
+  variables: ReadonlySet<string>,
+  defined: ReadonlySet<string>,
+): Set<string> {
+  const free = new Map(candidates.map((statement) => [statement.name, freeNames(statement)]));
+  const global = new Set(candidates.map(({ name }) => name));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const name of [...global]) {
+      const names = free.get(name)!;
+      if (
+        [...names.variables].every((variable) => variables.has(variable)) &&
+        [...names.calls].every((call) => global.has(call) || !defined.has(call))
+      )
+        continue;
+      global.delete(name);
+      changed = true;
+    }
+  }
+  return global;
+}
+
+/**
+ * Each legacy helper class file of a package that other files call into, as its own file (ADR 0022): its static
+ * fields with literal values as globals, and the methods that can be global functions (globalFunctionNames) as
+ * such; the other methods are copied into each script that calls them (composeProgram). A class with no such method
+ * writes no file.
+ */
+function classFiles(
+  files: readonly ParsedGroovyFile[],
+  lowered: readonly MigrationProgram[],
+): Map<number, MigrationProgram> {
+  const result = new Map<number, MigrationProgram>();
+  const defined = new Set(
+    lowered.flatMap((program) =>
+      program.statements.flatMap((statement) =>
+        statement.kind === "function" ? [statement.name] : [],
+      ),
+    ),
+  );
+  const called = new Set(
+    lowered.flatMap((program, index) =>
+      files[index]?.root?.kind === "compilationUnit"
+        ? []
+        : [...collectCallNames(program.statements)],
+    ),
+  );
+  files.forEach((file, index) => {
+    if (file.root?.kind !== "compilationUnit") return;
+    const program = lowered[index]!;
+    // A method that dispatches closure values needs the file's action dispatcher, which stays with each script.
+    if ((program.actions ?? []).length > 0) return;
+    const fields = program.statements.flatMap((statement) =>
+      statement.kind === "let" && isLiteralValue(statement.value) ? [statement] : [],
+    );
+    const methods = program.statements.flatMap((statement) =>
+      statement.kind === "function" && helperDefinitionOrder(statement) < 0 ? [statement] : [],
+    );
+    const helpers = program.statements.flatMap((statement) =>
+      statement.kind === "function" && helperDefinitionOrder(statement) >= 0 ? [statement] : [],
+    );
+    const global = globalFunctionNames(
+      [...methods, ...helpers],
+      new Set(fields.map(({ name }) => name)),
+      defined,
+    );
+    // Methods other files call are global functions; the class's other methods stay local to its file.
+    const kept = methods.filter(({ name }) => global.has(name));
+    // A global function calls only global functions, so the methods those call are global too.
+    const exported = new Set(kept.flatMap(({ name }) => (called.has(name) ? [name] : [])));
+    if (exported.size === 0) return;
+    for (const name of exported)
+      for (const call of freeNames(kept.find((method) => method.name === name)!).calls)
+        if (kept.some((method) => method.name === call)) exported.add(call);
+    result.set(
+      index,
+      renameConflictingIdentifiers({
+        ...program,
+        statements: [
+          ...fields.map((statement): IrStatement => ({ ...statement, global: true })),
+          ...helpers.filter(({ name }) => global.has(name)),
+          ...kept.map((statement): IrStatement =>
+            exported.has(statement.name) ? { ...statement, global: true } : statement,
+          ),
+        ],
+        diagnostics: program.diagnostics.filter((diagnostic) =>
+          kept.some((statement) => inside(diagnostic.span, statement.span)),
+        ),
+      }),
+    );
+  });
+  return result;
+}
+
+type FunctionStatement = Extract<IrStatement, { kind: "function" }>;
+type LetStatement = Extract<IrStatement, { kind: "let" }>;
+
+/** The generated list of a file's background sound handles (helpers.ts), which stays with its file. */
+const BACKGROUND_SOUNDS = "sexscriptBackgroundSounds";
+
+/** The variables a function uses that it does not declare, and the names it calls. */
+function freeNames(statement: FunctionStatement): { variables: Set<string>; calls: Set<string> } {
+  const declared = new Set(statement.parameters.map((parameter) => parameter.name));
+  const variables = new Set<string>();
+  const calls = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!isRecord(value)) return;
+    if (value.kind === "let" && typeof value.name === "string") declared.add(value.name);
+    if (value.kind === "for" && typeof value.variable === "string") declared.add(value.variable);
+    if (value.kind === "variable" && typeof value.name === "string") variables.add(value.name);
+    if (value.kind === "call" && typeof value.name === "string") calls.add(value.name);
+    for (const child of Object.values(value)) visit(child);
+  };
+  visit(statement.parameters.map((parameter) => parameter.defaultValue));
+  visit(statement.body);
+  return { variables: new Set([...variables].filter((name) => !declared.has(name))), calls };
+}
+
+/** Whether a value is made of literals only, so it can start a global (ADR 0022 §6.4). */
+function isLiteralValue(value: IrExpression): boolean {
+  switch (value.kind) {
+    case "literal":
+    case "duration":
+      return true;
+    case "list":
+      return value.items.every(isLiteralValue);
+    case "object":
+      return value.properties.every(
+        (property) => property.key === undefined && isLiteralValue(property.value),
+      );
+    default:
+      return false;
+  }
+}
+
+/** A file's TeaseScript path from the package root, its legacy path from the scripts folder. */
+function packagePath(sourceName: string, root: string): string {
+  const name = sourceName.replaceAll("\\", "/");
+  const relative = root !== "" && name.startsWith(`${root}/`) ? name.slice(root.length + 1) : name;
+  return relative.replace(/\.groovy$/iu, ".tease");
 }
 
 /**
@@ -783,7 +1026,46 @@ function keyPrefix(node: AstNode): string {
  * already taken are renamed inside their module first.
  */
 /** For each file, the files whose names it shares: a script with the modules it loads, and those modules. */
-function compositionGroups(files: readonly ParsedGroovyFile[]): ParsedGroovyFile[][] {
+/**
+ * Which files a file sees as modules (PackageOptions.releases): a file of a release sees the files of that release and
+ * the files of no release; every file skips the files of no release that are another version of a file the folder
+ * holds (`name__sha256_<hash>`).
+ */
+function moduleVisibility(
+  files: readonly ParsedGroovyFile[],
+  releases: ReadonlyArray<readonly string[]>,
+): (viewer: number, other: number) => boolean {
+  const path = (file: ParsedGroovyFile): string =>
+    file.sourceName.replaceAll("\\", "/").toLowerCase();
+  const sets = releases.map(
+    (paths) =>
+      new Set(
+        files.flatMap((file, index) =>
+          paths.some((item) => path(file).endsWith(`/${item.replaceAll("\\", "/").toLowerCase()}`))
+            ? [index]
+            : [],
+        ),
+      ),
+  );
+  const names = new Set(files.map(path));
+  const otherVersion = files.map((file) => {
+    const base = path(file).replace(/__sha256_[0-9a-f]+(?=\.groovy$)/u, "");
+    return base !== path(file) && names.has(base);
+  });
+  return (viewer, other) => {
+    if (viewer === other) return true;
+    if (sets.some((set) => set.has(viewer) && set.has(other))) return true;
+    return (
+      !otherVersion[other] &&
+      (!sets.some((set) => set.has(viewer)) || !sets.some((set) => set.has(other)))
+    );
+  };
+}
+
+function compositionGroups(
+  files: readonly ParsedGroovyFile[],
+  visible: (viewer: number, other: number) => boolean,
+): ParsedGroovyFile[][] {
   const moduleDirectory = files.map((file) => describeMixinModule(file)?.directory ?? null);
   const loads = files.map((file) => new Set(loadedModuleDirectories(file)));
   return files.map((file, index) => {
@@ -793,6 +1075,7 @@ function compositionGroups(files: readonly ParsedGroovyFile[]): ParsedGroovyFile
     if (directories.size === 0) return [file];
     return files.filter((_, other) => {
       const directory = moduleDirectory[other];
+      if (!visible(index, other)) return false;
       return (
         other === index ||
         (directory !== null && directory !== undefined && directories.has(directory)) ||
@@ -891,6 +1174,41 @@ function withLoadedModules(
   };
 }
 
+/** Words an identifier choice value may not be (V30 §38 grammar keywords and protected type names). */
+const RESERVED_IDS = new Set([
+  ..."let function return if else switch case default repeat for in while break continue and or not set true false".split(
+    " ",
+  ),
+  ..."null choose speaker say as label goto call end exit fallback global tagged save load delete is".split(
+    " ",
+  ),
+  ..."string boolean integer number date time datetime timestamp duration list dict object range media script timer".split(
+    " ",
+  ),
+]);
+
+/**
+ * For each script an entry menu offers, an identifier from its file name, such as `intro` for `intro.tease` and
+ * `first_de` for `chapters/first_de.tease`: unique, and different from the words TeaseScript reserves.
+ */
+function menuIds(paths: readonly string[]): Map<string, string> {
+  const taken = new Set<string>();
+  return new Map(
+    paths.map((path) => {
+      const file = path
+        .split("/")
+        .at(-1)!
+        .replace(/\.tease$/u, "");
+      let base = file.replace(/[^A-Za-z0-9_]+/gu, "_").replace(/^_+|_+$/gu, "");
+      if (base === "" || /^[0-9]/u.test(base) || RESERVED_IDS.has(base)) base = `script_${base}`;
+      let id = base;
+      for (let suffix = 2; taken.has(id); suffix += 1) id = `${base}_${suffix}`;
+      taken.add(id);
+      return [path, id];
+    }),
+  );
+}
+
 function rootNames(statements: readonly IrStatement[]): string[] {
   return statements.flatMap((statement) =>
     statement.kind === "let" || statement.kind === "function" ? [statement.name] : [],
@@ -935,6 +1253,8 @@ function buildFunctionCatalog(
 function composeProgram(
   program: MigrationProgram,
   catalog: Map<string, HelperFunctionEntry | null>,
+  /** Helper class methods that are global functions of their class's file, which the script calls there. */
+  globalFunctions: ReadonlySet<string> = new Set(),
 ): MigrationProgram {
   const localFunctions = new Set(
     program.statements.flatMap((statement) =>
@@ -947,7 +1267,7 @@ function composeProgram(
 
   while (queue.length > 0) {
     const name = queue.shift()!;
-    if (localFunctions.has(name) || required.has(name)) continue;
+    if (localFunctions.has(name) || required.has(name) || globalFunctions.has(name)) continue;
     const entry = catalog.get(name);
     if (entry === undefined) continue;
     if (entry === null) {
@@ -980,7 +1300,7 @@ function composeProgram(
     statements: [...helperStatements, ...program.statements],
     ...(actions.size === 0 ? {} : { actions: [...actions] }),
   });
-  diagnostics.push(...packageDependencyDiagnostics(composed.statements));
+  diagnostics.push(...packageDependencyDiagnostics(composed.statements, globalFunctions));
   return renameConflictingIdentifiers({
     ...composed,
     diagnostics: deduplicateDiagnostics(diagnostics),
@@ -989,10 +1309,13 @@ function composeProgram(
 
 export function packageDependencyDiagnostics(
   statements: readonly IrStatement[],
+  /** Global functions of other files of the package. */
+  globalFunctions: ReadonlySet<string> = new Set(),
 ): MigrationDiagnostic[] {
-  const defined = new Set(
-    statements.flatMap((statement) => (statement.kind === "function" ? [statement.name] : [])),
-  );
+  const defined = new Set([
+    ...globalFunctions,
+    ...statements.flatMap((statement) => (statement.kind === "function" ? [statement.name] : [])),
+  ]);
   const diagnostics: MigrationDiagnostic[] = [];
   for (const name of collectCallNames(statements)) {
     if (defined.has(name) || ACCEPTED_EXTERNAL_CALLS.has(name)) continue;

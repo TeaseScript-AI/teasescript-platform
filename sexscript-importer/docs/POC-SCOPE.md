@@ -34,8 +34,11 @@ avoiding accepted-but-unimplemented forms would only trade compiler errors for w
 - prefer a compact form when it is equally faithful, such as `say` plus `askText`, `askNumber`, a `choose` with
   numeric or `yes`/`no` values, or `showButton "Done", timeout: 30`, instead of parenthesized V30 input calls;
 - produce natural TeaseScript: keep comments and paragraph breaks, `else if` chains, interpolation, and idiomatic
-  forms such as `list.random`; rename only identifiers TeaseScript rejects; make Groovy's implicit last-expression
-  result an explicit `return` only in functions whose result some caller in the package uses;
+  forms such as `list.random`; write text with line breaks as a V30 §8 block string with the same value, except
+  inside an interpolation and where dedent or invisible trailing spaces would change or hide the value (an all-indented
+  text, a whitespace-only line, a line ending in a space or tab); rename only identifiers TeaseScript rejects; make
+  Groovy's implicit last-expression result an explicit `return` only in functions whose result some caller in the
+  package uses;
 - never move evaluation silently: a rewrite that hoists a condition or an input prompt applies only when the
   expression is unguarded, nothing with side effects is evaluated earlier in the same statement, and a hoisted part
   with side effects does not run before values the statement read earlier;

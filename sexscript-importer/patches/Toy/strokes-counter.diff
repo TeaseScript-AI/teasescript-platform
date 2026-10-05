@@ -1,0 +1,40 @@
+--- a/scripts/toy/tease.groovy
++++ b/scripts/toy/tease.groovy
+@@ -185,7 +185,7 @@
+ 		def edges = 0;
+ 		def itr = 0;
+ 		def nloops = getRandom(scaleTease(amount)) + 5
+-		for (it=0; it<nloops; it++) {
++		for (def loop = 0; loop < nloops; loop++) {
+ 			switch (itr) {
+ 				case 2:
+ 					final cmt = imageTagsComment(tags);
+@@ -235,7 +235,7 @@
+ 						playBackgroundSound(null);
+ 				}
+ 				executeTrigger("toyEdged");
+-				if (it < nloops-1) tags = present(imageSpec, [
++				if (loop < nloops-1) tags = present(imageSpec, [
+ 						["Back to stroking, toy...", "Get to it again...."],
+ 						["follow the beat..."],
+ 						["no accidents.", "and concentrate."]]);
+--- a/scripts/toy/tease__sha256_8e74911c9cd1.groovy
++++ b/scripts/toy/tease__sha256_8e74911c9cd1.groovy
+@@ -185,7 +185,7 @@
+ 		def edges = 0;
+ 		def itr = 0;
+ 		def nloops = getRandom(scaleTease(amount)) + 5
+-		for (it=0; it<nloops; it++) {
++		for (def loop = 0; loop < nloops; loop++) {
+ 			switch (itr) {
+ 				case 2:
+ 					final cmt = imageTagsComment(tags);
+@@ -235,7 +235,7 @@
+ 						playBackgroundSound(null);
+ 				}
+ 				executeTrigger("toyEdged");
+-				if (it < nloops-1) tags = present(imageSpec, [
++				if (loop < nloops-1) tags = present(imageSpec, [
+ 						["Back to stroking, toy...", "Get to it again...."],
+ 						["follow the beat..."],
+ 						["no accidents.", "and concentrate."]]);

@@ -6,4 +6,4 @@ if (load "Story.start.launch.firsttime") == null {
 save getTimestamp().toSeconds() as "Story.start.launch.lasttime"
 save (load "Story.start.launch.nb", default: 0) + 1 as "Story.start.launch.nb"
 say "The story begins."
-goto "middle.tease"
+goto "Story/middle.tease"

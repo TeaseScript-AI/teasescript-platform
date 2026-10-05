@@ -11,3 +11,4 @@ def report = { -> show("Level ${level}") }
 enter()
 report()
 greet()
+return "rooms/cellar.groovy"

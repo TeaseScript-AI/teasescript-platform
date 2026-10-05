@@ -553,7 +553,9 @@ test("maps literal getSelectedValue options to zero-based numeric choice labels"
     emitTease(program),
     [
       'say "Choose one"',
-      'let selected = choose 0: "First", 1: "Second", 2: "Third"',
+      'let selected = choose 0: "First",',
+      '  1: "Second",',
+      '  2: "Third"',
       "exit",
       "",
     ].join("\n"),

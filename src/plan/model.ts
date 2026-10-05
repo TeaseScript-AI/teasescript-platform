@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 55;
+export const INSTRUCTION_PLAN_VERSION = 56;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -590,14 +590,14 @@ export type PreparedInteractionUiPayload =
   | {
       readonly kind: "text";
       readonly hintTemporary: number | null;
-      /** Holds the evaluated default answer until the field opens, then its prefill text. */
+      /** Holds the evaluated default answer until the field opens, then its prefill text, or `null` for none. */
       readonly prefillTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }
   | {
       readonly kind: "number";
       readonly hintTemporary: number | null;
-      /** Holds the evaluated default answer until the field opens, then its prefill text. */
+      /** Holds the evaluated default answer until the field opens, then its prefill text, or `null` for none. */
       readonly prefillTemporary?: number;
       /** `askInteger`: only a whole number is an answer. */
       readonly integer?: true;
@@ -607,7 +607,7 @@ export type PreparedInteractionUiPayload =
       readonly kind: "temporal";
       readonly temporalKind: InteractionTemporalKind;
       readonly hintTemporary: number | null;
-      /** Holds the evaluated default answer until the field opens, then its ISO prefill text. */
+      /** Holds the evaluated default answer until the field opens, then its ISO prefill text, or `null` for none. */
       readonly prefillTemporary?: number;
       readonly accessibleName: InteractionAccessibleName;
     }

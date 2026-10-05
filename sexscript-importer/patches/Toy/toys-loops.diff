@@ -1,0 +1,74 @@
+--- a/scripts/toy/toys.groovy
++++ b/scripts/toy/toys.groovy
+@@ -130,23 +130,34 @@
+ 	};
+ 
+ 	toy.metaClass.anyToys {
+-		return toys.any { s, t -> stateIs(t.state) };
++		for (s in toys.keySet()) {
++			if (stateIs(toys[s].state)) return true;
++		}
++		return false;
+ 	}
+ 	
+ 	toy.metaClass.backgroundRemoveAllToys {
+ 		// Assume toy will release himself
+ 		def hadtoys = false
+-		toys.findAll { s, t -> stateIs(t.state) }.each {
+-			removeEvent("$RELEASEFROM-$it.value.state");
+-			undoToy(it.key)
+- 			setProp("state.$it.value.state-$LOCKED", null);
++		def worn = [];
++		for (s in toys.keySet()) {
++			if (stateIs(toys[s].state)) worn.add(s);
++		}
++		for (s in worn) {
++			removeEvent("$RELEASEFROM-${toys[s].state}");
++			undoToy(s)
++ 			setProp("state.${toys[s].state}-$LOCKED", null);
+ 			hadtoys = true
+-		};
++		}
+ 		return hadtoys;
+ 	}
+ 
+ 	toy.metaClass.removeAllToys { imageSpec, probKeep = 0, offer=false ->
+-		def toRemove = toys.findAll { s, t -> stateIs(t.state) }.collect{ k,v -> v.state }.unique();
++		def toRemove = [];
++		for (s in toys.keySet()) {
++			if (stateIs(toys[s].state)) toRemove.add(toys[s].state);
++		}
++		toRemove = toRemove.unique();
+ 		Collections.shuffle(toRemove);
+ 		if (toRemove.contains(PLUGGED)) toRemove = [PLUGGED] + (toRemove - [PLUGGED]);
+ 		toRemove.each { state ->
+--- a/scripts/toy/toys__sha256_192375d76f46.groovy
++++ b/scripts/toy/toys__sha256_192375d76f46.groovy
+@@ -67,15 +67,22 @@
+ 	};
+ 
+ 	toy.metaClass.anyToys {
+-		return toys.any { s, t -> stateIs(s) };
++		for (s in toys.keySet()) {
++			if (stateIs(s)) return true;
++		}
++		return false;
+ 	}
+ 
+ 	toy.metaClass.backgroundRemoveAllToys {
+ 		// Assume toy will release himself
+-		toys.findAll { s, t -> stateIs(s) }.each {
+-			removeEvent("$RELEASEFROM-${it.key}");
+-			set(it.key, false);
+-		};
++		def worn = [];
++		for (s in toys.keySet()) {
++			if (stateIs(s)) worn.add(s);
++		}
++		for (s in worn) {
++			removeEvent("$RELEASEFROM-${s}");
++			set(s, false);
++		}
+ 	}
+ 
+ 	toy.metaClass.removeAllToys { imageSpec, probKeep = 0 ->

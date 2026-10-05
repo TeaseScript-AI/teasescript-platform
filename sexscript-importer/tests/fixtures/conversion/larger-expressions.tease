@@ -25,9 +25,9 @@ if earlier >= earlier2 * conditional {
 }
 let missed = 3
 if missed > 1 {
-  say "Wrong${" again"}!"
+  say "Wrong again!"
 } else {
-  say "Wrong${""}!"
+  say "Wrong!"
 }
 let conditional2 = 3
 if likes("tape") {

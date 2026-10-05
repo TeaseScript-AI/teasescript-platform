@@ -1,4 +1,4 @@
-function sexscriptLegacyCompare(left, right) {
+global function sexscriptLegacyCompare(left, right) {
   if left == null {
     if right == null {
       return 0
@@ -16,11 +16,4 @@ function sexscriptLegacyCompare(left, right) {
   }
   return 0
 }
-// The one script in the package root is its entry.
-say "Hall or garden?"
-let visits = load "visits", default: 0
-save visits + 1 as "visits"
-if sexscriptLegacyCompare(visits, 2) < 0 {
-  goto "rooms/hall.tease"
-}
-exit
+goto "start.tease"

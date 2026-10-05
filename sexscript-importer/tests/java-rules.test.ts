@@ -169,8 +169,8 @@ test("converts Calendar and Date values to local dates and times", { skip }, asy
     "Date built = new Date(126, 9, 6, 25, 0, 0)",
     'show("${built.year + 1900}-${built.month + 1}-${built.date} ${built.hours}")',
   ]);
-  assert.match(source, /^c = c \+ 50 \* 1 min$/mu);
-  assert.match(source, /^c = c - 1 \* 1 day$/mu);
+  assert.match(source, /^c \+= 50 \* 1 min$/mu);
+  assert.match(source, /^c -= 1 \* 1 day$/mu);
   assert.match(
     source,
     /^c = sexscriptLegacyCalendarTime\(c, 1, c\.minute, c\.second, c\.millisecond\)$/mu,
@@ -214,6 +214,9 @@ test("converts Java text, number, random, and collection APIs", { skip }, async 
     "def rnd = new Random()",
     "def roll = rnd.nextInt(6)",
     'show("${roll >= 0 && roll < 6} ${rnd.nextFloat() < 1} ${rnd.nextGaussian() < 100} ${rnd.nextBoolean() || true} ${Math.random() < 1}")',
+    // Blocks that each declare their own Random draw from the session's random numbers too.
+    "def pick = { n -> if (n > 1) { Random dice = new Random(); return dice.nextInt(2) } else { Random dice = new Random(); return dice.nextInt(3) } }",
+    'show("${pick(2) < 2} ${pick(0) < 3}")',
     'String code = "abc"',
     "def chars = code.toCharArray()",
     "chars[1] = 'X'",
@@ -238,7 +241,7 @@ test("converts Java text, number, random, and collection APIs", { skip }, async 
     "show(\"${items.size()} ${copy.size()} ${seen.contains('x')}\")",
   ]);
   assert.match(source, /sexscriptLegacyFormEncode\("Zoë & Bob"\)/u);
-  assert.doesNotMatch(source, /TODO|let rnd/u);
+  assert.doesNotMatch(source, /TODO|let rnd|let dice/u);
   assert.match(source, /^let seen = set\["captured", "x"\]$/mu);
   assert.match(source, /^let chars = code\.split\(""\)$/mu);
   assert.deepEqual(run(source), [
@@ -247,6 +250,7 @@ test("converts Java text, number, random, and collection APIs", { skip }, async 
     "1024 true 0.25 true true",
     "true true true",
     "true true true true true",
+    "true true",
     "aXc",
     "true false true false false true",
     "3 5 3 b",
@@ -372,7 +376,8 @@ test("keeps reads of files that any write of the package may change", { skip }, 
   );
   assert.match(
     stored,
-    /^let lines = sexscriptLegacyTextLines\(\(load "file:quiz\.txt", default: "first\\n"\)\)$/mu,
+    // Text with a line break is a block string (V30 §8), except inside an interpolation.
+    /^let lines = sexscriptLegacyTextLines\(\(load "file:quiz\.txt", default: """\n {2}first\n\n"""\)\)$/mu,
   );
 });
 
@@ -401,7 +406,7 @@ test(
       ],
       { "quiz.txt": "first\n", "settings.ini": '[S]\nq="a"\nc=x ; n\nd=1\nd=2\n' },
     );
-    assert.match(source, /^let lines = sexscriptLegacyTextLines\("\$\{""\}\/quiz\.txt"\)$/mu);
+    assert.match(source, /^let lines = sexscriptLegacyTextLines\("\/quiz\.txt"\)$/mu);
     assert.match(source, /TODO SX_PACKAGE_TEXT_MISSING line 2/u);
     assert.doesNotMatch(source, /^let pack = (?:true|false)$/mu);
     assert.match(source, /TODO SX_CALENDAR_SET_RANGE line 7/u);

@@ -4,7 +4,9 @@ say "Your weight?"
 let weight = askNumber default: 0
 say "Hello ${name}, you said ${weight}."
 say "Choose a task"
-let task = choose 0: "Kneel", 1: "Wait", 2: "Count"
+let task = choose 0: "Kneel",
+  1: "Wait",
+  2: "Count"
 while true {
   say "Ready?"
   if (choose 0: "No", 1: "Yes") != 0 {

@@ -44,10 +44,13 @@ say "Whole ${whole}, stored ${stored}, later ${later}"
 // A position that may hold a fraction truncates when it indexes a list, as Groovy did.
 let names = ["first", "second"]
 let position = 0
-position = position + 0.5
+position += 0.5
 say names[toInteger(position)]
 // Groovy pairs of a name and a level: a list of lists whose elements are text or whole numbers.
-let offenses: (string | integer)[][] = [["late", 2], ["rude", 4]]
+let offenses: (string | integer)[][] = [
+  ["late", 2],
+  ["rude", 4]
+]
 let single: (string | integer)[][] = [["missed", 1]]
 say "First: ${offenses[0][0]}, then ${single[0][0]}"
 // A list that starts with a null element takes text later.
@@ -59,7 +62,10 @@ say toys[0]
 let words: (string | string[])[] = ["Rub", "Caress"]
 say "More?"
 if (choose yes: "Yes", no: "No") == "yes" {
-  words = [["Pinch", "Twist"], ["them!"]]
+  words = [
+    ["Pinch", "Twist"],
+    ["them!"]
+  ]
 }
 say "${words.length}"
 // A variable declared String converted every value stored in it to text, and kept null.

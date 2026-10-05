@@ -1,12 +1,3 @@
-// A default before a required parameter applies only to calls that leave it out; these calls pass it.
-function rounds(count, msg) {
-  for it in 0..count {
-    showWait(msg, 1)
-  }
-}
-function twice(it = null) {
-  return it * 2
-}
 showWait("Kneel")
 rounds(3, "Stroke")
 say "Twice ${twice(2)}"

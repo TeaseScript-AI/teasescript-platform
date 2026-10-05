@@ -1,0 +1,34 @@
+--- a/scripts/toy/tease.groovy
++++ b/scripts/toy/tease.groovy
+@@ -395,12 +395,12 @@
+ 							"Not now!", "No, you may not!", "And I don't want you to cum!",
+ 							"No, I tell you what to do!", "No, do what your ${dommeTitle()} says!"]]);
+ 					pause(7);
+-					if (timing) waitTime -= 7;
++					if (waitTime != null) waitTime -= 7;
+ 					present(null, [["Get soft!", "Get it soft!"],["Now!", ""]]);
+ 				}
+ 				else return 0;
+ 			}
+-			if (timing) waitTime -= click;
++			if (waitTime != null) waitTime -= click;
+ 		}
+ 		def click2 = showButtonG("It is soft, ${dommeTitle()}", "soft", waitTime);
+ 		if (timing && click2==waitTime) {
+--- a/scripts/toy/tease__sha256_8e74911c9cd1.groovy
++++ b/scripts/toy/tease__sha256_8e74911c9cd1.groovy
+@@ -419,12 +419,12 @@
+ 							"Not now!", "No, you may not!", "And I don't want you to cum!",
+ 							"No, I tell you what to do!", "No, do what your ${dommeTitle()} says!"]]);
+ 					pause(7);
+-					if (timing) waitTime -= 7;
++					if (waitTime != null) waitTime -= 7;
+ 					present(null, [["Get soft!", "Get it soft!"],["Now!", ""]]);
+ 				}
+ 				else return 0;
+ 			}
+-			if (timing) waitTime -= click;
++			if (waitTime != null) waitTime -= click;
+ 		}
+ 		def click2 = showButtonG("It is soft, ${dommeTitle()}", "soft", waitTime);
+ 		if (timing && click2==waitTime) {

@@ -22,8 +22,13 @@ import {
   type TeaseProjectCompiler,
 } from "../src/compile-check.ts";
 import { emitTease } from "../src/emit-tease.ts";
-import type { MigrationProgram } from "../src/ir.ts";
-import { lowerPackage, lowerSelfContainedPackage, type PackageOptions } from "../src/package.ts";
+import type { IrExpression, IrStatement, MigrationProgram } from "../src/ir.ts";
+import {
+  lowerPackage,
+  lowerSelfContainedPackage,
+  packageOutputs,
+  type PackageOptions,
+} from "../src/package.ts";
 import { helperStatements } from "../src/helpers.ts";
 import { imageCatalog, pathTag } from "../src/image-tags.ts";
 import { pendingHostFunctions, shimPendingCapabilities } from "../src/pending.ts";
@@ -438,7 +443,7 @@ test(
       assert.equal(report.loweredScriptFileCount, 0);
       assert.deepEqual(
         report.smokeRuns.map(({ status, visited }) => ({ status, visited })),
-        [{ status: "halted", visited: ["main.tease"] }],
+        [{ status: "halted", visited: ["main.tease", "start.tease"] }],
       );
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -730,8 +735,8 @@ test(
       const output = emitTease(program);
       // A range is a list in Groovy, so its elements are appended.
       assert.match(output, /^ {2}items = sexscriptLegacyConcat\(\[items, 1\.\.=3\]\)$/mu);
-      // A value that may be a list or one element is reported; a function result is a list.
-      assert.match(output, /^ {2}\/\/ TODO SX_LIST_CONCATENATION line 5: /mu);
+      // A value that may be a list or one element is decided at runtime; a function result is a list.
+      assert.match(output, /^ {2}items \+= sexscriptLegacyListPart\(more\)$/mu);
       assert.match(output, /^ {2}items \+= extra\(\)$/mu);
       // A list literal is checked element by element, as the compiler does; mixed elements need a union.
       assert.match(output, /^let weights: \(integer \| string\)\[\] = \[1, 2\]$/mu);
@@ -838,26 +843,11 @@ test(
         sources.map((file) => parseGroovySource(path.join(scripts, file))),
       );
       const lowered = lowerPackage(files);
-      const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;
-      // Paths start at the scripts' common folder, as convert-package writes them.
-      // A helper class writes no file of its own, as in convert-package.
-      const outputs = lowered.composed.flatMap(
-        (program, index): Array<[string, MigrationProgram]> =>
-          files[index]!.root?.kind === "scriptBody"
-            ? [
-                [
-                  index === entry
-                    ? "main.tease"
-                    : (lowered.paths[index] ?? sources[index]!.replace(/\.groovy$/u, ".tease")),
-                  program,
-                ],
-              ]
-            : [],
+      // Each file keeps its legacy path from the scripts folder, beside a generated main.tease, as convert-package
+      // writes them.
+      const outputs = packageOutputs(lowered).map(
+        ({ path: file, program }): [string, MigrationProgram] => [file, program],
       );
-      if (lowered.main !== null && "menu" in lowered.main)
-        outputs.push(["main.tease", lowered.main.menu]);
-      const helpers = lowered.globals?.helpers ?? null;
-      if (helpers !== null) outputs.push(["helpers.tease", helpers]);
       const expected = readdirSync(path.join(directory, "expected"), {
         recursive: true,
         encoding: "utf8",
@@ -887,7 +877,7 @@ test(
         // An assembled unit's internal script, such as an add-on, is no entry: the package starts at the story.
         const unit = lowerPackage(files, { internalScripts: ["Story/addon.groovy"] });
         assert.ok(unit.main !== null && "menu" in unit.main);
-        assert.match(emitTease(unit.main.menu), /\ngoto "start\.tease"\n$/u);
+        assert.match(emitTease(unit.main.menu), /\ngoto "Story\/start\.tease"\n$/u);
       }
       if (name === "helper-class") {
         // The scripts call the class's static closures as functions, in both scripts.
@@ -901,7 +891,8 @@ test(
         );
       }
       if (name === "shared-helpers") {
-        // The scripts call the shared functions, which read the shared table and the global each script assigns.
+        // The scripts call the shared functions, which read the shared table and the global each script assigns; the
+        // cellar keeps its own variable of a global's name, with values of another type.
         const report = analyzeFeasibility(files, {
           compiler: projectResult.compiler,
           runner: projectResult.runner,
@@ -912,24 +903,14 @@ test(
             {
               start: "main.tease",
               status: "halted",
-              visited: ["main.tease", "rooms/hall.tease", "rooms/garden.tease"],
+              visited: [
+                "main.tease",
+                "rooms/hall.tease",
+                "rooms/garden.tease",
+                "rooms/cellar.tease",
+              ],
             },
           ],
-        );
-        assert.deepEqual(
-          {
-            promoted: report.globalFunctions?.promoted,
-            copiesReplaced: report.globalFunctions?.copiesReplaced,
-            globals: report.globalFunctions?.globals,
-          },
-          {
-            promoted: 3,
-            copiesReplaced: 7,
-            globals: [
-              { name: "phrases", kind: "table" },
-              { name: "mistress", kind: "reassigned" },
-            ],
-          },
         );
         continue;
       }
@@ -993,8 +974,13 @@ test(
           visited,
         })),
         [
-          // The one script in the package root is the entry, main.tease (ADR 0022).
-          { entry: "main.tease", isolated: false, status: "halted", visited: ["main.tease"] },
+          // The one script in the package root is the main script, which main.tease goes to (ADR 0022).
+          {
+            entry: "main.tease",
+            isolated: false,
+            status: "halted",
+            visited: ["main.tease", "helper.tease"],
+          },
           {
             entry: "sub/start.tease",
             isolated: true,
@@ -1111,6 +1097,135 @@ test(
       { status: run.status, failure: run.failure },
       { status: "halted", failure: null },
     );
+  },
+);
+
+// Text with line breaks is written as a block string with the same value (V30 §8), also with interpolations and in a
+// nested block; text the block form would change or hide stays single-line.
+test(
+  "writes text with line breaks as block strings with the same value",
+  { skip: "reason" in runnerResult ? runnerResult.reason : false },
+  () => {
+    if (!("runner" in runnerResult)) return;
+    const values = [
+      'Hello!\n\nThe door "opens".\n',
+      "\nstarts with a break",
+      "line one\n  indented two\n\tthird",
+      'quotes """ and """" inside\n"next"',
+      "back\\slash, tab\t, ${literal}\r\nend",
+      "  every line\n  indented",
+      "trailing space \nnext",
+      "spaces only\n   \nnext",
+      "\n\n",
+      "single line",
+    ];
+    const literal = (value: string): IrExpression => ({ kind: "literal", value });
+    const saves: IrStatement[] = values.map((value, index) => ({
+      kind: "save",
+      key: literal(`k${index}`),
+      value: literal(value),
+      span: null,
+    }));
+    const template: IrExpression = {
+      kind: "template",
+      parts: [
+        { text: "Dear " },
+        { value: { kind: "call", name: "toString", positional: [literal("An\nn")], named: {} } },
+        { text: ",\n  kneel." },
+      ],
+    };
+    const program: MigrationProgram = {
+      sourceName: "blocks.tease",
+      metadata: null,
+      statements: [
+        {
+          kind: "if",
+          condition: { kind: "literal", value: true },
+          then: [...saves, { kind: "save", key: literal("t"), value: template, span: null }],
+          else: [],
+          span: null,
+        },
+        { kind: "exit", span: null },
+      ],
+      diagnostics: [],
+    };
+    const source = emitTease(program);
+    // Five texts and the template become blocks; the interpolated text stays single-line inside its block.
+    assert.equal(source.match(/"""\n/gu)?.length, 6);
+    assert.match(source, /^ {4}Dear \$\{toString\("An\\nn"\)\},$/mu);
+    assert.match(source, /^ {2}""" as "t"$/mu);
+    const storage = new Map();
+    const run = runnerResult.runner(source, {}, { storage });
+    assert.deepEqual(
+      { status: run.status, failure: run.failure },
+      { status: "halted", failure: null },
+    );
+    assert.deepEqual(Object.fromEntries(storage), {
+      ...Object.fromEntries(values.map((value, index) => [`k${index}`, value])),
+      t: "Dear An\nn,\n  kneel.",
+    });
+  },
+);
+
+// A corpus merge puts the releases of a package side by side (`name__sha256_<hash>`): a release's script loads the
+// module versions of its own release and the modules of no release; without releases, a script skips other versions.
+test(
+  "loads only the module versions of a script's own release",
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
+  async () => {
+    if (!("compiler" in projectResult)) return;
+    const scripts = fileURLToPath(
+      new URL("./fixtures/packages/module-releases/scripts/", import.meta.url),
+    );
+    const sources = readdirSync(scripts, { recursive: true, encoding: "utf8" })
+      .filter((file) => file.endsWith(".groovy"))
+      .sort();
+    const files = await Promise.all(
+      sources.map((file) => parseGroovySource(path.join(scripts, file))),
+    );
+    const convert = (releases: string[][], compiles: boolean): Map<string, string> => {
+      const lowered = lowerPackage(files, { releases });
+      const outputs = packageOutputs(lowered).map(
+        ({ path: file, program }): [string, MigrationProgram] => [file, program],
+      );
+      const shims = outputs.map(([file, program]) => ({
+        path: file,
+        shim: shimPendingCapabilities(program),
+      }));
+      if (compiles)
+        assert.deepEqual(
+          projectResult.compiler(
+            shims.map(({ path: file, shim }) => ({ path: file, source: shim.source })),
+            shims.flatMap(({ shim }) => shim.builtins),
+          ).diagnostics,
+          [],
+        );
+      return new Map(outputs.map(([file, program]) => [file, emitTease(program)]));
+    };
+    const released = convert(
+      [
+        ["game.groovy", "game/play.groovy", "game/extra.groovy"],
+        [
+          "game__sha256_aaaaaaaaaaaa.groovy",
+          "game/play__sha256_bbbbbbbbbbbb.groovy",
+          "game/extra.groovy",
+        ],
+      ],
+      true,
+    );
+    const current = released.get("game.tease") ?? "";
+    const older = released.get("game__sha256_aaaaaaaaaaaa.tease") ?? "";
+    // Both scripts load the modules they share, which the package defines once in helpers.tease.
+    for (const name of ["Extra", "Added"]) {
+      assert.match(current, new RegExp(`load${name}Module\\(\\)`, "u"));
+      assert.match(older, new RegExp(`load${name}Module\\(\\)`, "u"));
+    }
+    assert.match(current, /say "Play \$\{rounds\}"/u);
+    assert.doesNotMatch(current, /Old play/u);
+    assert.match(older, /"Old play"/u);
+    assert.doesNotMatch(older, /"Play /u);
+    const plain = convert([], false).get("game.tease") ?? "";
+    assert.doesNotMatch(plain, /Old play/u);
   },
 );
 

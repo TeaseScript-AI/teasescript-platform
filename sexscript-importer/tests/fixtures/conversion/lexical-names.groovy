@@ -19,3 +19,11 @@ def countUp = {
 }
 countUp()
 show("Counted " + counter)
+// Another closure's parameter of the same name, or an implicit `it`, declares it only inside that closure.
+def mood = "calm"
+def setMood = { -> level = "high"; mood = level }
+def describe = { level -> show("Level " + level) }
+def again = { it = "x"; show(it) }
+setMood()
+describe(level)
+again()

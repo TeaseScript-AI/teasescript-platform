@@ -54,7 +54,10 @@ function greet {
 function setupLaterModule(times = 2) {
   say "Setup ${times}"
 }
+// NOTE SX_BINDING_VARIABLE: Groovy kept lastPause, which functions assign without a declaration, in the script's binding that every function shares; it is declared at the top of the script with an empty value.
+let lastPause = 0
 function loadPauseModule {
+  // A variable that the module's methods assign without a declaration lives in the module's binding.
   // Returning nothing on every path keeps the module's result fixed.
   if not enabled {
     return null
@@ -62,7 +65,8 @@ function loadPauseModule {
   say "Pausing enabled"
 }
 function pause {
-  wait sexscriptLegacyRandom(rounds - 2) + 1
+  lastPause = sexscriptLegacyRandom(rounds - 2) + 1
+  wait lastPause
   sexscriptLegacyStopBackgroundSounds()
 }
 // NOTE SX_DATA_FOLDER line 2: getDataFolder() was the legacy player's data folder on the player's computer; package paths start at the package root, so it is empty text here.

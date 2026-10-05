@@ -1,0 +1,225 @@
+--- a/scripts/toy__sha256_0d24d6c78bca.groovy
++++ b/scripts/toy__sha256_0d24d6c78bca.groovy
+@@ -217,32 +217,32 @@
+ 		Event event;
+ 	}
+ 
+-	Map<String, Event> loadEvents() {
+-		return (loadMap("toy.events") ?: [:])
+-			.collectEntries { k, v -> [ k, new Event(v) ] };
++	Map loadEvents() {
++		return load("toy.events") ?: [:];
+ 	}
+ 
+-	void saveEvents(Map<String, Event> events) {
+-		save("toy.events", events.collectEntries { k, v -> [ k, v.map() ] });
++	void saveEvents(Map events) {
++		save("toy.events", events);
+ 	}
+ 
+-	NamedEvent nextEvent(Map<String, Event> events) {
+-		NamedEvent first = null;
+-		events.each{ String k, Event v ->
++	def nextEvent(Map events) {
++		def first = null;
++		for (k in events.keySet()) {
++			def v = events[k];
+ 			if (!first || first.event.time > v.time) {
+-				first = new NamedEvent(name: k, event: v);
++				first = [name: k, event: v];
+ 			}
+-		};
++		}
+ 		return first;
+ 	}
+ 
+-	boolean setEvent(Map<String, Event> events, String name, int time, String func, Object arg = null) {
++	boolean setEvent(Map events, String name, int time, String func, Object arg = null) {
+ 		if (namedEvents.containsKey(func)) {
+-			events[name] = new Event(
++			events.put(name, [
+ 				time: time,
+ 				func: func,
+ 				arg: arg
+-			);
++			]);
+ 			saveEvents(events);
+ 			return true;
+ 		}
+@@ -272,7 +272,7 @@
+ 	}
+ 
+ 	void execEvents(boolean rt) {
+-		for (def e = nextEvent(loadEvents()); e && e.event.time <= getTime(); e = nextEvent(loadEvents())) {
++		for (def e = nextEvent(loadEvents()); e != null && e.event.time <= getTime(); e = nextEvent(loadEvents())) {
+ 			def f = namedEvents[e.event.func];
+ 			removeEvent(e.name);
+ 			if (f) {
+@@ -529,7 +529,7 @@
+ 		while (true) {
+ 			def away = getAway();
+ 			def e = nextEvent(loadEvents());
+-			if (!e) return "toy"; // Force restart, should create some events
++			if (e == null) return "toy"; // Force restart, should create some events
+ 
+ 			if (away) {
+ 				def note = loadString("toy.note");
+@@ -545,7 +545,7 @@
+ 				else {
+ 					show("${dommeTitle()} ${dommeName()} is away ($away)...");
+ 				}
+-				if (e && e.event && e.event.time > getTime()) {
++				if (e != null && e.event != null && e.event.time > getTime()) {
+ 					pause(e.event.time - getTime());
+ 				}
+ 			}
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -214,32 +214,32 @@
+ 		Event event;
+ 	}
+ 
+-	Map<String, Event> loadEvents() {
+-		return (loadMap("toy.events") ?: [:])
+-			.collectEntries { k, v -> [ k, new Event(v) ] };
++	Map loadEvents() {
++		return load("toy.events") ?: [:];
+ 	}
+ 
+-	void saveEvents(Map<String, Event> events) {
+-		save("toy.events", events.collectEntries { k, v -> [ k, v.map() ] });
++	void saveEvents(Map events) {
++		save("toy.events", events);
+ 	}
+ 
+-	NamedEvent nextEvent(Map<String, Event> events) {
+-		NamedEvent first = null;
+-		events.each{ String k, Event v ->
++	def nextEvent(Map events) {
++		def first = null;
++		for (k in events.keySet()) {
++			def v = events[k];
+ 			if (!first || first.event.time > v.time) {
+-				first = new NamedEvent(name: k, event: v);
++				first = [name: k, event: v];
+ 			}
+-		};
++		}
+ 		return first;
+ 	}
+ 
+-	boolean setEvent(Map<String, Event> events, String name, int time, String func, Object arg = null) {
++	boolean setEvent(Map events, String name, int time, String func, Object arg = null) {
+ 		if (namedEvents.containsKey(func)) {
+-			events[name] = new Event(
++			events.put(name, [
+ 				time: time,
+ 				func: func,
+ 				arg: arg
+-			);
++			]);
+ 			saveEvents(events);
+ 			return true;
+ 		}
+@@ -269,7 +269,7 @@
+ 	}
+ 
+ 	void execEvents(boolean rt) {
+-		for (def e = nextEvent(loadEvents()); e && e.event.time <= getTime(); e = nextEvent(loadEvents())) {
++		for (def e = nextEvent(loadEvents()); e != null && e.event.time <= getTime(); e = nextEvent(loadEvents())) {
+ 			def f = namedEvents[e.event.func];
+ 			removeEvent(e.name);
+ 			if (f) {
+@@ -526,7 +526,7 @@
+ 		while (true) {
+ 			def away = getAway();
+ 			def e = nextEvent(loadEvents());
+-			if (!e) return "toy"; // Force restart, should create some events
++			if (e == null) return "toy"; // Force restart, should create some events
+ 
+ 			if (away) {
+ 				def note = loadString("toy.note");
+@@ -542,7 +542,7 @@
+ 				else {
+ 					show("${dommeTitle()} ${dommeName()} is away ($away)...");
+ 				}
+-				if (e && e.event && e.event.time > getTime()) {
++				if (e != null && e.event != null && e.event.time > getTime()) {
+ 					pause(e.event.time - getTime());
+ 				}
+ 			}
+--- a/scripts/toy__sha256_bf0bc1679772.groovy
++++ b/scripts/toy__sha256_bf0bc1679772.groovy
+@@ -169,32 +169,32 @@
+ 		Event event;
+ 	}
+ 
+-	Map<String, Event> loadEvents() {
+-		return (loadMap("toy.events") ?: [:])
+-			.collectEntries { k, v -> [ k, new Event(v) ] };
++	Map loadEvents() {
++		return load("toy.events") ?: [:];
+ 	}
+ 
+-	void saveEvents(Map<String, Event> events) {
+-		save("toy.events", events.collectEntries { k, v -> [ k, v.map() ] });
++	void saveEvents(Map events) {
++		save("toy.events", events);
+ 	}
+ 
+-	NamedEvent nextEvent(Map<String, Event> events) {
+-		NamedEvent first = null;
+-		events.each{ String k, Event v ->
++	def nextEvent(Map events) {
++		def first = null;
++		for (k in events.keySet()) {
++			def v = events[k];
+ 			if (!first || first.event.time > v.time) {
+-				first = new NamedEvent(name: k, event: v);
++				first = [name: k, event: v];
+ 			}
+-		};
++		}
+ 		return first;
+ 	}
+ 
+-	boolean setEvent(Map<String, Event> events, String name, int time, String func, Object arg = null) {
++	boolean setEvent(Map events, String name, int time, String func, Object arg = null) {
+ 		if (namedEvents.containsKey(func)) {
+-			events[name] = new Event(
++			events.put(name, [
+ 				time: time,
+ 				func: func,
+ 				arg: arg
+-			);
++			]);
+ 			saveEvents(events);
+ 			return true;
+ 		}
+@@ -224,7 +224,7 @@
+ 	}
+ 
+ 	void execEvents(boolean rt) {
+-		for (def e = nextEvent(loadEvents()); e && e.event.time <= getTime(); e = nextEvent(loadEvents())) {
++		for (def e = nextEvent(loadEvents()); e != null && e.event.time <= getTime(); e = nextEvent(loadEvents())) {
+ 			def f = namedEvents[e.event.func];
+ 			removeEvent(e.name);
+ 			if (f) {
+@@ -376,7 +376,7 @@
+ 		while (true) {
+ 			def away = getAway();
+ 			def e = nextEvent(loadEvents());
+-			if (!e) return "toy"; // Force restart, should create some events
++			if (e == null) return "toy"; // Force restart, should create some events
+ 
+ 			if (away) {
+ 				def note = loadString("toy.note");
+@@ -392,7 +392,7 @@
+ 				else {
+ 					show("${dommeTitle()} ${dommeName()} is away ($away)...");
+ 				}
+-				if (e && e.event && e.event.time > getTime()) {
++				if (e != null && e.event != null && e.event.time > getTime()) {
+ 					pause(e.event.time - getTime());
+ 				}
+ 			}

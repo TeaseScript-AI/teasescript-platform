@@ -64,7 +64,7 @@ let trail = ""
 for step in [1, 2] {
   trail = "${trail}${step}"
 }
-trail = "${trail}!"
+trail += "!"
 say trail
 // tokenize() splits at any delimiter character and drops empty parts; String.format() pads and rounds.
 let fields = sexscriptLegacyTokenize("a,b,,c;d", ",;")

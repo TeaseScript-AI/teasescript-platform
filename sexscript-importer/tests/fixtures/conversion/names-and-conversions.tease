@@ -1,6 +1,6 @@
 // Groovy allows `$` in names; TeaseScript names keep the letters and digits.
 let score = 3
-score = score + 1
+score += 1
 say "Score ${score}"
 // Consecutive C-style loops may each declare the same counter, which Groovy scoped to its own loop.
 let i = 0

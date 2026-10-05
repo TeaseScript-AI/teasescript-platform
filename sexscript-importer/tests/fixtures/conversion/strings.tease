@@ -23,7 +23,11 @@ say "Hello ${name}, you have ${count + 1} tasks."
 say "Literal \${not interpolated} and \"quotes\""
 say "Path C:\\temp\tTab"
 // Text with HTML that a variable keeps or a function receives becomes markup where it is written.
-let rulesTitle = "# Rules\n\n"
+let rulesTitle = """
+  # Rules
+
+
+"""
 function announce(message) {
   say "${rulesTitle}${message}"
 }
@@ -42,6 +46,9 @@ let dialog = ""
 let counts = [3, 5]
 // NOTE SX_LOAD_KEEPS_VALUE line 22: Groovy stored null in 'dialog' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
 dialog = load "training.greeting", default: dialog
-dialog = "${dialog}${counts[1]} swats\n"
+dialog += """
+  ${counts[1]} swats
+
+"""
 say dialog
 exit

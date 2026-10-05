@@ -23,7 +23,7 @@ say "Twice ${twice(scores[0])}, ${labelValue(scores[1])}"
 // A final assignment returns the assigned value.
 let counter = 0
 function bump {
-  counter = counter + 1
+  counter += 1
   return counter
 }
 say "Count ${bump()}"
@@ -42,4 +42,12 @@ if kinds[pick] != sexscriptLegacyItemAt(kinds, lastPick) {
   say "Another kind"
 }
 lastPick = pick
+// A menu choice minus one reads the last element when the player picks the first button, as Groovy counted it.
+let ratings = ["soft", "hard", "none"]
+say "Which limit?"
+let limit = choose 0: "Back",
+  1: "Soft",
+  2: "Hard"
+// NOTE SX_NEGATIVE_INDEX line 22: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+say "Limit ${sexscriptLegacyItemAt(ratings, limit - 1)}"
 exit

@@ -4425,7 +4425,9 @@ class TypeChecker {
 
   /**
    * A default answer must be an answer the field accepts: text for askText, a number for askNumber, and a whole number
-   * for askInteger. The compiler rejects a default it knows is wrong; the runtime checks the others when the field opens.
+   * for askInteger. One that is `null` or blank when the field opens prefills nothing, but one known here to be `null`
+   * or blank is an error. The compiler rejects a default it knows is wrong; the runtime checks the others when the field
+   * opens.
    */
   #checkInteractionDefault(
     kind: Exclude<InteractionExpression["interactionKind"], "choice">,
@@ -4433,6 +4435,7 @@ class TypeChecker {
     type: StaticType,
   ): void {
     const name = expression.kind === "identifier" ? expression.name : null;
+    const value = nonNullTypeForUse(type);
     const holds = !isKnown(type)
       ? ""
       : name === null
@@ -4441,41 +4444,35 @@ class TypeChecker {
     if (kind === "date" || kind === "time" || kind === "datetime") {
       // A date or time field shows its default as ISO text; text is converted first (V30 §20, §35).
       const expected = interactionResultType(kind);
-      if (!isAssignable(expected, type))
+      if (!isAssignable(expected, value))
         this.#report(
           typeCode.invalidInteractionDefault,
           `The default answer of ${TEMPORAL_ASKS[kind]} must be ${describeValue(expected)}${holds}.${
             resolved(type).kind === "null"
               ? EMPTY_FIELD_FIX
-              : isNullable(type) && isAssignable(expected, nonNullType(type))
-                ? (checkFirstFix(expected, type, expression) ?? "")
-                : isScalar(type, "string")
-                  ? ` Convert the text with ${TEMPORAL_CONVERSION_NAMES[kind]}(...).`
-                  : ""
+              : isScalar(type, "string")
+                ? ` Convert the text with ${TEMPORAL_CONVERSION_NAMES[kind]}(...).`
+                : ""
           }`,
           expression.span,
         );
       return;
     }
-    const expected =
-      kind === "integer" ? INTEGER_TYPE : kind === "number" ? NUMBER_TYPE : STRING_TYPE;
     const fix =
       resolved(type).kind === "null"
         ? EMPTY_FIELD_FIX
-        : isNullable(type) && isAssignable(expected, nonNullType(type))
-          ? (checkFirstFix(expected, type, expression) ?? "")
-          : kind === "text"
-            ? textDefaultFix(expression, name)
-            : numberDefaultFix(expression);
+        : kind === "text"
+          ? textDefaultFix(expression, name)
+          : numberDefaultFix(expression);
     if (kind === "integer") {
       // A non-whole default is never rounded; a number variable may be one that widened (rule 1.2).
-      if (isScalar(nonNullTypeForUse(type), "number"))
+      if (isScalar(value, "number"))
         this.#report(
           typeCode.invalidInteractionDefault,
           `The default answer of askInteger must be a whole number (integer)${holds}.${this.#widenedNote(expression)}${ROUND_FIX}.`,
           expression.span,
         );
-      else if (!isAssignable(INTEGER_TYPE, type))
+      else if (!isAssignable(INTEGER_TYPE, value))
         this.#report(
           typeCode.invalidInteractionDefault,
           `The default answer of askInteger must be a whole number (integer)${holds}.${resolved(type).kind === "null" || isNullable(type) ? fix : " Use a whole number, such as 'default: 10'."}`,
@@ -4490,7 +4487,7 @@ class TypeChecker {
       return;
     }
     if (kind === "number") {
-      if (!isAssignable(NUMBER_TYPE, type))
+      if (!isAssignable(NUMBER_TYPE, value))
         this.#report(
           typeCode.invalidInteractionDefault,
           `The default answer of askNumber must be a number${holds}.${fix}`,
@@ -4498,7 +4495,7 @@ class TypeChecker {
         );
       return;
     }
-    if (!isAssignable(STRING_TYPE, type) || isArithmetic(expression)) {
+    if (!isAssignable(STRING_TYPE, value) || isArithmetic(expression)) {
       this.#report(
         typeCode.invalidInteractionDefault,
         `The default answer of askText must be text${holds}.${fix}`,

@@ -10,10 +10,10 @@ while rest.contains("<") {
   if close < 0 {
     break
   }
-  withoutTags = "${withoutTags}${rest.substring(0, open)}"
+  withoutTags += "${rest.substring(0, open)}"
   rest = rest.substring(open + close + 1)
 }
-withoutTags = "${withoutTags}${rest}"
+withoutTags += "${rest}"
 say withoutTags.trim()
 // NOTE SX_REGEX_WORKAROUND line 5: Workaround: TeaseScript has no regular expressions yet (a future .ts text library), so a loop over the parts between spaces stands in for split(/\s+/), with tabs and line breaks read as spaces; unlike Java, a leading space gives no empty first part.
 let words = []

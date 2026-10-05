@@ -11,11 +11,12 @@ function sexscriptLegacyRandom(limit) {
   }
   return 0
 }
-// NOTE SX_BINDING_VARIABLE: Groovy kept counter, which functions assign without a declaration, in the script's binding that every function shares; it is declared at the top of the script with an empty value.
+// NOTE SX_BINDING_VARIABLE: Groovy kept counter, level, which functions assign without a declaration, in the script's binding that every function shares; they are declared at the top of the script with an empty value.
 let counter = 0
+let level = null
 // A closure named like a SexScript method calls that method inside its own body, where the variable is not defined yet.
 function getRandom(low, high) {
-  // NOTE SX_PLUS_OPERAND_TYPE line 2: Groovy + operands are not proven numeric; TeaseScript + only adds numbers. Use interpolation if this joins text.
+  // NOTE SX_PLUS_OPERAND_TYPE line 2: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
   return low + sexscriptLegacyRandom(high - low)
 }
 say "Roll ${getRandom(3, 6)}"
@@ -45,8 +46,24 @@ while (playing is boolean and playing == true) or (playing is number and playing
 // A variable a closure assigns without a declaration lived in the script binding that every closure shares.
 function countUp {
   counter = 0
-  counter = counter + 1
+  counter += 1
 }
 countUp()
 say "Counted ${counter}"
+// Another closure's parameter of the same name, or an implicit `it`, declares it only inside that closure.
+let mood: string? = "calm"
+function setMood {
+  level = "high"
+  mood = level
+}
+function describe(levelValue) {
+  say "Level ${levelValue}"
+}
+function again(it = null) {
+  it = "x"
+  say it
+}
+setMood()
+describe(level)
+again()
 exit

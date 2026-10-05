@@ -1,6 +1,12 @@
 // Both scripts share these functions; one reads the script's lastTime, the other keeps a local of that name.
-// lastTime is a global of helpers.tease; this script starts it with its own value.
-lastTime = getTimestamp().toSeconds()
+let lastTime = getTimestamp().toSeconds()
+function elapsed {
+  return getTimestamp().toSeconds() - lastTime
+}
+function remember {
+  let lastTimeValue = getTimestamp().toSeconds()
+  save lastTimeValue as "demo.lastTime"
+}
 remember()
 say "Elapsed ${elapsed()}"
 goto "second.tease"

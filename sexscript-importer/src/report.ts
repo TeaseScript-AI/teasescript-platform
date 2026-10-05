@@ -83,6 +83,8 @@ export interface FeasibilityOptions {
   readFile?: PackageFileReader;
   /** Scripts that are no entries of their own, which the generated entry menu does not offer (PackageOptions). */
   internalScripts?: readonly string[];
+  /** Releases that a corpus merge put side by side (PackageOptions.releases). */
+  releases?: ReadonlyArray<readonly string[]>;
   /**
    * The converted package as written, after any manual output patches, read as the Player reads it, which
    * `finalPackage` compiles and runs as it is; needs `compiler`.
@@ -183,18 +185,6 @@ export interface FeasibilityReport {
   smokeRunFailuresByMessage: Record<string, number>;
   /** Null when no runner was supplied. */
   smokeRunReachedScriptFileCount: number | null;
-  /**
-   * Functions several scripts share, promoted to `global function`s in a generated helpers.tease (#570): how many
-   * names and copies, the globals they read, the functions that stay in each file and why, and whether helpers.tease
-   * compiles (null without a compiler or helpers).
-   */
-  globalFunctions: {
-    promoted: number;
-    copiesReplaced: number;
-    globals: Array<{ name: string; kind: string }>;
-    kept: Array<{ name: string; copies: number; reason: string }>;
-    helpersCompile: boolean | null;
-  } | null;
   files: FeasibilityFileReport[];
   /** The check of the package as written; null unless its files and a compiler were given. */
   finalPackage: FinalPackageCheck | null;
@@ -208,7 +198,6 @@ export function analyzeFeasibility(
     lowered: filePrograms,
     composed: packagePrograms,
     main,
-    globals,
     paths,
   } = lowerPackage(files, {
     ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
@@ -216,12 +205,12 @@ export function analyzeFeasibility(
     ...(options.files === undefined ? {} : { files: options.files }),
     ...(options.readFile === undefined ? {} : { readFile: options.readFile }),
     ...(options.internalScripts === undefined ? {} : { internalScripts: options.internalScripts }),
+    ...(options.releases === undefined ? {} : { releases: options.releases }),
   });
-  const helpers = globals?.helpers ?? null;
   const isScriptBodyAt = (index: number): boolean =>
     files[index]!.root?.kind === "scriptBody" && packagePrograms[index]?.module === undefined;
-  // The package as a project (ADR 0022): each script at its path, a single script as main.tease, the generated entry
-  // menu, and helpers.tease.
+  // The package as a project (ADR 0022): each script at its path, a single script as main.tease, the generated
+  // main.tease, and the files of helper classes.
   const scriptIndexes = files.flatMap((_, index) => (isScriptBodyAt(index) ? [index] : []));
   const projectPathOf = new Map<number, string>(
     scriptIndexes.flatMap((index): Array<[number, string]> => {
@@ -238,7 +227,13 @@ export function analyzeFeasibility(
     ...(main !== null && "menu" in main
       ? [{ path: MAIN, program: main.menu, fileIndex: null }]
       : []),
-    ...(helpers === null ? [] : [{ path: HELPERS, program: helpers, fileIndex: null }]),
+    // A helper class's own file, with its global functions.
+    ...files.flatMap((file, index) => {
+      const path = paths[index];
+      return file.root?.kind === "compilationUnit" && path != null
+        ? [{ path, program: packagePrograms[index]!, fileIndex: null }]
+        : [];
+    }),
   ].map((entry) => ({ ...entry, shim: shimPendingCapabilities(entry.program) }));
   const shimOf = new Map(projectFiles.map((entry) => [entry.path, entry.shim]));
   const placeholders = [...new Set(projectFiles.flatMap((entry) => entry.shim.builtins))].sort();
@@ -286,17 +281,6 @@ export function analyzeFeasibility(
     smokeRuns: [],
     smokeRunStatusCounts: emptyCounts(),
     smokeRunFailuresByMessage: emptyCounts(),
-    globalFunctions:
-      globals === null
-        ? null
-        : {
-            promoted: globals.promoted.length,
-            copiesReplaced: globals.promoted.reduce((sum, { copies }) => sum + copies, 0),
-            globals: globals.globals,
-            kept: globals.kept,
-            helpersCompile:
-              helpers === null || shimmed === null ? null : errorFree(shimmedDiagnostics, HELPERS),
-          },
     smokeRunReachedScriptFileCount: options.runner === undefined ? null : 0,
     files: [],
     finalPackage:
@@ -441,7 +425,6 @@ interface ProjectEntry {
 
 /** The fixed entry file of a package (ADR 0022 §1), and the generated file of its global functions (#570). */
 const MAIN = "main.tease";
-const HELPERS = "helpers.tease";
 
 /**
  * Host functions of the smoke harness: each runnable file announces itself when it starts, a stub of an unconverted
@@ -487,9 +470,27 @@ function diagnosticsByPath(
 
 /** A stand-in for a file that has no runnable conversion: reaching it ends the run as `blocked`. */
 function stub(path: string, source = ""): string {
-  // Speakers are global (V30 §37): the files that run still need the speakers a failing file declares.
-  const speakers = source.match(/^speaker \w+ \{\n(?: {2}.*\n)*\}\n/gmu) ?? [];
-  return `${speakers.join("")}${BLOCKED}(${JSON.stringify(path)})\nexit\n`;
+  return `${globalDeclarations(source)}${BLOCKED}(${JSON.stringify(path)})\nexit\n`;
+}
+
+/**
+ * The declarations of a file that other files see: speakers (V30 §37), globals, and global functions (V30 §11), such
+ * as the generated helpers of main.tease; the files that run still need them when the file becomes a stub.
+ */
+function globalDeclarations(source: string): string {
+  const lines = source.split("\n");
+  const kept: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!/^(?:global|speaker) /u.test(lines[index]!)) continue;
+    kept.push(lines[index]!);
+    // The declaration continues on indented and blank lines, up to a closing delimiter at the start of a line.
+    while (index + 1 < lines.length && /^(?:\s|$|[}\])]|""")/u.test(lines[index + 1]!)) {
+      index += 1;
+      kept.push(lines[index]!);
+      if (/^(?:[}\])]|""")/u.test(lines[index]!)) break;
+    }
+  }
+  return kept.map((line) => `${line}\n`).join("");
 }
 
 /**
@@ -646,7 +647,8 @@ function runPackageProject(
     file.path === MAIN
       ? {
           path: MAIN,
-          source: `let start = ${START}()\nif start != "" {\n  goto script(start)\n}\n${stub(MAIN)}`,
+          // It keeps what main.tease declares for the other files, such as the generated global helpers.
+          source: `let start = ${START}()\nif start != "" {\n  goto script(start)\n}\n${stub(MAIN, file.source)}`,
         }
       : file,
   );

@@ -87,7 +87,8 @@ export type HelperName =
   | "textLines"
   | "endsWithDigits"
   | "plainText"
-  | "askText"
+  | "listPart"
+  | "repeatList"
   | "compare"
   | "replaceChars"
   | "askInteger"
@@ -191,7 +192,8 @@ const HELPER_ORDER: readonly HelperName[] = [
   "textLines",
   "endsWithDigits",
   "plainText",
-  "askText",
+  "listPart",
+  "repeatList",
   "compare",
   "replaceChars",
   "askInteger",
@@ -692,30 +694,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
-  // Legacy input with a prefill that may be blank or null, which a TeaseScript default rejects: no default then.
-  askText: {
-    name: "sexscriptLegacyAskText",
-    build: () =>
-      fn(
-        "sexscriptLegacyAskText",
-        ["prefill"],
-        [
-          ifS(
-            bin(
-              "or",
-              bin("==", v("prefill"), lit(null)),
-              bin(
-                "==",
-                { kind: "methodCall", target: template(v("prefill")), name: "trim", arguments: [] },
-                lit(""),
-              ),
-            ),
-            [ret({ kind: "input", input: "askText" })],
-          ),
-          ret({ kind: "input", input: "askText", defaultValue: template(v("prefill")) }),
-        ],
-      ),
-  },
   askInteger: {
     name: "sexscriptLegacyAskInteger",
     build: () =>
@@ -1079,6 +1057,48 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       );
     },
+  },
+  // What Groovy `list + value` appended: the elements of a list, or any other value, also null, as one element.
+  listPart: {
+    name: "sexscriptLegacyListPart",
+    build: () =>
+      fn(
+        "sexscriptLegacyListPart",
+        ["value"],
+        [
+          ifS({ kind: "typeTest", value: v("value"), type: "list" }, [ret(v("value"))]),
+          ret({ kind: "list", items: [v("value")] }),
+        ],
+      ),
+  },
+  // Groovy `list * n`: the list's elements, n times over.
+  repeatList: {
+    name: "sexscriptLegacyRepeatList",
+    build: () =>
+      fn(
+        "sexscriptLegacyRepeatList",
+        ["items", "times"],
+        [
+          { kind: "let", name: "result", value: { kind: "list", items: [] }, span: null },
+          { kind: "let", name: "round", value: lit(0), span: null },
+          {
+            kind: "while",
+            condition: bin("<", v("round"), v("times")),
+            body: [
+              {
+                kind: "assign",
+                target: v("result"),
+                operator: "+=",
+                value: v("items"),
+                span: null,
+              },
+              { kind: "assign", target: v("round"), operator: "+=", value: lit(1), span: null },
+            ],
+            span: null,
+          },
+          ret(v("result")),
+        ],
+      ),
   },
   // The items a Groovy loop visited: the characters of text, the elements of anything else.
   items: {

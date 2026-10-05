@@ -1,0 +1,84 @@
+--- a/scripts/toy__sha256_0d24d6c78bca.groovy
++++ b/scripts/toy__sha256_0d24d6c78bca.groovy
+@@ -97,10 +97,12 @@
+ 
+ 	// Utils
+ 	int localTimeOffset() {
+-		return java.time.ZoneId.systemDefault()
+-			.getRules()
+-			.getOffset(java.time.Instant.now())
+-			.getTotalSeconds();
++		final now = Calendar.getInstance();
++		def offset = now.get(Calendar.HOUR_OF_DAY) * 3600 + now.get(Calendar.MINUTE) * 60 - getTime() % DAY;
++		offset = Math.round(offset / 900) * 900;
++		if (offset > 14 * 3600) offset -= DAY;
++		if (offset < -12 * 3600) offset += DAY;
++		return offset;
+ 	}
+ 
+ 	java.time.LocalDateTime localTimeOf(int s) {
+@@ -121,7 +123,7 @@
+ 		return ((int) getDayNum() * DAY - localTimeOffset() );
+ 	}
+ 	int getDayNum() {
+-		return Math.floorDiv(getTime() + localTimeOffset() - (4 * (int)HOUR), DAY)
++		return (getTime() + localTimeOffset() - (4 * (int)HOUR)).intdiv(DAY)
+ 	}
+ 
+ 	def getProp(String i, String f, d = null) {
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -94,10 +94,12 @@
+ 
+ 	// Utils
+ 	int localTimeOffset() {
+-		return java.time.ZoneId.systemDefault()
+-			.getRules()
+-			.getOffset(java.time.Instant.now())
+-			.getTotalSeconds();
++		final now = Calendar.getInstance();
++		def offset = now.get(Calendar.HOUR_OF_DAY) * 3600 + now.get(Calendar.MINUTE) * 60 - getTime() % DAY;
++		offset = Math.round(offset / 900) * 900;
++		if (offset > 14 * 3600) offset -= DAY;
++		if (offset < -12 * 3600) offset += DAY;
++		return offset;
+ 	}
+ 
+ 	java.time.LocalDateTime localTimeOf(int s) {
+@@ -118,7 +120,7 @@
+ 		return ((int) getDayNum() * DAY - localTimeOffset() );
+ 	}
+ 	int getDayNum() {
+-		return Math.floorDiv(getTime() + localTimeOffset() - (4 * (int)HOUR), DAY)
++		return (getTime() + localTimeOffset() - (4 * (int)HOUR)).intdiv(DAY)
+ 	}
+ 
+ 	def getProp(String i, String f, d = null) {
+--- a/scripts/toy__sha256_bf0bc1679772.groovy
++++ b/scripts/toy__sha256_bf0bc1679772.groovy
+@@ -76,10 +76,12 @@
+ 
+ 	// Utils
+ 	int localTimeOffset() {
+-		return java.time.ZoneId.systemDefault()
+-			.getRules()
+-			.getOffset(java.time.Instant.now())
+-			.getTotalSeconds();
++		final now = Calendar.getInstance();
++		def offset = now.get(Calendar.HOUR_OF_DAY) * 3600 + now.get(Calendar.MINUTE) * 60 - getTime() % DAY;
++		offset = Math.round(offset / 900) * 900;
++		if (offset > 14 * 3600) offset -= DAY;
++		if (offset < -12 * 3600) offset += DAY;
++		return offset;
+ 	}
+ 
+ 	java.time.LocalDateTime localTimeOf(int s) {
+@@ -100,7 +102,7 @@
+ 		return ((int)(getTime() / DAY) * DAY);
+ 	}
+ 	int getDayNum() {
+-		return Math.floorDiv(getTime() - localTimeOffset() - (4 * (int)HOUR), DAY)
++		return (getTime() - localTimeOffset() - (4 * (int)HOUR)).intdiv(DAY)
+ 	}
+ 
+ 	def getProp(String i, String f, d = null) {

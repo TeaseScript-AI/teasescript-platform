@@ -1,7 +1,0 @@
-// Functions and values the package's scripts share (#570). Nothing transfers to this file.
-// The shared functions of this helper class are static closures that the scripts call like methods.
-global function showWait(msg, tmo = 5) {
-  say msg, instant
-  wait tmo
-}
-exit

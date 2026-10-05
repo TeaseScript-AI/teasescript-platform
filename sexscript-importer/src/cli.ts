@@ -67,6 +67,8 @@ if (command === "inventory") {
     options.readFile = packageFileReader(dataRoot);
     const internal = await internalScripts(args[0]!);
     if (internal !== null) options.internalScripts = internal;
+    const versions = await releases(args[0]!);
+    if (versions.length > 0) options.releases = versions;
   }
   if (finalPackageDir !== null) options.finalPackage = await finalPackage(finalPackageDir);
   const report = analyzeFeasibility(files, options);
@@ -130,20 +132,22 @@ async function convertPackage(
   const media = await packageMedia(path.join(dataRoot, "images"));
   const files = await packageFiles(dataRoot);
   const internal = await internalScripts(sourceRoot);
+  const versions = await releases(sourceRoot);
   const lowered = lowerPackage(parsed, {
     accepted,
     media,
     files,
     readFile: packageFileReader(dataRoot),
     ...(internal === null ? {} : { internalScripts: internal }),
+    ...(versions.length === 0 ? {} : { releases: versions }),
   });
   const programs = lowered.composed;
-  // The package starts at main.tease (ADR 0022): its entry script, or a generated menu over the scripts it lists.
+  // Each file keeps its legacy folder and name (lowerPackage paths); the package starts at main.tease (ADR 0022): a
+  // legacy main.groovy, or a generated file that goes to the main script.
   const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;
   const outputs = programs.map((program, index) => ({
     program,
     index,
-    // Transfers name paths relative to the scripts' common folder, which lowerPackage gives.
     relative:
       lowered.paths[index] ??
       (index === entry
@@ -152,9 +156,6 @@ async function convertPackage(
   }));
   if (lowered.main !== null && "menu" in lowered.main)
     outputs.push({ program: lowered.main.menu, index: -1, relative: "main.tease" });
-  // The functions the scripts share, as global functions (#570).
-  if (lowered.globals?.helpers != null)
-    outputs.push({ program: lowered.globals.helpers, index: -1, relative: "helpers.tease" });
   let errors = 0;
   let written = 0;
   const project: Array<{ path: string; source: string; outputPath: string }> = [];
@@ -162,7 +163,12 @@ async function convertPackage(
     const file = index < 0 ? null : parsed[index]!;
     // A file that does not parse produces no output but reports its parser errors.
     if (file !== null && file.root === null) errors += reportDiagnostics(program);
-    if (file !== null && (file.root?.kind !== "scriptBody" || program.module !== undefined))
+    // A helper class writes its own file where it has global functions, which gives it a path.
+    if (
+      file !== null &&
+      (program.module !== undefined ||
+        (file.root?.kind !== "scriptBody" && lowered.paths[index] === null))
+    )
       continue;
     const outputPath = path.join(outputRoot, relative);
     await mkdir(path.dirname(outputPath), { recursive: true });
@@ -254,6 +260,27 @@ async function internalScripts(scriptsRoot: string): Promise<string[] | null> {
   )
     fail(`${path.join(scriptsRoot, "..", "unit.json")} needs an "internalScripts" list of paths.`);
   return unit.internalScripts;
+}
+
+/**
+ * The releases that a corpus merge put side by side in a unit, from its `unit.json` (`releases`, lists of paths from
+ * the scripts folder, PackageOptions.releases); empty without them.
+ */
+async function releases(scriptsRoot: string): Promise<string[][]> {
+  const text = await readFile(path.join(scriptsRoot, "..", "unit.json"), "utf8").catch(() => null);
+  if (text === null) return [];
+  const unit: unknown = JSON.parse(text);
+  if (typeof unit !== "object" || unit === null || !("releases" in unit)) return [];
+  const list = unit.releases;
+  if (
+    !Array.isArray(list) ||
+    !list.every(
+      (release): release is string[] =>
+        Array.isArray(release) && release.every((item): item is string => typeof item === "string"),
+    )
+  )
+    fail(`${path.join(scriptsRoot, "..", "unit.json")} needs "releases" as lists of paths.`);
+  return list;
 }
 
 /** Every file below the legacy data folder, relative to it with forward slashes. */
