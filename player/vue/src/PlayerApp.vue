@@ -8,6 +8,7 @@ import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import type { PlayerSpeakerPresentation } from "../../model.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import FloatingViewfinder, { type FloatingPlace } from "./FloatingViewfinder.vue";
+import ImageCapture from "./ImageCapture.vue";
 import PlayerComposition from "./PlayerComposition.vue";
 import PlayerNotificationCenter from "./PlayerNotificationCenter.vue";
 import PlayerToasts from "./PlayerToasts.vue";
@@ -45,6 +46,19 @@ const props = withDefaults(
 // The camera view's window keeps the place the user gave it, and the view its mirroring, while the Player is mounted.
 const floatingPlace = ref<FloatingPlace | null>(null);
 const viewfinderMirrored = ref(true);
+// An image request takes its photo in the camera window the script shows, otherwise on the Stage, where it shows the
+// camera instead of any camera view the script shows there.
+const capture = computed(() => props.player.imageCapture.view.value);
+const captureInWindow = computed(
+  () => capture.value !== null && props.player.viewfinderPlacement.value === "window",
+);
+const stageCamera = computed(() =>
+  capture.value && !captureInWindow.value
+    ? capture.value.track
+    : props.player.viewfinderPlacement.value === "stage"
+      ? props.player.viewfinder.value
+      : null,
+);
 const themeIntent = defineModel<PlayerThemeIntent>("themeIntent", {
   default: () => defaultPlayerThemeIntents.light,
 });
@@ -196,17 +210,36 @@ async function toggleFullscreen() {
             ref="stage"
             v-model:camera-mirrored="viewfinderMirrored"
             :media="stageMedia"
-            :camera="player.viewfinderPlacement.value === 'stage' ? player.viewfinder.value : null"
+            :camera="stageCamera"
             @media-aspect="mediaAspect = $event"
-          />
+          >
+            <template v-if="capture && !captureInWindow" #camera>
+              <ImageCapture
+                :view="capture"
+                @shutter="player.imageCapture.shutter"
+                @retake="player.imageCapture.retake"
+                @use="player.imageCapture.use"
+                @retry="player.imageCapture.retry"
+              />
+            </template>
+          </Stage>
         </template>
         <template #overlay>
           <FloatingViewfinder
-            v-if="player.viewfinderPlacement.value === 'window' && player.viewfinder.value"
+            v-if="player.viewfinderPlacement.value === 'window' && (captureInWindow || player.viewfinder.value)"
             v-model:place="floatingPlace"
             v-model:mirrored="viewfinderMirrored"
-            :track="player.viewfinder.value"
-          />
+            :track="captureInWindow ? capture!.track : player.viewfinder.value"
+          >
+            <ImageCapture
+              v-if="captureInWindow"
+              :view="capture!"
+              @shutter="player.imageCapture.shutter"
+              @retake="player.imageCapture.retake"
+              @use="player.imageCapture.use"
+              @retry="player.imageCapture.retry"
+            />
+          </FloatingViewfinder>
           <ScriptProblems v-if="failure" :failure="failure" />
           <SessionActivation v-else :activation="player.activation.value" @activate="player.activate" />
           <PlayerToasts

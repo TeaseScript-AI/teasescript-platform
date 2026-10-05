@@ -592,10 +592,14 @@ its `main.tease` with its own Stage image and plays its own sound, and one that 
 with file and line. Its `pictures` package checks `askImage(...)`: only while a request waits does the composer offer
 a paperclip, which opens the native picker, and a drop target; a chosen and a dropped image each answer and reach the
 Stage, while a text file, two files, or a file outside the request's filters are refused and the request keeps waiting;
-its `picture-race` package checks that a file chosen for a request a timer's request replaced answers neither. On the
+its `picture-race` package checks that a file chosen for a request a timer's request replaced answers neither; and
+its `picture-camera` and `picture-camera-view` packages check that the camera opens by itself, on the Stage or in the
+script's camera window, take a photo of the fake camera's test card after the countdown, with Retake before Use this, check that the camera
+the request opened turns off after a photo or a file answered, and that a busy camera offers Try again while the
+paperclip stays. On the
 importer's route `/player/?dev&package=waiting&time=skip`, auto-skip ends that package's 15 s wait right after a
-physical Start, and +10 s at its button reaches the button's elapsed time; without `time=skip`, Skip ends the wait, and
-the default build offers no time controls.
+physical Start, and +10 s at its button reaches the button's elapsed time; without `time=skip`, Skip event ends the
+wait, and the default build offers no Debug tool.
 With a Windows user agent, the editor opens a package served only as a catalog whose file paths a
 model URI could merge (a `\` in a name, `C:` and `c:` folders) and keeps every file apart. Development preview
 presentation is covered by the [Player browser verification route](#player-browser-and-visual-verification).

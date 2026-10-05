@@ -2170,9 +2170,10 @@ async function markupLinkChecks(page) {
   return "PASS authored HTML stays literal and links open an isolated browsing context";
 }
 
-// Development time controls (#615) exist only with `?dev`: their switches and buttons are reachable by role and
-// keyboard, a badge stays visible while they are on, each jump is reported outside the transcript and notices, and
-// `time=skip` only sets the initial state. This group replaces the development scenario with its own script.
+// The Debug tool (#615) exists only with `?dev`: its time controls are always active there and reachable by role,
+// keyboard and touch; explanations stay collapsed until their label opens them, several at once; jumps go to the Debug
+// log and an invisible live region, never the transcript or notices; a badge shows auto-skip; and `time=skip` only
+// sets the initial state. This group replaces the development scenario with its own script.
 async function developmentTimeChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -2197,12 +2198,16 @@ async function developmentTimeChecks(page) {
     });
   });
   const base = page.url().split("?")[0];
-  const launcher = page.locator('[data-launcher] button[aria-label="Time Controls"]');
+  const launcher = page.locator('[data-launcher] button[aria-label="Debug"]');
   const badge = page.locator("[data-development-time-badge]");
-  const marker = page.locator("[data-development-time-marker]");
-  const enable = page.getByRole("switch", { name: "Enable time controls", exact: true });
+  const announcement = page.locator('[role="status"]').filter({ hasText: "Debug log" });
+  const logLines = page.locator("[data-debug-log] li");
   const autoSkip = page.getByRole("switch", { name: "Auto-skip", exact: true });
-  const skip = page.getByRole("button", { name: "Skip to next timed event", exact: true });
+  const aboutAutoSkip = page.getByRole("button", { name: "About auto-skip", exact: true });
+  const aboutJumps = page.getByRole("button", { name: "About time jumps", exact: true });
+  const autoSkipText = page.getByText("Waits, timers and pacing pauses complete at once");
+  const jumpsText = page.getByText("Skip event jumps to the next wait");
+  const skip = page.getByRole("button", { name: "Skip event", exact: true });
   const tenSeconds = page.getByRole("button", { name: "+10 s", exact: true });
   const minute = page.getByRole("button", { name: "+1 min", exact: true });
   const foreground = (name) =>
@@ -2214,67 +2219,99 @@ async function developmentTimeChecks(page) {
     return ![...texts, ...toasts].some((text) => text.includes("⏩"));
   };
 
-  // The development server opens the preview without `?dev`, but not the time controls.
+  // The development server opens the preview without `?dev`, but not the Debug tool.
   await page.reload();
   await page.locator("[data-launcher]").waitFor();
   check(
     (await launcher.count()) === 0 && (await badge.count()) === 0,
-    "Time controls exist without ?dev",
+    "The Debug tool exists without ?dev",
   );
 
-  // `?dev` starts with the controls off; the keyboard switches them on, and Skip ends the wait at once.
+  // `?dev` starts with auto-skip off and the controls active; explanations start collapsed.
   await page.goto(`${base}?dev`);
   await launcher.click();
-  await enable.waitFor();
+  await autoSkip.waitFor();
   check(
-    !(await enable.isChecked()) &&
-      !(await autoSkip.isChecked()) &&
-      (await autoSkip.isDisabled()) &&
-      (await skip.isDisabled()) &&
-      (await badge.count()) === 0,
-    "?dev must start with the time controls off",
+    !(await autoSkip.isChecked()) &&
+      (await badge.count()) === 0 &&
+      !(await autoSkipText.isVisible()) &&
+      !(await jumpsText.isVisible()),
+    "?dev must start with auto-skip off and explanations collapsed",
   );
-  await enable.focus();
-  await page.keyboard.press("Space");
-  await badge.waitFor();
+  // The three jump buttons share one row and one size.
+  const boxes = await Promise.all([skip, tenSeconds, minute].map((button) => button.boundingBox()));
+  check(
+    boxes.every(
+      (box) =>
+        Math.abs(box.y - boxes[0].y) < 1 &&
+        Math.abs(box.width - boxes[0].width) < 1 &&
+        Math.abs(box.height - boxes[0].height) < 1,
+    ),
+    `Skip event, +10 s and +1 min must share one row and size: ${JSON.stringify(boxes)}`,
+  );
+  // A click, the keyboard, and a tap each open an explanation, and several stay open together.
+  await aboutAutoSkip.click();
+  await autoSkipText.waitFor();
+  await aboutJumps.focus();
+  await page.keyboard.press("Enter");
+  await jumpsText.waitFor();
+  check(await autoSkipText.isVisible(), "Opening one explanation closed another");
+  await aboutAutoSkip.click();
+  await autoSkipText.waitFor({ state: "hidden" });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  const label = await aboutAutoSkip.boundingBox();
+  const touch = { x: label.x + label.width / 2, y: label.y + label.height / 2 };
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await cdp.detach();
+  await autoSkipText.waitFor();
+  check(!(await autoSkip.isChecked()), "Tapping the label switched auto-skip");
+
+  // Skip ends the wait at once and logs the jump; a waiting button offers +10 s and +1 min, but nothing to skip.
   await skip.click();
   await foreground("Done").waitFor({ timeout: 5_000 });
   // What really elapsed before Skip is not skipped.
-  await marker.filter({ hasText: /^⏩ 1[0-5] s skipped$/ }).waitFor();
+  await logLines
+    .first()
+    .filter({ hasText: /^⏩ 1[0-5] s skipped$/ })
+    .waitFor();
   check(
     (await skip.isDisabled()) && (await tenSeconds.isEnabled()) && (await minute.isEnabled()),
     "A waiting button must offer +10 s and +1 min, but nothing to skip",
   );
   await tenSeconds.click();
-  await page
-    .locator("[data-development-time-jumps] li")
-    .first()
-    .filter({ hasText: "⏩ 10 s skipped" })
-    .waitFor();
+  await logLines.first().filter({ hasText: "⏩ 10 s skipped" }).waitFor();
   await foreground("Done").click();
   const waited = await entry("Waited").innerText();
   check(
     /Waited 1\d(\.\d+)? s/.test(waited),
     `+10 s did not reach the button's elapsed time: ${waited}`,
   );
-  // The 30 s timer falls inside +1 min and fires during the jump.
+  // Equal jumps announce again; the 30 s timer falls inside +1 min and fires during the jump.
+  await tenSeconds.click();
+  await announcement.filter({ hasText: "Debug log 3: ⏩ 10 s skipped" }).waitFor();
+  await tenSeconds.click();
+  await announcement.filter({ hasText: "Debug log 4: ⏩ 10 s skipped" }).waitFor();
+  check(
+    (await announcement.boundingBox()) === null ||
+      (await announcement.evaluate((element) => element.getBoundingClientRect().width <= 1)),
+    "The live region takes visible space",
+  );
   await minute.click();
   await entry("Timer fired").waitFor({ timeout: 5_000 });
-  // The live region numbers jumps, so equal jumps are announced again.
-  await badge.locator('[role="status"]').filter({ hasText: "Jump 3: ⏩ 1 min skipped" }).waitFor();
+  check(
+    (await logLines.count()) === 5 && (await logLines.first().innerText()) === "⏩ 1 min skipped",
+    "The Debug log must list every jump, newest first",
+  );
   check(await outsideTranscript(), "A jump marker reached the transcript or a notice");
-  await enable.click();
-  await badge.waitFor({ state: "detached" });
-  check(await minute.isDisabled(), "Switched-off controls must not jump");
 
   // `time=skip` starts with auto-skip on: the wait ends by itself, but the player's think time stays real, and the
-  // background timer does not fire while Again waits.
+  // background timer does not fire while Again waits. The switch turns it off again.
   await page.goto(`${base}?dev&time=skip`);
   await foreground("Done").waitFor({ timeout: 5_000 });
-  await badge
-    .filter({ hasText: "auto-skip" })
-    .filter({ hasText: /⏩ 1[45] s skipped/ })
-    .waitFor();
+  await badge.filter({ hasText: "Auto-skip" }).waitFor();
   await foreground("Done").click();
   const thinkTime = await entry("Waited").innerText();
   check(
@@ -2288,14 +2325,15 @@ async function developmentTimeChecks(page) {
     "Auto-skip advanced a background timer during input",
   );
   await launcher.click();
-  check(
-    (await enable.isChecked()) && (await autoSkip.isChecked()),
-    "time=skip must switch the controls and auto-skip on",
-  );
+  check(await autoSkip.isChecked(), "time=skip must switch auto-skip on");
+  await logLines
+    .first()
+    .filter({ hasText: /^⏩ 1[45] s skipped$/ })
+    .waitFor();
   await autoSkip.click();
-  await badge.filter({ hasNotText: "auto-skip" }).waitFor();
+  await badge.waitFor({ state: "detached" });
   check(await outsideTranscript(), "A jump marker reached the transcript or a notice");
-  return "PASS time controls only with ?dev, switches, Skip, +10 s, +1 min, auto-skip at input, badge and markers";
+  return "PASS Debug tool only with ?dev, collapsed explanations by click, key and tap, one button row, Debug log, announcements, auto-skip";
 }
 
 const groups = [

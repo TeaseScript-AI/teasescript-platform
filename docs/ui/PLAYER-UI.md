@@ -58,7 +58,8 @@ specification may lead the implementation. The Player presents supported transcr
 pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds Visual
 Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The default
 build plays the repository demo without that preview; the development server or explicit `?dev` URL opt-in loads it.
-Only `?dev` adds development time controls, which are not a Standard Player tool; `player/README.md` describes them.
+Only `?dev` adds the Debug tool with development time controls, which is not a Standard Player tool; `player/README.md`
+describes it.
 Runtime timers, permanent buttons, the Stage image, and audio are wired; browser video playback and production host
 integration remain separate work. Values marked for retesting remain provisional tuning baselines.
 
@@ -421,7 +422,7 @@ audio, is labelled **Needs action**, offers no dismiss control, and disappears o
 
 The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
 (info: saved progress is not kept), a failed script-storage write (warning, for the run it happened in; a new
-Start withdraws it), and an image request that allows only the camera, which this Player cannot answer yet (warning,
+Start withdraws it), and an image request that allows only the camera where no camera can be used (warning,
 withdrawn when the request ends). Each level also has a theme status colour, following the usual convention: info blue, warning
 orange, error red. A toast uses the level's soft tint as its surface and its solid tone for the border and icon; a
 panel entry uses the same tint with a solid mark along its start edge and a solid icon; and the bell's dot takes the
@@ -685,8 +686,24 @@ AVIF, or BMP), requires the extension and the type to match `types` and `mime` w
 it; a file that fails, more than one file, or typed text shows the composer notice and the request keeps waiting, as
 does a cancelled picker. A file chosen in a picker opened for a request that is no longer presented, for example
 because a timer's request replaced it meanwhile, answers nothing and shows the composer notice. An accepted image is
-stored as session media and recorded in the transcript as the player message `Image`. Until the camera route exists, a
-request that allows only the camera cannot be answered, and a [player notice](#player-notices) says so.
+stored as session media and recorded in the transcript as the player message `Image`.
+
+An `askImage(...)` that allows the camera turns the camera on by itself as it asks, where the browser can capture. Its
+viewfinder opens over the Stage, or in the camera window when the script shows one, and draws on the picture the
+request's message as its question and a **Take photo** shutter in the material of the viewfinder's mirror button,
+both at the bottom so the top stays clear. The
+shutter starts a five-second countdown: a number from 5 to 1 as large as the viewfinder allows, each appearing large and
+settling over the live picture, without the motion when the player prefers reduced motion; a request that ends during
+the countdown takes no photo. The photo taken covers the live picture, unmirrored as it will be used, with **Retake** and **Use this**; only **Use this**
+answers the request, and **Retake** drops the photo and returns to the live camera. The paperclip stays available
+throughout. Once the player works in the viewfinder, each step moves keyboard focus to its main control; opening by
+itself, it takes no focus. None of these controls enter the transcript. The session camera is used when it is open;
+otherwise the request opens a camera of its own, only for itself, and turns it off after the answer, whether a photo or
+a file answered. A camera that is denied, missing, broken, or ended shows why in an alert, with **Try again**, which asks
+for it again. The viewfinder belongs to its request: it closes when the request ends or is interrupted, or its session is
+replaced, and a restored session asks for the camera again but never takes a photo by itself. Where no camera can be
+used, such as on a page that is not a secure context, a request that allows only the camera cannot be answered, and a
+[player notice](#player-notices) says so.
 
 `choose` and `showButton` keep the composer enabled rather than visually disabling it:
 

@@ -1029,8 +1029,8 @@ any other answer leaves the request waiting, and there is no cancellation result
 `mime` before it stores an image; the engine sees only the reference. The result is the reference, the player
 transcript shows `Image`, and like other interactions the request may be interrupted by a timer expiry block,
 survives checkpoint and restore, and replays a repeated completion as `alreadySettled`. The Player stores a chosen
-image as session media with the lifecycle of a photo; see [Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation)
-for its file route.
+image or a photo taken for the request as session media with the lifecycle of a `takePhoto()` photo; see
+[Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation) for its file and camera routes.
 
 The Player opens the session camera after Start when the trusted host grants the camera capability, answers each capture
 once from that open stream, and delivers the answer until the runtime settles it. Captured photos are session media; a
@@ -1138,10 +1138,11 @@ Live externally supplied instruction plans, runtime snapshots, globals, script s
 into stable plain-data graphs before detailed validation, freezing, state construction, execution, event emission, or
 RNG consumption. Capture rejects accessors, failed traps, cycles, unsupported prototypes, non-finite values, and
 non-canonical arrays without imposing a generic graph-work or nesting ceiling. Compiler-owned plans are validated
-directly. Runtime entry points reuse an exact immutable plan graph after complete validation has established
-process-local evidence for that graph; compiler output and plans returned from capture or checkpoint restore can retain
-this evidence across calls. A caller-owned plan without that evidence is captured and validated at every entry, while
-caller-controlled snapshots are always freshly captured and validated, including for halted and failed entries. Runtime
+directly. Runtime entry points reuse an exact immutable plan graph, and the facts that snapshot validation derives from
+that plan alone, after complete validation has established process-local evidence for that graph; compiler output and
+plans returned from capture or checkpoint restore can retain this evidence across calls. A caller-owned plan without
+that evidence is captured and validated at every entry, while caller-controlled snapshots are always freshly captured
+and validated, including for halted and failed entries. Runtime
 and checkpoint operations also reuse a plan already captured and validated by that operation when validating the
 snapshot, and checkpoint data freshly produced by `JSON.parse(...)` goes directly through complete structural
 validation. Checkpoint restore validates its envelope, plan, snapshot, and their consistency before execution resumes.

@@ -77,6 +77,7 @@ import {
   serializedTopContext,
 } from "./activation-validation.js";
 import { validateTimerState } from "./timer-validation.js";
+import { recordValidationTestWork } from "../validation-testing.js";
 import { validateMediaState } from "./media-validation.js";
 import {
   cloneTimer,
@@ -94,6 +95,12 @@ import {
   instructionKilledTemporaries,
   requiredInstructionTemporaries,
 } from "../plan/temporary-uses.js";
+import {
+  continuationLivenessKey,
+  snapshotValidationAnalysis,
+  type PreparedSayTemporaryOwnership,
+  type SnapshotValidationAnalysis,
+} from "./snapshot-validation-analysis.js";
 import {
   cloneScriptStorage,
   sortScriptStorage,
@@ -1072,7 +1079,8 @@ function validateCapturedRuntimeSnapshotDetails(
   );
   if (temporalProblem !== null)
     errors.push(`Runtime temporalCaptures is malformed: ${temporalProblem}`);
-  const analysis = plan === undefined ? undefined : createSnapshotValidationAnalysis(plan);
+  const analysis = plan === undefined ? undefined : snapshotValidationAnalysis(plan);
+  const continuationRequests: ContinuationLivenessRequests = new Map();
   // Every region ends in a transfer, so a position is always an instruction of the runnable plan.
   if (
     !nonNegativeSafeInteger(value.nextInstruction) ||
@@ -1080,15 +1088,15 @@ function validateCapturedRuntimeSnapshotDetails(
   ) {
     errors.push("Runtime nextInstruction is outside the plan.");
   }
-  validateScopes(value.frames, value.retainedScopes, plan, errors);
+  validateScopes(value.frames, value.retainedScopes, analysis, errors);
   validateRootPlacement(value.frames, value.callFrames, errors);
-  validateFallback(value.fallback, plan, errors);
+  validateFallback(value.fallback, analysis, errors);
   const speakerIds = validateSpeakers(value.speakers, errors);
   validateGlobals(value, plan, errors);
   validateStartupPhase(value, plan, errors);
   const scopes = referenceScopes(value);
-  const preparedReferenceTemporaryIds = collectPreparedReferenceTemporaryIds(plan);
-  const preparedSayTemporaryOwnership = collectPreparedSayTemporaryOwnership(plan);
+  const preparedReferenceTemporaryIds = analysis?.preparedReferenceTemporaryIds;
+  const preparedSayTemporaryOwnership = analysis?.preparedSayTemporaryOwnership;
   validateTemporaries(value.temporaries, plan, "Runtime temporaries", errors);
   validatePreparedReferenceTemporaries(
     value.temporaries,
@@ -1114,6 +1122,7 @@ function validateCapturedRuntimeSnapshotDetails(
     value.maxCallDepth,
     plan,
     analysis,
+    continuationRequests,
     preparedReferenceTemporaryIds,
     preparedSayTemporaryOwnership,
     value,
@@ -1163,7 +1172,7 @@ function validateCapturedRuntimeSnapshotDetails(
     value.nextInstruction,
     value.callFrames,
     callFrameIds,
-    plan,
+    analysis,
     value,
     errors,
   );
@@ -1248,6 +1257,9 @@ function validateCapturedRuntimeSnapshotDetails(
   validateFailure(value.failure, value.status, plan, errors);
   validateStatusConsistency(value, plan, errors);
   const validation = Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
+  if (validation.valid && analysis !== undefined) {
+    keepContinuationLiveness(analysis, continuationRequests);
+  }
   return Object.freeze({ validation, failureKind: validation.valid ? null : failureKind });
 }
 
@@ -1257,7 +1269,7 @@ function validateLoopFrames(
   nextInstruction: unknown,
   callFrames: unknown,
   callFrameIds: ReadonlySet<number>,
-  plan: InstructionPlan | undefined,
+  analysis: SnapshotValidationAnalysis | undefined,
   snapshotValue: Record<string, unknown>,
   errors: string[],
 ): void {
@@ -1313,7 +1325,15 @@ function validateLoopFrames(
     }
   }
   if (Array.isArray(callFrames)) {
-    validateLoopContexts(value, frames, nextInstruction, callFrames, plan, snapshotValue, errors);
+    validateLoopContexts(
+      value,
+      frames,
+      nextInstruction,
+      callFrames,
+      analysis,
+      snapshotValue,
+      errors,
+    );
   }
 }
 
@@ -1328,32 +1348,13 @@ function validateLoopContexts(
   frames: unknown,
   nextInstruction: unknown,
   callFrames: readonly unknown[],
-  plan: InstructionPlan | undefined,
+  analysis: SnapshotValidationAnalysis | undefined,
   snapshotValue: Record<string, unknown>,
   errors: string[],
 ): void {
   const frameList = Array.isArray(frames) ? frames : [];
-  const plannedLoops = new Map<
-    number,
-    {
-      readonly kind: "repeat" | "for" | "while";
-      readonly variable?: string;
-      readonly start: number;
-      readonly continueStart: number;
-      readonly target: number;
-    }
-  >();
-  plan?.instructions.forEach((instruction, index) => {
-    if (instruction.kind === "loopStart") {
-      plannedLoops.set(instruction.loopId, {
-        kind: instruction.loopKind,
-        ...(instruction.loopKind === "for" ? { variable: instruction.variable } : {}),
-        start: index,
-        continueStart: instruction.continueTarget,
-        target: instruction.target,
-      });
-    }
-  });
+  const plan = analysis?.plan;
+  const plannedLoops = analysis?.loops ?? new Map<number, never>();
   const depth = (frame: unknown, key: "loopBaseDepth" | "scopeBaseDepth", fallback: number) =>
     isPlainRecord(frame) && nonNegativeSafeInteger(frame[key]) ? frame[key] : fallback;
   // The call frames' own checks report impossible bases; only real, ordered partitions are walked.
@@ -1502,11 +1503,16 @@ function validatePreparedReferenceTemporaries(
   value: unknown,
   frames: unknown,
   speakers: unknown,
-  preparedTemporaryIds: ReadonlySet<number>,
+  preparedTemporaryIds: ReadonlySet<number> | undefined,
   label: string,
   errors: string[],
 ): void {
-  if (preparedTemporaryIds.size === 0 || !Array.isArray(value)) return;
+  if (
+    preparedTemporaryIds === undefined ||
+    preparedTemporaryIds.size === 0 ||
+    !Array.isArray(value)
+  )
+    return;
 
   for (const temporary of value) {
     if (
@@ -1523,86 +1529,19 @@ function validatePreparedReferenceTemporaries(
   }
 }
 
-function collectPreparedReferenceTemporaryIds(
-  plan: InstructionPlan | undefined,
-): ReadonlySet<number> {
-  if (plan === undefined) return new Set<number>();
-  return new Set(
-    plan.instructions
-      .filter(
-        (instruction): instruction is Extract<Instruction, { kind: "prepareReference" }> =>
-          instruction?.kind === "prepareReference",
-      )
-      .map((instruction) => instruction.destinationTemporary),
-  );
-}
-
-interface PreparedSayTemporaryOwnership {
-  readonly outputSpeakerIds: ReadonlySet<number>;
-  readonly nullableOutputSpeakerIds: ReadonlySet<number>;
-  readonly explicitOutputSpeakerIdentifiers: ReadonlyMap<number, string>;
-  readonly textIds: ReadonlySet<number>;
-  readonly contextualSpeakerIds: ReadonlySet<number>;
-  readonly nullableContextualSpeakerIds: ReadonlySet<number>;
-  readonly contextualSpeakerSources: ReadonlyMap<number, number>;
-}
-
-function collectPreparedSayTemporaryOwnership(
-  plan: InstructionPlan | undefined,
-): PreparedSayTemporaryOwnership {
-  const outputSpeakerIds = new Set<number>();
-  const textIds = new Set<number>();
-  const contextualSpeakerIds = new Set<number>();
-  const nullableContextualSpeakerIds = new Set<number>();
-  const contextualSpeakerSources = new Map<number, number>();
-  const explicitOutputSpeakerIdentifiers = new Map<number, string>();
-  const nullableSaySpeakerSources = new Set<number>();
-  if (plan !== undefined) {
-    for (const instruction of plan.instructions) {
-      if (instruction === undefined) continue;
-      if (instruction.kind === "prepareSaySpeaker") {
-        outputSpeakerIds.add(instruction.destinationTemporary);
-        if (instruction.speaker === null)
-          nullableSaySpeakerSources.add(instruction.destinationTemporary);
-        else
-          explicitOutputSpeakerIdentifiers.set(
-            instruction.destinationTemporary,
-            instruction.speaker,
-          );
-      } else if (instruction.kind === "prepareSayText") {
-        textIds.add(instruction.destinationTemporary);
-      } else if (instruction.kind === "prepareSayContextualSpeaker") {
-        contextualSpeakerIds.add(instruction.destinationTemporary);
-        contextualSpeakerSources.set(
-          instruction.destinationTemporary,
-          instruction.speakerTemporary,
-        );
-        if (nullableSaySpeakerSources.has(instruction.speakerTemporary)) {
-          nullableContextualSpeakerIds.add(instruction.destinationTemporary);
-        }
-      }
-    }
-  }
-  return {
-    outputSpeakerIds,
-    nullableOutputSpeakerIds: nullableSaySpeakerSources,
-    explicitOutputSpeakerIdentifiers,
-    textIds,
-    contextualSpeakerIds,
-    nullableContextualSpeakerIds,
-    contextualSpeakerSources,
-  };
-}
-
 function validatePreparedSayTemporaries(
   value: unknown,
   speakers: unknown,
-  ownership: PreparedSayTemporaryOwnership,
+  ownership: PreparedSayTemporaryOwnership | undefined,
   label: string,
   errors: string[],
 ): void {
-  if (!Array.isArray(value)) return;
+  if (ownership === undefined || !Array.isArray(value)) return;
+  // The first record of each temporary ID; the temporaries' own checks report duplicates.
+  const records = new Map<number, Record<string, unknown>>();
   for (const temporary of value) {
+    if (isPlainRecord(temporary) && typeof temporary.id === "number" && !records.has(temporary.id))
+      records.set(temporary.id, temporary);
     if (
       !isPlainRecord(temporary) ||
       !nonNegativeSafeInteger(temporary.id) ||
@@ -1628,27 +1567,14 @@ function validatePreparedSayTemporaries(
     }
     if (!valid) errors.push(`${label} contain malformed prepared-say state.`);
   }
-  for (const [contextualTemporaryId, outputTemporaryId] of ownership.contextualSpeakerSources) {
-    const contextual = runtimeTemporaryValueRecord(value, contextualTemporaryId);
-    const output = runtimeTemporaryValueRecord(value, outputTemporaryId);
-    if (
-      contextual !== undefined &&
-      output !== undefined &&
-      !preparedSaySpeakerValuesMatch(output.value, contextual.value)
-    ) {
+  // Each contextual speaker the state holds matches the output speaker it was prepared from, if that is held too.
+  for (const [temporaryId, contextual] of records) {
+    const outputTemporaryId = ownership.contextualSpeakerSources.get(temporaryId);
+    const output = outputTemporaryId === undefined ? undefined : records.get(outputTemporaryId);
+    if (output !== undefined && !preparedSaySpeakerValuesMatch(output.value, contextual.value)) {
       errors.push(`${label} contain inconsistent prepared-say speaker state.`);
     }
   }
-}
-
-function runtimeTemporaryValueRecord(
-  temporaries: readonly unknown[],
-  temporaryId: number,
-): Record<string, unknown> | undefined {
-  return temporaries.find(
-    (temporary): temporary is Record<string, unknown> =>
-      isPlainRecord(temporary) && temporary.id === temporaryId,
-  );
 }
 
 function preparedSaySpeakerValuesMatch(output: unknown, contextual: unknown): boolean {
@@ -1978,8 +1904,9 @@ function validateCallFrames(
   maxCallDepth: unknown,
   plan: InstructionPlan | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
-  preparedReferenceTemporaryIds: ReadonlySet<number>,
-  preparedSayTemporaryOwnership: PreparedSayTemporaryOwnership,
+  continuationRequests: ContinuationLivenessRequests,
+  preparedReferenceTemporaryIds: ReadonlySet<number> | undefined,
+  preparedSayTemporaryOwnership: PreparedSayTemporaryOwnership | undefined,
   snapshotValue: Record<string, unknown>,
   errors: string[],
 ): Set<number> {
@@ -2179,6 +2106,7 @@ function validateCallFrames(
           callContextOwner(value, frameIndex),
         ),
         analysis!,
+        continuationRequests,
         errors,
       );
     }
@@ -2634,96 +2562,84 @@ function expectedParameterProgress(
   return null;
 }
 
-interface SnapshotValidationAnalysis {
-  readonly plan: InstructionPlan;
-  readonly functionsById: ReadonlyMap<number, CompiledFunctionDefinition>;
-  readonly regionEnds: readonly number[];
-  readonly functionIdsByInstruction: readonly (number | null)[];
-  readonly continuationLiveness: Map<string, readonly ReadonlySet<number>[]>;
-  readonly defaultBindingPositions: ReadonlyMap<string, number>;
-  readonly parameterNames: ReadonlyMap<number, ReadonlySet<string>>;
-}
-
-function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
-  const functionsById = new Map<number, InstructionPlan["functions"][number]>();
-  const regionEnds = new Array<number>(plan.instructions.length).fill(plan.instructions.length);
-  for (const file of plan.files) {
-    regionEnds.fill(file.rootEndInstruction, file.startInstruction, file.rootEndInstruction);
-  }
-  const functionIdsByInstruction = new Array<number | null>(plan.instructions.length).fill(null);
-  for (const definition of plan.functions) {
-    if (definition === undefined) continue;
-    functionsById.set(definition.id, definition);
-    for (let index = definition.entryInstruction; index < definition.endInstruction; index += 1) {
-      regionEnds[index] = definition.endInstruction;
-      functionIdsByInstruction[index] = definition.id;
-    }
-  }
-  const defaultBindingPositions = new Map<string, number>();
-  for (let index = 0; index < plan.instructions.length; index += 1) {
-    const instruction = plan.instructions[index];
-    if (instruction?.kind === "bindDefaultParameter") {
-      defaultBindingPositions.set(`${instruction.functionId}:${instruction.parameterIndex}`, index);
-    }
-  }
-  // A media block's self-handle is bound on entry, like a parameter.
-  const parameterNames = new Map(
-    [...functionsById.values()].map((definition) => [
-      definition.id,
-      new Set([
-        ...definition.parameters.map((parameter) => parameter.name),
-        ...(definition.selfHandle === null ? [] : [definition.selfHandle]),
-      ]),
-    ]),
-  );
-  return {
-    plan,
-    functionsById,
-    regionEnds,
-    functionIdsByInstruction,
-    continuationLiveness: new Map(),
-    defaultBindingPositions,
-    parameterNames,
-  };
-}
-
 function validateSuspendedContinuationTemporaries(
   callerTemporaries: unknown[],
   destinationTemporary: number | null,
   returnInstruction: number,
   activeLoopId: number | null,
   analysis: SnapshotValidationAnalysis,
+  continuationRequests: ContinuationLivenessRequests,
   errors: string[],
 ): void {
   const present = new Set(createTemporaryMap(callerTemporaries).keys());
   if (destinationTemporary !== null) present.add(destinationTemporary);
-  const required = requiredContinuationTemporaries(analysis, returnInstruction, activeLoopId);
+  const required = requiredContinuationTemporaries(
+    analysis,
+    returnInstruction,
+    activeLoopId,
+    continuationRequests,
+  );
   if ([...required].some((temporaryId) => !present.has(temporaryId))) {
     errors.push("Runtime caller temporaries cannot resume the suspended continuation.");
   }
 }
 
+/**
+ * The liveness that one snapshot validation computes, by loop key, with the continuation starts it asked about. The
+ * whole instruction-sized liveness lives only for that validation.
+ */
+type ContinuationLivenessRequests = Map<
+  number | null,
+  { readonly liveIn: readonly ReadonlySet<number>[]; readonly starts: Set<number> }
+>;
+
+/** Shared by every instruction with nothing live while a liveness is computed. */
+const NOTHING_LIVE: ReadonlySet<number> = new Set<number>();
+
 function requiredContinuationTemporaries(
   analysis: SnapshotValidationAnalysis,
   startInstruction: number,
   activeLoopId: number | null,
+  continuationRequests: ContinuationLivenessRequests,
 ): ReadonlySet<number> {
-  const loopSignature = activeLoopId === null ? "none" : `loop:${activeLoopId}`;
-  let liveIn = analysis.continuationLiveness.get(loopSignature);
-  if (liveIn === undefined) {
-    liveIn = computeContinuationLiveness(analysis, activeLoopId);
-    analysis.continuationLiveness.set(loopSignature, liveIn);
+  const key = continuationLivenessKey(analysis, activeLoopId);
+  const kept = analysis.continuationLiveness.get(key)?.get(startInstruction);
+  if (kept !== undefined) return kept;
+  let request = continuationRequests.get(key);
+  if (request === undefined) {
+    request = { liveIn: computeContinuationLiveness(analysis, key), starts: new Set() };
+    continuationRequests.set(key, request);
   }
-  return liveIn[startInstruction] ?? new Set<number>();
+  request.starts.add(startInstruction);
+  return request.liveIn[startInstruction] ?? NOTHING_LIVE;
+}
+
+/** An accepted snapshot's continuations are ones the session can reach, so the plan keeps just their sets. */
+function keepContinuationLiveness(
+  analysis: SnapshotValidationAnalysis,
+  continuationRequests: ContinuationLivenessRequests,
+): void {
+  for (const [key, { liveIn, starts }] of continuationRequests) {
+    let kept = analysis.continuationLiveness.get(key);
+    if (kept === undefined) {
+      kept = new Map();
+      analysis.continuationLiveness.set(key, kept);
+    }
+    for (const start of starts) {
+      const live = liveIn[start];
+      if (live !== undefined) kept.set(start, live);
+    }
+  }
 }
 
 function computeContinuationLiveness(
   analysis: SnapshotValidationAnalysis,
   activeLoopId: number | null,
 ): readonly ReadonlySet<number>[] {
+  recordValidationTestWork("continuationLivenessAnalyses");
   const plan = analysis.plan;
   const count = plan.instructions.length;
-  const liveIn = Array.from({ length: count }, () => new Set<number>());
+  const liveIn = new Array<ReadonlySet<number>>(count).fill(NOTHING_LIVE);
   let changed = true;
   while (changed) {
     changed = false;
@@ -3187,7 +3103,7 @@ function validateStartupPhase(
 function validateScopes(
   frames: unknown,
   retainedScopes: unknown,
-  plan: InstructionPlan | undefined,
+  analysis: SnapshotValidationAnalysis | undefined,
   errors: string[],
 ): void {
   if (!Array.isArray(frames) || frames.length === 0) {
@@ -3209,7 +3125,7 @@ function validateScopes(
         ? frame.entry !== null
         : !nonNegativeSafeInteger(frame.file) ||
           !nonNegativeSafeInteger(frame.entry) ||
-          (plan !== undefined && !isFileEntry(plan, frame.file, frame.entry))) ||
+          (analysis !== undefined && !isFileEntry(analysis, frame.file, frame.entry))) ||
       (index >= frames.length && frame.file === null)
     ) {
       errors.push("Runtime scope frame is malformed.");
@@ -3236,13 +3152,8 @@ function validateScopes(
 }
 
 /** Whether an activation of a file may start at an instruction: the file's entry or one of its labels. */
-function isFileEntry(plan: InstructionPlan, file: number, entry: number): boolean {
-  const planFile = plan.files[file];
-  return (
-    planFile !== undefined &&
-    (entry === planFile.entryInstruction ||
-      planFile.labels.some((label) => label.instruction === entry))
-  );
+function isFileEntry(analysis: SnapshotValidationAnalysis, file: number, entry: number): boolean {
+  return analysis.fileEntries[file]?.has(entry) === true;
 }
 
 /** An activation's root stands at the bottom of the stack and above each file call; no other scope is a root. */
@@ -3286,7 +3197,7 @@ function sameTransferDestination(planned: PlanTransferDestination, stored: unkno
  */
 function validateFallback(
   value: unknown,
-  plan: InstructionPlan | undefined,
+  analysis: SnapshotValidationAnalysis | undefined,
   errors: string[],
 ): void {
   if (value === null) return;
@@ -3304,34 +3215,27 @@ function validateFallback(
       value.pick.every(destination));
   if (
     !shaped ||
-    (plan !== undefined &&
-      !plan.instructions.some(
-        (instruction) =>
-          instruction.kind === "setFallback" &&
-          instruction.destination !== null &&
-          // A computed destination holds an expression, never a stored fallback.
-          !("value" in instruction.destination) &&
-          sameTransferDestination(instruction.destination, value),
+    (analysis !== undefined &&
+      !analysis.fallbackDestinations.some((destination) =>
+        sameTransferDestination(destination, value),
       ) &&
-      !(isPlainRecord(value) && resolvedFallbackFits(value, plan)))
+      !(isPlainRecord(value) && resolvedFallbackFits(value, analysis)))
   ) {
     errors.push("Runtime fallback is malformed.");
   }
 }
 
 /** Whether a fallback is one that a computed `fallback` of the plan may have resolved to. */
-function resolvedFallbackFits(value: Record<string, unknown>, plan: InstructionPlan): boolean {
+function resolvedFallbackFits(
+  value: Record<string, unknown>,
+  analysis: SnapshotValidationAnalysis,
+): boolean {
   return (
-    plan.instructions.some(
-      (instruction) =>
-        instruction.kind === "setFallback" &&
-        instruction.destination !== null &&
-        "value" in instruction.destination,
-    ) &&
+    analysis.computedFallback &&
     nonNegativeSafeInteger(value.file) &&
     nonNegativeSafeInteger(value.target) &&
-    isFileEntry(plan, value.file, value.target) &&
-    !runsNothing(plan, value.file)
+    isFileEntry(analysis, value.file, value.target) &&
+    !runsNothing(analysis.plan, value.file)
   );
 }
 

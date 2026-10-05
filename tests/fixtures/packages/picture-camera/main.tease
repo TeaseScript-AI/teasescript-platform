@@ -1,0 +1,6 @@
+say "Smile for the camera."
+let picture: string = askImage("Take a selfie for me")
+showImage picture
+say "Lovely."
+showButton "Done"
+exit
