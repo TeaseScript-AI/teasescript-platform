@@ -60,6 +60,45 @@ test("resume equivalence preserves structured control flow and lexical scope", (
   );
 });
 
+test("resume equivalence preserves collections changed in place inside a loop", () => {
+  const result = assertRuntimeResumeEquivalent(
+    [
+      "function dynamic(value) {",
+      "    return value",
+      "}",
+      "let grow = [0]",
+      "let marks = set[0]",
+      "let state = { rows: [[0], [0]], picks: [1, 0, 1] }",
+      "let taken = []",
+      "for step in 1..=3 {",
+      "    grow.add(step)",
+      "    grow[0] = step",
+      "    marks.add(step)",
+      "    taken.add(grow)",
+      // The receiver is prepared before the call, and its index changes the root it is prepared from.
+      "    state.rows[state.picks.removeFirst()].add(dynamic(step))",
+      "}",
+      "say grow",
+      "say marks.toList()",
+      "say state",
+      "say taken",
+      "exit",
+    ].join("\n"),
+    { scenarioName: "in-place collection loop corpus" },
+  );
+
+  assert.ok(result.boundaries.some((snapshot) => snapshot.loopFrames.length > 0));
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    [
+      "[3, 1, 2, 3]",
+      "[0, 1, 2, 3]",
+      "{ rows: [[0, 2], [0, 1, 3]], picks: [] }",
+      "[[1, 1], [2, 1, 2], [3, 1, 2, 3]]",
+    ],
+  );
+});
+
 test("resume equivalence preserves deterministic random advancement", () => {
   const result = assertRuntimeResumeEquivalent(
     [

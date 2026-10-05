@@ -431,7 +431,9 @@ export class Evaluator {
               rootFrameId: location.frame.id,
               rootName: expression.name,
               path: [],
-              capturedRoot: cloneCapturedSerializableValue(location.binding.value),
+              // An attached descriptor resolves through its binding, so the root is shared, not copied: a receiver
+              // mutated in place costs only its change, and serializePreparedReference copies the root it stores.
+              capturedRoot: location.binding.value,
               detached: false,
             },
             epoch: this.#referenceEpoch,
