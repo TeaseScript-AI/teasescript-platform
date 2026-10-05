@@ -3,10 +3,13 @@ import test from "node:test";
 
 import { compileSource } from "../src/compiler.js";
 import type { Instruction, InstructionPlan } from "../src/plan/model.js";
+import { validateInstructionPlan } from "../src/plan/validation.js";
 import {
   CHECKPOINT_VERSION,
   createCheckpoint,
+  deserializeCheckpoint,
   restoreCheckpoint,
+  serializeCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { executeInstruction, run, type RuntimeBuiltinFunction } from "../src/runtime/engine.js";
 import { observeTime } from "../src/runtime/operations/observe-time.js";
@@ -174,6 +177,51 @@ test("restores calls suspended in nested loops whose outer loop header called a 
       ),
     );
   }
+});
+
+test("resumes a nested-loop call after which a break falls through to the outer loop", () => {
+  const compiled = mutablePlan(
+    plan(
+      [
+        "function size {\n  return 1\n}",
+        "function pause {\n  wait 1\n}",
+        "repeat size() {",
+        "  repeat 1 {",
+        "    pause()",
+        "    break",
+        "  }",
+        "}",
+        "exit",
+      ].join("\n"),
+    ),
+  );
+  // Without the inner loop's unreachable closing `continue`, the break leads straight to the outer one's.
+  const breakIndex = compiled.instructions.findIndex(
+    (instruction: Instruction) =>
+      instruction.kind === "loopControl" && instruction.action === "break",
+  );
+  const removed = breakIndex + 1;
+  assert.equal(compiled.instructions[removed].action, "continue");
+  compiled.instructions.splice(removed, 1);
+  const shift = (value: unknown): void => {
+    if (typeof value !== "object" || value === null) return;
+    for (const [key, nested] of Object.entries(value)) {
+      if (typeof nested === "number" && INSTRUCTION_ADDRESS_FIELDS.has(key) && nested > removed) {
+        // EVIDENCE: the fixture owns this JSON plan copy and moves every address past the removed instruction.
+        (value as Record<string, number>)[key] = nested - 1;
+      } else shift(nested);
+    }
+  };
+  shift(compiled);
+  assert.equal(compiled.instructions[breakIndex].target, breakIndex + 1);
+  assert.equal(validateInstructionPlan(compiled).valid, true);
+
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
+  assert.equal(callerLoops(waiting, 0).length, 2);
+  assert.deepEqual(validateRuntimeSnapshot(waiting, compiled).errors, []);
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(compiled, waiting)));
+  const observed = observeTime(restored.plan, restored.snapshot, 1_000).snapshot;
+  assert.equal(run(restored.plan, observed).snapshot.status, "halted");
 });
 
 test("restores direct and mutual recursion at every instruction boundary", () => {
@@ -939,6 +987,19 @@ type MutableCheckpoint = ReturnType<typeof mutableCheckpoint>;
 function mutableCheckpoint(checkpoint: ReturnType<typeof createCheckpoint>): any {
   return JSON.parse(JSON.stringify(checkpoint));
 }
+
+/** Plan fields that hold an instruction address. */
+const INSTRUCTION_ADDRESS_FIELDS = new Set([
+  "target",
+  "continueTarget",
+  "returnInstruction",
+  "startInstruction",
+  "entryInstruction",
+  "rootEndInstruction",
+  "endInstruction",
+  "bodyEntryInstruction",
+  "implicitReturnInstruction",
+]);
 
 // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: plan fixtures mutate readonly and invalid instruction fields across the plan validation matrix.
 function mutablePlan(compiled: InstructionPlan): any {

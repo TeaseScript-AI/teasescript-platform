@@ -97,6 +97,7 @@ import {
 } from "../plan/temporary-uses.js";
 import {
   snapshotValidationAnalysis,
+  type PlannedLoop,
   type PreparedSayTemporaryOwnership,
   type SnapshotValidationAnalysis,
 } from "./snapshot-validation-analysis.js";
@@ -1079,7 +1080,7 @@ function validateCapturedRuntimeSnapshotDetails(
   if (temporalProblem !== null)
     errors.push(`Runtime temporalCaptures is malformed: ${temporalProblem}`);
   const analysis = plan === undefined ? undefined : snapshotValidationAnalysis(plan);
-  const continuationRequests: ContinuationRequests = new Map();
+  const continuationRequests: ContinuationRequests = { graphs: new Map(), required: new Map() };
   // Every region ends in a transfer, so a position is always an instruction of the runnable plan.
   if (
     !nonNegativeSafeInteger(value.nextInstruction) ||
@@ -2565,7 +2566,7 @@ function validateSuspendedContinuationTemporaries(
   callerTemporaries: unknown[],
   destinationTemporary: number | null,
   returnInstruction: number,
-  activeLoops: readonly number[],
+  contextLoops: readonly number[],
   analysis: SnapshotValidationAnalysis,
   continuationRequests: ContinuationRequests,
   errors: string[],
@@ -2575,7 +2576,7 @@ function validateSuspendedContinuationTemporaries(
   const required = requiredContinuationTemporaries(
     analysis,
     returnInstruction,
-    activeLoops,
+    contextLoops,
     continuationRequests,
   );
   if ([...required].some((temporaryId) => !present.has(temporaryId))) {
@@ -2583,29 +2584,76 @@ function validateSuspendedContinuationTemporaries(
   }
 }
 
-/** The continuation requirements that one snapshot validation computed, by `continuationKey`. */
-type ContinuationRequests = Map<string, ReadonlySet<number>>;
-
-/** Shared by every continuation that needs no temporary. */
-const NOTHING_LIVE: ReadonlySet<number> = new Set<number>();
-
-/** A continuation by where it resumes and the loops of its context, outermost first. */
-function continuationKey(startInstruction: number, activeLoops: readonly number[]): string {
-  return `${startInstruction}:${activeLoops.join(",")}`;
+/**
+ * One snapshot validation's continuation liveness. Its continuations with the same loops share one graph, which each
+ * query extends with the nodes it reaches; `required` holds what each continuation it asked about needs.
+ */
+interface ContinuationRequests {
+  readonly graphs: Map<string, ContinuationGraph>;
+  readonly required: Map<string, ReadonlySet<number>>;
 }
+
+/** Analysed nodes and what each needs; closed under successors, so every result is final. */
+interface ContinuationGraph {
+  readonly nodes: Map<number, ContinuationNode>;
+  readonly liveIn: Map<number, ReadonlySet<number>>;
+}
+
+/** A node's successors and the temporaries its instruction sets or reads. */
+interface ContinuationNode {
+  readonly successors: readonly number[];
+  readonly killed: ReadonlySet<number>;
+  readonly read: ReadonlySet<number>;
+}
+
+/** Shared by every node that needs no temporary. */
+const NOTHING_LIVE: ReadonlySet<number> = new Set<number>();
 
 function requiredContinuationTemporaries(
   analysis: SnapshotValidationAnalysis,
   startInstruction: number,
-  activeLoops: readonly number[],
+  contextLoops: readonly number[],
   continuationRequests: ContinuationRequests,
 ): ReadonlySet<number> {
-  const key = continuationKey(startInstruction, activeLoops);
-  const known = analysis.continuationRequirements.get(key) ?? continuationRequests.get(key);
+  const activeLoops = analysableLoops(analysis, contextLoops);
+  const loopsKey = activeLoops.join(",");
+  // A continuation by where it resumes and the loops of its context, outermost first.
+  const key = `${startInstruction}:${loopsKey}`;
+  const known =
+    analysis.continuationRequirements.get(key) ?? continuationRequests.required.get(key);
   if (known !== undefined) return known;
-  const required = computeContinuationRequirement(analysis, startInstruction, activeLoops);
-  continuationRequests.set(key, required);
+  let graph = continuationRequests.graphs.get(loopsKey);
+  if (graph === undefined) {
+    graph = { nodes: new Map(), liveIn: new Map() };
+    continuationRequests.graphs.set(loopsKey, graph);
+  }
+  const required = continuationRequirement(analysis, startInstruction, activeLoops, graph);
+  continuationRequests.required.set(key, required);
   return required;
+}
+
+/**
+ * The context's loops as a continuation query uses them. A session's are planned loops, each nested in the one before,
+ * so there are no more of them than the plan nests. Any other list fails loop validation; its query uses only its
+ * innermost planned loop, so that the list cannot enlarge the analysis.
+ */
+function analysableLoops(
+  analysis: SnapshotValidationAnalysis,
+  loopIds: readonly number[],
+): readonly number[] {
+  let outer: PlannedLoop | undefined;
+  for (const loopId of loopIds) {
+    const loop = analysis.loops.get(loopId);
+    if (
+      loop === undefined ||
+      (outer !== undefined && (loop.start <= outer.start || loop.start >= outer.target))
+    ) {
+      const innermost = loopIds.at(-1);
+      return innermost !== undefined && analysis.loops.has(innermost) ? [innermost] : [];
+    }
+    outer = loop;
+  }
+  return loopIds;
 }
 
 /**
@@ -2616,7 +2664,7 @@ function keepContinuationRequirements(
   analysis: SnapshotValidationAnalysis,
   continuationRequests: ContinuationRequests,
 ): void {
-  for (const [key, required] of continuationRequests) {
+  for (const [key, required] of continuationRequests.required) {
     analysis.continuationRequirements.set(key, required);
   }
 }
@@ -2627,68 +2675,77 @@ function keepContinuationRequirements(
  * context's loops are still active there. Leaving the innermost of them, at its loop start's exit or by its `break`,
  * ends it; a loop start reads its expression unless its loop is the innermost one still active, which it continues.
  */
-function computeContinuationRequirement(
+function continuationRequirement(
   analysis: SnapshotValidationAnalysis,
   startInstruction: number,
   activeLoops: readonly number[],
+  graph: ContinuationGraph,
 ): ReadonlySet<number> {
   const { plan } = analysis;
   // A position outside the runnable plan has nothing live.
   if (plan.instructions[startInstruction] === undefined) return NOTHING_LIVE;
-  recordValidationTestWork("continuationLivenessAnalyses");
+  const { nodes, liveIn } = graph;
   const depths = activeLoops.length + 1;
-  const indexOf = (node: number) => Math.floor(node / depths);
-  const innermostOf = (node: number) => activeLoops[(node % depths) - 1] ?? null;
-  const successors = new Map<number, readonly number[]>();
-  const pending = [startInstruction * depths + activeLoops.length];
+  const startNode = startInstruction * depths + activeLoops.length;
+  // The nodes that this continuation reaches and earlier ones of the validation did not.
+  const added: number[] = [];
+  const pending = [startNode];
   while (pending.length > 0) {
     const node = pending.pop()!;
-    if (successors.has(node)) continue;
-    const index = indexOf(node);
+    if (nodes.has(node)) continue;
+    const index = Math.floor(node / depths);
     const active = node % depths;
     const instruction = plan.instructions[index];
-    const innermost = innermostOf(node);
-    const next: number[] = [];
-    if (instruction !== undefined) {
-      for (const successor of instructionSuccessors(analysis, index)) {
-        const leaves = innermost !== null && leavesLoop(instruction, innermost, successor);
-        if (leaves) next.push(successor * depths + active - 1);
-        // An empty loop body would make the exit and the body the same instruction.
-        if (!leaves || successor === index + 1) next.push(successor * depths + active);
+    const innermost = activeLoops[active - 1] ?? null;
+    const successors: number[] = [];
+    // An instruction outside the runnable plan has nothing live.
+    if (instruction === undefined) {
+      nodes.set(node, { successors, killed: NOTHING_LIVE, read: NOTHING_LIVE });
+      continue;
+    }
+    for (const successor of instructionSuccessors(analysis, index)) {
+      const leaves = innermost !== null && leavesLoop(instruction, innermost, successor);
+      if (leaves) successors.push(successor * depths + active - 1);
+      // An empty loop body would make a loop's exit and its body the same instruction.
+      if (!leaves || (instruction.kind === "loopStart" && successor === index + 1)) {
+        successors.push(successor * depths + active);
       }
     }
-    successors.set(node, next);
-    pending.push(...next);
+    nodes.set(node, {
+      successors,
+      killed: instructionKilledTemporaries(instruction),
+      read: requiredInstructionTemporaries(instruction, innermost),
+    });
+    added.push(node);
+    for (const successor of successors) pending.push(successor);
   }
+  if (added.length === 0) return liveIn.get(startNode) ?? NOTHING_LIVE;
+  recordValidationTestWork("continuationLivenessAnalyses");
+  recordValidationTestWork("continuationLivenessNodes", added.length);
 
-  const liveIn = new Map<number, ReadonlySet<number>>();
-  const nodes = [...successors.keys()].sort((left, right) => right - left);
+  // Earlier nodes are final, so only the added ones take part in the fixed point, latest instructions first.
+  added.sort((left, right) => right - left);
   let changed = true;
   while (changed) {
     changed = false;
-    for (const node of nodes) {
-      const instruction = plan.instructions[indexOf(node)];
-      // An instruction outside the runnable plan has nothing live.
-      if (instruction === undefined) continue;
-      const liveOut = new Set<number>();
-      for (const successor of successors.get(node)!) {
+    for (const node of added) {
+      const { successors, killed, read } = nodes.get(node)!;
+      // Most instructions have nothing live, which needs no set of their own.
+      let liveOut: Set<number> | undefined;
+      for (const successor of successors) {
         for (const temporaryId of liveIn.get(successor) ?? NOTHING_LIVE) {
-          liveOut.add(temporaryId);
+          (liveOut ??= new Set()).add(temporaryId);
         }
       }
-      for (const temporaryId of instructionKilledTemporaries(instruction)) {
-        liveOut.delete(temporaryId);
-      }
-      for (const temporaryId of requiredInstructionTemporaries(instruction, innermostOf(node))) {
-        liveOut.add(temporaryId);
-      }
-      if (!sameNumberSet(liveIn.get(node) ?? NOTHING_LIVE, liveOut)) {
+      for (const temporaryId of killed) liveOut?.delete(temporaryId);
+      for (const temporaryId of read) (liveOut ??= new Set()).add(temporaryId);
+      if (liveOut !== undefined && !sameNumberSet(liveIn.get(node) ?? NOTHING_LIVE, liveOut)) {
         liveIn.set(node, liveOut);
         changed = true;
       }
     }
   }
-  return liveIn.get(startInstruction * depths + activeLoops.length) ?? NOTHING_LIVE;
+  return liveIn.get(startNode) ?? NOTHING_LIVE;
 }
 
 /** Whether going from an instruction to this successor leaves the loop: at the loop's exit or by its `break`. */
