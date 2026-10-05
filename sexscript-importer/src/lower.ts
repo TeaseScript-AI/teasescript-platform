@@ -23,6 +23,7 @@ import {
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { enforceVariableTypes, functionResultTypes, type TeaseType } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
+import { legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
@@ -1030,8 +1031,8 @@ export function lowerParsedFile(
     mixin === null && !terminates(lowered)
       ? [...lowered, { kind: "exit" as const, span: null }]
       : lowered;
-  const typedStatements = withEnforcedTypes(
-    [...context.closureFunctions, ...authoredStatements],
+  const typedStatements = withLegacyMarkup(
+    withEnforcedTypes([...context.closureFunctions, ...authoredStatements], context),
     context,
   );
   const statements = [...helperStatements(context.syntheticHelpers), ...typedStatements];
@@ -1058,6 +1059,39 @@ export function lowerParsedFile(
   };
   if (options.renameIdentifiers === false) return program;
   return renameConflictingIdentifiers(withActionDispatcher(program));
+}
+
+/**
+ * Legacy show() rendered HTML, which `say` text keeps as message markup (markup.ts); layout tags that markup cannot
+ * express are dropped, with one note for the file.
+ */
+function withLegacyMarkup(statements: IrStatement[], context: LowerContext): IrStatement[] {
+  let dropped = 0;
+  const convert = (items: IrStatement[]): IrStatement[] =>
+    items.map((statement) => {
+      if (statement.kind === "function") return { ...statement, body: convert(statement.body) };
+      if (statement.kind !== "say") return withNestedStatements(statement, convert);
+      const value = statement.value;
+      const parts: TextPart[] | null =
+        value.kind === "literal" && typeof value.value === "string"
+          ? [{ text: value.value }]
+          : value.kind === "template"
+            ? value.parts
+            : null;
+      if (parts === null) return statement;
+      const result = legacyHtmlToMarkup(parts);
+      if (!result.changed) return statement;
+      if (result.dropped) dropped += 1;
+      return { ...statement, value: templateOrLiteral(result.parts) };
+    });
+  const converted = convert(statements);
+  if (dropped === 0) return converted;
+  const message = `Legacy show() rendered HTML; the text keeps bold, italic, colour, and line breaks as message markup, and drops layout tags such as TEXTFORMAT, FONT FACE and SIZE, and ALIGN (${dropped} text${dropped === 1 ? "" : "s"} in this file).`;
+  context.diagnostics.push({ code: "SX_HTML_LAYOUT", severity: "warning", message, span: null });
+  return [
+    { kind: "comment", text: `// NOTE SX_HTML_LAYOUT: ${message}`, trailing: false, span: null },
+    ...converted,
+  ];
 }
 
 function lowerHelperCompilationUnit(
