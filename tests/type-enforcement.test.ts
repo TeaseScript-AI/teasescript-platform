@@ -1185,8 +1185,9 @@ test("a function result, a body, or a copy never changes the types another place
     codes('let a = []\ntimer async 1 { a.add(1) }\nwait 2\nlet b = a.toSet()\nb.add("x")\nexit'),
     [["TSV041", '"x"']],
   );
-  // A mismatch names the variable a copy was taken from, however it was copied, but not for a copy that its own first
-  // value decided. Around a cycle of copies, the first value in checking order decides.
+  // A mismatch in a copy, or in a part of one, names the variable it was copied from, also when the copy was taken
+  // through an index, a function, or a literal, but not for a copy or a part that its own first value decided. Around a
+  // cycle of copies, the first value in checking order decides.
   const copyNotes = (source: string) =>
     mismatches(source).map(([code, message, text]) => [
       code,
@@ -1201,6 +1202,19 @@ test("a function result, a body, or a copy never changes the types another place
       [["TSV041", "a", '"x"']],
       copy,
     );
+  for (const store of ['b.add({ n: "x" })', 'let c = { n: "x" }\nb.add(c)', 'b += [{ n: "x" }]'])
+    assert.deepEqual(
+      copyNotes(`let a = []\nlet b = a\na.add({ n: 1 })\n${store}\nexit`).map(([code, source]) => [
+        code,
+        source,
+      ]),
+      [[store.startsWith("b +=") ? "TSV044" : "TSV041", "a"]],
+      store,
+    );
+  assert.deepEqual(
+    copyNotes('let a = []\nlet b = a\na.add({ n: 1 })\nb[0].m = "x"\nb[0].m = 2\nexit'),
+    [["TSV041", null, "2"]],
+  );
   assert.deepEqual(copyNotes('let a = 1\nlet b = a\nb = 0.5\nb = "x"\nexit'), [
     ["TSV041", null, '"x"'],
   ]);

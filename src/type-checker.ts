@@ -1653,13 +1653,14 @@ class TypeChecker {
           second.element,
           [target],
           statement.value.span,
+          this.#copyNote(extendPath(place.widening, "[]"), first.element),
         );
         return;
       }
       const subject = place.subject;
       this.#report(
         typeCode.typeMismatch,
-        `${subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${operandFix(nonNullType(kept), value, statement)}`,
+        `${subject}, so ${describeValue(value)} cannot be ${operator === "+" ? "added to" : "subtracted from"} ${place.verb === "contain" ? "an element" : "it"}.${this.#copyNote(place.widening, place.type)}${operandFix(nonNullType(kept), value, statement)}`,
         statement.value.span,
       );
       return;
@@ -1669,7 +1670,7 @@ class TypeChecker {
     if (!isAssignable(place.type, result))
       this.#report(
         typeCode.typeMismatch,
-        `${place.subject}, so '${statement.operator}' cannot make ${place.verb === "contain" ? "an element" : "it"} ${describeValue(result)}.${place.fix(result, null)}`,
+        `${place.subject}, so '${statement.operator}' cannot make ${place.verb === "contain" ? "an element" : "it"} ${describeValue(result)}.${this.#copyNote(place.widening, place.type)}${place.fix(result, null)}`,
         statement.value.span,
       );
     else {
@@ -1799,26 +1800,32 @@ class TypeChecker {
     if (property !== undefined) {
       this.#report(
         typeCode.typeMismatch,
-        `${place.subject}, so its property '${property.name}', which holds ${describeValue(property.kept)}, cannot be set to ${describeValue(property.value)}. Use a separate property for a value of another type.`,
+        `${place.subject}, so its property '${property.name}', which holds ${describeValue(property.kept)}, cannot be set to ${describeValue(property.value)}.${this.#copyNote(place.widening, place.type)} Use a separate property for a value of another type.`,
         expression.span,
       );
       return;
     }
     this.#report(
       typeCode.typeMismatch,
-      `${place.subject}, so it cannot ${place.verb} ${describeValue(value)}.${this.#widenedNote(expression)}${this.#copyNote(place)}${checkFirstFix(place.type, value, expression, place.listed) ?? place.fix(value, expression)}`,
+      `${place.subject}, so it cannot ${place.verb} ${describeValue(value)}.${this.#widenedNote(expression)}${this.#copyNote(place.widening, place.type)}${checkFirstFix(place.type, value, expression, place.listed) ?? place.fix(value, expression)}`,
       expression.span,
     );
   }
 
-  /** Why a place has its type when it is a copy of another variable's place that was still undecided (see `Copies`). */
-  #copyNote(place: Place): string {
-    const owner = place.widening;
-    const source =
-      owner === undefined ? undefined : this.#copies.get(owner.root)?.get(owner.path.join("."));
-    if (owner === undefined || source === undefined) return "";
-    const name = declaredName(owner.root);
-    return ` '${name}' was copied from '${source}' before its type was decided, so it has the type of '${source}'.`;
+  /**
+   * Why a place of type `type` has its type when it is, or is inside, a copy of another variable's place that was still
+   * undecided (see `Copies`). A part that a value of its own decided, such as a property added to the copy later, has
+   * its own reason.
+   */
+  #copyNote(owner: PlacePath | undefined, type: StaticType): string {
+    const copies = owner === undefined ? undefined : this.#copies.get(owner.root);
+    if (owner === undefined || copies === undefined || findDecidedSlot(type) !== null) return "";
+    for (let length = owner.path.length; length >= 0; length -= 1) {
+      const source = copies.get(owner.path.slice(0, length).join("."));
+      if (source !== undefined)
+        return ` '${declaredName(owner.root)}' was copied from '${source}' before its type was decided, so the first value stored in '${source}' decided it.`;
+    }
+    return "";
   }
 
   /**
@@ -3887,6 +3894,7 @@ class TypeChecker {
     other: StaticType,
     targets: readonly Expression[],
     span: SourceSpan,
+    note = "",
   ): void {
     const target = targets.map(unwrap).find((node) => node.kind === "identifier");
     const name = target?.kind === "identifier" ? target.name : "values";
@@ -3900,7 +3908,7 @@ class TypeChecker {
           `to keep both, declare a union type, as in '${this.#keyword(name)} ${name}: ${written} = ...'`);
     this.#report(
       typeCode.mixedTypes,
-      `${operation} would mix ${mixDescription(own, other)}. A ${kind} holds one type; ${fix}.`,
+      `${operation} would mix ${mixDescription(own, other)}.${note} A ${kind} holds one type; ${fix}.`,
       span,
     );
   }
