@@ -57,7 +57,8 @@ export interface Status {
     | "compiles"
     | "error"
     | "partial"
-    | "stub";
+    | "stub"
+    | "parked";
   /** A few words for the table. */
   readonly label: string;
   readonly detail: string;
@@ -137,10 +138,16 @@ interface ImporterReport {
 /** The fields of a `play-check.ts` result the status uses. */
 export interface PlayCheck {
   readonly contentHash: string;
-  readonly verdict: "plays" | "stops" | "no-start";
+  readonly verdict: "plays" | "stops" | "no-start" | "parked";
+  /** The step limit of its runs; 300 before checks recorded it. */
+  readonly stepLimit: number;
   readonly checkedAt: string;
   readonly runs: ReadonlyArray<{
-    readonly stop: { readonly kind: string; readonly detail: string };
+    readonly stop: {
+      readonly kind: string;
+      readonly detail: string;
+      readonly where: string | null;
+    };
   }>;
   readonly coverage: {
     readonly files: readonly string[];
@@ -541,13 +548,15 @@ function packageStatus(
 export function parsePlayCheck(value: unknown): PlayCheck | null {
   if (!isRecord(value) || typeof value.contentHash !== "string") return null;
   const { verdict, checkedAt, runs, coverage } = value;
-  if (verdict !== "plays" && verdict !== "stops" && verdict !== "no-start") return null;
+  if (verdict !== "plays" && verdict !== "stops" && verdict !== "no-start" && verdict !== "parked")
+    return null;
   if (typeof checkedAt !== "string" || !Array.isArray(runs) || !isRecord(coverage)) return null;
   const strings = (item: unknown): string[] =>
     Array.isArray(item) ? item.filter((entry): entry is string => typeof entry === "string") : [];
   const count = (item: unknown): number => (typeof item === "number" ? item : 0);
   return {
     contentHash: value.contentHash,
+    stepLimit: typeof value.stepLimit === "number" ? value.stepLimit : 300,
     verdict,
     checkedAt,
     runs: runs.map((run) => {
@@ -556,6 +565,10 @@ export function parsePlayCheck(value: unknown): PlayCheck | null {
         stop: {
           kind: typeof stop.kind === "string" ? stop.kind : "harness",
           detail: typeof stop.detail === "string" ? stop.detail : "",
+          where:
+            typeof stop.file === "string"
+              ? `${stop.file}${typeof stop.line === "number" ? `:${stop.line}` : ""}`
+              : null,
         },
       };
     }),
@@ -593,6 +606,12 @@ function playStatus(play: PlayCheck, compileStatus: Status): Status {
     play.rawMarkup.length === 0
       ? ""
       : ` Its text shows legacy HTML as written, such as "${play.rawMarkup[0]}".`;
+  if (play.verdict === "parked")
+    return {
+      kind: "parked",
+      label: `runs, step limit ${play.stepLimit} (parked)`,
+      detail: `Every run played without errors and kept showing new prompts until the limit of ${play.stepLimit} interactions or four minutes; parked until the limit rises. ${coverage}${media}${markup}`,
+    };
   if (play.verdict === "plays")
     return {
       kind: "plays",
@@ -616,7 +635,9 @@ function playStatus(play: PlayCheck, compileStatus: Status): Status {
             ? "hangs"
             : stop.kind === "budget"
               ? "no end in the step budget"
-              : `stops (${stop.kind})`;
+              : stop.kind === "loops"
+                ? `loops${stop.where === null ? "" : ` at ${stop.where}`}`
+                : `stops (${stop.kind})`;
   // A session that halts right after Start, before showing anything or before its first interaction, does not start.
   const atStart =
     play.runs[0]?.stop.kind === stop.kind && (stop.kind === "empty" || stop.kind === "early-end");
@@ -788,6 +809,7 @@ export function renderCatalogPage(
     ["Compile", entries.filter((entry) => entry.compiles).length],
     ["Play to the end", count("plays") + count("verified") + count("approved")],
     ["Stop during play", count("stops")],
+    ["Parked (step limit)", count("parked")],
     ["Do not start", count("nostart")],
     ["Do not compile", count("error")],
     ["Not played yet", count("compiles") + count("unbuilt")],
@@ -822,6 +844,7 @@ dl.summary dd { margin: 0; font-size: 1.3em; font-weight: 600; }
 .status.verified, .status.approved { background: #1d5e1d; color: #fff; }
 .status.stops, .status.partial { background: #fff1cc; color: #6b4e00; }
 .status.unbuilt { background: #e6e3fb; color: #3c2f86; }
+.status.parked { background: #e3eefb; color: #24508a; }
 .status.stub { background: #eee; color: #555; font-style: italic; }
 .status.error, .status.nostart { background: #fde2e1; color: #8a1c1c; }
 details summary { cursor: pointer; }

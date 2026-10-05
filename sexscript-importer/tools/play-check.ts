@@ -8,7 +8,9 @@
  *
  * Each package opens in headless Chromium, one browser at a time, from `<origin>` (default
  * `https://agents.home.arpa:4443`, see `serve-catalog.ts`). A run presses buttons, picks choices, and types answers
- * until the session halts, fails, hangs, or the step budget ends. With `--clock dev` (the default) the package opens at
+ * until the session halts, fails, hangs, or the step limit ends it. A run that reaches the step limit, or four minutes of
+ * real time, is `parked` while new prompts kept appearing (a long or endless tease, to be tried again at a higher limit
+ * with `--steps`), and `loops` when the second half of the run only repeated prompts of the first. With `--clock dev` (the default) the package opens at
  * `/player/?dev&package=<id>&time=skip`, whose development time controls (#615) skip waits, timers, pacing, and audio
  * while no input is pending. With `--clock fake`, the fallback, it opens at `/player/?package=<id>` with Playwright's
  * fake clock and media at 16 times speed. A prompt that comes back three times in a row may wait for an answer that
@@ -53,7 +55,7 @@ const IMAGE_EXTENSIONS = new Set([
   ".tiff",
 ]);
 const MEDIA_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".mp4", ".webm"]);
-/** A run that takes longer in real time ends as `budget`: a very long session, or one that stopped responding. */
+/** A run that takes longer in real time ends there, parked or looping like one that reaches the step limit. */
 const RUN_TIMEOUT_MS = 240_000;
 /** The fake-clock waits before answering a prompt that keeps coming back, one per three repeats. */
 const WAIT_STEPS_S = [30, 120, 300];
@@ -125,6 +127,8 @@ export interface RunResult {
       | "error"
       | "hang"
       | "budget"
+      | "parked"
+      | "loops"
       | "no-start"
       | "unsupported"
       | "harness";
@@ -152,7 +156,10 @@ export interface PlayCheckResult {
   readonly contentHash: string;
   /** The importer commit that converted the played files, from the unit's `.conversion.json` or the root's summary. */
   readonly converter: string | null;
-  readonly verdict: "plays" | "stops" | "no-start";
+  /** `parked`: every run ran without errors until a limit while new content kept appearing. */
+  readonly verdict: "plays" | "stops" | "no-start" | "parked";
+  /** The step limit of the runs, which a parked package is tried again above. */
+  readonly stepLimit: number;
   readonly summary: string;
   readonly runs: readonly RunResult[];
   readonly coverage: {
@@ -244,7 +251,12 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
       (text) => parsePlayCheck(JSON.parse(text)),
       () => null,
     );
-    if (last?.contentHash === packageContentHash(sources)) return null;
+    // A parked package is tried again when the step limit rises.
+    if (
+      last?.contentHash === packageContentHash(sources) &&
+      !(last.verdict === "parked" && last.stepLimit < Number(values.steps))
+    )
+      return null;
   }
   await rm(outFolder, { recursive: true, force: true });
   await mkdir(outFolder, { recursive: true });
@@ -268,6 +280,8 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
     });
     let result: RunResult;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Each prompt the run answered, by place, options, and text, to tell a long tease from a loop.
+    const prompts: string[] = [];
     try {
       const page = await context.newPage();
       const timedOut = new Promise<RunResult>((resolve) => {
@@ -282,13 +296,10 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
             .then((taken) =>
               resolve({
                 run,
-                stop: {
-                  kind: "budget",
-                  detail: `still running after ${RUN_TIMEOUT_MS / 60_000} minutes of real time`,
-                  file: null,
-                  line: null,
-                  code: null,
-                },
+                stop: limitStop(
+                  prompts,
+                  `still running after ${RUN_TIMEOUT_MS / 60_000} minutes of real time`,
+                ),
                 steps: 0,
                 files: [],
                 path: [],
@@ -300,6 +311,7 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
       });
       const playing = playOnce(page, id, run, outFolder, {
         tries,
+        prompts,
         seen: (state) => {
           siteCount = Math.max(siteCount, state.sites);
           if (state.file !== null) coveredFiles.add(state.file);
@@ -338,13 +350,24 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
     }
     runs.push(result);
     if (Date.now() - started > PACKAGE_TIMEOUT_MS) break;
-    if (["no-start", "empty", "hang", "budget", "harness"].includes(result.stop.kind)) break;
+    if (
+      ["no-start", "empty", "hang", "budget", "parked", "loops", "harness"].includes(
+        result.stop.kind,
+      )
+    )
+      break;
     if (run > 0 && coveredFiles.size + coveredSites.size + coveredChoices.size === before) break;
   }
   fileCount = Math.max(fileCount, coveredFiles.size);
   const notEnded = runs.find((item) => item.stop.kind !== "ended");
   const verdict =
-    runs[0]?.stop.kind === "no-start" ? "no-start" : notEnded === undefined ? "plays" : "stops";
+    runs[0]?.stop.kind === "no-start"
+      ? "no-start"
+      : notEnded === undefined
+        ? "plays"
+        : runs.every((item) => item.stop.kind === "ended" || item.stop.kind === "parked")
+          ? "parked"
+          : "stops";
   const media = [
     ...(missingImages.size > 0 ? [`${missingImages.size} missing images`] : []),
     ...(missingMedia.size > 0 ? [`${missingMedia.size} missing audio/video`] : []),
@@ -361,6 +384,7 @@ async function checkPackage(browser: Browser, id: string): Promise<PlayCheckResu
     base: values.base,
     contentHash: packageContentHash(sources),
     converter: await converterOf(folder),
+    stepLimit: Number(values.steps),
     verdict,
     summary,
     runs,
@@ -386,6 +410,7 @@ async function playOnce(
   outFolder: string,
   track: {
     tries: Map<string, number[]>;
+    prompts: string[];
     seen(state: PlayerState): void;
     chose(site: string, option: number): void;
   },
@@ -515,6 +540,7 @@ async function playOnce(
       // A script may time how long its prompt stays unanswered, as in "beg for at least 15 seconds". The same place
       // with the same options and text counts as the same prompt; a loop over questions, such as toys, does not.
       const key = `${state.site}\u0000${state.options.join("\u0000")}\u0000${state.lastText}`;
+      track.prompts.push(key);
       repeated =
         key === repeated.key
           ? { ...repeated, count: repeated.count + 1 }
@@ -599,11 +625,51 @@ async function playOnce(
       await idle(unchanged > 2 ? 20_000 : 1_000);
     }
   }
-  return finish(
-    "budget",
-    `${values.steps} interactions without reaching the end`,
-    Number(values.steps),
-  );
+  const limit = limitStop(track.prompts, `${values.steps} interactions without reaching the end`);
+  return finish(limit.kind, limit.detail, Number(values.steps), limit);
+}
+
+/**
+ * How a run that reached a limit ended: `loops` when the prompts of its second half all appeared in its first half,
+ * with the most repeated ones, else `parked`, as a long tease that kept showing new prompts.
+ */
+function limitStop(
+  prompts: readonly string[],
+  limit: string,
+): {
+  kind: "parked" | "loops";
+  detail: string;
+  file: string | null;
+  line: number | null;
+  code: null;
+} {
+  const half = Math.floor(prompts.length / 2);
+  const earlier = new Set(prompts.slice(0, half));
+  const fresh = new Set(prompts.slice(half).filter((prompt) => !earlier.has(prompt)));
+  if (prompts.length < 20 || fresh.size > 0)
+    return {
+      kind: "parked",
+      detail: `${limit}; new prompts kept appearing (${fresh.size} new in the second half)`,
+      file: null,
+      line: null,
+      code: null,
+    };
+  const counts = new Map<string, number>();
+  for (const prompt of prompts.slice(half)) counts.set(prompt, (counts.get(prompt) ?? 0) + 1);
+  const repeated = [...counts].sort((left, right) => right[1] - left[1]).slice(0, 3);
+  const shown = repeated.map(([prompt, count]) => {
+    const [site, options, text] = prompt.split("\u0000");
+    return `${site} "${(text ?? "").slice(0, 60)}" [${(options ?? "").replaceAll("\u0000", " / ")}] ×${count}`;
+  });
+  const top = repeated[0]?.[0].split("\u0000")[0] ?? "";
+  const colon = top.lastIndexOf(":");
+  return {
+    kind: "loops",
+    detail: `${limit}; the second half only repeats earlier prompts: ${shown.join("; ")}`,
+    file: colon < 0 ? null : top.slice(0, colon),
+    line: colon < 0 ? null : Number(top.slice(colon + 1)),
+    code: null,
+  };
 }
 
 /** Reads the session from the Player's mounted Vue tree and the controls from the page. */
