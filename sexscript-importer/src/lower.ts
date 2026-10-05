@@ -2926,6 +2926,8 @@ function lowerDeclaration(
     ];
   }
   if (right.kind === "closure") return lowerClosureDeclaration(name, right, span, context);
+  // A file path object that only gives its byte size (SX_PHOTO_SIZE) is not needed.
+  if (isFileConstructor(right) && onlySizeReads(name, context)) return [];
   if (context.classLoaderVariables.has(name) && isGroovyClassLoaderConstructor(right)) {
     addDiagnostic(
       context,
@@ -8095,6 +8097,24 @@ function lowerObjectMethodCallExpression(
     const counted = imageCount(node, name, argumentsNodes, context, context.media);
     if (counted !== undefined) return counted;
   }
+  // The byte size of a file, which legacy photo code compared with a threshold to detect a broken webcam picture.
+  if (
+    (name === "size" &&
+      argumentsNodes.length === 0 &&
+      targetNode?.kind === "methodCall" &&
+      constantString(targetNode.method) === "getBytes" &&
+      isFileValue(asNode(targetNode.object), context)) ||
+    (name === "length" && argumentsNodes.length === 0 && isFileValue(targetNode, context))
+  ) {
+    addDiagnostic(
+      context,
+      "SX_PHOTO_SIZE",
+      "warning",
+      "Legacy code read the byte size of a file, which photo code compared with a threshold to detect a broken webcam picture; a package cannot read file sizes, and a photo the player took counts as valid, so the size reads as 1000000 bytes.",
+      node.span,
+    );
+    return { kind: "literal", value: 1000000 };
+  }
   // Groovy `a.equals(b)` compares values as `==` does for text, numbers, lists, and maps.
   if (name === "equals" && argumentsNodes.length === 1 && targetNode !== null) {
     const left = lowerExpression(targetNode, context);
@@ -11933,6 +11953,49 @@ function fileTests(body: AstNode): {
       ),
     ),
   };
+}
+
+/** Whether every read of `name` in the current function is a file size read, `name.getBytes().size()` or `.length()`. */
+function onlySizeReads(name: string, context: LowerContext): boolean {
+  const body = context.currentFunction?.body;
+  if (body === undefined) return false;
+  const sizeReceivers = new Set<AstNode>();
+  const targets = new Set<AstNode>();
+  walkAst(body, (node) => {
+    if (node.kind === "declaration" || (node.kind === "binary" && node.operator === "=")) {
+      const left = asNode(node.left);
+      if (left !== null) targets.add(left);
+    }
+    if (node.kind !== "methodCall") return;
+    const method = constantString(node.method);
+    const receiver = asNode(node.object);
+    if (method === "length" && receiver !== null) sizeReceivers.add(receiver);
+    if (
+      method === "size" &&
+      receiver?.kind === "methodCall" &&
+      constantString(receiver.method) === "getBytes"
+    ) {
+      const file = asNode(receiver.object);
+      if (file !== null) sizeReceivers.add(file);
+    }
+  });
+  let reads = 0;
+  let others = false;
+  walkAst(body, (node) => {
+    if (node.kind !== "variable" || variableName(node) !== name || targets.has(node)) return;
+    reads += 1;
+    if (!sizeReceivers.has(node)) others = true;
+  });
+  return reads > 0 && !others;
+}
+
+/** A `new File(path)`, or a variable that only ever holds one. */
+function isFileValue(node: AstNode | null, context: LowerContext): boolean {
+  if (node === null) return false;
+  if (isFileConstructor(node)) return true;
+  const key = node.kind === "variable" ? bindingKey(node, context.bindings) : null;
+  const values = key === null ? undefined : context.assignedValues.get(key);
+  return values !== undefined && values.length > 0 && values.every(isFileConstructor);
 }
 
 /**

@@ -26,3 +26,13 @@ useFile("images/clips/scene.wmv")
 def draft = ""
 def answer = getString("Your name?", draft)
 show("Hello " + answer)
+// A photo check that read the file size to detect a broken webcam picture counts a taken photo as valid.
+def checkPhoto = { snapfile ->
+  if (snapfile != null) {
+    def snap = new File(snapfile)
+    if (snap.getBytes().size() < 15000) return false
+    return true
+  }
+  return false
+}
+if (checkPhoto(getImage("Smile"))) show("Nice photo")
