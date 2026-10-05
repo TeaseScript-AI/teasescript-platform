@@ -12093,10 +12093,20 @@ function imagePathBelowImages(node: AstNode, context: LowerContext): IrExpressio
 
 /** Audio files the legacy useFile() opened in the system's player. */
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".m4a", ".mid", ".midi"]);
+/** Video files a browser plays, and the formats the corpus driver converts to MP4 (H.264) at conversion time. */
+const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".m4v", ".ogv"]);
+export const CONVERTED_VIDEO_EXTENSIONS = new Set([
+  ".wmv",
+  ".avi",
+  ".mpg",
+  ".mpeg",
+  ".flv",
+  ".mov",
+]);
 
 /**
- * `useFile(path)` opened a file with a program of the player's computer: an audio file plays in the session, and
- * anything else, such as a device control program or an executable, cannot start from a package.
+ * `useFile(path)` opened a file with a program of the player's computer: an audio or video file plays in the session,
+ * and anything else, such as a device control program or an executable, cannot start from a package.
  */
 function useFileStatements(
   args: AstNode[],
@@ -12106,6 +12116,34 @@ function useFileStatements(
 ): IrStatement[] {
   const path = args.length === 1 ? constantString(args[0]) : null;
   const extension = path === null ? "" : path.slice(path.lastIndexOf(".")).toLowerCase();
+  if (
+    path !== null &&
+    (VIDEO_EXTENSIONS.has(extension) || CONVERTED_VIDEO_EXTENSIONS.has(extension))
+  ) {
+    const converted = CONVERTED_VIDEO_EXTENSIONS.has(extension);
+    addDiagnostic(
+      context,
+      "SX_USE_FILE_VIDEO",
+      "warning",
+      `useFile() opened this video in the system's player; it plays in the session here, without waiting.${converted ? " The package holds it as an MP4 converted at import, since browsers do not play this format." : ""}`,
+      node.span,
+    );
+    // The package root holds the images folder's files; other data folders keep their names.
+    const file = path.replaceAll("\\", "/").replace(/^images\//iu, "");
+    return [
+      {
+        kind: "playAudio",
+        video: true,
+        file: {
+          kind: "literal",
+          value: converted ? `${file.slice(0, file.lastIndexOf("."))}.mp4` : file,
+        },
+        async: true,
+        repeatCount: null,
+        span,
+      },
+    ];
+  }
   if (path === null || !AUDIO_EXTENSIONS.has(extension))
     return [
       unsupportedStatement(

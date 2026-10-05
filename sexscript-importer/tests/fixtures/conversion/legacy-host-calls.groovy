@@ -19,3 +19,6 @@ show("Best score ${best}")
 def selfie = getImage("Smile")
 if (selfie != null) setImage(selfie)
 new File(selfie).delete()
+// A video opened in the system player plays in the session; a format browsers lack becomes an MP4 at import.
+useFile("videos/intro.mp4")
+useFile("images/clips/scene.wmv")

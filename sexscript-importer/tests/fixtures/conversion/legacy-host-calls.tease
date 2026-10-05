@@ -68,4 +68,9 @@ if selfie != null {
 }
 // NOTE SX_PHOTO_DELETE line 21: The legacy script deleted the file of a photo it took; the reference is cleared instead, and the Player removes a photo that nothing references any more (V30 §33).
 selfie = null
+// A video opened in the system player plays in the session; a format browsers lack becomes an MP4 at import.
+// NOTE SX_USE_FILE_VIDEO line 23: useFile() opened this video in the system's player; it plays in the session here, without waiting.
+playVideo async "videos/intro.mp4"
+// NOTE SX_USE_FILE_VIDEO line 24: useFile() opened this video in the system's player; it plays in the session here, without waiting. The package holds it as an MP4 converted at import, since browsers do not play this format.
+playVideo async "clips/scene.mp4"
 exit

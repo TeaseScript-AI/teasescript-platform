@@ -34,6 +34,7 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CONVERTED_VIDEO_EXTENSIONS } from "../src/lower.ts";
 import {
   applyOutputPatches,
   applySourcePatches,
@@ -397,14 +398,20 @@ async function linkMedia(
 > {
   const collisions: string[] = [];
   let linkedMedia = 0;
-  for (const media of MEDIA_FOLDERS) {
+  // Legacy scripts name videos from the data folder, `videos/x.mp4`, so that folder keeps its name.
+  for (const media of [...MEDIA_FOLDERS, "videos"]) {
     const root = await mediaRoot(corpusRoot, id, media);
+    const into = media === "videos" ? path.join(packageRoot, "videos") : packageRoot;
     for (const file of (await files(root)).filter((file) => !isGroovy(file))) {
       const relative = toPosix(path.relative(root, file));
-      // The converter names a MIDI file's MP3, which the package holds instead (owner decision 2026-10-05).
+      const extension = path.extname(file).toLowerCase();
+      // The converter names a MIDI file's MP3, which the package holds instead (owner decision 2026-10-05), and a
+      // video in a format browsers do not play as an MP4.
       const result = /\.midi?$/iu.test(file)
-        ? await renderMidi(file, path.join(packageRoot, relative.replace(/\.midi?$/iu, ".mp3")))
-        : await hardLink(file, path.join(packageRoot, relative));
+        ? await renderMidi(file, path.join(into, relative.replace(/\.midi?$/iu, ".mp3")))
+        : CONVERTED_VIDEO_EXTENSIONS.has(extension)
+          ? await renderVideo(file, path.join(into, `${relative.slice(0, -extension.length)}.mp4`))
+          : await hardLink(file, path.join(into, relative));
       if (result === "linked") linkedMedia += 1;
       else if (result === "taken") collisions.push(relative);
     }
@@ -553,6 +560,41 @@ async function renderMidi(source: string, target: string): Promise<"linked" | "t
   } finally {
     await rm(wave, { force: true });
   }
+}
+
+/** Converts a video to an MP4 (H.264 and AAC) at `target` with ffmpeg, like renderMidi. */
+async function renderVideo(source: string, target: string): Promise<"linked" | "taken" | "failed"> {
+  if ((await stat(target).catch(() => null)) !== null) return "taken";
+  await mkdir(path.dirname(target), { recursive: true });
+  const temporary = `${target}.tmp.mp4`;
+  const encoded = await run("ffmpeg", [
+    "-v",
+    "error",
+    "-y",
+    "-i",
+    source,
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "26",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    "-movflags",
+    "+faststart",
+    temporary,
+  ]);
+  if (encoded.exitCode !== 0) {
+    await rm(temporary, { force: true });
+    return "failed";
+  }
+  await rename(temporary, target);
+  return "linked";
 }
 
 /** The last commit of the importer's conversion code, marked `-modified` when it has uncommitted changes. */

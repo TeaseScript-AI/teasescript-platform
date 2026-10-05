@@ -79,6 +79,8 @@ export type IrStatement =
   | (IrBase & {
       kind: "playAudio";
       file: IrExpression;
+      /** `playVideo` instead of `playAudio`. */
+      video?: true;
       async: boolean;
       repeatCount: IrExpression | null;
       /** Declares a variable holding the handle of async media. */

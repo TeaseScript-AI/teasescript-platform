@@ -121,8 +121,9 @@ node tools/catalog.ts [--player https://host:port] --play-checks external/play-c
 `convert-package` on each folder whose `scripts/` holds Groovy, then `report --run --package`, whose JSON it keeps as
 `.report.json`; its `finalPackage` reads the package as the Player does (the playground server's package scan, with
 the images and their tags), compiles the `.tease` files as written, and runs them natively from `main.tease`. Legacy scripts name media relative to `images/` and `sounds/`, and package paths start at the package
-root, so both trees are hard-linked into the package root. Media are never copied, so the corpus and the output must
-share one filesystem. A resource pack (a folder without scripts) is linked into each script package whose source names
+root, so both trees are hard-linked into the package root, and a `videos/` folder keeps its name. Media are never
+copied, so the corpus and the output must share one filesystem; only MIDI files become MP3s and videos in formats
+browsers do not play become MP4s (H.264), both rendered with ffmpeg. A resource pack (a folder without scripts) is linked into each script package whose source names
 one of its top media folders, narrowed to the packages that name its subfolder when any do. Each package folder records
 the conversion in `.conversion.json` (the converter commit, the SHA-256 of each legacy script, the patches applied,
 and the unit's status) and `.conversion.log`; `.conversion-summary.json` in the root records the importer commit and

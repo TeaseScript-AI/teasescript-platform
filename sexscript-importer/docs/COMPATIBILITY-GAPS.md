@@ -490,7 +490,8 @@ pixel size, or an image-size query.
 - Files: `new File(path).exists()` reads the package's files at conversion time, a literal path as `true` or `false` and
   a computed one as a lookup in the package files below its fixed beginning; a program (`.exe`) never exists, and
   `getDataFolder()` is the package root (`SX_FILE_EXISTS`, `SX_DATA_FOLDER`). Deleting the file of a photo the script
-  took clears the reference (`SX_PHOTO_DELETE`). `useFile(path)` plays an audio file (`SX_USE_FILE_AUDIO`); any other
+  took clears the reference (`SX_PHOTO_DELETE`). `useFile(path)` plays an audio file (`SX_USE_FILE_AUDIO`) or a video
+  (`SX_USE_FILE_VIDEO`, a WMV, AVI, MPEG, FLV, or MOV file as an MP4 that the corpus driver converts); any other
   file, such as a device control program, stays reported as a program a package cannot start (`SX_EXTERNAL_PROGRAM`).
   A device switch program (`"SwitchBox.exe 7 ein".execute()`, a command ending with `on`, `ein`, `an`, `off`, or
   `aus`) becomes a persistent permanent button, "Power: ON" or "Power: OFF", which replaces the previous one; the
