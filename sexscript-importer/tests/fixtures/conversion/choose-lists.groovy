@@ -26,3 +26,7 @@ for (round in 1..2) {
 	show("Picked " + options[picked])
 	options = ["Plug", "Clamps"]
 }
+// Written options after a runtime list join it, so their positions follow the list's.
+def mistresses = ["Vera", "Anna"]
+def pickMistress = getSelectedValue("Who will see you?", mistresses + ["Back"])
+if (pickMistress == mistresses.size()) show("Back") else show("Mistress " + mistresses[pickMistress])

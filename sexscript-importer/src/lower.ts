@@ -12536,10 +12536,16 @@ function runtimeListSelectedValue(
   optionsNode: AstNode,
   context: LowerContext,
 ): IrExpression | null | undefined {
-  const pieces = listPlusOperands(optionsNode);
+  const allPieces = listPlusOperands(optionsNode);
+  // Written options after the runtime list, `list + ["Back"]`, join it at runtime (#609), so their positions follow.
+  let end = allPieces.length;
+  while (end > 1 && allPieces[end - 1]!.kind === "list") end -= 1;
+  const trailing = allPieces.slice(end);
+  const pieces = allPieces.slice(0, end);
   const listNode = pieces.at(-1)!;
   const written = pieces.slice(0, -1);
   if (listNode.kind === "list" || written.some((piece) => piece.kind !== "list")) return undefined;
+  const trailingItems = trailing.flatMap((piece) => nodeArray(piece.items));
   const writtenItems = written.flatMap((piece) => nodeArray(piece.items));
   let loop: IrStatement[] = [];
   let list: IrExpression;
@@ -12567,6 +12573,11 @@ function runtimeListSelectedValue(
     const lowered = lowerExpression(listNode, context);
     if (lowered === null) return null;
     list = lowered;
+  }
+  if (trailingItems.length > 0) {
+    const after = lowerArguments(trailingItems, context);
+    if (after === null) return null;
+    list = { kind: "binary", operator: "+", left: list, right: { kind: "list", items: after } };
   }
   const options: IrListChoiceOption[] = [];
   for (const [index, item] of writtenItems.entries()) {
