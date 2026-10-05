@@ -378,6 +378,7 @@ function storedPlace(slot: OpenType): OpenType | undefined {
 
 /** The name of the variable a declaration creates. */
 function declaredName(declaration: Declaration): string {
+  if (declaration.kind === "identifier") return declaration.name;
   return declaration.kind === "forStatement" ? declaration.variable.name : declaration.name.name;
 }
 
