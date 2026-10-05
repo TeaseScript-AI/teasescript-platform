@@ -395,10 +395,18 @@ function entryMenu(
   internal: ReadonlySet<number>,
 ): MigrationProgram {
   const targets = new Set<string>();
+  // The literal transfers of each script, by its path.
+  const transfers = new Map<string, Set<string>>();
+  let source = "";
   const collect = (statements: readonly IrStatement[]): void => {
     for (const statement of statements) {
-      if (statement.kind === "goto" && statement.target.kind === "file")
+      if (statement.kind === "goto" && statement.target.kind === "file") {
         targets.add(statement.target.path.toLowerCase());
+        transfers.set(
+          source,
+          (transfers.get(source) ?? new Set()).add(statement.target.path.toLowerCase()),
+        );
+      }
       if (statement.kind === "function") collect(statement.body);
       if (statement.kind === "if") {
         collect(statement.then);
@@ -412,26 +420,52 @@ function entryMenu(
       }
     }
   };
-  for (const program of programs) collect(program.statements);
+  programs.forEach((program, index) => {
+    source = (scripts.pathOf.get(index) ?? "").toLowerCase();
+    collect(program.statements);
+  });
   const base = (path: string): string =>
     path.replace(/_[a-z]{2}(?:_[a-z]{2})?\.tease$/iu, ".tease");
+  const depthOf = (path: string): number => path.split("/").length - 1;
+  // A script that another script of its own level or above chains to is no entry; sub-scripts one folder down that
+  // return to their main script do not count.
+  const chainedFrom = (path: string, depth: number): boolean =>
+    [...transfers].some(
+      ([from, to]) =>
+        from !== path.toLowerCase() &&
+        depthOf(from) <= depth &&
+        (to.has(path.toLowerCase()) || to.has(base(path).toLowerCase())),
+    );
   const targeted = (path: string): boolean =>
     targets.has(path.toLowerCase()) || targets.has(base(path).toLowerCase());
   // The entries (owner decision 2026-10-05): the scripts of the top folder that call setInfos, as the legacy player
   // listed them, apart from internal scripts and scripts another script chains to; without one there, those one folder
   // down, beside folders such as system/.
-  const named = (depth: number): string[] =>
+  const listedAt = (depth: number): string[] =>
     [...scripts.pathOf]
       .filter(
         ([index, path]) =>
-          path.split("/").length - 1 === depth &&
-          !internal.has(index) &&
-          programs[index]?.metadata != null &&
-          !targeted(path),
+          depthOf(path) === depth && !internal.has(index) && programs[index]?.metadata != null,
       )
       .map(([, path]) => path)
       .sort(versionOrder);
-  const entries = named(0).length > 0 ? named(0) : named(1);
+  const named = (depth: number): string[] =>
+    listedAt(depth).filter((path) => !chainedFrom(path, depth));
+  // Where the scripts of a level all chain to each other, the hub that chains to the most of them starts.
+  const hub = (depth: number): string[] => {
+    const outgoing = (path: string): number => transfers.get(path.toLowerCase())?.size ?? 0;
+    const candidates = listedAt(depth);
+    const most = Math.max(0, ...candidates.map(outgoing));
+    return most === 0 ? [] : candidates.filter((path) => outgoing(path) === most).slice(0, 1);
+  };
+  const entries =
+    named(0).length > 0
+      ? named(0)
+      : named(1).length > 0
+        ? named(1)
+        : hub(0).length > 0
+          ? hub(0)
+          : hub(1);
   // Without such a script, the scripts of the top folder that nothing chains to.
   const listed = scripts.rootScripts.filter((index) => !internal.has(index));
   const offered = listed

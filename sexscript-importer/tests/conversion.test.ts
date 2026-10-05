@@ -835,6 +835,7 @@ test(
       "global-locals",
       "entries",
       "module-files",
+      "entry-hub",
     ]) {
       const directory = fileURLToPath(new URL(`./fixtures/packages/${name}/`, import.meta.url));
       const scripts = path.join(directory, "scripts");
