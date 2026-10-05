@@ -169,8 +169,8 @@ test("converts Calendar and Date values to local dates and times", { skip }, asy
     "Date built = new Date(126, 9, 6, 25, 0, 0)",
     'show("${built.year + 1900}-${built.month + 1}-${built.date} ${built.hours}")',
   ]);
-  assert.match(source, /^c = c \+ 50 \* 1 min$/mu);
-  assert.match(source, /^c = c - 1 \* 1 day$/mu);
+  assert.match(source, /^c \+= 50 \* 1 min$/mu);
+  assert.match(source, /^c -= 1 \* 1 day$/mu);
   assert.match(
     source,
     /^c = sexscriptLegacyCalendarTime\(c, 1, c\.minute, c\.second, c\.millisecond\)$/mu,
@@ -406,7 +406,7 @@ test(
       ],
       { "quiz.txt": "first\n", "settings.ini": '[S]\nq="a"\nc=x ; n\nd=1\nd=2\n' },
     );
-    assert.match(source, /^let lines = sexscriptLegacyTextLines\("\$\{""\}\/quiz\.txt"\)$/mu);
+    assert.match(source, /^let lines = sexscriptLegacyTextLines\("\/quiz\.txt"\)$/mu);
     assert.match(source, /TODO SX_PACKAGE_TEXT_MISSING line 2/u);
     assert.doesNotMatch(source, /^let pack = (?:true|false)$/mu);
     assert.match(source, /TODO SX_CALENDAR_SET_RANGE line 7/u);

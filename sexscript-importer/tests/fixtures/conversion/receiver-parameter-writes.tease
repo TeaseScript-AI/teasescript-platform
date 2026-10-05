@@ -9,7 +9,10 @@ function addCard(cards, card) {
 }
 let queue = ["first"]
 addCard(queue, "second")
-let stacks = [[1], [2]]
+let stacks = [
+  [1],
+  [2]
+]
 for stack in stacks {
   // TODO SX_PARAMETER_LIST_WRITE line 7: Groovy changed the list that stack refers to, which the caller or the iterated collection shares; in TeaseScript stack holds a copy (ADR 0014), so the change would be lost. Return the changed list and store it where it is kept.
   // | stacks.each { stack -> stack << 3 }

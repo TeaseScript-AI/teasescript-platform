@@ -46,7 +46,7 @@ while (playing is boolean and playing == true) or (playing is number and playing
 // A variable a closure assigns without a declaration lived in the script binding that every closure shares.
 function countUp {
   counter = 0
-  counter = counter + 1
+  counter += 1
 }
 countUp()
 say "Counted ${counter}"

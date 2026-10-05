@@ -4,7 +4,7 @@ function pickToy {
   let toys = ["paddle", "crop", "cane"]
   say "Add the strap?"
   if (choose yes: "Yes", no: "No") == "yes" {
-    toys = toys + ["strap"]
+    toys += ["strap"]
   }
   // NOTE SX_LIST_DIFFERENCE line 6: Groovy list - kept repeated elements of the list; difference() keeps each remaining element once (V30 §16).
   if picked != null {

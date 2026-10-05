@@ -14,7 +14,7 @@ function sexscriptLegacyRepeatList(items, times) {
   return result
 }
 let text = "Start"
-text = "${text} and more"
+text += " and more"
 let menu = ["Back"]
 let extra = ["One", "Two"]
 menu = ["Back"] + extra + ["Last"]

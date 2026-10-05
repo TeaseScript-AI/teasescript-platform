@@ -21,7 +21,7 @@ sexscriptLegacyPlayBackgroundSound("rain.wav", 1)
 sexscriptLegacyPlayBackgroundSound("bell.wav", 2)
 let answer = 0
 while answer < 5 {
-  answer = answer + 2
+  answer += 2
 }
 // The sound starts again before every round of the endless loop.
 while true {

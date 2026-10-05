@@ -49,10 +49,10 @@ while rest.contains("<") {
   if close < 0 {
     break
   }
-  withoutTags = "${withoutTags}${rest.substring(0, open)}"
+  withoutTags += "${rest.substring(0, open)}"
   rest = rest.substring(open + close + 1)
 }
-withoutTags = "${withoutTags}${rest}"
+withoutTags += "${rest}"
 t = withoutTags
 save t as "tags"
 // A fallback with effects runs only for a missing key.

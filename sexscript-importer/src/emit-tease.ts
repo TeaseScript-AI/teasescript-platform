@@ -186,15 +186,36 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
       );
       return;
     }
-    case "assign":
+    case "assign": {
+      // `x = x + e` is `x += e` when the left operand is the variable itself, so nothing regroups.
+      const value = statement.value;
+      const compound =
+        statement.operator === "=" &&
+        statement.target.kind === "variable" &&
+        value.kind === "binary" &&
+        (value.operator === "+" || value.operator === "-") &&
+        value.left.kind === "variable" &&
+        value.left.name === statement.target.name;
       lines.push(
-        `${pad}${emitExpression(statement.target)} ${statement.operator} ${emitValue(statement.value)}`,
+        compound
+          ? `${pad}${emitExpression(statement.target)} ${value.operator}= ${emitValue(value.right)}`
+          : `${pad}${emitExpression(statement.target)} ${statement.operator} ${emitValue(value)}`,
       );
       return;
+    }
     case "expression":
       lines.push(`${pad}${emitValue(statement.expression)}`);
       return;
     case "if": {
+      // `if p { return true } else { return false }` returns the predicate itself.
+      if (
+        isPredicate(statement.condition) &&
+        returnsLiteral(statement.then, true) &&
+        returnsLiteral(statement.else, false)
+      ) {
+        lines.push(`${pad}return ${emitExpression(statement.condition)}`);
+        return;
+      }
       lines.push(`${pad}if ${emitExpression(statement.condition)} {`);
       emitStatements(statement.then, lines, depth + 1);
       let alternative = statement.else;
@@ -273,17 +294,30 @@ export function emitExpression(expression: IrExpression): string {
     case "duration":
       return `${expression.value} ${expression.unit}`;
     case "template": {
-      const block = blockString(expression.parts);
+      const flat = flatParts(expression.parts);
+      if (flat.every((part) => "text" in part))
+        return emitExpression({
+          kind: "literal",
+          value: flat.map((part) => ("text" in part ? part.text : "")).join(""),
+        });
+      const block = blockString(flat);
       if (block !== null) return block;
-      const parts = expression.parts.map((part) =>
+      const parts = flat.map((part) =>
         "text" in part ? escapeStringText(part.text) : `\${${interpolated(part.value)}}`,
       );
       return `"${parts.join("")}"`;
     }
     case "variable":
       return expression.name;
-    case "list":
-      return `${expression.set === true ? "set" : ""}[${expression.items.map(emitExpression).join(", ")}]`;
+    case "list": {
+      const prefix = expression.set === true ? "set" : "";
+      // A table, a list of rows, has a row on each line.
+      if (expression.items.length >= 2 && expression.items.every(isRow)) {
+        const rows = laidOut(expression.items.map((item) => () => emitExpression(item)));
+        if (rows !== null) return `${prefix}[${rows}]`;
+      }
+      return `${prefix}[${expression.items.map(emitExpression).join(", ")}]`;
+    }
     case "object": {
       const prefix = expression.dict === true ? "dict" : "";
       const key = (property: (typeof expression.properties)[number]): string => {
@@ -295,6 +329,17 @@ export function emitExpression(expression: IrExpression): string {
             : emitExpression(property.key);
         return `[${emitExpression(property.key)}]`;
       };
+      // An object or dict of rows has a row on each line.
+      const rows =
+        expression.properties.length >= 2 &&
+        expression.properties.every((property) => isRow(property.value))
+          ? laidOut(
+              expression.properties.map(
+                (property) => () => `${key(property)}: ${emitExpression(property.value)}`,
+              ),
+            )
+          : null;
+      if (rows !== null) return `${prefix}{${rows}}`;
       return expression.properties.length === 0
         ? `${prefix}{}`
         : `${prefix}{ ${expression.properties
@@ -379,6 +424,78 @@ function escapeStringText(text: string): string {
     .replace(/\r/gu, "\\r")
     .replace(/\t/gu, "\\t")
     .replace(/\$\{/gu, "\\${");
+}
+
+/** Whether a condition is a comparison, a logical combination, a negation, or a type test, which give true or false. */
+function isPredicate(condition: IrExpression): boolean {
+  if (condition.kind === "typeTest") return true;
+  if (condition.kind === "unary") return condition.operator === "not";
+  if (condition.kind === "literal") return typeof condition.value === "boolean";
+  return (
+    condition.kind === "binary" &&
+    ["==", "!=", "<", ">", "<=", ">=", "and", "or"].includes(condition.operator)
+  );
+}
+
+function returnsLiteral(statements: readonly IrStatement[], value: boolean): boolean {
+  const [only] = statements;
+  return (
+    statements.length === 1 &&
+    only?.kind === "return" &&
+    only.value?.kind === "literal" &&
+    only.value.value === value
+  );
+}
+
+/**
+ * Template parts without interpolation scaffolding: an interpolated literal text is text, and an interpolated
+ * template contributes its own parts (`"${"toy.${i}"}"` is `"toy.${i}"`).
+ */
+function flatParts(parts: readonly TextPart[]): TextPart[] {
+  const result: TextPart[] = [];
+  const add = (part: TextPart): void => {
+    const last = result.at(-1);
+    if ("text" in part && last !== undefined && "text" in last)
+      result[result.length - 1] = { text: last.text + part.text };
+    else result.push(part);
+  };
+  for (const part of parts) {
+    if ("text" in part) add(part);
+    else if (part.value.kind === "literal" && typeof part.value.value === "string")
+      add({ text: part.value.value });
+    else if (part.value.kind === "template")
+      for (const inner of flatParts(part.value.parts)) add(inner);
+    else add(part);
+  }
+  return result;
+}
+
+/** A list or object literal with content, a row of a table. */
+function isRow(value: IrExpression): boolean {
+  return (
+    (value.kind === "list" && value.items.length > 0) ||
+    (value.kind === "object" && value.properties.length > 0)
+  );
+}
+
+/** Items one per line, one level deeper than the current line, between the delimiters; null where text is single-line. */
+function laidOut(items: ReadonlyArray<() => string>): string | null {
+  if (blockPad === null) return null;
+  const outer = blockPad;
+  const inner = `${outer}  `;
+  const lines = within(inner, () => items.map((item) => `${inner}${item()}`));
+  return `\n${lines.join(",\n")}\n${outer}`;
+}
+
+/** The result of emitting with lines that continue at `pad`. */
+function within<T>(pad: string, emit: () => T): T {
+  const outer = blockPad;
+  blockPad = pad;
+  try {
+    return emit();
+  } finally {
+    blockPad = outer;
+  }
 }
 
 /** An interpolated value, written single-line: a string inside `${...}` may not span lines (V30 §8). */
@@ -509,17 +626,25 @@ function precedence(expression: IrExpression): number {
 
 function emitChoice(expression: Extract<IrExpression, { kind: "choice" | "listChoice" }>): string {
   if (expression.kind === "listChoice") {
-    const options = expression.options.map((option) => {
+    const options = expression.options.map((option) => () => {
       if (option.kind === "list") return emitExpression(option.list);
       const text = emitExpression(option.text);
       return option.value === null ? text : `${option.value}: ${text}`;
     });
-    return `choose ${options.join(", ")}`;
+    return `choose ${menuOptions(options)}`;
   }
   const options = expression.options.map(
-    (option, index) => `${expression.labels?.[index] ?? index}: ${emitExpression(option)}`,
+    (option, index) => () => `${expression.labels?.[index] ?? index}: ${emitExpression(option)}`,
   );
-  return `choose ${options.join(", ")}`;
+  return `choose ${menuOptions(options)}`;
+}
+
+/** A menu's options, from three on with each option after the first on its own line, one level deeper. */
+function menuOptions(options: ReadonlyArray<() => string>): string {
+  if (blockPad === null || options.length < 3) return options.map((option) => option()).join(", ");
+  const inner = `${blockPad}  `;
+  const [first, ...rest] = within(inner, () => options.map((option) => option()));
+  return [first, ...rest.map((option) => `${inner}${option}`)].join(",\n");
 }
 
 /** Compact `showButton` with its optional timeout option (#531). */

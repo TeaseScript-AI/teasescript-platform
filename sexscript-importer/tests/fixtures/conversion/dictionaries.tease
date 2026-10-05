@@ -122,14 +122,20 @@ session = { mood: null, aborted: null }
 session.mood = "tense"
 say "Mood ${session.mood}, aborted ${session.aborted}"
 // Records of a list in which only some give a field a value: Groovy read each record's own field.
-let exercises: object[] = [{ kind: "counted", text: "Push-ups" }, { kind: "posture", text: null }]
+let exercises: object[] = [
+  { kind: "counted", text: "Push-ups" },
+  { kind: "posture", text: null }
+]
 let exercise = exercises[randomInteger(0..2)]
 // NOTE SX_LENGTH_RECEIVER line 76: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
 if exercise.kind == "counted" {
   say "Do ${exercise.text} (${exercise.text.length} letters)"
 }
 // A record that leaves out a key the others have read it as null.
-let permissions: object[] = [{ title: "Rest", chance: 75, flag: null }, { title: "Play", chance: 55, flag: "deny.play" }]
+let permissions: object[] = [
+  { title: "Rest", chance: 75, flag: null },
+  { title: "Play", chance: 55, flag: "deny.play" }
+]
 let permission = permissions[randomInteger(0..2)]
 if permission.flag != null and (load permission.flag) != null {
   say "Not now"
@@ -148,7 +154,7 @@ let needed = dict{ rope: "rope", rubber_bands: "rubber bands" }
 let missing = ""
 for toyValue in needed {
   if (load "toys.${toyValue}") != true {
-    missing = "${missing}${needed[toyValue]} "
+    missing += "${needed[toyValue]} "
   }
 }
 say "Missing: ${missing}"

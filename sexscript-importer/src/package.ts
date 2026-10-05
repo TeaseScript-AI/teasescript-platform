@@ -431,6 +431,8 @@ function entryMenu(
       ? ""
       : ` The legacy player also chose a localized variant of a script by the system language, which the converted scripts do not, so these variants are not reached: ${variants.join(", ")}.`);
   const name = menuLabels(choices, scripts, programs);
+  // Each button returns an identifier named after its script, which a switch sends to that script.
+  const id = menuIds(choices);
   // With one script to offer, the package starts there.
   const question: IrStatement[] =
     choices.length === 1
@@ -447,30 +449,34 @@ function entryMenu(
             value: {
               kind: "choice",
               options: choices.map((path) => ({ kind: "literal", value: name.get(path)! })),
+              labels: choices.map((path) => id.get(path)!),
             },
             span: null,
           },
         ];
-  const picked = { kind: "variable" as const, name: "picked" };
-  let chain: IrStatement[] = [
-    { kind: "goto", target: { kind: "file", path: choices.at(-1)! }, span: null },
-  ];
-  for (let index = choices.length - 2; index >= 0; index -= 1) {
-    chain = [
-      {
-        kind: "if",
-        condition: {
-          kind: "binary",
-          operator: "==",
-          left: picked,
-          right: { kind: "literal", value: index },
-        },
-        then: [{ kind: "goto", target: { kind: "file", path: choices[index]! }, span: null }],
-        else: chain,
-        span: null,
-      },
-    ];
-  }
+  const goto = (path: string): IrStatement => ({
+    kind: "goto",
+    target: { kind: "file", path },
+    span: null,
+  });
+  const chain: IrStatement[] =
+    choices.length === 1
+      ? [goto(choices[0]!)]
+      : [
+          {
+            kind: "switch",
+            value: { kind: "variable", name: "picked" },
+            cases: choices
+              .slice(0, -1)
+              .map((path) => ({
+                matches: [{ kind: "literal", value: id.get(path)! }],
+                body: [goto(path)],
+                span: null,
+              })),
+            default: [goto(choices.at(-1)!)],
+            span: null,
+          },
+        ];
   return {
     sourceName: `${scripts.root}/main.tease`,
     metadata: null,
@@ -949,6 +955,41 @@ function withLoadedModules(
     diagnostics,
     actions: [...actions],
   };
+}
+
+/** Words an identifier choice value may not be (V30 §38 grammar keywords and protected type names). */
+const RESERVED_IDS = new Set([
+  ..."let function return if else switch case default repeat for in while break continue and or not set true false".split(
+    " ",
+  ),
+  ..."null choose speaker say as label goto call end exit fallback global tagged save load delete is".split(
+    " ",
+  ),
+  ..."string boolean integer number date time datetime timestamp duration list dict object range media script timer".split(
+    " ",
+  ),
+]);
+
+/**
+ * For each script an entry menu offers, an identifier from its file name, such as `intro` for `intro.tease` and
+ * `first_de` for `chapters/first_de.tease`: unique, and different from the words TeaseScript reserves.
+ */
+function menuIds(paths: readonly string[]): Map<string, string> {
+  const taken = new Set<string>();
+  return new Map(
+    paths.map((path) => {
+      const file = path
+        .split("/")
+        .at(-1)!
+        .replace(/\.tease$/u, "");
+      let base = file.replace(/[^A-Za-z0-9_]+/gu, "_").replace(/^_+|_+$/gu, "");
+      if (base === "" || /^[0-9]/u.test(base) || RESERVED_IDS.has(base)) base = `script_${base}`;
+      let id = base;
+      for (let suffix = 2; taken.has(id); suffix += 1) id = `${base}_${suffix}`;
+      taken.add(id);
+      return [path, id];
+    }),
+  );
 }
 
 function rootNames(statements: readonly IrStatement[]): string[] {

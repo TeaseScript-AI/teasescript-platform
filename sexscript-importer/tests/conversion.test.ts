@@ -1148,7 +1148,11 @@ test(
     }));
     const template: IrExpression = {
       kind: "template",
-      parts: [{ text: "Dear " }, { value: literal("An\nn") }, { text: ",\n  kneel." }],
+      parts: [
+        { text: "Dear " },
+        { value: { kind: "call", name: "toString", positional: [literal("An\nn")], named: {} } },
+        { text: ",\n  kneel." },
+      ],
     };
     const program: MigrationProgram = {
       sourceName: "blocks.tease",
@@ -1168,7 +1172,7 @@ test(
     const source = emitTease(program);
     // Five texts and the template become blocks; the interpolated text stays single-line inside its block.
     assert.equal(source.match(/"""\n/gu)?.length, 6);
-    assert.match(source, /^ {4}Dear \$\{"An\\nn"\},$/mu);
+    assert.match(source, /^ {4}Dear \$\{toString\("An\\nn"\)\},$/mu);
     assert.match(source, /^ {2}""" as "t"$/mu);
     const storage = new Map();
     const run = runnerResult.runner(source, {}, { storage });

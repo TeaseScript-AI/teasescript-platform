@@ -70,7 +70,10 @@ for i in 0..items.length {
 items = sexscriptLegacyShuffled(items)
 items.removeAt(0)
 items.remove("wait")
-let pairs = [[1, 2], [3, 4]]
+let pairs = [
+  [1, 2],
+  [3, 4]
+]
 pairs.remove([1, 2])
 let numbers = [5, 6]
 say "Pairs left: ${pairs.length}, took ${numbers.removeAt(0)}"

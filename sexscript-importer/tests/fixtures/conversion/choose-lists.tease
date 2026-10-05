@@ -21,7 +21,10 @@ say "Which level?"
 let level = choose sexscriptLegacyMenuOptions(levels, 0)
 say "Level ${levels[level]}"
 
-let toys = [{ lbl: "Plug", id: "plug" }, { lbl: "Clamps", id: "clamps" }]
+let toys = [
+  { lbl: "Plug", id: "plug" },
+  { lbl: "Clamps", id: "clamps" }
+]
 let menuTexts = []
 for it in toys {
   menuTexts.add(it.lbl)

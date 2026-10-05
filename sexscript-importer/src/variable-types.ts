@@ -147,6 +147,7 @@ interface Rounds {
   conflicts: Conflict[];
   appends: Map<IrStatement, "list" | "range" | "value" | "part">;
   textAppends: Set<IrStatement>;
+  selfAppends: Map<IrStatement, Binding>;
   unguarded: Set<IrStatement>;
   /** Statements whose stored number truncates to an integer. */
   truncations: Set<IrStatement>;
@@ -167,6 +168,7 @@ function runRounds(
     conflicts: [],
     appends: new Map(),
     textAppends: new Set(),
+    selfAppends: new Map(),
     unguarded: new Set(),
     truncations: new Set(),
     integerLoads: new Set(),
@@ -180,6 +182,7 @@ function runRounds(
     rounds.conflicts = analysis.conflicts;
     rounds.appends = analysis.appends;
     rounds.textAppends = analysis.textAppends;
+    rounds.selfAppends = analysis.selfAppends;
     rounds.unguarded = analysis.unguarded;
     rounds.indexes = analysis.indexes;
     rounds.loadDefaults = analysis.loadDefaults;
@@ -206,6 +209,7 @@ export function enforceVariableTypes(
     bindings,
     appends,
     textAppends,
+    selfAppends,
     truncations,
     integerLoads,
     textIntegers,
@@ -353,6 +357,25 @@ export function enforceVariableTypes(
             result.loadDefaults.push(rewritten);
             return rewritten;
           }
+          // `text = "${text}..."` on a variable that only holds text appends the rest: `text += "..."`.
+          const appendedTo = selfAppends.get(statement);
+          const appendedType = appendedTo === undefined ? undefined : bindingType(appendedTo);
+          if (
+            appendedType?.kind === "scalar" &&
+            appendedType.name === "string" &&
+            statement.value.kind === "template"
+          ) {
+            const rest = statement.value.parts.slice(1);
+            const [only] = rest;
+            return {
+              ...statement,
+              operator: "+=",
+              value:
+                rest.length === 1 && only !== undefined && "text" in only
+                  ? { kind: "literal", value: only.text }
+                  : { kind: "template", parts: rest },
+            };
+          }
           if (textAppends.has(statement)) {
             // Groovy `text += value` appended the value's text.
             result.textAppended.push(statement);
@@ -486,6 +509,8 @@ interface Analysis {
   appends: Map<IrStatement, "list" | "range" | "value" | "part">;
   /** `text += value` statements on a variable that holds text. */
   textAppends: Set<IrStatement>;
+  /** `text = "${text}..."` statements, with the variable, which become `text += "..."` where it only holds text. */
+  selfAppends: Map<IrStatement, Binding>;
   /** The importer's null tests of input questions on variables that can never hold null. */
   unguarded: Set<IrStatement>;
   /** Unguarded storage reads into a variable with a type that cannot hold null, read with the variable as default. */
@@ -507,6 +532,7 @@ function analyse(
     indexes: new Set(),
     appends: new Map(),
     textAppends: new Set(),
+    selfAppends: new Map(),
     unguarded: new Set(),
     loadDefaults: new Set(),
   };
@@ -725,6 +751,17 @@ function analyse(
         const target = scope.resolve(item.target.name);
         if (target === undefined) return;
         const type = bindingType(target);
+        const first = item.value.kind === "template" ? item.value.parts[0] : undefined;
+        if (
+          item.operator === "=" &&
+          item.value.kind === "template" &&
+          item.value.parts.length > 1 &&
+          first !== undefined &&
+          "value" in first &&
+          first.value.kind === "variable" &&
+          first.value.name === item.target.name
+        )
+          analysis.selfAppends.set(item, target);
         if (item.operator === "=") {
           if (target.integer && isText(value)) {
             conflict(
