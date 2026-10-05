@@ -4704,7 +4704,7 @@ function lowerAssignment(
     ];
   }
   if (operator === "+=" && variableTarget !== null) {
-    // TeaseScript += only adds numbers; text and list appends become an ordinary assignment.
+    // Groovy `+=` joined text with any value; the append is lowered as the `+` it stands for.
     const sum = lowerPlus(
       { kind: "binary", span: node.span, operator: "+", left: targetNode, right },
       context,
@@ -8893,8 +8893,9 @@ function isRepeatableExpression(node: AstNode): boolean {
 }
 
 /**
- * Groovy `+` concatenates when either operand is a string; TeaseScript `+` is numeric only, so string
- * concatenation becomes interpolation. Left-associative chains such as `1 + 2 + "x"` keep their numeric prefix.
+ * Groovy `+` concatenates when either operand is a string, with any value; TeaseScript `+` joins only two texts (or
+ * adds two numbers, or joins two lists), so string concatenation becomes interpolation. Left-associative chains such as
+ * `1 + 2 + "x"` keep their numeric prefix.
  */
 function lowerPlus(node: AstNode, context: LowerContext): IrExpression | null {
   const leftNode = asNode(node.left);
@@ -8938,7 +8939,7 @@ function lowerPlus(node: AstNode, context: LowerContext): IrExpression | null {
       context,
       "SX_PLUS_OPERAND_TYPE",
       "warning",
-      "Groovy + operands are not proven numeric; TeaseScript + only adds numbers. Use interpolation if this joins text.",
+      "Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.",
       node.span,
     );
   }

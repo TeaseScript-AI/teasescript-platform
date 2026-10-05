@@ -7,4 +7,3 @@ global function remember {
   let lastTimeValue = getTimestamp().toSeconds()
   save lastTimeValue as "demo.lastTime"
 }
-exit

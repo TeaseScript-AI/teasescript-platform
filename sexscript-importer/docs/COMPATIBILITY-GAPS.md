@@ -48,7 +48,7 @@ implemented):
 
 | Legacy pattern | TeaseScript form |
 | --- | --- |
-| `"Hi " + name` (string `+`) | `"Hi ${name}"`; TeaseScript `+` is numeric only |
+| `"Hi " + name` (string `+`) | `"Hi ${name}"`; TeaseScript `+` adds two numbers or joins two texts or two lists (V30 §4), and Groovy joined text with any value |
 | Groovy truthiness (`if (name)`, `!count`, `if (map)`) | explicit comparisons chosen from inferred types (`name != ""`, `count == null or count == 0`, `map != {}`, `dict.length > 0`) |
 | ternary / Elvis | `if` statements with one assignment or statement per branch |
 | implicit last-expression return | explicit `return`, also in the last statements of `if`/`else` branches |
@@ -260,8 +260,8 @@ unannotated integer widens to `number` by itself (option B). Measured on the fou
   Groovy's `int` rejected null too. Groovy stored a one-character text in an `int` as its character code (`"3"` became
   51), so a value proven to be text is reported and a truncated value that may be text gets a note
   (`SX_INTEGER_FROM_TEXT`; 0 corpus sites).
-- **Text `+=`:** Groovy appended to text with `+=`; `main` rejects `+=` on text at compile time (TeaseScript `+` is
-  numeric), so `text += value` on a variable that holds text becomes `text = "${text}${value}"` (Domme3's
+- **Text `+=`:** Groovy appended any value to text with `+=`; TeaseScript `+=` joins text only with text (V30 §4), so
+  `text += value` on a variable that holds text becomes `text = "${text}${value}"` (Domme3's
   `showDynamically`, which also iterates over the characters of a text, which TeaseScript `for` rejects at runtime).
 - **Index rule:** a variable that may hold a fraction cannot index a list (#504 option B); such an index truncates with
   `toInteger`, as Groovy's `getAt(Number)` did. No corpus site remains.
@@ -405,8 +405,8 @@ Converting the corpus's script chains to ADR 0022 surfaced:
 - **Friction.** Unique global names reach every file: a variant with another body must be renamed, and any file-level
   variable of a global's name must become an assignment to it. A global's initializer may not call a function (ADR 0022
   §6.4), so a value a script computes at its start becomes a global with an empty start value and an assignment in each
-  script. A file that only declares global functions and globals still needs an `exit` at its end under §4 as written,
-  although nothing transfers to it; `helpers.tease` has one, which is an open question for #570. The warning for
+  script. A file that only declares global functions and globals needs no `exit` (ADR 0022 §4.3), so `helpers.tease`
+  ends with its declarations. The warning for
   impossible null tests also reaches the importer's null test of an input question right after the question was set
   to text, which main's narrowing proves non-null; the importer leaves that test out too (59 of 64 such sites in
   DisciplineClinic's `Punish`, which does not reach the type pass yet; the other 5 follow the assignment in an outer

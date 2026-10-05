@@ -709,7 +709,6 @@ function withSharedSpeaker(
         trailing: false,
         span: null,
       },
-      { kind: "exit", span: null },
     ],
     diagnostics: [],
   };

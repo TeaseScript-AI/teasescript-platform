@@ -306,7 +306,7 @@ export function promoteGlobalFunctions(
         ...withoutGlobalNames(statement, globalNames),
         global: true,
       })),
-      { kind: "exit", span: null },
+      // A file of declarations only needs no `exit` (ADR 0022 §4.3).
     ],
     diagnostics: [],
   };

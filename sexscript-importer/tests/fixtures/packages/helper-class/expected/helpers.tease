@@ -4,4 +4,3 @@ global function showWait(msg, tmo = 5) {
   say msg, instant
   wait tmo
 }
-exit

@@ -10,4 +10,3 @@ global function taunt {
 global function greet {
   say "Welcome to ${mistress}'s house."
 }
-exit

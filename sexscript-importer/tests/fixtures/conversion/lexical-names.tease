@@ -16,7 +16,7 @@ let counter = 0
 let level = null
 // A closure named like a SexScript method calls that method inside its own body, where the variable is not defined yet.
 function getRandom(low, high) {
-  // NOTE SX_PLUS_OPERAND_TYPE line 2: Groovy + operands are not proven numeric; TeaseScript + only adds numbers. Use interpolation if this joins text.
+  // NOTE SX_PLUS_OPERAND_TYPE line 2: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
   return low + sexscriptLegacyRandom(high - low)
 }
 say "Roll ${getRandom(3, 6)}"
