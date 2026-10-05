@@ -3,24 +3,55 @@
  * `images/`, and `sounds/`) into a root of TeaseScript packages that the playground server offers with
  * `PLAYGROUND_PACKAGES`.
  *
- * Usage: node tools/convert-corpus.ts [--jobs N] [--only id,id] [--report-only] <corpus-root> <converted-root>
+ * Usage: node tools/convert-corpus.ts [--jobs N] [--only id,id] [--report-only] [--patches dir] <corpus-root>
+ *   <converted-root>
  *
- * Each package is converted by `src/cli.ts convert-package`, and `src/cli.ts report --run` writes its report to
- * `.report.json` in the package folder; `--report-only` writes only the reports of packages already converted. Legacy scripts name images relative to `images/` and
+ * Each package is converted by `src/cli.ts convert-package`, and `src/cli.ts report --run --package` writes its report
+ * to `.report.json` in the package folder, with `finalPackage` checking the files as written; `--report-only` writes
+ * only the reports of packages already converted. Manual patches of a unit (`patches/<unit>/patches.json`, see
+ * `unit-patches.ts`; `--patches` names another folder) apply to a staged copy of its sources before conversion and to
+ * the generated files after it. A unit is converted in `<converted-root>/.staging/<unit>/` and replaces its published
+ * folder only when every step succeeded; otherwise the previous output stays and `.failures/<unit>.json` says why.
+ * `.conversion.json` records the converter commit, the hashes of the legacy scripts, and the patches applied.
+ *
+ * Legacy scripts name images relative to `images/` and
  * sounds relative to `sounds/`, while a TeaseScript package names its files from the package root (ADR 0022), so both
  * media trees are hard-linked into the package root. Resource packs (folders without scripts) are linked into the
  * script packages that name their media folders (see `resourcePackTargets`). Links are hard links, never copies.
  */
 import { execFile } from "node:child_process";
-import { link, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+  copyFile,
+  link,
+  mkdir,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  applyOutputPatches,
+  applySourcePatches,
+  readUnitPatches,
+  sha256,
+  sourcePatchPaths,
+  type UnitPatches,
+} from "./unit-patches.ts";
 
 const MEDIA_FOLDERS = ["images", "sounds"] as const;
 /** The General MIDI soundfont that renders MIDI files (Debian `fluid-soundfont-gm`, else `timgm6mb-soundfont`). */
 const SOUNDFONTS = ["/usr/share/sounds/sf2/FluidR3_GM.sf2", "/usr/share/sounds/sf2/TimGM6mb.sf2"];
 const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
+/** The manual unit patches, `patches/<unit>/patches.json`. */
+const PATCHES = fileURLToPath(new URL("../patches", import.meta.url));
+/** Hidden folders of the converted root: units being converted, and why a unit kept its previous output. */
+const STAGING = ".staging";
+const FAILURES = ".failures";
 
 /** One file of a resource pack, by its path from the pack's media folder, with the packages it is linked into. */
 export interface ResourceFileTarget {
@@ -30,9 +61,15 @@ export interface ResourceFileTarget {
   readonly packages: readonly string[];
 }
 
-/** What the conversion of one package did; written as `.conversion.json` in the package folder. */
-interface ConversionRecord {
+/** What the conversion of one package did and from what; written as `.conversion.json` in the package folder. */
+export interface ConversionRecord {
   readonly source: string;
+  /** The importer commit of the converter code, marked `-modified` when it had uncommitted changes. */
+  readonly converter: string;
+  /** SHA-256 of each legacy script before patches, by its path from the unit folder. */
+  readonly inputs: Readonly<Record<string, string>>;
+  /** The manual patches applied, in order, with the SHA-256 of each diff file or output-patch entry. */
+  readonly patches: ReadonlyArray<{ id: string; layer: "source" | "output"; sha256: string }>;
   readonly exitCode: number;
   readonly linkedMedia: number;
   readonly linkedResourceMedia: number;
@@ -41,23 +78,49 @@ interface ConversionRecord {
   readonly resourcePacks: readonly string[];
 }
 
+export interface UnitOptions {
+  readonly corpusRoot: string;
+  readonly outputRoot: string;
+  readonly id: string;
+  readonly resources: readonly ResourceFileTarget[];
+  readonly patchesRoot: string;
+  /** Recorded as `converter` in `.conversion.json`. */
+  readonly converter: string;
+}
+
+/** Why a unit kept its previous output: the step that failed and its message. */
+export interface UnitFailure {
+  readonly stage: string;
+  readonly message: string;
+}
+
+export type UnitResult =
+  | {
+      readonly converted: true;
+      readonly record: ConversionRecord;
+      readonly report: "ok" | "failed";
+    }
+  | { readonly converted: false; readonly failure: UnitFailure };
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));
 
 async function main(rawArgs: string[]): Promise<void> {
   let jobs = 3;
   let only: Set<string> | null = null;
   let reportOnly = false;
+  let patchesRoot = PATCHES;
   const args: string[] = [];
   for (let index = 0; index < rawArgs.length; index += 1) {
     const arg = rawArgs[index]!;
     if (arg === "--jobs") jobs = Number(rawArgs[++index]);
     else if (arg === "--only") only = new Set(rawArgs[++index]!.split(","));
     else if (arg === "--report-only") reportOnly = true;
+    else if (arg === "--patches") patchesRoot = path.resolve(rawArgs[++index] ?? "");
     else args.push(arg);
   }
   if (args.length !== 2 || !Number.isInteger(jobs) || jobs < 1) {
     process.stderr.write(
-      "Usage: node tools/convert-corpus.ts [--jobs N] [--only id,id] [--report-only] <corpus-root> <converted-root>\n",
+      "Usage: node tools/convert-corpus.ts [--jobs N] [--only id,id] [--report-only] [--patches dir] <corpus-root> <converted-root>\n",
     );
     process.exit(2);
   }
@@ -66,13 +129,10 @@ async function main(rawArgs: string[]): Promise<void> {
   const scriptPackages: Array<{ id: string; scripts: string[] }> = [];
   const resourcePacks: string[] = [];
   for (const id of await folders(corpusRoot)) {
-    const scriptsRoot = path.join(corpusRoot, id, "scripts");
     const mediaRoots = await Promise.all(
       MEDIA_FOLDERS.map((media) => mediaRoot(corpusRoot, id, media)),
     );
-    const scripts = (await files(scriptsRoot)).filter(
-      (file) => isGroovy(file) && !mediaRoots.some((root) => file.startsWith(`${root}${path.sep}`)),
-    );
+    const scripts = await unitScripts(corpusRoot, id);
     if (scripts.length > 0) scriptPackages.push({ id, scripts });
     else if ((await Promise.all(mediaRoots.map((root) => hasFiles(root)))).some(Boolean))
       resourcePacks.push(id);
@@ -98,23 +158,38 @@ async function main(rawArgs: string[]): Promise<void> {
   await mkdir(outputRoot, { recursive: true });
   const importer = await importerVersion();
   const records = new Map<string, ConversionRecord>();
+  const failures = new Map<string, UnitFailure>();
   let next = 0;
   let done = 0;
   await Promise.all(
     Array.from({ length: Math.min(jobs, selected.length) }, async () => {
       while (next < selected.length) {
         const { id } = selected[next++]!;
-        let progress = "";
-        if (!reportOnly) {
-          const record = await convertOne(corpusRoot, outputRoot, id, byPackage.get(id) ?? []);
+        const options: UnitOptions = {
+          corpusRoot,
+          outputRoot,
+          id,
+          resources: byPackage.get(id) ?? [],
+          patchesRoot,
+          converter: importer,
+        };
+        const result = reportOnly ? await reportUnit(options) : await convertUnit(options);
+        let progress: string;
+        if (typeof result === "string") progress = `report ${result}`;
+        else if (!result.converted) {
+          failures.set(id, result.failure);
+          progress = `FAILED at ${result.failure.stage}, previous output kept: ${result.failure.message}`;
+        } else {
+          const { record } = result;
           records.set(id, record);
-          progress = `exit ${record.exitCode}, ${record.linkedMedia + record.linkedResourceMedia} media linked, `;
+          progress = `exit ${record.exitCode}, ${record.linkedMedia + record.linkedResourceMedia} media linked, ${record.patches.length} patches, report ${result.report}`;
         }
-        progress += `report ${await reportOne(corpusRoot, outputRoot, id)}`;
         process.stderr.write(`${++done}/${selected.length} ${id}: ${progress}\n`);
       }
     }),
   );
+  await rm(path.join(outputRoot, STAGING), { recursive: true, force: true });
+  if (failures.size > 0) process.exitCode = 1;
   const summaryPath = path.join(outputRoot, ".conversion-summary.json");
   if (reportOnly) {
     if (only === null) {
@@ -141,29 +216,156 @@ async function main(rawArgs: string[]): Promise<void> {
     resourcePacks: resourcePacks.length,
     unattachedResourcePacks: unattached,
     collisions: [...records.values()].reduce((sum, record) => sum + record.collisions.length, 0),
+    patched: [...records.values()].filter((record) => record.patches.length > 0).length,
+    failed: Object.fromEntries(failures),
   };
   if (only === null) await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
   process.stderr.write(`${JSON.stringify(summary, null, 2)}\n`);
 }
 
-async function convertOne(
-  corpusRoot: string,
-  outputRoot: string,
-  id: string,
-  resources: readonly ResourceFileTarget[],
-): Promise<ConversionRecord> {
-  const packageRoot = path.join(outputRoot, id);
-  // Removing the folder removes only generated text and links; the corpus keeps its media.
-  await rm(packageRoot, { recursive: true, force: true });
-  await mkdir(packageRoot, { recursive: true });
-  const { exitCode, stderr } = await run(process.execPath, [
-    cliPath,
-    "convert-package",
-    path.join(corpusRoot, id, "scripts"),
-    packageRoot,
-  ]);
-  await writeFile(path.join(packageRoot, ".conversion.log"), stderr);
+/** Converts one unit in a staging folder and replaces its published output only when every step succeeded. */
+export async function convertUnit(options: UnitOptions): Promise<UnitResult> {
+  const { id } = options;
+  const corpusRoot = path.resolve(options.corpusRoot);
+  const outputRoot = path.resolve(options.outputRoot);
+  const stage = path.join(outputRoot, STAGING, id);
+  const packageRoot = path.join(stage, "package");
+  const published = path.join(outputRoot, id);
+  await rm(stage, { recursive: true, force: true });
+  let step = "patches";
+  try {
+    const patches = await readUnitPatches(options.patchesRoot, id);
+    step = "source patch";
+    const unitRoot = await patchedUnit(corpusRoot, id, stage, patches);
+    step = "conversion";
+    await mkdir(packageRoot, { recursive: true });
+    const { exitCode, stderr } = await run(process.execPath, [
+      cliPath,
+      "convert-package",
+      path.join(unitRoot, "scripts"),
+      packageRoot,
+    ]);
+    // Exit code 1 also means converted with TODOs; without the closing line, the converter itself failed.
+    if (!/^Converted \d+ SexScript source file/mu.test(stderr))
+      throw new Error(stderr.trim().split("\n").slice(-5).join("\n") || `exit ${exitCode}`);
+    await writeFile(
+      path.join(packageRoot, ".conversion.log"),
+      stderr.replaceAll(packageRoot, published).replaceAll(unitRoot, path.join(corpusRoot, id)),
+    );
+    step = "media";
+    const media = await linkMedia(corpusRoot, id, packageRoot, options.resources);
+    step = "output patch";
+    if (patches !== null) await applyOutputPatches(packageRoot, patches);
+    step = "report";
+    const report = await unitReport(unitRoot, packageRoot);
+    const record: ConversionRecord = {
+      source: path.join(corpusRoot, id),
+      converter: options.converter,
+      inputs: await inputHashes(corpusRoot, id),
+      patches:
+        patches === null
+          ? []
+          : patches.patches.map(({ id: patchId, layer }) => ({
+              id: patchId,
+              layer,
+              sha256: patches.hashes.get(patchId)!,
+            })),
+      exitCode,
+      ...media,
+    };
+    await writeFile(path.join(packageRoot, ".report.json"), `${JSON.stringify(report.json)}\n`);
+    await writeFile(
+      path.join(packageRoot, ".conversion.json"),
+      `${JSON.stringify(record, null, 2)}\n`,
+    );
+    step = "replacement";
+    const previous = path.join(stage, "previous");
+    const hadPrevious = (await stat(published).catch(() => null)) !== null;
+    if (hadPrevious) await rename(published, previous);
+    try {
+      await rename(packageRoot, published);
+    } catch (error) {
+      if (hadPrevious) await rename(previous, published);
+      throw error;
+    }
+    await rm(failurePath(outputRoot, id), { force: true });
+    return { converted: true, record, report: report.ok ? "ok" : "failed" };
+  } catch (error) {
+    return { converted: false, failure: await recordFailure(outputRoot, id, step, error) };
+  } finally {
+    // The staging folder holds generated text and links, and after a replacement the previous output.
+    await rm(stage, { recursive: true, force: true });
+  }
+}
 
+/**
+ * Writes a new `.report.json` for a unit already converted, from its patched sources and its package as written;
+ * on a failure, the previous report stays.
+ */
+export async function reportUnit(options: UnitOptions): Promise<UnitResult | "ok" | "failed"> {
+  const { id } = options;
+  const corpusRoot = path.resolve(options.corpusRoot);
+  const outputRoot = path.resolve(options.outputRoot);
+  const stage = path.join(outputRoot, STAGING, id);
+  await rm(stage, { recursive: true, force: true });
+  let step = "patches";
+  try {
+    const patches = await readUnitPatches(options.patchesRoot, id);
+    step = "source patch";
+    const unitRoot = await patchedUnit(corpusRoot, id, stage, patches);
+    step = "report";
+    const published = path.join(outputRoot, id);
+    const report = await unitReport(unitRoot, published);
+    const temporary = path.join(published, ".report.json.tmp");
+    await writeFile(temporary, `${JSON.stringify(report.json)}\n`);
+    await rename(temporary, path.join(published, ".report.json"));
+    return report.ok ? "ok" : "failed";
+  } catch (error) {
+    return { converted: false, failure: await recordFailure(outputRoot, id, step, error) };
+  } finally {
+    await rm(stage, { recursive: true, force: true });
+  }
+}
+
+/**
+ * The unit folder to convert: the corpus unit itself, or with source patches a staged copy whose media are hard links
+ * and whose patched files are copies of their own.
+ */
+async function patchedUnit(
+  corpusRoot: string,
+  id: string,
+  stage: string,
+  patches: UnitPatches | null,
+): Promise<string> {
+  const original = path.join(corpusRoot, id);
+  const diffs = (patches?.patches ?? []).filter((patch) => patch.layer === "source");
+  if (patches === null || diffs.length === 0) return original;
+  const staged = path.join(stage, "source", id);
+  await mkdir(path.dirname(staged), { recursive: true });
+  const copied = await run("cp", ["-al", original, staged]);
+  if (copied.exitCode !== 0) throw new Error(`cannot stage ${original}: ${copied.stderr.trim()}`);
+  for (const patch of diffs) {
+    const diff = await readFile(path.join(patches.folder, patch.diff), "utf8");
+    for (const file of sourcePatchPaths(diff, patch.diff)) {
+      const target = path.join(staged, file);
+      if ((await stat(target).catch(() => null)) === null) continue;
+      await rm(target);
+      await copyFile(path.join(original, file), target);
+    }
+  }
+  await applySourcePatches(staged, patches);
+  return staged;
+}
+
+/** Hard-links a unit's media and the resource-pack files it names into its package; renders MIDI files to MP3. */
+async function linkMedia(
+  corpusRoot: string,
+  id: string,
+  packageRoot: string,
+  resources: readonly ResourceFileTarget[],
+): Promise<
+  Pick<ConversionRecord, "linkedMedia" | "linkedResourceMedia" | "collisions" | "resourcePacks">
+> {
   const collisions: string[] = [];
   let linkedMedia = 0;
   for (const media of MEDIA_FOLDERS) {
@@ -187,31 +389,24 @@ async function convertOne(
       packs.add(resource.pack);
     } else if (result === "taken") collisions.push(`${resource.pack}: ${resource.relative}`);
   }
-  const record: ConversionRecord = {
-    source: path.join(corpusRoot, id),
-    exitCode,
-    linkedMedia,
-    linkedResourceMedia,
-    collisions,
-    resourcePacks: [...packs].sort(),
-  };
-  await writeFile(
-    path.join(packageRoot, ".conversion.json"),
-    `${JSON.stringify(record, null, 2)}\n`,
-  );
-  return record;
+  return { linkedMedia, linkedResourceMedia, collisions, resourcePacks: [...packs].sort() };
 }
 
 /**
- * Writes the importer's report of a package, with compiler checks and smoke runs, as `.report.json`; on failure, the
- * error instead. Returns `ok` or `failed`.
+ * The importer's report of a unit's sources, with compiler checks and smoke runs, and with `finalPackage` checking
+ * the package as written; on failure, the error instead.
  */
-async function reportOne(corpusRoot: string, outputRoot: string, id: string): Promise<string> {
+async function unitReport(
+  unitRoot: string,
+  packageRoot: string,
+): Promise<{ json: Record<string, unknown>; ok: boolean }> {
   const { exitCode, stdout, stderr } = await run(process.execPath, [
     cliPath,
     "report",
     "--run",
-    path.join(corpusRoot, id, "scripts"),
+    "--package",
+    packageRoot,
+    path.join(unitRoot, "scripts"),
   ]);
   let report: Record<string, unknown> | null;
   try {
@@ -220,9 +415,51 @@ async function reportOne(corpusRoot: string, outputRoot: string, id: string): Pr
   } catch {
     report = null;
   }
-  const result = report ?? { error: stderr.slice(-2000) || `exit ${exitCode}` };
-  await writeFile(path.join(outputRoot, id, ".report.json"), `${JSON.stringify(result)}\n`);
-  return report === null ? "failed" : "ok";
+  return report === null
+    ? { json: { error: stderr.slice(-2000) || `exit ${exitCode}` }, ok: false }
+    : { json: report, ok: true };
+}
+
+/** SHA-256 of each legacy script of a unit, by its path from the unit folder. */
+async function inputHashes(corpusRoot: string, id: string): Promise<Record<string, string>> {
+  const unitRoot = path.join(corpusRoot, id);
+  const hashes: Record<string, string> = {};
+  for (const file of await unitScripts(corpusRoot, id))
+    hashes[toPosix(path.relative(unitRoot, file))] = sha256(await readFile(file));
+  return hashes;
+}
+
+/** The Groovy scripts of a unit, outside its media folders. */
+async function unitScripts(corpusRoot: string, id: string): Promise<string[]> {
+  const mediaRoots = await Promise.all(
+    MEDIA_FOLDERS.map((media) => mediaRoot(corpusRoot, id, media)),
+  );
+  return (await files(path.join(corpusRoot, id, "scripts"))).filter(
+    (file) => isGroovy(file) && !mediaRoots.some((root) => file.startsWith(`${root}${path.sep}`)),
+  );
+}
+
+function failurePath(outputRoot: string, id: string): string {
+  return path.join(outputRoot, FAILURES, `${id}.json`);
+}
+
+/** Records why a unit kept its previous output in `.failures/<unit>.json`. */
+async function recordFailure(
+  outputRoot: string,
+  id: string,
+  stage: string,
+  error: unknown,
+): Promise<UnitFailure> {
+  const failure: UnitFailure = {
+    stage,
+    message: error instanceof Error ? error.message : String(error),
+  };
+  await mkdir(path.join(outputRoot, FAILURES), { recursive: true });
+  await writeFile(
+    failurePath(outputRoot, id),
+    `${JSON.stringify({ unit: id, ...failure, at: new Date().toISOString() }, null, 2)}\n`,
+  );
+  return failure;
 }
 
 /**
