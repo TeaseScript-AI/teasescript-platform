@@ -75,10 +75,12 @@ checkpoint restore, time observation, and resumed execution. Compiler containmen
 stack exhaustion outside these repaired paths. Fixture depths are diagnostic evidence, not supported-capacity
 claims or language limits.
 
-Checkpoint capture, restore, and the public `serializeCheckpoint` path use iterative traversal for validated
-checkpoint data, preserving JSON wire ordering and scalar representation without introducing a depth rejection
-policy. Callers using native `JSON.stringify` remain outside that guarantee. Constrained-stack list and object
-regressions verify the complete public JSON checkpoint/resume route.
+Checkpoint capture and restore use iterative traversal for validated checkpoint data. The public `serializeCheckpoint`
+path writes the validated data with native `JSON.stringify`, and with an iterative writer of the same bytes when the
+host stack is exhausted or an inherited `toJSON` hook could apply, preserving JSON wire ordering and scalar
+representation without introducing a depth rejection policy. Callers using native `JSON.stringify` themselves remain
+outside that guarantee. Constrained-stack list and object regressions verify the complete public JSON
+checkpoint/resume route.
 
 ## Non-rejecting scale diagnostics
 
