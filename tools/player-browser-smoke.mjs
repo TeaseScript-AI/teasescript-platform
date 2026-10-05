@@ -33,6 +33,8 @@ const MODEL_PATHS_CATALOG = {
   problems: [],
 };
 
+const LAN_HOST = "player-lan.test";
+
 await main();
 
 async function main() {
@@ -76,6 +78,8 @@ async function main() {
     // scenario through CDP.
     "--use-fake-device-for-media-stream",
     `--use-file-for-fake-video-capture=${cameraFeed}`,
+    // A local-network name for the same server: plain HTTP there is not a secure context, unlike 127.0.0.1.
+    `--host-resolver-rules=MAP ${LAN_HOST} 127.0.0.1`,
     `--remote-debugging-port=${debugPort}`,
     "--remote-allow-origins=*",
     `--user-data-dir=${profile}`,
@@ -105,6 +109,7 @@ async function main() {
       await narrowScenario(cdp);
       await scriptStorageScenario(cdp, origin);
       await demoScenario(cdp, origin);
+      await insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`);
       await packageScenario(cdp, origin);
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
@@ -559,6 +564,25 @@ async function scriptStorageScenario(cdp, origin) {
 
 // Plays the repository demo on the maintained /player/ route of the built Player with trusted input, so the Start
 // click is the user activation its audio relies on. Checks rely on the demo's authored text and timer labels.
+// The Player also runs over plain HTTP on a local network, where browsers withhold secure-context APIs such as
+// crypto.randomUUID; it must still start and play.
+async function insecureOriginScenario(cdp, origin) {
+  await navigate(cdp, `${origin}/player/`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  assertEqual(
+    await value(cdp, `window.isSecureContext`),
+    false,
+    "The local-network origin is secure",
+  );
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    `document.querySelectorAll('.transcript-entry').length > 0`,
+    8_000,
+    "The Player did not start over plain HTTP",
+  );
+}
+
 async function demoScenario(cdp, origin) {
   const {
     result: { identifier },
