@@ -67,6 +67,7 @@ export type HelperName =
   | "packagePath"
   | "pathTag"
   | "items"
+  | "itemAt"
   | "sendImage"
   | "switchButton"
   | "switchButtonId"
@@ -139,6 +140,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "packagePath",
   "pathTag",
   "items",
+  "itemAt",
   "tokenize",
   "sendImage",
   "switchButtonId",
@@ -526,6 +528,19 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ],
           ),
           ret(v("tag")),
+        ],
+      ),
+  },
+  // A list element as Groovy read it: null past the end.
+  itemAt: {
+    name: "sexscriptLegacyItemAt",
+    build: () =>
+      fn(
+        "sexscriptLegacyItemAt",
+        ["list", "position"],
+        [
+          ifS(bin(">=", v("position"), prop(v("list"), "length")), [ret(lit(null))]),
+          ret(at(v("list"), v("position"))),
         ],
       ),
   },

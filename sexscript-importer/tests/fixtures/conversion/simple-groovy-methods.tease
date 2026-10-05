@@ -1,8 +1,27 @@
+function sexscriptLegacyRandom(limit) {
+  if limit == null {
+    return randomInteger(0..100)
+  }
+  let bound = limit - limit % 1
+  if bound > 0 {
+    return randomInteger(0..bound)
+  }
+  if bound < 0 {
+    return -randomInteger(0..-bound)
+  }
+  return 0
+}
 function sexscriptLegacyItems(value) {
   if value is string {
     return value.split("")
   }
   return value
+}
+function sexscriptLegacyItemAt(listValue, positionValue) {
+  if positionValue >= listValue.length {
+    return null
+  }
+  return listValue[positionValue]
 }
 // equals() compares values like ==.
 let name = "Anna"
@@ -50,4 +69,11 @@ function spell(text) {
   return shown
 }
 say spell(word)
+// Groovy read null one past the end of a list, which a 1-based random pick relies on.
+let positions = [" ", "otk"]
+let pick = sexscriptLegacyRandom(positions.length) + 1
+// NOTE SX_INDEX_PAST_END line 39: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+if sexscriptLegacyItemAt(positions, pick) == "otk" {
+  say "Over my knee"
+}
 exit

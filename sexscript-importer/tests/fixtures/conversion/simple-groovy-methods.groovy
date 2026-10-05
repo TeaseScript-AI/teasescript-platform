@@ -33,3 +33,7 @@ def spell = { text ->
   return shown
 }
 show(spell(word))
+// Groovy read null one past the end of a list, which a 1-based random pick relies on.
+def positions = [" ", "otk"]
+def pick = getRandom(positions.size()) + 1
+if (positions[pick] == "otk") show("Over my knee")

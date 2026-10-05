@@ -5246,6 +5246,36 @@ function lowerIterated(
   };
 }
 
+/**
+ * Whether a list position can be one past the end: a random position plus a positive number, `getRandom(n) + 1` for a
+ * 1-based pick, a list's size, or a variable assigned one of these.
+ */
+function mayIndexPastEnd(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
+  if (node.kind === "binary" && text(node.operator) === "+") {
+    const [left, right] = [asNode(node.left), asNode(node.right)];
+    const random = (side: AstNode | null): boolean =>
+      side?.kind === "methodCall" &&
+      ["getRandom", "nextInt"].includes(constantString(side.method) ?? "");
+    const positive = (side: AstNode | null): boolean => {
+      const value = side === null ? undefined : constantValue(side);
+      return typeof value === "number" && value > 0;
+    };
+    return (random(left) && positive(right)) || (random(right) && positive(left));
+  }
+  if (node.kind === "methodCall" && constantString(node.method) === "size") return true;
+  if (node.kind === "property" && ["size", "length"].includes(constantString(node.property) ?? ""))
+    return true;
+  if (node.kind === "variable") {
+    const key = bindingKey(node, context.bindings);
+    if (key === null || seen.has(key)) return false;
+    seen.add(key);
+    return (context.assignedValues.get(key) ?? []).some((value) =>
+      mayIndexPastEnd(value, context, seen),
+    );
+  }
+  return false;
+}
+
 /** Methods whose results are whole numbers. */
 const WHOLE_NUMBER_METHODS = new Set([
   "size",
@@ -6554,6 +6584,17 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     }
     const index = lowerExpression(indexNode, context);
     if (index === null) return null;
+    // Groovy read null past the end of a list, which code that picks `getRandom(size) + 1` relies on.
+    if (!context.writeTargets.has(node) && mayIndexPastEnd(indexNode, context)) {
+      addDiagnostic(
+        context,
+        "SX_INDEX_PAST_END",
+        "warning",
+        "This position can be one past the end of the list, where Groovy read null; a helper reads null there too.",
+        node.span,
+      );
+      return useHelper(context, "itemAt", [target, index]);
+    }
     return { kind: "index", target, index };
   }
   if (operator === "&&" || operator === "||") {
