@@ -1306,7 +1306,8 @@ export function lowerParsedFile(
   const typedStatements = withLegacyMarkup(
     withEnforcedTypes(
       [
-        ...(mixin === null ? bindingDeclarations(body, context) : []),
+        // A module's `object.name`, without its receiver, is the script object's member, not a binding variable.
+        ...bindingDeclarations(body, context, mixin?.receiverMembers),
         ...context.closureFunctions,
         ...authoredStatements,
       ],
@@ -13105,7 +13106,7 @@ export function describeMixinModule(file: ParsedGroovyFile): MixinModuleInfo | n
 function desugarMixinModule(
   body: AstNode,
   sourceName: string,
-): { body: AstNode; info: MixinModuleInfo } | null {
+): { body: AstNode; info: MixinModuleInfo; receiverMembers: Set<string> } | null {
   const shape = mixinShape(body);
   const info =
     shape === null
@@ -13224,7 +13225,7 @@ function desugarMixinModule(
   const statements = [...globals, ...members].sort(
     (left, right) => (left.span?.line ?? 0) - (right.span?.line ?? 0),
   );
-  return { body: { ...body, statements }, info };
+  return { body: { ...body, statements }, info, receiverMembers };
 }
 
 /** Renames plain variable references; member accesses such as `object.name` keep their property names. */
@@ -13310,6 +13311,86 @@ function desugarObjectScript(
 }
 
 /**
+ * Methods without the overloads that only cast their parameters for another method of the same name and arity, such
+ * as `void adjust(double p) { adjust((int) p) }` beside `void adjust(int p) { ... }`: TeaseScript has one function per
+ * name, so the method they called starts by casting those parameters itself, as the dropped overload did.
+ */
+function withoutCastOverloads(methods: AstNode[]): AstNode[] {
+  const targets = new Map<AstNode, { target: AstNode; casts: Array<string | null> }>();
+  for (const method of methods) {
+    const statements = nodeArray(asNode(method.body)?.statements);
+    const only = statements.length === 1 ? statements[0]! : null;
+    const call = asNode(only?.kind === "return" ? only.value : only?.expression);
+    const parameters = parameterRecords(method).map((parameter) => text(parameter.name));
+    if (call?.kind !== "methodCall" || call.implicitThis !== true) continue;
+    if (constantString(call.method) !== method.name) continue;
+    const items = nodeArray(asNode(call.arguments)?.items);
+    if (items.length !== parameters.length) continue;
+    const casts = items.map((item, index) =>
+      item.kind === "cast" && variableName(asNode(item.value)) === parameters[index]
+        ? text(item.type)
+        : variableName(item) === parameters[index]
+          ? null
+          : undefined,
+    );
+    if (casts.includes(undefined) || casts.every((cast) => cast === null)) continue;
+    // The called overload takes the cast types where the call casts.
+    const target = methods.filter(
+      (other) =>
+        other !== method &&
+        other.name === method.name &&
+        parameterRecords(other).length === parameters.length &&
+        casts.every(
+          (cast, index) => cast === null || text(parameterRecords(other)[index]?.type) === cast,
+        ),
+    );
+    if (target.length === 1)
+      targets.set(method, { target: target[0]!, casts: casts.map((cast) => cast ?? null) });
+  }
+  if (targets.size === 0) return methods;
+  return methods.flatMap((method) => {
+    if (targets.has(method) && !targets.has(targets.get(method)!.target)) return [];
+    const casts = [...targets.values()].filter(({ target }) => target === method);
+    if (casts.length === 0) return [method];
+    const span = method.span ?? null;
+    const names = parameterRecords(method).map((parameter) => text(parameter.name));
+    const types = names.map(
+      (_, index) => casts.find((cast) => cast.casts[index] !== null)?.casts[index] ?? null,
+    );
+    const conversions = names.flatMap((name, index): AstNode[] => {
+      const type = types[index];
+      if (name === null || type === null || type === undefined) return [];
+      const variable = (): AstNode => ({ kind: "variable", span, name, type: "java.lang.Object" });
+      return [
+        {
+          kind: "expressionStatement",
+          span,
+          expression: {
+            kind: "binary",
+            span,
+            operator: "=",
+            left: variable(),
+            right: { kind: "cast", span, type, value: variable() },
+          },
+        },
+      ];
+    });
+    const body = asNode(method.body);
+    return [
+      {
+        ...method,
+        body: { ...body, statements: [...conversions, ...nodeArray(body?.statements)] },
+      },
+    ];
+  });
+}
+
+/** A method's or closure's parameters, plain records with a name and a type. */
+function parameterRecords(node: AstNode): Array<Record<string, unknown>> {
+  return Array.isArray(node.parameters) ? node.parameters.filter(isRecord) : [];
+}
+
+/**
  * An object script's statements before the construction, its fields and other methods as declarations, and the entry
  * method's statements; null when the body does not end by constructing one of its classes and calling a method
  * without arguments.
@@ -13331,7 +13412,7 @@ function objectScriptParts(
   const objectClass = classes.find((item) => item.name === constructor?.type);
   const callArguments = call === null ? [] : nodeArray(asNode(call.arguments)?.items);
   if (constructor?.kind !== "constructorCall" || objectClass === undefined) return null;
-  const methods = nodeArray(objectClass.methods);
+  const methods = withoutCastOverloads(nodeArray(objectClass.methods));
   const entry = methods.find((method) => method.name === entryName);
   const entryBody = asNode(entry?.body);
   if (entry === undefined || entryBody?.kind !== "block" || callArguments.length > 0) return null;
@@ -14254,37 +14335,56 @@ function formatText(
  * Variables a closure assigns that nothing declares: Groovy kept them in the script's binding, shared by every
  * closure, so they are declared at the top of the script, starting with their type's empty value.
  */
-function bindingDeclarations(body: AstNode | null, context: LowerContext): IrStatement[] {
+function bindingDeclarations(
+  body: AstNode | null,
+  context: LowerContext,
+  members: ReadonlySet<string> = new Set(),
+): IrStatement[] {
   if (body === null || context.functionDepth > 0) return [];
+  // The names each closure declares itself (its parameters, also the implicit `it`, its locals, and loop variables),
+  // and the names the script body declares or assigns outside closures.
   const declared = new Set<string>();
-  const assigned = new Map<string, AstNode>();
-  const visit = (node: AstNode, insideClosure: boolean): void => {
-    if (node.kind === "declaration") {
-      const name = variableName(node.left);
-      if (name !== null) declared.add(name);
-    }
-    if (node.kind === "closure")
+  const scopes = new Map<AstNode, Set<string>>();
+  const collect = (node: AstNode, scope: Set<string>, insideClosure: boolean): void => {
+    if (node.kind === "closure") {
+      const own = new Set<string>();
       for (const parameter of Array.isArray(node.parameters) ? node.parameters : [])
-        if (isRecord(parameter) && typeof parameter.name === "string") declared.add(parameter.name);
-    if (node.kind === "for") {
-      const name = text(node.variable);
-      if (name !== null) declared.add(name);
+        if (isRecord(parameter) && typeof parameter.name === "string") own.add(parameter.name);
+      if (node.parameterSpecified !== true) own.add("it");
+      scopes.set(node, own);
+      for (const child of nodeChildren(node)) collect(child, own, true);
+      return;
     }
-    if (!insideClosure && node.kind === "binary" && node.operator === "=") {
-      // A top-level assignment declares the variable there.
-      const name = variableName(node.left);
-      if (name !== null) declared.add(name);
-    }
-    if (insideClosure && node.kind === "binary" && node.operator === "=") {
-      const name = variableName(node.left);
-      if (name !== null && !assigned.has(name)) assigned.set(name, node);
-    }
-    for (const child of nodeChildren(node)) visit(child, insideClosure || node.kind === "closure");
+    const name =
+      node.kind === "declaration"
+        ? variableName(node.left)
+        : node.kind === "for"
+          ? text(node.variable)
+          : // A top-level assignment declares the variable there.
+            !insideClosure && node.kind === "binary" && node.operator === "="
+            ? variableName(node.left)
+            : null;
+    if (name !== null) scope.add(name);
+    for (const child of nodeChildren(node)) collect(child, scope, insideClosure);
   };
-  visit(body, false);
+  collect(body, declared, false);
+  // A closure's assignment to a name that neither it nor a closure around it declares writes the binding.
+  const assigned = new Map<string, AstNode>();
+  const visit = (node: AstNode, enclosing: ReadonlyArray<Set<string>>): void => {
+    const inner =
+      node.kind === "closure" ? [...enclosing, scopes.get(node) ?? new Set<string>()] : enclosing;
+    if (inner.length > 0 && node.kind === "binary" && node.operator === "=") {
+      const name = variableName(node.left);
+      if (name !== null && !assigned.has(name) && !inner.some((scope) => scope.has(name)))
+        assigned.set(name, node);
+    }
+    for (const child of nodeChildren(node)) visit(child, inner);
+  };
+  visit(body, []);
   const names = [...assigned.keys()].filter(
     (name) =>
       !declared.has(name) &&
+      !members.has(name) &&
       !context.functions.has(name) &&
       !context.packageFunctions.has(name) &&
       !isLegacyGetterProperty(name),
