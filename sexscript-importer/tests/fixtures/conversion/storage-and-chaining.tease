@@ -46,8 +46,15 @@ say "Hello ${greeting}"
 if sexscriptLegacyCompare(load "training.level", 3) < 0 {
   say "Still a beginner"
 }
+// So did a function that returns a stored value.
+function rank {
+  return load "training.rank"
+}
+if sexscriptLegacyCompare(rank(), 2) >= 0 {
+  say "Ranked"
+}
 // A read from the legacy online service, too.
-// NOTE SX_ONLINE_STORAGE line 19: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
+// NOTE SX_ONLINE_STORAGE line 22: The legacy online service kept this value on a server, shared by the script's players and sessions; it is kept in the package's storage here (owner decision 2026-10-05), so only this player's sessions share it.
 let record = load "training.record"
 if sexscriptLegacyCompare(record, 10) >= 0 {
   say "A new record"
@@ -56,7 +63,7 @@ if sexscriptLegacyCompare(record, 10) >= 0 {
 say "Keep the streak?"
 if (choose yes: "Yes", no: "No") == "yes" {
   let streak = 0
-  // NOTE SX_LOAD_KEEPS_VALUE line 24: Groovy stored null in 'streak' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
+  // NOTE SX_LOAD_KEEPS_VALUE line 27: Groovy stored null in 'streak' when this key was missing, which the variable's type cannot hold; the variable keeps its value then.
   streak = load "training.streak", default: streak
   say "Streak ${streak + 1}"
 } else {

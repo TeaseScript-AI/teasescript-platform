@@ -15,6 +15,9 @@ greeting = load("training.greeting")
 show("Hello " + greeting)
 // Groovy ordered a missing storage value, null, below every value.
 if (loadInteger("training.level") < 3) show("Still a beginner")
+// So did a function that returns a stored value.
+def rank = { -> return loadInteger("training.rank") }
+if (rank() >= 2) show("Ranked")
 // A read from the legacy online service, too.
 def record = receiveInteger("training.record")
 if (record >= 10) show("A new record")

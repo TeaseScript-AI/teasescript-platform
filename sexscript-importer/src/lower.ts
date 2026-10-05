@@ -6916,7 +6916,16 @@ function mayBeZero(node: AstNode, context: LowerContext, seen = new Set<string>(
 function mayReadNull(node: AstNode, context: LowerContext): boolean {
   if (node.kind === "methodCall") {
     const name = legacyApiCall(node, context)?.name ?? "";
-    return DIRECT_STORAGE_LOADS.has(name) || ONLINE_LOADS.has(name);
+    if (DIRECT_STORAGE_LOADS.has(name) || ONLINE_LOADS.has(name)) return true;
+    // A function of the package whose returns include null, such as a stored value or a `return null`.
+    const call = callParts(node);
+    if (
+      call?.inherited !== true ||
+      !(context.functions.has(call.name) || context.packageFunctions.has(call.name))
+    )
+      return false;
+    const type = inferType(node, context.types);
+    return type !== UNKNOWN && (type & NULL) !== 0;
   }
   if (node.kind !== "variable") return false;
   const key = bindingKey(node, context.bindings);
@@ -8568,7 +8577,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       context,
       "SX_NULL_ORDER",
       "info",
-      "A side of this comparison may be a storage value that is missing; Groovy ordered null below every value, so a helper compares the sides as Groovy did.",
+      "A side of this comparison may be null, such as a missing storage value or a function's null result; Groovy ordered null below every value, so a helper compares the sides as Groovy did.",
       node.span,
     );
     return {
