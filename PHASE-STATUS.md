@@ -33,14 +33,16 @@ accept syntax, architecture, or implementation details.
   protected compact interactions on one typed foreground family; and ADR 0018 resumable `say` pacing, prepared
   output, typed skip settlement, and interaction/timer composition.
 - **Stage image and media:** `showImage`/`hideImage` Stage state, tag queries over the compiled package image catalog
-  and photos taken with tags (`showImage tagged`, `findImages`, `takePhoto(tags:)`), and blocking or asynchronous `playAudio`/`playVideo`
+  and photos taken with tags (`showImage tagged`, `findImages`, `takePhoto(tags:)`), and selection of files by
+  their header tags (`goto tagged`, `call tagged`, `findScripts`), and blocking or asynchronous `playAudio`/`playVideo`
   with playback ranges, repetition, volume, handles, seeks, timeline cues, Player load/progress observations, and
   checkpoint restore at the language, compiler, and runtime level. The Player shows the Stage image and plays
   audio after explicit Start; browser video playback remains deferred.
 - **Camera capture:** `takePhoto()` as a typed capture action with trusted reference admission and non-fatal
   unavailability under [Runtime](docs/RUNTIME.md#camera-capture). With a trusted host capability the Player opens the
   session camera after Start and captures silently; a photo saved through script storage is stored in the browser and
-  shown again in a later run. `askImage`, recording APIs, and the advanced package media API remain deferred.
+  shown again in a later run. An optional host-driven viewfinder previews the session camera; no syntax requests it yet.
+  `askImage`, recording APIs, and the advanced package media API remain deferred.
 - **Player:** the POC Player is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. It uses
   Vue/Vite, Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the transcript
   owner. A framework-independent adapter connects it to the implemented transcript, foreground-interaction, pacing,

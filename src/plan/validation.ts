@@ -11,11 +11,13 @@ import {
 import { recordValidationTestWork } from "../validation-testing.js";
 import {
   compareProjectPaths,
+  isPathGlob,
   MAIN_FILE_PATH,
   packageAssetPathProblem,
+  packageGlobProblem,
   packagePathProblem,
 } from "../project-paths.js";
-import { normalizeTagName } from "../tags.js";
+import { isCanonicalTagList, normalizeTagName } from "../tags.js";
 import { INSTRUCTION_PLAN_FORMAT, INSTRUCTION_PLAN_VERSION, type Instruction } from "./model.js";
 import {
   type PlanFileBoundaries,
@@ -321,6 +323,7 @@ const FILE_FIELDS = [
   "rootEndInstruction",
   "endInstruction",
   "labels",
+  "tags",
 ];
 
 const LABEL_FIELDS = ["name", "instruction"];
@@ -490,6 +493,15 @@ function validatePlanFiles(
         ),
       );
     }
+    if (file.tags !== null && !isCanonicalTagList(file.tags)) {
+      errors.push(
+        planError(
+          "TSC002",
+          "A file's tags are null, or canonical names, each once, in name order, with a finite number or null.",
+          `${path}.tags`,
+        ),
+      );
+    }
     boundaries.push({
       startInstruction: start,
       entryInstruction: typeof entry === "number" ? entry : start,
@@ -586,7 +598,7 @@ const EXPRESSION_FIELDS = fieldsByKind([
   ["typeTest", "value", "type", "negated"],
   ["binary", "operator", "left", "right"],
   ["range", "start", "end", "inclusive"],
-  ["tagQuery", "catalog", "select", "operands", "steps"],
+  ["tagQuery", "catalog", "from", "select", "operands", "steps"],
 ]);
 
 function fieldsByKind(
@@ -2010,8 +2022,26 @@ function validateExpressionNode(
       pending.push({ value: value.start, path: `${path}.start`, assignmentTarget: false });
       return;
     case "tagQuery": {
-      if (value.catalog !== "images" || !isOneOf(value.select, ["random", "list"])) {
-        errors.push(planError("TSC002", "A tag query searches images for one or a list.", path));
+      if (
+        !isOneOf(value.catalog, ["images", "scripts"]) ||
+        !isOneOf(value.select, ["random", "list"])
+      ) {
+        errors.push(
+          planError("TSC002", "A tag query searches images or scripts for one or a list.", path),
+        );
+      }
+      // Only a script query limits its files, by a path or glob of the package.
+      if (
+        value.from !== null &&
+        (value.catalog !== "scripts" ||
+          typeof value.from !== "string" ||
+          (isPathGlob(value.from)
+            ? packageGlobProblem(value.from)
+            : packagePathProblem(value.from)) !== null)
+      ) {
+        errors.push(
+          planError("TSC002", "A tag query's from is a package path or glob.", `${path}.from`),
+        );
       }
       const operandCount = validateTagQuerySteps(value.steps, `${path}.steps`, errors);
       if (!Array.isArray(value.operands) || value.operands.length !== operandCount) {

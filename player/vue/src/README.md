@@ -38,7 +38,8 @@ specification.
 - `DevelopmentPreview.vue` opens one runtime choice scenario, with a Stage image and a short chime that
   `developmentMedia.ts` resolves, and supplies Visual Lab's Theme Lab, Stage media picker,
   and timer/background-button presentation fixtures, plus Layout Debug; `?scenario=camera` instead opens a camera
-  scenario with persistent script storage that shows the saved photo again in a later run, spoken by the repository
+  scenario with persistent script storage that shows the saved photo again in a later run, and `?scenario=viewfinder` a
+  photo scenario that shows the viewfinder while the script waits on its photo button; both speak as the repository
   demo's Mistress with that demo's images and sounds. `main.ts` loads it as a
   separate chunk on the development server, or in a build only with the `?dev` URL opt-in. The default build mounts `PlayerApp.vue` with the
   repository demo: `demoHost.ts` supplies its source and resolves its package-relative references to the package's

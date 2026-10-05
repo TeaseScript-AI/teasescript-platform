@@ -51,9 +51,13 @@ async function checks(page, url) {
           localStorage.getItem('player-storage:["development-camera","camera.photo"]') ?? "null",
         )?.value ?? null,
     );
-  // `abortDetachedPlay` reproduces the Owner's Firefox with a real camera: `play()` on a video element outside the
-  // document rejects with an AbortError at once, although the element then plays.
-  async function start(unsizedMilliseconds, { abortDetachedPlay = false } = {}) {
+  // `video` replaces the Player's camera constraints, for example to get a wide camera. `abortDetachedPlay` reproduces
+  // the Owner's Firefox with a real camera: `play()` on a video element outside the document rejects with an AbortError
+  // at once, although the element then plays.
+  async function start(
+    unsizedMilliseconds,
+    { scenario = url, video = undefined, abortDetachedPlay = false } = {},
+  ) {
     const tab = await context.newPage();
     const messages = [];
     tab.on(
@@ -78,26 +82,29 @@ async function checks(page, url) {
       });
     if (unsizedMilliseconds !== undefined) {
       // A real Firefox camera reports the video playable before its first frame has a size.
-      await tab.addInitScript((milliseconds) => {
-        let sizedAt = Infinity;
-        for (const name of ["videoWidth", "videoHeight"]) {
-          const native = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, name);
-          Object.defineProperty(HTMLVideoElement.prototype, name, {
-            configurable: true,
-            get() {
-              return performance.now() < sizedAt ? 0 : native.get.call(this);
-            },
-          });
-        }
-        const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-        navigator.mediaDevices.getUserMedia = async (constraints) => {
-          const stream = await getUserMedia(constraints);
-          sizedAt = performance.now() + milliseconds;
-          return stream;
-        };
-      }, unsizedMilliseconds);
+      await tab.addInitScript(
+        ([milliseconds, video]) => {
+          let sizedAt = Infinity;
+          for (const name of ["videoWidth", "videoHeight"]) {
+            const native = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, name);
+            Object.defineProperty(HTMLVideoElement.prototype, name, {
+              configurable: true,
+              get() {
+                return performance.now() < sizedAt ? 0 : native.get.call(this);
+              },
+            });
+          }
+          const getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+          navigator.mediaDevices.getUserMedia = async (constraints) => {
+            const stream = await getUserMedia(video ? { ...constraints, video } : constraints);
+            sizedAt = performance.now() + milliseconds;
+            return stream;
+          };
+        },
+        [unsizedMilliseconds, video],
+      );
     }
-    await tab.goto(url);
+    await tab.goto(scenario);
     await tab.locator("[data-session-activation] button").click();
     return { tab, messages };
   }
@@ -147,7 +154,32 @@ async function checks(page, url) {
   );
   check((await savedPhoto(tab)) === second, "A camera without frames replaced the saved photo");
   await tab.close();
-  return "PASS a late-sized first frame with an aborted play(), the saved photo in a new run, and a camera without frames";
+  // The viewfinder plays the same camera, also when its first frames have no size yet, and the photo follows. Its frame
+  // adopts the wide camera's aspect once the frames have a size.
+  ({ tab, messages } = await start(1_500, {
+    scenario: url.replace("scenario=camera", "scenario=viewfinder"),
+    video: { width: 1280, height: 720 },
+  }));
+  await tab.waitForFunction(() => {
+    const video = document.querySelector("[data-viewfinder] video");
+    const frame = document.querySelector("[data-viewfinder]")?.getBoundingClientRect();
+    return (
+      video?.videoWidth === 1280 &&
+      !video.paused &&
+      getComputedStyle(video).transform === "matrix(-1, 0, 0, 1, 0, 0)" &&
+      Math.abs(frame.width / frame.height - 16 / 9) < 0.02
+    );
+  });
+  await tab.locator("button", { hasText: "I'm ready, Mistress" }).click();
+  await shows(tab, "There you are. I'll keep that one.");
+  await tab.waitForFunction(decodedPhotos);
+  check(
+    (await tab.locator("[data-viewfinder]").count()) === 0,
+    "The viewfinder stayed after the photo",
+  );
+  check(messages.length === 0, `The viewfinder run reported: ${messages.join(" | ")}`);
+  await tab.close();
+  return "PASS a late-sized first frame with an aborted play(), the saved photo in a new run, a camera without frames, and the viewfinder";
 }
 
 let passed = false;

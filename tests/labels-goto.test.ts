@@ -163,6 +163,11 @@ test("every file says how it ends, and the project reaches an exit", () => {
   assert.deepEqual(diagnostics('exit\nlabel later\nsay "later"').map(format), [runsOff]);
   assert.deepEqual(diagnostics("let n = 0\nwhile true { n += 1 }"), [
     [
+      "TSV058",
+      2,
+      "If this loop starts, it has no way to stop. Add a condition with `break` to leave the loop, or use `exit` to finish the session.",
+    ],
+    [
       "TSV053",
       2,
       "The script never reaches exit, so the session has no end. Add exit where the session should finish.",

@@ -9,3 +9,4 @@ coverage/
 .playwright-cli/
 __pycache__/
 *.py[cod]
+.playground-tls/

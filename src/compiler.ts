@@ -4,6 +4,8 @@ import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnos
 import { compileStableProject, type InstructionPlan } from "./compiler/compile-program.js";
 import { parse } from "./parser.js";
 import type { ScriptHeader } from "./script-header.js";
+import { runsOnItsOwn } from "./project-globals.js";
+import type { Tag } from "./tags.js";
 import { validateCapturedInstructionPlan } from "./plan/validation.js";
 import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutable.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
@@ -25,6 +27,10 @@ export interface CompileOptions extends SemanticValidationOptions {
 interface ProjectCheckOptions extends CompileOptions {
   readonly imageCatalog?: readonly PlanImage[];
   readonly capturesTaggedPhotos?: boolean;
+  readonly scriptCatalog?: readonly {
+    readonly path: string;
+    readonly tags: readonly Tag[] | null;
+  }[];
 }
 
 export interface CompilationResult {
@@ -112,6 +118,7 @@ function compileProjectFiles(
   const checked = checkProject(files, {
     ...validationOptions,
     capturesTaggedPhotos: capturesTaggedPhotos(files.map((file) => file.result.program)),
+    scriptCatalog: files.map((file) => ({ path: file.result.path, tags: scriptTags(file.result) })),
   });
   if (inventory.diagnostics.length === 0 && !hasErrors(catalog.diagnostics) && checked !== null) {
     if (checked.reachesExit) {
@@ -356,6 +363,7 @@ function lowerProject(
         path: file.result.path,
         program: file.result.program,
         ...(file.picks === undefined ? {} : { picks: file.picks }),
+        tags: scriptTags(file.result),
       })),
       typeChecks,
       (fileIndex) => {
@@ -496,4 +504,13 @@ function compiledPlanValidationDiagnostic(
 
 function hasErrors(diagnostics: readonly Diagnostic[]): boolean {
   return diagnostics.some((diagnostic) => diagnostic.severity === DiagnosticSeverity.Error);
+}
+
+/**
+ * The tags script tag queries match for a file: its header tags in name order, or `null` for a file of declarations
+ * only, which runs nothing on its own and so is never picked or listed, as for globs (ADR 0022 §4.3).
+ */
+function scriptTags(file: ProjectFileCompilation): readonly Tag[] | null {
+  if (!file.program.statements.some(runsOnItsOwn)) return null;
+  return [...(file.header?.tags ?? [])].sort((left, right) => (left.name < right.name ? -1 : 1));
 }

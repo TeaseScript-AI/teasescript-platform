@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
 import type { PlayerTimerKind } from "../../model.js";
-import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime-adapter.js";
+import {
+  createPlayerRuntimeSession,
+  playerRuntimeForeground,
+  playerTemporalContext,
+} from "../../runtime-adapter.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
@@ -13,7 +17,7 @@ import PlayerApp from "./PlayerApp.vue";
 import type { PlayerTool } from "./PlayerToolsShell.vue";
 import { resolveDemoAsset } from "./demoHost";
 import { resolveDevelopmentAsset } from "./developmentMedia";
-import { cameraScenarioSource, openingScenario } from "./runtimeScenario";
+import { cameraScenarioSource, openingScenario, viewfinderScenarioSource } from "./runtimeScenario";
 import { stageFixtures } from "./stageFixtures";
 import StageRightRail from "./StageRightRail.vue";
 import ThemeLab from "./ThemeLab.vue";
@@ -44,14 +48,17 @@ const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
 
 const props = defineProps<{ capturedMediaRepository?: CapturedMediaRepository | null }>();
 // `?scenario=camera` opens the camera scenario with the session camera capability and persistent script storage, so
-// a saved photo is shown again in a later run.
-const cameraScenario = new URLSearchParams(window.location.search).get("scenario") === "camera";
+// a saved photo is shown again in a later run. `?scenario=viewfinder` opens the viewfinder scenario with the camera.
+const scenario = new URLSearchParams(window.location.search).get("scenario");
+const cameraScenario = scenario === "camera";
+const viewfinderScenario = scenario === "viewfinder";
 const player = usePlayerSession({
-  // The camera scenario speaks as the repository demo's Mistress and uses its images and sounds.
-  resolveAsset: cameraScenario
-    ? (path) => resolveDevelopmentAsset(path) ?? resolveDemoAsset(path)
-    : resolveDevelopmentAsset,
-  capabilities: { camera: cameraScenario },
+  // The camera scenarios speak as the repository demo's Mistress and use its images and sounds.
+  resolveAsset:
+    cameraScenario || viewfinderScenario
+      ? (path) => resolveDevelopmentAsset(path) ?? resolveDemoAsset(path)
+      : resolveDevelopmentAsset,
+  capabilities: { camera: cameraScenario || viewfinderScenario },
   ...(cameraScenario && {
     scriptStorage: createLocalScriptStorage(browserStorage(), "development-camera"),
     capturedMedia: { repository: props.capturedMediaRepository ?? null },
@@ -69,7 +76,18 @@ if (cameraScenario)
         }),
       ),
     );
-else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptions()));
+else if (viewfinderScenario) {
+  player.prepare(() => createPlayerRuntimeSession(viewfinderScenarioSource, startOptions()));
+  // Shown while the script waits on its photo button, until the language can request the viewfinder itself.
+  watch(
+    () => {
+      const current = player.session.value;
+      const foreground = current && playerRuntimeForeground(current);
+      return foreground?.kind === "show-button" && foreground.label === "I'm ready, Mistress";
+    },
+    (shown) => player.showViewfinder(shown),
+  );
+} else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptions()));
 </script>
 
 <template>

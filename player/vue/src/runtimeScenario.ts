@@ -43,3 +43,27 @@ if photo != null {
 showButton "Yes, Mistress"
 exit
 `;
+
+// Development viewfinder content: the preview shows the viewfinder while the script waits on "Take photo", standing in
+// for a viewfinder request the language cannot express yet. The script alone takes the photo, right after the press.
+export const viewfinderScenarioSource = `
+speaker mistressVera {
+    title: "Mistress"
+    firstName: "Vera"
+    color: "#c2185b"
+    avatar: "avatars/mistress-vera.svg"
+}
+speaker mistressVera
+showImage "images/playroom.svg"
+say "Time for your picture. Get into the frame and look at me.", instant
+showButton "I'm ready, Mistress"
+let photo: string? = takePhoto()
+if photo != null {
+    showImage photo
+    say "There you are. I'll keep that one.", instant
+} else {
+    say "No camera? Then you stay unseen, for now. We go on without a photo.", instant
+}
+showButton "Yes, Mistress"
+exit
+`;
