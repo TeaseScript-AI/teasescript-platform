@@ -43,7 +43,13 @@ import {
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import { runValidatedState } from "../src/runtime/engine.js";
-import { nextMediaEvent, type RuntimeMediaSnapshot } from "../src/runtime/media.js";
+import {
+  mediaTerminalProgressMs,
+  nextMediaEvent,
+  repeatsSilently,
+  type RuntimeMediaSnapshot,
+} from "../src/runtime/media.js";
+import type { RuntimeTimerSnapshot } from "../src/runtime/timers.js";
 import type {
   PlayerForegroundPresentation,
   PlayerPermanentButtonPresentation,
@@ -339,6 +345,13 @@ export function playerRuntimeTimers(
 
 /** Session-time deadlines at which the Player must observe time again. A failed session settles nothing further. */
 export function playerRuntimeDeadlines(snapshot: RuntimeSnapshot): readonly number[] {
+  return timedDeadlines(snapshot, () => true);
+}
+
+function timedDeadlines(
+  snapshot: RuntimeSnapshot,
+  timerCounts: (timer: RuntimeTimerSnapshot) => boolean,
+): number[] {
   const deadlines: number[] = [];
   if (snapshot.status === "failed") return deadlines;
   for (const action of [
@@ -350,7 +363,11 @@ export function playerRuntimeDeadlines(snapshot: RuntimeSnapshot): readonly numb
   ]) {
     if (action?.kind === "delay" || action?.kind === "chatPacingGate") {
       deadlines.push(action.deadlineMs);
-    } else if (action?.kind === "timer" && action.timer.deadlineMs !== null) {
+    } else if (
+      action?.kind === "timer" &&
+      action.timer.deadlineMs !== null &&
+      timerCounts(action.timer)
+    ) {
       deadlines.push(action.timer.deadlineMs);
     }
   }
@@ -569,12 +586,17 @@ export function observePlayerRuntimeTime(
 
 /**
  * The scene time of the session's next timed event: the earliest of `playerRuntimeDeadlines` and the next timeline
- * event of running loaded media, which play on at 1× from their last reported sample. An event that is already due,
- * such as one of media that stalled, gives the next whole millisecond, so time moves on. `null` when nothing is
- * scheduled, for example while only player input, loading media, or paused timers remain.
+ * event of running loaded media, which play on at 1× from their last reported sample. Rounds of a repeating timer
+ * without an expiry block and passes of repeating media without cues run nothing, so they are no event; an observation
+ * past many of them gives the same result as observing each, and such media count only with their end. An event that
+ * is already due, such as one of media that stalled, gives the next whole millisecond, so time moves on. `null` when
+ * nothing is scheduled, for example while only player input, loading media, or paused timers remain.
  */
 export function nextPlayerRuntimeEventMs(snapshot: RuntimeSnapshot): number | null {
-  const times = [...playerRuntimeDeadlines(snapshot)];
+  const times = timedDeadlines(
+    snapshot,
+    (timer) => !timer.repeat || timer.handlerFunctionId !== null,
+  );
   if (snapshot.status !== "failed") {
     for (const action of snapshot.backgroundActions) {
       const atMs = action.kind === "media" ? nextMediaEventMs(action.media) : null;
@@ -592,9 +614,9 @@ function nextMediaEventMs(media: RuntimeMediaSnapshot): number | null {
   const event = nextMediaEvent(media);
   if (event === null || event.dueAtMs !== null) return event?.dueAtMs ?? null;
   const last = media.points.at(-1)!;
-  return event.kind === "departure"
-    ? Math.floor(last.atMs) + 1
-    : Math.ceil(last.atMs + event.progressMs - last.progressMs);
+  if (event.kind === "departure") return Math.floor(last.atMs) + 1;
+  const progressMs = repeatsSilently(media) ? mediaTerminalProgressMs(media) : event.progressMs;
+  return progressMs === null ? null : Math.ceil(last.atMs + progressMs - last.progressMs);
 }
 
 /**
@@ -611,26 +633,38 @@ export function playerRuntimeAwaitsHost(snapshot: RuntimeSnapshot): boolean {
 }
 
 /**
- * Development time jump (#615): advances scene time to `targetMs` through ordinary observations, one at each timed
- * event as `nextPlayerRuntimeEventMs` finds it, with running loaded media playing on at 1×. Blocks, timeouts and
- * continuations therefore run in scene-time order, and a block's change to playback or its request to the host applies
- * before later events, exactly as when the Player observes each event on time; a session with jumps is a normal session.
- * The jump stops early while `playerRuntimeAwaitsHost`; call it again once the host answered.
+ * One step of a development time jump (#615) toward `targetMs`: an ordinary observation at the next timed event as
+ * `nextPlayerRuntimeEventMs` finds it, or at `targetMs` when that comes first, with running loaded media playing on
+ * at 1×. Returns the session itself once time reached the target, or while `playerRuntimeAwaitsHost`.
+ */
+export function stepPlayerRuntimeTime(
+  session: PlayerRuntimeSession,
+  targetMs: number,
+): PlayerRuntimeSession {
+  const { snapshot } = session;
+  if (snapshot.observedSessionTimeMs >= targetMs || playerRuntimeAwaitsHost(snapshot))
+    return session;
+  const stepMs = Math.min(targetMs, nextPlayerRuntimeEventMs(snapshot) ?? targetMs);
+  const result = observePlayerRuntimeTime(session, stepMs, playingMediaReports(snapshot, stepMs));
+  return result.outcome.kind === "observed" ? result.session : session;
+}
+
+/**
+ * Development time jump (#615): advances scene time to `targetMs` in steps of `stepPlayerRuntimeTime`. Blocks,
+ * timeouts and continuations therefore run in scene-time order, and a block's change to playback or its request to
+ * the host applies before later events, exactly as when the Player observes each event on time; a session with jumps
+ * is a normal session. The jump stops early while `playerRuntimeAwaitsHost`; call it again once the host answered.
  */
 export function advancePlayerRuntimeTime(
   session: PlayerRuntimeSession,
   targetMs: number,
 ): PlayerRuntimeSession {
   let current = session;
-  for (;;) {
-    const { snapshot } = current;
-    if (snapshot.observedSessionTimeMs >= targetMs || playerRuntimeAwaitsHost(snapshot))
-      return current;
-    const stepMs = Math.min(targetMs, nextPlayerRuntimeEventMs(snapshot) ?? targetMs);
-    const result = observePlayerRuntimeTime(current, stepMs, playingMediaReports(snapshot, stepMs));
-    if (result.outcome.kind !== "observed") return current;
-    current = result.session;
+  for (let next = stepPlayerRuntimeTime(current, targetMs); next !== current;) {
+    current = next;
+    next = stepPlayerRuntimeTime(current, targetMs);
   }
+  return current;
 }
 
 /** Progress of every running loaded media at scene time `atMs`, playing on at 1× from its last sample. */

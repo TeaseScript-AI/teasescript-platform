@@ -599,7 +599,9 @@ Presentation refresh cadence does not impose a minimum timer duration.
 The development Player (`?dev`, see [`player/README.md`](../player/README.md#development-only-behavior)) can jump
 scene time forward without an engine mode. A jump first observes the time that really elapsed, then submits one
 ordinary observation at each next timed event up to its target: the earliest Player deadline or media timeline event,
-with running loaded media reported as playing on at 1× from their last sample. Blocks, timeouts, and continuations
+with running loaded media reported as playing on at 1× from their last sample. Rounds of a repeating timer without an
+expiry block and passes of repeating media without cues run nothing, so they are passed within one observation, as
+silent catch-up passes them; such media stop a jump only at their end. Blocks, timeouts, and continuations
 therefore run in scene-time order, and a block's change to playback or its `save`, `delete`, or `takePhoto()` applies
 before later events; the jump waits while such a host answer is pending. The Player then seeks its media elements to
 the reported playhead and rebases its clock on the new observed time. A session with jumps is an ordinary session:

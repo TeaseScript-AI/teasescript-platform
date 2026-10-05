@@ -117,11 +117,13 @@ the opening scenario still uses the shared canonical runtime adapter.
 
 With the explicit `?dev` opt-in, also on the development server, the preview adds the Time Controls tool (#615) for
 testing long scripts. Its **Enable time controls** switch arms **Skip to next timed event**, which advances scene time
-to the next wait, timer round, pacing pause, button timeout, or audio cue or end, and **+10 s** and **+1 min**, which
+to the next wait, timer expiry, pacing pause, button timeout, or audio cue or end (silent rounds of a repeating timer
+without an expiry block and passes of looping audio without cues are no stops), and **+10 s** and **+1 min**, which
 apply only while the script waits for player input. **Auto-skip** skips event after event while no input is pending and
 no media is loading, so a player's think time and the background timers running meanwhile stay real time. Jumps are
-ordinary observations (see [`docs/RUNTIME.md`](../docs/RUNTIME.md#timers-and-scene-time)); playing audio seeks along,
-and browser video seeking waits for video playback. While the controls are on, a badge over the Stage shows them and
+ordinary observations (see [`docs/RUNTIME.md`](../docs/RUNTIME.md#timers-and-scene-time)), made in short tasks so the
+Player stays responsive and switching the controls off stops a long one; playing audio seeks along, and browser video
+seeking waits for video playback. While the controls are on, a badge over the Stage shows them and
 announces each jump ("⏩ 30 s skipped"), and the panel lists recent jumps; these markers are local UI state, never
 transcript entries, notices, or checkpoint data. `?dev&time=skip` starts with the controls and auto-skip on, plain
 `?dev` with both off; the switches change them during a session.

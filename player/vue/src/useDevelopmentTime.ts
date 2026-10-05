@@ -6,14 +6,15 @@ import {
   nextPlayerRuntimeEventMs,
   playerRuntimeAwaitsHost,
   playerRuntimeMedia,
+  stepPlayerRuntimeTime,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
 import type { RuntimeSnapshot } from "../../../src/index.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 const LISTED_JUMPS = 20;
-// How long one auto-skip task may skip events before it yields to input and rendering.
-const AUTO_SKIP_TASK_MS = 10;
+// How long one task may observe events of a jump before it yields to input and rendering.
+const JUMP_TASK_MS = 10;
 
 /** One jump as the development panel reports it; never part of the transcript, notices, or checkpoints. */
 export interface DevelopmentTimeJump {
@@ -79,12 +80,21 @@ export function useDevelopmentTime(
       if (start === null || targetMs === null || playerRuntimeAwaitsHost(start.snapshot)) return;
       let current = start;
       for (;;) {
-        const next = advancePlayerRuntimeTime(current, targetMs);
-        if (next !== current) player.publishJump(next);
-        current = next;
+        // Each task observes events for a bounded time, so a long jump stays responsive and can be switched off.
+        const published = current;
+        const until = performance.now() + JUMP_TASK_MS;
+        for (let next = stepPlayerRuntimeTime(current, targetMs); next !== current;) {
+          current = next;
+          if (performance.now() >= until) break;
+          next = stepPlayerRuntimeTime(current, targetMs);
+        }
+        if (current !== published) player.publishJump(current);
         if (current.snapshot.observedSessionTimeMs >= targetMs) break;
         // A save, delete, or photo waits for the host; the jump continues once its answer is published.
-        await new Promise<void>((resolve) => (wake = resolve));
+        if (playerRuntimeAwaitsHost(current.snapshot))
+          await new Promise<void>((resolve) => (wake = resolve));
+        else if (current !== published) await new Promise((resolve) => setTimeout(resolve, 0));
+        else break;
         if (disposed || !enabled.value || player.generation.value !== generation) break;
         current = player.session.value ?? current;
       }
@@ -111,7 +121,7 @@ export function useDevelopmentTime(
     const start = player.observe();
     if (start === null || !autoSkippable(start.snapshot)) return;
     let current = start;
-    const until = performance.now() + AUTO_SKIP_TASK_MS;
+    const until = performance.now() + JUMP_TASK_MS;
     do {
       current = advancePlayerRuntimeTime(current, nextPlayerRuntimeEventMs(current.snapshot)!);
     } while (performance.now() < until && autoSkippable(current.snapshot));

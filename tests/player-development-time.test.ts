@@ -15,6 +15,7 @@ import {
   playerRuntimeDeadlines,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
+  stepPlayerRuntimeTime,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
@@ -213,6 +214,44 @@ test("Skip goes to the end of blocking audio once it loaded; loading audio has n
   assert.equal(session.snapshot.status, "halted");
 });
 
+test("a jump passes silent timer rounds and cue-free media passes like one late observation", () => {
+  const source = [
+    "timer(duration: 0.001 ms, async: true, repeat: true)",
+    'playAudio(file: "tick.mp3", async: true, repeat: 3000 times) {',
+    "  finish {",
+    '    say "ticks done", instant',
+    "  }",
+    "}",
+    'let e = showButton "Done"',
+    "exit",
+  ].join("\n");
+  // Rounds of a repeating timer without a block and passes without cues run nothing; only the audio's end is an event.
+  assert.equal(nextPlayerRuntimeEventMs(createPlayerRuntimeSession(source).snapshot), null);
+  const loaded = () =>
+    reportPlayerRuntimeMediaLoad(createPlayerRuntimeSession(source), 1, {
+      kind: "loaded",
+      durationMs: 2,
+    }).session;
+  let jumped = loaded();
+  const steps: number[] = [];
+  for (let next = stepPlayerRuntimeTime(jumped, 10_000); next !== jumped;) {
+    jumped = next;
+    steps.push(jumped.snapshot.observedSessionTimeMs);
+    // Bounded, so observing each round or pass fails here instead of running for hours.
+    assert.ok(steps.length <= 2, `steps at ${steps.slice(0, 5).join(", ")}`);
+    next = stepPlayerRuntimeTime(jumped, 10_000);
+  }
+  assert.deepEqual(steps, [6_000, 10_000]);
+  const late = loaded();
+  const media = late.snapshot.backgroundActions.find((action) => action.kind === "media");
+  assert.ok(media?.kind === "media");
+  const observed = observePlayerRuntimeTime(late, 10_000, [
+    { mediaId: media.media.mediaId, segment: media.media.segment, progressMs: 10_000 },
+  ]).session;
+  assert.deepEqual(said(jumped), ["ticks done"]);
+  assert.deepEqual(canonical(jumped), canonical(observed));
+});
+
 test("after a jump the device plays from the jumped playhead and measures on from there", () => {
   const player = harness(
     'let music = playAudio async repeat "loop.mp3" {\n  at 3 s {\n    say "cue ${music.position}"\n  }\n}\nlet e = showButton "Done"\nexit',
@@ -243,6 +282,7 @@ test("after a jump the device plays from the jumped playhead and measures on fro
 // The composable, loaded through the build tool like the Player loads it.
 interface DevelopmentTimeHost {
   readonly enabled: Ref<boolean>;
+  readonly canAdvance: Readonly<Ref<boolean>>;
   readonly jumps: Readonly<Ref<readonly { readonly text: string }[]>>;
   advanceBy(milliseconds: number): Promise<void>;
 }
@@ -381,4 +421,24 @@ test("auto-skip completes waits but leaves the player's think time and backgroun
   session = player.session.value!;
   assert.deepEqual(said(session), ["Done"], "the timer runs in real time while Again waits");
   assert.ok(session.snapshot.observedSessionTimeMs < skippedTo + 1_000);
+});
+
+test("a long jump yields between tasks, and switching the controls off stops it", async (context) => {
+  const { player, time } = await mount(
+    context,
+    'timer(duration: 1 ms, async: true, repeat: true) {\n  let x = 1\n}\nlet e = showButton "Done"\nexit',
+    { enabled: true, autoSkip: false },
+  );
+  const fromMs = player.session.value!.snapshot.observedSessionTimeMs;
+  let yielded = false;
+  setTimeout(() => {
+    yielded = true;
+    time.enabled.value = false;
+  }, 0);
+  await time.advanceBy(60_000);
+  assert.ok(yielded, "the jump let other tasks run");
+  const reachedMs = player.session.value!.snapshot.observedSessionTimeMs;
+  assert.ok(reachedMs > fromMs && reachedMs < fromMs + 60_000, `${fromMs} → ${reachedMs}`);
+  assert.equal(time.jumps.value.length, 1, "the part that was jumped is reported");
+  assert.equal(time.canAdvance.value, false);
 });
