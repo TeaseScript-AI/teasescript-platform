@@ -411,6 +411,60 @@ test("a global or property that starts as null takes its type from a store in an
   assert.deepEqual(conflicting("let level = 0"), conflicting("let level = params.level"));
 });
 
+test("a value the compiler cannot know, such as an untyped parameter, decides no null-first place and is checked when it runs", () => {
+  // An untyped parameter is unknown, also for the global and the property it is stored in from another file: reads
+  // before that store are not narrowed to null, and a known place checks the value when it runs.
+  const project = (argument: string | null): ProjectSourceFile[] => [
+    {
+      path: "main.tease",
+      source: [
+        "global params = { tcum: null }",
+        "global plain = null",
+        "let v = params.tcum",
+        "let o = 0",
+        "if v != null {",
+        "  o = v",
+        "}",
+        "let w = plain",
+        "let p = 0",
+        "if w != null {",
+        "  p = w",
+        "}",
+        'say "${o} ${p}"',
+        "if o == 0 and p == 0 {",
+        '  goto "other.tease"',
+        "}",
+        "exit",
+      ].join("\n"),
+    },
+    {
+      path: "other.tease",
+      source: `global function setT(t) {\n  params.tcum = t\n  plain = t\n}\n${argument === null ? "" : `setT(${argument})\n`}${argument === null ? "exit" : 'goto "main.tease"'}`,
+    },
+  ];
+  assert.deepEqual(said(runToEnd(compiledPlan(project("5"))).events), ["0 0", "5 5"]);
+  for (const argument of ['"high"', "1.5"]) {
+    const result = runToEnd(compiledPlan(project(argument)));
+    assert.deepEqual([said(result.events), result.snapshot.failure?.code], [["0 0"], "TSR058"]);
+  }
+  // Without a call, nothing but null reaches the property.
+  assert.deepEqual(
+    said(
+      runToEnd(
+        compiledPlan([
+          {
+            path: "main.tease",
+            source:
+              'global params = { tcum: null }\nlet v = params.tcum\nlet o = 0\nif v != null {\n  o = v\n}\nsay "${o}"\nexit',
+          },
+          { path: "other.tease", source: "global function setT(t) {\n  params.tcum = t\n}" },
+        ]),
+      ).events,
+    ),
+    ["0"],
+  );
+});
+
 test("a global function is callable from every file and sees only globals, its parameters, and its locals", () => {
   const plan = compiledPlan([
     {

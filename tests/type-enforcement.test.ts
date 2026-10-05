@@ -701,6 +701,12 @@ test("a variable that starts as null takes the type of its first non-null value 
     ),
     [["TSV041", "b[0].n"]],
   );
+  // A value the compiler cannot know, here an untyped parameter, decides nothing: a read before it is not narrowed to
+  // null, and a known place checks it when the store runs.
+  const unknownStore = (argument: string) =>
+    `let box = { t: null }\nfunction setT(t) {\n    box.t = t\n}\nfunction show {\n    let v = box.t\n    let o = 0\n    if v != null {\n        o = v\n    }\n    say "\${o}"\n}\nshow()\nsetT(${argument})\nshow()\nexit`;
+  assert.deepEqual(sayTexts(unknownStore("5")), ["0", "5"]);
+  assert.equal(runValidSource(unknownStore('"high"')).snapshot.failure?.code, "TSR058");
   // A place that holds itself is never decided further, so the check ends.
   assert.deepEqual(
     codes("let a = []\na.add(a)\nlet b = { n: null }\nlet c = b.n\nb.n = b\nexit"),
