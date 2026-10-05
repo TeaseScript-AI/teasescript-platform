@@ -13,7 +13,14 @@ import { analyzeFeasibility, type FeasibilityOptions } from "./report.ts";
 import { loadRepositoryProjectRunner } from "./runtime-check.ts";
 import { parseGroovySource } from "./source-parser.ts";
 
-const [command, ...rawArgs] = process.argv.slice(2);
+const [command, ...givenArgs] = process.argv.slice(2);
+// `report --package <dir>` also checks a converted package as written (`finalPackage`).
+const packageFlag = givenArgs.indexOf("--package");
+const finalPackageDir = packageFlag < 0 ? null : (givenArgs[packageFlag + 1] ?? "");
+const rawArgs =
+  packageFlag < 0
+    ? givenArgs
+    : givenArgs.filter((_, index) => index !== packageFlag && index !== packageFlag + 1);
 const runRequested = rawArgs.includes("--run");
 const compileRequested = runRequested || rawArgs.includes("--compile");
 // `--proposed` emits every proposed language change in its working syntax, `--proposed=a,b` the listed ones.
@@ -40,9 +47,13 @@ if (command === "inventory") {
   const files = await readReportInputs(args);
   process.stdout.write(`${JSON.stringify(inventoryFiles(files), null, 2)}\n`);
 } else if (command === "report") {
-  if (args.length === 0) {
+  if (
+    args.length === 0 ||
+    finalPackageDir === "" ||
+    (finalPackageDir !== null && !compileRequested)
+  ) {
     fail(
-      "Usage: node src/cli.ts report [--compile | --run] [--proposed[=ids]] [--accepted[=ids]] <ast.json|script.groovy|source-dir> [...]",
+      "Usage: node src/cli.ts report [--compile | --run] [--package <converted-dir>] [--proposed[=ids]] [--accepted[=ids]] <ast.json|script.groovy|source-dir> [...]",
     );
   }
   const files = await readReportInputs(args);
@@ -55,6 +66,7 @@ if (command === "inventory") {
     options.media = await packageMedia(path.join(dataRoot, "images"));
     options.files = await packageFiles(dataRoot);
   }
+  if (finalPackageDir !== null) options.finalPackage = await packageTeaseFiles(finalPackageDir);
   const report = analyzeFeasibility(files, options);
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } else if (command === "convert") {
@@ -185,6 +197,21 @@ async function legacyDataRoot(scriptsRoot: string): Promise<string> {
     if (found?.isDirectory() === true) return scriptsRoot;
   }
   return path.join(scriptsRoot, "..");
+}
+
+/** The `.tease` files of a converted package, by their package paths. */
+async function packageTeaseFiles(root: string): Promise<Array<{ path: string; source: string }>> {
+  const paths = (await packageFiles(root)).filter(
+    (file) =>
+      file.toLowerCase().endsWith(".tease") &&
+      !file.split("/").some((part) => part.startsWith(".")),
+  );
+  return Promise.all(
+    paths.map(async (file) => ({
+      path: file,
+      source: await readFile(path.join(root, file), "utf8"),
+    })),
+  );
 }
 
 /** Every file below the legacy data folder, relative to it with forward slashes. */

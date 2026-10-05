@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { walkAst, type ParsedGroovyFile } from "./ast.ts";
 import type {
   TeaseCompileDiagnostic,
@@ -76,6 +77,24 @@ export interface FeasibilityOptions {
   media?: readonly MediaFile[];
   /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
   files?: readonly string[];
+  /**
+   * The converted package's files as written, after any manual output patches, which `finalPackage` compiles and runs
+   * as they are; needs `compiler`.
+   */
+  finalPackage?: readonly TeaseProjectFile[];
+}
+
+/** The converted package as written: whether its files compile as one project, and a native run from `main.tease`. */
+export interface FinalPackageCheck {
+  /** The files checked, with the SHA-256 of each. */
+  files: Array<{ path: string; sha256: string }>;
+  compiles: boolean;
+  /** The files with compiler errors. */
+  failingFiles: string[];
+  /** Compiler errors grouped by code and message. */
+  errorsByMessage: Record<string, number>;
+  /** Null without a runner or `main.tease`, or when the project does not compile. */
+  run: ProjectRunResult | null;
 }
 
 /** One smoke run of a package project. */
@@ -158,6 +177,8 @@ export interface FeasibilityReport {
     helpersCompile: boolean | null;
   } | null;
   files: FeasibilityFileReport[];
+  /** The check of the package as written; null unless its files and a compiler were given. */
+  finalPackage: FinalPackageCheck | null;
 }
 
 export function analyzeFeasibility(
@@ -254,6 +275,10 @@ export function analyzeFeasibility(
           },
     smokeRunReachedScriptFileCount: options.runner === undefined ? null : 0,
     files: [],
+    finalPackage:
+      options.finalPackage === undefined || options.compiler === undefined
+        ? null
+        : checkFinalPackage(options.finalPackage, options.compiler, options.runner),
   };
 
   // The project files a smoke run may execute: every file that compiles clean except pending capabilities.
@@ -407,6 +432,31 @@ const HELPERS = "helpers.tease";
 const ENTER = "sxSmokeEnter";
 const BLOCKED = "sxSmokeBlocked";
 const START = "sxSmokeStart";
+
+/** Compiles the package as written, without placeholders, and runs it natively from `main.tease` when it compiles. */
+function checkFinalPackage(
+  files: readonly TeaseProjectFile[],
+  compiler: TeaseProjectCompiler,
+  runner: TeaseProjectRunner | undefined,
+): FinalPackageCheck {
+  const compiled = compiler(files);
+  const errors = compiled.diagnostics.filter(({ severity }) => severity === "error");
+  const errorsByMessage = emptyCounts();
+  for (const { code, message } of errors) increment(errorsByMessage, `${code} ${message}`);
+  return {
+    files: files.map(({ path, source }) => ({
+      path,
+      sha256: createHash("sha256").update(source).digest("hex"),
+    })),
+    compiles: compiled.compiled,
+    failingFiles: [...new Set(errors.map(({ path }) => path))].sort(),
+    errorsByMessage: sortCounts(errorsByMessage),
+    run:
+      runner === undefined || !compiled.compiled || !files.some(({ path }) => path === MAIN)
+        ? null
+        : runner(files, {}),
+  };
+}
 
 function diagnosticsByPath(
   result: TeaseProjectCompileResult | null,
