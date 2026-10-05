@@ -73,13 +73,15 @@ specification.
   clipping bubble borders; the scrollbar ends above the composer. The trailing slot contributes foreground-control
   height to the end inset. Message rendering and contrast are split into `TranscriptMessage.vue`, `TranscriptMarkup.vue`,
   `TranscriptLine.vue`, `transcriptPresentation.ts` and `messageContrast.ts`.
-- `RuntimeInteraction.vue` composes `Composer.vue` and `ForegroundControls.vue` and alone submits runtime actions,
+- `RuntimeInteraction.vue` composes `Composer.vue` and `ForegroundControls.vue` and submits their runtime actions,
   including [pacing skips](../../../docs/ui/PLAYER-UI.md#composer-and-foreground-interactions), with shared
   submission guards and focus handling. The composer uses shadcn Textarea/Button and VueUse autosizing;
   foreground controls use `components/PlayerActionButton.vue` in the transcript's trailing slot.
   `playerRuntimeForeground` maps authored backgrounds from live/restored actions; `player/theme/story-choice.ts`
   supplies theme/authored button material. See [ADR 0018](../../../docs/decisions/0018-first-standard-library-poc-contract.md)
   for syntax and completion semantics.
+- `useImageCapture.ts` holds the Player-only state of taking a photo for `askImage` and answers the request on
+  "Use this"; `ImageCapture.vue` shows it over the Stage through `Stage.vue`'s slot.
 - `usePlayerTheme.ts` applies/restores document variables; `player/theme` calculates colours and Theme Lab edits intent.
   See [theme evaluation](../../README.md#experimental-dynamic-theme-evaluation).
 - `StageRightRail.vue` owns the right overlay rail and its viewport-centred control placement, `TimerRegion.vue` its

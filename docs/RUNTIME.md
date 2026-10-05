@@ -1029,8 +1029,8 @@ any other answer leaves the request waiting, and there is no cancellation result
 `mime` before it stores an image; the engine sees only the reference. The result is the reference, the player
 transcript shows `Image`, and like other interactions the request may be interrupted by a timer expiry block,
 survives checkpoint and restore, and replays a repeated completion as `alreadySettled`. The Player stores a chosen
-image as session media with the lifecycle of a photo; see [Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation)
-for its file route.
+image or a photo taken for the request as session media with the lifecycle of a `takePhoto()` photo; see
+[Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation) for its file and camera routes.
 
 The Player opens the session camera after Start when the trusted host grants the camera capability, answers each capture
 once from that open stream, and delivers the answer until the runtime settles it. Captured photos are session media; a

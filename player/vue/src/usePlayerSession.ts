@@ -46,6 +46,7 @@ import type {
   TemporalContext,
 } from "../../../src/index.js";
 import { silence } from "./generatedAudio";
+import { useImageCapture } from "./useImageCapture";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 
 const PRIMED_AUDIO_ELEMENTS = 2;
@@ -225,13 +226,31 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     },
   );
 
-  // Until the Player offers the camera route, an image request that allows only the camera cannot be answered here.
-  // Each such request, of a session and an action, is reported once, so a dismissal holds only for the request it was
-  // given for.
+  // The camera route of `askImage`: with the camera capability the session camera is already open; otherwise the
+  // player's click on the camera button opens it for the capture, and it closes again when the capture ends.
+  const cameraOffered =
+    options.capabilities?.camera === true ||
+    (typeof navigator !== "undefined" &&
+      typeof navigator.mediaDevices?.getUserMedia === "function");
+  const imageCapture = useImageCapture({
+    session,
+    generation,
+    camera,
+    cameraRevision,
+    media: capturedMedia,
+    openCamera: () => camera.open(true),
+    captureEnded: () => {
+      if (options.capabilities?.camera !== true) camera.release();
+    },
+    observe: () => clock.observe(),
+    publish: (next) => (session.value = next),
+  });
+  // An image request that allows only the camera cannot be answered where no camera can be used. Each such request, of
+  // a session and an action, is reported once, so a dismissal holds only for the request it was given for.
   watch(
     () => {
       const request = session.value && activePlayerRuntimeInteraction(session.value.snapshot);
-      return request?.ui.kind === "image" && !request.ui.allowFile
+      return request?.ui.kind === "image" && !request.ui.allowFile && !cameraOffered
         ? `${generation.value}:${request.actionId}`
         : null;
     },
@@ -524,9 +543,22 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
      * ended while the file was read.
      */
     images: {
+      /** Whether the camera route can be offered: the session camera, or a camera the browser can open on request. */
+      camera: cameraOffered,
+      /** Opens the camera view for the presented request that allows the camera. */
+      openCamera: imageCapture.open,
       store: storeImageFile,
       admission: imageAdmission,
       discard: (reference: string) => capturedMedia.discard(reference),
+    },
+    /** Taking a photo for an `askImage` request on the Stage, or `null` while no capture is open. */
+    imageCapture: {
+      view: imageCapture.view,
+      retry: imageCapture.retry,
+      shutter: imageCapture.shutter,
+      retake: imageCapture.retake,
+      use: imageCapture.use,
+      close: imageCapture.close,
     },
     /** Bounded developer diagnostics, for example an unavailable session camera. */
     diagnostics: computed(() => diagnostics.value),

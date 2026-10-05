@@ -93,7 +93,10 @@ raw resources, such as cloned tracks, relies on the sandbox teardown or lifecycl
 reference grants access only when the trusted Player media store resolves it within the owning package namespace; a
 well-formed string, including one returned by `load`, is ordinary data. A file the player chooses for `askImage(...)`
 is external data: the Player identifies the image type from the file's bytes and has the browser decode it before
-storing it as session media, and only its reference reaches the runtime. A recording contains exactly the sources the
+storing it as session media, and only its reference reaches the runtime. Taking a photo for `askImage(...)` is the
+player's own act in a visible camera view: without an open session camera, the player's click on the camera button
+acquires the camera, so the browser asks permission then, and the view releases it when it closes; no photo is taken
+without the player's shutter press, and a photo reaches the runtime only through "Use this". A recording contains exactly the sources the
 author requests; whether video includes microphone audio never depends on whether a microphone is already open. How
 brokered acquisition and capability authorization are enforced against package code that calls browser capture APIs
 directly, which needs a concrete isolation mechanism such as a separate execution realm rather than a wrapper API or

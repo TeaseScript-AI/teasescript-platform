@@ -737,6 +737,7 @@ test("an image request is presented, survives a restore while it waits, and show
     accessibleName: "Answer",
     hint: "Add an image",
     allowFile: true,
+    allowCamera: true,
     types: [".png"],
     mime: null,
   });

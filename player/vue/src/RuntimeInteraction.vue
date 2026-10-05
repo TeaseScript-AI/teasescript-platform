@@ -30,9 +30,11 @@ export interface PlayerImageInput {
   ): Promise<{ readonly reference: string } | { readonly message: string }>;
   readonly admission: CapturedMediaAdmission;
   discard(reference: string): void;
+  /** Whether a photo from the camera can answer here. */
+  readonly camera: boolean;
+  /** Opens the camera view for the presented request. */
+  openCamera(): void;
 }
-
-const IMAGE_TEXT_FEEDBACK = "Attach an image with the paperclip, or drop it onto the message field.";
 
 const props = defineProps<{
   session: PlayerRuntimeSession | null;
@@ -97,6 +99,21 @@ const attach = computed(() =>
         request: { plan: plan.value, reset: props.reset, actionId: actionId.value },
       }
     : null,
+);
+const cameraButton = computed(() =>
+  imageRequest.value?.allowCamera === true && props.images?.camera === true
+    ? { label: "Take a photo" }
+    : null,
+);
+// Typed text never answers an image request; the notice names the routes it offers.
+const imageTextFeedback = computed(() =>
+  attach.value && cameraButton.value
+    ? "Attach or drop an image, or take a photo with the camera button."
+    : attach.value
+      ? "Attach an image with the paperclip, or drop it onto the message field."
+      : cameraButton.value
+        ? "Take a photo with the camera button."
+        : "",
 );
 type ImageRequestIdentity = NonNullable<typeof attach.value>["request"];
 /** Whether the image request the files are for is the one presented now. */
@@ -224,9 +241,7 @@ async function complete(
       showFeedback(
         foreground.value?.kind === "show-button"
           ? "Type the exact button text or activate it above."
-          : attach.value
-            ? IMAGE_TEXT_FEEDBACK
-            : "",
+          : imageTextFeedback.value,
       );
       if (refocusInput) focusInput();
       return;
@@ -407,6 +422,7 @@ function submit(source: "input" | "button") {
                 : 'Type your response…'
           "
           :attach="attach"
+          :camera="cameraButton"
           :accessible-name="foreground?.accessibleName ?? 'Response'"
           :input-mode="
             foreground?.kind !== 'ask-number' ? 'text' : foreground.integer ? 'numeric' : 'decimal'
@@ -426,6 +442,7 @@ function submit(source: "input" | "button") {
           @submit="submit"
           @skip="skipPacing(true)"
           @files="submitImage"
+          @camera="props.images?.openCamera()"
         />
       </template>
     </ConversationSurface>

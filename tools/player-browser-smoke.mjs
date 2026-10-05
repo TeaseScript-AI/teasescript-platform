@@ -114,11 +114,12 @@ async function main() {
       await packageScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
       await developmentTimeScenario(cdp, origin);
+      await askImageCameraScenario(cdp, origin);
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker and drop, development time controls, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, development time controls, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -1763,6 +1764,135 @@ async function askImageScenario(cdp, origin, profile) {
     8_000,
     "A file chosen before the second request was suspended did not answer it",
   );
+}
+
+/**
+ * The camera route of `askImage` on the Stage: the camera button opens the camera from the player's click, the shutter
+ * takes a photo the player may take again, and "Use this" alone answers the request with the camera's own, unmirrored
+ * picture. A camera that fails offers "Try again" while the paperclip stays; Escape closes the view, and the request
+ * waits.
+ */
+async function askImageCameraScenario(cdp, origin) {
+  const liveVideo = `(() => { const video = document.querySelector('[data-image-capture] video'); return !!video && video.readyState >= 2 && video.videoWidth > 0; })()`;
+  const photo = `document.querySelector('[data-image-capture-photo]')`;
+  const photoReady = `(${photo}?.complete && ${photo}.naturalWidth > 0) === true`;
+  const imageAnswers = `[...document.querySelectorAll('.transcript-entry')].filter((entry) => entry.textContent.trim() === 'Image').length`;
+  const start = async () => {
+    await navigate(cdp, `${origin}/player/?package=picture-camera`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await physicalClick(cdp, "[data-session-activation] button");
+    await waitFor(
+      cdp,
+      visible("[data-composer-camera]"),
+      8_000,
+      "The image request offered no camera button",
+    );
+  };
+  await cdp.call("Browser.setPermission", {
+    origin,
+    permission: { name: "camera" },
+    setting: "granted",
+  });
+  await start();
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-image-capture]')`),
+    false,
+    "The camera opened by itself",
+  );
+  await physicalClick(cdp, "[data-composer-camera]");
+  await waitFor(cdp, liveVideo, 8_000, "The camera view showed no live camera");
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('[data-image-capture]').textContent.includes('Take a selfie for me')`,
+    ),
+    true,
+    "The camera view does not ask the request's question",
+  );
+  await physicalClick(cdp, "[data-image-capture-shutter]");
+  await waitFor(cdp, photoReady, 8_000, "The photo taken is not shown for review");
+  assertTestCard(
+    await value(cdp, quadrantColors(photo)),
+    "The photo taken does not show the camera's frame",
+  );
+  assertEqual(
+    await value(cdp, `${imageAnswers}`),
+    0,
+    "Taking a photo answered the request before Use this",
+  );
+  await physicalClick(cdp, "[data-image-capture-retake]");
+  await waitFor(cdp, liveVideo, 8_000, "Retake did not return to the live camera");
+  await physicalClick(cdp, "[data-image-capture-shutter]");
+  await waitFor(cdp, photoReady);
+  await physicalClick(cdp, "[data-image-capture-use]");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-image-capture]') && ${imageAnswers} === 1 && document.body.innerText.includes('Lovely.')`,
+    8_000,
+    "Use this did not answer the request",
+  );
+  await waitFor(
+    cdp,
+    `(() => { const image = document.querySelector('.stage-media'); return !!image && image.complete && image.src.startsWith('blob:'); })()`,
+  );
+  assertTestCard(
+    await value(cdp, quadrantColors(`document.querySelector('.stage-media')`)),
+    "The Stage does not show the photo used",
+  );
+
+  // The camera is busy the first time: the view offers Try again, the paperclip stays, and Escape closes it.
+  const {
+    result: { identifier },
+  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `{
+      const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      let calls = 0;
+      navigator.mediaDevices.getUserMedia = (constraints) =>
+        ++calls === 1 ? Promise.reject(new DOMException('busy', 'NotReadableError')) : real(constraints);
+    }`,
+  });
+  try {
+    await start();
+    await physicalClick(cdp, "[data-composer-camera]");
+    await waitFor(
+      cdp,
+      visible("[data-image-capture-retry]"),
+      8_000,
+      "A busy camera offered no Try again",
+    );
+    assertEqual(
+      await value(cdp, visible("[data-composer-attach]")),
+      true,
+      "The paperclip went with the camera",
+    );
+    await physicalClick(cdp, "[data-image-capture-retry]");
+    await waitFor(cdp, liveVideo, 8_000, "Try again did not open the camera");
+    await pressEscape(cdp);
+    await waitFor(
+      cdp,
+      `!document.querySelector('[data-image-capture]')`,
+      8_000,
+      "Escape did not close the camera view",
+    );
+    assertEqual(
+      await value(cdp, visible("[data-composer-camera]")),
+      true,
+      "Closing the camera view ended the request",
+    );
+  } finally {
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    await cdp.call("Browser.resetPermissions");
+  }
+}
+
+async function pressEscape(cdp) {
+  for (const type of ["keyDown", "keyUp"])
+    await cdp.call("Input.dispatchKeyEvent", {
+      type,
+      key: "Escape",
+      code: "Escape",
+      windowsVirtualKeyCode: 27,
+    });
 }
 
 /** Opens the file picker with the paperclip; the native dialog itself is suppressed, and `setInputFiles` answers it. */

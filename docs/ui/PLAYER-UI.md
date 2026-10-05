@@ -422,7 +422,7 @@ audio, is labelled **Needs action**, offers no dismiss control, and disappears o
 
 The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
 (info: saved progress is not kept), a failed script-storage write (warning, for the run it happened in; a new
-Start withdraws it), and an image request that allows only the camera, which this Player cannot answer yet (warning,
+Start withdraws it), and an image request that allows only the camera where no camera can be used (warning,
 withdrawn when the request ends). Each level also has a theme status colour, following the usual convention: info blue, warning
 orange, error red. A toast uses the level's soft tint as its surface and its solid tone for the border and icon; a
 panel entry uses the same tint with a solid mark along its start edge and a solid icon; and the bell's dot takes the
@@ -686,8 +686,20 @@ AVIF, or BMP), requires the extension and the type to match `types` and `mime` w
 it; a file that fails, more than one file, or typed text shows the composer notice and the request keeps waiting, as
 does a cancelled picker. A file chosen in a picker opened for a request that is no longer presented, for example
 because a timer's request replaced it meanwhile, answers nothing and shows the composer notice. An accepted image is
-stored as session media and recorded in the transcript as the player message `Image`. Until the camera route exists, a
-request that allows only the camera cannot be answered, and a [player notice](#player-notices) says so.
+stored as session media and recorded in the transcript as the player message `Image`.
+
+An `askImage(...)` that allows the camera shows a camera button, named "Take a photo", beside the paperclip. It opens a
+camera view over the Stage: the request's message as its question above the live camera, mirrored like the viewfinder
+and with the same flip control, and below it a close control and **Take photo**. The photo taken replaces the live
+picture, unmirrored as it will be used, with **Retake** and **Use this**; only **Use this** answers the request, and
+**Retake** drops the photo and returns to the live camera. Each step focuses its main control, and Escape or the close
+control returns to the composer while the request waits. None of these controls enter the transcript. Without an open
+session camera, the camera button opens the camera from that click, and the view releases it when it closes. A camera
+that is denied, missing, or broken shows why with **Try again**, which opens it again from that click, while the
+paperclip stays. The view belongs to its request: it closes when the request ends, is interrupted, or its session is
+replaced, and a restored session never reopens it or takes a photo by itself. Where no camera can be used, such as on
+a page that is not a secure context, a request that allows only the camera cannot be answered, and a
+[player notice](#player-notices) says so.
 
 `choose` and `showButton` keep the composer enabled rather than visually disabling it:
 

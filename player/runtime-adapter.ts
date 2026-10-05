@@ -272,6 +272,7 @@ export function playerRuntimeForeground(
         accessibleName,
         hint: action.ui.hint ?? "",
         allowFile: action.ui.allowFile,
+        allowCamera: action.ui.allowCamera,
         types: action.ui.types,
         mime: action.ui.mime,
       });

@@ -8,6 +8,7 @@ import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import type { PlayerSpeakerPresentation } from "../../model.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import FloatingViewfinder, { type FloatingPlace } from "./FloatingViewfinder.vue";
+import ImageCapture from "./ImageCapture.vue";
 import PlayerComposition from "./PlayerComposition.vue";
 import PlayerNotificationCenter from "./PlayerNotificationCenter.vue";
 import PlayerToasts from "./PlayerToasts.vue";
@@ -198,7 +199,18 @@ async function toggleFullscreen() {
             :media="stageMedia"
             :camera="player.viewfinderPlacement.value === 'stage' ? player.viewfinder.value : null"
             @media-aspect="mediaAspect = $event"
-          />
+          >
+            <ImageCapture
+              v-if="player.imageCapture.view.value"
+              v-model:mirrored="viewfinderMirrored"
+              :view="player.imageCapture.view.value"
+              @shutter="player.imageCapture.shutter"
+              @retake="player.imageCapture.retake"
+              @use="player.imageCapture.use"
+              @close="player.imageCapture.close"
+              @retry="player.imageCapture.retry"
+            />
+          </Stage>
         </template>
         <template #overlay>
           <FloatingViewfinder

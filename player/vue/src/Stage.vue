@@ -49,6 +49,8 @@ function cameraMeasured(ratio: number) {
           <ViewfinderMirrorButton v-model="cameraMirrored" />
         </div>
       </div>
+      <!-- Player controls over the Stage, such as taking a photo for an image request. -->
+      <slot />
     </div>
   </section>
 </template>
