@@ -560,8 +560,15 @@ test("maps literal getSelectedValue options to zero-based numeric choice labels"
   );
 });
 
-test("keeps dynamic getSelectedValue option lists explicit", () => {
+test("keeps getSelectedValue options that cannot be a list explicit", () => {
   const source = file([
+    statement({
+      kind: "declaration",
+      span,
+      multipleAssignment: false,
+      left: variable("options"),
+      right: constant("not a list"),
+    }),
     statement({
       kind: "declaration",
       span,

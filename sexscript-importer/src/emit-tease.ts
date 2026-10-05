@@ -253,7 +253,7 @@ export function emitExpression(expression: IrExpression): string {
     case "variable":
       return expression.name;
     case "list":
-      return `[${expression.items.map(emitExpression).join(", ")}]`;
+      return `${expression.set === true ? "set" : ""}[${expression.items.map(emitExpression).join(", ")}]`;
     case "object": {
       const prefix = expression.dict === true ? "dict" : "";
       const key = (property: (typeof expression.properties)[number]): string => {

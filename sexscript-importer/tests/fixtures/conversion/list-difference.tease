@@ -46,4 +46,9 @@ let got = collected()
 if got.length > 0 {
   say "Found ${got.length}"
 }
+// A list appended to and assigned to itself, list = list << value, appends once.
+let lessons = []
+lessons.add("Spelling")
+lessons.add("Manners")
+say "Lessons: ${lessons.length}"
 exit

@@ -10,6 +10,9 @@ if (missed > 1 && getBoolean("Continue?")) show("Continuing")
 // Groovy's & on booleans evaluates both sides, so a right side with effects runs first.
 def asked = { -> show("Asked"); return true }
 def both = likes("tape") & asked()
+// A stored flag of unknown type and a comparison are both tested as conditions.
+def helpmode = loadBoolean("help")
+if (helpmode | missed < 0) show("Help")
 // A list method with a closure becomes a loop before the statement.
 def toys = ["rope", "tape", "gag"]
 show("Liked: " + toys.findAll { t -> likes(t) }.join(", "))

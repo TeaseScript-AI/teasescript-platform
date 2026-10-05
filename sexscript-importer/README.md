@@ -61,9 +61,10 @@ accept `.groovy` files, directories, or parser JSON; inputs of one invocation fo
 
 `report` compiles the package as one project (`compileProject`); a file is compiler-clean when the project reports no
 error for it. `report --run` also smoke-runs the project in the real runtime, which follows the transfers between files
-itself: from `main.tease`, then each runnable script no run reached in isolation (with empty storage, so a failure there
-can come from missing setup). A file that is not compiler-clean becomes a stub in the run's project, and a run that
-reaches it ends as `blocked`. Answers are deterministic: buttons are pressed, each visit of a choice takes the next
+itself: from `main.tease`, then each runnable script no run reached in isolation, starting with the storage the run
+from `main.tease` left (setup that only a script no run reached saves can still be missing). A file runs where the
+project compiles it, also with unconverted statements kept as TODO comments; a file that does not compile becomes a
+stub in the run's project, and a run that reaches it ends as `blocked`. Answers are deterministic: buttons are pressed, each visit of a choice takes the next
 option, text and number inputs cycle through fixed values, `takePhoto()` returns null as in a Player without a camera,
 and time and media advance in simulation; the wall clock starts at 2026-10-02 12:00 UTC and follows that time. Accepted
 forms selected with `--accepted` use host stand-ins with the same answer rotation. A run proves one path executes;
@@ -84,6 +85,16 @@ folder path, `images/Domme3/Pack 2/x.jpg` → `images-domme3-pack-2`, and the co
 `findImages(all: ["images-domme3-pack-2"]).length`, or the `sexscriptLegacyPathTag` helper's tag of a computed folder
 (`SX_IMAGE_TAGS`). The report's gate and smoke runs give the compiler these tags. A count filtered by file name stays
 counted at conversion time (`SX_IMAGE_COUNT_WORKAROUND`).
+
+A package text file that no script of the package writes, such as quiz lines, Properties strings, or INI settings, is
+part of the package as converted: a `File`, stream, or reader over it becomes its path text, and `readLines()`,
+`Properties.load()`, and `Wini.get()` read a generated function that holds the file's text at conversion time, marked
+with a `// NOTE`. A file some script writes, deletes, or hands to code the importer cannot follow stays manual work.
+
+Java library calls convert where their receiver and arguments are proven and TeaseScript has the same behavior
+(`src/java-time.ts`, `src/java-text.ts`): a Calendar or Date becomes a `datetime`, a Random object the session's random
+numbers, a StringBuilder text, and URL encoding, Math functions, Groovy number checks, and similar operations generated
+`sexscriptLegacy*` helpers. A remaining difference, such as the last digits of a Math helper, gets a `// NOTE`.
 
 Generated files follow these conventions:
 

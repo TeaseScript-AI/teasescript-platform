@@ -10,6 +10,7 @@ import { emitTease } from "./emit-tease.ts";
 import { imageCatalog } from "./image-tags.ts";
 import { rootDiagnostics } from "./diagnostics.ts";
 import type { IrStatement, MigrationProgram } from "./ir.ts";
+import type { PackageFileReader } from "./java-data.ts";
 import { lowerPackage } from "./package.ts";
 import type { AcceptedForm } from "./workarounds.ts";
 import {
@@ -78,6 +79,8 @@ export interface FeasibilityOptions {
   media?: readonly MediaFile[];
   /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
   files?: readonly string[];
+  /** Reads a file of `files`, whose text package text reads snapshot (java-data.ts). */
+  readFile?: PackageFileReader;
   /** Scripts that are no entries of their own, which the generated entry menu does not offer (PackageOptions). */
   internalScripts?: readonly string[];
   /**
@@ -116,7 +119,7 @@ export interface FinalPackageCheck {
 export interface PackageRunResult {
   /** `main.tease`, or the file an isolated run started at. */
   entry: string;
-  /** A run started at a script that no earlier run reached, with empty storage instead of the package's state. */
+  /** A run started at a script that no earlier run reached, with the storage the run from `main.tease` left. */
   isolated: boolean;
   /** `blocked`: the run reached a file that has no runnable conversion. */
   status: ProjectRunResult["status"] | "blocked";
@@ -211,6 +214,7 @@ export function analyzeFeasibility(
     ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
     ...(options.media === undefined ? {} : { media: options.media }),
     ...(options.files === undefined ? {} : { files: options.files }),
+    ...(options.readFile === undefined ? {} : { readFile: options.readFile }),
     ...(options.internalScripts === undefined ? {} : { internalScripts: options.internalScripts }),
   });
   const helpers = globals?.helpers ?? null;
@@ -570,6 +574,8 @@ function runPackageProject(
       probeLines.delete(path);
     }
   }
+  // Isolated runs start with the storage the run from main.tease left, as a player who played it first.
+  const entryStorage = new Map<string, RuntimeValue>();
   const run = (files: readonly TeaseProjectFile[], entry: string, isolated: boolean): void => {
     const answers = new Map<string, number>();
     const visits: string[] = [];
@@ -580,7 +586,10 @@ function runPackageProject(
     hosts[ENTER] = ([path]: readonly RuntimeValue[]) => (visits.push(String(path)), null);
     hosts[BLOCKED] = ([target]: readonly RuntimeValue[]) => ((blocked = String(target)), null);
     hosts[START] = () => (started ? "" : ((started = true), entry));
-    const result = runner(files, hosts, images === undefined ? {} : { images });
+    const result = runner(files, hosts, {
+      ...(images === undefined ? {} : { images }),
+      storage: isolated ? new Map(entryStorage) : entryStorage,
+    });
     const failure = blocked === null ? result.failure : null;
     // The announcing statement moved the generated file's lines after it down.
     const probe = failure?.path === null ? undefined : probeLines.get(failure?.path ?? "");

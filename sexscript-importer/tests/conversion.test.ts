@@ -196,6 +196,62 @@ test(
   },
 );
 
+// A legacy folder listing becomes the package paths of the folder's images, found by the tag of its path; a missing
+// folder, whose listing was null, has no images.
+test(
+  "lists an images folder as the package paths of its images",
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
+  async () => {
+    if (!("compiler" in projectResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-listing-"));
+    try {
+      const sourcePath = path.join(directory, "listing.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          "def pick = { name ->",
+          '  def folder = new File(System.getProperty("user.dir") + "/images/Mistress/" + name + "/")',
+          "  def files = folder.listFiles()",
+          '  if (files == null) return "none"',
+          "  return files[getRandom(files.length)].toString()",
+          "}",
+          'save("picked", pick("Pack 2"))',
+          'save("missing", pick("Pack 3"))',
+          'save("count", new File(getDataFolder() + "images/Mistress/Pack 1").listFiles().length)',
+          "",
+        ].join("\n"),
+      );
+      const media = ["Mistress/Pack 1/a.jpg", "Mistress/Pack 1/b.png", "Mistress/Pack 2/c.JPG"].map(
+        (file) => ({ path: file }),
+      );
+      const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { media });
+      const source = emitTease(program!);
+      assert.match(
+        source,
+        /^ {2}let files = findImages\(all: \[sexscriptLegacyPathTag\(folder\)\]\)$/mu,
+      );
+      assert.match(source, /^ {2}if files\.length == 0 \{$/mu);
+      const storage = new Map();
+      const result = projectResult.runner(
+        [{ path: "main.tease", source }],
+        {},
+        { images: imageCatalog(media), storage },
+      );
+      assert.deepEqual(
+        { status: result.status, failure: result.failure },
+        { status: "halted", failure: null },
+      );
+      assert.deepEqual(Object.fromEntries(storage), {
+        picked: "Mistress/Pack 2/c.JPG",
+        missing: "none",
+        count: 2,
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 // The pathTag helper gives a computed folder at runtime the tag that the sidecars carry from conversion.
 test(
   "the runtime path tag of a folder equals its conversion-time tag",
@@ -719,6 +775,7 @@ test(
       "lone-script",
       "branches",
       "nested-story",
+      "helper-class",
     ]) {
       const directory = fileURLToPath(new URL(`./fixtures/packages/${name}/`, import.meta.url));
       const scripts = path.join(directory, "scripts");
@@ -731,12 +788,20 @@ test(
       const lowered = lowerPackage(files);
       const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;
       // Paths start at the scripts' common folder, as convert-package writes them.
-      const outputs = lowered.composed.map((program, index): [string, MigrationProgram] => [
-        index === entry
-          ? "main.tease"
-          : (lowered.paths[index] ?? sources[index]!.replace(/\.groovy$/u, ".tease")),
-        program,
-      ]);
+      // A helper class writes no file of its own, as in convert-package.
+      const outputs = lowered.composed.flatMap(
+        (program, index): Array<[string, MigrationProgram]> =>
+          files[index]!.root?.kind === "scriptBody"
+            ? [
+                [
+                  index === entry
+                    ? "main.tease"
+                    : (lowered.paths[index] ?? sources[index]!.replace(/\.groovy$/u, ".tease")),
+                  program,
+                ],
+              ]
+            : [],
+      );
       if (lowered.main !== null && "menu" in lowered.main)
         outputs.push(["main.tease", lowered.main.menu]);
       const helpers = lowered.globals?.helpers ?? null;
@@ -771,6 +836,17 @@ test(
         const unit = lowerPackage(files, { internalScripts: ["Story/addon.groovy"] });
         assert.ok(unit.main !== null && "menu" in unit.main);
         assert.match(emitTease(unit.main.menu), /\ngoto "start\.tease"\n$/u);
+      }
+      if (name === "helper-class") {
+        // The scripts call the class's static closures as functions, in both scripts.
+        const report = analyzeFeasibility(files, {
+          compiler: projectResult.compiler,
+          runner: projectResult.runner,
+        });
+        assert.deepEqual(
+          report.smokeRuns.map(({ entry: start, status, visited }) => ({ start, status, visited })),
+          [{ start: "main.tease", status: "halted", visited: ["main.tease", "next.tease"] }],
+        );
       }
       if (name === "shared-helpers") {
         // The scripts call the shared functions, which read the shared table and the global each script assigns.

@@ -28,3 +28,8 @@ def collected = {
 }
 def got = collected()
 if (got.size > 0) show("Found " + got.size)
+// A list appended to and assigned to itself, list = list << value, appends once.
+def lessons = []
+lessons = lessons << "Spelling"
+lessons = lessons << "Manners"
+show("Lessons: " + lessons.size())

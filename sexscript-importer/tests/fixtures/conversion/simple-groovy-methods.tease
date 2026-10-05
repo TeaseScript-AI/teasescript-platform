@@ -11,17 +11,42 @@ function sexscriptLegacyRandom(limit) {
   }
   return 0
 }
+function sexscriptLegacyMenuOptions(texts, first) {
+  let options = []
+  let positionValue = first
+  for text in texts {
+    options.add({ value: positionValue, text: text })
+    positionValue += 1
+  }
+  return options
+}
 function sexscriptLegacyItems(value) {
   if value is string {
     return value.split("")
   }
   return value
 }
-function sexscriptLegacyItemAt(listValue, positionValue) {
-  if positionValue >= listValue.length {
+function sexscriptLegacyItemAt(listValue, positionValue2) {
+  if positionValue2 >= listValue.length {
     return null
   }
-  return listValue[positionValue]
+  return listValue[positionValue2]
+}
+function sexscriptLegacyReplaceChars(text, chars, keep, replacement, runs) {
+  let result = ""
+  let inRun = false
+  for character in text.split("") {
+    if chars.contains(character) == keep {
+      result = "${result}${character}"
+      inRun = false
+    } else {
+      if not (runs and inRun) {
+        result = "${result}${replacement}"
+      }
+      inRun = true
+    }
+  }
+  return result
 }
 // equals() compares values like ==.
 let name = "Anna"
@@ -76,4 +101,16 @@ let pick = sexscriptLegacyRandom(positions.length) + 1
 if sexscriptLegacyItemAt(positions, pick) == "otk" {
   say "Over my knee"
 }
+// Java replaceAll() with a regular expression that text operations express.
+let serial = "ab12-x|[y]"
+// NOTE SX_SAY_MARKUP line 42: This legacy plain text contains a line-start list/heading/quote marker or a backslash escape that TeaseScript say renders as message markup; use escapeMarkup() if it must stay literal.
+say "${sexscriptLegacyReplaceChars(serial, "0123456789", true, "", false)} ${serial.replace("[", "").replace("]", "")} ${serial.replace("|", "/")}"
+// Menu options from a value not proven to be a list are offered as one, as Groovy required.
+function rooms {
+  return ["Hall", "Garden"]
+}
+let roomList = rooms()
+say "Where to?"
+let room = choose sexscriptLegacyMenuOptions(roomList, 0)
+say "Going to ${roomList[room]}"
 exit
