@@ -99,6 +99,34 @@ test("resume equivalence preserves collections changed in place inside a loop", 
   );
 });
 
+test("a prepared receiver whose index removes its ancestor keeps the value it selected", () => {
+  // The index empties `rows` after `rows[0]` was selected, so the change goes to the selected copy, not to `rows`.
+  for (const change of [
+    "rows[0][rows.removeFirst().length - 1].add(dynamic(7))",
+    "rows[0][rows.removeFirst().length - 1][0] = 7",
+  ]) {
+    const result = assertRuntimeResumeEquivalent(
+      [
+        "function dynamic(value) {",
+        "    return value",
+        "}",
+        "let rows = [[[0]]]",
+        change,
+        "say rows",
+        "exit",
+      ].join("\n"),
+      { scenarioName: change },
+    );
+
+    assert.equal(result.finalSnapshot.failure, null, change);
+    assert.deepEqual(
+      result.events.filter((event) => event.kind === "say").map((event) => event.text),
+      ["[]"],
+      change,
+    );
+  }
+});
+
 test("resume equivalence preserves deterministic random advancement", () => {
   const result = assertRuntimeResumeEquivalent(
     [
