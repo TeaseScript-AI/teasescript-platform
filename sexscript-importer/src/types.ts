@@ -212,6 +212,11 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
     return element === undefined || element === 0 ? UNKNOWN : element;
   }
   if (BOOLEAN_OPERATORS.has(operator)) return BOOLEAN;
+  // Groovy `list << value` appends to the list and is the list.
+  if (operator === "<<") {
+    const left = inferType(asNode(node.left), environment);
+    if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
+  }
   // Groovy list - value is a list without the value.
   if (operator === "-") {
     const left = inferType(asNode(node.left), environment);

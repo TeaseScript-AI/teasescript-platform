@@ -3834,6 +3834,16 @@ function lowerAssignment(
   context: LowerContext,
 ): IrStatement[] {
   const operator = text(node.operator);
+  // `list = list << value` appends; assigning the list to itself adds nothing.
+  const appended = asNode(node.right);
+  if (
+    operator === "=" &&
+    appended?.kind === "binary" &&
+    appended.operator === "<<" &&
+    variableName(node.left) !== null &&
+    variableName(appended.left) === variableName(node.left)
+  )
+    return lowerAssignment(appended, span, context);
   // A photo copied to a package image path keeps its reference under that path, where showing the path shows it.
   const copy = photoCopy(node);
   if (operator === "<<" && copy !== null) {
