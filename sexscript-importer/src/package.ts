@@ -7,7 +7,12 @@ import {
   type ParsedGroovyFile,
   type SourceSpan,
 } from "./ast.ts";
-import type { IrStatement, MigrationDiagnostic, MigrationProgram } from "./ir.ts";
+import type {
+  IrExpression,
+  IrStatement,
+  MigrationDiagnostic,
+  MigrationProgram,
+} from "./ir.ts";
 import {
   buildHelperRegistry,
   describeMixinModule,
@@ -78,6 +83,93 @@ export interface PackageOptions {
    * converted file of any legacy script name. Otherwise a package's only script becomes its main.tease.
    */
   standalone?: boolean;
+}
+
+/** Every literal text of the package's files. */
+function packageTexts(files: readonly ParsedGroovyFile[]): Set<string> {
+  const texts = new Set<string>();
+  for (const file of files)
+    walkAst(file.root, (node) => {
+      const text = constantString(node);
+      if (text !== null) texts.add(text);
+    });
+  return texts;
+}
+
+/**
+ * The storage key under which the legacy player recorded each start of a script (FullScript.groovytemplate with
+ * ScriptContainer.getMiniCurrentScriptName): its path from the scripts folder, up to the first dot, without a
+ * language suffix such as `_de`, with dots for slashes. A merged variant's `__sha256_…` suffix is no part of it.
+ */
+function launchKey(sourceName: string): string {
+  let name = sourceName.replaceAll("\\", "/").replace(/__sha256_[0-9a-f]+(?=\.[^/]*$)/u, "");
+  const folder = name.lastIndexOf("scripts/");
+  name =
+    folder >= 0 ? name.slice(folder + "scripts/".length) : name.slice(name.lastIndexOf("/") + 1);
+  if (name.includes(".")) name = name.slice(0, name.indexOf("."));
+  if (name.includes("_") && name.lastIndexOf("_") > name.length - 4)
+    name = name.slice(0, name.lastIndexOf("_"));
+  return name.replaceAll("/", ".");
+}
+
+/**
+ * The legacy player saved `<key>.launch.firsttime`, `.lasttime` (Unix seconds), and `.nb` (the number of starts) when
+ * a script started. Where the package reads one of them, the script saves them first, after its leading comments.
+ */
+function withLaunchMarkers(
+  program: MigrationProgram,
+  key: string,
+  texts: ReadonlySet<string>,
+): MigrationProgram {
+  const [first, last, count] = ["firsttime", "lasttime", "nb"].map(
+    (name) => `${key}.launch.${name}`,
+  );
+  if (![first, last, count].some((name) => texts.has(name!))) return program;
+  const now: IrExpression = {
+    kind: "methodCall",
+    target: { kind: "call", name: "getTimestamp", positional: [], named: {} },
+    name: "toSeconds",
+    arguments: [],
+  };
+  const literal = (value: string): IrExpression => ({ kind: "literal", value });
+  const message = `The legacy player recorded each start of this script under "${key}.launch.*", which the package reads; the script saves the first and last start time and the number of starts as it did.`;
+  const markers: IrStatement[] = [
+    { kind: "comment", text: `// NOTE SX_LAUNCH_MARKERS: ${message}`, trailing: false, span: null },
+    {
+      kind: "if",
+      condition: {
+        kind: "binary",
+        operator: "==",
+        left: { kind: "load", key: literal(first!) },
+        right: { kind: "literal", value: null },
+      },
+      then: [{ kind: "save", key: literal(first!), value: now, span: null }],
+      else: [],
+      span: null,
+    },
+    { kind: "save", key: literal(last!), value: now, span: null },
+    {
+      kind: "save",
+      key: literal(count!),
+      value: {
+        kind: "binary",
+        operator: "+",
+        left: { kind: "load", key: literal(count!), defaultValue: { kind: "literal", value: 0 } },
+        right: { kind: "literal", value: 1 },
+      },
+      span: null,
+    },
+  ];
+  const leading = program.statements.findIndex((statement) => statement.kind !== "comment");
+  const at = leading < 0 ? program.statements.length : leading;
+  return {
+    ...program,
+    statements: [...program.statements.slice(0, at), ...markers, ...program.statements.slice(at)],
+    diagnostics: [
+      ...program.diagnostics,
+      { code: "SX_LAUNCH_MARKERS", severity: "warning", message, span: null },
+    ],
+  };
 }
 
 /** The indexes of the files that `internal` names by their paths from the legacy scripts folder. */
@@ -343,9 +435,14 @@ export function lowerPackage(
 
   // What a function nothing references cannot convert becomes a note, in the file and in the composed script.
   const uncalled: MigrationDiagnostic[][] = files.map(() => []);
+  const texts = packageTexts(files);
   const composed = lowered.map((program, index) => {
     if (files[index]?.root?.kind !== "scriptBody" || program.module !== undefined) return program;
-    const script = composeProgram(withLoadedModules(program, modulePrograms), functionCatalog);
+    const script = withLaunchMarkers(
+      composeProgram(withLoadedModules(program, modulePrograms), functionCatalog),
+      launchKey(files[index]!.sourceName),
+      texts,
+    );
     uncalled[index] = uncalledDiagnostics(script, legacyUnreferencedFunctions(groups[index]!));
     return withUncalledNotes(script, uncalled[index]!);
   });
