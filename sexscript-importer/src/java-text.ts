@@ -23,6 +23,8 @@ export interface TextAnalysis {
   readonly textBuffers: ReadonlySet<string>;
   /** The constructors that the text buffer variables are assigned. */
   readonly bufferValues: ReadonlySet<AstNode>;
+  /** Map keys whose every value in the body's map literals is a closure, as `[label: "a slap", action: { ... }]`. */
+  readonly closureFields: ReadonlySet<string>;
 }
 
 const RANDOM_TYPES = new Set(["Random", "java.util.Random"]);
@@ -53,6 +55,24 @@ const BUFFER_TYPES = new Set([
 /** Members of a text buffer that read its text. */
 const BUFFER_READS = new Set(["length", "toString"]);
 const SYSTEM_CLASSES = new Set(["System", "java.lang.System"]);
+const FILE_CLASSES = new Set(["File", "java.io.File"]);
+/** Methods of a Groovy map, which a map key of the same name does not replace. */
+const MAP_METHODS = new Set([
+  "clear",
+  "containsKey",
+  "containsValue",
+  "each",
+  "find",
+  "findAll",
+  "get",
+  "isEmpty",
+  "keySet",
+  "put",
+  "putAll",
+  "remove",
+  "size",
+  "values",
+]);
 const CHARACTER_CLASSES = new Set(["Character", "java.lang.Character"]);
 /** Java regex `.` matches any character except these line terminators. */
 const LINE_TERMINATORS = ["\n", "\r", "\u0085", "\u2028", "\u2029"];
@@ -131,7 +151,34 @@ export function analyzeText(root: AstNode): TextAnalysis {
       bufferValues.add(only);
     }
   }
-  return { randoms, charArrays, orderedSets, textBuffers, bufferValues };
+  return {
+    randoms,
+    charArrays,
+    orderedSets,
+    textBuffers,
+    bufferValues,
+    closureFields: closureFields(tree),
+  };
+}
+
+/** Map keys whose every literal value is a closure or a variable that only ever holds closures. */
+function closureFields(tree: Tree): Set<string> {
+  const closures = new Set<string>();
+  for (const [name, values] of tree.assignments) {
+    if (values.length > 0 && values.every((value) => value?.kind === "closure")) closures.add(name);
+  }
+  const fields = new Map<string, boolean>();
+  for (const node of tree.parents.keys()) {
+    if (node.kind !== "mapEntry") continue;
+    const key = constantString(node.key);
+    const value = asNode(node.value);
+    if (key === null || value === null) continue;
+    const closure = value.kind === "closure" || closures.has(variableName(value) ?? "");
+    fields.set(key, (fields.get(key) ?? true) && closure);
+  }
+  return new Set(
+    [...fields].filter(([key, closure]) => closure && !MAP_METHODS.has(key)).map(([key]) => key),
+  );
 }
 
 /** A HashSet (not a LinkedHashSet), whose iteration order Java chose by hash codes. */
@@ -273,6 +320,35 @@ export function textCall(
       return literal("\n");
     }
     return undefined;
+  }
+  // `new File(path).getName()`: the last part of a package path, as java.io.File gave it on Windows.
+  if (
+    name === "getName" &&
+    args.length === 0 &&
+    receiver.kind === "constructorCall" &&
+    FILE_CLASSES.has(String(receiver.type)) &&
+    argumentsOf(receiver).length === 1
+  ) {
+    const pathNode = argumentsOf(receiver)[0]!;
+    if (host.isPhoto(pathNode) || !onlyOf(host.valueType(pathNode), STRING | NULL))
+      return undefined;
+    const path = host.lower(pathNode);
+    return path === null ? null : host.helper("fileName", [path]);
+  }
+  // `record.action()` calls the closure that the record's field holds, as a Groovy map did.
+  if (
+    analysis.closureFields.has(name) &&
+    (owner === null || host.isVariable(owner.split(".")[0]!))
+  ) {
+    const field = host.lower({
+      kind: "property",
+      span: node.span,
+      object: receiver,
+      property: { kind: "constant", span: null, value: name },
+    });
+    const lowered = lowerAll();
+    if (field === null || lowered === null) return null;
+    return host.actionCall(field, lowered);
   }
   // The text of a StringBuilder or StringBuffer variable.
   const buffer = variableName(receiver);

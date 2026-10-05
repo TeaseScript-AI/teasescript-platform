@@ -294,6 +294,27 @@ test(
   },
 );
 
+// The GregorianCalendar idiom shows seconds as a clock that wraps at midnight, File.getName() is the last part of a
+// path with either separator, and `record.action()` calls the closure the record's field holds.
+test("converts clock texts, file names, and closures kept in record fields", { skip }, async () => {
+  const source = await convert([
+    "def maxSessionTime = 3725",
+    "def clock = new GregorianCalendar( 0, 0, 0, 0, 0, maxSessionTime, 0 ).time.format( 'HH:mm:ss' )",
+    "def wrapped = new GregorianCalendar(0, 0, 0, 25, 0, 5).getTime().format('HH:mm')",
+    'def shortName = (new File("images/Room\\\\Sub/bed.jpg")).getName()',
+    "def count = 0",
+    'def hardSlap = [label: "a hard slap", action: { count = count + 1 }]',
+    'def soft = [label: "soft", action: { count = count + 10 }]',
+    "def strike = hardSlap",
+    "strike.action()",
+    "soft.action()",
+    'show("${clock} ${wrapped} ${shortName} ${count}")',
+  ]);
+  assert.match(source, /^sexscriptLegacyCall\(strike\.action, \[\]\)$/mu);
+  assert.doesNotMatch(source, /TODO/u);
+  assert.deepEqual(run(source), ["01:02:05 01:00 bed.jpg 11"]);
+});
+
 function groovyParserUnavailableReason(): string | false {
   if (spawnSync("java", ["-version"], { stdio: "ignore" }).status !== 0) {
     return "Java is not available for the Groovy 2.5.21 parser helper.";

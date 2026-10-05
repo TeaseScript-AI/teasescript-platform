@@ -385,6 +385,36 @@ export function temporalCall(
   if (receiver === null) return undefined;
   const analysis = host.state.temporal;
   const owner = dottedName(receiver);
+  const clock = name === "format" && args.length === 1 ? clockSeconds(receiver, args[0]!) : null;
+  if (clock !== null) {
+    const parts: IrExpression[] = [];
+    for (const field of clock.fields) {
+      const value = host.lower(field);
+      if (value === null) return null;
+      parts.push(whole(value));
+    }
+    // The total seconds, without the terms of zero hours or minutes.
+    const terms = [
+      binary("*", parts[0]!, literal(3600)),
+      binary("*", parts[1]!, literal(60)),
+      parts[2]!,
+    ].filter(
+      (term, index) =>
+        !(index < 2 && parts[index]!.kind === "literal" && parts[index]!.value === 0),
+    );
+    const total = terms.slice(1).reduce((sum, term) => binary("+", sum, term), terms[0]!);
+    const text = host.helper("clockText", [total]);
+    return clock.pattern === "HH:mm:ss"
+      ? text
+      : clock.pattern === "HH:mm"
+        ? {
+            kind: "methodCall",
+            target: text,
+            name: "substring",
+            arguments: [literal(0), literal(5)],
+          }
+        : { kind: "methodCall", target: text, name: "substring", arguments: [literal(3)] };
+  }
   if (owner === "System" && name === "currentTimeMillis" && args.length === 0)
     return {
       kind: "methodCall",
@@ -633,6 +663,33 @@ export function temporalStatement(
     default:
       return null;
   }
+}
+
+/**
+ * `new GregorianCalendar(0, 0, 0, hours, minutes, seconds[, 0]).time.format("HH:mm:ss")`, the idiom that shows a
+ * number of seconds as a clock: a lenient calendar wraps the time at midnight, so only the time of day shows.
+ */
+function clockSeconds(
+  receiver: AstNode,
+  patternNode: AstNode,
+): { fields: AstNode[]; pattern: string } | null {
+  const pattern = constantString(patternNode);
+  if (pattern !== "HH:mm:ss" && pattern !== "HH:mm" && pattern !== "mm:ss") return null;
+  const calendar =
+    receiver.kind === "property" && constantString(receiver.property) === "time"
+      ? asNode(receiver.object)
+      : receiver.kind === "methodCall" &&
+          constantString(receiver.method) === "getTime" &&
+          argumentsOf(receiver).length === 0
+        ? asNode(receiver.object)
+        : null;
+  if (calendar?.kind !== "constructorCall" || !GREGORIAN_TYPES.has(String(calendar.type)))
+    return null;
+  const args = argumentsOf(calendar);
+  const zero = (node: AstNode | undefined) => node?.kind === "constant" && node.value === 0;
+  if (args.length < 6 || args.length > 7 || !args.slice(0, 3).every(zero)) return null;
+  if (args.length === 7 && !zero(args[6])) return null;
+  return { fields: args.slice(3, 6), pattern };
 }
 
 /** Groovy properties of a Date that read its deprecated getters, such as `date.year` for getYear(). */

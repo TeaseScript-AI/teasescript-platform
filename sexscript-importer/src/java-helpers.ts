@@ -23,7 +23,9 @@ export type JavaHelperName =
   | "indexFrom"
   | "character"
   | "insert"
-  | "aroundText";
+  | "aroundText"
+  | "fileName"
+  | "clockText";
 
 /** The Java helpers in their stable order after the other generated helpers. */
 export const JAVA_HELPER_ORDER: readonly JavaHelperName[] = [
@@ -44,6 +46,8 @@ export const JAVA_HELPER_ORDER: readonly JavaHelperName[] = [
   "character",
   "insert",
   "aroundText",
+  "fileName",
+  "clockText",
 ];
 
 const DEPENDENCIES = new Map<string, JavaHelperName[]>([
@@ -760,5 +764,69 @@ export const JAVA_HELPERS: Record<JavaHelperName, { name: string; build: () => I
         ],
       );
     },
+  },
+  // java.io.File getName() as on Windows: the part after the last / or \\, without separators at the end.
+  fileName: {
+    name: "sexscriptLegacyFileName",
+    build: () =>
+      fn(
+        "sexscriptLegacyFileName",
+        ["path"],
+        [
+          letS("name", method(v("path"), "replace", lit("\\"), lit("/"))),
+          whileS(
+            bin(
+              "and",
+              bin(">", length(v("name")), lit(1)),
+              method(v("name"), "endsWith", lit("/")),
+            ),
+            [
+              set(
+                "name",
+                method(v("name"), "substring", lit(0), bin("-", length(v("name")), lit(1))),
+              ),
+            ],
+          ),
+          ret(
+            method(
+              v("name"),
+              "substring",
+              bin("+", method(v("name"), "lastIndexOf", lit("/")), lit(1)),
+            ),
+          ),
+        ],
+      ),
+  },
+  // A number of seconds as the time of day HH:mm:ss, wrapped at midnight as a lenient calendar wrapped it.
+  clockText: {
+    name: "sexscriptLegacyClockText",
+    build: () =>
+      fn(
+        "sexscriptLegacyClockText",
+        ["seconds"],
+        [
+          letS(
+            "rest",
+            bin(
+              "-",
+              v("seconds"),
+              bin("*", call("floor", bin("/", v("seconds"), lit(86400))), lit(86400)),
+            ),
+          ),
+          letS("hours", call("floor", bin("/", v("rest"), lit(3600)))),
+          set("rest", bin("-", v("rest"), bin("*", v("hours"), lit(3600)))),
+          letS("minutes", call("floor", bin("/", v("rest"), lit(60)))),
+          set("rest", bin("-", v("rest"), bin("*", v("minutes"), lit(60)))),
+          ret(
+            template(
+              padded(v("hours"), 2),
+              ":",
+              padded(v("minutes"), 2),
+              ":",
+              padded(v("rest"), 2),
+            ),
+          ),
+        ],
+      ),
   },
 };

@@ -12743,6 +12743,8 @@ function javaHost(context: LowerContext): JavaRuleHost {
       noteSharedListWrite(receiver, node, context);
       return true;
     },
+    actionCall: (action, args) => actionCall(action, args, context),
+    isPhoto: (node) => context.photoVariables.has(variableName(node) ?? ""),
     state: context.java,
   };
 }

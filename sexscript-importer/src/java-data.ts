@@ -74,6 +74,10 @@ export interface JavaRuleHost {
    * otherwise, with a note when another variable shared it.
    */
   listWrite(receiver: AstNode, node: AstNode): boolean;
+  /** A call of the function an action ID (a converted closure value) names. */
+  actionCall(action: IrExpression, args: IrExpression[]): IrExpression;
+  /** Whether a node names a photo the script took, whose reference is no package path. */
+  isPhoto(node: AstNode): boolean;
   readonly state: JavaFileState;
 }
 
@@ -307,6 +311,7 @@ export function javaFileState(
             orderedSets: new Set(),
             textBuffers: new Set(),
             bufferValues: new Set(),
+            closureFields: new Set(),
           }
         : analyzeText(body),
     data: shared?.data ?? {
