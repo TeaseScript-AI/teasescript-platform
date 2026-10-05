@@ -73,7 +73,8 @@ export interface PlayerSessionOptions {
   capabilities?: { readonly camera?: boolean };
   /**
    * Durable storage for captured photos and chosen images that a saved value references, in the script storage's scope.
-   * Without a repository, they stay session media, and a persistent save that references one fails.
+   * Without a repository, they stay session media, and a persistent save that references one fails. A host with
+   * persistent script storage passes it, also without a repository, so that no saved reference outlives its media.
    */
   capturedMedia?: { readonly repository: CapturedMediaRepository | null };
   /** Decodes a chosen image file before it is stored; the browser's decoder by default. */
@@ -108,12 +109,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     options.scriptStorage?.scope ?? "player",
     () => mediaRevision.value++,
   );
-  // Any session may hold a captured photo or a chosen image, so a value is saved only after storing the media it
-  // references, and only while the Player holds the scope's live lock, so no other Player reclaims media it might still
-  // use.
-  const capturedMediaPersistence = options.scriptStorage
-    ? capturedMediaStorage(options.scriptStorage, capturedMedia, browserCapturedMediaLocks())
-    : undefined;
+  // A Player that can capture photos, or whose host keeps captured and chosen media, saves a value only after storing the
+  // media it references, and only while it holds the scope's live lock, so no other Player reclaims media it might still
+  // use. Otherwise storage is used directly.
+  const capturedMediaPersistence =
+    options.scriptStorage &&
+    (options.capabilities?.camera === true || options.capturedMedia !== undefined)
+      ? capturedMediaStorage(options.scriptStorage, capturedMedia, browserCapturedMediaLocks())
+      : undefined;
   const scriptStorage = capturedMediaPersistence ?? options.scriptStorage;
   // Changes whenever the session camera may have opened, failed, ended, or been released.
   const cameraRevision = ref(0);
