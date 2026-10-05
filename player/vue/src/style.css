@@ -111,9 +111,9 @@
   border-color: var(--button-pressed-border);
 }
 
-/* One polarity-aware translucent material for chrome over Stage media: the title, top-media controls, and the
-   viewfinder. */
-:is([data-player-top-bar], [data-viewfinder], [data-floating-viewfinder], [data-stage-camera]) {
+/* One polarity-aware translucent material for chrome over Stage media: the title, top-media controls, the
+   viewfinder, and the development time badge. */
+:is([data-player-top-bar], [data-viewfinder], [data-floating-viewfinder], [data-stage-camera], [data-development-time-badge]) {
   --media-surface: var(--theme-media-surface, oklch(96% 0.01 70 / 58%));
   --media-text: var(--theme-media-text, oklch(15% 0 0));
   --media-border: var(--theme-media-border, oklch(15% 0 0 / 22%));
