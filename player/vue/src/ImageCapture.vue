@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId, watch } from "vue";
-import { Camera } from "@lucide/vue";
+import { nextTick, ref, useId, watch } from "vue";
+import { Camera, CameraOff } from "@lucide/vue";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
+import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
+import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import PlayerActionButton from "@/components/PlayerActionButton.vue";
 import type { ImageCaptureView } from "./useImageCapture";
 
@@ -14,14 +18,6 @@ const emit = defineEmits<{ shutter: []; retake: []; use: []; retry: [] }>();
 const questionId = useId();
 const root = ref<HTMLElement | null>(null);
 const focusInside = ref(false);
-
-const status = computed(() =>
-  props.view.phase === "opening"
-    ? "Opening the camera…"
-    : props.view.phase === "unavailable"
-      ? "The camera cannot be used. Check that it is connected and that this page may use it, then try again."
-      : "",
-);
 
 // After the player's step, focus moves to the next step's main control, so the flow can be completed from the keyboard.
 watch(
@@ -78,7 +74,20 @@ function focusOut(event: FocusEvent) {
     </span>
     <!-- The free area above the question: why there is no picture, centred, and scrolling in a small viewfinder. -->
     <div class="image-capture-message">
-      <p v-if="status" class="image-capture-status" role="status">{{ status }}</p>
+      <div v-if="view.phase === 'opening'" class="image-capture-status">
+        <Alert role="status">
+          <Camera aria-hidden="true" />
+          <AlertDescription>Opening the camera…</AlertDescription>
+        </Alert>
+      </div>
+      <div v-else-if="view.phase === 'unavailable'" class="image-capture-status">
+        <Alert>
+          <CameraOff aria-hidden="true" />
+          <AlertDescription>
+            The camera cannot be used. Check that it is connected and that this page may use it, then try again.
+          </AlertDescription>
+        </Alert>
+      </div>
     </div>
     <p :id="questionId" class="image-capture-question">{{ view.question }}</p>
     <!-- In a floating window, pressing a control does not start moving the window. -->
@@ -87,17 +96,21 @@ function focusOut(event: FocusEvent) {
         v-if="view.phase === 'live' || view.phase === 'countdown' || view.phase === 'taking'"
         class="image-capture-shutter"
       >
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          aria-label="Take photo"
-          title="Take photo"
-          data-image-capture-shutter
-          :disabled="view.phase !== 'live'"
-          @click="emit('shutter')"
-        >
-          <Camera aria-hidden="true" />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              variant="ghost"
+              size="icon-lg"
+              aria-label="Take photo"
+              data-image-capture-shutter
+              :disabled="view.phase !== 'live'"
+              @click="emit('shutter')"
+            >
+              <Camera aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Take photo</TooltipContent>
+        </Tooltip>
       </div>
       <template v-else-if="view.phase === 'review'">
         <PlayerActionButton data-image-capture-retake @click="emit('retake')">Retake</PlayerActionButton>
@@ -147,8 +160,8 @@ function focusOut(event: FocusEvent) {
   background: var(--media-surface);
   backdrop-filter: blur(6px);
 }
-.image-capture-question,
-.image-capture-status {
+/* The question is a label on the picture, in the media material of the Player's title over the Stage. */
+.image-capture-question {
   position: relative;
   margin: 0;
   max-inline-size: 100%;
@@ -171,9 +184,11 @@ function focusOut(event: FocusEvent) {
   place-items: center;
   overflow-y: auto;
 }
+/* Its words may break, so the alert fits a camera window at its smallest. */
 .image-capture-status {
-  max-inline-size: min(100%, 28rem);
-  font-size: 0.875rem;
+  position: relative;
+  inline-size: min(100%, 28rem);
+  overflow-wrap: anywhere;
 }
 /* The question keeps the controls in view: in a small viewfinder it takes at most a third of it and scrolls. */
 .image-capture-question {
@@ -191,15 +206,15 @@ function focusOut(event: FocusEvent) {
   align-items: center;
   gap: 8px;
 }
-/* The shutter: a round control on the picture, in the media-control material. */
+/* The shutter sits on the picture like the viewfinder's mirror button, in the same media-control material. */
 .image-capture-shutter {
   display: flex;
-  border: 2px solid var(--media-border);
-  border-radius: 999px;
+  border: 1px solid var(--media-border);
+  border-radius: 8px;
+  color: var(--media-text);
   background: var(--media-surface);
   box-shadow: 0 1px 3px var(--media-shadow);
   backdrop-filter: blur(3px);
-  overflow: hidden;
 }
 /* Above the question and the controls, so a small viewfinder still shows the whole number. */
 .image-capture-countdown {
