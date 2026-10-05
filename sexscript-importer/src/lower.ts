@@ -80,6 +80,8 @@ export interface LowerOptions {
    * (packageStorageLiterals); a branch for any other value of such a key never runs.
    */
   storageLiterals?: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Image paths below `images/` that some script of the package copies a photo to (packageCopiedImages). */
+  copiedImages?: ReadonlySet<string>;
   /** Value types of package globals defined in other files, such as anonymous-object fields. */
   globalTypes?: ReadonlyMap<string, number>;
   /**
@@ -148,6 +150,7 @@ interface LowerContext {
   packageFunctions: ReadonlySet<string>;
   stableNames: ReadonlySet<string>;
   storageLiterals: ReadonlyMap<string, ReadonlySet<string>>;
+  copiedImages: ReadonlySet<string>;
   /** Set while lowering a branch that never runs because no code stores the value it tests. */
   unreachable: boolean;
   mixinModules: readonly MixinModuleInfo[];
@@ -902,6 +905,7 @@ export function lowerParsedFile(
     packageFunctions: options.packageFunctions ?? new Set(),
     stableNames: options.stableNames ?? new Set(),
     storageLiterals: options.storageLiterals ?? new Map(),
+    copiedImages: options.copiedImages ?? new Set(),
     unreachable: false,
     mixinModules: options.mixinModules ?? [],
     loadsModuleDirectories: new Set(),
@@ -1542,6 +1546,7 @@ function lowerHelperMethod(
     packageFunctions: baseContext.packageFunctions,
     stableNames: baseContext.stableNames,
     storageLiterals: baseContext.storageLiterals,
+    copiedImages: baseContext.copiedImages,
     unreachable: false,
     mixinModules: baseContext.mixinModules,
     loadsModuleDirectories: baseContext.loadsModuleDirectories,
@@ -3821,6 +3826,27 @@ function lowerAssignment(
   context: LowerContext,
 ): IrStatement[] {
   const operator = text(node.operator);
+  // A photo copied to a package image path keeps its reference under that path, where showing the path shows it.
+  const copy = photoCopy(node);
+  if (operator === "<<" && copy !== null) {
+    const source = lowerExpression(copy.source, context);
+    if (source === null) return [];
+    addDiagnostic(
+      context,
+      "SX_PHOTO_COPY",
+      "warning",
+      `Legacy code copied this photo to images/${copy.path}, which a package cannot write; the photo's reference is saved for that path, and showing the path shows the photo.`,
+      node.span,
+    );
+    return [
+      {
+        kind: "save",
+        key: { kind: "literal", value: `${SENT_IMAGE_PREFIX}images/${copy.path}` },
+        value: source,
+        span,
+      },
+    ];
+  }
   if (operator === "<<") {
     // Groovy `list << value` appends one element.
     const listNode = asNode(node.left);
@@ -4287,6 +4313,28 @@ function lowerCallStatement(
       ];
     }
   }
+  // Deleting a package image a photo was copied to forgets the photo (SX_PHOTO_COPY).
+  const copyDeleted = asNode(node.object);
+  const copyDeletePath =
+    call?.name === "delete" &&
+    call.arguments.length === 0 &&
+    copyDeleted !== null &&
+    isFileConstructor(copyDeleted)
+      ? constantString(nodeArray(asNode(copyDeleted.arguments)?.items)[0])
+      : null;
+  if (
+    copyDeletePath !== null &&
+    /^images\//iu.test(copyDeletePath) &&
+    context.copiedImages.has(copyDeletePath.slice(7))
+  ) {
+    return [
+      {
+        kind: "delete",
+        key: { kind: "literal", value: `${SENT_IMAGE_PREFIX}${copyDeletePath}` },
+        span,
+      },
+    ];
+  }
   // Java `TimeUnit.SECONDS.sleep(n)` blocks the script thread like a hidden wait.
   const unit = asNode(node.object);
   const unitName = unit?.kind === "property" ? constantString(unit.property) : null;
@@ -4491,6 +4539,28 @@ function lowerCallStatement(
       // setImage(null), and an empty or blank path, cleared the picture.
       if (isNullConstant(args[0]) || constantString(args[0])?.trim() === "")
         return [{ kind: "hideImage", span }];
+      // A path a photo was copied to shows the photo (SX_PHOTO_COPY), or else the package's file of that name.
+      const copied = constantString(args[0]);
+      if (copied !== null && context.copiedImages.has(copied)) {
+        addDiagnostic(
+          context,
+          "SX_PHOTO_COPY",
+          "warning",
+          `A script copied the player's photo to images/${copied}; showing the path shows that photo.`,
+          node.span,
+        );
+        return [
+          {
+            kind: "showImage",
+            file: {
+              kind: "load",
+              key: { kind: "literal", value: `${SENT_IMAGE_PREFIX}images/${copied}` },
+              defaultValue: { kind: "literal", value: copied },
+            },
+            span,
+          },
+        ];
+      }
       return oneArgumentStatement(args, context, node, (file) => ({
         kind: "showImage",
         file: mediaFile(file, "images", node, context),
@@ -12172,6 +12242,32 @@ export function packageFilePath(path: string): string {
     .replace(/^(?:\.?\/)+/u, "")
     .replace(/^scripts\//iu, "")
     .toLowerCase();
+}
+
+/**
+ * `new File("images/x.jpg") << new File(photo).getBytes()` (or `photo.getBytes()`): the target's path below `images/`
+ * and the photo; null for another statement.
+ */
+export function photoCopy(node: AstNode): { path: string; source: AstNode } | null {
+  if (node.kind !== "binary" || node.operator !== "<<") return null;
+  const target = asNode(node.left);
+  const bytes = asNode(node.right);
+  const path =
+    target !== null && isFileConstructor(target)
+      ? constantString(nodeArray(asNode(target.arguments)?.items)[0])
+      : null;
+  if (path === null || !/^images\//iu.test(path)) return null;
+  if (
+    bytes?.kind !== "methodCall" ||
+    !["getBytes", "bytes"].includes(constantString(bytes.method) ?? "")
+  )
+    return null;
+  const file = asNode(bytes.object);
+  const source =
+    file !== null && isFileConstructor(file)
+      ? (nodeArray(asNode(file.arguments)?.items)[0] ?? null)
+      : file;
+  return source === null ? null : { path: path.slice("images/".length), source };
 }
 
 function isFileConstructor(node: AstNode): boolean {

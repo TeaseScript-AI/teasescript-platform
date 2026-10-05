@@ -23,6 +23,7 @@ import {
   packageResultUses,
   packageStableNames,
   packageStopsBackgroundSounds,
+  photoCopy,
 } from "./lower.ts";
 import { helperDefinitionOrder, withActionDispatcher } from "./helpers.ts";
 import { promoteGlobalFunctions, type GlobalPromotion } from "./globals.ts";
@@ -443,6 +444,16 @@ export function lowerPackage(
   const mixinModules = files.flatMap((file) => describeMixinModule(file) ?? []);
   const stableNames = packageStableNames(files);
   const storageLiterals = packageStorageLiterals(files);
+  const copiedImages = new Set(
+    files.flatMap((file) => {
+      const paths: string[] = [];
+      walkAst(file.root, (node) => {
+        const copy = photoCopy(node);
+        if (copy !== null) paths.push(copy.path);
+      });
+      return paths;
+    }),
+  );
   // Function names and object field types are shared only by a script and the mixin modules it loads.
   const groups = compositionGroups(files);
   const stopsBackgroundSounds = packageStopsBackgroundSounds(files);
@@ -465,6 +476,7 @@ export function lowerPackage(
       packageFunctions: packageFunctionNames(groups[index]!),
       stableNames,
       storageLiterals,
+      copiedImages,
       globalTypes: packageGlobalTypes(groups[index]!),
       stopsBackgroundSounds,
       resultUses,
