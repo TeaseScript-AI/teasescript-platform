@@ -4788,7 +4788,7 @@ function lowerEachStatement(
   }
   const variable = parameterSpecified ? closureParameters[0]!.name : "it";
 
-  const collection = lowerExpression(receiverNode, context);
+  const collection = lowerIterated(receiverNode, context);
   if (collection === null) {
     return [
       unsupportedStatement(
@@ -5139,7 +5139,7 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
     loopBody !== null && loopBody.kind !== "block" && loopBody.kind !== "empty"
       ? { kind: "block", span: loopBody.span, statements: [loopBody] }
       : loopBody;
-  const collection = collectionNode === null ? null : lowerExpression(collectionNode, context);
+  const collection = collectionNode === null ? null : lowerIterated(collectionNode, context);
   if (variable === null || collection === null || body?.kind !== "block") {
     return [
       unsupportedStatement(
@@ -5165,6 +5165,81 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
   const facts = dict === null ? [] : [`${dict}\u0000$${loopKey ?? variable}`];
   const loweredBody = withPresentKeys(facts, body, context, () => lowerBlock(body, context));
   return [{ kind: "for", variable, collection, body: loweredBody, span: node.span }];
+}
+
+/**
+ * A collection a loop iterates. Groovy iterated a range up to the whole number at or below a fractional upper bound,
+ * where TeaseScript stops, so a bound that may hold a fraction is floored.
+ */
+function lowerIterated(node: AstNode, context: LowerContext): IrExpression | null {
+  const collection = lowerExpression(node, context);
+  const toNode = node.kind === "range" ? asNode(node.to) : null;
+  if (collection?.kind !== "range" || toNode === null || !mayBeFractional(toNode, context))
+    return collection;
+  addDiagnostic(
+    context,
+    "SX_RANGE_FLOOR",
+    "info",
+    "Groovy iterated this range up to the whole number at or below its upper bound, which may hold a fraction; the bound is floored.",
+    node.span,
+  );
+  return {
+    ...collection,
+    to: { kind: "call", name: "floor", positional: [collection.to], named: {} },
+  };
+}
+
+/** Methods whose results are whole numbers. */
+const WHOLE_NUMBER_METHODS = new Set([
+  "size",
+  "length",
+  "getRandom",
+  "round",
+  "intdiv",
+  "toInteger",
+  "intValue",
+  "indexOf",
+  "count",
+  "floor",
+  "ceil",
+]);
+
+/**
+ * Whether a Groovy number may hold a fraction: a fractional literal, a division (which gave a decimal where it did not
+ * divide evenly), a value of unknown origin such as a parameter, or a variable assigned one of these.
+ */
+function mayBeFractional(node: AstNode, context: LowerContext, seen = new Set<string>()): boolean {
+  switch (node.kind) {
+    case "constant":
+      return typeof node.value !== "number" || !Number.isInteger(node.value);
+    case "unaryMinus":
+    case "unaryPlus": {
+      const value = asNode(node.value);
+      return value === null || mayBeFractional(value, context, seen);
+    }
+    case "binary": {
+      const operator = text(node.operator) ?? "";
+      const left = asNode(node.left);
+      const right = asNode(node.right);
+      if (!["+", "-", "*", "%"].includes(operator) || left === null || right === null) return true;
+      return mayBeFractional(left, context, seen) || mayBeFractional(right, context, seen);
+    }
+    case "property":
+      return !["size", "length"].includes(constantString(node.property) ?? "");
+    case "methodCall":
+      return !WHOLE_NUMBER_METHODS.has(constantString(node.method) ?? "");
+    case "variable": {
+      const key = bindingKey(node, context.bindings);
+      if (key === null) return true;
+      if (context.integerVariables.has(key) || seen.has(key)) return false;
+      const values = context.assignedValues.get(key);
+      if (values === undefined || values.length === 0) return true;
+      seen.add(key);
+      return values.some((value) => mayBeFractional(value, context, seen));
+    }
+    default:
+      return true;
+  }
 }
 
 function lowerCStyleFor(

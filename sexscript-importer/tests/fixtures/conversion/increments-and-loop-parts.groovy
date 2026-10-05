@@ -31,3 +31,7 @@ def score = 0
 for (def card : cards)
     score += card
 show("Score: " + score)
+// A range up to a value that may hold a fraction iterates up to the whole number below it, as Groovy did.
+def swats = 17
+def perCheek = swats / 2
+for (swat in 1..perCheek) show("Swat " + swat)
