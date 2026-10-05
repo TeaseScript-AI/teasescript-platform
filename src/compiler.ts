@@ -1,4 +1,4 @@
-import type { FileTarget, Program } from "./ast.js";
+import type { FileTarget, Program, Statement } from "./ast.js";
 import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-validation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { compileStableProject, type InstructionPlan } from "./compiler/compile-program.js";
@@ -16,7 +16,7 @@ import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./proje
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import { validateProjectSemantics, type SemanticValidationOptions } from "./semantic.js";
 import { checkTypes, type RuntimeCheckSite } from "./type-checker.js";
-import { createSourcePosition, createSourceSpan } from "./source.js";
+import { createSourcePosition, createSourceSpan, type SourceSpan } from "./source.js";
 
 export interface CompileOptions extends SemanticValidationOptions {
   /** The package images and their XMP keywords, which tag queries search; none by default. */
@@ -250,9 +250,11 @@ function parseFile(path: string, source: string): CompiledProjectFile {
 }
 
 /**
- * Validates the names of the files without syntax errors, then, when every file is free of errors, the types of the
- * whole project and, by the flow of that check, the initialization of variables at labels. Returns the runtime checks
- * the type check recorded and whether the project reaches an exit, or `null` when the project has an error.
+ * Validates the names of the files without syntax errors, then the types of the whole project and, by the flow of that
+ * check, the initialization of variables at labels. A file with a name error keeps only its name errors; when one could
+ * change what the other files are checked with, the types are not checked at all (see `onlyReadsUnresolvedNames`).
+ * Returns the runtime checks the type check recorded and whether the project reaches an exit, or `null` when the
+ * project has an error.
  */
 function checkProject(
   files: CompiledProjectFile[],
@@ -276,9 +278,15 @@ function checkProject(
       addSemanticDiagnostics(files[index]!, result.diagnostics);
       files[index]!.picks = result.picks;
     });
-    if (files.some((file) => file.parsed === null || hasErrors(file.result.diagnostics)))
+    // A name error that may pass a value on leaves the types of other files unknowable, so then none is checked.
+    const failing = files.map((file) => hasErrors(file.result.diagnostics));
+    if (
+      failing.some(
+        (fails, index) =>
+          fails && !onlyReadsUnresolvedNames(files[index]!, names[index]!.diagnostics),
+      )
+    )
       return null;
-    // Types are checked once every name resolves, so a type message never repeats a name or structure error.
     const types = checkTypes(
       files.map((file) => ({ path: file.result.path, program: file.result.program })),
       options,
@@ -306,16 +314,18 @@ function checkProject(
         }
       }
     }
-    // The initialization check at labels follows the flow of the type check.
-    types.diagnostics.forEach((diagnostics, index) =>
+    // The initialization check at labels follows the flow of the type check. A file with a name error keeps only its
+    // name errors, so a type message never repeats one.
+    types.diagnostics.forEach((diagnostics, index) => {
+      if (failing[index]) return;
       addSemanticDiagnostics(files[index]!, [
         ...diagnostics,
         ...names[index]!.checkInitialization(
           freshLabels.get(files[index]!.result.path) ?? new Set(),
           types.flow,
         ),
-      ]),
-    );
+      ]);
+    });
     return files.some((file) => hasErrors(file.result.diagnostics))
       ? null
       : { typeChecks: types.runtimeChecks, reachesExit: types.reachesExit };
@@ -331,6 +341,110 @@ function checkProject(
     );
     return null;
   }
+}
+
+/** The name errors after which a statement is still type checked: a variable or speaker that does not resolve. */
+const UNRESOLVED_NAMES: ReadonlySet<string> = new Set(["TSV002", "TSV005"]);
+
+/** Statements that declare and assign nothing themselves; the statements of their blocks stand on their own. */
+const READING_STATEMENTS: ReadonlySet<string> = new Set([
+  "sayStatement",
+  "waitStatement",
+  "showImageStatement",
+  "ifStatement",
+  "whileStatement",
+  "repeatStatement",
+  "switchStatement",
+]);
+
+/** Expressions that run code, ask, wait, or play, and so may pass a value on. */
+const ACTING_EXPRESSIONS: ReadonlySet<string> = new Set([
+  "callExpression",
+  "interactionExpression",
+  "showButtonExpression",
+  "timerExpression",
+  "playMediaExpression",
+]);
+
+/**
+ * Whether the type check of a file with name errors leaves the other files as they would be once it is fixed: the file
+ * parsed without errors, and each name error is a variable or speaker that does not resolve, in a statement that only
+ * reads. Such a name has the type `unknown` and goes nowhere. Written, declared, returned, or passed to a call, it could
+ * reach a place that other files read, whose type would then miss what the fixed source stores there.
+ */
+function onlyReadsUnresolvedNames(
+  file: CompiledProjectFile,
+  nameDiagnostics: readonly Diagnostic[],
+): boolean {
+  if (file.parsed === null || hasErrors(file.result.parserDiagnostics)) return false;
+  const errors = nameDiagnostics.filter(
+    (diagnostic) => diagnostic.severity === DiagnosticSeverity.Error,
+  );
+  if (errors.some((error) => !UNRESOLVED_NAMES.has(error.code))) return false;
+  const spans = new Set(errors.map((error) => spanKey(error.span)));
+  const statements = innermostStatements(file.result.program, spans);
+  // Each statement is looked at once, however many of its names fail.
+  return statements.size === spans.size && [...new Set(statements.values())].every(onlyReads);
+}
+
+function spanKey(span: SourceSpan): string {
+  return `${span.start.offset}:${span.end.offset}`;
+}
+
+function isStatementKind(kind: string): boolean {
+  return kind.endsWith("Statement") || kind.endsWith("Declaration");
+}
+
+/** The innermost statement around the node with each of the spans, by {@link spanKey}. */
+function innermostStatements(
+  program: Program,
+  spans: ReadonlySet<string>,
+): ReadonlyMap<string, Statement> {
+  const found = new Map<string, Statement>();
+  const pending: { readonly value: unknown; readonly statement: Statement | null }[] = [
+    { value: program.statements, statement: null },
+  ];
+  while (pending.length > 0) {
+    const { value, statement } = pending.pop()!;
+    if (value === null || typeof value !== "object") continue;
+    if (Array.isArray(value)) {
+      for (const item of value) pending.push({ value: item, statement });
+      continue;
+    }
+    // EVIDENCE: invariant: an object of a parser-owned AST is a node with a kind and a span, or a span or position.
+    const node = value as { readonly kind?: unknown; readonly span?: SourceSpan };
+    // Spans and positions hold no nodes.
+    if (typeof node.kind !== "string") continue;
+    // EVIDENCE: invariant: the parser gives kinds ending in Statement or Declaration to statements alone.
+    const inner = isStatementKind(node.kind) ? (value as Statement) : statement;
+    if (inner !== value && inner !== null && node.span !== undefined) {
+      const key = spanKey(node.span);
+      if (spans.has(key)) found.set(key, inner);
+    }
+    for (const nested of Object.values(node)) pending.push({ value: nested, statement: inner });
+  }
+  return found;
+}
+
+/** Whether a statement only reads: its own expressions, outside its blocks, run no code and store nothing. */
+function onlyReads(statement: Statement): boolean {
+  if (!READING_STATEMENTS.has(statement.kind)) return false;
+  const pending: unknown[] = Object.values(statement);
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (value === null || typeof value !== "object") continue;
+    if (Array.isArray(value)) {
+      for (const item of value) pending.push(item);
+      continue;
+    }
+    // EVIDENCE: invariant: an object of a parser-owned AST is a node with a kind, or a span or position without one.
+    const kind = (value as { readonly kind?: unknown }).kind;
+    if (typeof kind !== "string") continue;
+    if (ACTING_EXPRESSIONS.has(kind)) return false;
+    if (kind === "block" || isStatementKind(kind)) continue;
+    for (const nested of Object.values(value)) pending.push(nested);
+  }
+  return true;
 }
 
 function addSemanticDiagnostics(

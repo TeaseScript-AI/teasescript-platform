@@ -268,6 +268,12 @@ union `TSV044`, and a provably constant type test or comparison warning `TSV046`
 such as untyped storage, host data, or an unknown parameter, is stored in a place whose type is at least partly known,
 the plan carries that type and the runtime checks the value before storing it (`TSR058`).
 
+A file with a name error reports only its syntax and name diagnostics. The other files of its project are type checked
+all the same when each name error is an unknown variable or speaker (`TSV002`, `TSV005`) that a `say`, `wait`, or
+`showImage`, or the condition, count, or subject of an `if`, `while`, `repeat`, or `switch` only reads, with no call,
+choice, button, timer, or media in that statement. Any other name error, or a syntax error, leaves every file without a
+type check, because the value it stands for could reach a place that another file reads.
+
 The wider V30 Standard Library/runtime APIs are not implemented yet.
 
 The current source/compiler implements authored presentation options and the ADR 0018 `say` pacing and skip forms while

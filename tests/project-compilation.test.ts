@@ -109,6 +109,90 @@ test("each diagnostic names its file, and an error in any file leaves no plan", 
   );
 });
 
+/** The diagnostics of a project as `code@path`. */
+function codes(sources: Readonly<Record<string, string>>): string[] {
+  return diagnostics(Object.entries(sources).map(([path, source]) => ({ path, source }))).map(
+    ([path, code]) => `${code}@${path}`,
+  );
+}
+
+test("a name error that is only read leaves the type and ending checks of the other files", () => {
+  assert.deepEqual(
+    codes({ "main.tease": 'let x: integer = "a"\ngoto "b.tease"', "b.tease": 'say "b"' }),
+    ["TSV041@main.tease", "TSV052@b.tease"],
+  );
+  assert.deepEqual(codes({ "main.tease": 'say missing\ngoto "b.tease"', "b.tease": 'say "b"' }), [
+    "TSV002@main.tease",
+    "TSV052@b.tease",
+  ]);
+  assert.deepEqual(
+    codes({
+      "main.tease": 'let x: integer = "a"\ngoto "b.tease"',
+      "b.tease": 'say missing\ngoto "c.tease"',
+      "c.tease": 'say "c"',
+    }),
+    ["TSV041@main.tease", "TSV002@b.tease", "TSV052@c.tease"],
+  );
+  // The file with the name error itself keeps only its name errors, also on its own.
+  assert.deepEqual(codes({ "main.tease": 'let x: integer = "a"\nsay missing' }), [
+    "TSV002@main.tease",
+  ]);
+});
+
+/** Globals that another file may widen: a test that takes a whole number for granted misleads the checks after it. */
+function widenedGlobal(change: string, place = "n"): string {
+  return `global n = 1\nglobal xs = [1]\n${change}\nlet value: integer | string = 1\nif ${place} is integer { value = 2 } else { value = "fraction" }\nif value is string { say value.length }\nexit`;
+}
+
+test("the code of a file with a name error still counts for the other files", () => {
+  // Its function makes n a number, so n may not be a whole number after the call.
+  assert.deepEqual(
+    codes({
+      "main.tease": widenedGlobal("reset()"),
+      "b.tease": "global function reset { n = 1.5 }\nsay missing\nexit",
+    }),
+    ["TSV002@b.tease"],
+  );
+  // Its timer block can end the session, so the loop of the other file has a way out.
+  assert.deepEqual(
+    codes({
+      "main.tease": 'say missing\ntimer async 2 s { exit }\ncall "b.tease"\nexit',
+      "b.tease": "while true { wait 1 s }",
+    }),
+    ["TSV002@main.tease"],
+  );
+});
+
+test("a name error that may pass a value on leaves only the name and syntax errors", () => {
+  // What an unknown value would make n is unknown, so no file is type checked.
+  assert.deepEqual(
+    codes({
+      "main.tease": widenedGlobal("reset()"),
+      "b.tease": "global function reset { n = missing }\nexit",
+    }),
+    ["TSV002@b.tease"],
+  );
+  assert.deepEqual(
+    codes({ "main.tease": widenedGlobal('call "b.tease"'), "b.tease": "n = missing\nend" }),
+    ["TSV002@b.tease"],
+  );
+  // A call may store it, too, also in a statement that otherwise only reads.
+  assert.deepEqual(
+    codes({
+      "main.tease": widenedGlobal('call "b.tease"', "xs[0]"),
+      "b.tease": 'if xs.add(missing) == null { say "added" }\nend',
+    }),
+    ["TSV002@b.tease"],
+  );
+  // Any other name error, or a syntax error, leaves the types unchecked, too.
+  assert.deepEqual(
+    codes({ "main.tease": 'let x: integer = "a"\nexit', "b.tease": "let y = 1\nlet y = 2\nexit" }),
+    ["TSV001@b.tease"],
+  );
+  const syntax = codes({ "main.tease": 'let x: integer = "a"\nexit', "b.tease": "say (\nexit" });
+  assert.ok(syntax.length > 0 && syntax.every((code) => code.endsWith("@b.tease")), `${syntax}`);
+});
+
 test("the session starts in main.tease and never runs into the next file", () => {
   const plan = compiledPlan([
     { path: "main.tease", source: 'say "main"\nexit' },
