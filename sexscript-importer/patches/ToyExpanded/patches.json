@@ -202,6 +202,13 @@
       "category": "b",
       "reason": "sessionPlay ran the nine session plans of images/toy/domme.groovy by evaluating their require and number expression strings with Eval.me in a scope of closures, which does not convert, so no play session ever ran (owner decision 2026-10-05: native code instead of eval emulation). Each plan becomes a method of a new module toy/domme.groovy (the data file under images is no script the converter reads): its phases are plain calls in the same order, with the conditions as ifs and the numbers as arguments, so randRange draws happen where the expressions drew them; sessionChoices lists the sessions whose condition holds with their probabilities for the same weighted pick, and runSession calls a session by its theme. The runner in play.groovy keeps the rest: wildcards expand by tags in the same order with repetitions kept, the session dresses for the activities of all its phases first, take/repeat/sequence and the punishMultiply/punishApply uses run as before, and the session reads the punishment once at its start as the loaded toy.punishment was (0 when missing, where the legacy division failed). The DEBUG self-check of the expression strings is dropped, since no strings are left to check.",
       "diff": "native-sessions.diff"
+    },
+    {
+      "id": "manual-cornertime",
+      "layer": "source",
+      "category": "b",
+      "reason": "Webcam corner time (owner decision 2026-10-05: manual instead): with the webcamcornertime toy, doCornertime wrote a base64 JSON task to a file for cornertime.github.io and parsed the base64 JSON report pasted back (File, decodeBase64, JsonSlurper, JsonOutput), none of which converts. Remove that path, its helpers, the configuration step that offered and tested it, and its 'Cornertime with webcam' choice, so that corner time always runs the manual flow the tease already had: the bell, the wait, and the player's own answer whether they moved; duration, punishment, and result are computed as before.",
+      "diff": "manual-cornertime.diff"
     }
   ]
 }
