@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProject, compileSource, type ProjectSourceFile } from "../src/compiler.js";
+import { parse } from "../src/parser.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import {
   createCheckpoint,
@@ -416,6 +417,26 @@ test("persist is a literal option of the command, and the block line it replaces
       ...recovered(1),
     ]);
   }
+  // A missing value also leaves a block on the next line to the button.
+  assert.deepEqual(errors(`showPermanentButton "Stop", persist:\n{\n${after}`), [
+    "TSP012 1:0 Expected true or false after 'persist:'.",
+    ...recovered(2),
+  ]);
+
+  // Text that would take the option as its own, such as a compact choice, is grouped in the replacement, which keeps
+  // the two choice options and makes the button persist.
+  const [replacement] = compileSource(
+    'showPermanentButton choose "A", "B" {\n    persist: true\n    say "clicked"\n}\nexit',
+  ).diagnostics.map(
+    (diagnostic) => /'(showPermanentButton .*) \{'\.$/u.exec(diagnostic.message)?.[1],
+  );
+  assert.equal(replacement, 'showPermanentButton (choose "A", "B"), persist: true');
+  const [statement] = parse(`${replacement} {\n    say "clicked"\n}\nexit`).program.statements;
+  assert.ok(statement?.kind === "showPermanentButtonStatement");
+  assert.equal(statement.persist, true);
+  assert.ok(statement.text.kind === "parenthesizedExpression");
+  assert.ok(statement.text.expression.kind === "interactionExpression");
+  assert.equal(statement.text.expression.options.length, 2);
 });
 
 test("a parameter default shows its button only when the argument is left out", () => {

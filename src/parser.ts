@@ -173,6 +173,15 @@ const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionK
   ["askDateTime", "datetime"],
 ]);
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
+/** Expressions that end at their own last token, so a following `, name:` cannot belong to them. */
+const SELF_DELIMITED_EXPRESSIONS: ReadonlySet<Expression["kind"]> = new Set([
+  "stringLiteral",
+  "identifier",
+  "parenthesizedExpression",
+  "propertyAccessExpression",
+  "indexExpression",
+  "callExpression",
+]);
 const SAVE_VALUE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set(["as"]);
 
 /** Parses the accepted core-language milestone. */
@@ -1118,7 +1127,7 @@ class Parser {
       return null;
     }
     const handler = yield* parseChild(
-      this.#asStatements(this.#parsePermanentButtonBlock(this.#sourceText(textStart, textEnd))),
+      this.#asStatements(this.#parsePermanentButtonBlock(text, textStart, textEnd)),
     );
     if (handler === null || options === null) return null;
     return {
@@ -1145,9 +1154,12 @@ class Parser {
       for (let skipped = 0; skipped < offset; skipped += 1) this.#advance();
       const name = this.#advance();
       this.#advance();
-      const value = this.#check(TokenKind.LeftBrace)
-        ? null
-        : yield* parseChild(this.#parseColonValueTask(false));
+      // A missing value leaves the block, also one on the next line, to the button.
+      let blockOffset = 0;
+      while (this.#peek(blockOffset).kind === TokenKind.Newline) blockOffset += 1;
+      const atBlock = this.#peek(blockOffset).kind === TokenKind.LeftBrace;
+      if (atBlock) this.#skipNewlines();
+      const value = atBlock ? null : yield* parseChild(this.#parseColonValueTask(false));
       if (value === null) {
         this.#reportInsertion(
           parserDiagnosticCode.expectedExpression,
@@ -1185,15 +1197,22 @@ class Parser {
 
   /**
    * The click action of a permanent button. A first line `persist: ...`, the earlier spelling of the option, is reported
-   * with the command that replaces it.
+   * with the command that replaces it; `text` is the button text, written by the tokens from `textStart` to `textEnd`.
    */
-  *#parsePermanentButtonBlock(text: string): ParseTask<Block | null> {
+  *#parsePermanentButtonBlock(
+    text: Expression,
+    textStart: number,
+    textEnd: number,
+  ): ParseTask<Block | null> {
     const leftBrace = this.#advance();
     this.#skipNewlines();
     if (this.#checkIdentifier("persist") && this.#peek(1).kind === TokenKind.Colon) {
+      let written = this.#sourceText(textStart, textEnd);
+      // Text such as a compact `choose` would take the option as its own, so it is grouped.
+      if (!SELF_DELIMITED_EXPRESSIONS.has(text.kind)) written = `(${written})`;
       this.#reportToken(
         parserDiagnosticCode.invalidMediaForm,
-        `Write 'persist:' on the command instead of in the block: 'showPermanentButton ${text}, persist: true {'.`,
+        `Write 'persist:' on the command instead of in the block: 'showPermanentButton ${written}, persist: true {'.`,
         this.#peek(),
       );
       this.#synchronizeStatement(true);
