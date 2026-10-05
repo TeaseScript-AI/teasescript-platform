@@ -7,6 +7,7 @@ import {
   type DurationUnitPlan,
   type Instruction,
   type InstructionPlan,
+  type InteractionAccessibleName,
   type InteractionTemporalKind,
   type InteractionUiPayload,
   type PlanSourceLocation,
@@ -107,7 +108,16 @@ import type {
   RuntimeStorageWriteActionSnapshot,
 } from "./actions/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
-import { buttonTimeoutMilliseconds } from "./actions/interaction.js";
+import {
+  buttonTimeoutMilliseconds,
+  cloneImageUi,
+  imageRequestValue,
+} from "./actions/interaction.js";
+import {
+  emptyImageFilterMessage,
+  IMAGE_NO_SOURCE_MESSAGE,
+  imageFilterTextProblem,
+} from "../image-input.js";
 import {
   calculatePacingDeadlineMs,
   calculateSmartPacingDurationMs,
@@ -990,6 +1000,12 @@ function materializeInteractionUi(
       ...(prefill === undefined ? {} : { prefill }),
       accessibleName: prepared.accessibleName,
     };
+  } else if (prepared.kind === "image") {
+    const request = read(prepared.requestTemporary);
+    const image = imageInteractionUi(request.value, prepared.accessibleName, temporalContext, span);
+    // The request keeps what it shows, so a restore can check the open request against it.
+    stagedWrites.push({ temporaryId: request.id, value: imageRequestValue(image) });
+    ui = image;
   } else {
     const source = read(prepared.optionsTemporary);
     if (!isList(source.value) || source.value.items.length !== prepared.values.length) {
@@ -1026,6 +1042,70 @@ function materializeInteractionUi(
  */
 function isEmptyDefault(value: SerializableRuntimeValue): boolean {
   return value === null || (typeof value === "string" && isBlankTextAnswer(value));
+}
+
+/**
+ * The request of `askImage`, from its written arguments in source order: the message as text, sources that default to
+ * true and are not both off, and `types:` and `mime:` lists of valid texts.
+ */
+function imageInteractionUi(
+  value: SerializableRuntimeValue,
+  accessibleName: InteractionAccessibleName,
+  temporalContext: TemporalContext,
+  span: SourceSpan,
+): Extract<InteractionUiPayload, { kind: "image" }> {
+  if (!isObject(value)) throw fault("TSR052", "The prepared image request is malformed.", span);
+  let hint: string | null = null;
+  let allowCamera = true;
+  let allowFile = true;
+  let types: readonly string[] | null = null;
+  let mime: readonly string[] | null = null;
+  for (const { name, value: argument } of value.properties) {
+    if (name === "message") hint = fieldText(argument, span, temporalContext);
+    else if (name === "allowCamera" || name === "allowFile") {
+      if (typeof argument !== "boolean")
+        throw fault(
+          "TSR052",
+          `askImage(${name}:) takes true or false, not ${describeRuntimeValue(argument)}.`,
+          span,
+        );
+      if (name === "allowCamera") allowCamera = argument;
+      else allowFile = argument;
+    } else if (name === "types" || name === "mime") {
+      const texts = imageFilterTexts(name, argument, span);
+      if (name === "types") types = texts;
+      else mime = texts;
+    } else throw fault("TSR052", "The prepared image request is malformed.", span);
+  }
+  if (!allowCamera && !allowFile) throw fault("TSR052", IMAGE_NO_SOURCE_MESSAGE, span);
+  return { kind: "image", hint, allowCamera, allowFile, types, mime, accessibleName };
+}
+
+function imageFilterTexts(
+  option: "types" | "mime",
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): readonly string[] {
+  if (!isList(value))
+    throw fault(
+      "TSR052",
+      option === "types"
+        ? `askImage(types:) takes a list of file extensions, such as [".png"], not ${describeRuntimeValue(value)}.`
+        : `askImage(mime:) takes a list of image MIME types, such as ["image/png"], not ${describeRuntimeValue(value)}.`,
+      span,
+    );
+  if (value.items.length === 0) throw fault("TSR052", emptyImageFilterMessage(option), span);
+  return value.items.map((item) => {
+    if (typeof item !== "string")
+      throw fault(
+        "TSR052",
+        `askImage(${option}:) takes texts such as ${option === "types" ? '".png"' : '"image/png"'}, but it holds ${describeRuntimeValue(item)}.`,
+        span,
+      );
+    const problem = imageFilterTextProblem(option, item);
+    if (problem !== null) throw fault("TSR052", problem, span);
+    return item;
+  });
 }
 
 /** The prefill text of a default answer, which must be an answer the field accepts. */
@@ -1110,7 +1190,12 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   const strings: string[] = [];
   if (ui.accessibleName.kind === "text") strings.push(ui.accessibleName.text);
   if (ui.kind === "button") strings.push(ui.buttonLabel);
-  else if (ui.kind !== "choice") {
+  else if (ui.kind === "image") {
+    if (ui.hint !== null) strings.push(ui.hint);
+    // Item by item: a long computed filter must reach the limit below, not the native argument limit of a spread.
+    for (const text of ui.types ?? []) strings.push(text);
+    for (const text of ui.mime ?? []) strings.push(text);
+  } else if (ui.kind !== "choice") {
     if (ui.hint !== null) strings.push(ui.hint);
     if (ui.prefill !== undefined) strings.push(ui.prefill);
   } else {
@@ -1614,6 +1699,7 @@ function cloneInteractionUi(
       ...(ui.prefill === undefined ? {} : { prefill: ui.prefill }),
       accessibleName,
     };
+  if (ui.kind === "image") return cloneImageUi(ui, accessibleName);
   return {
     kind: ui.kind,
     hint: ui.hint,

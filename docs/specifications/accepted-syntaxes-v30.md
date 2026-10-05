@@ -2023,6 +2023,12 @@ let image = askImage(
 
 `askImage(...)` returns one engine-managed image reference as `string`.
 
+`askImage(...)` **status (Owner decisions, 2026-10-05):** images only, for now. The Player offers the file route:
+while the request waits, a paperclip in its composer opens the browser's native file picker, and an image file dropped
+onto the composer answers the request; outside such a request there is neither. A chosen image stays in the browser
+and is session media with the lifecycle of a `takePhoto()` photo (§33): durable only while saved script storage
+references it. The camera route, `invalidMessage`, and `invalidLlmInstruction` are not implemented yet.
+
 ### Video input
 
 By default, camera recording and file upload are both available:
@@ -2700,7 +2706,8 @@ Rules:
   session and cannot be saved, including when nested inside lists or objects (`TSR055`). Nested `null` is allowed.
 - Saving and loading copy data: later changes to the saved variable or a loaded value do not change storage.
 - A string naming a camera, file, or media reference is stored only as a string; storage itself does not persist the
-  media. A photo from `takePhoto()` is kept by the Player while saved storage references it (§33).
+  media. A photo from `takePhoto()` or an image from `askImage(...)` is kept by the Player while saved storage
+  references it (§33).
 - Storage keys are plain strings.
 - After unwrapping parentheses, a recognizably non-string outer key expression is a compile error (`TSV038`). Other
   keys are checked at runtime and raise `TSR054` if non-string. For `load`, the diagnostic explains:

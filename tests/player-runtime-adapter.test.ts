@@ -21,6 +21,7 @@ import {
   activatePlayerRuntimeButton,
   activePlayerRuntimeCapture,
   answerPlayerRuntimeCapture,
+  answerPlayerRuntimeImage,
   compilePlayerProject,
   completePlayerRuntimeStorageWrite,
   pendingPlayerRuntimeStorageWrite,
@@ -724,6 +725,44 @@ test("the Player answers takePhoto() with a vouched reference or an unavailable 
       (event) => event.kind === "developerWarning" && event.code === "TSW015",
     ),
   );
+});
+
+test("an image request is presented, survives a restore while it waits, and shows the chosen image", () => {
+  const session = createPlayerRuntimeSession(
+    'say "Show me.", instant\nlet pick = askImage(message: "Add an image", types: [".png"])\nshowImage pick\nexit',
+  );
+  const presented = playerRuntimeForeground(session);
+  assert.deepEqual(presented, {
+    kind: "ask-image",
+    accessibleName: "Answer",
+    hint: "Add an image",
+    allowFile: true,
+    types: [".png"],
+    mime: null,
+  });
+  // Typed text does not answer an image request.
+  assert.equal(submitPlayerRuntimeComposer(session, "me.png"), null);
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(playerRuntimeForeground(restored), presented);
+  assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
+  const reference = "captured-media:session:1";
+  const store = {
+    holds: (candidate: string, kind: "image") => candidate === reference && kind === "image",
+  };
+  assert.equal(
+    answerPlayerRuntimeImage(restored, "images/coast.svg", store)?.outcome.kind,
+    "invalidPayload",
+  );
+  const answered = answerPlayerRuntimeImage(restored, reference, store);
+  assert.equal(answered?.outcome.kind, "completed");
+  assert.equal(answered.session.snapshot.status, "halted");
+  assert.equal(playerRuntimeMedia(answered.session.snapshot).stage.image, reference);
+  assert.deepEqual(
+    answered.session.transcriptEntries.map((entry) => entry.text),
+    ["Show me.", "Image"],
+  );
+  // Without a pending image request there is nothing to answer.
+  assert.equal(answerPlayerRuntimeImage(answered.session, reference, store), null);
 });
 
 test("runtime adapter leaves evaluated persistent writes pending until acknowledgement", () => {

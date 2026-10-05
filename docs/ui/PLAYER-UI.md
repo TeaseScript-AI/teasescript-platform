@@ -419,8 +419,9 @@ the bell. A notice whose action is the only way to continue, such as **Enable au
 audio, is labelled **Needs action**, offers no dismiss control, and disappears once its condition resolves.
 
 The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
-(info: saved progress is not kept), and a failed script-storage write (warning, for the run it happened in; a new
-Start withdraws it). Each level also has a theme status colour, following the usual convention: info blue, warning
+(info: saved progress is not kept), a failed script-storage write (warning, for the run it happened in; a new
+Start withdraws it), and an image request that allows only the camera, which this Player cannot answer yet (warning,
+withdrawn when the request ends). Each level also has a theme status colour, following the usual convention: info blue, warning
 orange, error red. A toast uses the level's soft tint as its surface and its solid tone for the border and icon; a
 panel entry uses the same tint with a solid mark along its start edge and a solid icon; and the bell's dot takes the
 most severe level that needs attention. The development preview's Visual Lab shows every level.
@@ -672,8 +673,21 @@ through 9999; a default in year 0000, which they cannot show, is offered as edit
 Send moves to an interaction whose field is of the other kind, the editing focus and the keyboard's state move to the
 new field. A default answer starts as the composer text,
 which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint restore the
-composer shows the default again, and unsent edits are not kept. `choose` and `showButton` keep the composer enabled
-rather than visually disabling it:
+composer shows the default again, and unsent edits are not kept.
+
+`askImage(...)` that allows files shows a paperclip before the composer's input, named "Attach an image", with the
+request's message as the input's hint. The paperclip opens the browser's native file picker for one image, with the
+request's `types` and `mime` as its `accept` hint. A file dragged over the composer marks it as a drop target ("Drop
+the image here") and answers when dropped; dragged text or links are not taken. Outside such a request there is no
+paperclip and no drop target. The Player identifies a file's image type from its first bytes (PNG, JPEG, GIF, WebP,
+AVIF, or BMP), requires the extension and the type to match `types` and `mime` when given, and has the browser decode
+it; a file that fails, more than one file, or typed text shows the composer notice and the request keeps waiting, as
+does a cancelled picker. A file chosen in a picker opened for a request that is no longer presented, for example
+because a timer's request replaced it meanwhile, answers nothing and shows the composer notice. An accepted image is
+stored as session media and recorded in the transcript as the player message `Image`. Until the camera route exists, a
+request that allows only the camera cannot be answered, and a [player notice](#player-notices) says so.
+
+`choose` and `showButton` keep the composer enabled rather than visually disabling it:
 
 - `choose`: selecting a rendered control or typing one exact unambiguous visible option completes the same choice;
 - `showButton`: clicking the rendered button or submitting its exact non-empty visible label in the composer activates

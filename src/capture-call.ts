@@ -12,6 +12,18 @@ export function isTakePhotoCall(expression: Expression): boolean {
   );
 }
 
+/**
+ * Whether an expression is the accepted `askImage(...)` call (V30 §20). Like `takePhoto()` it looks like an ordinary
+ * call, but it waits for the player's image and therefore lowers to an interaction.
+ */
+export function isAskImageCall(expression: Expression): boolean {
+  return (
+    expression.kind === "callExpression" &&
+    expression.callee.kind === "identifier" &&
+    expression.callee.name === "askImage"
+  );
+}
+
 /** Whether any of the programs takes a photo with `tags:`, which joins the image catalog at runtime (ADR 0023). */
 export function capturesTaggedPhotos(programs: readonly Program[]): boolean {
   const work: unknown[] = [...programs];

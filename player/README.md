@@ -30,8 +30,9 @@ This is a local inspection route, not the production cross-origin Player/host pr
 - `capture-device.ts`, `rgba-image.ts`, and `browser-capture.ts` contain the framework-independent camera/microphone
   capture foundation: Player-owned stream lifecycle, bounded failures, recording, still frames, pixel copies, and
   microphone sampling. `session-camera.ts` opens the session camera at Start and answers `takePhoto()`;
-  `captured-media.ts`, `indexeddb-media-repository.ts`, and `captured-media-persistence.ts` keep captured photos as
-  session media and durable while saved script storage references them. These shapes are implementation details rather
+  `captured-media.ts`, `indexeddb-media-repository.ts`, and `captured-media-persistence.ts` keep captured photos and
+  images chosen for `askImage(...)` as session media and durable while saved script storage references them;
+  `image-file.ts` checks a chosen file before it is stored. These shapes are implementation details rather
   than an accepted author-facing API.
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local

@@ -259,6 +259,15 @@ export function playerRuntimeForeground(
         // A native date control has no year 0000, so such a default is shown and edited as ISO text.
         ...(action.ui.prefill?.startsWith("0000") === true ? { isoText: true as const } : {}),
       });
+    case "image":
+      return Object.freeze({
+        kind: "ask-image",
+        accessibleName,
+        hint: action.ui.hint ?? "",
+        allowFile: action.ui.allowFile,
+        types: action.ui.types,
+        mime: action.ui.mime,
+      });
     case "choice":
       return Object.freeze({
         kind: "choose",
@@ -450,6 +459,39 @@ export function submitPlayerRuntimeComposer(
     return null;
   }
   return completePlayerAction(session, action, { kind: "submittedText", submittedText });
+}
+
+/**
+ * Answers the pending `askImage` with an image the trusted store holds, and continues on success. The runtime accepts
+ * only a reference `capturedMedia` vouches for.
+ */
+export function answerPlayerRuntimeImage(
+  session: PlayerRuntimeSession,
+  reference: string,
+  capturedMedia: CapturedMediaAdmission,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
+  const action = activeInteraction(session.snapshot);
+  if (action?.ui.kind !== "image") return null;
+  const operation = completeAction(
+    session.plan,
+    session.snapshot,
+    {
+      actionId: action.actionId,
+      actionKind: "interaction",
+      interactionKind: "image",
+      payload: { kind: "image", reference },
+    },
+    { capturedMedia },
+  );
+  return Object.freeze({
+    session: applyOperation(
+      session,
+      operation.snapshot,
+      operation.events,
+      operation.outcome.kind === "completed",
+    ),
+    outcome: operation.outcome,
+  });
 }
 
 export function activatePlayerRuntimeButton(

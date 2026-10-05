@@ -1,4 +1,5 @@
-import { isTakePhotoCall } from "./capture-call.js";
+import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
+import { IMAGE_REQUEST_OPTIONS } from "./image-input.js";
 import { normalizeOpaqueColor } from "./color.js";
 import {
   presentationPropertyDiagnostics,
@@ -520,6 +521,7 @@ class SemanticValidator {
           "showCamera",
           "hideCamera",
           "showPermanentButton",
+          "askImage",
         ].includes(name),
       ),
     );
@@ -1777,7 +1779,11 @@ class SemanticValidator {
         const binding = scope.resolve(expression.name);
         this.#recordRootAccess(expression.name, binding, expression.span);
         if (binding === undefined) {
-          if (this.#builtins.has(expression.name) || expression.name === "takePhoto") {
+          if (
+            this.#builtins.has(expression.name) ||
+            expression.name === "takePhoto" ||
+            expression.name === "askImage"
+          ) {
             this.#report(
               semanticCode.functionValue,
               `Builtin '${expression.name}' is not a first-class runtime value.`,
@@ -1892,6 +1898,8 @@ class SemanticValidator {
                 expression.span,
               );
             }
+          } else if (isAskImageCall(expression)) {
+            this.#validateAskImageArguments(expression);
           } else if (binding?.declaration !== undefined) {
             // The initialization check follows the calls of this file's functions.
             if (this.#functions.get(name) === binding.declaration)
@@ -2248,6 +2256,48 @@ class SemanticValidator {
   }
 
   /** Reports a parameter name given twice in a call whose parameters only the callee knows. */
+  /**
+   * `askImage(...)` takes its message first, positionally or as `message:`, and the named options of V30 §20. The
+   * invalid-input options are not supported yet.
+   */
+  #validateAskImageArguments(expression: Extract<Expression, { kind: "callExpression" }>): void {
+    let message = false;
+    for (const [index, argument] of expression.arguments.entries()) {
+      if (argument.kind === "positionalArgument") {
+        if (index > 0 || message)
+          this.#report(
+            semanticCode.argumentCount,
+            'askImage() takes only its message without a name, first, such as askImage("Add an image").',
+            argument.span,
+          );
+        message = true;
+        continue;
+      }
+      const name = argument.name.name;
+      if (name === "message") {
+        if (message)
+          this.#report(
+            semanticCode.argumentCount,
+            "askImage() takes one message: give it without a name or as message:, not both.",
+            argument.name.span,
+          );
+        message = true;
+      } else if (name === "invalidMessage" || name === "invalidLlmInstruction") {
+        this.#report(
+          semanticCode.unknownNamedArgument,
+          `askImage(${name}:) is not supported yet.`,
+          argument.name.span,
+        );
+      } else if (!IMAGE_REQUEST_OPTIONS.has(name)) {
+        this.#report(
+          semanticCode.unknownNamedArgument,
+          `askImage() has no argument '${name}'. It takes a message, allowCamera:, allowFile:, types:, and mime:.`,
+          argument.name.span,
+        );
+      }
+    }
+  }
+
   #validateDistinctNamedArguments(
     expression: Extract<Expression, { kind: "callExpression" }>,
   ): void {
@@ -2820,7 +2870,7 @@ function findFirstInteraction(
       current.kind === "showButtonExpression" ||
       current.kind === "playMediaExpression" ||
       current.kind === "showCameraExpression" ||
-      (current.kind === "callExpression" && isTakePhotoCall(current))
+      (current.kind === "callExpression" && (isTakePhotoCall(current) || isAskImageCall(current)))
     )
       return current;
     const children = expressionChildren(current);
