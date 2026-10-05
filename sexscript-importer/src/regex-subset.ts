@@ -38,6 +38,24 @@ export function parseRegexSubset(pattern: string): RegexSubset | null {
   return characterClass(pattern);
 }
 
+/**
+ * A pattern that a whole text matches by its end (Groovy `==~`): any text, then optionally a run of digits, then fixed
+ * text, `.*\d+\.jpg` or `.*\.png`, also case-insensitive with `(?i)`. Null for any other pattern.
+ */
+export function parseTailPattern(
+  pattern: string,
+): { insensitive: boolean; digits: boolean; tail: string } | null {
+  let rest = pattern;
+  const insensitive = rest.startsWith("(?i)");
+  if (insensitive) rest = rest.slice(4);
+  if (!rest.startsWith(".*")) return null;
+  rest = rest.slice(2);
+  const digits = rest.startsWith("\\d+");
+  if (digits) rest = rest.slice(3);
+  const tail = literalText(rest);
+  return tail === null || tail === "" ? null : { insensitive, digits, tail };
+}
+
 /** A Java replacement text as plain text: `\$` and `\\` are escapes, and an unescaped `$` names a group (null). */
 export function javaReplacementText(replacement: string): string | null {
   let result = "";

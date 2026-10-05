@@ -78,6 +78,14 @@ export type HelperName =
   | "text"
   | "systemSpeaker"
   | "askBooleansSystem"
+  | "deviceButtons"
+  | "showDevice"
+  | "openTray"
+  | "askOnce"
+  | "deviceId"
+  | "maskUrl"
+  | "textLines"
+  | "endsWithDigits"
   | "askText"
   | "compare"
   | "replaceChars"
@@ -105,6 +113,9 @@ export type HelperName =
   | "unique"
   | JavaHelperName;
 
+/** Parts of query parameter names whose values a notice hides (helper `maskUrl`, maskedUrl in lower.ts). */
+export const SECRET_PARAMETER_PARTS = ["key", "token", "pass", "secret", "auth"];
+
 /** The speaker of the questions and notices the importer adds (helper `systemSpeaker`). */
 export const SYSTEM_SPEAKER = "system";
 
@@ -127,6 +138,8 @@ export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] 
   const needed = new Set(names);
   if (needed.has("switchButton")) needed.add("switchButtonId");
   if (needed.has("askBooleansSystem")) needed.add("systemSpeaker");
+  if (needed.has("showDevice") || needed.has("openTray")) needed.add("deviceButtons");
+  if (needed.has("askOnce")) needed.add("systemSpeaker");
   if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
   if (needed.has("stopBackgroundSounds")) needed.add("backgroundSounds");
   for (const name of needed)
@@ -168,6 +181,14 @@ const HELPER_ORDER: readonly HelperName[] = [
   "truth",
   "text",
   "askBooleansSystem",
+  "deviceButtons",
+  "showDevice",
+  "openTray",
+  "askOnce",
+  "deviceId",
+  "maskUrl",
+  "textLines",
+  "endsWithDigits",
   "askText",
   "compare",
   "replaceChars",
@@ -307,6 +328,38 @@ const randomBelow = (max: IrExpression): IrExpression => ({
   positional: [range(max)],
   named: {},
 });
+
+/** The button of a device in the device buttons (helper `deviceButtons`). */
+function deviceButton(device: IrExpression): IrExpression {
+  return { kind: "index", target: v("sexscriptLegacyDeviceButtons"), index: device, dict: true };
+}
+
+/** Removes a device's button, if it has one. */
+function removeDeviceButton(device: IrExpression): IrStatement[] {
+  return [
+    ifS(
+      {
+        kind: "methodCall",
+        target: v("sexscriptLegacyDeviceButtons"),
+        name: "contains",
+        arguments: [device],
+        dict: true,
+      },
+      [
+        {
+          kind: "expression",
+          expression: {
+            kind: "call",
+            name: "removePermanentButton",
+            positional: [deviceButton(device)],
+            named: {},
+          },
+          span: null,
+        },
+      ],
+    ),
+  ];
+}
 
 /** A yes/no answer per text, confirmed at the end: legacy getBooleans() and the profile's owned items. */
 function askBooleansHelper(name: string, speaker?: string): IrStatement {
@@ -725,6 +778,223 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
       properties: [{ name: "title", value: lit("System") }],
       span: null,
     }),
+  },
+  // The permanent buttons that show the state of each device the legacy script controlled through a program.
+  deviceButtons: {
+    name: "sexscriptLegacyDeviceButtons",
+    build: () =>
+      letS("sexscriptLegacyDeviceButtons", { kind: "object", properties: [], dict: true }),
+  },
+  // A device's state as a permanent button, `Estim: RUNNING`, replacing the device's earlier button (owner decision).
+  showDevice: {
+    name: "sexscriptLegacyShowDevice",
+    build: () =>
+      fn(
+        "sexscriptLegacyShowDevice",
+        ["device", "state"],
+        [
+          ...removeDeviceButton(v("device")),
+          {
+            kind: "permanentButton",
+            target: deviceButton(v("device")),
+            label: template(v("device"), ": ", v("state")),
+            persist: true,
+            span: null,
+          },
+        ],
+      ),
+  },
+  // An open CD tray as a permanent button; clicking it closes the tray, so the button goes (owner decision).
+  openTray: {
+    name: "sexscriptLegacyOpenTray",
+    build: () =>
+      fn(
+        "sexscriptLegacyOpenTray",
+        [],
+        [
+          ...removeDeviceButton(lit("CD tray")),
+          {
+            kind: "permanentButton",
+            target: deviceButton(lit("CD tray")),
+            label: lit("CD tray: OPEN"),
+            persist: true,
+            body: removeDeviceButton(lit("CD tray")).flatMap((statement) =>
+              statement.kind === "if" ? statement.then : [],
+            ),
+            span: null,
+          },
+        ],
+      ),
+  },
+  // Information the legacy player's computer provided, asked once as the system speaker and saved (owner decision).
+  askOnce: {
+    name: "sexscriptLegacyAskOnce",
+    build: () =>
+      fn(
+        "sexscriptLegacyAskOnce",
+        ["key", "question"],
+        [
+          ifS(bin("==", { kind: "load", key: v("key") }, lit(null)), [
+            { kind: "say", value: v("question"), speaker: SYSTEM_SPEAKER, span: null },
+            {
+              kind: "save",
+              key: v("key"),
+              value: { kind: "input", input: "askText", speaker: SYSTEM_SPEAKER },
+              span: null,
+            },
+          ]),
+          ret({ kind: "load", key: v("key") }),
+        ],
+      ),
+  },
+  // A random ID made once and saved, where the legacy script used the computer's network hardware address.
+  deviceId: {
+    name: "sexscriptLegacyDeviceId",
+    build: () =>
+      fn(
+        "sexscriptLegacyDeviceId",
+        [],
+        [
+          ifS(bin("==", { kind: "load", key: lit("system.deviceId") }, lit(null)), [
+            {
+              kind: "save",
+              key: lit("system.deviceId"),
+              value: template({
+                kind: "call",
+                name: "randomInteger",
+                positional: [
+                  { kind: "range", from: lit(0), to: lit(2147483647), inclusive: false },
+                ],
+                named: {},
+              }),
+              span: null,
+            },
+          ]),
+          ret({ kind: "load", key: lit("system.deviceId") }),
+        ],
+      ),
+  },
+  // A URL for a notice, with the values of query parameters named like a key, token, or password hidden.
+  maskUrl: {
+    name: "sexscriptLegacyMaskUrl",
+    build: () => {
+      const method = (
+        target: IrExpression,
+        name: string,
+        ...args: IrExpression[]
+      ): IrExpression => ({ kind: "methodCall", target, name, arguments: args });
+      const secret = SECRET_PARAMETER_PARTS.map((part) =>
+        method(v("name"), "contains", lit(part)),
+      ).reduce((left, right) => bin("or", left, right));
+      return fn(
+        "sexscriptLegacyMaskUrl",
+        ["url"],
+        [
+          letS("parts", method(template(v("url")), "split", lit("?"))),
+          ifS(bin("<", prop(v("parts"), "length"), lit(2)), [ret(template(v("url")))]),
+          letS("masked", { kind: "list", items: [] }),
+          forS("pair", method(at(v("parts"), lit(1)), "split", lit("&")), [
+            letS("field", at(method(v("pair"), "split", lit("=")), lit(0))),
+            letS("name", method(v("field"), "lowercase")),
+            ifS(
+              secret,
+              [
+                {
+                  kind: "expression",
+                  expression: method(v("masked"), "add", template(v("field"), "=…")),
+                  span: null,
+                },
+              ],
+              [
+                {
+                  kind: "expression",
+                  expression: method(v("masked"), "add", v("pair")),
+                  span: null,
+                },
+              ],
+            ),
+          ]),
+          ret(template(at(v("parts"), lit(0)), "?", method(v("masked"), "join", lit("&")))),
+        ],
+      );
+    },
+  },
+  // The lines of a text as File.readLines() split them: at LF, CR, or CRLF, without an empty last line.
+  textLines: {
+    name: "sexscriptLegacyTextLines",
+    build: () => {
+      const replace = (target: IrExpression, from: string, to: string): IrExpression => ({
+        kind: "methodCall",
+        target,
+        name: "replace",
+        arguments: [lit(from), lit(to)],
+      });
+      return fn(
+        "sexscriptLegacyTextLines",
+        ["text"],
+        [
+          letS("lines", {
+            kind: "methodCall",
+            target: replace(replace(template(v("text")), "\r\n", "\n"), "\r", "\n"),
+            name: "split",
+            arguments: [lit("\n")],
+          }),
+          ifS(bin("==", prop(v("lines"), "last"), lit("")), [
+            {
+              kind: "expression",
+              expression: {
+                kind: "methodCall",
+                target: v("lines"),
+                name: "removeLast",
+                arguments: [],
+              },
+              span: null,
+            },
+          ]),
+          ret(v("lines")),
+        ],
+      );
+    },
+  },
+  // Whether a text ends with digits and then `tail`, as a whole match of `.*\d+tail` (regex-subset parseTailPattern).
+  endsWithDigits: {
+    name: "sexscriptLegacyEndsWithDigits",
+    build: () => {
+      const method = (
+        target: IrExpression,
+        name: string,
+        ...args: IrExpression[]
+      ): IrExpression => ({ kind: "methodCall", target, name, arguments: args });
+      return fn(
+        "sexscriptLegacyEndsWithDigits",
+        ["text", "tail"],
+        [
+          ifS({ kind: "unary", operator: "not", value: method(v("text"), "endsWith", v("tail")) }, [
+            ret(lit(false)),
+          ]),
+          letS(
+            "head",
+            method(
+              v("text"),
+              "substring",
+              lit(0),
+              bin("-", prop(v("text"), "length"), prop(v("tail"), "length")),
+            ),
+          ),
+          ret(
+            bin(
+              "and",
+              bin(">", prop(v("head"), "length"), lit(0)),
+              method(
+                lit("0123456789"),
+                "contains",
+                method(v("head"), "substring", bin("-", prop(v("head"), "length"), lit(1))),
+              ),
+            ),
+          ),
+        ],
+      );
+    },
   },
   // A value stored in a Groovy String variable: its text, and null stays null.
   text: {

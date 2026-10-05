@@ -252,6 +252,55 @@ test(
   },
 );
 
+// A walk through an images folder goes through the folder's images; a whole match of a name that ends with digits and
+// an extension keeps the images Groovy kept.
+test(
+  "walks an images folder as its images with a name filter",
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
+  async () => {
+    if (!("compiler" in projectResult)) return;
+    const directory = mkdtempSync(path.join(tmpdir(), "sexscript-walk-"));
+    try {
+      const sourcePath = path.join(directory, "walk.groovy");
+      writeFileSync(
+        sourcePath,
+        [
+          'def set = "Pack 1"',
+          "def names = []",
+          'new File("images/Mistress/" + set + "/").eachFile() { file ->',
+          "  if (file.isFile() && (file.name ==~ /.*\\d+\\.jpg/ || file.name ==~ /(?i).*\\d+\\.png/)) {",
+          "    names << file.name",
+          "  }",
+          "}",
+          'save("names", names.join(","))',
+          "",
+        ].join("\n"),
+      );
+      const media = [
+        "Mistress/Pack 1/a1.jpg",
+        "Mistress/Pack 1/b22.PNG",
+        "Mistress/Pack 1/cover.jpg",
+      ].map((file) => ({ path: file }));
+      const [program] = lowerSelfContainedPackage([await parseGroovySource(sourcePath)], { media });
+      const source = emitTease(program!);
+      assert.match(source, /^for file in findImages\(all: \[sexscriptLegacyPathTag\(/mu);
+      const storage = new Map();
+      const result = projectResult.runner(
+        [{ path: "main.tease", source }],
+        {},
+        { images: imageCatalog(media), storage },
+      );
+      assert.deepEqual(
+        { status: result.status, failure: result.failure },
+        { status: "halted", failure: null },
+      );
+      assert.equal(storage.get("names"), "a1.jpg,b22.PNG");
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 // The pathTag helper gives a computed folder at runtime the tag that the sidecars carry from conversion.
 test(
   "the runtime path tag of a folder equals its conversion-time tag",

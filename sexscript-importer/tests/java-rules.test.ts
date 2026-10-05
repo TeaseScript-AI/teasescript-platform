@@ -346,7 +346,6 @@ test("keeps reads of files that any write of the package may change", { skip }, 
     ['new File("scripts/tmp.txt").renameTo("scripts/quiz.txt")', "scripts/quiz.txt"],
     ['new File("scripts", "quiz.txt").write("x")', "scripts/quiz.txt"],
     ['new File("scripts/data").deleteDir()', "scripts/data/quiz.txt"],
-    ['def f = new File("scripts/quiz.txt"); f.text += "x"', "scripts/quiz.txt"],
     ['("scripts/quiz.txt" as File).write("x")', "scripts/quiz.txt"],
     ['new File("scripts/quiz.txt").absoluteFile.text = "x"', "scripts/quiz.txt"],
     ['new File("scripts/quiz.txt").with { write("x") }', "scripts/quiz.txt"],
@@ -363,6 +362,18 @@ test("keeps reads of files that any write of the package may change", { skip }, 
     const source = await convert([write, `def lines = new File("${read}").readLines()`], files);
     assert.match(source, /TODO SX_PACKAGE_TEXT_WRITTEN line 2/u, write);
   }
+  // A write that storage keeps turns the file into stored text (storedText) instead.
+  const stored = await convert(
+    [
+      'def f = new File("scripts/quiz.txt"); f.text += "x"',
+      'def lines = new File("scripts/quiz.txt").readLines()',
+    ],
+    files,
+  );
+  assert.match(
+    stored,
+    /^let lines = sexscriptLegacyTextLines\(\(load "file:quiz\.txt", default: "first\\n"\)\)$/mu,
+  );
 });
 
 // A path from getDataFolder() names a file of the package root; a file the package lacks, a flag that a read may still
@@ -413,3 +424,54 @@ function groovyParserUnavailableReason(): string | false {
   const missing = jars.find((jar) => !existsSync(jar));
   return missing === undefined ? false : `Groovy 2.5.21 JAR not found: ${missing}`;
 }
+
+// A text file the package's scripts write keeps its text in storage under `file:` and its path, starting from the
+// package's own file; a text file opened in the computer's editor shows its text as prose from the system speaker.
+test("keeps written text files in storage and shows viewed files as prose", { skip }, async () => {
+  if (!("compiler" in project)) return;
+  const source = await convert(
+    [
+      'def journal = new File("logs/session.txt")',
+      'journal.write("first")',
+      'journal.append(System.getProperty("line.separator"))',
+      'journal << "second"',
+      'def lines = new File("logs/session.txt").readLines()',
+      'save("count", lines.size())',
+      'save("last", lines[1])',
+      'def notes = new File("notes.txt")',
+      'save("before", notes.text)',
+      'notes.text = "rewritten"',
+      'save("after", new File("notes.txt").text)',
+      'useFile("logs/session.txt")',
+      'useFile("readme.txt")',
+    ],
+    { "notes.txt": "packaged", "readme.txt": "Read me" },
+  );
+  assert.match(source, /^save "first" as "file:logs\/session\.txt"$/mu);
+  assert.match(
+    source,
+    /^say as system prose "\$\{\(load "file:readme\.txt", default: "Read me"\)\}"$/mu,
+  );
+  assert.doesNotMatch(source, /TODO/u);
+  const files = [{ path: "main.tease", source }];
+  assert.deepEqual(
+    project.compiler(files).diagnostics.filter((diagnostic) => diagnostic.severity === "error"),
+    [],
+  );
+  const storage = new Map();
+  const result = project.runner(files, {}, { storage });
+  assert.deepEqual(
+    { status: result.status, failure: result.failure },
+    { status: "halted", failure: null },
+  );
+  assert.deepEqual(
+    {
+      count: storage.get("count"),
+      last: storage.get("last"),
+      before: storage.get("before"),
+      after: storage.get("after"),
+      journal: storage.get("file:logs/session.txt"),
+    },
+    { count: 2, last: "second", before: "packaged", after: "rewritten", journal: "first\nsecond" },
+  );
+});

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { javaReplacementText, parseRegexSubset } from "../src/regex-subset.ts";
+import { javaReplacementText, parseRegexSubset, parseTailPattern } from "../src/regex-subset.ts";
 
 test("the regular expressions that text operations express are recognized", () => {
   assert.deepEqual(parseRegexSubset("BOSS"), { kind: "literal", text: "BOSS" });
@@ -31,4 +31,19 @@ test("the regular expressions that text operations express are recognized", () =
 test("Java replacement texts are plain text unless they name a group", () => {
   assert.equal(javaReplacementText("a\\$b\\\\c"), "a$b\\c");
   assert.equal(javaReplacementText("$1"), null);
+});
+
+test("patterns that a whole text matches by its end", () => {
+  assert.deepEqual(parseTailPattern(".*\\d+\\.jpg"), {
+    insensitive: false,
+    digits: true,
+    tail: ".jpg",
+  });
+  assert.deepEqual(parseTailPattern("(?i).*\\.png"), {
+    insensitive: true,
+    digits: false,
+    tail: ".png",
+  });
+  assert.equal(parseTailPattern("Domme(\\d+).jpg"), null);
+  assert.equal(parseTailPattern(".*"), null);
 });

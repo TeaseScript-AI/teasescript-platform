@@ -135,6 +135,11 @@ interface PathPattern {
   complete: boolean;
   /** Where a write of the path happens, as `file:line`. */
   origin?: string;
+  /**
+   * For a write that the conversion keeps in storage (storedText): a whole-text write, an append, or a delete through a
+   * `File` variable or a `File` of one path.
+   */
+  stored?: "write" | "append" | "delete";
 }
 
 type ResourceKind = "file" | "stream" | "ini";
@@ -562,8 +567,29 @@ function supportedResourceUse(
   const parent = tree.parents.get(node) ?? null;
   const member = memberOf(node, tree);
   if (member !== null) {
-    if (member.property) return false;
+    // A text file the package writes keeps its text in storage (storedText): `file.text` reads it, and `file.text = x`
+    // and `file.text += x` write it as statements.
+    if (member.property) {
+      if (kind !== "file" || member.name !== "text") return false;
+      const assignment = tree.parents.get(member.call) ?? null;
+      if (assignment?.kind !== "binary" || asNode(assignment.left) !== member.call) return true;
+      return (
+        ["=", "+="].includes(String(assignment.operator)) && isWholeStatement(assignment, tree)
+      );
+    }
     switch (member.name) {
+      case "write":
+      case "setText":
+      case "append":
+        return (
+          kind === "file" && member.arguments.length === 1 && isWholeStatement(member.call, tree)
+        );
+      case "delete":
+        return (
+          kind === "file" && member.arguments.length === 0 && isWholeStatement(member.call, tree)
+        );
+      case "getText":
+        return kind === "file" && member.arguments.length === 0;
       case "readLines":
         return member.arguments.length === 0 && kind !== "ini";
       case "exists":
@@ -578,6 +604,15 @@ function supportedResourceUse(
         return false;
     }
   }
+  // `file << text` as a statement appends to a stored text file.
+  if (
+    kind === "file" &&
+    parent?.kind === "binary" &&
+    parent.operator === "<<" &&
+    asNode(parent.left) === node &&
+    isWholeStatement(parent, tree)
+  )
+    return true;
   const argument = argumentOf(node, tree);
   if (argument !== null) {
     if (argument.call.kind === "constructorCall" && argument.index === 0)
@@ -722,9 +757,24 @@ function writtenPaths(tree: Tree): FileWrites {
     );
   };
   // A write of a value: of its paths when it is a known File, of any escaped File when its origin is unknown.
-  const write = (target: AstNode | null, operation: AstNode) => {
+  const write = (
+    target: AstNode | null,
+    operation: AstNode,
+    stored?: "write" | "append" | "delete",
+  ) => {
     if (target === null) return;
-    if (isFile(target)) at(writes.direct, operation, pathsOf(target, new Set()));
+    const simple =
+      stored !== undefined &&
+      (variableName(target) !== null ||
+        (target.kind === "constructorCall" &&
+          FILE_TYPES.has(String(target.type)) &&
+          argumentsOf(target).length === 1));
+    if (isFile(target))
+      at(
+        writes.direct,
+        operation,
+        pathsOf(target, new Set()).map((path) => (simple ? { ...path, stored } : path)),
+      );
     else if (!notFile(target, new Set())) writes.unknownWrite = true;
   };
   // Where each File value and each read of a File variable goes.
@@ -814,8 +864,16 @@ function writtenPaths(tree: Tree): FileWrites {
     ) {
       // StringBuilder.delete(start, end) is no file deletion; Wini.store(file) writes its argument; renameTo(target)
       // changes both files.
+      const stored =
+        (method === "write" || method === "setText") && args.length === 1
+          ? "write"
+          : method === "append" && args.length === 1
+            ? "append"
+            : method === "delete" && args.length === 0
+              ? "delete"
+              : undefined;
       if (method === "store" && args.length > 0) write(args[0]!, call);
-      else if (method !== "delete" || args.length === 0) write(receiver, call);
+      else if (method !== "delete" || args.length === 0) write(receiver, call, stored);
       // The target of renameTo() is a File or, through Groovy, a path text.
       const renamed = receiver !== null && (isFile(receiver) || !notFile(receiver, new Set()));
       if (method === "renameTo" && args[0] !== undefined && renamed)
@@ -837,7 +895,7 @@ function writtenPaths(tree: Tree): FileWrites {
   }
   // `file.text = value`, `file.bytes += value`, and `file << value`.
   for (const [node, parent] of tree.parents) {
-    if (node.kind === "binary" && node.operator === "<<") write(asNode(node.left), node);
+    if (node.kind === "binary" && node.operator === "<<") write(asNode(node.left), node, "append");
     if (
       node.kind === "property" &&
       ["text", "bytes"].includes(constantString(node.property) ?? "") &&
@@ -845,7 +903,17 @@ function writtenPaths(tree: Tree): FileWrites {
       ASSIGNMENT_OPERATORS.test(String(parent.operator)) &&
       asNode(parent.left) === node
     )
-      write(asNode(node.object), node);
+      write(
+        asNode(node.object),
+        node,
+        constantString(node.property) !== "text"
+          ? undefined
+          : parent.operator === "="
+            ? "write"
+            : parent.operator === "+="
+              ? "append"
+              : undefined,
+      );
   }
   return writes;
 }
@@ -945,6 +1013,22 @@ export function javaMethodCall(
     return host.lower(receiver);
   const kind = resourceKindOf(receiver, analysis);
   if (kind !== null) {
+    const stored = kind === "file" ? storedText(receiver, host) : undefined;
+    if (stored !== undefined) {
+      if (stored === null) return null;
+      if (name === "readLines" && args.length === 0) return host.helper("textLines", [stored.read]);
+      if (name === "getText" && args.length === 0) return stored.read;
+      if (name === "exists" && args.length === 0)
+        return stored.packaged
+          ? { kind: "literal", value: true }
+          : {
+              kind: "binary",
+              operator: "!=",
+              left: { kind: "load", key: stored.key },
+              right: { kind: "literal", value: null },
+            };
+      return undefined;
+    }
     if (name === "readLines" && args.length === 0 && kind !== "ini")
       return packageTextRead(node, receiver, "lines", host);
     if (name === "exists" && args.length === 0 && kind === "file")
@@ -987,6 +1071,15 @@ export function javaProperty(
   name: string,
   host: JavaRuleHost,
 ): IrExpression | null | undefined {
+  const receiver = asNode(node.object);
+  if (
+    name === "text" &&
+    receiver !== null &&
+    resourceKindOf(receiver, host.state.analysis) === "file"
+  ) {
+    const stored = storedText(receiver, host);
+    if (stored !== undefined) return stored === null ? null : stored.read;
+  }
   return temporalProperty(node, name, host) ?? textProperty(node, name);
 }
 
@@ -1001,6 +1094,21 @@ export function javaAssignment(
   span: SourceSpan | null,
   host: JavaRuleHost,
 ): IrStatement[] | null {
+  const operator = String(node.operator);
+  const left = asNode(node.left);
+  const right = asNode(node.right);
+  const file =
+    operator === "<<"
+      ? left
+      : left?.kind === "property" &&
+          constantString(left.property) === "text" &&
+          (operator === "=" || operator === "+=")
+        ? asNode(left.object)
+        : null;
+  if (file !== null && right !== null && resourceKindOf(file, host.state.analysis) === "file") {
+    const written = storedWrite(file, operator === "=" ? "write" : "append", right, span, host);
+    if (written !== undefined) return written;
+  }
   return textAssignment(node, span, host);
 }
 
@@ -1015,6 +1123,20 @@ export function javaCallStatement(
   const receiver = asNode(node.object);
   if (receiver === null) return null;
   const { analysis } = host.state;
+  if (resourceKindOf(receiver, analysis) === "file") {
+    const operation =
+      (name === "write" || name === "setText") && args.length === 1
+        ? "write"
+        : name === "append" && args.length === 1
+          ? "append"
+          : name === "delete" && args.length === 0
+            ? "delete"
+            : null;
+    if (operation !== null) {
+      const written = storedWrite(receiver, operation, args[0] ?? null, span, host);
+      if (written !== undefined) return written;
+    }
+  }
   if (name === "close" && args.length === 0 && resourceKindOf(receiver, analysis) === "stream") {
     host.diagnostic(
       "SX_PACKAGE_TEXT_CLOSE",
@@ -1208,6 +1330,127 @@ function packageTextRead(
   if (files === null) return null;
   noteOnce(host, "SX_PACKAGE_TEXT_SNAPSHOT", SNAPSHOT_NOTE, node.span);
   return dataCall(resource, kind, files, host);
+}
+
+/**
+ * A text file the package's scripts write, such as a log or a task list the legacy script kept for itself or for
+ * another program, keeps its text in storage under `file:` and its package path (owner decision: such files become
+ * `save`/`load`): `key` names it, and `read` is its stored text, or the package's own file as converted, or "" when
+ * neither exists yet. Undefined for a file no script writes, which stays a package resource, and null after a
+ * diagnostic.
+ */
+export function storedText(
+  receiver: AstNode,
+  host: JavaRuleHost,
+): { key: IrExpression; read: IrExpression; packaged: boolean } | null | undefined {
+  const paths = resourcePaths(receiver, host.state.analysis).map(({ pattern }) => pattern);
+  return storedFile(paths, receiver, false, host);
+}
+
+/**
+ * The text of a file that useFile() opened in the computer's editor or viewer, named by its path text: a stored text
+ * file (storedText), or a package file no script writes, as converted. Undefined for another file, and null after a
+ * diagnostic.
+ */
+export function viewedText(
+  path: AstNode,
+  host: JavaRuleHost,
+): { key: IrExpression; read: IrExpression; packaged: boolean } | null | undefined {
+  return storedFile([pathPattern(path, host.state.analysis.constants)], path, true, host);
+}
+
+/** storedText and viewedText: the file of `paths`, whose path text `node` lowers to. */
+function storedFile(
+  paths: readonly PathPattern[],
+  node: AstNode,
+  viewed: boolean,
+  host: JavaRuleHost,
+): { key: IrExpression; read: IrExpression; packaged: boolean } | null | undefined {
+  const { resources } = host.state;
+  if (resources === null || paths.length === 0) return undefined;
+  const single =
+    paths.length === 1 && paths[0]!.complete ? packageFilePath(paths[0]!.prefix) : null;
+  // The package's own file is the text until a script writes it.
+  const bytes = single === null ? null : fileBytes(resources, single);
+  const decoded = bytes === null ? null : decodeText(bytes, "platform");
+  // Every write of the file must be one that storage keeps; deleting a package file would bring its text back.
+  const written = (pattern: PathPattern): boolean => {
+    const writes = resources.writes.filter((write) =>
+      pattern.complete
+        ? writeMatches(write, packageFilePath(pattern.prefix))
+        : packageFilePath(write.prefix) === packageFilePath(pattern.prefix) &&
+          write.suffix.toLowerCase() === pattern.suffix.toLowerCase(),
+    );
+    return (
+      writes.length > 0 &&
+      writes.every(
+        (write) =>
+          write.stored !== undefined &&
+          (write.complete || !pattern.complete) &&
+          !(write.stored === "delete" && decoded !== null),
+      )
+    );
+  };
+  if (!paths.every(written) && !(viewed && decoded !== null)) return undefined;
+  // A computed path that may name a file of the package would need that file's text as its start; it stays manual.
+  if (
+    single === null &&
+    paths.some((pattern) => [...resources.files.keys()].some((file) => matches(pattern, file)))
+  )
+    return undefined;
+  const path = host.lower(node);
+  if (path === null) return null;
+  const key: IrExpression =
+    single !== null
+      ? { kind: "literal", value: `file:${single}` }
+      : {
+          kind: "template",
+          parts: [{ text: "file:" }, { value: host.helper("packagePath", [path]) }],
+        };
+  if (!viewed) noteOnce(host, "SX_STORED_FILE", STORED_FILE_NOTE, node.span);
+  return {
+    key,
+    read: { kind: "load", key, defaultValue: { kind: "literal", value: decoded?.text ?? "" } },
+    packaged: decoded !== null,
+  };
+}
+
+const STORED_FILE_NOTE =
+  "The legacy script wrote this text file on the player's computer, which a package cannot do; its text is kept in storage under file: and its path instead, starting from the package's own file where there is one.";
+
+/** A write, append, or delete of a stored text file (storedText) as storage statements. */
+function storedWrite(
+  receiver: AstNode,
+  operation: "write" | "append" | "delete",
+  value: AstNode | null,
+  span: SourceSpan | null,
+  host: JavaRuleHost,
+): IrStatement[] | null | undefined {
+  const stored = storedText(receiver, host);
+  if (stored === undefined || stored === null) return stored;
+  if (operation === "delete") return [{ kind: "delete", key: stored.key, span }];
+  const text = value === null ? null : host.lower(value);
+  if (text === null) return null;
+  // Groovy wrote the text of the value; literal text joins as it is.
+  const part = (item: IrExpression): { text: string } | { value: IrExpression } =>
+    item.kind === "literal" && typeof item.value === "string"
+      ? { text: item.value }
+      : { value: item };
+  const parts = operation === "append" ? [part(stored.read), part(text)] : [part(text)];
+  const literal = parts.every((item) => "text" in item);
+  return [
+    {
+      kind: "save",
+      key: stored.key,
+      value: literal
+        ? {
+            kind: "literal",
+            value: parts.map((item) => ("text" in item ? item.text : "")).join(""),
+          }
+        : { kind: "template", parts },
+      span,
+    },
+  ];
 }
 
 /** The call of the generated data function of a kind, which then holds the given files. */

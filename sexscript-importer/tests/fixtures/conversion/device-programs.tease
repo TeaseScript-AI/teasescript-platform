@@ -1,0 +1,41 @@
+let sexscriptLegacyDeviceButtons = dict{}
+function sexscriptLegacyShowDevice(device, state) {
+  if sexscriptLegacyDeviceButtons.contains(device) {
+    removePermanentButton(sexscriptLegacyDeviceButtons[device])
+  }
+  sexscriptLegacyDeviceButtons[device] = showPermanentButton "${device}: ${state}" {
+    persist: true
+  }
+}
+function sexscriptLegacyOpenTray {
+  if sexscriptLegacyDeviceButtons.contains("CD tray") {
+    removePermanentButton(sexscriptLegacyDeviceButtons["CD tray"])
+  }
+  sexscriptLegacyDeviceButtons["CD tray"] = showPermanentButton "CD tray: OPEN" {
+    persist: true
+    removePermanentButton(sexscriptLegacyDeviceButtons["CD tray"])
+  }
+}
+// Device programs on the player's computer cannot run from a package; a permanent button shows each device's state.
+// NOTE SX_DATA_FOLDER line 2: getDataFolder() was the legacy player's data folder on the player's computer; package paths start at the package root, so it is empty text here.
+let path = ""
+let estim_start = load "training.estim_start"
+let estim_finish = load "training.estim_finish"
+let lock_start = load "training.lock"
+let arm_finish = load "training.disarm"
+// NOTE SX_DEVICE_STATE line 7: useFile() ran the device command in lock_start on the player's computer, which a package cannot start; a permanent button shows the device's state instead, "Lock: LOCKED".
+if lock_start != "" {
+  sexscriptLegacyShowDevice("Lock", "LOCKED")
+}
+// NOTE SX_DEVICE_STATE line 8: useFile() ran the device command in estim_start on the player's computer, which a package cannot start; a permanent button shows the device's state instead, "Estim: RUNNING".
+sexscriptLegacyShowDevice("Estim", "RUNNING")
+wait 2
+// NOTE SX_DEVICE_STATE line 10: useFile() ran the device command in estim_finish on the player's computer, which a package cannot start; a permanent button shows the device's state instead, "Estim: STOPPED".
+sexscriptLegacyShowDevice("Estim", "STOPPED")
+// NOTE SX_DEVICE_STATE line 11: useFile() ran the device command in arm_finish on the player's computer, which a package cannot start; a permanent button shows the device's state instead, "Lock: UNLOCKED".
+sexscriptLegacyShowDevice("Lock", "UNLOCKED")
+// An open CD tray is a button; clicking it closes the tray.
+// NOTE SX_DEVICE_STATE line 13: openCdTrays() opened the CD trays of the player's computer, which a package cannot do; a permanent button shows the open tray, and clicking it closes the tray.
+sexscriptLegacyOpenTray()
+say "Put the key in the tray"
+exit

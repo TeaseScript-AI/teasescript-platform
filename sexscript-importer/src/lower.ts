@@ -17,6 +17,8 @@ import {
   helperCall,
   allHelperStatements,
   helperStatements,
+  SECRET_PARAMETER_PARTS,
+  SYSTEM_SPEAKER,
   withActionDispatcher,
   type HelperName,
 } from "./helpers.ts";
@@ -30,6 +32,7 @@ import {
   javaFileState,
   javaMethodCall,
   javaProperty,
+  viewedText,
   type JavaFileState,
   type JavaRuleHost,
   type PackageResources,
@@ -44,7 +47,7 @@ import {
 } from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
 import { legacyHtmlToMarkup, type TextPart } from "./markup.ts";
-import { javaReplacementText, parseRegexSubset } from "./regex-subset.ts";
+import { javaReplacementText, parseRegexSubset, parseTailPattern } from "./regex-subset.ts";
 import type { AcceptedForm, MediaFile } from "./workarounds.ts";
 import { SEXSCRIPT_API_METHODS } from "./sexscript-api.ts";
 import {
@@ -227,6 +230,8 @@ interface LowerContext {
   integerVariables: ReadonlySet<string>;
   /** Bindings declared with the Groovy type String, which converted every value stored in them to text. */
   textVariables: ReadonlySet<string>;
+  /** Loop variables that hold the package path of an image of a listed folder (imageFolderWalk). */
+  imagePaths: Set<string>;
   /** Initializers of variables assigned once, by their declaration (staticNumber). */
   constantInitializers: ReadonlyMap<string, AstNode>;
   /** Dict keys known present where the lowering is (presenceFact), from surrounding tests. */
@@ -978,6 +983,7 @@ export function lowerParsedFile(
     bindings: new Map(),
     integerVariables: new Set(),
     textVariables: new Set(),
+    imagePaths: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -1740,6 +1746,7 @@ function lowerHelperMethod(
     bindings: new Map(),
     integerVariables: new Set(),
     textVariables: new Set(),
+    imagePaths: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -3524,7 +3531,10 @@ function lowerClosureDeclaration(
   // A function body runs later, when keys known present here may be gone.
   const outerKeys = context.knownKeys.splice(0);
   try {
-    const composed = composedImage(body, context);
+    const composed =
+      composedImage(body, context) ??
+      pixelCheck(body, closure, context) ??
+      onlineFunction(body, closure, context);
     const lowered =
       composed ??
       lowerBlock(
@@ -3551,6 +3561,98 @@ function lowerClosureDeclaration(
     context.currentFunction = outerFunction;
     context.knownKeys.splice(0, context.knownKeys.length, ...outerKeys);
   }
+}
+
+/**
+ * A function that inspects the pixels of a photo (`image.getRGB(x, y)`) and answers yes or no, such as a check whether
+ * the camera gave a blank picture: a package cannot read pixels, so it answers false, as for a photo in which there is
+ * nothing to detect (owner decision: reading photo pixels is skipped, with a note). Null for any other body.
+ */
+function pixelCheck(body: AstNode, node: AstNode, context: LowerContext): IrStatement[] | null {
+  let readsPixels = false;
+  let answers = true;
+  walkAst(body, (child) => {
+    if (child.kind === "methodCall" && constantString(child.method) === "getRGB")
+      readsPixels = true;
+    if (child.kind === "return") {
+      const value = constantValue(asNode(child.value) ?? undefined);
+      if (typeof value !== "boolean") answers = false;
+    }
+  });
+  if (!readsPixels || !answers) return null;
+  addDiagnostic(
+    context,
+    "SX_PHOTO_PIXELS",
+    "warning",
+    "This function read the pixels of a photo to answer yes or no; a package cannot read pixels, so it answers false, as for a photo in which there is nothing to detect.",
+    node.span,
+  );
+  return [{ kind: "return", value: { kind: "literal", value: false }, span: node.span }];
+}
+
+/**
+ * A function that makes a request to an online service, `new URL(address)` with `openStream()` or `openConnection()`,
+ * such as a download into a file or a chat with a language model: a package cannot reach the service (owner decision),
+ * so the function shows the request as a system notice, with its method and secret values hidden, and returns false,
+ * or null, as when the request failed. Null for any other body.
+ */
+function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): IrStatement[] | null {
+  let address: AstNode | null = null;
+  let opens = false;
+  let writes = false;
+  let answers = true;
+  let method = "GET";
+  walkAst(body, (child) => {
+    if (
+      child.kind === "constructorCall" &&
+      (child.type === "URL" || child.type === "java.net.URL") &&
+      address === null
+    )
+      address = nodeArray(asNode(child.arguments)?.items)[0] ?? null;
+    const called = child.kind === "methodCall" ? constantString(child.method) : null;
+    if (called === "openStream" || called === "openConnection") opens = true;
+    const requested =
+      called === "setRequestMethod"
+        ? constantString(nodeArray(asNode(child.arguments)?.items)[0])
+        : null;
+    if (requested !== null) method = requested.toUpperCase();
+    if (
+      child.kind === "constructorCall" &&
+      ["FileOutputStream", "java.io.FileOutputStream"].includes(String(child.type))
+    )
+      writes = true;
+    if (child.kind === "return") {
+      const value = constantValue(asNode(child.value) ?? undefined);
+      if (typeof value !== "boolean") answers = false;
+    }
+  });
+  if (address === null || !opens) return null;
+  const url = lowerExpression(address, context);
+  if (url === null) return null;
+  addDiagnostic(
+    context,
+    "SX_ONLINE_REQUEST",
+    "warning",
+    `This function ${writes ? "downloaded a web address into a file" : "made a request to an online service"}, which a package cannot do; a system notice shows the request, with secret values hidden, and the function returns as when the request failed.`,
+    node.span,
+  );
+  const shown =
+    url.kind === "literal" && typeof url.value === "string"
+      ? { text: maskedUrl(url.value) }
+      : { value: useHelper(context, "maskUrl", [url]) };
+  return [
+    systemSay(
+      templateOrLiteral([
+        {
+          text: `Online feature not available here. The original would have requested: ${method} `,
+        },
+        shown,
+      ]),
+      node.span,
+      context,
+    ),
+    { kind: "return", value: { kind: "literal", value: answers ? false : null }, span: node.span },
+  ];
 }
 
 const INPUT_CALLS = new Set([
@@ -4423,6 +4525,91 @@ function lowerCallStatement(
 ): IrStatement[] {
   const call = callParts(node);
   const receiver = asNode(node.object);
+  // A script manager lists the installed scripts to run, change, or delete them, which a package cannot do.
+  if (
+    call !== null &&
+    receiver !== null &&
+    ["eachFile", "eachFileRecurse", "eachDir", "eachFileMatch"].includes(call.name) &&
+    isInstalledScriptsFolder(receiver, context)
+  ) {
+    addDiagnostic(
+      context,
+      "SX_SCRIPT_MANAGER",
+      "warning",
+      `${call.name}() went through the installed scripts of the legacy player to manage them, which a package cannot do; a system notice says so, and the session ends.`,
+      node.span,
+    );
+    return [
+      systemSay(
+        {
+          kind: "literal",
+          value:
+            "Managing the installed scripts is not available here: scripts cannot be listed, changed, or removed from a package.",
+        },
+        span,
+        context,
+      ),
+      { kind: "exit", span },
+    ];
+  }
+  // Going through the files of an images folder goes through the folder's images (imageFolderWalk).
+  if (
+    call?.name === "eachFile" &&
+    receiver !== null &&
+    context.media !== null &&
+    call.arguments.length === 1 &&
+    call.arguments[0]!.kind === "closure"
+  ) {
+    const walk = imageFolderWalk(node, receiver, call.arguments[0]!, span, context);
+    if (walk !== undefined) return walk;
+  }
+  // Looking through the player's pictures on the computer becomes asking for a photo (owner decision).
+  if (
+    call !== null &&
+    receiver !== null &&
+    FOLDER_WALKS.has(call.name) &&
+    walksHome(receiver, context)
+  ) {
+    addDiagnostic(
+      context,
+      "SX_HOME_PICTURES",
+      "warning",
+      `${call.name}() looked through the files of a folder of the player's computer, such as the pictures in the home, Downloads, or Documents folder, which a package cannot see; the player is asked for a photo instead.`,
+      node.span,
+    );
+    return [
+      systemSay(
+        {
+          kind: "literal",
+          value:
+            "The original looked through the pictures on your computer. Take a photo to show here instead.",
+        },
+        span,
+        context,
+      ),
+      {
+        kind: "showImage",
+        file: { kind: "call", name: "takePhoto", positional: [], named: {} },
+        span,
+      },
+    ];
+  }
+  // Settings of the Java network stack, such as TLS options or the HTTP user agent, mean nothing in a package.
+  const property = call?.name === "setProperty" ? constantString(call.arguments[0]) : null;
+  if (
+    variableName(receiver) === "System" &&
+    property !== null &&
+    /^(?:jsse|javax?\.net|https?|sun\.net|networkaddress)\./iu.test(property)
+  ) {
+    addDiagnostic(
+      context,
+      "SX_JVM_SETTING",
+      "info",
+      `System.setProperty("${property}") set up the Java network stack of the legacy player, which a package does not have; it is dropped.`,
+      node.span,
+    );
+    return [];
+  }
   if (call !== null && !call.inherited && receiver !== null && isDictionary(receiver, context)) {
     const dictionary = dictStatement(receiver, call, span, context);
     if (dictionary !== null) return dictionary;
@@ -4872,6 +5059,58 @@ function lowerCallStatement(
       return lowerSave(args, node, span, context);
     case "useFile":
       return useFileStatements(args, node, span, context);
+    case "useEmailAddress": {
+      if (args.length !== 1)
+        return [
+          unsupportedStatement(
+            context,
+            node,
+            "SX_CALL_ARITY",
+            "useEmailAddress() must have one argument.",
+          ),
+        ];
+      const address = lowerExpression(args[0]!, context);
+      if (address === null) return [];
+      addDiagnostic(
+        context,
+        "SX_EMAIL",
+        "warning",
+        "useEmailAddress() opened the computer's email program with this address, which a browser package cannot do: the player's email address is asked once as the system speaker, and a system notice says that the email is not sent.",
+        node.span,
+      );
+      return [
+        {
+          kind: "expression",
+          expression: useHelper(context, "askOnce", [
+            { kind: "literal", value: "system.emailAddress" },
+            { kind: "literal", value: "What is your email address?" },
+          ]),
+          span,
+        },
+        systemSay(
+          templateOrLiteral([
+            {
+              text: "Sending email is not available here. The original would have opened an email to ",
+            },
+            address.kind === "literal" && typeof address.value === "string"
+              ? { text: address.value }
+              : { value: address },
+            { text: " in your email program." },
+          ]),
+          span,
+          context,
+        ),
+      ];
+    }
+    case "openCdTrays":
+      addDiagnostic(
+        context,
+        "SX_DEVICE_STATE",
+        "warning",
+        "openCdTrays() opened the CD trays of the player's computer, which a package cannot do; a permanent button shows the open tray, and clicking it closes the tray.",
+        node.span,
+      );
+      return [{ kind: "expression", expression: useHelper(context, "openTray", []), span }];
     case "exit":
       if (args.length !== 0)
         return [
@@ -6722,6 +6961,18 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
       }
       if (context.fileValues.has(node)) {
         const pathNode = nodeArray(asNode(node.arguments)?.items)[0];
+        if (pathNode !== undefined && isHomePath(pathNode)) {
+          // A folder of the player's home, where the legacy script looked for pictures; walks through it ask for a
+          // photo (homePictures), so the path only names it.
+          addDiagnostic(
+            context,
+            "SX_HOME_FOLDER",
+            "warning",
+            "The legacy script named a folder of the player's home on the computer, which a package cannot see; the path only names it, as ~ and the folder below the home.",
+            node.span,
+          );
+          return { kind: "literal", value: `~${homeSuffix(pathNode)}` };
+        }
         return pathNode === undefined ? null : lowerExpression(pathNode, context);
       }
       return unsupportedExpression(
@@ -7158,6 +7409,10 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   const java = javaBinary(node, javaHost(context));
   if (java !== undefined) return java;
   const operator = text(node.operator);
+  if (operator === "==~") {
+    const matched = tailMatch(node, context);
+    if (matched !== undefined) return matched;
+  }
   if (operator === "==" || operator === "!=") {
     // A listing of a missing folder was null; the images of a folder (imageFolderListing) are an empty list then.
     const left = asNode(node.left);
@@ -7989,7 +8244,8 @@ function truthiness(
   node: AstNode,
   context: LowerContext,
 ): IrExpression | null {
-  if (onlyOf(type, BOOLEAN)) return value;
+  if (onlyOf(type, BOOLEAN) || (value.kind === "literal" && typeof value.value === "boolean"))
+    return value;
   const compare = (operator: string, right: IrExpression): IrExpression => ({
     kind: "binary",
     operator,
@@ -8496,6 +8752,14 @@ function lowerPropertyExpression(node: AstNode, context: LowerContext): IrExpres
       "Dynamic Groovy property access is not lowered automatically.",
     );
   }
+  const folder = playerFolder(targetNode, property, node, context);
+  if (folder !== undefined) return folder;
+  const image = listedImageMember(targetNode, property, context);
+  if (image !== undefined) return image;
+  if (property === "text") {
+    const request = onlineRequest(targetNode, node, context);
+    if (request !== undefined) return request;
+  }
   const java = javaProperty(node, property, javaHost(context));
   if (java !== undefined) return java;
   // Groovy on the legacy Java read a list's private `size` field, and an array's `length`; no other legacy value had
@@ -8573,6 +8837,57 @@ function lowerObjectMethodCallExpression(
       node.span,
     );
     return { kind: "literal", value: "en" };
+  }
+  const systemProperty =
+    name === "getProperty" && variableName(targetNode) === "System" && argumentsNodes.length === 1
+      ? constantString(argumentsNodes[0])
+      : null;
+  if (systemProperty === "user.name" || systemProperty === "user.home") {
+    const [key, question, what] =
+      systemProperty === "user.name"
+        ? ["intro.name", "What is your name?", "the player's account name"]
+        : ["system.homeFolder", "Which folder is your home folder?", "the player's home folder"];
+    addDiagnostic(
+      context,
+      "SX_OS_INFO",
+      "warning",
+      `System.getProperty("${systemProperty}") read ${what} from the computer, which a browser does not provide; the player is asked once, as the system speaker, and the answer is saved as "${key}".`,
+      node.span,
+    );
+    return useHelper(context, "askOnce", [
+      { kind: "literal", value: key },
+      { kind: "literal", value: question },
+    ]);
+  }
+  if (targetNode !== null && argumentsNodes.length === 0) {
+    const image = listedImageMember(targetNode, name, context);
+    if (image !== undefined) return image;
+  }
+  if (
+    (name === "getAbsolutePath" || name === "getCanonicalPath") &&
+    argumentsNodes.length === 0 &&
+    targetNode !== null
+  ) {
+    const folder = playerFolder(targetNode, name, node, context);
+    if (folder !== undefined) return folder;
+  }
+  if (
+    (name === "getText" || name === "readLines" || name === "openStream") &&
+    argumentsNodes.length === 0 &&
+    targetNode !== null
+  ) {
+    const request = onlineRequest(targetNode, node, context);
+    if (request !== undefined) return request;
+  }
+  if (name === "collect" && targetNode !== null && isNetworkInterfaces(targetNode)) {
+    addDiagnostic(
+      context,
+      "SX_OS_INFO",
+      "warning",
+      "The legacy script read the network hardware addresses of the computer as an ID, which a browser does not provide; a random ID, made once and saved, stands in for them.",
+      node.span,
+    );
+    return { kind: "list", items: [useHelper(context, "deviceId", [])] };
   }
   if (
     name === "getProperty" &&
@@ -12812,9 +13127,13 @@ function isFileConstructor(node: AstNode): boolean {
   );
 }
 
+/** Members that go through the files of a folder with a closure. */
+const FOLDER_WALKS = new Set(["eachFile", "eachFileRecurse", "eachDir", "eachFileMatch"]);
+
 /**
- * The `new File(path)` values whose only use is `.exists()` or `.listFiles()`: directly as its receiver, or kept in a
- * variable that nothing reads otherwise (LowerContext.fileValues, fileVariables).
+ * The `new File(path)` values whose only use is `.exists()`, `.listFiles()`, or a walk through the folder's files
+ * (FOLDER_WALKS): directly as its receiver, or kept in a variable that nothing reads otherwise
+ * (LowerContext.fileValues, fileVariables).
  */
 function fileTests(body: AstNode): {
   fileValues: Set<AstNode>;
@@ -12838,7 +13157,8 @@ function fileTests(body: AstNode): {
     const method = node.kind === "methodCall" ? constantString(node.method) : null;
     if (
       method === "exists" ||
-      (method === "listFiles" && nodeArray(asNode(node.arguments)?.items).length === 0)
+      (method === "listFiles" && nodeArray(asNode(node.arguments)?.items).length === 0) ||
+      (method !== null && FOLDER_WALKS.has(method))
     ) {
       const receiver = asNode(node.object);
       if (receiver !== null) existsReceivers.add(receiver);
@@ -12926,6 +13246,34 @@ function fileExists(
   );
   // A path of text and getDataFolder(), or a variable that only ever holds such paths, is known now.
   const variable = variableName(pathNode);
+  // A folder of the player's home existed on the computer (SX_HOME_FOLDER).
+  const sources = context.fileVariables.has(variable ?? "")
+    ? [...context.filePathOwners]
+        .filter(([, owner]) => owner === variable)
+        .map(([value]) => nodeArray(asNode(value.arguments)?.items)[0] ?? value)
+    : [pathNode];
+  if (sources.some(isHomePath)) {
+    if (sources.every(isHomePath)) return { kind: "literal", value: true };
+    const path = lowerExpression(pathNode, context);
+    const others = fileExists(
+      pathNode,
+      node,
+      { ...context, fileVariables: new Set(), filePathOwners: new Map() },
+      files,
+    );
+    if (path === null || others === null) return null;
+    return {
+      kind: "binary",
+      operator: "or",
+      left: {
+        kind: "methodCall",
+        target: path,
+        name: "startsWith",
+        arguments: [{ kind: "literal", value: "~" }],
+      },
+      right: others,
+    };
+  }
   const paths = context.fileVariables.has(variable ?? "")
     ? [...context.filePathOwners]
         .filter(([, owner]) => owner === variable)
@@ -12950,6 +13298,275 @@ function fileExists(
     name: "contains",
     arguments: [useHelper(context, "packagePath", [path])],
   };
+}
+
+/**
+ * The full path of the legacy player's folder, `new File(".").absolutePath`, which the computer provided: asked once as
+ * the system speaker (owner decision). Undefined for another receiver or property.
+ */
+function playerFolder(
+  receiver: AstNode,
+  property: string,
+  node: AstNode,
+  context: LowerContext,
+): IrExpression | undefined {
+  if (
+    !isFileConstructor(receiver) ||
+    constantString(nodeArray(asNode(receiver.arguments)?.items)[0]) !== "." ||
+    !["absolutePath", "canonicalPath", "getAbsolutePath", "getCanonicalPath"].includes(property)
+  )
+    return undefined;
+  addDiagnostic(
+    context,
+    "SX_OS_INFO",
+    "warning",
+    'The legacy script read the full path of the player\'s folder on the computer, which a browser does not provide; the player is asked once, as the system speaker, and the answer is saved as "system.playerFolder".',
+    node.span,
+  );
+  return useHelper(context, "askOnce", [
+    { kind: "literal", value: "system.playerFolder" },
+    { kind: "literal", value: "Which folder holds your SexScripts player?" },
+  ]);
+}
+
+/**
+ * A read of a web address, `address.toURL().text` or `new URL(address).text`, which an online service answered: a
+ * package has no such service (owner decision), so a system notice before the statement shows the request the
+ * original made, with secret query values hidden, and the read is empty, as when the service answered nothing, so code
+ * that goes on with the answer still runs. Undefined for any
+ * other receiver.
+ */
+function onlineRequest(
+  receiver: AstNode,
+  node: AstNode,
+  context: LowerContext,
+): IrExpression | null | undefined {
+  const address =
+    receiver.kind === "methodCall" &&
+    constantString(receiver.method) === "toURL" &&
+    nodeArray(asNode(receiver.arguments)?.items).length === 0
+      ? asNode(receiver.object)
+      : receiver.kind === "constructorCall" &&
+          (receiver.type === "URL" || receiver.type === "java.net.URL") &&
+          nodeArray(asNode(receiver.arguments)?.items).length === 1
+        ? nodeArray(asNode(receiver.arguments)?.items)[0]!
+        : null;
+  if (address === null) return undefined;
+  const url = lowerExpression(address, context);
+  if (url === null) return null;
+  addDiagnostic(
+    context,
+    "SX_ONLINE_REQUEST",
+    "warning",
+    "The legacy script read this web address from an online service, which a package cannot reach; a system notice shows the request, with secret values hidden, and the read is empty, as when the service answered nothing.",
+    node.span,
+  );
+  const shown =
+    url.kind === "literal" && typeof url.value === "string"
+      ? { text: maskedUrl(url.value) }
+      : { value: useHelper(context, "maskUrl", [url]) };
+  context.prelude.push(
+    systemSay(
+      templateOrLiteral([
+        { text: "Online feature not available here. The original would have requested: GET " },
+        shown,
+      ]),
+      node.span,
+      context,
+    ),
+  );
+  return node.kind === "methodCall" && constantString(node.method) === "readLines"
+    ? { kind: "list", items: [] }
+    : { kind: "literal", value: "" };
+}
+
+/** A URL with the values of query parameters named like a key, token, or password hidden (helper `maskUrl`). */
+export function maskedUrl(url: string): string {
+  const [base, query] = url.split("?");
+  if (query === undefined) return url;
+  const pairs = query.split("&").map((pair) => {
+    const field = pair.split("=")[0]!;
+    return SECRET_PARAMETER_PARTS.some((part) => field.toLowerCase().includes(part))
+      ? `${field}=…`
+      : pair;
+  });
+  return `${base}?${pairs.join("&")}`;
+}
+
+/**
+ * `text ==~ /.*\d+\.jpg/`, Groovy's whole match of a pattern that a text matches by its end (parseTailPattern), as
+ * text operations; undefined for another pattern.
+ */
+function tailMatch(node: AstNode, context: LowerContext): IrExpression | null | undefined {
+  const leftNode = asNode(node.left);
+  const pattern = constantString(node.right);
+  const tail = pattern === null ? null : parseTailPattern(pattern);
+  // Groovy matched the text of the value; a proven number or list stays manual.
+  const type = leftNode === null ? 0 : inferType(leftNode, context.types);
+  if (leftNode === null || tail === null || (type & STRING) === 0) return undefined;
+  const value = lowerExpression(leftNode, context);
+  if (value === null) return null;
+  const text: IrExpression = tail.insensitive
+    ? {
+        kind: "methodCall",
+        target: templateOrLiteral([{ value }]),
+        name: "lowercase",
+        arguments: [],
+      }
+    : templateOrLiteral([{ value }]);
+  const ending: IrExpression = {
+    kind: "literal",
+    value: tail.insensitive ? tail.tail.toLowerCase() : tail.tail,
+  };
+  return tail.digits
+    ? useHelper(context, "endsWithDigits", [text, ending])
+    : { kind: "methodCall", target: text, name: "endsWith", arguments: [ending] };
+}
+
+/**
+ * `new File(imagesFolder).eachFile { file -> ... }`: a loop over the package paths of the folder's images, found by the
+ * tag of the folder's path (imageFolderListing); the loop variable answers what the closure asked of each File
+ * (listedImageMember). The legacy walk also visited subfolders and other files. Undefined for another receiver.
+ */
+function imageFolderWalk(
+  node: AstNode,
+  receiver: AstNode,
+  closure: AstNode,
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] | undefined {
+  const body = asNode(closure.body);
+  const parameters = groovyParameters(closure.parameters);
+  if (body?.kind !== "block" || parameters === null || parameters.length > 1) return undefined;
+  if (imageFolderPaths(receiver, context) === null) return undefined;
+  const returns = closureReturns(body);
+  if (returns.some(({ insideLoop, value }) => insideLoop || value !== null)) return undefined;
+  const images = imageFolderListing(receiver, node, context);
+  if (images === undefined || images === null) return images === null ? [] : undefined;
+  const variable = closure.parameterSpecified === true ? parameters[0]!.name : "it";
+  const known = context.imagePaths.has(variable);
+  context.imagePaths.add(variable);
+  try {
+    if (returns.length > 0) noteReturnAsContinue(returns[0]!.node, context);
+    const loopBody = lowerBlock(body, context);
+    return [
+      {
+        kind: "for",
+        variable,
+        collection: images,
+        body: returns.length > 0 ? withoutFinalContinue(returnsAsContinue(loopBody)) : loopBody,
+        span,
+      },
+    ];
+  } finally {
+    if (!known) context.imagePaths.delete(variable);
+  }
+}
+
+/**
+ * What a folder walk asked of a File that is an image of the folder (imageFolderWalk): its name, its path, and whether
+ * it is a file. Undefined for another receiver or member.
+ */
+function listedImageMember(
+  receiver: AstNode,
+  member: string,
+  context: LowerContext,
+): IrExpression | undefined {
+  const variable = variableName(receiver);
+  if (variable === null || !context.imagePaths.has(variable)) return undefined;
+  const path: IrExpression = { kind: "variable", name: variable };
+  if (member === "name" || member === "getName") return useHelper(context, "fileName", [path]);
+  if (["path", "getPath", "absolutePath", "getAbsolutePath", "toString"].includes(member))
+    return path;
+  if (member === "isFile" || member === "file") return { kind: "literal", value: true };
+  if (member === "isDirectory" || member === "directory") return { kind: "literal", value: false };
+  return undefined;
+}
+
+/** Whether a path names a folder of the player's home, `System.getProperty("user.home") + "/Downloads"`. */
+function isHomePath(node: AstNode): boolean {
+  let home = false;
+  walkAst(node, (child) => {
+    home ||=
+      child.kind === "methodCall" &&
+      constantString(child.method) === "getProperty" &&
+      variableName(child.object) === "System" &&
+      constantString(nodeArray(asNode(child.arguments)?.items)[0]) === "user.home";
+  });
+  return home;
+}
+
+/** The fixed text after the home in a home path, `/Downloads`; empty for a computed rest. */
+function homeSuffix(node: AstNode): string {
+  if (node.kind === "binary" && node.operator === "+") {
+    const left = asNode(node.left);
+    const right = asNode(node.right);
+    if (left !== null && isHomePath(left) && right !== null) {
+      const rest = staticPath(right);
+      return left.kind === "methodCall" ? rest.text : `${homeSuffix(left)}${rest.text}`;
+    }
+  }
+  return "";
+}
+
+/** Whether a folder walk's receiver may be a folder of the player's home: a home File, or a variable holding one. */
+function walksHome(receiver: AstNode, context: LowerContext): boolean {
+  if (isFileConstructor(receiver))
+    return isHomePath(nodeArray(asNode(receiver.arguments)?.items)[0] ?? receiver);
+  const variable = variableName(receiver);
+  return (
+    variable !== null &&
+    context.fileVariables.has(variable) &&
+    [...context.filePathOwners].some(
+      ([value, owner]) =>
+        owner === variable && isHomePath(nodeArray(asNode(value.arguments)?.items)[0] ?? value),
+    )
+  );
+}
+
+/**
+ * Whether a value is the legacy player's folder of installed scripts, `new File(getDataFolder() + "scripts/")`, also
+ * through variables that only ever hold it or its path.
+ */
+function isInstalledScriptsFolder(
+  node: AstNode,
+  context: LowerContext,
+  seen = new Set<string>(),
+): boolean {
+  const resolve = (value: AstNode): AstNode => {
+    const name = variableName(value);
+    const key = name === null ? null : bindingKey(value, context.bindings);
+    const values = key === null ? undefined : context.assignedValues.get(key);
+    if (name === null || key === null || seen.has(key) || values?.length !== 1) return value;
+    seen.add(key);
+    return resolve(values[0]!);
+  };
+  let value = resolve(node);
+  if (isFileConstructor(value)) value = resolve(nodeArray(asNode(value.arguments)?.items)[0]!);
+  if (
+    value.kind === "methodCall" &&
+    constantString(value.method) === "toString" &&
+    asNode(value.object) !== null
+  )
+    value = asNode(value.object)!;
+  const path = staticPath(value);
+  return path.complete && /^(?:\.?\/)*scripts\/?$/iu.test(path.text.replaceAll("\\", "/"));
+}
+
+/** `NetworkInterface.networkInterfaces` or `NetworkInterface.getNetworkInterfaces()`. */
+function isNetworkInterfaces(node: AstNode): boolean {
+  const owner = asNode(node.object);
+  const ownerName = variableName(owner) ?? (owner?.kind === "class" ? text(owner.type) : null);
+  const named = (name: string | null): boolean =>
+    name === "NetworkInterface" || name === "java.net.NetworkInterface";
+  return (
+    (node.kind === "property" &&
+      constantString(node.property) === "networkInterfaces" &&
+      named(ownerName)) ||
+    (node.kind === "methodCall" &&
+      constantString(node.method) === "getNetworkInterfaces" &&
+      named(ownerName))
+  );
 }
 
 /**
@@ -13564,6 +14181,51 @@ function imagePathBelowImages(node: AstNode, context: LowerContext): IrExpressio
   return null;
 }
 
+/**
+ * A device command that useFile() ran, named by the variable that holds it, such as `estim_start` or `lock_finish`:
+ * the device's label and the state the command left it in (owner decision: an estim unit runs or stops, and a lock
+ * or a guillotine's arm locks or unlocks). Null for any other path.
+ */
+function deviceCommand(node: AstNode): { name: string; label: string; state: string } | null {
+  let found: { name: string; label: string; state: string } | null = null;
+  walkAst(node, (child) => {
+    const name = variableName(child);
+    const match =
+      name === null ? null : /^(estim|lock|arm)_?(start|on|finish|stop|off|end)$/iu.exec(name);
+    if (found !== null || match === null) return;
+    const estim = match[1]!.toLowerCase() === "estim";
+    const starts = ["start", "on"].includes(match[2]!.toLowerCase());
+    found = {
+      name: name!,
+      label: estim ? "Estim" : "Lock",
+      state: estim ? (starts ? "RUNNING" : "STOPPED") : starts ? "LOCKED" : "UNLOCKED",
+    };
+  });
+  return found;
+}
+
+/** Text files that useFile() opened in an editor or viewer of the player's computer. */
+const TEXT_FILE_EXTENSIONS = new Set([".txt", ".log", ".csv", ".ini"]);
+
+/** The fixed text at the end of a path, `".txt"` of `"log_" + code + ".txt"`; null when the end is computed. */
+function pathSuffix(node: AstNode): string | null {
+  const literal = constantString(node);
+  if (literal !== null) return literal;
+  if (node.kind === "binary" && node.operator === "+") {
+    const right = asNode(node.right);
+    return right === null ? null : pathSuffix(right);
+  }
+  if (node.kind === "gstring") {
+    const strings = Array.isArray(node.strings) ? node.strings : [];
+    const last: unknown = strings.at(-1);
+    return typeof last === "string" && last !== "" ? last : null;
+  }
+  return null;
+}
+
+/** Programs a package may hold, which useFile() started on the player's computer. */
+const PROGRAM_EXTENSIONS = new Set([".exe", ".bat", ".cmd", ".com", ".jar", ".msi"]);
+
 /** Audio files the legacy useFile() opened in the system's player. */
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".m4a", ".mid", ".midi"]);
 /** Video files a browser plays, and the formats the corpus driver converts to MP4 (H.264) at conversion time. */
@@ -13587,6 +14249,26 @@ function useFileStatements(
   span: SourceSpan | null,
   context: LowerContext,
 ): IrStatement[] {
+  const device = args.length === 1 ? deviceCommand(args[0]!) : null;
+  if (device !== null) {
+    addDiagnostic(
+      context,
+      "SX_DEVICE_STATE",
+      "warning",
+      `useFile() ran the device command in ${device.name} on the player's computer, which a package cannot start; a permanent button shows the device's state instead, "${device.label}: ${device.state}".`,
+      node.span,
+    );
+    return [
+      {
+        kind: "expression",
+        expression: useHelper(context, "showDevice", [
+          { kind: "literal", value: device.label },
+          { kind: "literal", value: device.state },
+        ]),
+        span,
+      },
+    ];
+  }
   const path = args.length === 1 ? constantString(args[0]) : null;
   const extension = path === null ? "" : path.slice(path.lastIndexOf(".")).toLowerCase();
   if (
@@ -13615,6 +14297,68 @@ function useFileStatements(
         repeatCount: null,
         span,
       },
+    ];
+  }
+  // A text file opened in the computer's editor or viewer, such as a log: its text shows in the chat as prose from the
+  // system speaker, since the player only reads it (owner decision).
+  const suffix = args.length === 1 ? pathSuffix(args[0]!) : null;
+  if (
+    suffix !== null &&
+    TEXT_FILE_EXTENSIONS.has(suffix.slice(suffix.lastIndexOf(".")).toLowerCase())
+  ) {
+    const viewed = viewedText(args[0]!, javaHost(context));
+    if (viewed === null) return [];
+    if (viewed !== undefined) {
+      addDiagnostic(
+        context,
+        "SX_FILE_VIEW",
+        "warning",
+        "useFile() opened this text file in a program of the player's computer; its text shows in the chat as prose from the system speaker.",
+        node.span,
+      );
+      return [systemSay(viewed.read, span, context, true)];
+    }
+  }
+  // A program the package holds, such as a puzzle, cannot start: a system notice says so (owner decision), and for a
+  // puzzle the player says whether it was solved, so the story continues.
+  if (path !== null && PROGRAM_EXTENSIONS.has(extension)) {
+    const name = path.replaceAll("\\", "/").split("/").at(-1)!;
+    const puzzle = /puzzle/iu.test(path);
+    addDiagnostic(
+      context,
+      "SX_EXTERNAL_PROGRAM_NOTICE",
+      "warning",
+      `useFile() started the program ${path} on the player's computer, which a package cannot do; a system notice says so${puzzle ? ", and the player says whether the puzzle was solved" : ""}.`,
+      node.span,
+    );
+    return [
+      systemSay(
+        {
+          kind: "literal",
+          value: puzzle
+            ? `The puzzle (${name}) is not available here. Solve it in your mind, or skip it.`
+            : `The program ${name} that the original started is not available here.`,
+        },
+        span,
+        context,
+      ),
+      ...(puzzle
+        ? [
+            {
+              kind: "let" as const,
+              name: freshName("puzzleSolved", context),
+              value: {
+                kind: "choice" as const,
+                options: [
+                  { kind: "literal" as const, value: "Puzzle solved" },
+                  { kind: "literal" as const, value: "Not solved" },
+                ],
+                labels: ["solved", "unsolved"],
+              },
+              span,
+            },
+          ]
+        : []),
     ];
   }
   if (path === null || !AUDIO_EXTENSIONS.has(extension))
@@ -13734,14 +14478,13 @@ function urlStatements(
     span,
   );
   return [
-    {
-      kind: "say",
-      value:
-        url.kind === "literal" && typeof url.value === "string"
-          ? { kind: "literal", value: `Open this link: ${url.value}` }
-          : { kind: "template", parts: [{ text: "Open this link: " }, { value: url }] },
+    systemSay(
+      url.kind === "literal" && typeof url.value === "string"
+        ? { kind: "literal", value: `Open this link: ${url.value}` }
+        : { kind: "template", parts: [{ text: "Open this link: " }, { value: url }] },
       span,
-    },
+      context,
+    ),
     { kind: "showButton", label: { kind: "literal", value: "Continue" }, timeout: null, span },
   ];
 }
@@ -13768,6 +14511,31 @@ function javaHost(context: LowerContext): JavaRuleHost {
     actionCall: (action, args) => actionCall(action, args, context),
     isPhoto: (node) => context.photoVariables.has(variableName(node) ?? ""),
     state: context.java,
+  };
+}
+
+/**
+ * Text the importer adds, which the legacy author never wrote, said as the system speaker (owner decision); `prose`
+ * shows text the player only reads, such as a file's content, as prose.
+ */
+function systemSay(
+  value: IrExpression,
+  span: SourceSpan | null,
+  context: LowerContext,
+  prose = false,
+): IrStatement {
+  context.syntheticHelpers.add("systemSpeaker");
+  // `prose (…)` would read as prose options (V30 §17), so other values are written as text.
+  const shown =
+    prose && value.kind !== "literal" && value.kind !== "template"
+      ? { kind: "template" as const, parts: [{ value }] }
+      : value;
+  return {
+    kind: "say",
+    value: shown,
+    speaker: SYSTEM_SPEAKER,
+    ...(prose ? { prose: true } : {}),
+    span,
   };
 }
 

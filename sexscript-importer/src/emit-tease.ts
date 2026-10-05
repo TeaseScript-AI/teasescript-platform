@@ -92,8 +92,9 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
       lines.push(
         `${pad}${emitExpression(statement.target)} = showPermanentButton ${emitExpression(statement.label)} {`,
         ...(statement.persist ? [`${pad}  persist: true`] : []),
-        `${pad}}`,
       );
+      emitStatements(statement.body ?? [], lines, depth + 1);
+      lines.push(`${pad}}`);
       return;
     case "showImage":
       lines.push(`${pad}showImage ${emitExpression(statement.file)}`);
