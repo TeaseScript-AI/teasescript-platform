@@ -542,6 +542,11 @@ interrupts, normal resume versus handler `exit`, suspended input rejection, susp
 result-handoff boundaries, and JSON checkpoint/restore equivalence. Late observation must give the same output,
 events, and snapshot as observing every deadline on time, for main-path waits and pacing as well as expiry blocks.
 
+Permanent button coverage starts with real `.tease` source and exercises clicks during waits and questions, queued,
+busy, removed, and early clicks, removal, and file-entry ownership across `call`, `end`, `goto`, and `exit`. The shared
+resume-equivalence helper takes an optional simulated Player that clicks permanent buttons whenever execution waits,
+so restore is checked at every boundary with buttons shown and blocks running.
+
 Player adapter coverage derives presented timers and observation deadlines from real `.tease` fixtures, catches up
 late observations, and restores the same timer state from a checkpoint. Malformed timer, handler, suspended-action, and handle-reference state is rejected
 through public validation/restore paths.

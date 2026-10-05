@@ -93,6 +93,12 @@ export interface SerializableMediaHandle {
   readonly mediaId: number;
 }
 
+/** The opaque identifier of one permanent button, as `showPermanentButton` gives it. */
+export interface SerializablePermanentButtonHandle {
+  readonly kind: "permanentButtonHandle";
+  readonly buttonId: number;
+}
+
 /** An opaque script handle for the default camera's view, the snapshot's `cameraView`. */
 export interface SerializableCameraViewHandle {
   readonly kind: "cameraView";
@@ -125,6 +131,7 @@ export type SerializableRuntimeValue =
   | SerializableRuntimeTemporal
   | SerializableTimerHandle
   | SerializableMediaHandle
+  | SerializablePermanentButtonHandle
   | SerializableCameraViewHandle
   | SerializableSpeakerReference
   | SerializableScriptReference;
@@ -290,9 +297,9 @@ function isComposite(value: SerializableRuntimeValue): value is CompositeValue {
 }
 
 /**
- * Whether a value holds a timer handle, media handle, or speaker reference: identities the runtime allocates for the
- * current session, which host data and stored values cannot carry. Lists, sets, objects, and dicts are checked
- * iteratively at every depth.
+ * Whether a value holds a timer or media handle, permanent button, camera view, or speaker reference: identities the
+ * runtime allocates for the current session, which host data and stored values cannot carry. Lists, sets, objects, and
+ * dicts are checked iteratively at every depth.
  */
 export function containsRuntimeIdentity(value: SerializableRuntimeValue): boolean {
   const work: SerializableRuntimeValue[] = [value];
@@ -302,6 +309,7 @@ export function containsRuntimeIdentity(value: SerializableRuntimeValue): boolea
     switch (current.kind) {
       case "timerHandle":
       case "mediaHandle":
+      case "permanentButtonHandle":
       case "cameraView":
       case "speakerReference":
         return true;
@@ -335,6 +343,7 @@ function cloneSerializableNode(value: SerializableRuntimeValue): SerializableRun
     case "timestamp":
     case "timerHandle":
     case "mediaHandle":
+    case "permanentButtonHandle":
     case "cameraView":
     case "script":
       return { ...value };
@@ -594,6 +603,8 @@ function leafKey(value: SerializableRuntimeValue): string | undefined {
       return `h${value.timerId};`;
     case "mediaHandle":
       return `m${value.mediaId};`;
+    case "permanentButtonHandle":
+      return `b${value.buttonId};`;
     case "cameraView":
       return "c;";
     case "script":
@@ -729,6 +740,8 @@ function equalsOrDefer(
       return right.kind === "timerHandle" && right.timerId === left.timerId;
     case "mediaHandle":
       return right.kind === "mediaHandle" && right.mediaId === left.mediaId;
+    case "permanentButtonHandle":
+      return right.kind === "permanentButtonHandle" && right.buttonId === left.buttonId;
     case "cameraView":
       return right.kind === "cameraView";
     case "speakerReference":
@@ -915,6 +928,16 @@ function validateSerializableValueInternal(value: unknown, rootPath: string): st
         (current.timerId as number) < 1
       )
         return `${path()} contains a malformed timer handle.`;
+      continue;
+    }
+    if (current.kind === "permanentButtonHandle") {
+      // EVIDENCE: validation: Number.isSafeInteger establishes the numeric button ID before comparison.
+      if (
+        !hasOnlyKeys(current, ["kind", "buttonId"]) ||
+        !Number.isSafeInteger(current.buttonId) ||
+        (current.buttonId as number) < 1
+      )
+        return `${path()} contains a malformed permanent button identifier.`;
       continue;
     }
     if (current.kind === "cameraView") {

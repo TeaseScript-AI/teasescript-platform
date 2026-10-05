@@ -42,6 +42,7 @@ import type {
   HideImageStatement,
   HideCameraStatement,
   CameraPlacement,
+  ShowPermanentButtonParts,
   MediaCue,
   MediaHandlers,
   MediaKind,
@@ -257,6 +258,12 @@ class Parser {
     }
     if (this.#checkIdentifier("timer")) {
       return yield* parseChild(this.#parseTimerStatement());
+    }
+    if (this.#checkIdentifier("showPermanentButton")) {
+      const parts = yield* parseChild(this.#parseShowPermanentButtonParts());
+      return parts === null
+        ? null
+        : Object.freeze({ kind: "showPermanentButtonStatement", ...parts });
     }
     if (this.#checkIdentifier("showImage")) {
       return this.#parseShowImageStatement();
@@ -1069,6 +1076,102 @@ class Parser {
     if (!this.#check(TokenKind.LeftBrace)) return null;
     const block = yield* parseChild(this.#parseBlock());
     return block ?? false;
+  }
+
+  /**
+   * `showPermanentButton <text> { ... }`: the text is followed by the required block with the click action, whose first
+   * line may be `persist: true`.
+   */
+  *#parseShowPermanentButtonParts(): ParseTask<ShowPermanentButtonParts | null> {
+    const command = this.#advance();
+    if (
+      this.#rejectAdjacentParenthesis(
+        command,
+        "showPermanentButton uses command syntax, such as 'showPermanentButton \"Stop\" { goto stopped }'.",
+      )
+    ) {
+      // The block belongs to the rejected command.
+      if (this.#check(TokenKind.LeftBrace)) this.#skipMalformedBlock();
+      return null;
+    }
+    const enclosing = this.#blockEndsCompactInteraction;
+    this.#blockEndsCompactInteraction = true;
+    const text = yield* parseChild(this.#parseOr());
+    this.#blockEndsCompactInteraction = enclosing;
+    if (text === null) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedInteractionText,
+        "Expected button text after 'showPermanentButton'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    if (!this.#check(TokenKind.LeftBrace)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedBlock,
+        "Expected '{' with what the button does when clicked, such as 'showPermanentButton \"Stop\" { goto stopped }'.",
+      );
+      this.#synchronizeStatement();
+      return null;
+    }
+    const block = yield* parseChild(this.#asStatements(this.#parsePermanentButtonBlock()));
+    if (block === null) return null;
+    return {
+      text,
+      persist: block.persist,
+      handler: block.handler,
+      commandSpan: copySpan(command.span),
+      span: spanFrom(command.span, block.handler.span),
+    };
+  }
+
+  /** The click action of a permanent button; only its first line may be `persist: true`. */
+  *#parsePermanentButtonBlock(): ParseTask<{ persist: boolean; handler: Block } | null> {
+    const leftBrace = this.#advance();
+    this.#skipNewlines();
+    let persist = false;
+    if (this.#checkIdentifier("persist") && this.#peek(1).kind === TokenKind.Colon) {
+      this.#advance();
+      this.#advance();
+      if (this.#check(TokenKind.KeywordTrue)) {
+        this.#advance();
+        persist = true;
+      } else {
+        this.#reportToken(
+          parserDiagnosticCode.expectedExpression,
+          "A button block's 'persist:' takes the literal true; leave the line out for a button that its file entry owns.",
+          this.#peek(),
+        );
+        this.#synchronizeStatement(true);
+      }
+      this.#finishStatement(true);
+      this.#skipNewlines();
+    }
+    const statements: Statement[] = [];
+    while (!this.#check(TokenKind.RightBrace) && !this.#check(TokenKind.EndOfFile)) {
+      const startIndex = this.#current;
+      const statement = yield* parseChild(this.#parseStatement());
+      if (statement !== null) statements.push(statement);
+      if (this.#current === startIndex) this.#advance();
+      if (this.#recoveredAtStatementBoundary) {
+        this.#recoveredAtStatementBoundary = false;
+      } else {
+        this.#finishStatement(true);
+      }
+      this.#skipNewlines();
+    }
+    if (!this.#match(TokenKind.RightBrace)) {
+      this.#reportInsertion(
+        parserDiagnosticCode.expectedRightBrace,
+        "Expected '}' to close the block.",
+      );
+      return null;
+    }
+    const span = spanFrom(leftBrace.span, this.#previous().span);
+    return {
+      persist,
+      handler: Object.freeze({ kind: "block", statements: Object.freeze(statements), span }),
+    };
   }
 
   /** `showImage <file>` uses command syntax; the V30 parenthesized layered-image form is not supported. */
@@ -3052,6 +3155,12 @@ class Parser {
     if (this.#checkIdentifier("showCamera")) {
       const parts = this.#parseShowCameraParts();
       return parts === null ? null : Object.freeze({ kind: "showCameraExpression", ...parts });
+    }
+    if (this.#checkIdentifier("showPermanentButton")) {
+      const parts = yield* parseChild(this.#parseShowPermanentButtonParts());
+      return parts === null
+        ? null
+        : Object.freeze({ kind: "showPermanentButtonExpression", ...parts });
     }
     if (this.#checkIdentifier("playAudio") || this.#checkIdentifier("playVideo")) {
       const parts = yield* parseChild(this.#parseMediaParts());

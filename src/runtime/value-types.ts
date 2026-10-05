@@ -10,6 +10,7 @@ import {
   isDuration,
   isList,
   isMediaHandle,
+  isPermanentButton,
   isCameraView,
   isObject,
   isRange,
@@ -161,6 +162,8 @@ function matchStep(frame: MatchFrame, fits: boolean): MatchFrame | boolean {
       return isMediaHandle(value);
     case "camera":
       return isCameraView(value);
+    case "permanentButton":
+      return isPermanentButton(value);
     case "script":
       return isScriptReference(value);
     case "date":
@@ -193,6 +196,7 @@ const NAMED_DESCRIPTIONS: Readonly<Record<string, string>> = {
   timer: "a timer handle",
   media: "a media handle",
   camera: "a camera view",
+  permanentButton: "a permanent button",
   script: "a script reference",
   object: "an object",
   never: "no value",
@@ -288,6 +292,8 @@ export function describeValue(value: SerializableRuntimeValue): string {
       return "a media handle";
     case "cameraView":
       return "a camera view";
+    case "permanentButtonHandle":
+      return "a permanent button";
     default:
       return NAMED_DESCRIPTIONS[value.kind]!;
   }

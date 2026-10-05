@@ -14,6 +14,7 @@ import type {
   Program,
   ScalarTypeName,
   ShowButtonParts,
+  ShowPermanentButtonParts,
   SpeakerDeclaration,
   SwitchTypeTest,
   Statement,
@@ -849,6 +850,9 @@ class TypeChecker {
         yield* compileChild(this.#timerTask(statement, scope));
         this.#suspend();
         return true;
+      case "showPermanentButtonStatement":
+        yield* compileChild(this.#permanentButtonTask(statement, scope));
+        return true;
       case "playMediaStatement":
         yield* compileChild(this.#mediaTask(statement, scope, null));
         return true;
@@ -866,11 +870,13 @@ class TypeChecker {
       case "saveStatement": {
         const value = yield* compileChild(this.#expressionTask(statement.value, scope));
         if (
-          containsType(value, (part) => ["speaker", "timer", "media", "camera"].includes(part.kind))
+          containsType(value, (part) =>
+            ["speaker", "timer", "media", "camera", "permanentButton"].includes(part.kind),
+          )
         )
           this.#report(
             typeCode.invalidOperand,
-            `Speakers, camera views, and timer or media handles cannot be saved, but this is ${describeValue(value)}.`,
+            `Speakers, camera views, permanent buttons, and timer or media handles cannot be saved, but this is ${describeValue(value)}.`,
             statement.value.span,
           );
         yield* compileChild(this.#storageKeyTask(statement.key, scope));
@@ -2522,6 +2528,9 @@ class TypeChecker {
       case "showCameraExpression":
         this.#suspend();
         return { kind: "camera" };
+      case "showPermanentButtonExpression":
+        yield* compileChild(this.#permanentButtonTask(expression, scope));
+        return { kind: "permanentButton" };
       case "loadExpression": {
         yield* compileChild(this.#storageKeyTask(expression.key, scope));
         if (expression.defaultValue === null) return UNKNOWN_TYPE;
@@ -3647,6 +3656,15 @@ class TypeChecker {
             "randomInteger(...) takes a range such as 1..=6",
           );
         return INTEGER_TYPE;
+      case "removePermanentButton":
+        if (argument !== undefined && value !== undefined)
+          this.#reportUnless(
+            value,
+            (member) => member.kind === "permanentButton",
+            argument.value,
+            "removePermanentButton(...) takes the identifier that showPermanentButton gives",
+          );
+        return NULL_TYPE;
       case "round":
       case "floor":
       case "ceil":
@@ -4569,6 +4587,21 @@ class TypeChecker {
       });
   }
 
+  /** A button's text is shown text; its block runs later, when the player clicks it, like a timer expiry block. */
+  *#permanentButtonTask(button: ShowPermanentButtonParts, scope: Scope): CompileTask<void> {
+    this.#checkShownText(
+      button.text,
+      yield* compileChild(this.#expressionTask(button.text, scope)),
+      "a button label",
+    );
+    this.#handlers.push({
+      block: button.handler,
+      selfHandle: null,
+      scope: this.#outer,
+      file: this.#file,
+    });
+  }
+
   *#mediaTask(media: MediaParts, scope: Scope, selfHandle: string | null): CompileTask<StaticType> {
     // Media first waits for the previous message's pacing, and later for loading; handlers may run at both.
     this.#suspend();
@@ -5373,10 +5406,12 @@ function nestedStatements(statement: Statement): readonly Statement[] {
   }
 }
 
-/** The timer or media blocks that a statement or expression registers. */
+/** The timer, media, or permanent button blocks that a statement or expression registers. */
 function handlerBlocks(node: Statement | Expression): readonly Block[] {
   if (node.kind === "timerStatement" || node.kind === "timerExpression")
     return node.handler === null ? [] : [node.handler];
+  if (node.kind === "showPermanentButtonStatement" || node.kind === "showPermanentButtonExpression")
+    return [node.handler];
   if (node.kind === "playMediaStatement" || node.kind === "playMediaExpression")
     return mediaHandlerBlocks(node);
   return [];
@@ -5409,6 +5444,8 @@ function statementExpressions(statement: Statement): readonly Expression[] {
       return [statement.duration];
     case "timerStatement":
       return timerOperands(statement);
+    case "showPermanentButtonStatement":
+      return [statement.text];
     case "playMediaStatement":
       return mediaOperands(statement);
     case "showImageStatement":
@@ -5727,6 +5764,7 @@ function memberPropertyType(type: StaticType, name: string): StaticType | undefi
       return temporalFieldType(value.name, name);
     case "range":
     case "null":
+    case "permanentButton":
       return undefined;
     default:
       return UNKNOWN_TYPE;
@@ -5999,6 +6037,7 @@ const UNSHOWABLE_KINDS: ReadonlySet<StaticType["kind"]> = new Set([
   "timer",
   "media",
   "camera",
+  "permanentButton",
   "speaker",
 ]);
 
@@ -6170,6 +6209,7 @@ const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([
   ["chance", BOOLEAN_TYPE],
   ["randomInteger", INTEGER_TYPE],
   ["escapeMarkup", STRING_TYPE],
+  ["removePermanentButton", NULL_TYPE],
 ]);
 
 /** Speaker properties shown as text: the display name and the parts it is derived from. */

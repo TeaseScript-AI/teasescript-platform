@@ -10,6 +10,8 @@ import {
   MAIN_FILE_PATH,
   mediaPlaybackProjection,
   observeTime,
+  permanentButtonProjection,
+  pressPermanentButton,
   recordContinueCapture,
   reportMediaLoad,
   stageProjection,
@@ -26,6 +28,7 @@ import {
   type MediaReportOutcome,
   type StageProjection,
   type PendingActionOperationResult,
+  type PermanentButtonPressOutcome,
   type ProjectImageFile,
   type ProjectSourceFile,
   type RuntimeInteractionActionSnapshot,
@@ -42,6 +45,7 @@ import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions
 import { runValidatedState } from "../src/runtime/engine.js";
 import type {
   PlayerForegroundPresentation,
+  PlayerPermanentButtonPresentation,
   PlayerTimerPresentation,
   PlayerSpeakerPresentation,
   PlayerTranscriptEntryPresentation,
@@ -533,6 +537,35 @@ export function reportPlayerRuntimeMediaLoad(
       operation.snapshot,
       operation.events,
       operation.outcome.kind === "accepted",
+    ),
+    outcome: operation.outcome,
+  });
+}
+
+/** The permanent buttons the session shows, in creation order; a session that has ended or failed shows none. */
+export function playerRuntimePermanentButtons(
+  snapshot: RuntimeSnapshot,
+): readonly PlayerPermanentButtonPresentation[] {
+  if (snapshot.status !== "running" && snapshot.status !== "waiting") return Object.freeze([]);
+  return Object.freeze(
+    permanentButtonProjection(snapshot).map((button) =>
+      Object.freeze({ buttonId: button.buttonId, label: button.text, busy: button.busy }),
+    ),
+  );
+}
+
+/** Clicks a permanent button, then runs the session, which starts the button's block. */
+export function pressPlayerRuntimePermanentButton(
+  session: PlayerRuntimeSession,
+  buttonId: number,
+): PlayerRuntimeControlResult<PermanentButtonPressOutcome> {
+  const operation = pressPermanentButton(session.plan, session.snapshot, buttonId);
+  return Object.freeze({
+    session: applyOperation(
+      session,
+      operation.snapshot,
+      operation.events,
+      operation.outcome.kind === "pressed",
     ),
     outcome: operation.outcome,
   });
