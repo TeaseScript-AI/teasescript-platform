@@ -564,6 +564,11 @@ async function playOnce(
     } else {
       // Media play in real time; everything else waits on the fake clock.
       if (state.foreground === "media") await new Promise((resolve) => setTimeout(resolve, 250));
+      // Auto-skip pauses while media load, which a missing file never finishes; "Skip event" still jumps then.
+      if (dev && unchanged > 2)
+        await page
+          .click('[data-development-time-action="skip"]:not([disabled])', { timeout: 1_000 })
+          .catch(() => undefined);
       await idle(unchanged > 2 ? 20_000 : 1_000);
     }
   }
