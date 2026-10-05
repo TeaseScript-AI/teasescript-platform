@@ -32,11 +32,8 @@ export interface SnapshotValidationAnalysis {
   readonly functionsById: ReadonlyMap<number, CompiledFunctionDefinition>;
   readonly regionEnds: readonly number[];
   readonly functionIdsByInstruction: readonly (number | null)[];
-  /**
-   * The temporaries that continuations of accepted snapshots need, by the key of their innermost loop (see
-   * `continuationLivenessKey`) and their start; never a whole instruction-sized liveness.
-   */
-  readonly continuationLiveness: Map<number | null, Map<number, ReadonlySet<number>>>;
+  /** The temporaries that continuations of accepted snapshots need, by where they resume and the loops they run in. */
+  readonly continuationRequirements: Map<string, ReadonlySet<number>>;
   readonly defaultBindingPositions: ReadonlyMap<string, number>;
   readonly parameterNames: ReadonlyMap<number, ReadonlySet<string>>;
   readonly preparedReferenceTemporaryIds: ReadonlySet<number>;
@@ -84,19 +81,6 @@ export function functionHoldingInstruction(
   const analysis = snapshotValidationAnalysis(plan);
   const functionId = analysis.functionIdsByInstruction[instruction];
   return functionId == null ? undefined : analysis.functionsById.get(functionId);
-}
-
-/**
- * The key of the continuation liveness for a context whose innermost loop frame is `activeLoopId`. Only a repeat or
- * for loop of the plan changes which temporaries an instruction reads, so every other loop ID, including one that no
- * loop of the plan has, shares the liveness of no loop.
- */
-export function continuationLivenessKey(
-  analysis: SnapshotValidationAnalysis,
-  activeLoopId: number | null,
-): number | null {
-  const loop = activeLoopId === null ? undefined : analysis.loops.get(activeLoopId);
-  return loop === undefined || loop.kind === "while" ? null : activeLoopId;
 }
 
 function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValidationAnalysis {
@@ -152,7 +136,7 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     functionsById,
     regionEnds,
     functionIdsByInstruction,
-    continuationLiveness: new Map(),
+    continuationRequirements: new Map(),
     defaultBindingPositions,
     parameterNames,
     preparedReferenceTemporaryIds: collectPreparedReferenceTemporaryIds(plan),

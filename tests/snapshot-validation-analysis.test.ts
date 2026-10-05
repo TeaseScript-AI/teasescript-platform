@@ -307,15 +307,11 @@ test("a mutated external plan is validated against its new content", () => {
   );
 });
 
-test("rejected snapshots add nothing to the kept continuation liveness", () => {
+test("rejected snapshots add nothing to the kept continuation requirements", () => {
   const plan = compileValidPlan(LOOPS_SOURCE);
   const waiting = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
   assert.equal(validateRuntimeSnapshot(waiting, plan).valid, true);
-  const kept = () =>
-    [...snapshotValidationAnalysis(plan).continuationLiveness].map(([key, starts]) => [
-      key,
-      [...starts.keys()],
-    ]);
+  const kept = () => [...snapshotValidationAnalysis(plan).continuationRequirements.keys()];
   const before = kept();
   assert.equal(before.length, 1);
 

@@ -96,7 +96,6 @@ import {
   requiredInstructionTemporaries,
 } from "../plan/temporary-uses.js";
 import {
-  continuationLivenessKey,
   snapshotValidationAnalysis,
   type PreparedSayTemporaryOwnership,
   type SnapshotValidationAnalysis,
@@ -1080,7 +1079,7 @@ function validateCapturedRuntimeSnapshotDetails(
   if (temporalProblem !== null)
     errors.push(`Runtime temporalCaptures is malformed: ${temporalProblem}`);
   const analysis = plan === undefined ? undefined : snapshotValidationAnalysis(plan);
-  const continuationRequests: ContinuationLivenessRequests = new Map();
+  const continuationRequests: ContinuationRequests = new Map();
   // Every region ends in a transfer, so a position is always an instruction of the runnable plan.
   if (
     !nonNegativeSafeInteger(value.nextInstruction) ||
@@ -1258,7 +1257,7 @@ function validateCapturedRuntimeSnapshotDetails(
   validateStatusConsistency(value, plan, errors);
   const validation = Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
   if (validation.valid && analysis !== undefined) {
-    keepContinuationLiveness(analysis, continuationRequests);
+    keepContinuationRequirements(analysis, continuationRequests);
   }
   return Object.freeze({ validation, failureKind: validation.valid ? null : failureKind });
 }
@@ -1904,7 +1903,7 @@ function validateCallFrames(
   maxCallDepth: unknown,
   plan: InstructionPlan | undefined,
   analysis: SnapshotValidationAnalysis | undefined,
-  continuationRequests: ContinuationLivenessRequests,
+  continuationRequests: ContinuationRequests,
   preparedReferenceTemporaryIds: ReadonlySet<number> | undefined,
   preparedSayTemporaryOwnership: PreparedSayTemporaryOwnership | undefined,
   snapshotValue: Record<string, unknown>,
@@ -2099,7 +2098,7 @@ function validateCallFrames(
         frame.callerTemporaries,
         nonNegativeSafeInteger(frame.destinationTemporary) ? frame.destinationTemporary : null,
         frame.returnInstruction,
-        activeLoopIdOf(
+        contextLoopIds(
           Array.isArray(loopFrames) && nonNegativeSafeInteger(frame.loopBaseDepth)
             ? loopFrames.slice(0, frame.loopBaseDepth)
             : [],
@@ -2566,9 +2565,9 @@ function validateSuspendedContinuationTemporaries(
   callerTemporaries: unknown[],
   destinationTemporary: number | null,
   returnInstruction: number,
-  activeLoopId: number | null,
+  activeLoops: readonly number[],
   analysis: SnapshotValidationAnalysis,
-  continuationRequests: ContinuationLivenessRequests,
+  continuationRequests: ContinuationRequests,
   errors: string[],
 ): void {
   const present = new Set(createTemporaryMap(callerTemporaries).keys());
@@ -2576,7 +2575,7 @@ function validateSuspendedContinuationTemporaries(
   const required = requiredContinuationTemporaries(
     analysis,
     returnInstruction,
-    activeLoopId,
+    activeLoops,
     continuationRequests,
   );
   if ([...required].some((temporaryId) => !present.has(temporaryId))) {
@@ -2584,88 +2583,124 @@ function validateSuspendedContinuationTemporaries(
   }
 }
 
-/**
- * The liveness that one snapshot validation computes, by loop key, with the continuation starts it asked about. The
- * whole instruction-sized liveness lives only for that validation.
- */
-type ContinuationLivenessRequests = Map<
-  number | null,
-  { readonly liveIn: readonly ReadonlySet<number>[]; readonly starts: Set<number> }
->;
+/** The continuation requirements that one snapshot validation computed, by `continuationKey`. */
+type ContinuationRequests = Map<string, ReadonlySet<number>>;
 
-/** Shared by every instruction with nothing live while a liveness is computed. */
+/** Shared by every continuation that needs no temporary. */
 const NOTHING_LIVE: ReadonlySet<number> = new Set<number>();
+
+/** A continuation by where it resumes and the loops of its context, outermost first. */
+function continuationKey(startInstruction: number, activeLoops: readonly number[]): string {
+  return `${startInstruction}:${activeLoops.join(",")}`;
+}
 
 function requiredContinuationTemporaries(
   analysis: SnapshotValidationAnalysis,
   startInstruction: number,
-  activeLoopId: number | null,
-  continuationRequests: ContinuationLivenessRequests,
+  activeLoops: readonly number[],
+  continuationRequests: ContinuationRequests,
 ): ReadonlySet<number> {
-  const key = continuationLivenessKey(analysis, activeLoopId);
-  const kept = analysis.continuationLiveness.get(key)?.get(startInstruction);
-  if (kept !== undefined) return kept;
-  let request = continuationRequests.get(key);
-  if (request === undefined) {
-    request = { liveIn: computeContinuationLiveness(analysis, key), starts: new Set() };
-    continuationRequests.set(key, request);
-  }
-  request.starts.add(startInstruction);
-  return request.liveIn[startInstruction] ?? NOTHING_LIVE;
+  const key = continuationKey(startInstruction, activeLoops);
+  const known = analysis.continuationRequirements.get(key) ?? continuationRequests.get(key);
+  if (known !== undefined) return known;
+  const required = computeContinuationRequirement(analysis, startInstruction, activeLoops);
+  continuationRequests.set(key, required);
+  return required;
 }
 
-/** An accepted snapshot's continuations are ones the session can reach, so the plan keeps just their sets. */
-function keepContinuationLiveness(
+/**
+ * An accepted snapshot's continuations are ones its session can resume, with validated loops, so the plan keeps what
+ * they need.
+ */
+function keepContinuationRequirements(
   analysis: SnapshotValidationAnalysis,
-  continuationRequests: ContinuationLivenessRequests,
+  continuationRequests: ContinuationRequests,
 ): void {
-  for (const [key, { liveIn, starts }] of continuationRequests) {
-    let kept = analysis.continuationLiveness.get(key);
-    if (kept === undefined) {
-      kept = new Map();
-      analysis.continuationLiveness.set(key, kept);
-    }
-    for (const start of starts) {
-      const live = liveIn[start];
-      if (live !== undefined) kept.set(start, live);
-    }
+  for (const [key, required] of continuationRequests) {
+    analysis.continuationRequirements.set(key, required);
   }
 }
 
-function computeContinuationLiveness(
+/**
+ * The temporaries that a continuation reads before setting them: backward liveness over the control flow that it can
+ * reach from `startInstruction`, and nothing else of the plan. A node is an instruction together with how many of the
+ * context's loops are still active there. Leaving the innermost of them, at its loop start's exit or by its `break`,
+ * ends it; a loop start reads its expression unless its loop is the innermost one still active, which it continues.
+ */
+function computeContinuationRequirement(
   analysis: SnapshotValidationAnalysis,
-  activeLoopId: number | null,
-): readonly ReadonlySet<number>[] {
+  startInstruction: number,
+  activeLoops: readonly number[],
+): ReadonlySet<number> {
+  const { plan } = analysis;
+  // A position outside the runnable plan has nothing live.
+  if (plan.instructions[startInstruction] === undefined) return NOTHING_LIVE;
   recordValidationTestWork("continuationLivenessAnalyses");
-  const plan = analysis.plan;
-  const count = plan.instructions.length;
-  const liveIn = new Array<ReadonlySet<number>>(count).fill(NOTHING_LIVE);
+  const depths = activeLoops.length + 1;
+  const indexOf = (node: number) => Math.floor(node / depths);
+  const innermostOf = (node: number) => activeLoops[(node % depths) - 1] ?? null;
+  const successors = new Map<number, readonly number[]>();
+  const pending = [startInstruction * depths + activeLoops.length];
+  while (pending.length > 0) {
+    const node = pending.pop()!;
+    if (successors.has(node)) continue;
+    const index = indexOf(node);
+    const active = node % depths;
+    const instruction = plan.instructions[index];
+    const innermost = innermostOf(node);
+    const next: number[] = [];
+    if (instruction !== undefined) {
+      for (const successor of instructionSuccessors(analysis, index)) {
+        const leaves = innermost !== null && leavesLoop(instruction, innermost, successor);
+        if (leaves) next.push(successor * depths + active - 1);
+        // An empty loop body would make the exit and the body the same instruction.
+        if (!leaves || successor === index + 1) next.push(successor * depths + active);
+      }
+    }
+    successors.set(node, next);
+    pending.push(...next);
+  }
+
+  const liveIn = new Map<number, ReadonlySet<number>>();
+  const nodes = [...successors.keys()].sort((left, right) => right - left);
   let changed = true;
   while (changed) {
     changed = false;
-    for (let index = count - 1; index >= 0; index -= 1) {
-      const instruction = plan.instructions[index];
+    for (const node of nodes) {
+      const instruction = plan.instructions[indexOf(node)];
       // An instruction outside the runnable plan has nothing live.
       if (instruction === undefined) continue;
       const liveOut = new Set<number>();
-      for (const successor of instructionSuccessors(analysis, index)) {
-        for (const temporaryId of liveIn[successor] ?? []) {
+      for (const successor of successors.get(node)!) {
+        for (const temporaryId of liveIn.get(successor) ?? NOTHING_LIVE) {
           liveOut.add(temporaryId);
         }
       }
       for (const temporaryId of instructionKilledTemporaries(instruction)) {
         liveOut.delete(temporaryId);
       }
-      for (const temporaryId of requiredInstructionTemporaries(instruction, activeLoopId)) {
+      for (const temporaryId of requiredInstructionTemporaries(instruction, innermostOf(node))) {
         liveOut.add(temporaryId);
       }
-      if (!sameNumberSet(liveIn[index]!, liveOut)) {
-        liveIn[index] = liveOut;
+      if (!sameNumberSet(liveIn.get(node) ?? NOTHING_LIVE, liveOut)) {
+        liveIn.set(node, liveOut);
         changed = true;
       }
     }
   }
-  return liveIn;
+  return liveIn.get(startInstruction * depths + activeLoops.length) ?? NOTHING_LIVE;
+}
+
+/** Whether going from an instruction to this successor leaves the loop: at the loop's exit or by its `break`. */
+function leavesLoop(instruction: Instruction, loopId: number, successor: number): boolean {
+  if (instruction.kind === "loopStart") {
+    return instruction.loopId === loopId && successor === instruction.target;
+  }
+  return (
+    instruction.kind === "loopControl" &&
+    instruction.action === "break" &&
+    instruction.loopId === loopId
+  );
 }
 
 function instructionSuccessors(
@@ -3531,6 +3566,25 @@ function snapshotExternalDataFailureMessage(kind: ExternalDataFailureKind): stri
     case "nonPlainObject":
       return "Runtime snapshot contains a non-plain object.";
   }
+}
+
+/** The loops of a context, outermost first: the loop frames at the end that the context owns. */
+function contextLoopIds(
+  loopFrames: readonly unknown[],
+  owner: number | null | undefined,
+): number[] {
+  const loopIds: number[] = [];
+  for (let index = loopFrames.length - 1; index >= 0; index -= 1) {
+    const frame = loopFrames[index];
+    if (
+      !isPlainRecord(frame) ||
+      !nonNegativeSafeInteger(frame.loopId) ||
+      frame.callFrameId !== owner
+    )
+      break;
+    loopIds.push(frame.loopId);
+  }
+  return loopIds.reverse();
 }
 
 /** The innermost loop of a context: the last loop frame, when the context owns it. */

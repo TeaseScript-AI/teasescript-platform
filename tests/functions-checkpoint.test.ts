@@ -9,6 +9,8 @@ import {
   restoreCheckpoint,
 } from "../src/runtime/checkpoint.js";
 import { executeInstruction, run, type RuntimeBuiltinFunction } from "../src/runtime/engine.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
+import { RuntimeDataError } from "../src/runtime/operations/support.js";
 import type {
   SerializableRuntimeObject,
   SerializableRuntimeValue,
@@ -91,6 +93,87 @@ test("restores inside function loops, after continue, and before early return", 
     events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
     ["loop:2", "loop:3", "3"],
   );
+});
+
+/** The loops of the context that a call frame suspended. */
+function callerLoops(snapshot: RuntimeSnapshot, frameIndex: number) {
+  const owner = frameIndex === 0 ? null : snapshot.callFrames[frameIndex - 1]!.id;
+  return snapshot.loopFrames
+    .slice(0, snapshot.callFrames[frameIndex]!.loopBaseDepth)
+    .filter((loop) => loop.callFrameId === owner);
+}
+
+test("restores calls suspended in nested loops whose outer loop header called a function", () => {
+  const size = "function size(n) {\n  return n\n}";
+  const pause = "function pause {\n  wait 1\n}";
+  const nested = [
+    size,
+    pause,
+    "repeat size(1) {",
+    "  repeat 1 {",
+    "    pause()",
+    "  }",
+    "}",
+    "exit",
+  ];
+  // The outer count is cleared once its loop starts; resuming continues the outer loop rather than starting it again.
+  const compiled = plan(nested.join("\n"));
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
+  assert.equal(waiting.status, "waiting");
+  assert.equal(callerLoops(waiting, 0).length, 2);
+  assert.deepEqual(validateRuntimeSnapshot(waiting, compiled).errors, []);
+  assert.equal(observeTime(compiled, waiting, 1_000).outcome.kind, "observed");
+  assert.deepEqual(restoreCheckpoint(createCheckpoint(compiled, waiting)).snapshot, waiting);
+
+  for (const source of [
+    nested,
+    // Loop control around the suspended calls, and a while loop whose condition calls a function on every pass.
+    [
+      size,
+      "function pauseFor(seconds = 1) {\n  wait seconds\n  return seconds\n}",
+      "function ready(value) {\n  return value < 2\n}",
+      "let log = []",
+      "let count = 0",
+      "repeat size(2) {",
+      "  for item in [1, 2, 3] {",
+      "    if item == 2 {\n      continue\n    }",
+      "    log.add(pauseFor())",
+      "    if item == 3 {\n      break\n    }",
+      "  }",
+      "  while ready(count) {",
+      "    count += 1",
+      "    log.add(pauseFor())",
+      "  }",
+      "}",
+      'say "${log.length}"',
+      "exit",
+    ],
+    // Nested loops of a called function, interrupted by a repeating timer's block while they wait.
+    [
+      size,
+      pause,
+      "let ticks = 0",
+      "let t = timer(duration: 1500 ms, async: true, repeat: true) {\n  ticks += 1\n  wait 1\n}",
+      "function rounds(n) {",
+      "  repeat size(n) {",
+      "    repeat size(1) {",
+      "      pause()",
+      "    }",
+      "  }",
+      "  return n",
+      "}",
+      'say "${rounds(2)}"',
+      "t.stop()",
+      "exit",
+    ],
+  ]) {
+    const { boundaries } = assertRuntimeResumeEquivalent(source.join("\n"));
+    assert.ok(
+      boundaries.some((snapshot) =>
+        snapshot.callFrames.some((_, index) => callerLoops(snapshot, index).length === 2),
+      ),
+    );
+  }
 });
 
 test("restores direct and mutual recursion at every instruction boundary", () => {
@@ -619,6 +702,33 @@ test("rejects missing temporaries in every suspended caller continuation", () =>
     checkpoint.snapshot.callFrames.at(-1)!.callerTemporaries = [];
     assertCheckpointRejected(checkpoint, "TSK002");
   }
+});
+
+test("rejects a nested-loop continuation without a temporary it still reads", () => {
+  const compiled = plan(
+    [
+      "function one {\n  return 1\n}",
+      "function pause {\n  wait 1\n  return 2\n}",
+      "function size(n) {\n  return n\n}",
+      "repeat size(2) {",
+      "  for item in [1, 2] {",
+      '    say "${one()} ${pause()}"',
+      "  }",
+      "}",
+      "exit",
+    ].join("\n"),
+  );
+  const waiting = run(compiled, createFreshRuntimeSnapshot(compiled)).snapshot;
+  assert.equal(callerLoops(waiting, 0).length, 2);
+  // The caller holds the result of `one()` until `pause()` returns.
+  const checkpoint = mutableCheckpoint(createCheckpoint(compiled, waiting));
+  assert.ok(checkpoint.snapshot.callFrames[0].callerTemporaries.length > 0);
+  checkpoint.snapshot.callFrames[0].callerTemporaries = [];
+  assertCheckpointRejected(checkpoint, "TSK002");
+  assert.throws(
+    () => observeTime(compiled, checkpoint.snapshot, 1_000),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
+  );
 });
 
 test("rejects missing suspended results at multiple recursion depths", () => {
