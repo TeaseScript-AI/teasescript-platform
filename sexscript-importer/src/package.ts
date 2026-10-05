@@ -69,10 +69,29 @@ export interface PackageOptions {
   /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
   files?: readonly string[];
   /**
+   * Scripts of the package that are no entries of their own, by their paths from the legacy scripts folder, such as an
+   * expansion or a story chapter of an assembled unit: the generated entry menu does not offer them.
+   */
+  internalScripts?: readonly string[];
+  /**
    * A lone file converted on its own, without a package around it: it keeps its name, and a transfer names the
    * converted file of any legacy script name. Otherwise a package's only script becomes its main.tease.
    */
   standalone?: boolean;
+}
+
+/** The indexes of the files that `internal` names by their paths from the legacy scripts folder. */
+function internalScripts(
+  files: readonly ParsedGroovyFile[],
+  internal: readonly string[] | undefined,
+): Set<number> {
+  const suffixes = (internal ?? []).map((path) => `/${path.replaceAll("\\", "/").toLowerCase()}`);
+  return new Set(
+    files.flatMap((file, index) => {
+      const name = `/${file.sourceName.replaceAll("\\", "/").toLowerCase()}`;
+      return suffixes.some((suffix) => name.endsWith(suffix)) ? [index] : [];
+    }),
+  );
 }
 
 export function lowerSelfContainedPackage(
@@ -152,14 +171,19 @@ function packageScripts(
       index === entry ? "main.tease" : relative(index).replace(/\.groovy$/iu, ".tease"),
     ]),
   );
-  const paths = new Map(
-    scripts.map((index) => [
-      relative(index)
+  // A legacy script name is a path from the legacy scripts folder, which may be an ancestor of the scripts' common
+  // directory (`TheProgram/002TherapistA` when every script is in `TheProgram/`), so the name also resolves with the
+  // common directory's own folders in front.
+  const paths = new Map<string, string>();
+  for (let depth = 0; depth <= root.length; depth += 1) {
+    const prefix = root.slice(root.length - depth).join("/");
+    for (const index of scripts) {
+      const name = `${prefix === "" ? "" : `${prefix}/`}${relative(index)}`
         .replace(/\.groovy$/iu, "")
-        .toLowerCase(),
-      pathOf.get(index)!,
-    ]),
-  );
+        .toLowerCase();
+      if (!paths.has(name)) paths.set(name, pathOf.get(index)!);
+    }
+  }
   return { paths, entry, rootScripts, pathOf, root: root.join("/") };
 }
 
@@ -171,6 +195,7 @@ function packageScripts(
 function entryMenu(
   scripts: PackageScripts,
   programs: readonly MigrationProgram[],
+  internal: ReadonlySet<number>,
 ): MigrationProgram {
   const targets = new Set<string>();
   const collect = (statements: readonly IrStatement[]): void => {
@@ -195,21 +220,48 @@ function entryMenu(
     path.replace(/_[a-z]{2}(?:_[a-z]{2})?\.tease$/iu, ".tease");
   const targeted = (path: string): boolean =>
     targets.has(path.toLowerCase()) || targets.has(base(path).toLowerCase());
-  const offered = scripts.rootScripts
+  const listed = scripts.rootScripts.filter((index) => !internal.has(index));
+  const offered = listed
     .map((index) => scripts.pathOf.get(index)!)
     .filter((path) => !targeted(path))
     .sort();
   const choices =
-    offered.length > 0 ? offered : scripts.rootScripts.map((index) => scripts.pathOf.get(index)!);
+    offered.length > 0
+      ? offered
+      : (listed.length > 0 ? listed : scripts.rootScripts).map((index) =>
+          scripts.pathOf.get(index)!,
+        );
   const variants = [...scripts.pathOf.values()]
     .filter((path) => base(path) !== path && targeted(path) && !targets.has(path.toLowerCase()))
     .sort();
   const message =
-    "The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, so this menu offers each script that no other script chains to." +
+    (choices.length === 1
+      ? `The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, which goes to ${choices[0]}, the only listed script that no other script chains to.`
+      : "The legacy player listed the package's scripts for the player to pick; a TeaseScript package starts at main.tease, so this menu offers each script that no other script chains to.") +
     (variants.length === 0
       ? ""
       : ` The legacy player also chose a localized variant of a script by the system language, which the converted scripts do not, so these variants are not reached: ${variants.join(", ")}.`);
   const name = (path: string): string => path.replace(/\.tease$/u, "");
+  // With one script to offer, the package starts there.
+  const question: IrStatement[] =
+    choices.length === 1
+      ? []
+      : [
+          {
+            kind: "say",
+            value: { kind: "literal", value: "Which script do you want to start?" },
+            span: null,
+          },
+          {
+            kind: "let",
+            name: "picked",
+            value: {
+              kind: "choice",
+              options: choices.map((path) => ({ kind: "literal", value: name(path) })),
+            },
+            span: null,
+          },
+        ];
   const picked = { kind: "variable" as const, name: "picked" };
   let chain: IrStatement[] = [
     { kind: "goto", target: { kind: "file", path: choices.at(-1)! }, span: null },
@@ -235,20 +287,7 @@ function entryMenu(
     metadata: null,
     statements: [
       { kind: "comment", text: `// NOTE SX_ENTRY_MENU: ${message}`, trailing: false, span: null },
-      {
-        kind: "say",
-        value: { kind: "literal", value: "Which script do you want to start?" },
-        span: null,
-      },
-      {
-        kind: "let",
-        name: "picked",
-        value: {
-          kind: "choice",
-          options: choices.map((path) => ({ kind: "literal", value: name(path) })),
-        },
-        span: null,
-      },
+      ...question,
       ...chain,
     ],
     diagnostics: [{ code: "SX_ENTRY_MENU", severity: "warning", message, span: null }],
@@ -374,7 +413,17 @@ export function lowerPackage(
         ? null
         : scripts.entry !== null
           ? { file: scripts.entry }
-          : { menu: withProfile(entryMenu(scripts, composedPrograms), composedPrograms, accepted) },
+          : {
+              menu: withProfile(
+                entryMenu(
+                  scripts,
+                  composedPrograms,
+                  internalScripts(files, options.internalScripts),
+                ),
+                composedPrograms,
+                accepted,
+              ),
+            },
     globals:
       promotion === null
         ? null

@@ -78,6 +78,8 @@ export interface FeasibilityOptions {
   media?: readonly MediaFile[];
   /** Every file of the package's legacy data folder, relative to it, which file existence tests read. */
   files?: readonly string[];
+  /** Scripts that are no entries of their own, which the generated entry menu does not offer (PackageOptions). */
+  internalScripts?: readonly string[];
   /**
    * The converted package as written, after any manual output patches, read as the Player reads it, which
    * `finalPackage` compiles and runs as it is; needs `compiler`.
@@ -208,6 +210,7 @@ export function analyzeFeasibility(
     ...(options.accepted === undefined ? {} : { accepted: options.accepted }),
     ...(options.media === undefined ? {} : { media: options.media }),
     ...(options.files === undefined ? {} : { files: options.files }),
+    ...(options.internalScripts === undefined ? {} : { internalScripts: options.internalScripts }),
   });
   const helpers = globals?.helpers ?? null;
   const isScriptBodyAt = (index: number): boolean =>

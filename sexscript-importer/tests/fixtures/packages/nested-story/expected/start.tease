@@ -1,0 +1,3 @@
+// The story starts here and names the next chapter from the legacy scripts folder.
+say "The story begins."
+goto "middle.tease"

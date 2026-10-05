@@ -664,6 +664,7 @@ test(
       "shared-helpers",
       "lone-script",
       "branches",
+      "nested-story",
     ]) {
       const directory = fileURLToPath(new URL(`./fixtures/packages/${name}/`, import.meta.url));
       const scripts = path.join(directory, "scripts");
@@ -675,8 +676,11 @@ test(
       );
       const lowered = lowerPackage(files);
       const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;
+      // Paths start at the scripts' common folder, as convert-package writes them.
       const outputs = lowered.composed.map((program, index): [string, MigrationProgram] => [
-        index === entry ? "main.tease" : sources[index]!.replace(/\.groovy$/u, ".tease"),
+        index === entry
+          ? "main.tease"
+          : (lowered.paths[index] ?? sources[index]!.replace(/\.groovy$/u, ".tease")),
         program,
       ]);
       if (lowered.main !== null && "menu" in lowered.main)
@@ -708,6 +712,12 @@ test(
         [],
         name,
       );
+      if (name === "nested-story") {
+        // An assembled unit's internal script, such as an add-on, is no entry: the package starts at the story.
+        const unit = lowerPackage(files, { internalScripts: ["Story/addon.groovy"] });
+        assert.ok(unit.main !== null && "menu" in unit.main);
+        assert.match(emitTease(unit.main.menu), /\ngoto "start\.tease"\n$/u);
+      }
       if (name === "shared-helpers") {
         // The scripts call the shared functions, which read the shared table and the global each script assigns.
         const report = analyzeFeasibility(files, {

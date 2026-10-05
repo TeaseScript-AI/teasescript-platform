@@ -63,6 +63,8 @@ if (command === "inventory") {
     const dataRoot = await legacyDataRoot(args[0]!);
     options.media = await packageMedia(path.join(dataRoot, "images"));
     options.files = await packageFiles(dataRoot);
+    const internal = await internalScripts(args[0]!);
+    if (internal !== null) options.internalScripts = internal;
   }
   if (finalPackageDir !== null) options.finalPackage = await finalPackage(finalPackageDir);
   const report = analyzeFeasibility(files, options);
@@ -125,7 +127,13 @@ async function convertPackage(
   const dataRoot = await legacyDataRoot(sourceRoot);
   const media = await packageMedia(path.join(dataRoot, "images"));
   const files = await packageFiles(dataRoot);
-  const lowered = lowerPackage(parsed, { accepted, media, files });
+  const internal = await internalScripts(sourceRoot);
+  const lowered = lowerPackage(parsed, {
+    accepted,
+    media,
+    files,
+    ...(internal === null ? {} : { internalScripts: internal }),
+  });
   const programs = lowered.composed;
   // The package starts at main.tease (ADR 0022): its entry script, or a generated menu over the scripts it lists.
   const entry = lowered.main !== null && "file" in lowered.main ? lowered.main.file : null;
@@ -224,6 +232,25 @@ async function finalPackage(root: string): Promise<FinalPackageInput> {
     images: scan.images,
     problems: scan.problems,
   };
+}
+
+/**
+ * The scripts of an assembled unit that are no entries of their own, from the `unit.json` the merged corpus keeps beside
+ * a unit's scripts folder (`internalScripts`, paths from the scripts folder); null without one.
+ */
+async function internalScripts(scriptsRoot: string): Promise<string[] | null> {
+  const text = await readFile(path.join(scriptsRoot, "..", "unit.json"), "utf8").catch(() => null);
+  if (text === null) return null;
+  const unit: unknown = JSON.parse(text);
+  if (
+    typeof unit !== "object" ||
+    unit === null ||
+    !("internalScripts" in unit) ||
+    !Array.isArray(unit.internalScripts) ||
+    !unit.internalScripts.every((item): item is string => typeof item === "string")
+  )
+    fail(`${path.join(scriptsRoot, "..", "unit.json")} needs an "internalScripts" list of paths.`);
+  return unit.internalScripts;
 }
 
 /** Every file below the legacy data folder, relative to it with forward slashes. */

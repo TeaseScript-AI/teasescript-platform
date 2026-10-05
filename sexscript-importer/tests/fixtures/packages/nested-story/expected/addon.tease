@@ -1,0 +1,3 @@
+// An add-on that only installs content; nothing chains to it.
+say "This script does nothing on its own."
+exit
