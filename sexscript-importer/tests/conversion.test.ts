@@ -373,6 +373,8 @@ test(
           "def ws = zs",
           "ws.add([1, 2])",
           'show(ws.join("|"))',
+          // A function nothing calls only notes its problems.
+          "build(5)",
           "",
         ].join("\n"),
       );

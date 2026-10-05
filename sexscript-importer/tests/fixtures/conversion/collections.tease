@@ -33,7 +33,6 @@ let upper = []
 for it in items {
   upper.add("${it}!")
 }
-// NOTE SX_LENGTH_RECEIVER line 3: Groovy size() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
 let longOnes = []
 for item in items {
   if item.length > 4 {

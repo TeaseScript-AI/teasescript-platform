@@ -36,6 +36,7 @@ import {
   onlyOf,
   STRING,
   type TypeEnvironment,
+  type VariableBindings,
   UNKNOWN,
 } from "./types.ts";
 import type {
@@ -732,6 +733,15 @@ function bindingKeys(body: AstNode, sourceName: string): Map<AstNode | string, s
   return keys;
 }
 
+/** Binding keys for type inference, so a closure's variables get types apart from other variables of their name. */
+function variableBindings(keys: BindingKeys, sourceName: string): VariableBindings {
+  return {
+    bindingOf: (node) => bindingKey(node, keys),
+    parameterKey: (closure, name) => scopedBindingKey(name, closure.span, sourceName),
+    loopKey: (loop) => keys.get(loop) ?? String(loop.variable),
+  };
+}
+
 /** The key of a variable a closure declares at `span` (see `bindingKeys`). */
 function scopedBindingKey(
   name: string,
@@ -939,13 +949,19 @@ export function lowerParsedFile(
   if (body?.kind === "block") {
     context.functions = collectClosureInfo(body);
     context.shadowingReferences = collectShadowingReferences(body, context.functions);
+    context.bindings = bindingKeys(body, file.sourceName);
     context.types = withGlobalTypes(
-      inferVariableTypes(body, [], context.packageFunctions, options.functionResults),
+      inferVariableTypes(
+        body,
+        [],
+        context.packageFunctions,
+        options.functionResults,
+        variableBindings(context.bindings, file.sourceName),
+      ),
       options.globalTypes,
     );
     context.dateValues = currentDateVariables(body, context.types);
     context.aliasedLists = aliasedListVariables(body, context.types);
-    context.bindings = bindingKeys(body, file.sourceName);
     context.parameterBindings = parameterBindings(body, file.sourceName);
     context.assignedValues = assignedValues(body, context.bindings);
     context.constantInitializers = declarationInitializers(body, context.types);
@@ -7513,10 +7529,13 @@ function lowerObjectMethodCallExpression(
     const operation = dictOperation(node, targetNode, name, argumentsNodes, context);
     if (operation !== undefined) return operation;
   }
+  // A null receiver fails in Groovy and TeaseScript alike, so "text or null" counts as text.
+  const receiverType = targetNode === null ? UNKNOWN : inferType(targetNode, context.types);
   const textReceiver =
     targetNode !== null &&
     (TEXT_ONLY_METHODS.has(name) || STRING_METHODS.has(name)) &&
-    onlyOf(inferType(targetNode, context.types), STRING);
+    onlyOf(receiverType, STRING | NULL) &&
+    (receiverType & STRING) !== 0;
   if (
     targetNode !== null &&
     (textReceiver || (STRING_METHODS.has(name) && !isKnownListExpression(targetNode, context)))
@@ -7692,7 +7711,8 @@ function unprovenReceiverOperation(
   const type = inferType(targetNode, context.types);
   const mayBeList = (type & LIST) !== 0;
   const mayBeText = (type & STRING) !== 0;
-  const argumentType = argumentsNodes.length === 1 ? inferType(argumentsNodes[0]!, context.types) : 0;
+  const argumentType =
+    argumentsNodes.length === 1 ? inferType(argumentsNodes[0]!, context.types) : 0;
   const statement = context.statementRoot?.kind === "expressionStatement";
   const whole = statement && asNode(context.statementRoot!.expression) === node;
   const call = (method: string, args: IrExpression[], target: IrExpression): IrExpression => ({
@@ -7762,7 +7782,9 @@ function unprovenReceiverOperation(
   switch (name) {
     case "indexOf":
       // Text has indexOf; a list that cannot be text needs the helper.
-      return mayBeText ? call("indexOf", args, target) : useHelper(context, "indexOf", [target, args[0]!]);
+      return mayBeText
+        ? call("indexOf", args, target)
+        : useHelper(context, "indexOf", [target, args[0]!]);
     case "count":
       return useHelper(context, "count", [target, args[0]!]);
     case "min":
@@ -8119,9 +8141,7 @@ function mayAppendToUnprovenList(receiver: AstNode, context: LowerContext): bool
   if (root === null) return false;
   if (root !== receiver) return true;
   const key = bindingKey(root, context.bindings) ?? variableName(root)!;
-  return !(context.assignedValues.get(key) ?? []).some(
-    (value) => value.kind === "constructorCall",
-  );
+  return !(context.assignedValues.get(key) ?? []).some((value) => value.kind === "constructorCall");
 }
 
 /** The variable a place (`v`, `v[i]`, `v.field`, and chains of them) starts from; null for any other expression. */
