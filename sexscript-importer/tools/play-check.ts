@@ -13,7 +13,7 @@
  * while no input is pending. With `--clock fake`, the fallback, it opens at `/player/?package=<id>` with Playwright's
  * fake clock and media at 16 times speed. A prompt that comes back three times in a row may wait for an answer that
  * takes time, so the runner then lets 30 seconds pass before answering, then 120 and 300 seconds after three more
- * repeats each (+10 s and +1 min presses of the time controls, or fake-clock jumps), noted in the run's path as
+ * repeats each (+10 s and +1 min presses in the Debug tool's time controls, or fake-clock jumps), noted in the run's path as
  * `[waited 30 s]`. Each run picks, at
  * every choice, the option tried least often in
  * earlier runs, so later runs take other branches; a package stops after a run that reached nothing new, or after a
@@ -437,8 +437,8 @@ async function playOnce(
   };
   if (state.scriptFailure !== null) return finish("no-start", state.scriptFailure, 0);
   await page.click("[data-session-activation] button");
-  // The +10 s and +1 min buttons live in the Time Controls tool.
-  if (dev) await page.click('[data-tools-focus="launcher:Time Controls"]', { timeout: 5_000 });
+  // The +10 s and +1 min buttons live in the Debug tool (#624).
+  if (dev) await page.click('button[aria-label="Debug"]', { timeout: 5_000 });
   const visits = new Map<string, number>();
   // The prompt answered last, how often in a row, and how many waits that streak has had.
   let repeated = { key: "", count: 0, waits: 0 };
