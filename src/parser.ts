@@ -3384,6 +3384,9 @@ class Parser {
 
   *#parseInteractionExpression(): ParseTask<InteractionExpression | null> {
     const command = this.#advance();
+    const interactionKind = INTERACTION_KINDS.get(command.lexeme) ?? "choice";
+    if (this.#check(TokenKind.LeftParenthesis) && interactionKind !== "choice")
+      return yield* parseChild(this.#parseBoundedAsk(command, interactionKind, null, null));
     if (this.#check(TokenKind.LeftParenthesis)) {
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
@@ -3393,7 +3396,6 @@ class Parser {
       this.#synchronizeStatement();
       return null;
     }
-    const interactionKind = INTERACTION_KINDS.get(command.lexeme) ?? "choice";
     let asSpan: SourceSpan | null = null;
     let speaker: Identifier | null = null;
     if (!this.#atStorageDelimiter() && this.#match(TokenKind.KeywordAs)) {
@@ -3407,6 +3409,8 @@ class Parser {
       }
       speaker = this.#identifier(this.#advance());
     }
+    if (this.#check(TokenKind.LeftParenthesis) && interactionKind !== "choice")
+      return yield* parseChild(this.#parseBoundedAsk(command, interactionKind, asSpan, speaker));
     if (this.#check(TokenKind.LeftParenthesis)) {
       this.#reportSpan(
         parserDiagnosticCode.unsupportedInteractionForm,
@@ -3565,6 +3569,47 @@ class Parser {
       defaultValue: null,
       options: Object.freeze(options),
       span: spanFrom(command.span, end),
+    });
+  }
+
+  /**
+   * `askText [as speaker] ([hint][, default: value])` and the other basic asks: the parentheses hold the arguments of
+   * the compact form, so `)` ends the ask and both forms give the same interaction.
+   */
+  *#parseBoundedAsk(
+    command: Token,
+    interactionKind: Exclude<InteractionExpression["interactionKind"], "choice">,
+    asSpan: SourceSpan | null,
+    speaker: Identifier | null,
+  ): ParseTask<InteractionExpression | null> {
+    const call = yield* parseChild(
+      this.#withinDelimiters(this.#finishCall(this.#identifier(command), this.#advance())),
+    );
+    const parts = this.#boundedArguments(
+      command,
+      call,
+      ["default"],
+      parserDiagnosticCode.unsupportedInteractionForm,
+    );
+    if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
+      this.#reportSpan(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        `The 'as speaker' clause must appear immediately after '${command.lexeme}'.`,
+        this.#peek().span,
+      );
+      this.#synchronizeStatement();
+    }
+    if (parts === null) return null;
+    return Object.freeze({
+      kind: "interactionExpression",
+      interactionKind,
+      commandSpan: copySpan(command.span),
+      asSpan,
+      speaker,
+      hint: parts.value,
+      defaultValue: parts.options.get("default") ?? null,
+      options: Object.freeze([]),
+      span: spanFrom(command.span, call.span),
     });
   }
 

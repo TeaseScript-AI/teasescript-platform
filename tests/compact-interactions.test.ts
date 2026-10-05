@@ -248,16 +248,17 @@ test("nested compact choices report missing options once per affected invocation
   );
 });
 
-// V30 accepts parenthesized interaction APIs (accepted-syntaxes-v30.md sections 20-21) and ADR 0018 leaves their
-// compatibility mapping to later work. The spelling must not be parsed as a compact form whose payload is the
-// parenthesized text, grouped or unwrapped, which would silently decide that mapping.
-test("a parenthesized interaction spelling is never silently given compact semantics", () => {
+// V30 accepts parenthesized `showButton` and `choose` forms (accepted-syntaxes-v30.md sections 20-21), and ADR 0018
+// leaves their mapping to later work. The spelling must not be parsed as a compact form whose payload is the
+// parenthesized text, grouped or unwrapped, which would silently decide that mapping. The basic asks have their own
+// parenthesized form (tests/parenthesized-asks.test.ts).
+test("a parenthesized button or choice spelling is never silently given compact semantics", () => {
   // The statement and expression commands each have one parenthesis check before and after `as speaker`.
   for (const source of [
     'showButton("Continue")',
     'showButton as mistress ("Continue")',
-    'let answer = askText("Type here")',
-    'let answer = askText as mistress ("Type here")',
+    'let answer = choose("Yes", "No")',
+    'let answer = choose as mistress ("Yes", "No")',
   ]) {
     const parsed = parse(`${source}\nsay "recovered"`);
     const opening = source.indexOf("(");
@@ -268,7 +269,7 @@ test("a parenthesized interaction spelling is never silently given compact seman
         statement.kind === "letStatement" &&
         statement.initializer.kind === "interactionExpression"
       )
-        return [statement.initializer.hint];
+        return statement.initializer.options.map((option) => option.expression);
       return [];
     });
     assert.equal(
