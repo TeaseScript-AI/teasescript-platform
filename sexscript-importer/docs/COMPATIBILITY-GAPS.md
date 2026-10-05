@@ -560,6 +560,7 @@ the merge of `main` at `242ada7a`; the column "Before" gives the count at the `d
 | Closures that capture local state | Toy 10 | Toy 10 | explicit state parameters: feasible for 2 local helpers that call sibling local closures (`suck`, `suckBeat`); the other 8 are stored in registries, returned, or evaluate persona expressions |
 | Method pointers; calls of closures kept in data (`it.cond()`, `e.event.func(...)`) | Toy 3 and 4 | Toy 3 and 5 | action IDs with a dispatcher |
 | Persona data files with Groovy expression strings | Toy | Toy | data converted at import time |
+| Behaviour kept as data with code strings evaluated at runtime (`Eval.me`, expression strings in plan or config records, Toy's 9 session plans with 26 expression strings in `images/toy/domme.groovy`, run by `sessionPlay`) | Toy | Toy | owner decision 2026-10-05: native TeaseScript, in per-unit patches and in converter rules where the pattern is general: each behaviour an ordinary function, its conditions plain `if`s, and the choice among them a small selection list or `switch` (Toy: a function per session, and session choice as a list of conditions with weights). Eval is not emulated with a lookup table of expression texts |
 | `instanceof`; `asBoolean()`; `Math.floorDiv` | Toy 1 each | Toy 1 each | `is` (#530); Groovy truth; `floor(a / b)` |
 
 **Workaround possible, but a hack.** Works with current TeaseScript but differs from the intended behavior; the
