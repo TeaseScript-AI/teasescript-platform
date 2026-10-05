@@ -85,4 +85,19 @@ let draft = ""
 say "Your name?"
 let answer = sexscriptLegacyAskText(draft)
 say "Hello ${answer}"
+// A photo check that read the file size to detect a broken webcam picture counts a taken photo as valid.
+function checkPhoto(snapfile) {
+  if snapfile != null {
+    // NOTE SX_PHOTO_SIZE line 33: Legacy code read the byte size of a file, which photo code compared with a threshold to detect a broken webcam picture; a package cannot read file sizes, and a photo the player took counts as valid, so the size reads as 1000000 bytes.
+    if 1000000 < 15000 {
+      return false
+    }
+    return true
+  }
+  return false
+}
+// NOTE SX_CAMERA_FALLBACK line 38: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.
+if checkPhoto(takePhoto()) {
+  say "Nice photo"
+}
 exit
