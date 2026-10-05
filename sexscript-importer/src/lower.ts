@@ -2716,12 +2716,24 @@ function legacyApiCall(
 ): { name: string; arguments: AstNode[] } | null {
   const call = callParts(node);
   if (call === null || !call.inherited) return null;
+  if (callsHostOfOwnName(call.name, call.arguments.length, context)) return call;
   const shadowed =
     context.functions.has(call.name) ||
     context.packageFunctions.has(call.name) ||
     context.helperFunctions.has(call.name) ||
     isVisibleLocal(call.name, node, context);
   return shadowed ? null : call;
+}
+
+/**
+ * Inside the closure a variable defines, the variable is not defined yet, so a call of its name with another number
+ * of arguments than the closure takes called the SexScript method of that name, as in
+ * `def getRandom = { low, high -> low + getRandom(high - low) }`.
+ */
+function callsHostOfOwnName(name: string, count: number, context: LowerContext): boolean {
+  if (context.currentFunction?.name !== name) return false;
+  const info = context.functions.get(name);
+  return info !== undefined && (count < info.minArgs || count > info.maxArgs);
 }
 
 /** Whether a parameter or local of the current function, visible at `node`, has this name. */
@@ -4171,7 +4183,7 @@ function lowerCallStatement(
         ]
       : [{ kind: "expression", expression, span }];
   }
-  if (call.name === "sleep") {
+  if (call.name === "sleep" && legacyApiCall(node, context) !== null) {
     // Groovy's sleep(milliseconds) blocks the script thread like a hidden wait.
     return oneArgumentStatement(call.arguments, context, node, (duration) => ({
       kind: "wait",
@@ -10224,7 +10236,26 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     const args = lowerArguments(call.arguments, context);
     return args === null ? null : actionCall({ kind: "variable", name: call.name }, args, context);
   }
-  const functionInfo = context.functions.get(call.name);
+  const functionInfo = callsHostOfOwnName(call.name, call.arguments.length, context)
+    ? undefined
+    : context.functions.get(call.name);
+  // Groovy called a closure of one parameter without an argument with null.
+  if (functionInfo !== undefined && call.arguments.length === 0 && functionInfo.minArgs === 1) {
+    addDiagnostic(
+      context,
+      "SX_NULL_ARGUMENT",
+      "info",
+      `Groovy called ${call.name} without an argument, which gave its one parameter null; the call passes null.`,
+      node.span,
+    );
+    return {
+      kind: "call",
+      name: call.name,
+      positional: [{ kind: "literal", value: null }],
+      named: {},
+      local: true,
+    };
+  }
   if (functionInfo !== undefined) {
     if (
       call.arguments.length < functionInfo.minArgs ||

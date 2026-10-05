@@ -1,3 +1,6 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
 function sexscriptLegacyRandom(limit) {
   if limit == null {
     return randomInteger(0..100)
@@ -71,9 +74,31 @@ function spell(text) {
 say spell(word)
 // Groovy read null one past the end of a list, which a 1-based random pick relies on.
 let positions = [" ", "otk"]
-let pick = sexscriptLegacyRandom(positions.length) + 1
+// TODO SX_FUNCTION_ARITY line 38: Call to getRandom has 1 arguments; expected 2..2.
+// | def pick = getRandom(positions.size()) + 1
+let pick = null
 // NOTE SX_INDEX_PAST_END line 39: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
 if sexscriptLegacyItemAt(positions, pick) == "otk" {
   say "Over my knee"
 }
+// A closure named like a SexScript method calls that method inside its own body, where the variable is not defined yet.
+function getRandom(low, high) {
+  // NOTE SX_PLUS_OPERAND_TYPE line 41: Groovy + operands are not proven numeric; TeaseScript + only adds numbers. Use interpolation if this joins text.
+  return low + sexscriptLegacyRandom(high - low)
+}
+say "Roll ${getRandom(3, 6)}"
+// A closure of one parameter called without an argument gets null.
+function greet(who) {
+  if who == null {
+    say "Hello"
+  } else {
+    say "Hello ${who}"
+  }
+}
+greet(null)
+// A local closure named sleep is called instead of Groovy sleep(milliseconds).
+function sleep {
+  say "You fall asleep."
+}
+sleep()
 exit
