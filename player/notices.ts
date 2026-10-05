@@ -85,6 +85,6 @@ export const playerNotices = {
   imageNeedsCamera: (): PlayerNotice => ({
     key: playerNoticeKeys.imageNeedsCamera,
     level: "warning",
-    message: "This image request needs a camera, which this Player does not offer yet.",
+    message: "This image request needs a camera, which cannot be used here.",
   }),
 } as const;

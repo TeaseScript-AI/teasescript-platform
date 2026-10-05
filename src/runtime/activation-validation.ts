@@ -1,5 +1,6 @@
 import type { InstructionPlan } from "../plan/model.js";
 import { nonNegativeSafeInteger } from "../plan/validation-support.js";
+import { functionHoldingInstruction } from "./snapshot-validation-analysis.js";
 
 /**
  * Restore validation for activations (ADR 0022 §5). Code runs in a context: the root region of an activation's file,
@@ -92,10 +93,7 @@ export function ownerFitsInstruction(
   ownerId: unknown,
   instruction: number,
 ): boolean {
-  const functionId = plan.functions.find(
-    (definition) =>
-      instruction >= definition.entryInstruction && instruction < definition.endInstruction,
-  )?.id;
+  const functionId = functionHoldingInstruction(plan, instruction)?.id;
   if (ownerId === null) return functionId === undefined;
   if (
     !nonNegativeSafeInteger(ownerId) ||
@@ -153,12 +151,7 @@ export function runsNothing(plan: InstructionPlan, file: number): boolean {
 
 /** Whether an instruction is code of a global function or one of its blocks, which runs for any file's activation. */
 export function inGlobalCode(plan: InstructionPlan, instruction: number): boolean {
-  return plan.functions.some(
-    (definition) =>
-      definition.global &&
-      instruction >= definition.entryInstruction &&
-      instruction < definition.endInstruction,
-  );
+  return functionHoldingInstruction(plan, instruction)?.global === true;
 }
 
 /** The file of each instruction of a plan, built once per plan. */

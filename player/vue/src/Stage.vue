@@ -4,7 +4,10 @@ import Viewfinder from "./Viewfinder.vue";
 import ViewfinderMirrorButton from "./ViewfinderMirrorButton.vue";
 const props = defineProps<{
   media: { src: string; alt: string } | undefined;
-  /** The session camera's track while the script shows the camera view over the Stage (`showCamera stage`). */
+  /**
+   * The camera's track while the script shows the camera view over the Stage (`showCamera stage`), or while an image
+   * request takes a photo there; the `camera` slot draws Player controls on that view.
+   */
   camera?: MediaStreamTrack | null;
 }>();
 const emit = defineEmits<{ mediaAspect: [ratio: number] }>();
@@ -43,9 +46,16 @@ function cameraMeasured(ratio: number) {
   <section class="player-stage" aria-label="Primary stage">
     <div class="stage-media-frame">
       <img v-if="media" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" />
-      <div v-if="camera" class="stage-camera" data-stage-camera :style="{ '--viewfinder-ratio': cameraRatio }">
-        <Viewfinder :track="camera" :mirrored="cameraMirrored" @aspect="cameraMeasured" />
-        <div class="stage-camera-mirror">
+      <div
+        v-if="camera || $slots.camera"
+        class="stage-camera"
+        data-stage-camera
+        :style="{ '--viewfinder-ratio': cameraRatio }"
+      >
+        <Viewfinder v-if="camera" :track="camera" :mirrored="cameraMirrored" @aspect="cameraMeasured" />
+        <!-- Player controls drawn on the camera view, such as taking a photo for an image request. -->
+        <slot name="camera" />
+        <div v-if="camera" class="stage-camera-mirror">
           <ViewfinderMirrorButton v-model="cameraMirrored" />
         </div>
       </div>

@@ -30,9 +30,9 @@ export interface PlayerImageInput {
   ): Promise<{ readonly reference: string } | { readonly message: string }>;
   readonly admission: CapturedMediaAdmission;
   discard(reference: string): void;
+  /** Whether a photo from the camera can answer here. */
+  readonly camera: boolean;
 }
-
-const IMAGE_TEXT_FEEDBACK = "Attach an image with the paperclip, or drop it onto the message field.";
 
 const props = defineProps<{
   session: PlayerRuntimeSession | null;
@@ -97,6 +97,20 @@ const attach = computed(() =>
         request: { plan: plan.value, reset: props.reset, actionId: actionId.value },
       }
     : null,
+);
+// The camera opens by itself for a request that allows it, on the Stage or in the camera window.
+const camera = computed(
+  () => imageRequest.value?.allowCamera === true && props.images?.camera === true,
+);
+// Typed text never answers an image request; the notice names the routes it offers.
+const imageTextFeedback = computed(() =>
+  attach.value && camera.value
+    ? "Take a photo with the camera, or attach or drop an image."
+    : attach.value
+      ? "Attach an image with the paperclip, or drop it onto the message field."
+      : camera.value
+        ? "Take a photo with the camera."
+        : "",
 );
 type ImageRequestIdentity = NonNullable<typeof attach.value>["request"];
 /** Whether the image request the files are for is the one presented now. */
@@ -224,9 +238,7 @@ async function complete(
       showFeedback(
         foreground.value?.kind === "show-button"
           ? "Type the exact button text or activate it above."
-          : attach.value
-            ? IMAGE_TEXT_FEEDBACK
-            : "",
+          : imageTextFeedback.value,
       );
       if (refocusInput) focusInput();
       return;

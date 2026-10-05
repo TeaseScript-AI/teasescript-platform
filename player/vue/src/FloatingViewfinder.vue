@@ -16,7 +16,8 @@ export interface FloatingPlace {
   /** The camera's aspect when the place was last set, so a window shown again keeps its height and place. */
   readonly ratio?: number;
 }
-defineProps<{ track: MediaStreamTrack }>();
+// Without a track the window keeps its frame, for Player controls drawn on it while a camera opens or cannot be used.
+defineProps<{ track: MediaStreamTrack | null }>();
 const place = defineModel<FloatingPlace | null>("place", { default: null });
 const mirrored = defineModel<boolean>("mirrored", { default: true });
 
@@ -204,7 +205,12 @@ function measured(next: number) {
         <div class="floating-viewfinder-bar" :style="{ '--bar-height': `${BAR}px`, height: `${BAR}px` }">
           <ViewfinderMirrorButton v-model="mirrored" />
         </div>
-        <Viewfinder :track="track" :mirrored="mirrored" @aspect="measured" />
+        <div class="floating-viewfinder-picture" :style="{ '--viewfinder-ratio': ratio }">
+          <Viewfinder v-if="track" :track="track" :mirrored="mirrored" @aspect="measured" />
+          <div v-else class="floating-viewfinder-empty" />
+          <!-- Player controls drawn on the camera view, such as taking a photo for an image request. -->
+          <slot />
+        </div>
       </div>
       <span
         v-for="handle in HANDLES"
@@ -232,6 +238,12 @@ function measured(next: number) {
 .floating-viewfinder:focus-visible .floating-viewfinder-window {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+.floating-viewfinder-picture {
+  position: relative;
+}
+.floating-viewfinder-empty {
+  aspect-ratio: var(--viewfinder-ratio);
 }
 .floating-viewfinder-window {
   overflow: hidden;
