@@ -31,4 +31,7 @@ if (getBoolean("Keep the streak?")) {
   streak = loadInteger("training.streak")
   if (streak == null) show("No streak")
 }
+// loadString() read a stored number as text.
+save("training.version", 2)
+if (loadString("training.version") == "2") show("Version 2")
 return null

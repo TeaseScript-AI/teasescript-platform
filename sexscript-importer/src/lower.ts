@@ -113,6 +113,8 @@ export interface LowerOptions {
    * (packageStorageLiterals); a branch for any other value of such a key never runs.
    */
   storageLiterals?: ReadonlyMap<string, ReadonlySet<string>>;
+  /** The storage keys under which the package saves a number or a boolean (packageNonTextKeys). */
+  nonTextKeys?: ReadonlySet<string>;
   /** Image paths below `images/` that some script of the package copies a photo to (packageCopiedImages). */
   copiedImages?: ReadonlySet<string>;
   /** Value types of package globals defined in other files, such as anonymous-object fields. */
@@ -185,6 +187,7 @@ interface LowerContext {
   packageFunctions: ReadonlySet<string>;
   stableNames: ReadonlySet<string>;
   storageLiterals: ReadonlyMap<string, ReadonlySet<string>>;
+  nonTextKeys: ReadonlySet<string>;
   copiedImages: ReadonlySet<string>;
   /** Set while lowering a branch that never runs because no code stores the value it tests. */
   unreachable: boolean;
@@ -1165,6 +1168,7 @@ export function lowerParsedFile(
     packageFunctions: options.packageFunctions ?? new Set(),
     stableNames: options.stableNames ?? new Set(),
     storageLiterals: options.storageLiterals ?? new Map(),
+    nonTextKeys: options.nonTextKeys ?? new Set(),
     copiedImages: options.copiedImages ?? new Set(),
     unreachable: false,
     mixinModules: options.mixinModules ?? [],
@@ -1952,6 +1956,7 @@ function lowerHelperMethod(
     packageFunctions: baseContext.packageFunctions,
     stableNames: baseContext.stableNames,
     storageLiterals: baseContext.storageLiterals,
+    nonTextKeys: baseContext.nonTextKeys,
     copiedImages: baseContext.copiedImages,
     unreachable: false,
     mixinModules: baseContext.mixinModules,
@@ -12531,9 +12536,20 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
     }
     const key = lowerExpression(call.arguments[0]!, context);
     if (key === null) return null;
-    return call.name === "loadInteger" || call.name === "receiveInteger"
-      ? { kind: "load", key, integer: true }
-      : { kind: "load", key };
+    if (call.name === "loadInteger" || call.name === "receiveInteger")
+      return { kind: "load", key, integer: true };
+    const literalKey = constantString(call.arguments[0]!);
+    if (call.name === "loadString" && literalKey !== null && context.nonTextKeys.has(literalKey)) {
+      addDiagnostic(
+        context,
+        "SX_LOAD_STRING_TEXT",
+        "warning",
+        "loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.",
+        node.span,
+      );
+      return useHelper(context, "text", [{ kind: "load", key }]);
+    }
+    return { kind: "load", key };
   }
   if (call.name === "loadMap") {
     return unsupportedExpression(

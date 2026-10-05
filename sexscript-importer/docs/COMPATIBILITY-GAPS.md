@@ -98,6 +98,7 @@ implemented):
 | `showButton(text, s)` used as a value (seconds until the click) | `(showButton text, timeout: s) / 1 s` (#531) |
 | `showButton(text, 0)` (the button stayed for its 10 ms safety margin; the result was 0) | `showButton text, timeout: 10 ms`, with a note, also for a timeout known before the run (`def t = 0`, `1 - 1`); a used result is `0` |
 | `x = loadInteger(k)` followed by `if (x == null) x = d` | `x = load k, default: d` (#541; also `loadString`, `loadBoolean`, `loadFloat`) |
+| `loadString(k)` of a key under which the package saves a number or a boolean (legacy read it as text) | the text helper around `load k`, with a note (`SX_LOAD_STRING_TEXT`) |
 | `m[k] ?: d`, `m.containsKey(k) ? m[k] : d`, `x = m[k]` followed by `if (x == null) x = d` on a dict | `m.get(k, default: d)` (#536) |
 | `getImage(message)` (webcam picture path or null) | `takePhoto()`, with a note (V30 §33) |
 | `playBackgroundSound(null)`, `stopSoundThreads()` | handles of the async sounds kept in a list and stopped by a generated helper |

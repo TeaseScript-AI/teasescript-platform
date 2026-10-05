@@ -707,6 +707,7 @@ export function lowerPackage(
   const mixinModules = moduleInfos.flatMap((info) => info ?? []);
   const stableNames = packageStableNames(files);
   const storageLiterals = packageStorageLiterals(files);
+  const nonTextKeys = packageNonTextKeys(files);
   const copiedImages = new Set(
     files.flatMap((file) => {
       const paths: string[] = [];
@@ -750,6 +751,7 @@ export function lowerPackage(
       packageFunctions: packageFunctionNames(groups[index]!),
       stableNames,
       storageLiterals,
+      nonTextKeys,
       copiedImages,
       globalTypes: packageGlobalTypes(groups[index]!),
       stopsBackgroundSounds,
@@ -1379,6 +1381,35 @@ function packageStorageLiterals(
       ([key]) => !computed.has(key) && !computedPrefixes.some((prefix) => key.startsWith(prefix)),
     ),
   );
+}
+
+/**
+ * The storage keys under which the package saves a number or a boolean, `save("toy.version", 1.4)`: legacy
+ * `loadString()` read such a value as text.
+ */
+function packageNonTextKeys(files: readonly ParsedGroovyFile[]): ReadonlySet<string> {
+  const keys = new Set<string>();
+  for (const file of files) {
+    walkAst(file.root, (node) => {
+      if (node.kind !== "methodCall" || node.implicitThis !== true) return;
+      const name = constantString(node.method);
+      if (name !== "save" && name !== "send") return;
+      const argumentList = isAstNode(node.arguments) ? node.arguments.items : undefined;
+      const [keyNode, valueNode]: Array<AstNode | undefined> = Array.isArray(argumentList)
+        ? argumentList.filter(isAstNode)
+        : [];
+      const key = keyNode === undefined ? null : constantString(keyNode);
+      const inner = valueNode?.kind === "unaryMinus" ? valueNode.value : valueNode;
+      const value = isAstNode(inner) ? inner : null;
+      if (
+        key !== null &&
+        value?.kind === "constant" &&
+        (typeof value.value === "number" || typeof value.value === "boolean")
+      )
+        keys.add(key);
+    });
+  }
+  return keys;
 }
 
 /** A generated entry menu that first asks the legacy player's profile the package reads but never saves. */

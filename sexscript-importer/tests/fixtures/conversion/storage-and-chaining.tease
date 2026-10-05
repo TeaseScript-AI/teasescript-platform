@@ -6,6 +6,12 @@ keywords: "training"
 ---
 // Legacy setInfos(): API version 9, status "working", color 0x000000, language "EN"
 
+function sexscriptLegacyText(value): string? {
+  if value == null {
+    return null
+  }
+  return "${value}"
+}
 function sexscriptLegacyCompare(left, right) {
   if left == null {
     if right == null {
@@ -72,5 +78,11 @@ if (choose yes: "Yes", no: "No") == "yes" {
   if streak == null {
     say "No streak"
   }
+}
+// loadString() read a stored number as text.
+save 2 as "training.version"
+// NOTE SX_LOAD_STRING_TEXT line 36: loadString() read the stored value as text, and the package saves a number or a boolean under this key, so the value is turned into text.
+if sexscriptLegacyText(load "training.version") == "2" {
+  say "Version 2"
 }
 exit
