@@ -77,13 +77,14 @@ The accepted boundary does not itself change accepted V30 forms such as `wait 2`
 
 ADR 0018 selects direct Standard Library names with no import and no first-POC opt-out or shadowing.
 
-The current compiler implements the compact interaction forms in this section through explicit versioned
-interaction instructions and the canonical resumable runtime. The broader parenthesized V30 APIs and their advanced
-parameters remain deferred, except `askImage(...)`, which is implemented in its V30 call form
-(`let picture = askImage("Add an image")`; see [Image input](RUNTIME.md#image-input)); this slice does not treat
-compact syntax as a runtime library call. A parenthesized
-interaction-call spelling is never interpreted as compact syntax; until those APIs are implemented, the parser reports
-it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the same diagnostic.
+The current compiler implements the compact interaction forms in this section, and the parenthesized form of the basic
+asks as the same interactions, through explicit versioned interaction instructions and the canonical resumable runtime.
+The broader parenthesized V30 APIs and their advanced parameters remain deferred, except `askImage(...)`, which is
+implemented in its V30 call form (`let picture = askImage("Add an image")`; see [Image input](RUNTIME.md#image-input));
+this slice does not treat compact syntax as a runtime library call. Another parenthesized interaction-call spelling,
+such as `showButton(...)` or `choose(...)`, is never interpreted as compact syntax; until those APIs are implemented,
+the parser reports it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the
+same diagnostic.
 
 ### Basic interactions
 
@@ -104,7 +105,14 @@ let count = askInteger "How many?", default: 3
 let day = askDate "Which day?"
 let start = askTime as mistress "What time?", default: toTime("20:00")
 let moment = askDateTime "When are you free?"
+
+let name = askText("Your name?", default: "Ada")
+let more = askInteger as mistress ("How many?", default: 3) + 1
 ```
+
+The basic asks also take their arguments in parentheses, with the same meaning; the `)` ends the ask inside a larger
+expression, and `as speaker` comes before the parentheses
+([ADR 0018](decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)).
 
 For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional string is Standard UI field text or a hint. It is not automatically spoken
 into the transcript. The normal question is a preceding `say`. An optional `default:` answer prefills the field; the

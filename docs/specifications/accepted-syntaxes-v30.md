@@ -1714,7 +1714,15 @@ Rules:
 - `choose` does not return a result object.
 
 ## 20. Input functions
-**Status:** Accepted
+**Status:** Accepted (parenthesized basic asks implemented: Owner decision on #627, 2026-10-05)
+
+`askText`, `askNumber`, `askInteger`, `askDate`, `askTime`, and `askDateTime` are implemented in this parenthesized
+form with the arguments of their compact form
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#parenthesized-basic-asks)): an optional text and
+an optional `default:`. Both forms mean the same: `askText()` is `askText`, and
+`askText as mistress ("Name?", default: "Ada")` is `askText as mistress "Name?", default: "Ada"`. The speaker clause
+comes before the parentheses, and the `)` ends the ask, so `askInteger("How many?") + 1` adds to the answer. Their
+other options in this section, such as `message:` and `invalidMessage:`, are not implemented yet.
 
 ### Text input
 
@@ -2682,9 +2690,10 @@ load("a", default: 0) + 1
 
 The operands of `save` and of a compact `load` are full expressions. `as` ends the value of `save`. A `, default:`
 belongs to the nearest construct before it that takes one, also inside a bounded `load`: a compact `load`, the default
-answer of an ask, or a labelled option of a compact `choose`. Group the inner construct to give the fallback to `load`,
-as in `load((askText "Key?"), default: "none")` or `load((choose a: "x", b: "y"), default: "z")`; without the inner
-parentheses, the choice gets a third option labelled `default`. Inside `()`, `[]`, and object literals, where a line
+answer of an ask, or a labelled option of a compact `choose`. Group the inner construct, or use a parenthesized ask,
+to give the fallback to `load`, as in `load(askText("Key?"), default: "none")` or
+`load((choose a: "x", b: "y"), default: "z")`; without the inner parentheses, the choice gets a third option labelled
+`default`. Inside `()`, `[]`, and object literals, where a line
 break does not end an expression, the comma may also start the next line. Group a compact `load`, as in
 `(load "k") == null`, before combining its result with another expression. Without parentheses, `load "k" == null`
 uses `"k" == null` as the key, which is not a string. Group a nested compact `load` used as a key too.
