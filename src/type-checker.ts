@@ -4155,7 +4155,7 @@ class TypeChecker {
     if (mixed === undefined) return;
     this.#report(
       typeCode.mixedTypes,
-      `This choose returns ${describeValue(mixed)}. A place keeps one type; ${fix(typeName(mixed))}.`,
+      `This choose returns ${describeValue(mixed)}. A place keeps one type; ${unnamedMixFix(mixed) ?? fix(typeName(mixed))}.`,
       expression.span,
     );
   }
@@ -5137,6 +5137,10 @@ function programEffects(program: Program): ProgramEffects {
     switch (statement.kind) {
       case "functionDeclaration":
         enter(statement.body.statements, null, true);
+        // A parameter default runs in the function too, and the blocks it shows run later.
+        for (const parameter of statement.parameters)
+          if (parameter.defaultValue !== null)
+            work.push({ expression: parameter.defaultValue, loop: null, inside: true });
         continue;
       case "whileStatement": {
         const node = loopNode(statement.body, loop);

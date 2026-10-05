@@ -410,6 +410,30 @@ test("a parameter default shows its button only when the argument is left out", 
   );
 });
 
+test("a block a parameter default shows may change variables when the script waits", () => {
+  const source = [
+    "let value: number | string = 1",
+    'function make(button = showPermanentButton "Text" { value = "text" }) {',
+    "    return button",
+    "}",
+    "let made = make()",
+    "if value is number {",
+    "    wait 1",
+    '    say "${value + 1}"',
+    "}",
+    "exit",
+  ].join("\n");
+  assert.deepEqual(errorCodes(source), ["TSV043"]);
+});
+
+test("a button label may be quoted inside interpolation", () => {
+  const plan = compileValidPlan('say "count ${[showPermanentButton "Hint" {}].length}"\nexit');
+  const said = run(plan, createImmediatePacingRuntimeSnapshot(plan)).events.flatMap((event) =>
+    event.kind === "say" ? [event.text] : [],
+  );
+  assert.deepEqual(said, ["count 1"]);
+});
+
 test("deeply nested button text is checked without exhausting the native stack", () => {
   const depth = 2_000;
   const source = `let b = ${"showPermanentButton (".repeat(depth)}"x"${") {\n}".repeat(depth)}\nexit`;
@@ -418,11 +442,17 @@ test("deeply nested button text is checked without exhausting the native stack",
 });
 
 test("mixing permanent buttons with other values suggests no unwritable type", () => {
-  const messages = compileSource(
-    'let b = showPermanentButton "x" {\n}\nlet values = [b, 1]\nexit',
-  ).diagnostics.map((diagnostic) => diagnostic.message);
-  assert.equal(messages.length, 1);
-  assert.match(messages[0]!, /keep permanent buttons apart/u);
+  const button = 'let b = showPermanentButton "x" {\n}\n';
+  for (const source of [
+    `${button}let values = [b, 1]\nexit`,
+    `${button}let answer = choose { value: b, text: "B" }, { value: 1, text: "One" }\nexit`,
+  ]) {
+    const mixes = compileSource(source)
+      .diagnostics.filter((diagnostic) => diagnostic.code === "TSV044")
+      .map((diagnostic) => diagnostic.message);
+    assert.equal(mixes.length, 1, source);
+    assert.match(mixes[0]!, /keep permanent buttons apart/u, source);
+  }
 });
 
 test("restore rejects button state the runtime cannot produce", () => {
