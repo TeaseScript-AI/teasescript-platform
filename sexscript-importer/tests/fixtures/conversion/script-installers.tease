@@ -20,7 +20,7 @@ function sexscriptLegacyMaskUrl(url) {
 }
 // A download into the package cannot happen here: a system notice shows the request, with secret values hidden, and
 // the function answers as when the download failed.
-// NOTE SX_ONLINE_REQUEST line 3: This function downloaded a web address into a file, which a package cannot do; a system notice shows the request, with secret values hidden, and the function returns as when the download failed.
+// NOTE SX_ONLINE_REQUEST line 3: This function downloaded a web address into a file, which a package cannot do; a system notice shows the request, with secret values hidden, and the function returns as when the request failed.
 function downloadFile(link, file) {
   say as system "Online feature not available here. The original would have requested: GET ${sexscriptLegacyMaskUrl(link)}"
   return false

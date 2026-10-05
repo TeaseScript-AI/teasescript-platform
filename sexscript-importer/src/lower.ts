@@ -3530,7 +3530,7 @@ function lowerClosureDeclaration(
     const composed =
       composedImage(body, context) ??
       pixelCheck(body, closure, context) ??
-      downloadFunction(body, closure, context);
+      onlineFunction(body, closure, context);
     const lowered =
       composed ??
       lowerBlock(
@@ -3587,19 +3587,17 @@ function pixelCheck(body: AstNode, node: AstNode, context: LowerContext): IrStat
 }
 
 /**
- * A function that downloads a web address into a file, reading `new URL(address).openStream()` into a
- * FileOutputStream: a package cannot reach the service (owner decision), so the function shows the request as a system
- * notice, with secret values hidden, and returns false, or null, as when the download failed. Null for any other body.
+ * A function that makes a request to an online service, `new URL(address)` with `openStream()` or `openConnection()`,
+ * such as a download into a file or a chat with a language model: a package cannot reach the service (owner decision),
+ * so the function shows the request as a system notice, with its method and secret values hidden, and returns false,
+ * or null, as when the request failed. Null for any other body.
  */
-function downloadFunction(
-  body: AstNode,
-  node: AstNode,
-  context: LowerContext,
-): IrStatement[] | null {
+function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): IrStatement[] | null {
   let address: AstNode | null = null;
   let opens = false;
   let writes = false;
   let answers = true;
+  let method = "GET";
   walkAst(body, (child) => {
     if (
       child.kind === "constructorCall" &&
@@ -3607,7 +3605,13 @@ function downloadFunction(
       address === null
     )
       address = nodeArray(asNode(child.arguments)?.items)[0] ?? null;
-    if (child.kind === "methodCall" && constantString(child.method) === "openStream") opens = true;
+    const called = child.kind === "methodCall" ? constantString(child.method) : null;
+    if (called === "openStream" || called === "openConnection") opens = true;
+    const requested =
+      called === "setRequestMethod"
+        ? constantString(nodeArray(asNode(child.arguments)?.items)[0])
+        : null;
+    if (requested !== null) method = requested.toUpperCase();
     if (
       child.kind === "constructorCall" &&
       ["FileOutputStream", "java.io.FileOutputStream"].includes(String(child.type))
@@ -3618,14 +3622,14 @@ function downloadFunction(
       if (typeof value !== "boolean") answers = false;
     }
   });
-  if (address === null || !opens || !writes) return null;
+  if (address === null || !opens) return null;
   const url = lowerExpression(address, context);
   if (url === null) return null;
   addDiagnostic(
     context,
     "SX_ONLINE_REQUEST",
     "warning",
-    "This function downloaded a web address into a file, which a package cannot do; a system notice shows the request, with secret values hidden, and the function returns as when the download failed.",
+    `This function ${writes ? "downloaded a web address into a file" : "made a request to an online service"}, which a package cannot do; a system notice shows the request, with secret values hidden, and the function returns as when the request failed.`,
     node.span,
   );
   const shown =
@@ -3635,7 +3639,9 @@ function downloadFunction(
   return [
     systemSay(
       templateOrLiteral([
-        { text: "Online feature not available here. The original would have requested: GET " },
+        {
+          text: `Online feature not available here. The original would have requested: ${method} `,
+        },
         shown,
       ]),
       node.span,

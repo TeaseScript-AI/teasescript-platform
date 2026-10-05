@@ -32,4 +32,11 @@ if answer == null {
 say as system "Online feature not available here. The original would have requested: GET http://example.org/api?token=…&page=1"
 let page = null
 say "Page ${page}"
+// A function that talks to an online service, such as a language model, shows its request and fails as offline.
+// NOTE SX_ONLINE_REQUEST line 10: This function made a request to an online service, which a package cannot do; a system notice shows the request, with secret values hidden, and the function returns as when the request failed.
+function ask(prompt) {
+  say as system "Online feature not available here. The original would have requested: POST http://localhost:1234/v1/chat/completions"
+  return null
+}
+say "Reply: ${ask("Hello")}"
 exit
