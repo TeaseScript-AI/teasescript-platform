@@ -49,9 +49,9 @@ HOST=0.0.0.0 PORT=4173 PLAYGROUND_TLS_NAMES=agents.home.arpa npm run playground:
 ```
 
 The certificate covers `localhost`, this machine's host name, and the comma-separated `PLAYGROUND_TLS_NAMES`. It is made
-once with the system's `openssl` and kept in `.playground-tls/` (ignored by Git), and made again when those names
-change. The browser warns about it once; accept the warning to continue. It proves nothing about the server and is for
-development only.
+with the system's `openssl` and kept in `.playground-tls/` (ignored by Git), and made again when those names change or
+it is about to expire. The browser warns about a new certificate once; accept the warning to continue. It proves nothing
+about the server and is for development only.
 
 The page offers fixed repository examples for core behavior, control flow, active-loop checkpoints, and functions. Saved checkpoints are namespaced by example and checkpoint format version.
 
