@@ -50,3 +50,12 @@ test("layout tags are dropped and reported, and interpolated values keep their p
   assert.equal(result.dropped, true);
   assert.deepEqual(result.parts, [{ text: "Hello **" }, { value }, { text: "**" }]);
 });
+
+test("a text fragment keeps its surrounding whitespace, apart from what a tag at its start introduced", () => {
+  const fragment = (value: string): string =>
+    legacyHtmlToMarkup(text(value), { fragment: true })
+      .parts.map((part) => ("text" in part ? part.text : "${…}"))
+      .join("");
+  assert.equal(fragment("<h1 style='font-size:140%;'>Title</h1>\n\n"), "# Title\n\n");
+  assert.equal(fragment(" and <b>more</b> "), " and **more** ");
+});

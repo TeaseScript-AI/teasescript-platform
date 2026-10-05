@@ -43,7 +43,14 @@ const SPANS: Readonly<Record<string, string>> = {
 const HTML_TAG = /<\/?([a-z][a-z0-9]*)\b[^<>]*>/giu;
 const ENTITY = /&(?:#(\d{1,6});?|#x([0-9a-f]{1,6});?|(nbsp|quot|amp|lt|gt|apos);?)/giu;
 
-export function legacyHtmlToMarkup(parts: readonly TextPart[]): MarkupResult {
+/**
+ * `fragment` is for text that may become part of a longer text, such as a title that the script puts before a
+ * message: it keeps its own surrounding whitespace, and only drops whitespace that a tag at its start introduced.
+ */
+export function legacyHtmlToMarkup(
+  parts: readonly TextPart[],
+  options: { fragment?: boolean } = {},
+): MarkupResult {
   const values = parts.flatMap((part) => ("value" in part ? [part.value] : []));
   const source = parts.map((part) => ("value" in part ? VALUE : part.text)).join("");
   HTML_TAG.lastIndex = 0;
@@ -94,8 +101,13 @@ export function legacyHtmlToMarkup(parts: readonly TextPart[]): MarkupResult {
   );
   text = settleSpans(text)
     .replace(/[ \t]+\n/gu, "\n")
-    .replace(/\n{3,}/gu, "\n\n")
-    .replace(/^\s+|\s+$/gu, "");
+    .replace(/\n{3,}/gu, "\n\n");
+  text =
+    options.fragment !== true
+      ? text.replace(/^\s+|\s+$/gu, "")
+      : /^\s/u.test(source)
+        ? text
+        : text.replace(/^\s+/u, "");
   // Values return in order where their markers stand.
   const result: TextPart[] = [];
   let next = 0;

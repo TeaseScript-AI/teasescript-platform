@@ -3,4 +3,10 @@ let count = 3
 say "Hello ${name}, you have ${count + 1} tasks."
 say "Literal \${not interpolated} and \"quotes\""
 say "Path C:\\temp\tTab"
+// Text with HTML that a variable keeps or a function receives becomes markup where it is written.
+let rulesTitle = "# Rules\n\n"
+function announce(message) {
+  say "${rulesTitle}${message}"
+}
+announce("You may **not** touch")
 exit

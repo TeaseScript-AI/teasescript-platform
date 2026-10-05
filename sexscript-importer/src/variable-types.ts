@@ -1625,7 +1625,7 @@ function withIntegerIndexes<T extends IrStatement>(
 }
 
 /** A copy of a statement with `map` applied to each expression it evaluates itself (see ownExpressions). */
-function mapOwnExpressions<T extends IrStatement>(
+export function mapOwnExpressions<T extends IrStatement>(
   statement: T,
   map: (value: IrExpression) => IrExpression,
 ): T {
@@ -1694,7 +1694,7 @@ function mapOwnExpressions<T extends IrStatement>(
 }
 
 /** A copy of an expression with `map` applied to each direct child expression. */
-function mapChildren(
+export function mapChildren(
   value: IrExpression,
   map: (child: IrExpression) => IrExpression,
 ): IrExpression {

@@ -35,7 +35,13 @@ import {
   type PackageResources,
 } from "./java-data.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
-import { enforceVariableTypes, functionResultTypes, type TeaseType } from "./variable-types.ts";
+import {
+  enforceVariableTypes,
+  functionResultTypes,
+  mapChildren,
+  mapOwnExpressions,
+  type TeaseType,
+} from "./variable-types.ts";
 import { pathTag } from "./image-tags.ts";
 import { legacyHtmlToMarkup, type TextPart } from "./markup.ts";
 import { javaReplacementText, parseRegexSubset } from "./regex-subset.ts";
@@ -1088,6 +1094,8 @@ export function lowerParsedFile(
     mixin === null && !terminates(lowered)
       ? [...lowered, { kind: "exit" as const, span: null }]
       : lowered;
+  let stripsTags = false;
+  if (body !== null) walkAst(body, (node) => (stripsTags ||= regexWorkaround(node) === "tags"));
   const typedStatements = withLegacyMarkup(
     withEnforcedTypes(
       [
@@ -1098,6 +1106,7 @@ export function lowerParsedFile(
       context,
     ),
     context,
+    stripsTags,
   );
   const statements = [
     ...helperStatements(context.syntheticHelpers),
@@ -1131,26 +1140,43 @@ export function lowerParsedFile(
 
 /**
  * Legacy show() rendered HTML, which `say` text keeps as message markup (markup.ts); layout tags that markup cannot
- * express are dropped, with one note for the file.
+ * express are dropped, with one note for the file. Other text with HTML tags, such as a message kept in a variable or
+ * handed to a function that shows it later, is converted too; its entities alone do not count, since text such as a
+ * link may hold an ampersand. A script that removes tags from its text itself (`stripsTags`) keeps such text as written.
  */
-function withLegacyMarkup(statements: IrStatement[], context: LowerContext): IrStatement[] {
+function withLegacyMarkup(
+  statements: IrStatement[],
+  context: LowerContext,
+  stripsTags = false,
+): IrStatement[] {
   let dropped = 0;
+  const markup = (value: IrExpression, any: boolean): IrExpression => {
+    const parts: TextPart[] | null =
+      value.kind === "literal" && typeof value.value === "string"
+        ? [{ text: value.value }]
+        : value.kind === "template"
+          ? value.parts
+          : null;
+    if (parts === null) return value;
+    if (
+      !any &&
+      (stripsTags || !parts.some((part) => "text" in part && SHOWN_HTML_TAG.test(part.text)))
+    )
+      return value;
+    const result = legacyHtmlToMarkup(parts, { fragment: !any });
+    if (!result.changed) return value;
+    if (result.dropped) dropped += 1;
+    return templateOrLiteral(result.parts);
+  };
+  // Every text of a statement, inner values first; a say's own text also has its entities decoded.
+  const deep = (value: IrExpression): IrExpression => markup(mapChildren(value, deep), false);
   const convert = (items: IrStatement[]): IrStatement[] =>
     items.map((statement) => {
       if (statement.kind === "function") return { ...statement, body: convert(statement.body) };
-      if (statement.kind !== "say") return withNestedStatements(statement, convert);
-      const value = statement.value;
-      const parts: TextPart[] | null =
-        value.kind === "literal" && typeof value.value === "string"
-          ? [{ text: value.value }]
-          : value.kind === "template"
-            ? value.parts
-            : null;
-      if (parts === null) return statement;
-      const result = legacyHtmlToMarkup(parts);
-      if (!result.changed) return statement;
-      if (result.dropped) dropped += 1;
-      return { ...statement, value: templateOrLiteral(result.parts) };
+      const nested = withNestedStatements(statement, convert);
+      if (nested.kind === "say")
+        return { ...nested, value: markup(mapChildren(nested.value, deep), true) };
+      return mapOwnExpressions(nested, deep);
     });
   const converted = convert(statements);
   if (dropped === 0) return converted;
@@ -1424,6 +1450,10 @@ function withClosureMethods(helperClass: AstNode): boolean {
   );
   return true;
 }
+
+/** An HTML tag that legacy show() rendered and message markup expresses or drops (markup.ts). */
+const SHOWN_HTML_TAG =
+  /<\/?(?:b|strong|i|em|u|s|strike|del|br|p|div|font|span|h[1-6]|li|ul|ol|center|textformat)\b[^<>]*>/iu;
 
 /** What the generated helpers return, computed once. */
 let helperResults: ReadonlyMap<string, TeaseType> | undefined;
