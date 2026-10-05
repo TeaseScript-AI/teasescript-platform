@@ -248,10 +248,9 @@ test("nested compact choices report missing options once per affected invocation
   );
 });
 
-// V30 accepts parenthesized `showButton` and `choose` forms (accepted-syntaxes-v30.md sections 20-21), and ADR 0018
-// leaves their mapping to later work. The spelling must not be parsed as a compact form whose payload is the
-// parenthesized text, grouped or unwrapped, which would silently decide that mapping. The basic asks have their own
-// parenthesized form (tests/parenthesized-asks.test.ts).
+// Parenthesized button and choice spellings remain outside the implemented forms and must not silently receive compact
+// semantics: a compact form whose payload is the parenthesized text, grouped or unwrapped, would decide their mapping.
+// The basic asks have their own parenthesized form (tests/parenthesized-asks.test.ts).
 test("a parenthesized button or choice spelling is never silently given compact semantics", () => {
   // The statement and expression commands each have one parenthesis check before and after `as speaker`.
   for (const source of [

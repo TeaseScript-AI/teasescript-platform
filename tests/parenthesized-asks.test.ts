@@ -86,6 +86,8 @@ test("each parenthesized basic ask completes after a checkpoint restore like its
       const resumed = answer(restored, text);
       assert.equal(resumed.snapshot.status, "halted", expression);
       assert.deepEqual(resumed.snapshot, direct.snapshot, expression);
+      assert.deepEqual(resumed.events, direct.events, expression);
+      assert.deepEqual(resumed.transcriptEntries, direct.transcriptEntries, expression);
       return resumed.transcriptEntries.map((entry) => entry.text);
     });
     assert.deepEqual(transcripts[0], transcripts[1], command);
@@ -148,14 +150,14 @@ test("a parenthesized ask records its command, speaker, arguments, and closing p
 
 test("a parenthesized ask takes one hint and the option 'default:', and names what is wrong", () => {
   const errors = (source: string) =>
-    compileSource(`${PRELUDE}${source}\nsay question()\nlet = 1\nexit`)
+    compileSource(`${PRELUDE}${source}\nlet = 1\nsay question()\nexit`)
       .diagnostics.filter((diagnostic) => diagnostic.severity === "error")
       .map(
         (item) =>
           `${item.code} ${item.span.start.line - 4}:${item.span.start.column} ${item.message}`,
       );
-  // Each case ends with the error of a later statement, which shows that parsing recovered.
-  const next = "TSP013 2:4 Expected a variable identifier after 'let'.";
+  // Each case ends with the error of the next statement, which shows that parsing recovered there.
+  const next = "TSP013 1:4 Expected a variable identifier after 'let'.";
   for (const [source, error] of [
     [
       'let v = askText("a", "b")',
