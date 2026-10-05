@@ -2383,10 +2383,11 @@ playAudio async repeat "music/beat.mp3" {
 | positioned or timed top-level `showImage(...)` and `hideImage(ref)` | `showImage <file>` and `hideImage` for the Stage image |
 
 ### Future layered scene
-**Status:** Accepted V30 direction; not implemented. Background and overlay layers, their coordinate space, movement,
-blur, drawings, edited copies, and transitions remain separate from the Stage image and media foundation above, which
-supersedes the old positioned and timed top-level image. Points affected by the Stage image model must be reconciled
-before the layered scene is implemented.
+**Status:** Accepted V30 direction, extended with [pixels and image size](#pixels-and-image-size) (Owner decision on
+[#617](https://github.com/TeaseScript-AI/teasescript-platform/issues/617)); not implemented. Background and overlay
+layers, their coordinate space, movement, blur, drawings, edited copies, and transitions remain separate from the Stage
+image and media foundation above, which supersedes the old positioned and timed top-level image. Points affected by the
+Stage image model must be reconciled before the layered scene is implemented.
 
 ```text
 showBackgroundImage backgroundFile
@@ -2431,6 +2432,37 @@ Rules:
 - Content outside the selected reference space is clipped.
 - Image aspect ratio is preserved unless stretching is requested explicitly.
 - Background fit accepts `"contain"`, `"cover"`, or `"stretch"`. The default is `"contain"`; cropping occurs only when `"cover"` is selected.
+
+#### Pixels and image size
+
+`unit: "px"` gives `x`, `y`, `width`, and `height` in pixels instead of the default percentages. A pixel is a pixel of
+the reference space's intrinsic media canvas: with background media, the background's canvas, which is the default
+scene coordinate space above. The author selects pixels explicitly, so pixels and percentages are never mixed up by
+accident.
+
+`imageSize(image)` returns the width and height of an image in pixels, as an object with `width` and `height`. The size
+of a package image comes from data computed when the package is built, so the engine stays deterministic; the size of a
+photo from `takePhoto()` is recorded when it is taken.
+
+A scene composed in pixels, such as a row of cards:
+
+```text
+let card = imageSize(cardFile)
+let x = 0
+repeat 5 {
+    showOverlayImage(
+        image: cardFile,
+        relativeTo: "background",
+        unit: "px",
+        x: x,
+        y: 40
+    )
+    x += card.width
+}
+```
+
+Like the rest of the layered scene, pixels and `imageSize` are not implemented. Their open points, such as pixels with
+`relativeTo: "viewport"`, are listed under [Remaining open decisions](#remaining-open-decisions).
 
 #### Multiple overlays and movement
 
@@ -4567,6 +4599,7 @@ Resolved in this revision:
 - unit literals accept documented abbreviations and full names with a required separating space;
 - visible measurements use account-preferred unit systems, automatic readable scaling, an account decimal preference defaulting to two places, and per-call `format(unit: ..., decimals: ...)` overrides;
 - `relativeTo: "background" | "viewport"`, background `fit: "contain" | "cover" | "stretch"`, and `"contain"` as the default are accepted;
+- layered-scene positions and sizes may use `unit: "px"`, pixels of the background's intrinsic media canvas, and `imageSize(image)` returns an image's width and height in pixels (accepted future direction; not implemented; see [§22](#pixels-and-image-size));
 - overlays use `hideOverlay`, asynchronous `moveOverlay` and `animateOverlay`, optional blocking behavior, and keyframe hold durations;
 - `showImage <file>` and `hideImage` control the persistent Stage image; `showCamera [stage]` and `hideCamera` show and hide the camera's view; `playAudio` and `playVideo` are blocking by default, `async` returns a handle, and cues use `at`, `beforeEnd`, and `finish` ([§22](#22-stage-image-audio-and-video));
 - blur uses `showBlur` and `hideBlur` as a separate non-destructive visual layer;
@@ -4596,6 +4629,10 @@ Other open API and runtime decisions:
 - define the account field names for unit system and decimal precision;
 - decide whether an explicit unit-conversion method such as `measurement.to("km")` is needed in addition to presentation-only `format(...)`;
 - define background alignment/position values when `contain` or `cover` leaves or crops edges;
+- reconcile the Stage image with the layered scene: how `showImage` and the background and overlay layers coexist;
+- decide whether `unit: "px"` is allowed only relative to background media, making `relativeTo: "viewport"` with `unit: "px"` an error because the viewport has no stable pixel size;
+- decide how `imageSize` sizes an image other than a package image or a photo from `takePhoto()`, such as a file from `chooseFile()`;
+- decide which layered-scene features the first implementation includes (backgrounds, overlays, `hideOverlay`, positioning) and which follow (movement, animation, blur, drawings, transitions);
 - choose exact anchor values and decide whether hidden overlay references have a dedicated redisplay command;
 - finalize drawing style parameter names, including fill, stroke, stroke width, opacity, font, text size, color, and alignment;
 - define the edited-image export API and how an edited local reference links back to its original;
