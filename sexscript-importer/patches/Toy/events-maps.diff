@@ -1,6 +1,6 @@
 --- a/scripts/toy__sha256_0d24d6c78bca.groovy
 +++ b/scripts/toy__sha256_0d24d6c78bca.groovy
-@@ -216,32 +216,32 @@
+@@ -217,32 +217,32 @@
  		Event event;
  	}
  
@@ -46,7 +46,7 @@
  			saveEvents(events);
  			return true;
  		}
-@@ -271,7 +271,7 @@
+@@ -272,7 +272,7 @@
  	}
  
  	void execEvents(boolean rt) {
@@ -55,7 +55,7 @@
  			def f = namedEvents[e.event.func];
  			removeEvent(e.name);
  			if (f) {
-@@ -527,7 +527,7 @@
+@@ -529,7 +529,7 @@
  		while (true) {
  			def away = getAway();
  			def e = nextEvent(loadEvents());
@@ -64,7 +64,7 @@
  
  			if (away) {
  				def note = loadString("toy.note");
-@@ -543,7 +543,7 @@
+@@ -545,7 +545,7 @@
  				else {
  					show("${dommeTitle()} ${dommeName()} is away ($away)...");
  				}
@@ -75,7 +75,7 @@
  			}
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -213,32 +213,32 @@
+@@ -214,32 +214,32 @@
  		Event event;
  	}
  
@@ -121,7 +121,7 @@
  			saveEvents(events);
  			return true;
  		}
-@@ -268,7 +268,7 @@
+@@ -269,7 +269,7 @@
  	}
  
  	void execEvents(boolean rt) {
@@ -130,7 +130,7 @@
  			def f = namedEvents[e.event.func];
  			removeEvent(e.name);
  			if (f) {
-@@ -524,7 +524,7 @@
+@@ -526,7 +526,7 @@
  		while (true) {
  			def away = getAway();
  			def e = nextEvent(loadEvents());
@@ -139,7 +139,7 @@
  
  			if (away) {
  				def note = loadString("toy.note");
-@@ -540,7 +540,7 @@
+@@ -542,7 +542,7 @@
  				else {
  					show("${dommeTitle()} ${dommeName()} is away ($away)...");
  				}
@@ -150,7 +150,7 @@
  			}
 --- a/scripts/toy__sha256_bf0bc1679772.groovy
 +++ b/scripts/toy__sha256_bf0bc1679772.groovy
-@@ -168,32 +168,32 @@
+@@ -169,32 +169,32 @@
  		Event event;
  	}
  
@@ -196,7 +196,7 @@
  			saveEvents(events);
  			return true;
  		}
-@@ -223,7 +223,7 @@
+@@ -224,7 +224,7 @@
  	}
  
  	void execEvents(boolean rt) {
@@ -205,7 +205,7 @@
  			def f = namedEvents[e.event.func];
  			removeEvent(e.name);
  			if (f) {
-@@ -375,7 +375,7 @@
+@@ -376,7 +376,7 @@
  		while (true) {
  			def away = getAway();
  			def e = nextEvent(loadEvents());
@@ -214,7 +214,7 @@
  
  			if (away) {
  				def note = loadString("toy.note");
-@@ -391,7 +391,7 @@
+@@ -392,7 +392,7 @@
  				else {
  					show("${dommeTitle()} ${dommeName()} is away ($away)...");
  				}

@@ -5,7 +5,7 @@
  		}
  		snapFinger();
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  				["Here we go...", "Then let's start!", "Get ready!"]]);
  		pause(3);
  		def lines = prepareLines();
@@ -14,7 +14,7 @@
  			line = compose(lines[linenr]).capitalize();
  			lastline = linenr;
 -			cpm = writeLine([nDRESSED, [TITS,PUSSY,ASS]], line);
-+			cpm = writeLine([[nDRESSED], [TITS,PUSSY,ASS]], line);
++			cpm = writeLine([nDRESSED, "$TITS|$PUSSY|$ASS"], line);
  			if (Math.abs(cpm) > cpmGoal*2.5) {
  				present(null, [["No way", "How comes"], ["you can"], ["suddenly", ""], 
  						["type", "write"], ["that fast!?"], ["Stop cheating", "Don't try to cheat"], 
@@ -25,7 +25,7 @@
  		}
  		snapFinger();
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  				["Here we go...", "Then let's start!", "Get ready!"]]);
  		pause(3);
  		def lines = prepareLines();
@@ -34,7 +34,7 @@
  			line = compose(lines[linenr]).capitalize();
  			lastline = linenr;
 -			cpm = writeLine([nDRESSED, [TITS,PUSSY,ASS]], line);
-+			cpm = writeLine([[nDRESSED], [TITS,PUSSY,ASS]], line);
++			cpm = writeLine([nDRESSED, "$TITS|$PUSSY|$ASS"], line);
  			if (Math.abs(cpm) > cpmGoal*2.5) {
  				present(null, [["No way", "How comes"], ["you can"], ["suddenly", ""], 
  						["type", "write"], ["that fast!?"], ["Stop cheating", "Don't try to cheat"], 
@@ -45,7 +45,7 @@
  				["Get stroking!", "Jerk it!", "Stroke it for me!"]]);
  		if (mightCum(5 + getRandom(5))) return true;
 -		present([nDRESSED, [TITS,PUSSY,ASS]], []);
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], []);
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], []);
  		def mayCum = can(CUM) & !stateIs(CHASTE_TIMER) & sessionParams.askedCum;
  		def numbers = "";
  		def nmax = 10
@@ -54,7 +54,7 @@
  			}
  		}
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  				["Now! Cum", "Cum! Cum"],
  				["for me", "for your ${dommeTitle()}", ""],
  				["you little slut!", "my lucky toy!", "you dirty boy!"]]);
@@ -63,7 +63,7 @@
  		def soft = getRandom(8) ? true : teaseSoften();
  		if (soft) if (!harden([[TITS,PUSSY,ASS]])) return false;
 -		return edge(6, [nDRESSED, [TITS,PUSSY,ASS]], true, probCum, probRuin);
-+		return edge(6, [[nDRESSED], [TITS,PUSSY,ASS]], true, probCum, probRuin);
++		return edge(6, [nDRESSED, "$TITS|$PUSSY|$ASS"], true, probCum, probRuin);
  	};
  
  	toy.metaClass.cumChanceWindow { probCum=20, probRuin=33 ->
@@ -72,7 +72,7 @@
  			return cumChanceDenied();
  		}
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  				["Now! Cum", "Now! Try to cum", "Cum! Cum"],
  				["for me", "for your ${dommeTitle()}", ""],
  				["you little slut!", "my lucky toy!", "you dirty boy!"]]);
@@ -81,7 +81,7 @@
  		}
  		for (def n = 3 + getRandom(6); n >= 0; n--) {
 -			present([nDRESSED, [TITS,PUSSY,ASS]], [
-+			present([[nDRESSED], [TITS,PUSSY,ASS]], [
++			present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  					["Now! Cum", "Now! Try to cum", "Cum! Cum"],
  					["for me", "for your ${dommeTitle()}", ""],
  					["you little slut!", "my lucky toy!", "you dirty boy!"]]);
@@ -90,7 +90,7 @@
  			}
  			if (n > 0) {
 -				present([nDRESSED, [TITS,PUSSY,ASS]], [
-+				present([[nDRESSED], [TITS,PUSSY,ASS]], [
++				present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  						["Stop!", "Not now!", "Wait!"],
  						["Hands off!", "Hands by your side."]]);
  				w = (w - 2) + getRandom(8);
@@ -101,7 +101,7 @@
  				["Get stroking!", "Jerk it!", "Stroke it for me!"]]);
  		if (mightCum(5 + getRandom(5))) return true;
 -		present([nDRESSED, [TITS,PUSSY,ASS]], []);
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], []);
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], []);
  		def mayCum = can(CUM) & !stateIs(CHASTE_TIMER) & sessionParams.askedCum;
  		def numbers = "";
  		def nmax = 10
@@ -110,7 +110,7 @@
  			}
  		}
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  				["Now! Cum", "Cum! Cum"],
  				["for me", "for your ${dommeTitle()}", ""],
  				["you little slut!", "my lucky toy!", "you dirty boy!"]]);
@@ -119,7 +119,7 @@
  		def soft = getRandom(8) ? true : teaseSoften();
  		if (soft) if (!harden([[TITS,PUSSY,ASS]])) return false;
 -		return edge(6, [nDRESSED, [TITS,PUSSY,ASS]], true, probCum, probRuin);
-+		return edge(6, [[nDRESSED], [TITS,PUSSY,ASS]], true, probCum, probRuin);
++		return edge(6, [nDRESSED, "$TITS|$PUSSY|$ASS"], true, probCum, probRuin);
  	};
  
  	toy.metaClass.cumChanceWindow { probCum=20, probRuin=33 ->
@@ -128,7 +128,7 @@
  			return cumChanceDenied();
  		}
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  				["Now! Cum", "Now! Try to cum", "Cum! Cum"],
  				["for me", "for your ${dommeTitle()}", ""],
  				["you little slut!", "my lucky toy!", "you dirty boy!"]]);
@@ -137,7 +137,7 @@
  		}
  		for (def n = 3 + getRandom(6); n >= 0; n--) {
 -			present([nDRESSED, [TITS,PUSSY,ASS]], [
-+			present([[nDRESSED], [TITS,PUSSY,ASS]], [
++			present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  					["Now! Cum", "Now! Try to cum", "Cum! Cum"],
  					["for me", "for your ${dommeTitle()}", ""],
  					["you little slut!", "my lucky toy!", "you dirty boy!"]]);
@@ -146,7 +146,7 @@
  			}
  			if (n > 0) {
 -				present([nDRESSED, [TITS,PUSSY,ASS]], [
-+				present([[nDRESSED], [TITS,PUSSY,ASS]], [
++				present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  						["Stop!", "Not now!", "Wait!"],
  						["Hands off!", "Hands by your side."]]);
  				w = (w - 2) + getRandom(8);
@@ -157,42 +157,49 @@
  		def soft = getRandom(8) ? true : teaseSoften();
  		if (soft) if (!harden([[TITS,PUSSY,ASS]])) return false;
 -		strokes(15, [nDRESSED, [TITS,PUSSY,ASS]]);
-+		strokes(15, [[nDRESSED], [TITS,PUSSY,ASS]]);
++		strokes(15, [nDRESSED, "$TITS|$PUSSY|$ASS"]);
  		return true;
  	};
  
-@@ -306,7 +306,7 @@
+@@ -306,34 +306,34 @@
  		preRelease();
  		def soft = getRandom(8) ? true : teaseSoften();
  		if (soft) if (!harden([[TITS,PUSSY,ASS]])) return false;
 -		edge(6, [nDRESSED, [TITS,PUSSY,ASS]]);
-+		edge(6, [[nDRESSED], [TITS,PUSSY,ASS]]);
++		edge(6, [nDRESSED, "$TITS|$PUSSY|$ASS"]);
  		return true;
  	};
  
-@@ -319,21 +319,21 @@
- 		present([[TITS,PUSSY,ASS]], [
+ 	toy.metaClass.intTease {
+ 		if (!can(EDGE)) return false;
+ 		(getRandom(2) + 2).times {
+-			speak(imageTagsComment(showImage([[TITS,PUSSY,ASS]])));
++			speak(imageTagsComment(showImage(["$TITS|$PUSSY|$ASS"])));
+ 			pause(getRandom(5) + 10);
+ 		};
+-		present([[TITS,PUSSY,ASS]], [
++		present(["$TITS|$PUSSY|$ASS"], [
  				["You look so desperate.", "Can't hold back any more?", "Am I driving you mad?"]]);
  		pause(getRandom(10) + 5);
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  				["How about I let you cum?", "Maybe I should let you cum.", "Do you want to cum for your ${dommeTitle()}?"],
  				["Would you like that?", "Let some of that frustration out?", "Would this make you happy?"]]);
  		pause(getRandom(10) + 5);
 -		askToCum([nDRESSED, [TITS,PUSSY,ASS]]);
-+		askToCum([[nDRESSED], [TITS,PUSSY,ASS]]);
++		askToCum([nDRESSED, "$TITS|$PUSSY|$ASS"]);
  		pause(3);
  		return true;
  	};
  	
  	toy.metaClass.intTeaseBalls {
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  				["Grab your balls and tap them", "Fondle your balls", "Massage your balls", "Grad your balls and trace a figer over them,", "Grab your balls and caress them"],
  				["ever so", ""], ["softly!", "gently!"]]);
  		pause(8 + getRandom(4));
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [["Keep going!", "Just like that!", "Ain't that nice?"]]);
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [["Keep going!", "Just like that!", "Ain't that nice?"]]);
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [["Keep going!", "Just like that!", "Ain't that nice?"]]);
  		pause(8 + getRandom(2));
  		return true;
  	};
@@ -201,16 +208,16 @@
  		def txt = ["Stroke the head of my cock with ${getRandom(2)?"one finger":"two fingers"}..."];
  		if (sessionToys[HARDON]) txt += ["Trace a finger along my cock, up and down... up and down...", "${getRandom(2)?"Rub":"Tap"} the head of my cock with one finger,"];
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [txt, ["ever so", ""], ["softly!", "gently!", "slowly!"]]);
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [txt, ["ever so", ""], ["softly!", "gently!", "slowly!"]]);
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [txt, ["ever so", ""], ["softly!", "gently!", "slowly!"]]);
  		pause(8 + getRandom(4));
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [["Keep going!", "Just like that!", "Ain't that nice?", "Do you want more of that?"]]);
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [["Keep going!", "Just like that!", "Ain't that nice?", "Do you want more of that?"]]);
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [["Keep going!", "Just like that!", "Ain't that nice?", "Do you want more of that?"]]);
  		pause(8 + getRandom(2));
  		return true;
  	};
  	
 -	toy.metaClass.teaseNipples { imgSpec=[nDRESSED, [TITS,PUSSY,ASS]] ->
-+	toy.metaClass.teaseNipples { imgSpec=[[nDRESSED], [TITS,PUSSY,ASS]] ->
++	toy.metaClass.teaseNipples { imgSpec=[nDRESSED, "$TITS|$PUSSY|$ASS"] ->
  		if (!stateIs(NAKED) && !stateIs(CLAMPED)) {
  			present(imgSpec, [["Let me see", "I want to see", "Show me"], ["those", "your"], ["nipples!"]]);
  			pause(7);
@@ -221,42 +228,49 @@
  		def soft = getRandom(8) ? true : teaseSoften();
  		if (soft) if (!harden([[TITS,PUSSY,ASS]])) return false;
 -		strokes(15, [nDRESSED, [TITS,PUSSY,ASS]]);
-+		strokes(15, [[nDRESSED], [TITS,PUSSY,ASS]]);
++		strokes(15, [nDRESSED, "$TITS|$PUSSY|$ASS"]);
  		return true;
  	};
  
-@@ -330,7 +330,7 @@
+@@ -330,34 +330,34 @@
  		preRelease();
  		def soft = getRandom(8) ? true : teaseSoften();
  		if (soft) if (!harden([[TITS,PUSSY,ASS]])) return false;
 -		edge(6, [nDRESSED, [TITS,PUSSY,ASS]]);
-+		edge(6, [[nDRESSED], [TITS,PUSSY,ASS]]);
++		edge(6, [nDRESSED, "$TITS|$PUSSY|$ASS"]);
  		return true;
  	};
  
-@@ -343,21 +343,21 @@
- 		present([[TITS,PUSSY,ASS]], [
+ 	toy.metaClass.intTease {
+ 		if (!can(EDGE)) return false;
+ 		(getRandom(2) + 2).times {
+-			speak(imageTagsComment(showImage([[TITS,PUSSY,ASS]])));
++			speak(imageTagsComment(showImage(["$TITS|$PUSSY|$ASS"])));
+ 			pause(getRandom(5) + 10);
+ 		};
+-		present([[TITS,PUSSY,ASS]], [
++		present(["$TITS|$PUSSY|$ASS"], [
  				["You look so desperate.", "Can't hold back any more?", "Am I driving you mad?"]]);
  		pause(getRandom(10) + 5);
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  				["How about I let you cum?", "Maybe I should let you cum.", "Do you want to cum for your ${dommeTitle()}?"],
  				["Would you like that?", "Let some of that frustration out?", "Would this make you happy?"]]);
  		pause(getRandom(10) + 5);
 -		askToCum([nDRESSED, [TITS,PUSSY,ASS]]);
-+		askToCum([[nDRESSED], [TITS,PUSSY,ASS]]);
++		askToCum([nDRESSED, "$TITS|$PUSSY|$ASS"]);
  		pause(3);
  		return true;
  	};
  	
  	toy.metaClass.intTeaseBalls {
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [
  				["Grab your balls and tap them", "Fondle your balls", "Massage your balls", "Grad your balls and trace a finger over them,", "Grab your balls and caress them"],
  				["ever so", ""], ["softly!", "gently!"]]);
  		pause(8 + getRandom(4));
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [["Keep going!", "Just like that!", "Ain't that nice?"]]);
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [["Keep going!", "Just like that!", "Ain't that nice?"]]);
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [["Keep going!", "Just like that!", "Ain't that nice?"]]);
  		pause(8 + getRandom(2));
  		return true;
  	};
@@ -265,16 +279,38 @@
  		def txt = ["Stroke the head of my cock with ${getRandom(2)?"one finger":"two fingers"}..."];
  		if (sessionToys[HARDON]) txt += ["Trace a finger along my cock, up and down... up and down...", "${getRandom(2)?"Rub":"Tap"} the head of my cock with one finger,"];
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [txt, ["ever so", ""], ["softly!", "gently!", "slowly!"]]);
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [txt, ["ever so", ""], ["softly!", "gently!", "slowly!"]]);
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [txt, ["ever so", ""], ["softly!", "gently!", "slowly!"]]);
  		pause(8 + getRandom(4));
 -		present([nDRESSED, [TITS,PUSSY,ASS]], [["Keep going!", "Just like that!", "Ain't that nice?", "Do you want more of that?"]]);
-+		present([[nDRESSED], [TITS,PUSSY,ASS]], [["Keep going!", "Just like that!", "Ain't that nice?", "Do you want more of that?"]]);
++		present([nDRESSED, "$TITS|$PUSSY|$ASS"], [["Keep going!", "Just like that!", "Ain't that nice?", "Do you want more of that?"]]);
  		pause(8 + getRandom(2));
  		return true;
  	};
  	
 -	toy.metaClass.teaseNipples { imgSpec=[nDRESSED, [TITS,PUSSY,ASS]] ->
-+	toy.metaClass.teaseNipples { imgSpec=[[nDRESSED], [TITS,PUSSY,ASS]] ->
++	toy.metaClass.teaseNipples { imgSpec=[nDRESSED, "$TITS|$PUSSY|$ASS"] ->
  		if (!stateIs(NAKED) && !stateIs(CLAMPED)) {
  			present(imgSpec, [["Let me see", "I want to see", "Show me"], ["those", "your"], ["nipples!"]]);
  			pause(7);
+--- a/scripts/toy/misc.groovy
++++ b/scripts/toy/misc.groovy
+@@ -1,7 +1,7 @@
+ { toy ->
+ 	toy.metaClass.intNothing {
+ 		(getRandom(3) + 2).times {
+-			speak(imageTagsComment(showImage([[TITS,PUSSY,ASS]])));
++			speak(imageTagsComment(showImage(["$TITS|$PUSSY|$ASS"])));
+ 			pause(getRandom(10) + 10);
+ 		};
+ 		return true;
+--- a/scripts/toy/misc__sha256_3dc96cd3e82c.groovy
++++ b/scripts/toy/misc__sha256_3dc96cd3e82c.groovy
+@@ -1,7 +1,7 @@
+ { toy ->
+ 	toy.metaClass.intNothing {
+ 		(getRandom(3) + 2).times {
+-			speak(imageTagsComment(showImage([[TITS,PUSSY,ASS]])));
++			speak(imageTagsComment(showImage(["$TITS|$PUSSY|$ASS"])));
+ 			pause(getRandom(10) + 10);
+ 		};
+ 		return true;

@@ -1,18 +1,19 @@
 --- a/scripts/toy__sha256_0d24d6c78bca.groovy
 +++ b/scripts/toy__sha256_0d24d6c78bca.groovy
-@@ -484,8 +484,9 @@
+@@ -484,8 +484,10 @@
  		requestables.remove(name);
  	};
  	final execRequestables = {reqs ->
 -		reqs.add([ lbl: "...nevermind", act: null ]);
 -		def req = getSelectedValue(null, reqs.collect { it.lbl });
 +		reqs = reqs + [[ lbl: "...nevermind", act: null ]];
-+		def labels = reqs.collect { it.lbl };
++		def labels = [];
++		for (r in reqs) labels.add(r.lbl);
 +		def req = getSelectedValue(null, labels);
  		def act = reqs[req].act;
  		if (act)
  			return act(reqs[req].arg);
-@@ -563,12 +564,16 @@
+@@ -563,12 +565,16 @@
  						execEvents(false);
  					}
  					else {
@@ -37,19 +38,20 @@
  						stateIs("DEBUG") ? show(DOMME) : speak(compose([["Yes", "What is it,", "What's up"], ["toy?"]]));
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -481,8 +481,9 @@
+@@ -481,8 +481,10 @@
  		requestables.remove(name);
  	};
  	final execRequestables = {reqs ->
 -		reqs.add([ lbl: "...nevermind", act: null ]);
 -		def req = getSelectedValue(null, reqs.collect { it.lbl });
 +		reqs = reqs + [[ lbl: "...nevermind", act: null ]];
-+		def labels = reqs.collect { it.lbl };
++		def labels = [];
++		for (r in reqs) labels.add(r.lbl);
 +		def req = getSelectedValue(null, labels);
  		def act = reqs[req].act;
  		if (act)
  			return act(reqs[req].arg);
-@@ -560,12 +561,16 @@
+@@ -560,12 +562,16 @@
  						execEvents(false);
  					}
  					else {

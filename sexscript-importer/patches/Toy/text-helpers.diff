@@ -1,6 +1,6 @@
 --- a/scripts/toy__sha256_0d24d6c78bca.groovy
 +++ b/scripts/toy__sha256_0d24d6c78bca.groovy
-@@ -314,15 +314,15 @@
+@@ -315,15 +315,15 @@
  	final gagText = { t, p ->
  		if (!stateIs(GAGGED)) return t.toString();
  		if (findStateToy(GAGGED) in [RINGGAG, BITGAG]) {
@@ -19,7 +19,7 @@
  		}
  		else return t.split(/\s+/)
  			.collect {
-@@ -338,9 +338,9 @@
+@@ -339,9 +339,9 @@
  	};
  	final compose = { texts ->
  		if (!texts || texts.isEmpty()) return null;
@@ -34,7 +34,7 @@
  		def cleantext = text.toString().replaceAll(/<[^>]*>/, "").trim();
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -311,15 +311,15 @@
+@@ -312,15 +312,15 @@
  	final gagText = { t, p ->
  		if (!stateIs(GAGGED)) return t.toString();
  		if (findStateToy(GAGGED) in [RINGGAG, BITGAG]) {
@@ -53,7 +53,7 @@
  		}
  		else return t.split(/\s+/)
  			.collect {
-@@ -335,9 +335,9 @@
+@@ -336,9 +336,9 @@
  	};
  	final compose = { texts ->
  		if (!texts || texts.isEmpty()) return null;

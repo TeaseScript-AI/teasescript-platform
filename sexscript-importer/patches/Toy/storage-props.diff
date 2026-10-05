@@ -1,6 +1,6 @@
 --- a/scripts/toy__sha256_0d24d6c78bca.groovy
 +++ b/scripts/toy__sha256_0d24d6c78bca.groovy
-@@ -124,8 +124,8 @@
+@@ -124,8 +124,9 @@
  		return Math.floorDiv(getTime() + localTimeOffset() - (4 * (int)HOUR), DAY)
  	}
  
@@ -8,10 +8,11 @@
 -		final T v = f.apply("toy.$i".toString());
 +	def getProp(String i, String f, d = null) {
 +		final v = load("toy.$i".toString());
++		if (v != null && f == loadS) return v.toString();
  		if (v == null) return d;
  		return v;
  	}
-@@ -140,9 +140,9 @@
+@@ -140,9 +141,9 @@
  	String dommeTitle() { getDommeProp("title", "Mistress") }
  	String dommeName() { getDommeProp("name", "") }
  	String dommeLocale() { getDommeProp("locale", "") }
@@ -26,7 +27,7 @@
  	boolean likes(String i) { loadBoolean("fetish.$i") == true }
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -121,8 +121,8 @@
+@@ -121,8 +121,9 @@
  		return Math.floorDiv(getTime() + localTimeOffset() - (4 * (int)HOUR), DAY)
  	}
  
@@ -34,10 +35,11 @@
 -		final T v = f.apply("toy.$i".toString());
 +	def getProp(String i, String f, d = null) {
 +		final v = load("toy.$i".toString());
++		if (v != null && f == loadS) return v.toString();
  		if (v == null) return d;
  		return v;
  	}
-@@ -137,9 +137,9 @@
+@@ -137,9 +138,9 @@
  	String dommeTitle() { getDommeProp("title", "Mistress") }
  	String dommeName() { getDommeProp("name", "") }
  	String dommeLocale() { getDommeProp("locale", "") }
@@ -52,7 +54,7 @@
  	boolean likes(String i) { loadBoolean("fetish.$i") == true }
 --- a/scripts/toy__sha256_bf0bc1679772.groovy
 +++ b/scripts/toy__sha256_bf0bc1679772.groovy
-@@ -103,8 +103,8 @@
+@@ -103,8 +103,9 @@
  		return Math.floorDiv(getTime() - localTimeOffset() - (4 * (int)HOUR), DAY)
  	}
  
@@ -60,10 +62,11 @@
 -		final T v = f.apply("toy.$i".toString());
 +	def getProp(String i, String f, d = null) {
 +		final v = load("toy.$i".toString());
++		if (v != null && f == loadS) return v.toString();
  		if (v == null) return d;
  		return v;
  	}
-@@ -118,9 +118,9 @@
+@@ -118,9 +119,9 @@
  
  	String dommeTitle() { getDommeProp("title", "Mistress") }
  	String dommeName() { getDommeProp("name", "") }

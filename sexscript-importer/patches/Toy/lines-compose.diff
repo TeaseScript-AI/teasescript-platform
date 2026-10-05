@@ -7,7 +7,7 @@
 -			line = compose(lines[linenr]).capitalize();
 +			line = compose(lines[linenr]) ?: "";
  			lastline = linenr;
- 			cpm = writeLine([[nDRESSED], [TITS,PUSSY,ASS]], line);
+ 			cpm = writeLine([nDRESSED, "$TITS|$PUSSY|$ASS"], line);
  			if (Math.abs(cpm) > cpmGoal*2.5) {
 --- a/scripts/toy/lines__sha256_03356e049086.groovy
 +++ b/scripts/toy/lines__sha256_03356e049086.groovy
@@ -18,5 +18,5 @@
 -			line = compose(lines[linenr]).capitalize();
 +			line = compose(lines[linenr]) ?: "";
  			lastline = linenr;
- 			cpm = writeLine([[nDRESSED], [TITS,PUSSY,ASS]], line);
+ 			cpm = writeLine([nDRESSED, "$TITS|$PUSSY|$ASS"], line);
  			if (Math.abs(cpm) > cpmGoal*2.5) {

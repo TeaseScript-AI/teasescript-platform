@@ -11,14 +11,14 @@
       "id": "menu-conditions",
       "layer": "source",
       "category": "b",
-      "reason": "The main menu filtered its option and request records by calling the closure stored in each record (it.cond()), which the converter cannot lower inside findAll, so the menu came out empty. Filter in plain loops that call each condition through a local variable, in the same order; the request menu builds its label list in its own statement and adds '...nevermind' to a new list instead of the caller's list, which the caller rebuilds before each menu anyway.",
+      "reason": "The main menu filtered its option and request records by calling the closure stored in each record (it.cond()), which the converter cannot lower inside findAll, so the menu came out empty. Filter in plain loops that call each condition through a local variable, in the same order; the request menu builds its label list in its own loop and adds '...nevermind' to a new list instead of the caller's list, which the caller rebuilds before each menu anyway.",
       "diff": "menu-conditions.diff"
     },
     {
       "id": "storage-props",
       "layer": "source",
       "category": "b",
-      "reason": "getProp read a storage key through a Java method reference (this.&loadBoolean and the like, called with f.apply), which the converter cannot lower, so every toy.* property read its default. Read the key with load(), which returns the stored value whatever its type, and keep loadB, loadI, and loadS as names so that no call site changes; each toy.* key is only ever saved with one type, so the typed filter of the legacy loaders made no difference.",
+      "reason": "getProp read a storage key through a Java method reference (this.&loadBoolean and the like, called with f.apply), which the converter cannot lower, so every toy.* property read its default. Read the key with load(), which returns the stored value whatever its type, and keep loadB, loadI, and loadS as names so that no call site changes; loadS returns the value as text, as loadString did (the version is saved as a number and read as text), while the boolean and integer keys are only ever saved with their own type.",
       "diff": "storage-props.diff"
     },
     {
@@ -88,7 +88,7 @@
       "id": "image-spec-lists",
       "layer": "source",
       "category": "b",
-      "reason": "The image spec [nDRESSED, [TITS,PUSSY,ASS]] mixed a text and a list in one list, which TeaseScript rejects. Wrap the text in a one-element list; multiplexTags turns every element into a list ([]+t) before it combines them, so the images chosen are the same.",
+      "reason": "An image spec lists tags that must all match, and an element that is itself a list ([TITS,PUSSY,ASS]) gives alternatives, so specs mixed texts and lists in one list, which TeaseScript rejects. Write each alternative group as one text \"tits|pussy|ass\", so that every spec is a list of texts; imagery-loops expands such a text into the same combinations that multiplexTags made from the nested list.",
       "diff": "image-spec-lists.diff"
     },
     {
@@ -174,6 +174,20 @@
       "category": "e",
       "reason": "perm(String i) passed it, which is not defined there, to can() instead of its parameter i; nothing calls perm, so pass i.",
       "diff": "perm-parameter.diff"
+    },
+    {
+      "id": "imagery-loops",
+      "layer": "source",
+      "category": "b",
+      "reason": "The image catalogue was built at runtime by listing images/toy and reading each set's tags file (new File, listFiles, readLines), and images were chosen with nested closures (matchTags, findAll, every, sum, flatten, intersect, Collections.shuffle), none of which converts, so IMAGEDATA stayed null and the first image or outfit choice stopped the script. Write the 31 tags files out as text (exactly as they are, two trailing spaces included) and build the same catalogue from them in loops; choose images and outfits with plain loops in the same order, with the same short-circuits and random draws; and pick a random matching tag for the comment instead of shuffling the intersection, the same choice. A spec alternative is now written \"a|b\" (see image-spec-lists), so every spec is a list of texts. A missing domme, set, or outfit gives null as the Groovy lookups did, also where the legacy random pick from an empty list gave null.",
+      "diff": "imagery-loops.diff"
+    },
+    {
+      "id": "menu-record-args",
+      "layer": "source",
+      "category": "b",
+      "reason": "The menus pass opts[opt].arg and reqs[req].arg to the chosen action, but only the \"May I...\" record has an arg; Groovy read the missing key as null, while a TeaseScript record has fixed properties, so choosing any other entry stopped the script. Give the option and request records arg: null, the value Groovy read.",
+      "diff": "menu-record-args.diff"
     }
   ]
 }

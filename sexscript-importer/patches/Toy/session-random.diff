@@ -1,6 +1,6 @@
 --- a/scripts/toy__sha256_0d24d6c78bca.groovy
 +++ b/scripts/toy__sha256_0d24d6c78bca.groovy
-@@ -189,8 +189,8 @@
+@@ -190,8 +190,8 @@
  	void pause(BigDecimal t) { wait(t); }
  	// Random integer number, constant for play session or debug
  	int getRandomSession(int n) {
@@ -13,7 +13,7 @@
  		if (p > 0) adjustChastePts((int)p);
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -186,8 +186,8 @@
+@@ -187,8 +187,8 @@
  	void pause(BigDecimal t) { wait(t); }
  	// Random integer number, constant for play session or debug
  	int getRandomSession(int n) {
