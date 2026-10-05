@@ -195,6 +195,62 @@
       "category": "b",
       "reason": "The calendar, the debug status, and the debug lounge line showed times with java.time (localTimeOf(s).format(soonFormatter), pattern \"EEEE 'at' h:mma\"), which does not convert, so they showed null; the calendar's collect over the plans did not convert either. Format the same text from the local time arithmetic of localTimeOffset (English day names and AM/PM, as the English pattern gave), and list the plans in a loop that skips a plan without an event, as before.",
       "diff": "soon-text.diff"
+    },
+    {
+      "id": "native-sessions",
+      "layer": "source",
+      "category": "b",
+      "reason": "sessionPlay ran the nine session plans of images/toy/domme.groovy by evaluating their require and number expression strings with Eval.me in a scope of closures, which does not convert, so no play session ever ran (owner decision 2026-10-05: native code instead of eval emulation). Each plan becomes a method of a new module toy/domme.groovy (the data file under images is no script the converter reads): its phases are plain calls in the same order, with the conditions as ifs and the numbers as arguments, so randRange draws happen where the expressions drew them; sessionChoices lists the sessions whose condition holds with their probabilities for the same weighted pick, and runSession calls a session by its theme. The runner in play.groovy keeps the rest: wildcards expand by tags in the same order with repetitions kept, the session dresses for the activities of all its phases first, take/repeat/sequence and the punishMultiply/punishApply uses run as before, and the session reads the punishment once at its start as the loaded toy.punishment was (0 when missing, where the legacy division failed). The DEBUG self-check of the expression strings is dropped, since no strings are left to check.",
+      "diff": "native-sessions.diff"
+    },
+    {
+      "id": "manual-cornertime",
+      "layer": "source",
+      "category": "b",
+      "reason": "Webcam corner time (owner decision 2026-10-05: manual instead): with the webcornertime toy, doCornertime wrote a base64 JSON task to a file for cornertime.github.io and parsed the base64 JSON report pasted back (File, decodeBase64, JsonSlurper, JsonOutput), none of which converts. Remove that path, its helpers, the configuration step that offered and tested it, and its 'Cornertime with webcam' choice, so that corner time always runs the manual flow the tease already had: the bell, the wait, and the player's own answer whether they moved; duration, punishment, and result are computed as before.",
+      "diff": "manual-cornertime.diff"
+    },
+    {
+      "id": "tease-nipples-spec",
+      "layer": "source",
+      "category": "b",
+      "reason": "preTeaseNipples passed its image spec as teaseNipples(imgSpec=[DRESSED, TEASE]), a Groovy assignment to a script binding variable used as the argument, which the converter drops and declares as a top-level variable that makes toy/tease.tease fail to compile (TSV052). Pass the spec directly; nothing else reads that binding variable.",
+      "diff": "tease-nipples-spec.diff"
+    },
+    {
+      "id": "play-event-first",
+      "layer": "source",
+      "category": "b",
+      "reason": "playEvent tested its first flag with first.asBoolean(), a method call the converter does not lower, so after every successful summon the player was neither told to wait nor ordered to kneel. Test the flag directly, which is the same Groovy truth.",
+      "diff": "play-event-first.diff"
+    },
+    {
+      "id": "toy-release-requests",
+      "layer": "source",
+      "category": "b",
+      "reason": "addToy registered the request to remove a worn toy with closures that capture its toyState, which TeaseScript cannot express, so the converter dropped the request and no toy could be asked off. Give requestables an optional arg (null as before for the others) that the menu already passes to the action, pass it to the condition as well, and register the toy's state as arg with closures that take it; the custom request functions ignore the argument as before.",
+      "diff": "toy-release-requests.diff"
+    },
+    {
+      "id": "toys-liked-tags",
+      "layer": "source",
+      "category": "b",
+      "reason": "removeAllToys asked toys[stateToy].tags.any{tag -> likes(tag)}, a closure on a dynamic receiver the converter does not lower, so the loop body was dropped and toys were never removed or kept on at the end of a session. Ask a new likesAnyTag method that loops over the tags, once per toy before the random draw; likes() only reads storage, so the order does not matter.",
+      "diff": "toys-liked-tags.diff"
+    },
+    {
+      "id": "denial-square",
+      "layer": "source",
+      "category": "b",
+      "reason": "The cum-permit trigger computed its mean wait from dl**2, an operator the converter does not map, so the mean became 0 hours and the permission came far too early. Write dl*dl, the same value for the integer denial level.",
+      "diff": "denial-square.diff"
+    },
+    {
+      "id": "difficulty-menu",
+      "layer": "source",
+      "category": "b",
+      "reason": "The difficulty settings built the level overview with a collect over a GString holding a ternary and the choice list with (lmin..5).eachWithIndex, neither of which converts, so the overview was empty and only 'Cancel' could be chosen. Build both in loops with the same texts and IDs, and save the chosen level as the number it names: the defaults are numbers and getLevel reads a number, where the legacy saved the label text.",
+      "diff": "difficulty-menu.diff"
     }
   ]
 }

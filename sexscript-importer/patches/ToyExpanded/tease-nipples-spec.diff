@@ -1,0 +1,11 @@
+--- a/scripts/toy/tease.groovy
++++ b/scripts/toy/tease.groovy
+@@ -395,7 +395,7 @@
+ 	};
+ 	
+ 	toy.metaClass.preTeaseNipples {
+-		return teaseNipples(imgSpec=[DRESSED, TEASE]);
++		return teaseNipples([DRESSED, TEASE]);
+ 	};
+ 
+ 	toy.metaClass.intTeaseNipples {
