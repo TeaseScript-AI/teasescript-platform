@@ -8028,11 +8028,11 @@ function isLogicalOperation(node: AstNode, context: LowerContext): boolean {
   const left = asNode(node.left);
   const right = asNode(node.right);
   if (left === null || right === null) return false;
+  const leftType = inferType(left, context.types);
   const rightType = inferType(right, context.types);
-  return (
-    onlyOf(inferType(left, context.types), BOOLEAN) &&
-    (onlyOf(rightType, BOOLEAN | NULL) || rightType === UNKNOWN)
-  );
+  // A side of unknown type, such as a stored flag, is tested as a condition; a proven number is bitwise.
+  const flag = (type: number): boolean => onlyOf(type, BOOLEAN | NULL) || type === UNKNOWN;
+  return flag(leftType) && flag(rightType) && (leftType !== UNKNOWN || rightType !== UNKNOWN);
 }
 
 /** `x in list` tests membership; `x in a..b` tests the range bounds. */
