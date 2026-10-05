@@ -26,7 +26,7 @@ import {
   packageStopsBackgroundSounds,
   photoCopy,
 } from "./lower.ts";
-import { helperDefinitionOrder, withActionDispatcher } from "./helpers.ts";
+import { helperDefinitionOrder, SYSTEM_SPEAKER, withActionDispatcher } from "./helpers.ts";
 import { promoteGlobalFunctions, type GlobalPromotion } from "./globals.ts";
 import { renameConflictingIdentifiers } from "./naming.ts";
 import { legacyProfilePrompt } from "./profile.ts";
@@ -573,35 +573,99 @@ export function lowerPackage(
         )
       : program,
   );
+  const menu =
+    scripts === null || scripts.entry !== null
+      ? null
+      : withProfile(
+          entryMenu(scripts, composedPrograms, internalScripts(files, options.internalScripts)),
+          composedPrograms,
+          accepted,
+        );
+  const shared =
+    scripts === null
+      ? { programs: composedPrograms, menu, helpers: promotion?.helpers ?? null }
+      : withSharedSpeaker(
+          composedPrograms,
+          scriptIndexes,
+          menu,
+          promotion?.helpers ?? null,
+          scripts.root,
+        );
   return {
     lowered: lowered.map((program, index) => withUncalledNotes(program, notes(program, index))),
-    composed: composedPrograms,
+    composed: shared.programs,
     main:
       scripts === null
         ? null
         : scripts.entry !== null
           ? { file: scripts.entry }
-          : {
-              menu: withProfile(
-                entryMenu(
-                  scripts,
-                  composedPrograms,
-                  internalScripts(files, options.internalScripts),
-                ),
-                composedPrograms,
-                accepted,
-              ),
-            },
+          : { menu: shared.menu! },
     globals:
-      promotion === null
+      promotion === null && shared.helpers === null
         ? null
         : {
-            helpers: promotion.helpers,
-            promoted: promotion.promoted,
-            globals: promotion.globals,
-            kept: promotion.kept,
+            helpers: shared.helpers,
+            promoted: promotion?.promoted ?? [],
+            globals: promotion?.globals ?? [],
+            kept: promotion?.kept ?? [],
           },
     paths: files.map((_, index) => scripts?.pathOf.get(index) ?? null),
+  };
+}
+
+/**
+ * The system speaker (helpers.ts `systemSpeaker`) is global and declared once: in a package of several files in
+ * helpers.tease, which holds what the files share, created for it where needed; a lone script keeps its own.
+ */
+function withSharedSpeaker(
+  programs: MigrationProgram[],
+  scriptIndexes: readonly number[],
+  menu: MigrationProgram | null,
+  helpers: MigrationProgram | null,
+  root: string,
+): {
+  programs: MigrationProgram[];
+  menu: MigrationProgram | null;
+  helpers: MigrationProgram | null;
+} {
+  const isSpeaker = (statement: IrStatement): boolean =>
+    statement.kind === "speaker" && statement.name === SYSTEM_SPEAKER;
+  const outputs = [
+    ...scriptIndexes.map((index) => programs[index]!),
+    ...(menu === null ? [] : [menu]),
+  ];
+  const declaration = outputs.flatMap((program) => program.statements).find(isSpeaker);
+  if (declaration === undefined || outputs.length + (helpers === null ? 0 : 1) < 2)
+    return { programs, menu, helpers };
+  const without = (program: MigrationProgram): MigrationProgram => ({
+    ...program,
+    statements: program.statements.filter((statement) => !isSpeaker(statement)),
+  });
+  const shared: MigrationProgram = helpers ?? {
+    sourceName: `${root}/helpers.tease`,
+    metadata: null,
+    statements: [
+      {
+        kind: "comment",
+        text: "// Functions and values the package's scripts share (#570). Nothing transfers to this file.",
+        trailing: false,
+        span: null,
+      },
+      { kind: "exit", span: null },
+    ],
+    diagnostics: [],
+  };
+  const [header, ...rest] = shared.statements;
+  return {
+    programs: programs.map(without),
+    menu: menu === null ? null : without(menu),
+    helpers: {
+      ...shared,
+      statements:
+        header?.kind === "comment"
+          ? [header, declaration, ...rest]
+          : [declaration, ...shared.statements],
+    },
   };
 }
 

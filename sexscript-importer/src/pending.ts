@@ -215,6 +215,16 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
         return [{ ...item, expression: expression(item.expression) }];
       case "say":
         return [{ ...item, value: expression(item.value) }];
+      case "speaker":
+        return [
+          {
+            ...item,
+            properties: item.properties.map((property) => ({
+              ...property,
+              value: expression(property.value),
+            })),
+          },
+        ];
       case "wait":
         return [{ ...item, duration: expression(item.duration) }];
       case "showImage":

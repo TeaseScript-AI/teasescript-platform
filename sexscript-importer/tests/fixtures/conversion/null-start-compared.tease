@@ -1,9 +1,12 @@
-function sexscriptLegacyAskBooleans(message, texts, defaults) {
+speaker system {
+  title: "System"
+}
+function sexscriptLegacyAskBooleansSystem(message, texts, defaults) {
   let answersValue = []
   let confirmed = false
   while not confirmed {
     answersValue = []
-    say message
+    say as system message
     let index = 0
     for text in texts {
       let yes = "Yes"
@@ -12,7 +15,7 @@ function sexscriptLegacyAskBooleans(message, texts, defaults) {
         yes = "Yes (preset)"
         no = "No"
       }
-      say text
+      say as system text
       answersValue.add((choose yes: yes, no: no) == "yes")
       index += 1
     }
@@ -34,7 +37,7 @@ function sexscriptLegacyAskProfile {
     profileToysIndex += 1
   }
   if profileToysKeys.length > 0 {
-    let profileToysAnswers = sexscriptLegacyAskBooleans("What do you have in your toy chest ?", profileToysNames, profileToysDefaults)
+    let profileToysAnswers = sexscriptLegacyAskBooleansSystem("What do you have in your toy chest ?", profileToysNames, profileToysDefaults)
     profileToysIndex = 0
     for profileToysKey in profileToysKeys {
       save profileToysAnswers[profileToysIndex] as profileToysKey

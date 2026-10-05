@@ -66,8 +66,14 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
   switch (statement.kind) {
     case "say":
       lines.push(
-        `${pad}say ${emitExpression(statement.value)}${statement.instant === true ? ", instant" : ""}`,
+        `${pad}say ${statement.speaker === undefined ? "" : `as ${statement.speaker} `}${statement.prose === true ? "prose " : ""}${emitExpression(statement.value)}${statement.instant === true ? ", instant" : ""}`,
       );
+      return;
+    case "speaker":
+      lines.push(`${pad}speaker ${statement.name} {`);
+      for (const property of statement.properties)
+        lines.push(`${pad}  ${property.name}: ${emitExpression(property.value)}`);
+      lines.push(`${pad}}`);
       return;
     case "wait": {
       const unit = statement.unit === "ms" ? " ms" : "";
@@ -108,11 +114,16 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
       }
       return;
     }
-    case "save":
-      lines.push(
-        `${pad}save ${emitExpression(statement.value)} as ${emitExpression(statement.key)}`,
-      );
+    case "save": {
+      // An interaction with its own speaker clause is grouped: `save (askText as system) as "key"` (V30 §23).
+      const value = emitExpression(statement.value);
+      const grouped =
+        statement.value.kind === "input" && statement.value.speaker !== undefined
+          ? `(${value})`
+          : value;
+      lines.push(`${pad}save ${grouped} as ${emitExpression(statement.key)}`);
       return;
+    }
     case "delete":
       lines.push(`${pad}delete ${emitExpression(statement.key)}`);
       return;
@@ -287,10 +298,15 @@ export function emitExpression(expression: IrExpression): string {
       return expression.defaultValue === undefined
         ? `load ${operand(expression.key, POSTFIX)}`
         : `(${emitLoadDefault(expression)})`;
-    case "input":
+    case "input": {
+      const asked =
+        expression.speaker === undefined
+          ? expression.input
+          : `${expression.input} as ${expression.speaker}`;
       return expression.defaultValue === undefined
-        ? expression.input
-        : `${expression.input} default: ${emitExpression(expression.defaultValue)}`;
+        ? asked
+        : `${asked} default: ${emitExpression(expression.defaultValue)}`;
+    }
     case "choice":
     case "listChoice":
       // `choose a: x, b: y` extends over following commas, so it is parenthesized unless it is a whole
@@ -390,7 +406,10 @@ function precedence(expression: IrExpression): number {
     case "load":
       return expression.defaultValue === undefined ? 0 : PRIMARY;
     case "input":
-      return expression.defaultValue === undefined ? PRIMARY : 0;
+      // `save (askText as system) as "key"`: an interaction with its own speaker clause is grouped (V30 §23).
+      return expression.defaultValue === undefined && expression.speaker === undefined
+        ? PRIMARY
+        : 0;
     default:
       return PRIMARY;
   }

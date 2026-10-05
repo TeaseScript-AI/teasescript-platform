@@ -193,6 +193,14 @@ function renameStatement(
       };
     case "say":
       return { ...statement, value: expression(statement.value) };
+    case "speaker":
+      return {
+        ...statement,
+        properties: statement.properties.map((property) => ({
+          ...property,
+          value: expression(property.value),
+        })),
+      };
     case "wait":
       return { ...statement, duration: expression(statement.duration) };
     case "showButton":
