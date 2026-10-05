@@ -6,7 +6,15 @@
  */
 import { constantString, variableName, type AstNode, type SourceSpan } from "./ast.ts";
 import type { IrExpression, IrStatement } from "./ir.ts";
-import { argumentsOf, asNode, buildTree, dottedName, memberOf, type Tree } from "./java-ast.ts";
+import {
+  argumentsOf,
+  asNode,
+  buildTree,
+  dottedName,
+  isNullConstant,
+  memberOf,
+  type Tree,
+} from "./java-ast.ts";
 import { noteOnce, type JavaRuleHost } from "./java-data.ts";
 import { whole } from "./java-time.ts";
 import { LIST, NULL, NUMBER, onlyOf, STRING } from "./types.ts";
@@ -98,6 +106,8 @@ const LINE_SEPARATOR_NOTE =
   "Java used the platform's line separator, \\r\\n on Windows; the text uses a line break (\\n), as TeaseScript text does.";
 const CHARACTER_NOTE =
   "Java's (char) cast made any character from its code; the generated helper makes the printable ASCII characters and stops the script at any other code.";
+const CHAR_AT_NOTE =
+  "Java's charAt() gave a character, which compared equal to one-character text but counted as its code in arithmetic; the converted one-character text cannot be added to a number.";
 const SET_ORDER_NOTE =
   "A Java HashSet listed its members in hash order; a TeaseScript set keeps the order in which they were added.";
 
@@ -125,9 +135,11 @@ export function analyzeText(root: AstNode): TextAnalysis {
       )
     )
       randoms.add(name);
+    // Declarations without a value (`def a, chars`) hold no other value.
+    const charValues = values.filter((value) => value !== null && !isNullConstant(value));
     if (
-      values.length > 0 &&
-      values.every(
+      charValues.length > 0 &&
+      charValues.every(
         (value) =>
           value !== null &&
           value.kind === "methodCall" &&
@@ -367,6 +379,7 @@ export function textCall(
   const type = host.valueType(receiver);
   const text = onlyOf(type, STRING | NULL) && (type & STRING) !== 0;
   const number = onlyOf(type, NUMBER);
+  const maybeText = (type & STRING) !== 0;
   switch (name) {
     case "matches": {
       // A full match of `.{a,b}` text `.{c,d}`, such as the rough email shape `.{1,50}@.{5,50}`.
@@ -391,7 +404,9 @@ export function textCall(
       return value === null ? null : host.helper(list ? "reversed" : "reversedText", [value]);
     }
     case "toCharArray": {
-      if (args.length !== 0 || !text) return undefined;
+      // Only text has toCharArray(), charAt(), and indexOf(part, start): on any other value Groovy failed, as the
+      // converted text operation does, so a receiver that may be text needs no further proof.
+      if (args.length !== 0 || !maybeText) return undefined;
       const value = host.lower(receiver);
       return value === null ? null : method(value, "split", literal(""));
     }
@@ -418,7 +433,7 @@ export function textCall(
     }
     case "indexOf": {
       // indexOf(part, start): Java searches from the start position, clamped to the text.
-      if (args.length !== 2 || !text) return undefined;
+      if (args.length !== 2 || !maybeText) return undefined;
       if (!onlyOf(host.valueType(args[0]!), STRING) || !onlyOf(host.valueType(args[1]!), NUMBER))
         return undefined;
       const lowered = lowerAll();
@@ -427,10 +442,12 @@ export function textCall(
       return host.helper("indexFrom", [value, lowered[0]!, lowered[1]!]);
     }
     case "charAt": {
-      if (args.length !== 1 || !text || !onlyOf(host.valueType(args[0]!), NUMBER)) return undefined;
+      if (args.length !== 1 || !maybeText || !onlyOf(host.valueType(args[0]!), NUMBER))
+        return undefined;
       const value = host.lower(receiver);
       const index = host.lower(args[0]!);
       if (value === null || index === null) return null;
+      noteOnce(host, "SX_CHARACTER_TEXT", CHAR_AT_NOTE, node.span);
       return method(value, "substring", index, binary("+", index, literal(1)));
     }
     case "abs": {

@@ -224,6 +224,11 @@ test("converts Java text, number, random, and collection APIs", { skip }, async 
     "def total = 17",
     "def diff = -3",
     'show("${total.intdiv(5)} ${(-17).intdiv(5)} ${diff.abs()} ${(2.5).round()} ${(1.005 as double).round(2) == 1} ${(7.9).intValue()}")',
+    // A value of unknown type that Groovy read as text, such as a closure parameter, converts as text.
+    "def initial = { value -> '' + value.charAt(0) + value.indexOf('|', 2) }",
+    "def spare, letters",
+    'letters = "hey".toCharArray()',
+    'show(initial("x|y|z") + " " + String.valueOf(letters))',
     "def items = new ArrayList<String>()",
     'items.add("x")',
     "def copy = new ArrayList(items)",
@@ -243,6 +248,7 @@ test("converts Java text, number, random, and collection APIs", { skip }, async 
     "true false true false false true",
     "3 5 3 b",
     "3 -3 3 3 true 7",
+    "x3 hey",
     "1 1 true",
   ]);
 });
