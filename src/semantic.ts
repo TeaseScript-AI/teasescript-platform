@@ -2912,7 +2912,7 @@ function isDefinitelyNonNumeric(expression: Expression): boolean {
 }
 
 const LOAD_KEY_MESSAGE =
-  "Storage key must be a string. To compare the loaded value, write '(load \"k\") == null'.";
+  "Storage key must be a string. To compare the loaded value, write 'load(\"k\") == null'.";
 
 const NON_STRING_OPERATORS: ReadonlySet<string> = new Set([
   "==",
