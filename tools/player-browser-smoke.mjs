@@ -3,6 +3,7 @@ import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { crc32, deflateSync } from "node:zlib";
 import { createPlaygroundServer } from "../dist/playground/server.js";
 import { findChromium } from "./find-chromium.mjs";
 
@@ -111,11 +112,13 @@ async function main() {
       await demoScenario(cdp, origin);
       await insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`);
       await packageScenario(cdp, origin);
+      await askImageScenario(cdp, origin, profile);
+      await developmentTimeScenario(cdp, origin);
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker and drop, development time controls, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -1201,6 +1204,68 @@ async function packageScenario(cdp, origin) {
 }
 
 /**
+ * The importer's route (#615): a folder package opened by URL with development time controls, auto-skip on from the
+ * URL. After a physical Start the 15 s wait ends at once; +10 s at the waiting button shows in its elapsed time.
+ * Without auto-skip, Skip ends the wait; the default build has no time controls.
+ */
+async function developmentTimeScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const done = `[...document.querySelectorAll('[data-foreground-controls] button')].some((button) => button.textContent.trim() === 'Done')`;
+  const skipped = `/^⏩ 1[0-5] s skipped$/.test(document.querySelector('[data-development-time-marker]')?.textContent ?? '')`;
+  const start = async (url) => {
+    await navigate(cdp, url);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await physicalClick(cdp, "[data-session-activation] button");
+  };
+  const openPanel = async () => {
+    await physicalClick(cdp, '[data-launcher] button[aria-label="Time Controls"]');
+    await waitFor(cdp, `!!document.querySelector('[data-development-time]')`);
+  };
+
+  await start(`${origin}/player/?dev&package=waiting&time=skip`);
+  await waitFor(
+    cdp,
+    `${done} && ${skipped}`,
+    5_000,
+    "Auto-skip did not end the package's 15 s wait at once",
+  );
+  await openPanel();
+  await physicalClick(cdp, '[data-development-time-action="advance-10s"]');
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-development-time-jumps] li')?.textContent === '⏩ 10 s skipped'`,
+  );
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => /Waited 1\\d(\\.\\d+)? s/.test(entry.textContent))`,
+    5_000,
+    "+10 s did not reach the button's elapsed time",
+  );
+
+  await start(`${origin}/player/?dev&package=waiting`);
+  await openPanel();
+  await physicalClick(cdp, "[data-development-time-enable]");
+  await waitFor(cdp, `!document.querySelector('[data-development-time-action="skip"]').disabled`);
+  await physicalClick(cdp, '[data-development-time-action="skip"]');
+  await waitFor(cdp, `${done} && ${skipped}`, 5_000, "Skip did not end the package's 15 s wait");
+
+  await start(`${origin}/player/?package=waiting`);
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Before the wait'))`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `!!document.querySelector('[data-launcher] button[aria-label="Time Controls"], [data-development-time-badge]')`,
+    ),
+    false,
+    "The default build offered time controls",
+  );
+}
+
+/**
  * The session camera opens at Start and `takePhoto()` puts its photo on the Stage; without camera permission the
  * script continues without a photo.
  */
@@ -1511,6 +1576,234 @@ async function viewfinderScenario(cdp, origin) {
     `document.body.innerText.includes('No camera? Then you stay unseen, for now. We go on without a photo.')`,
   );
   await cdp.call("Browser.resetPermissions");
+}
+
+/**
+ * `askImage` in a package: only while it waits does the composer offer a paperclip, which opens the native file picker,
+ * and a drop target. A chosen or dropped file answers once the Player has checked it, and the Stage shows it; a file
+ * that is not an image, a second file, or one the request's filters exclude is refused and the request keeps waiting.
+ */
+async function askImageScenario(cdp, origin, profile) {
+  const chosen = join(profile, "chosen.png");
+  const notes = join(profile, "notes.png");
+  await writeFile(chosen, solidPng(48, 32, [200, 40, 120]));
+  await writeFile(notes, "not an image");
+  const stageImage = `(() => {
+    const image = document.querySelector('.stage-media');
+    return !!image && image.complete && image.naturalWidth > 0 && image.getAttribute('src').startsWith('blob:');
+  })()`;
+  const notice = (text) =>
+    `document.querySelector('.composer-notice')?.textContent.includes(${JSON.stringify(text)}) === true`;
+  const imageAnswers = `[...document.querySelectorAll('.transcript-entry')].filter((entry) => entry.textContent.trim() === 'Image').length`;
+  await setViewport(cdp, 1440, 900);
+  await navigate(cdp, `${origin}/player/?package=pictures`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-composer-attach]')`),
+    false,
+    "The composer offered a file input before the image request",
+  );
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    visible("[data-composer-attach]"),
+    8_000,
+    "The image request offered no paperclip",
+  );
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-composer-attach]').getAttribute('aria-label')`),
+    "Attach an image",
+    "The paperclip has no accessible name",
+  );
+  // The paperclip opens the native picker: a click on the hidden file input, which CDP then answers.
+  await evaluate(
+    cdp,
+    `const input = document.querySelector('[data-composer-file]');
+    window.__pickerOpened = 0;
+    input.addEventListener('click', () => window.__pickerOpened++, { once: true });
+    input.addEventListener('click', (event) => event.preventDefault(), { once: true });`,
+  );
+  await physicalClick(cdp, "[data-composer-attach]");
+  assertEqual(
+    await value(cdp, "window.__pickerOpened"),
+    1,
+    "The paperclip did not open the picker",
+  );
+  await setInputFiles(cdp, "[data-composer-file]", [notes]);
+  await waitFor(cdp, notice("That image is not valid."), 8_000, "A text file was not refused");
+  assertEqual(
+    await value(cdp, visible("[data-composer-attach]")),
+    true,
+    "The refused file ended the request",
+  );
+  await openPicker(cdp);
+  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await waitFor(
+    cdp,
+    `${stageImage} && ${imageAnswers} === 1`,
+    8_000,
+    "The chosen image is not on the Stage",
+  );
+
+  // The second request accepts PNG files only and is answered by a drop.
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('Now one more, as a PNG file.') && ${visible("[data-composer-attach]")}`,
+    8_000,
+    "The second image request did not open",
+  );
+  const pngBase64 = solidPng(24, 24, [30, 160, 90]).toString("base64");
+  const drop = (files) =>
+    evaluate(
+      cdp,
+      `const shell = document.querySelector('[data-composer-shell]');
+      const transfer = new DataTransfer();
+      for (const [name, base64] of ${JSON.stringify(files)})
+        transfer.items.add(new File([Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))], name));
+      const fire = (type) =>
+        !shell.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer }));
+      const entered = fire('dragenter') && fire('dragover');
+      // The highlight renders with the next update.
+      return new Promise((resolve) =>
+        setTimeout(() => {
+          const highlighted = shell.hasAttribute('data-drop-active');
+          resolve({ entered, highlighted, dropped: fire('drop') });
+        }, 0),
+      );`,
+    );
+  const two = await drop([
+    ["one.png", pngBase64],
+    ["two.png", pngBase64],
+  ]);
+  assertEqual(
+    two.entered && two.highlighted && two.dropped,
+    true,
+    "The composer was not a drop target",
+  );
+  await waitFor(cdp, notice("Choose one image."), 8_000, "Two dropped files were not refused");
+  await drop([["photo.jpg", Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString("base64")]]);
+  await waitFor(
+    cdp,
+    notice("Choose an image of these types: .png, image/png."),
+    8_000,
+    "A JPEG passed the PNG filter",
+  );
+  assertEqual(await value(cdp, `${imageAnswers}`), 1, "A refused drop answered the request");
+  await drop([["dropped.png", pngBase64]]);
+  await waitFor(
+    cdp,
+    `${stageImage} && ${imageAnswers} === 2 && document.body.innerText.includes('Thank you.')`,
+    8_000,
+    "The dropped image did not answer the request",
+  );
+  // Outside an image request there is no paperclip and the composer takes no files.
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-composer-attach]')`),
+    false,
+    "The paperclip stayed",
+  );
+  const after = await drop([["late.png", pngBase64]]);
+  assertEqual(
+    after.entered || after.dropped,
+    false,
+    "The composer took a file outside an image request",
+  );
+
+  // A file chosen in a picker opened for one request does not answer the timer's request that replaced it meanwhile.
+  const placeholder = (text) =>
+    `document.querySelector('[data-composer-input]')?.getAttribute('placeholder') === ${JSON.stringify(text)}`;
+  await navigate(cdp, `${origin}/player/?package=picture-race`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, placeholder("Main image"), 8_000, "The main image request did not open");
+  await openPicker(cdp);
+  await waitFor(cdp, placeholder("Timer image"), 8_000, "The timer's image request did not open");
+  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await waitFor(
+    cdp,
+    notice("This interaction is no longer available."),
+    8_000,
+    "A file chosen for the main request was not refused",
+  );
+  assertEqual(
+    await value(cdp, `${imageAnswers}`),
+    0,
+    "A stale choice answered the timer's request",
+  );
+  await drop([["timer.png", pngBase64]]);
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('Timer image received.') && ${placeholder("Main image")}`,
+    8_000,
+    "The timer's request was not answered, or the main request did not resume",
+  );
+  await drop([["main.png", pngBase64]]);
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('Main image received.') && ${imageAnswers} === 2`,
+    8_000,
+    "The resumed main request was not answered",
+  );
+  // A file chosen for a request that a timer's wait suspended answers it once it resumes.
+  await waitFor(cdp, placeholder("Second image"), 8_000, "The second image request did not open");
+  await openPicker(cdp);
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-composer-attach]')`,
+    8_000,
+    "The timer did not suspend the second request",
+  );
+  await waitFor(cdp, placeholder("Second image"), 8_000, "The second request did not resume");
+  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes('Second image received.') && ${imageAnswers} === 3`,
+    8_000,
+    "A file chosen before the second request was suspended did not answer it",
+  );
+}
+
+/** Opens the file picker with the paperclip; the native dialog itself is suppressed, and `setInputFiles` answers it. */
+async function openPicker(cdp) {
+  await evaluate(
+    cdp,
+    `document.querySelector('[data-composer-file]').addEventListener('click', (event) => event.preventDefault(), { once: true });`,
+  );
+  await physicalClick(cdp, "[data-composer-attach]");
+}
+
+/** Sets the files of a file input, as the native picker does, through the DevTools protocol. */
+async function setInputFiles(cdp, selector, files) {
+  const document = await cdp.call("DOM.getDocument", { depth: 0 });
+  const node = await cdp.call("DOM.querySelector", {
+    nodeId: document.result.root.nodeId,
+    selector,
+  });
+  await cdp.call("DOM.setFileInputFiles", { files, nodeId: node.result.nodeId });
+}
+
+/** A small opaque PNG of one color. */
+function solidPng(width, height, [red, green, blue]) {
+  const chunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const framed = Buffer.alloc(body.length + 8);
+    framed.writeUInt32BE(data.length, 0);
+    body.copy(framed, 4);
+    framed.writeUInt32BE(crc32(body), body.length + 4);
+    return framed;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bits per channel
+  header[9] = 2; // RGB
+  const row = Buffer.from([0, ...Array.from({ length: width }, () => [red, green, blue]).flat()]);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", header),
+    chunk("IDAT", deflateSync(Buffer.concat(Array.from({ length: height }, () => row)))),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
 }
 
 function documentTextIncludes(values, text) {

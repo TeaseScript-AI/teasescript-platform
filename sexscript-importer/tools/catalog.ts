@@ -15,7 +15,7 @@
  * files, and otherwise the compiler and the importer's report in `.report.json`.
  */
 import { createHash } from "node:crypto";
-import { copyFile, link, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, link, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -40,6 +40,8 @@ export interface CatalogEntry {
   /** Legacy Groovy files, from the package's `scripts/` folder, and converted `.tease` files, by relative path. */
   readonly groovy: SourceFiles;
   readonly tease: SourceFiles;
+  /** Earlier versions of the tease that the importer keeps out of the package, from the unit's `unit.json`. */
+  readonly earlier: readonly EarlierVersion[];
   readonly images: number;
   readonly audio: number;
 }
@@ -59,6 +61,16 @@ export interface Status {
   /** A few words for the table. */
   readonly label: string;
   readonly detail: string;
+}
+
+export interface EarlierVersion {
+  readonly title: string;
+  readonly status: string | null;
+  readonly date: string | null;
+  /** Why the version is kept apart, when the unit says. */
+  readonly note: string | null;
+  /** The version's original Groovy files: where they are, and the path they are shown under. */
+  readonly files: ReadonlyArray<{ readonly source: string; readonly name: string }>;
 }
 
 interface SourceFiles {
@@ -298,6 +310,7 @@ export async function readCatalogEntries(
               tools,
               sources,
               verified.has(id),
+              root,
             ),
           ),
       )),
@@ -315,6 +328,7 @@ async function readEntry(
   tools: CatalogTools,
   statusSources: StatusSources,
   isVerified: boolean,
+  convertedRoot: string,
 ): Promise<CatalogEntry> {
   const folder = path.join(root, id);
   const scan = await tools.scan(folder);
@@ -334,13 +348,37 @@ async function readEntry(
   const conversion = await readJson(".conversion.json");
   // EVIDENCE: see readJson above; a failed report has only `error`, which the fields read below treat as absent.
   const report = (await readJson(".report.json")) as ImporterReport | null;
-  const groovyRoot =
-    typeof conversion?.source === "string" ? path.join(conversion.source, "scripts") : null;
+  // A frozen copy names the legacy folder of its time; when that is gone, the current conversion's counts.
+  const legacyFolder = await existingFolder([
+    typeof conversion?.source === "string" ? conversion.source : null,
+    isVerified
+      ? await readFile(path.join(convertedRoot, id, ".conversion.json"), "utf8").then(
+          (text) => {
+            const current: unknown = JSON.parse(text);
+            return isRecord(current) && typeof current.source === "string" ? current.source : null;
+          },
+          () => null,
+        )
+      : null,
+  ]);
+  const groovyRoot = legacyFolder === null ? null : path.join(legacyFolder, "scripts");
+  const earlier =
+    legacyFolder === null
+      ? []
+      : await readFile(path.join(legacyFolder, "unit.json"), "utf8").then(
+          (text) => earlierVersions(JSON.parse(text), legacyFolder),
+          () => [],
+        );
+  // An earlier version's files are listed with that version, not as the package's source.
+  const earlierFiles = new Set(
+    earlier.flatMap((version) => version.files.map((file) => file.source)),
+  );
   const groovy =
     groovyRoot === null
       ? []
       : (await readdir(groovyRoot, { recursive: true, withFileTypes: true }).catch(() => []))
           .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".groovy"))
+          .filter((entry) => !earlierFiles.has(path.join(entry.parentPath, entry.name)))
           .map((entry) =>
             path
               .relative(groovyRoot, path.join(entry.parentPath, entry.name))
@@ -414,6 +452,7 @@ async function readEntry(
     status,
     partial: partialConversion(report, sources.length, todos),
     groovy: { root: groovyRoot, paths: groovy },
+    earlier,
     tease: { root: folder, paths: sources.map((file) => file.path).sort() },
     images: scan.images.length,
     audio: scan.media.filter((file) => AUDIO_EXTENSIONS.has(path.extname(file).toLowerCase()))
@@ -638,31 +677,78 @@ function commentAuthor(sources: PackageScan["sources"]): string | null {
   return null;
 }
 
-/** Hard-links each entry's Groovy and `.tease` files under `<folder>/source/<id>/{groovy,tease}/`. */
+/** The first of `candidates` that is a folder, or `null`. */
+async function existingFolder(candidates: ReadonlyArray<string | null>): Promise<string | null> {
+  for (const candidate of candidates) {
+    if (candidate === null) continue;
+    const information = await stat(candidate).catch(() => null);
+    if (information?.isDirectory() === true) return candidate;
+  }
+  return null;
+}
+
+/**
+ * The `earlierVersions` of a `unit.json`: each with its title, status, date, and Groovy files, which are paths
+ * relative to the unit's legacy folder (or absolute), given as text or as `{ path }`.
+ */
+export function earlierVersions(unit: unknown, legacyFolder: string): EarlierVersion[] {
+  if (!isRecord(unit) || !Array.isArray(unit.earlierVersions)) return [];
+  return unit.earlierVersions.filter(isRecord).map((version, index) => ({
+    title: typeof version.title === "string" ? version.title : `Version ${index + 1}`,
+    status: typeof version.status === "string" ? version.status : null,
+    date: typeof version.date === "string" ? version.date : null,
+    note: typeof version.note === "string" && version.note !== "" ? version.note : null,
+    files: (Array.isArray(version.files) ? version.files : [])
+      .map((file) => (typeof file === "string" ? file : isRecord(file) ? file.path : null))
+      .filter((file): file is string => typeof file === "string" && file !== "")
+      .map((file) => {
+        const source = path.resolve(legacyFolder, file);
+        const relative = path.relative(legacyFolder, source);
+        const name = relative.startsWith("..") ? path.basename(source) : relative;
+        return { source, name: name.split(path.sep).join("/") };
+      }),
+  }));
+}
+
+/**
+ * Hard-links each entry's Groovy and `.tease` files under `<folder>/source/<id>/{groovy,tease}/`, and the Groovy
+ * files of its earlier versions under `<folder>/source/<id>/earlier/<n>/`.
+ */
 export async function writeSourceViews(
   entries: readonly CatalogEntry[],
   folder: string,
 ): Promise<void> {
   const sourceRoot = path.join(folder, "source");
   await rm(sourceRoot, { recursive: true, force: true });
-  for (const entry of entries)
+  const place = async (source: string, target: string) => {
+    await mkdir(path.dirname(target), { recursive: true });
+    // Text files only, so on another filesystem a copy is fine; a missing earlier file is left out.
+    await link(source, target).catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "EXDEV")
+        return copyFile(source, target);
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return;
+      throw error;
+    });
+  };
+  for (const entry of entries) {
     for (const [kind, files] of [
       ["groovy", entry.groovy],
       ["tease", entry.tease],
     ] as const) {
       if (files.root === null) continue;
-      for (const relative of files.paths) {
-        const source = path.join(files.root, ...relative.split("/"));
-        const target = path.join(sourceRoot, entry.id, kind, ...relative.split("/"));
-        await mkdir(path.dirname(target), { recursive: true });
-        // Text files only, so on another filesystem a copy is fine.
-        await link(source, target).catch((error: unknown) => {
-          if (error instanceof Error && "code" in error && error.code === "EXDEV")
-            return copyFile(source, target);
-          throw error;
-        });
-      }
+      for (const relative of files.paths)
+        await place(
+          path.join(files.root, ...relative.split("/")),
+          path.join(sourceRoot, entry.id, kind, ...relative.split("/")),
+        );
     }
+    for (const [index, version] of entry.earlier.entries())
+      for (const file of version.files)
+        await place(
+          file.source,
+          path.join(sourceRoot, entry.id, "earlier", String(index + 1), ...file.name.split("/")),
+        );
+  }
 }
 
 /**
@@ -740,6 +826,8 @@ dl.summary dd { margin: 0; font-size: 1.3em; font-weight: 600; }
 .status.error, .status.nostart { background: #fde2e1; color: #8a1c1c; }
 details summary { cursor: pointer; }
 td.status-cell details summary { list-style: none; }
+details.earlier { margin-top: 0.3rem; font-size: 0.85em; color: #555; }
+details.earlier ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
 td.status-cell details p, td.source details p { margin: 0.2rem 0; font-size: 0.85em; color: #555; }
 button[data-pin] { font-size: 0.8em; }
 @media (max-width: 60rem) {
@@ -821,11 +909,27 @@ function renderRow(entry: CatalogEntry, playerOrigin: string): string {
     ],
     ["author", escapeHtml(entry.author ?? "")],
     ["keywords", entry.keywords.map(escapeHtml).join(", ")],
-    ["description", escapeHtml(entry.description ?? "")],
+    ["description", escapeHtml(entry.description ?? "") + renderEarlier(entry)],
     ["status-cell", statuses],
     ["source", renderSource(entry)],
   ];
   return `<tr data-id="${id}">${cells.map(([name, html]) => `<td class="${name}">${html}</td>`).join("")}</tr>`;
+}
+
+/** A collapsed list of the tease's earlier versions, each with its title, status, date, and original Groovy. */
+function renderEarlier(entry: CatalogEntry): string {
+  if (entry.earlier.length === 0) return "";
+  const items = entry.earlier.map((version, index) => {
+    const facts = [version.status, version.date, version.note].filter((fact) => fact !== null);
+    const links = version.files.map(
+      (file) =>
+        `<a href="${escapeHtml(
+          `source/${encodeURIComponent(entry.id)}/earlier/${index + 1}/${file.name.split("/").map(encodeURIComponent).join("/")}`,
+        )}">${escapeHtml(file.name)}</a>`,
+    );
+    return `<li>${escapeHtml(version.title)}${facts.length === 0 ? "" : ` &middot; ${facts.map((fact) => escapeHtml(fact!)).join(" &middot; ")}`}${links.length === 0 ? "" : `<br>Groovy: ${links.join(", ")}`}</li>`;
+  });
+  return `<details class="earlier"><summary>Earlier versions (${entry.earlier.length})</summary><ul>${items.join("")}</ul></details>`;
 }
 
 /** Links to the package's Groovy and `.tease` files: directly for one of each, else in a `<details>` list. */

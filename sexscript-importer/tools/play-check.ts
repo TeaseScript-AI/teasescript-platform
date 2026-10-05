@@ -3,13 +3,19 @@
  * Plays converted packages in the real Player through its UI, on several paths per package, and records how far each
  * run got and why it stopped.
  *
- * Usage: node tools/play-check.ts [--base <origin>] [--runs N] [--steps N] [--only id,id] [--again] <converted-root>
- *   <out-dir>
+ * Usage: node tools/play-check.ts [--base <origin>] [--runs N] [--steps N] [--only id,id] [--again] [--clock dev|fake]
+ *   <converted-root> <out-dir>
  *
- * Each package opens at `<origin>/player/?package=<id>` (default `https://agents.home.arpa:4443`, see
- * `serve-catalog.ts`) in headless Chromium, one browser at a time. A run presses buttons, picks choices, and types
- * answers until the session halts, fails, hangs, or the step budget ends. Playwright's fake clock skips waits, timers,
- * and chat pacing, and media play at 16 times speed. Each run picks, at every choice, the option tried least often in
+ * Each package opens in headless Chromium, one browser at a time, from `<origin>` (default
+ * `https://agents.home.arpa:4443`, see `serve-catalog.ts`). A run presses buttons, picks choices, and types answers
+ * until the session halts, fails, hangs, or the step budget ends. With `--clock dev` (the default) the package opens at
+ * `/player/?dev&package=<id>&time=skip`, whose development time controls (#615) skip waits, timers, pacing, and audio
+ * while no input is pending. With `--clock fake`, the fallback, it opens at `/player/?package=<id>` with Playwright's
+ * fake clock and media at 16 times speed. A prompt that comes back three times in a row may wait for an answer that
+ * takes time, so the runner then lets 30 seconds pass before answering, then 120 and 300 seconds after three more
+ * repeats each (+10 s and +1 min presses of the time controls, or fake-clock jumps), noted in the run's path as
+ * `[waited 30 s]`. Each run picks, at
+ * every choice, the option tried least often in
  * earlier runs, so later runs take other branches; a package stops after a run that reached nothing new, or after a
  * run that hung or used up its steps, which other paths rarely change. A package whose `.tease` files are unchanged
  * since its last check is skipped unless `--again` is given. The session
@@ -47,6 +53,8 @@ const IMAGE_EXTENSIONS = new Set([
 const MEDIA_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".mp4", ".webm"]);
 /** A run that takes longer in real time ends as `budget`: a very long session, or one that stopped responding. */
 const RUN_TIMEOUT_MS = 240_000;
+/** The fake-clock waits before answering a prompt that keeps coming back, one per three repeats. */
+const WAIT_STEPS_S = [30, 120, 300];
 /** A package's runs end after this much real time, so one long package cannot hold up a batch. */
 const PACKAGE_TIMEOUT_MS = 600_000;
 
@@ -160,6 +168,7 @@ const { values, positionals } = parseArgs({
     steps: { type: "string", default: "300" },
     only: { type: "string" },
     again: { type: "boolean", default: false },
+    clock: { type: "string", default: "dev" },
   },
 });
 if (positionals.length !== 2) {
@@ -366,16 +375,39 @@ async function playOnce(
   const files = new Set<string>();
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
-  await page.addInitScript(() => {
-    // Media play at 16 times speed, so a script that waits for a sound does not wait in real time.
-    const play = HTMLMediaElement.prototype.play;
-    HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
-      this.playbackRate = 16;
-      return play.call(this);
-    };
-  });
-  await page.clock.install();
-  await page.goto(`${values.base}/player/?package=${encodeURIComponent(id)}`);
+  const dev = values.clock !== "fake";
+  if (!dev) {
+    await page.addInitScript(() => {
+      // Media play at 16 times speed, so a script that waits for a sound does not wait in real time.
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function (this: HTMLMediaElement) {
+        this.playbackRate = 16;
+        return play.call(this);
+      };
+    });
+    await page.clock.install();
+  }
+  const target = encodeURIComponent(id);
+  await page.goto(
+    dev
+      ? `${values.base}/player/?dev&package=${target}&time=skip`
+      : `${values.base}/player/?package=${target}`,
+  );
+  // Time passes: with the time controls, auto-skip jumps on its own, so the runner only gives it a moment.
+  const idle = (ms: number) =>
+    dev
+      ? new Promise((resolve) => setTimeout(resolve, Math.min(ms, 150)))
+      : page.clock.fastForward(ms);
+  // Time passes while a prompt waits for an answer: +1 min and +10 s presses, or a fake-clock jump.
+  const pass = async (seconds: number) => {
+    if (!dev) return page.clock.fastForward(seconds * 1_000);
+    const presses = [
+      ...Array.from({ length: Math.floor(seconds / 60) }, () => "advance-1min"),
+      ...Array.from({ length: Math.floor((seconds % 60) / 10) }, () => "advance-10s"),
+    ];
+    for (const action of presses)
+      await page.click(`[data-development-time-action="${action}"]`, { timeout: 5_000 });
+  };
   await page.waitForSelector("[data-session-activation] button, [data-script-failure]", {
     timeout: 30_000,
   });
@@ -405,7 +437,11 @@ async function playOnce(
   };
   if (state.scriptFailure !== null) return finish("no-start", state.scriptFailure, 0);
   await page.click("[data-session-activation] button");
+  // The +10 s and +1 min buttons live in the Time Controls tool.
+  if (dev) await page.click('[data-tools-focus="launcher:Time Controls"]', { timeout: 5_000 });
   const visits = new Map<string, number>();
+  // The prompt answered last, how often in a row, and how many waits that streak has had.
+  let repeated = { key: "", count: 0, waits: 0 };
   let unchanged = 0;
   let lastProgress = -1;
   let progressAt = Date.now();
@@ -458,6 +494,23 @@ async function playOnce(
       const kind = state.foreground.slice("interaction:".length);
       const visit = visits.get(state.site) ?? 0;
       visits.set(state.site, visit + 1);
+      // A script may time how long its prompt stays unanswered, as in "beg for at least 15 seconds". The same place
+      // with the same options and text counts as the same prompt; a loop over questions, such as toys, does not.
+      const key = `${state.site}\u0000${state.options.join("\u0000")}\u0000${state.lastText}`;
+      repeated =
+        key === repeated.key
+          ? { ...repeated, count: repeated.count + 1 }
+          : { key, count: 1, waits: 0 };
+      if (
+        repeated.count >= 3 &&
+        repeated.waits < WAIT_STEPS_S.length &&
+        (state.options.length > 0 || state.composer !== null)
+      ) {
+        const seconds = WAIT_STEPS_S[repeated.waits]!;
+        await pass(seconds);
+        taken.push(`[waited ${seconds} s]`);
+        repeated = { key, count: 0, waits: repeated.waits + 1 };
+      }
       if ((kind === "button" || kind === "choice") && state.options.length > 0) {
         const counts =
           track.tries.get(state.site) ?? new Array<number>(state.options.length).fill(0);
@@ -504,15 +557,14 @@ async function playOnce(
       } else if (kind !== "button" && kind !== "choice" && unchanged > 3) {
         return finish("unsupported", `no control for the ${kind} interaction`, step);
       }
-      await page.clock.fastForward(300);
+      await idle(300);
     } else if (state.foreground === "delay" && state.delayMs !== null) {
       // Jumping fires each due timer once, instead of every animation frame on the way.
-      await page.clock.fastForward(Math.max(50, state.delayMs + 50));
+      await idle(Math.max(50, state.delayMs + 50));
     } else {
       // Media play in real time; everything else waits on the fake clock.
       if (state.foreground === "media") await new Promise((resolve) => setTimeout(resolve, 250));
-      if (unchanged > 2) await page.clock.fastForward(20_000);
-      else await page.clock.fastForward(1_000);
+      await idle(unchanged > 2 ? 20_000 : 1_000);
     }
   }
   return finish(

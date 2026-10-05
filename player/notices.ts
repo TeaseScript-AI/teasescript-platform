@@ -57,6 +57,7 @@ export const playerNoticeKeys = {
   audioBlocked: "audio-blocked",
   storageUnavailable: "storage-unavailable",
   storageWriteFailed: "storage-write-failed",
+  imageNeedsCamera: "image-needs-camera",
 } as const;
 
 /**
@@ -80,5 +81,10 @@ export const playerNotices = {
     key: playerNoticeKeys.storageWriteFailed,
     level: "warning",
     message: "Some progress could not be saved in this browser.",
+  }),
+  imageNeedsCamera: (): PlayerNotice => ({
+    key: playerNoticeKeys.imageNeedsCamera,
+    level: "warning",
+    message: "This image request needs a camera, which this Player does not offer yet.",
   }),
 } as const;

@@ -91,7 +91,9 @@ revocation, and cleanup, but adds no permission prompt, camera or microphone ind
 native browser, OS, and device privacy indicators are sufficient. Complete revocation of package-created derivatives of
 raw resources, such as cloned tracks, relies on the sandbox teardown or lifecycle contract (ADR 0017). A captured-media
 reference grants access only when the trusted Player media store resolves it within the owning package namespace; a
-well-formed string, including one returned by `load`, is ordinary data. A recording contains exactly the sources the
+well-formed string, including one returned by `load`, is ordinary data. A file the player chooses for `askImage(...)`
+is external data: the Player identifies the image type from the file's bytes and has the browser decode it before
+storing it as session media, and only its reference reaches the runtime. A recording contains exactly the sources the
 author requests; whether video includes microphone audio never depends on whether a microphone is already open. How
 brokered acquisition and capability authorization are enforced against package code that calls browser capture APIs
 directly, which needs a concrete isolation mechanism such as a separate execution realm rather than a wrapper API or

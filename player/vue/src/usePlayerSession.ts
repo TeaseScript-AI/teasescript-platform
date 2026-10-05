@@ -11,8 +11,15 @@ import {
   browserCapturedMediaLocks,
   capturedMediaStorage,
 } from "../../captured-media-persistence.js";
+import {
+  browserImageDecoder,
+  checkImageFile,
+  type ImageDecoder,
+  type ImageFileFilters,
+} from "../../image-file.js";
 import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../media-device.js";
 import {
+  activePlayerRuntimeInteraction,
   completePlayerRuntimeStorageWrite,
   continuePlayerRuntimeSession,
   playerTemporalContext,
@@ -33,7 +40,11 @@ import {
   playerNotices,
   type PlayerNotice,
 } from "../../notices.js";
-import type { RuntimeScriptStorageEntrySnapshot, TemporalContext } from "../../../src/index.js";
+import type {
+  CapturedMediaAdmission,
+  RuntimeScriptStorageEntrySnapshot,
+  TemporalContext,
+} from "../../../src/index.js";
 import { silence } from "./generatedAudio";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
 
@@ -61,10 +72,13 @@ export interface PlayerSessionOptions {
    */
   capabilities?: { readonly camera?: boolean };
   /**
-   * Durable storage for captured photos that a saved value references, in the script storage's scope. Without a
-   * repository, captures stay session media, and a persistent save that references one fails.
+   * Durable storage for captured photos and chosen images that a saved value references, in the script storage's scope.
+   * Without a repository, they stay session media, and a persistent save that references one fails. A host with
+   * persistent script storage passes it, also without a repository, so that no saved reference outlives its media.
    */
   capturedMedia?: { readonly repository: CapturedMediaRepository | null };
+  /** Decodes a chosen image file before it is stored; the browser's decoder by default. */
+  decodeImage?: ImageDecoder;
   /**
    * The player's time zone and date and time presentation as they are now: the account settings, else the browser's,
    * which is the default. Start and Continue resolve it again, so a changed setting applies from that point on.
@@ -95,12 +109,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     options.scriptStorage?.scope ?? "player",
     () => mediaRevision.value++,
   );
-  // A Player that can capture or read stored photos saves a value only after storing the photos it references, and
-  // only while it holds the scope's live lock, so no other Player reclaims media it might still use. Without either,
-  // no captured photo can exist here, and storage is used directly.
+  // A Player that can capture photos, or whose host keeps captured and chosen media, saves a value only after storing the
+  // media it references, and only while it holds the scope's live lock, so no other Player reclaims media it might still
+  // use. Otherwise storage is used directly.
   const capturedMediaPersistence =
     options.scriptStorage &&
-    (options.capabilities?.camera === true || options.capturedMedia?.repository)
+    (options.capabilities?.camera === true || options.capturedMedia !== undefined)
       ? capturedMediaStorage(options.scriptStorage, capturedMedia, browserCapturedMediaLocks())
       : undefined;
   const scriptStorage = capturedMediaPersistence ?? options.scriptStorage;
@@ -210,6 +224,43 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       if (status === "halted" || status === "failed") camera.release();
     },
   );
+
+  // Until the Player offers the camera route, an image request that allows only the camera cannot be answered here.
+  // Each such request, of a session and an action, is reported once, so a dismissal holds only for the request it was
+  // given for.
+  watch(
+    () => {
+      const request = session.value && activePlayerRuntimeInteraction(session.value.snapshot);
+      return request?.ui.kind === "image" && !request.ui.allowFile
+        ? `${generation.value}:${request.actionId}`
+        : null;
+    },
+    (cameraOnlyRequest) =>
+      cameraOnlyRequest === null
+        ? notices.dismiss(playerNoticeKeys.imageNeedsCamera)
+        : notices.publish(playerNotices.imageNeedsCamera()),
+  );
+  const decodeImage = options.decodeImage ?? browserImageDecoder;
+  // The runtime accepts an image answer only when the store vouches for it.
+  const imageAdmission: CapturedMediaAdmission = capturedMedia;
+  /**
+   * Checks an image file the player chose for the pending `askImage` and stores it as session media, like a photo.
+   * Resolves to its reference, or to why the file is not accepted.
+   */
+  async function storeImageFile(
+    file: File,
+    filters: ImageFileFilters,
+  ): Promise<{ readonly reference: string } | { readonly message: string }> {
+    const checked = await checkImageFile(file, filters, decodeImage);
+    if (!checked.ok) return { message: checked.message };
+    // An unmounted Player keeps no media.
+    if (disposed) return { message: "This interaction is no longer available." };
+    const stored = capturedMedia.add("image", checked.data, {
+      width: checked.width,
+      height: checked.height,
+    });
+    return { reference: stored.reference };
+  }
 
   /**
    * Plays silence on spare audio elements within the activating click, so script audio may still play when the
@@ -351,6 +402,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function update(next: PlayerRuntimeSession) {
     session.value = next;
   }
+  /**
+   * Publishes a session that development time jumps (#615) advanced from the current one: playing media seek to the
+   * progress the jumps reported, and the scene clock continues from the new observed time.
+   */
+  function publishJump(next: PlayerRuntimeSession) {
+    session.value = next;
+    device.jumped(playerRuntimeMedia(next.snapshot).media);
+    clock.rebase();
+  }
   const permanentButtons = computed(() =>
     session.value === null ? [] : playerRuntimePermanentButtons(session.value.snapshot),
   );
@@ -458,6 +518,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     viewfinder,
     /** Where the script shows the camera view, `"window"` or `"stage"`, or `null` while it shows none. */
     viewfinderPlacement,
+    /**
+     * The image input of `askImage`: `store` checks and stores a chosen file, `admission` vouches for stored images when
+     * the runtime is answered, and `discard` drops a stored image that never answered, for example after the request
+     * ended while the file was read.
+     */
+    images: {
+      store: storeImageFile,
+      admission: imageAdmission,
+      discard: (reference: string) => capturedMedia.discard(reference),
+    },
     /** Bounded developer diagnostics, for example an unavailable session camera. */
     diagnostics: computed(() => diagnostics.value),
     /** Presented runtime timers; hidden timers have no entry. */
@@ -467,6 +537,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     pressPermanentButton,
     /** Observes elapsed time and media progress, runs the session, and returns the published session. */
     observe: clock.observe,
+    publishJump,
     start,
     update,
     prepare,

@@ -29,8 +29,8 @@ import { usePlayerPreference } from "./usePlayerPreference";
 import type { PlayerSessionHost } from "./usePlayerSession";
 import { defaultPlayerThemeIntents, usePlayerTheme } from "./usePlayerTheme";
 
-// Product Player composition. The development preview supplies tools, a Stage media override and the
-// right rail only through these props and slots; production builds do not import it.
+// Product Player composition. The development preview supplies tools, a Stage media override, the right rail and an
+// overlay only through these props and slots; production builds do not import it.
 const props = withDefaults(
   defineProps<{
     player: PlayerSessionHost;
@@ -214,6 +214,7 @@ async function toggleFullscreen() {
             :seen-sequence="notifications.seenSequence.value"
             :theme-mode="themeIntent.mode"
           />
+          <slot name="overlay" />
         </template>
         <template #right-rail>
           <!-- Runtime timers and buttons are runtime-owned content; the preview may add fixtures around them. -->
@@ -245,6 +246,7 @@ async function toggleFullscreen() {
           :speakers="transcript.speakers"
           :revision="transcript.revision"
           :observe-time="player.observe"
+          :images="player.images"
           @update:session="player.update"
         />
       </PlayerComposition>

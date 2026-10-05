@@ -43,7 +43,10 @@ import {
 } from "./support.js";
 
 export interface ActionCompletionOptions {
-  /** Required to accept a captured photo; without it only an unavailable camera completes a capture. */
+  /**
+   * Required to accept a captured photo or an image answer; without it only an unavailable camera completes a capture,
+   * and no image request completes.
+   */
   readonly capturedMedia?: CapturedMediaAdmission;
 }
 
@@ -138,7 +141,7 @@ export function completeAction(
     return pendingResult(current, [], { kind: "executionPending", actionId });
   }
   if (active.kind === "interaction") {
-    return completeInteraction(captured.plan, current, active, value);
+    return completeInteraction(captured.plan, current, active, value, options.capturedMedia);
   }
   if (active.kind === "capture") {
     return completeCapture(captured.plan, current, active, value, options.capturedMedia);
@@ -373,6 +376,7 @@ function completeInteraction(
   current: RuntimeSnapshot,
   action: RuntimeInteractionActionSnapshot,
   request: Record<string, unknown>,
+  capturedMedia: CapturedMediaAdmission | undefined,
 ): PendingActionOperationResult<ActionCompletionOutcome> {
   if (request.interactionKind !== action.interactionKind) {
     const receivedInteractionKind = request.interactionKind;
@@ -381,7 +385,8 @@ function completeInteraction(
       receivedInteractionKind === "text" ||
       receivedInteractionKind === "number" ||
       receivedInteractionKind === "choice" ||
-      receivedInteractionKind === "temporal"
+      receivedInteractionKind === "temporal" ||
+      receivedInteractionKind === "image"
         ? `interaction:${receivedInteractionKind}`
         : "<invalid>";
     return pendingResult(current, [], {
@@ -395,6 +400,7 @@ function completeInteraction(
     action,
     request.payload,
     currentTemporalContext(current),
+    capturedMedia,
   );
   if (!resolved.ok) {
     return pendingResult(current, [], { kind: "invalidPayload", message: resolved.message });

@@ -1091,7 +1091,8 @@ if reward is integer {
 
 - `x is T` is true exactly when the value may be stored in a place of type `T`. `is number` is also true for integers,
   and `is integer` is true for any whole number, including `2.0`. A collection test with an element type checks every
-  element; `[] is integer[]` is true. `is date`, `is time`, and `is datetime` are false for every current value.
+  element; `[] is integer[]` is true. `is date`, `is time`, and `is datetime` test the date and time values of
+  [§35](#35-date-time-durations-and-timestamps).
 - A test works on every value, including untyped storage, host data, and parameters of unknown type. The operand is
   evaluated once, and the test has no side effects.
 - `x is "happy"` is a compile error: `is` checks a type, and `==` compares values.
@@ -2023,6 +2024,12 @@ let image = askImage(
 
 `askImage(...)` returns one engine-managed image reference as `string`.
 
+`askImage(...)` **status (Owner decisions, 2026-10-05):** images only, for now. The Player offers the file route:
+while the request waits, a paperclip in its composer opens the browser's native file picker, and an image file dropped
+onto the composer answers the request; outside such a request there is neither. A chosen image stays in the browser
+and is session media with the lifecycle of a `takePhoto()` photo (§33): durable only while saved script storage
+references it. The camera route, `invalidMessage`, and `invalidLlmInstruction` are not implemented yet.
+
 ### Video input
 
 By default, camera recording and file upload are both available:
@@ -2700,7 +2707,8 @@ Rules:
   session and cannot be saved, including when nested inside lists or objects (`TSR055`). Nested `null` is allowed.
 - Saving and loading copy data: later changes to the saved variable or a loaded value do not change storage.
 - A string naming a camera, file, or media reference is stored only as a string; storage itself does not persist the
-  media. A photo from `takePhoto()` is kept by the Player while saved storage references it (§33).
+  media. A photo from `takePhoto()` or an image from `askImage(...)` is kept by the Player while saved storage
+  references it (§33).
 - Storage keys are plain strings.
 - After unwrapping parentheses, a recognizably non-string outer key expression is a compile error (`TSV038`). Other
   keys are checked at runtime and raise `TSR054` if non-string. For `load`, the diagnostic explains:
@@ -4477,7 +4485,7 @@ for name in toys { ... }                // the keys
   object are never equal.
 - **Text:** `say` shows a dict as `dict{ "collar": "leather collar" }` ([§16](#lists-in-text)). `${toys}` is an error
   that names the fix: select one value with `toys[key]`, or show every value with `toys.values.join()`. A dict is not a
-  text field, a set element, or a `choose` option.
+  text field or a `choose` option; it may be a set member ([§16](#16-lists)).
 - **Copies and storage:** dicts are copied like lists ([ADR 0014](../decisions/0014-core-runtime-value-semantics.md)),
   and `keys` and `values` are new lists. Storage ([§25](#25-persistent-storage-and-keys)) and checkpoints keep a dict
   with its entry order.
@@ -4654,5 +4662,4 @@ Other open API and runtime decisions:
 - decide how scheduled chastity off-windows affect sentence duration in each account mode;
 - define exact current-state fields, detailed edge-event fields, duration-session fields, and reconnect/abandoned-session finalization rules;
 - define the standard and script-owned hygiene-pause APIs;
-- decide the technical fallback when a speaker has no `displayName` and all of `title`, `firstName`, and `lastName` are empty;
-- define the initial string-method library and future speaker-specific LLM context fields.
+- define future speaker-specific LLM context fields.

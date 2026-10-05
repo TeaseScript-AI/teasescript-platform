@@ -589,7 +589,14 @@ until its block ends; that a block can remove its own button, passing focus to t
 the waiting question, which returns; and that a `goto` and `exit` remove the buttons. Serving the fixture package root
 `tests/fixtures/packages/`, it opens packages by URL in the Player, playground, and editor: a valid package starts at
 its `main.tease` with its own Stage image and plays its own sound, and one that does not compile lists its diagnostic
-with file and line. With a Windows user agent, the editor opens a package served only as a catalog whose file paths a
+with file and line. Its `pictures` package checks `askImage(...)`: only while a request waits does the composer offer
+a paperclip, which opens the native picker, and a drop target; a chosen and a dropped image each answer and reach the
+Stage, while a text file, two files, or a file outside the request's filters are refused and the request keeps waiting;
+its `picture-race` package checks that a file chosen for a request a timer's request replaced answers neither. On the
+importer's route `/player/?dev&package=waiting&time=skip`, auto-skip ends that package's 15 s wait right after a
+physical Start, and +10 s at its button reaches the button's elapsed time; without `time=skip`, Skip ends the wait, and
+the default build offers no time controls.
+With a Windows user agent, the editor opens a package served only as a catalog whose file paths a
 model URI could merge (a `\` in a name, `C:` and `c:` folders) and keeps every file apart. Development preview
 presentation is covered by the [Player browser verification route](#player-browser-and-visual-verification).
 

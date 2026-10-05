@@ -94,6 +94,24 @@ export class MediaDevice {
     this.#updateBlocked();
   }
 
+  /**
+   * Applies the projection after a development time jump that reported progress the elements did not play: every
+   * loaded instance seeks to its projected playhead, and its measurement continues from the reported progress, also
+   * within an unchanged segment.
+   */
+  jumped(media: readonly MediaPlaybackProjection[]): void {
+    this.reconcile(media);
+    for (const entry of this.#entries.values()) {
+      const { projection } = entry;
+      if (entry.element === null || entry.failed || entry.segment !== projection.segment) continue;
+      entry.progressMs = projection.reportedProgressMs;
+      entry.pendingPositionMs = projection.playheadMs;
+      entry.finished = false;
+      this.#apply(entry);
+    }
+    this.#updateBlocked();
+  }
+
   /** Measures every running loaded instance; include the result in each time observation. */
   sample(): readonly MediaProgressReport[] {
     const reports: MediaProgressReport[] = [];

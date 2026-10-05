@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { MediaDevice, type MediaDeviceElement } from "../../player/media-device.js";
 import {
+  advancePlayerRuntimeTime,
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   playerRuntimeMedia,
@@ -144,6 +145,12 @@ export function harness(
       const result = observePlayerRuntimeTime(session, now, device.sample());
       assert.equal(result.outcome.kind, "observed");
       publish(result.session);
+    },
+    /** A development time jump to `targetMs`, published as the Player host publishes one. */
+    jump(targetMs: number) {
+      session = advancePlayerRuntimeTime(session, targetMs);
+      now = session.snapshot.observedSessionTimeMs;
+      device.jumped(playerRuntimeMedia(session.snapshot).media);
     },
     texts() {
       return session.transcriptEntries.flatMap((entry) =>
