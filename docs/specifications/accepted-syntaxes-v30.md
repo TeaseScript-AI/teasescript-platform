@@ -2610,7 +2610,7 @@ showBackgroundImage(
 ```
 
 ## 23. Loops
-**Status:** Accepted
+**Status:** Accepted (`for key, value`: Owner decision on #627, 2026-10-05)
 
 ```text
 repeat 5 {
@@ -2626,6 +2626,19 @@ for item in items {
 
 `for` goes through the elements of a list or set, the keys of a dict ([§40](#40-dictionaries)), or the whole numbers of
 a range, as they were when the loop started: changing the source inside the loop does not change what the loop visits.
+
+With two variables, `for` goes through the entries of a dict, giving each key and its value:
+
+```text
+for key, value in toys {
+    say "${key}: ${value}"
+}
+```
+
+The entries are taken when the loop starts, and each value is a copy: changing it, or adding, changing, or removing
+entries of the dict inside the loop, changes neither the dict's other entries nor what the loop visits. The key is text
+and the value has the dict's value type. The two names must differ. Another source is an error: a compile error when the
+compiler can see it, and runtime error `TSR044` otherwise. A list has no two-variable `for`.
 
 ```text
 while player.health > 0 {
@@ -4502,6 +4515,7 @@ toys.length                             // the number of entries
 toys.keys                               // a new list of the keys, in entry order
 toys.values                             // a new list of the values, in the same order
 for name in toys { ... }                // the keys
+for name, toy in toys { ... }           // the keys with a copy of each value
 ```
 
 - **Keys** are text. In a literal, `collar:` is the key `"collar"`, quoted text is any key, and `[expr]:` computes one.
@@ -4521,8 +4535,8 @@ for name in toys { ... }                // the keys
   `contains(key)` first or read with `get`. `get(key, default: value)` gives `value` for a missing key; its `default:`
   is required and must fit the value type like a value stored in the dict, also when the script runs (`TSR058`), and
   its result has the value type. Like any argument, the default is evaluated before the lookup.
-- **Iteration:** `for key in toys` goes through the keys as they were when the loop started
-  ([§23](#23-loops)), so changing the dict inside the loop is safe. There is no two-variable `for`.
+- **Iteration:** `for key in toys` goes through the keys, and `for key, value in toys` through the keys with a copy of
+  each value, as they were when the loop started ([§23](#23-loops)), so changing the dict inside the loop is safe.
 - **Equality:** two dicts are equal (`==`) when they have the same keys with equal values, in any order. A dict and an
   object are never equal.
 - **Text:** `say` shows a dict as `dict{ "collar": "leather collar" }` ([§16](#lists-in-text)). `${toys}` is an error
@@ -4533,7 +4547,7 @@ for name in toys { ... }                // the keys
   with its entry order.
 - **Type tests:** `is dict` and `is T dict` test the value; `is T dict` checks every value.
 
-Deferred: keys other than text, merging dicts, a two-variable `for`, and sorted dicts.
+Deferred: keys other than text, merging dicts, and sorted dicts.
 
 ## 41. Headers and tags
 **Status:** Accepted ([ADR 0023](../decisions/0023-tags-for-scripts-and-images.md))

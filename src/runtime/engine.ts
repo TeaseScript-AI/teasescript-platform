@@ -81,6 +81,7 @@ import {
   createCapturedSerializableList,
   createCapturedSerializableObject,
   getSerializableProperty,
+  type SerializableRuntimeDict,
   type SerializableRuntimeList,
   type SerializableRuntimeRange,
   type SerializableRuntimeSet,
@@ -1522,11 +1523,20 @@ function executeLoopStart(
       };
     } else {
       const evaluated = evaluator.evaluate(instruction.expression);
-      // A loop over a dict goes through its keys as they are when the loop starts.
-      const source = isDict(evaluated)
-        ? createCapturedSerializableList(evaluated.entries.map((entry) => entry.key))
-        : evaluated;
-      if (!isList(source) && !isSet(source) && !isRange(source)) {
+      const pair = instruction.valueVariable !== undefined;
+      if (pair && !isDict(evaluated)) {
+        throw fault(
+          "TSR044",
+          "for key, value requires a dict source.",
+          instruction.expression.span,
+        );
+      }
+      // A loop over a dict goes through its keys, or with a value variable its entries, as they are when it starts.
+      const source =
+        isDict(evaluated) && !pair
+          ? createCapturedSerializableList(evaluated.entries.map((entry) => entry.key))
+          : evaluated;
+      if (!isList(source) && !isSet(source) && !isRange(source) && !isDict(source)) {
         throw fault(
           "TSR044",
           "for requires a list, set, dict, or range source.",
@@ -1539,7 +1549,8 @@ function executeLoopStart(
         loopId: instruction.loopId,
         scopeDepth,
         variable: instruction.variable,
-        // EVIDENCE: the guards above narrow source to the three iterable runtime collection variants.
+        ...(pair ? { valueVariable: instruction.valueVariable } : {}),
+        // EVIDENCE: the guards above narrow source to the four iterable runtime collection variants.
         source: cloneCapturedSerializableValue(source) as Extract<
           RuntimeLoopFrameSnapshot,
           { kind: "for" }
@@ -1594,6 +1605,17 @@ function executeLoopStart(
     snapshot.nextInstruction = instruction.target;
     return;
   }
+  if (isDict(frame.source)) {
+    // Each iteration binds the key and its own copy of the value, so changes to either never reach the snapshot.
+    const entry = frame.source.entries[frame.position]!;
+    frame.position += 1;
+    pushIterationScope(snapshot, [
+      { name: frame.variable, value: entry.key },
+      { name: frame.valueVariable!, value: cloneCapturedSerializableValue(entry.value) },
+    ]);
+    advance(snapshot);
+    return;
+  }
   const value = iterationValue(frame.source, frame.position);
   frame.position += 1;
   pushIterationScope(snapshot, [
@@ -1632,8 +1654,13 @@ function pushIterationScope(snapshot: RuntimeSnapshot, bindings: RuntimeBindingS
 }
 
 function iterationLength(
-  source: SerializableRuntimeList | SerializableRuntimeSet | SerializableRuntimeRange,
+  source:
+    | SerializableRuntimeList
+    | SerializableRuntimeSet
+    | SerializableRuntimeRange
+    | SerializableRuntimeDict,
 ): number {
+  if (isDict(source)) return source.entries.length;
   return isRange(source) ? rangeLength(source) : source.items.length;
 }
 

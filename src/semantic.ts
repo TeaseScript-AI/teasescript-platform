@@ -1346,6 +1346,13 @@ class SemanticValidator {
         }
         const loopScope = new SemanticScope(scope);
         this.#declare(statement.variable.name, "variable", statement.variable.span, loopScope);
+        if (statement.valueVariable !== null)
+          this.#declare(
+            statement.valueVariable.name,
+            "variable",
+            statement.valueVariable.span,
+            loopScope,
+          );
         yield* compileChild(
           this.#validateStatements(statement.body.statements, loopScope, loopDepth + 1),
         );

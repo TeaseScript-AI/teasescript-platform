@@ -2538,10 +2538,25 @@ class Parser {
       return null;
     }
     const variable = this.#identifier(this.#advance());
+    // `for key, value in dict`: the second name receives each entry's value.
+    let valueVariable: Identifier | null = null;
+    if (this.#match(TokenKind.Comma)) {
+      if (!this.#checkDeclarationName()) {
+        this.#reportInsertion(
+          parserDiagnosticCode.expectedIdentifier,
+          "Expected a value-variable identifier after ',', as in 'for key, value in dict'.",
+        );
+        this.#synchronizeStatement();
+        return null;
+      }
+      valueVariable = this.#identifier(this.#advance());
+    }
     if (!this.#match(TokenKind.KeywordIn)) {
       this.#reportInsertion(
         parserDiagnosticCode.expectedIn,
-        "Expected 'in' after the loop variable.",
+        valueVariable === null
+          ? "Expected 'in' after the loop variable."
+          : "Expected 'in' after the loop variables.",
       );
       this.#synchronizeStatement();
       return null;
@@ -2557,6 +2572,7 @@ class Parser {
     return Object.freeze({
       kind: "forStatement",
       variable,
+      valueVariable,
       iterable,
       body,
       span: spanFrom(keyword.span, body.span),

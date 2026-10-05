@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 59;
+export const INSTRUCTION_PLAN_VERSION = 60;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -257,6 +257,8 @@ export type LoopStartInstruction =
       readonly loopKind: "for";
       readonly loopId: number;
       readonly variable: string;
+      /** `for key, value in dict`: the value variable; `variable` then receives each key. */
+      readonly valueVariable?: string;
       readonly expression: ExpressionPlan;
       readonly continueTarget: number;
       readonly target: number;
