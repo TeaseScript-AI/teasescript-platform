@@ -1114,6 +1114,75 @@ test(
   },
 );
 
+// A corpus merge puts the releases of a package side by side (`name__sha256_<hash>`): a release's script loads the
+// module versions of its own release and the modules of no release; without releases, a script skips other versions.
+test(
+  "loads only the module versions of a script's own release",
+  { skip: parserUnavailable || ("reason" in projectResult ? projectResult.reason : false) },
+  async () => {
+    if (!("compiler" in projectResult)) return;
+    const scripts = fileURLToPath(
+      new URL("./fixtures/packages/module-releases/scripts/", import.meta.url),
+    );
+    const sources = readdirSync(scripts, { recursive: true, encoding: "utf8" })
+      .filter((file) => file.endsWith(".groovy"))
+      .sort();
+    const files = await Promise.all(
+      sources.map((file) => parseGroovySource(path.join(scripts, file))),
+    );
+    const convert = (releases: string[][], compiles: boolean): Map<string, string> => {
+      const lowered = lowerPackage(files, { releases });
+      const outputs = lowered.composed.flatMap(
+        (program, index): Array<[string, MigrationProgram]> =>
+          program.module === undefined
+            ? [[lowered.paths[index] ?? sources[index]!.replace(/\.groovy$/u, ".tease"), program]]
+            : [],
+      );
+      if (lowered.main !== null && "menu" in lowered.main)
+        outputs.push(["main.tease", lowered.main.menu]);
+      const helpers = lowered.globals?.helpers ?? null;
+      if (helpers !== null) outputs.push(["helpers.tease", helpers]);
+      const shims = outputs.map(([file, program]) => ({
+        path: file,
+        shim: shimPendingCapabilities(program),
+      }));
+      if (compiles)
+        assert.deepEqual(
+          projectResult.compiler(
+            shims.map(({ path: file, shim }) => ({ path: file, source: shim.source })),
+            shims.flatMap(({ shim }) => shim.builtins),
+          ).diagnostics,
+          [],
+        );
+      return new Map(outputs.map(([file, program]) => [file, emitTease(program)]));
+    };
+    const released = convert(
+      [
+        ["game.groovy", "game/play.groovy", "game/extra.groovy"],
+        [
+          "game__sha256_aaaaaaaaaaaa.groovy",
+          "game/play__sha256_bbbbbbbbbbbb.groovy",
+          "game/extra.groovy",
+        ],
+      ],
+      true,
+    );
+    const current = released.get("game.tease") ?? "";
+    const older = released.get("game__sha256_aaaaaaaaaaaa.tease") ?? "";
+    // Both scripts load the modules they share, which the package defines once in helpers.tease.
+    for (const name of ["Extra", "Added"]) {
+      assert.match(current, new RegExp(`load${name}Module\\(\\)`, "u"));
+      assert.match(older, new RegExp(`load${name}Module\\(\\)`, "u"));
+    }
+    assert.match(current, /say "Play \$\{rounds\}"/u);
+    assert.doesNotMatch(current, /Old play/u);
+    assert.match(older, /"Old play"/u);
+    assert.doesNotMatch(older, /"Play /u);
+    const plain = convert([], false).get("game.tease") ?? "";
+    assert.doesNotMatch(plain, /Old play/u);
+  },
+);
+
 // A variable splits by type only in straight-line code of the block that declares it, which no function writes; a
 // write through a function, a function value, or a loop with break keeps one variable with a union type.
 test(

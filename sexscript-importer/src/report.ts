@@ -83,6 +83,8 @@ export interface FeasibilityOptions {
   readFile?: PackageFileReader;
   /** Scripts that are no entries of their own, which the generated entry menu does not offer (PackageOptions). */
   internalScripts?: readonly string[];
+  /** Releases that a corpus merge put side by side (PackageOptions.releases). */
+  releases?: ReadonlyArray<readonly string[]>;
   /**
    * The converted package as written, after any manual output patches, read as the Player reads it, which
    * `finalPackage` compiles and runs as it is; needs `compiler`.
@@ -216,6 +218,7 @@ export function analyzeFeasibility(
     ...(options.files === undefined ? {} : { files: options.files }),
     ...(options.readFile === undefined ? {} : { readFile: options.readFile }),
     ...(options.internalScripts === undefined ? {} : { internalScripts: options.internalScripts }),
+    ...(options.releases === undefined ? {} : { releases: options.releases }),
   });
   const helpers = globals?.helpers ?? null;
   const isScriptBodyAt = (index: number): boolean =>
