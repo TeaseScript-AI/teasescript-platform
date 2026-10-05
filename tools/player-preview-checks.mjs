@@ -1310,7 +1310,8 @@ async function composerNoticeChecks(page) {
     const input = page.locator("[data-runtime-interaction] textarea");
     await input.fill("Not an option");
     await input.press("Enter");
-    await page.locator("[data-runtime-interaction]").getByRole("status").waitFor();
+    // The composer's own feedback; the Player notice live regions are separate status regions.
+    await page.locator("[data-runtime-interaction] .composer-notice[role='status']").waitFor();
     const placement = await page.evaluate(() => {
       const notice = document.querySelector(".composer-notice").getBoundingClientRect();
       const composer = document.querySelector("[data-composer-shell]").getBoundingClientRect();
@@ -1637,6 +1638,217 @@ async function playerSettingsChecks(page) {
   return "PASS Player Settings apply, persist, validate stored and cross-tab values, and fit short screens";
 }
 
+// Player notices show as temporary toasts beside the timer and stay in the notification panel until resolved.
+async function noticeChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const keys = (locator, attribute) =>
+    locator.evaluateAll(
+      (elements, name) => elements.map((element) => element.getAttribute(name)),
+      attribute,
+    );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).first().click();
+  await page.getByRole("button", { name: "Show every notice level" }).click();
+  await page.mouse.move(0, 899);
+  // At most three toasts, newest first; the oldest publication waits in the panel.
+  const toasts = page.locator("[data-sonner-toast]");
+  const shown = page.locator('[data-sonner-toast][data-visible="true"]');
+  const texts = (locator) =>
+    locator.evaluateAll((elements) =>
+      elements.map((element) => element.querySelector("[data-title]")?.textContent.trim()),
+    );
+  await page.waitForFunction(() => document.querySelectorAll("[data-sonner-toast]").length === 4);
+  // Measure once the toasts have slid into place.
+  await page.waitForTimeout(600);
+  check(
+    JSON.stringify(await texts(shown)) ===
+      JSON.stringify([
+        "Some progress could not be saved in this browser.",
+        "The browser blocked audio.",
+        "This browser does not keep saved progress, so the next run starts fresh.",
+      ]),
+    `The newest three notices show as toasts, newest first: ${JSON.stringify(await texts(shown))}`,
+  );
+  // The fourth waits hidden behind the stack, out of reach of the keyboard.
+  check(
+    await page.locator('[data-sonner-toast][data-visible="false"]').evaluate((element) => {
+      element.focus();
+      return (
+        document.activeElement !== element && getComputedStyle(element).visibility === "hidden"
+      );
+    }),
+    "A hidden toast must not take keyboard focus",
+  );
+  // Each level has its own status colour; equal levels share it.
+  const surfaces = await shown.evaluateAll((elements) =>
+    elements.map((element) => getComputedStyle(element).backgroundColor),
+  );
+  check(
+    surfaces[0] === surfaces[1] && surfaces[1] !== surfaces[2],
+    `Toasts take their level's colour: ${JSON.stringify(surfaces)}`,
+  );
+  // Centred in the window, whether or not a side panel such as the Visual Lab is open, below the top controls.
+  const bell = page.locator("[data-notification-bell]");
+  const front = await shown.first().boundingBox();
+  const bellBox = await bell.boundingBox();
+  check(
+    front &&
+      bellBox &&
+      Math.abs(front.x + front.width / 2 - 720) < 2 &&
+      front.y >= bellBox.y + bellBox.height,
+    `Toasts are centred in the window below the top controls: ${JSON.stringify(front)}`,
+  );
+  check(
+    (await bell.locator(".player-notification-dot").count()) === 1,
+    "The bell marks unseen notices",
+  );
+  check(
+    /need attention/.test((await bell.getAttribute("aria-label")) ?? ""),
+    "The bell's name reports attention",
+  );
+  // The pointer on the toasts pauses expiry beyond an info toast's 5 s; once it leaves, the toast expires.
+  const infoToast = toasts.filter({ hasText: "does not keep saved progress" });
+  await shown.first().hover();
+  await page.waitForTimeout(6000);
+  check((await infoToast.count()) === 1, "A toast under the pointer must not expire");
+  // The pointer also expands the stack, newest at the top.
+  const tops = await shown.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().top),
+  );
+  check(
+    tops.every((top, index) => index === 0 || top > tops[index - 1]),
+    `The expanded stack keeps the newest toast at the top: ${JSON.stringify(tops)}`,
+  );
+  await page.mouse.move(0, 899);
+  await infoToast.waitFor({ state: "detached", timeout: 8000 });
+
+  // The panel lists every notice, newest first, and replaces the toasts.
+  check((await toasts.count()) > 0, "Toasts remain before the panel opens");
+  await bell.click();
+  const panel = page.locator("[data-player-notification-panel]");
+  await panel.waitFor();
+  const items = panel.locator("[data-player-notice]");
+  check(
+    JSON.stringify(await keys(items, "data-player-notice")) ===
+      JSON.stringify([
+        "storage-write-failed",
+        "audio-blocked",
+        "storage-unavailable",
+        "preview-error",
+      ]),
+    "The panel lists every notice, newest first",
+  );
+  await toasts.first().waitFor({ state: "detached" });
+  const tints = await items.evaluateAll((elements) =>
+    elements.map((element) => getComputedStyle(element).backgroundColor),
+  );
+  check(
+    tints[0] === tints[1] && new Set(tints).size === 3,
+    `Panel entries take their level's colour: ${JSON.stringify(tints)}`,
+  );
+  check(
+    (await panel.locator('[data-player-notice="audio-blocked"] [data-notice-dismiss]').count()) ===
+      0,
+    "A notice the player must act on offers no dismissal",
+  );
+  await panel.locator('[data-player-notice="preview-error"] [data-notice-dismiss]').click();
+  await panel.locator('[data-player-notice="preview-error"]').waitFor({ state: "detached" });
+  check(
+    await panel.evaluate(
+      (element) =>
+        element.contains(document.activeElement) && document.activeElement.matches("button"),
+    ),
+    "Dismissal moves focus to a remaining control in the panel",
+  );
+  await panel.locator("[data-notifications-clear]").focus();
+  await page.keyboard.press("Enter");
+  await panel.locator('[data-player-notice="storage-write-failed"]').waitFor({ state: "detached" });
+  check(
+    JSON.stringify(await keys(items, "data-player-notice")) === JSON.stringify(["audio-blocked"]),
+    "Clear all keeps only the notice the player must act on",
+  );
+  check(
+    await panel.evaluate(
+      (element) =>
+        document.activeElement?.closest("[data-player-notification-panel]") === element &&
+        document.activeElement.matches("[data-notice-action]"),
+    ),
+    "Clear all moves focus to the remaining notice's action",
+  );
+  await page.keyboard.press("Escape");
+  await panel.waitFor({ state: "detached" });
+  check(
+    (await bell.locator(".player-notification-dot").count()) === 1,
+    "A notice the player must act on keeps the bell marked after the panel was seen",
+  );
+  // Its producer withdraws it once resolved.
+  await page.getByRole("button", { name: "Clear notices" }).click();
+  await bell.locator(".player-notification-dot").waitFor({ state: "detached" });
+
+  // Resolving the last notice from the panel closes it and returns focus to the bell.
+  await page.getByRole("button", { name: "Show every notice level" }).click();
+  await bell.click();
+  await panel.locator("[data-notifications-clear]").focus();
+  await page.keyboard.press("Enter");
+  await panel.locator('[data-player-notice="audio-blocked"] [data-notice-action]').waitFor();
+  await page.keyboard.press("Enter");
+  await panel.waitFor({ state: "detached" });
+  check(
+    await bell.evaluate((element) => element === document.activeElement),
+    "With no notice left, focus returns to the bell",
+  );
+
+  // On a small phone, toasts span the Player and stay in view.
+  await page.getByRole("button", { name: "Show every notice level" }).click();
+  await page.setViewportSize({ width: 320, height: 568 });
+  // Sonner animates the change to its small-screen layout.
+  await page.waitForTimeout(600);
+  // The front toast spans the Player; those stacked behind it are drawn smaller.
+  const boxes = await shown.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().toJSON()),
+  );
+  check(
+    boxes[0]?.width >= 280,
+    `The front toast spans a small screen: ${JSON.stringify(boxes[0])}`,
+  );
+  for (const box of boxes)
+    check(
+      box.left >= 0 && box.right <= 320 && box.top >= 0,
+      `A toast must fit a small screen: ${JSON.stringify(box)}`,
+    );
+  // Withdrawn notices take their toasts with them.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.getByRole("button", { name: "Clear notices" }).click();
+  await toasts.first().waitFor({ state: "detached" });
+  // On a phone, without the development tools open, the panel shifts to fit and keeps the Player's edge space.
+  // Reduced motion skips the opening zoom, so the box is final when measured.
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.reload();
+  await bell.click();
+  const narrowPanel = await panel.boundingBox();
+  check(
+    narrowPanel && narrowPanel.x >= 8 && narrowPanel.x + narrowPanel.width <= 312,
+    `The panel keeps clear of a small screen's edges: ${JSON.stringify(narrowPanel)}`,
+  );
+  await page.keyboard.press("Escape");
+  await panel.waitFor({ state: "detached" });
+  await page.emulateMedia({ reducedMotion: null });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // With reduced motion the panel opens without animation.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await bell.click();
+  await panel.waitFor();
+  const animation = await panel.evaluate((element) => getComputedStyle(element).animationName);
+  check(animation === "none", `The panel must not animate with reduced motion: ${animation}`);
+  await page.keyboard.press("Escape");
+  await page.emulateMedia({ reducedMotion: null });
+  return "PASS notices toast at the top centre, expire, and stay in the panel until resolved or dismissed";
+}
+
 async function mediaPlaybackChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -1674,7 +1886,16 @@ async function mediaPlaybackChecks(page) {
     await page.evaluate(() => window.__played.length === 0),
     "Refused audio was reported as playing",
   );
-  await retry.click();
+  // The toast may expire, so the panel keeps the retry; it is the only way to continue, so it has no dismissal.
+  await page.locator("[data-notification-bell]").click();
+  const panelNotice = page.locator(
+    '[data-player-notification-panel] [data-player-notice="audio-blocked"]',
+  );
+  check(
+    (await panelNotice.locator("[data-notice-dismiss]").count()) === 0,
+    "The blocked-audio notice must not be dismissible",
+  );
+  await panelNotice.getByRole("button", { name: "Enable audio", exact: true }).click();
   await page.waitForFunction(() => window.__played[0]?.currentTime > 0.2);
   await retry.waitFor({ state: "hidden" });
   check(
@@ -1970,6 +2191,7 @@ const groups = [
   focusIndicatorChecks,
   backgroundControlPlacementChecks,
   mediaPlaybackChecks,
+  noticeChecks,
   directDemoLatestChecks,
   markupLinkChecks,
   timerChecks,

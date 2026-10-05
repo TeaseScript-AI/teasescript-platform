@@ -4,6 +4,7 @@ import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
 import type { PlayerTimerKind } from "../../model.js";
+import { playerNoticeKeys, playerNotices, type PlayerNotice } from "../../notices.js";
 import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime-adapter.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
@@ -60,6 +61,20 @@ const player = usePlayerSession({
     capturedMedia: { repository: props.capturedMediaRepository ?? null },
   }),
 });
+
+// Notice preview: the Player's own wording for real conditions, plus an error sample that no condition reports yet.
+const sampleNotices: readonly PlayerNotice[] = [
+  { key: "preview-error", level: "error", message: "The camera stopped unexpectedly." },
+  playerNotices.storageUnavailable(),
+  playerNotices.audioBlocked(() => player.withdrawNotice(playerNoticeKeys.audioBlocked)),
+  playerNotices.storageWriteFailed(),
+];
+function showSampleNotices() {
+  for (const notice of sampleNotices) player.publishNotice(notice);
+}
+function clearSampleNotices() {
+  for (const notice of sampleNotices) player.withdrawNotice(notice.key);
+}
 const startOptions = () => ({ temporalContext: playerTemporalContext(), wallClockMs: Date.now() });
 if (cameraScenario)
   void player
@@ -138,6 +153,11 @@ else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptio
           <Button class="min-w-0" variant="outline" @click="backgroundControlsReset++"
             >Reset background buttons</Button
           >
+        </fieldset>
+        <fieldset class="grid min-w-0 gap-2" data-notice-preview>
+          <legend class="mb-2">Player notices</legend>
+          <Button class="min-w-0" variant="outline" @click="showSampleNotices">Show every notice level</Button>
+          <Button class="min-w-0" variant="outline" @click="clearSampleNotices">Clear notices</Button>
         </fieldset>
       </div>
     </template>

@@ -388,9 +388,41 @@ the account setting when the host supplies one, else the browser's. They are ses
 
 If the browser still refuses required audible playback, the Player surfaces a deliberate activation/retry control. It
 does not silently substitute muted playback or report the audio as played: refused audio reports no progress, so its
-cues and settlement wait, and an **Enable audio** control retries playback from the user's click. In the Player the
+cues and settlement wait, and an **Enable audio** [player notice](#player-notices) retries playback from the user's
+click. In the Player the
 session is created only when Start is activated; the Continue path applies to a session the host restores. Durable
 checkpoint storage and automatic resume across page reloads are tracked in #469.
+
+## Player notices
+
+Player notices tell the player that something about the session's environment matters, such as blocked audio,
+unavailable storage, or a camera problem. They never stop the session and are separate from runtime developer warnings,
+which are creator diagnostics about a script location. Host features publish them through one Player-owned channel
+(`player/notices.ts`) with fixed Player wording per condition; a condition has one notice, which it replaces or
+withdraws, so repeated causes do not stack.
+
+Notices belong to the Player, not the story, so they never appear in the conversation. A new or replaced notice shows
+as a temporary toast (shadcn-vue Sonner) at the top centre of the window, below the Player's top controls, whether or
+not a side panel is open; on a narrow screen the toast spans the window and may cover the timer. Each toast shows a level icon (info, warning, or error), its text, and at
+most one action control that runs from the player's click (such as **Enable audio**). Up to three toasts show as a
+stack with the newest in front; the pointer expands the stack and pauses expiry. Info toasts expire after 5 seconds,
+warnings after 8, and errors after 10; swiping a toast away hides it sooner. Hiding or expiry removes only the toast.
+The toasts are announced politely, errors included.
+
+The notification bell in the top controls opens the notification panel, which lists every current notice, newest
+first, with its age, its action, and a dismiss control; **Clear all** dismisses every dismissible notice. A dot on the
+bell marks notices published since the panel was last opened and any notice the player must act on. Opening the panel
+marks the notices seen and replaces the toasts. When dismissal, **Clear all**, or a resolved condition removes the
+focused control, focus moves to the nearest remaining control; with none left, the panel closes and focus returns to
+the bell. A notice whose action is the only way to continue, such as **Enable audio** while the script waits for that
+audio, is labelled **Needs action**, offers no dismiss control, and disappears once its condition resolves.
+
+The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
+(info: saved progress is not kept), and a failed script-storage write (warning, for the run it happened in; a new
+Start withdraws it). Each level also has a theme status colour, following the usual convention: info blue, warning
+orange, error red. A toast uses the level's soft tint as its surface and its solid tone for the border and icon; a
+panel entry uses the same tint with a solid mark along its start edge and a solid icon; and the bell's dot takes the
+most severe level that needs attention. The development preview's Visual Lab shows every level.
 
 ## Stage and media presentation
 
