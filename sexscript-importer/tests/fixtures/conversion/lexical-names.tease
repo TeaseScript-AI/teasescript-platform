@@ -11,6 +11,8 @@ function sexscriptLegacyRandom(limit) {
   }
   return 0
 }
+// NOTE SX_BINDING_VARIABLE: Groovy kept counter, which functions assign without a declaration, in the script's binding that every function shares; it is declared at the top of the script with an empty value.
+let counter = 0
 // A closure named like a SexScript method calls that method inside its own body, where the variable is not defined yet.
 function getRandom(low, high) {
   // NOTE SX_PLUS_OPERAND_TYPE line 2: Groovy + operands are not proven numeric; TeaseScript + only adds numbers. Use interpolation if this joins text.
@@ -40,4 +42,11 @@ while (playing is boolean and playing == true) or (playing is number and playing
     playing = 0
   }
 }
+// A variable a closure assigns without a declaration lived in the script binding that every closure shares.
+function countUp {
+  counter = 0
+  counter = counter + 1
+}
+countUp()
+say "Counted ${counter}"
 exit

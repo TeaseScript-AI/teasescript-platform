@@ -1040,7 +1040,14 @@ export function lowerParsedFile(
       ? [...lowered, { kind: "exit" as const, span: null }]
       : lowered;
   const typedStatements = withLegacyMarkup(
-    withEnforcedTypes([...context.closureFunctions, ...authoredStatements], context),
+    withEnforcedTypes(
+      [
+        ...(mixin === null ? bindingDeclarations(body, context) : []),
+        ...context.closureFunctions,
+        ...authoredStatements,
+      ],
+      context,
+    ),
     context,
   );
   const statements = [...helperStatements(context.syntheticHelpers), ...typedStatements];
@@ -12521,6 +12528,69 @@ function formatText(
 }
 
 /** The empty value of a type, the start of a variable whose own initializer could not convert; null otherwise. */
+/**
+ * Variables a closure assigns that nothing declares: Groovy kept them in the script's binding, shared by every
+ * closure, so they are declared at the top of the script, starting with their type's empty value.
+ */
+function bindingDeclarations(body: AstNode | null, context: LowerContext): IrStatement[] {
+  if (body === null || context.functionDepth > 0) return [];
+  const declared = new Set<string>();
+  const assigned = new Map<string, AstNode>();
+  const visit = (node: AstNode, insideClosure: boolean): void => {
+    if (node.kind === "declaration") {
+      const name = variableName(node.left);
+      if (name !== null) declared.add(name);
+    }
+    if (node.kind === "closure")
+      for (const parameter of Array.isArray(node.parameters) ? node.parameters : [])
+        if (isRecord(parameter) && typeof parameter.name === "string") declared.add(parameter.name);
+    if (node.kind === "for") {
+      const name = text(node.variable);
+      if (name !== null) declared.add(name);
+    }
+    if (!insideClosure && node.kind === "binary" && node.operator === "=") {
+      // A top-level assignment declares the variable there.
+      const name = variableName(node.left);
+      if (name !== null) declared.add(name);
+    }
+    if (insideClosure && node.kind === "binary" && node.operator === "=") {
+      const name = variableName(node.left);
+      if (name !== null && !assigned.has(name)) assigned.set(name, node);
+    }
+    for (const child of nodeChildren(node)) visit(child, insideClosure || node.kind === "closure");
+  };
+  visit(body, false);
+  const names = [...assigned.keys()].filter(
+    (name) =>
+      !declared.has(name) &&
+      !context.functions.has(name) &&
+      !context.packageFunctions.has(name) &&
+      !isLegacyGetterProperty(name),
+  );
+  if (names.length === 0) return [];
+  const message = `Groovy kept ${names.join(", ")}, which functions assign without a declaration, in the script's binding that every function shares; ${names.length === 1 ? "it is" : "they are"} declared at the top of the script with an empty value.`;
+  context.diagnostics.push({
+    code: "SX_BINDING_VARIABLE",
+    severity: "warning",
+    message,
+    span: null,
+  });
+  return [
+    {
+      kind: "comment",
+      text: `// NOTE SX_BINDING_VARIABLE: ${message}`,
+      trailing: false,
+      span: null,
+    },
+    ...names.map((name): IrStatement => ({
+      kind: "let",
+      name,
+      value: neutralValue(context.types.variables.get(name) ?? UNKNOWN),
+      span: null,
+    })),
+  ];
+}
+
 function neutralValue(type: number): IrExpression {
   if (onlyOf(type, NUMBER | NULL) && (type & NUMBER) !== 0) return { kind: "literal", value: 0 };
   if (onlyOf(type, STRING | NULL) && (type & STRING) !== 0) return { kind: "literal", value: "" };

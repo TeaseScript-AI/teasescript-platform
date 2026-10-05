@@ -12,3 +12,10 @@ def playing = true
 while (playing) {
   if (getBoolean("Stop?")) playing = 0
 }
+// A variable a closure assigns without a declaration lived in the script binding that every closure shares.
+def countUp = {
+  counter = 0
+  counter = counter + 1
+}
+countUp()
+show("Counted " + counter)
