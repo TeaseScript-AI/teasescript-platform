@@ -2028,7 +2028,13 @@ let image = askImage(
 while the request waits, a paperclip in its composer opens the browser's native file picker, and an image file dropped
 onto the composer answers the request; outside such a request there is neither. A chosen image stays in the browser
 and is session media with the lifecycle of a `takePhoto()` photo (§33): durable only while saved script storage
-references it. The camera route, `invalidMessage`, and `invalidLlmInstruction` are not implemented yet.
+references it. When the request allows the camera and the browser can capture, the camera turns on by itself as the
+request asks (owner round 5): the session camera when it is already open, otherwise one the request opens, which turns
+off again after the answer, also when a file answers. The viewfinder opens on the Stage, or in the camera window a
+script shows, with the request's message as its question and the shutter on the picture; the photo taken shows with
+"Use this" and "Retake", and only "Use this" gives the script the photo. These are Player controls, not transcript
+messages. A camera that is denied or broken offers "Try again", and the paperclip keeps working. After a reload while
+the request waits, the camera is asked for again, but a photo is never taken by itself. `invalidMessage` and `invalidLlmInstruction` are not implemented yet.
 
 ### Video input
 

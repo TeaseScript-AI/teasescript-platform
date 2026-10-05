@@ -90,8 +90,10 @@ export type PlayerForegroundPresentation =
       readonly kind: "ask-image";
       readonly accessibleName: string;
       readonly hint: string;
-      /** Whether an image file may answer; a camera-only request cannot be answered in this Player yet. */
+      /** Whether an image file may answer. */
       readonly allowFile: boolean;
+      /** Whether a photo from the camera may answer. */
+      readonly allowCamera: boolean;
       /** The file extensions and image MIME types a file needs; `null` accepts any image. */
       readonly types: readonly string[] | null;
       readonly mime: readonly string[] | null;

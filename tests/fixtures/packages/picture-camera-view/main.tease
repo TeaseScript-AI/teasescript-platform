@@ -1,0 +1,3 @@
+showCamera
+let picture = askImage("Show me")
+exit
