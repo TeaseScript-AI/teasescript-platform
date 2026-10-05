@@ -216,6 +216,13 @@
       "category": "b",
       "reason": "preTeaseNipples passed its image spec as teaseNipples(imgSpec=[DRESSED, TEASE]), a Groovy assignment to a script binding variable used as the argument, which the converter drops and declares as a top-level variable that makes toy/tease.tease fail to compile (TSV052). Pass the spec directly; nothing else reads that binding variable.",
       "diff": "tease-nipples-spec.diff"
+    },
+    {
+      "id": "play-event-first",
+      "layer": "source",
+      "category": "b",
+      "reason": "playEvent tested its first flag with first.asBoolean(), a method call the converter does not lower, so after every successful summon the player was neither told to wait nor ordered to kneel. Test the flag directly, which is the same Groovy truth.",
+      "diff": "play-event-first.diff"
     }
   ]
 }

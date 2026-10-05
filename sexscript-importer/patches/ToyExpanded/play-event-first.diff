@@ -1,0 +1,11 @@
+--- a/scripts/toy/play.groovy
++++ b/scripts/toy/play.groovy
+@@ -402,7 +402,7 @@
+ 		}
+ 		dress([[DRESSED,nTEASE],[DRESSED,TEASE],[TITS]]);
+ 		if (sessionSummon([DRESSED,nTEASE])) {
+-			if (first.asBoolean()) {
++			if (first) {
+ 				playWait();
+ 			}
+ 			else orderPosition(KNEELING, [DRESSED, nTEASE,nKNEEL,nSQUAT,nLAY]);
