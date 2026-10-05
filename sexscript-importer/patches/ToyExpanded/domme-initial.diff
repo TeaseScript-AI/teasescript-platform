@@ -1,11 +1,11 @@
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -36,7 +36,7 @@
+@@ -51,7 +51,7 @@
  	// toy.position
  	final KNEELING = "kneeling", ALLFOURS = "allfours", STANDING = "standing";
  	def OWNER = null;
 -	def DOMME = null;
 +	def DOMME = [:];
  	final SITTER = "sarah-james";
- 	final SOFT = "soft";
- 	final DISAPPOINT = "disappoint";
+ 	final SOFT = "soft", NOEDGE = "noedge";
+ 	final DISAPPOINT = "disappoint", SUCK = "suck", HOLD = "hold";

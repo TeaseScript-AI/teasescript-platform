@@ -1,6 +1,6 @@
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -299,9 +299,11 @@
+@@ -425,9 +425,11 @@
  		];
  	};
  	final executeTrigger = { String triggerName, arg = null ->
@@ -13,5 +13,5 @@
 +			func(arg ?: th.defaultArg);
 +		}
  	};
- 
+ 	
  	// Session

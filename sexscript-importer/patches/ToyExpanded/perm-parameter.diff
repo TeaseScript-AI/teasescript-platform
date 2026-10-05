@@ -1,7 +1,7 @@
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -127,7 +127,7 @@
- 	boolean has(String i) { loadBoolean("toys.$i") == true }
+@@ -149,7 +149,7 @@
+ 	boolean has(String i) { (loadBoolean("toys.$i") == true) || (loadBoolean("toy.toys.$i") == true) || DEFAULTTOYS.contains(i) }
  	boolean likes(String i) { loadBoolean("fetish.$i") == true }
  	boolean can(String i) { loadBoolean("toy.permission.$i") == true }
 -	boolean perm(String i) { can(it) }

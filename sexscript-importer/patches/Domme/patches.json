@@ -15,13 +15,6 @@
       "diff": "inform-punish-closure.diff"
     },
     {
-      "id": "show-case-typo",
-      "layer": "source",
-      "category": "e",
-      "reason": "One punishment message calls Show(...) with a capital S, which is not a SexScript function; every other line uses show.",
-      "diff": "show-case-typo.diff"
-    },
-    {
       "id": "eat-ben-wa-chance",
       "layer": "source",
       "category": "e",

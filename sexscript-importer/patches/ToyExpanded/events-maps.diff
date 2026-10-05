@@ -1,6 +1,6 @@
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -169,32 +169,37 @@
+@@ -217,32 +217,37 @@
  		Event event;
  	}
  
@@ -51,7 +51,7 @@
  			saveEvents(events);
  			return true;
  		}
-@@ -224,7 +229,7 @@
+@@ -272,7 +277,7 @@
  	}
  
  	void execEvents(boolean rt) {
@@ -60,7 +60,7 @@
  			def f = namedEvents[e.event.func];
  			removeEvent(e.name);
  			if (f) {
-@@ -376,7 +381,7 @@
+@@ -529,7 +534,7 @@
  		while (true) {
  			def away = getAway();
  			def e = nextEvent(loadEvents());
@@ -69,7 +69,7 @@
  
  			if (away) {
  				def note = loadString("toy.note");
-@@ -392,7 +397,7 @@
+@@ -545,7 +550,7 @@
  				else {
  					show("${dommeTitle()} ${dommeName()} is away ($away)...");
  				}

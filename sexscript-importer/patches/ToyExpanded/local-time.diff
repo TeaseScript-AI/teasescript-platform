@@ -1,6 +1,6 @@
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -76,10 +76,12 @@
+@@ -97,10 +97,12 @@
  
  	// Utils
  	int localTimeOffset() {
@@ -17,12 +17,12 @@
  	}
  
  	java.time.LocalDateTime localTimeOf(int s) {
-@@ -100,7 +102,7 @@
- 		return ((int)(getTime() / DAY) * DAY);
+@@ -121,7 +123,7 @@
+ 		return ((int) getDayNum() * DAY - localTimeOffset() );
  	}
  	int getDayNum() {
--		return Math.floorDiv(getTime() - localTimeOffset() - (4 * (int)HOUR), DAY)
-+		return (getTime() - localTimeOffset() - (4 * (int)HOUR)).intdiv(DAY)
+-		return Math.floorDiv(getTime() + localTimeOffset() - (4 * (int)HOUR), DAY)
++		return (getTime() + localTimeOffset() - (4 * (int)HOUR)).intdiv(DAY)
  	}
  
  	def getProp(String i, String f, d = null) {

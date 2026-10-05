@@ -1,5 +1,5 @@
---- a/scripts/toy__sha256_0d24d6c78bca.groovy
-+++ b/scripts/toy__sha256_0d24d6c78bca.groovy
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
 @@ -109,6 +109,16 @@
  				java.time.Instant.ofEpochSecond(s), java.time.ZoneId.systemDefault());
  	}
@@ -26,8 +26,8 @@
  					show("$e.name: $timeStr -> ${e.event.func}(${e.event.arg})");
  				}
  				else {
---- a/scripts/toy/debug__sha256_9834187fedf9.groovy
-+++ b/scripts/toy/debug__sha256_9834187fedf9.groovy
+--- a/scripts/toy/debug.groovy
++++ b/scripts/toy/debug.groovy
 @@ -3,7 +3,7 @@
  		return;
  	}
@@ -65,22 +65,3 @@
  		showButton("OK");
  		return;
  	};
---- a/scripts/toy.groovy
-+++ b/scripts/toy.groovy
-@@ -106,6 +106,16 @@
- 				java.time.Instant.ofEpochSecond(s), java.time.ZoneId.systemDefault());
- 	}
- 
-+	// The text of a time as soonFormatter wrote it: "Monday at 3:05PM".
-+	String soonText(int s) {
-+		final local = s + localTimeOffset();
-+		final day = ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"][(int) (local / DAY) % 7];
-+		final minutes = (int) ((local % DAY) / 60);
-+		final hour = (int) (minutes / 60);
-+		final minute = minutes % 60;
-+		return "$day at ${(hour + 11) % 12 + 1}:${minute < 10 ? '0' : ''}$minute${hour < 12 ? 'AM' : 'PM'}";
-+	}
-+
- 	float localTime() {
- 		// A float between 4.0 (4am) and 28.0 (4am)
- 		def wallclock = ((getTime() + localTimeOffset()) % DAY) / HOUR;

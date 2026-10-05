@@ -1,17 +1,6 @@
---- a/scripts/toy__sha256_0d24d6c78bca.groovy
-+++ b/scripts/toy__sha256_0d24d6c78bca.groovy
-@@ -306,7 +306,7 @@
- 	}
- 	
- 	final hasSessionToy = { String name ->
--		if (!sessionToys.containsKey(name)) return false
-+		if (!sessionToys.containsKey(name)) return 0
- 		else return sessionToys[name];
- 	}
- 
 --- a/scripts/toy.groovy
 +++ b/scripts/toy.groovy
-@@ -303,7 +303,7 @@
+@@ -306,7 +306,7 @@
  	}
  	
  	final hasSessionToy = { String name ->

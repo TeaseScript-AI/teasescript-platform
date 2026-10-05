@@ -29,20 +29,6 @@
       "diff": "repeat-offense-credit-typo.diff"
     },
     {
-      "id": "ginger-button-typo",
-      "layer": "source",
-      "category": "e",
-      "reason": "The ginger-finger button reads tile, which is never assigned; every other button around it uses title.",
-      "diff": "ginger-button-typo.diff"
-    },
-    {
-      "id": "corner-position-names",
-      "layer": "source",
-      "category": "e",
-      "reason": "cornerPosition (never called) was copied from spankPosition and still tests positionName and clears positionSelection, which are locals of spankPosition; its own variables are cornerPosName and cornerPosSelection. Rename them in the three retained versions.",
-      "diff": "corner-position-names.diff"
-    },
-    {
       "id": "claire-clothespins-case",
       "layer": "source",
       "category": "e",
@@ -111,13 +97,6 @@
       "category": "b",
       "reason": "pointsBonus is declared without a value and always set by the wheel loop before it is added to the points; declare it as 0 so it is a number from the start.",
       "diff": "loyalty-wheel-default.diff"
-    },
-    {
-      "id": "variant-elapsed-default",
-      "layer": "source",
-      "category": "b",
-      "reason": "In the three retained versions lastTime is defaulted to 0 once, but a function call comes between that default and some elapsedTime computations, where it may be null again to the compiler; repeat the author's own default right before those computations, as each version already does before its later one.",
-      "diff": "variant-elapsed-default.diff"
     }
   ]
 }
