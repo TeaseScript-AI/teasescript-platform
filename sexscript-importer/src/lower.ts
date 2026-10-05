@@ -4229,20 +4229,37 @@ function lowerPostfix(
   }
   // `counts[i]++` and `player.score++` on plain references; an index counted from the end needs the list's length.
   const index = targetNode?.kind === "binary" ? asNode(targetNode.right) : null;
+  // A computed index of a plain list or map, `seen[n - 1]++` or `counts[score(card)]++`, is computed once.
+  const receiver =
+    targetNode?.kind === "binary" && targetNode.operator === "[" ? asNode(targetNode.left) : null;
+  const computed =
+    receiver !== null &&
+    index !== null &&
+    isRepeatableExpression(receiver) &&
+    !isRepeatableExpression(index);
   if (
     targetNode === null ||
-    !isRepeatableIndex(targetNode) ||
+    (!isRepeatableIndex(targetNode) && !computed) ||
     (index !== null && negativeConstantIndex(index) !== null)
   )
     return [unsupportedPostfix(node, context)];
   context.writeTargets.add(targetNode);
-  const target = lowerExpression(targetNode, context);
+  let target = lowerExpression(targetNode, context);
   context.writeTargets.delete(targetNode);
   if (target === null) return [];
+  const before: IrStatement[] = [];
+  if (computed && !isPure(index, context)) {
+    // An index with effects, such as a call, runs once, before the update.
+    if (target.kind !== "index") return [unsupportedPostfix(node, context)];
+    const name = freshName("index", context);
+    before.push({ kind: "let", name, value: target.index, span });
+    target = { ...target, index: { kind: "variable", name } };
+  }
   if (targetNode.kind === "binary") noteSharedListWrite(asNode(targetNode.left), node, context);
   if (targetNode.kind === "property" || (target.kind === "index" && target.dict === true))
     noteSharedMapWrite(node.span, context);
   return [
+    ...before,
     {
       kind: "assign",
       target,
