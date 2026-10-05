@@ -102,6 +102,7 @@ import type {
   RuntimePreparedSayOutputSnapshot,
   RuntimeTimerActionSnapshot,
   RuntimeMediaActionSnapshot,
+  RuntimePermanentButtonActionSnapshot,
   RuntimeMediaPlaybackActionSnapshot,
   RuntimeStorageWriteActionSnapshot,
 } from "./actions/model.js";
@@ -868,6 +869,9 @@ function executePlannedInstruction(
     case "hideCamera":
       if (snapshot.cameraView !== null) snapshot.cameraView.shown = false;
       advance(snapshot);
+      return;
+    case "showPermanentButton":
+      showPermanentButton(instruction, snapshot, evaluator, events);
       return;
     case "storageWrite":
       writeStorage(instruction, snapshot, evaluator, events);
@@ -2602,6 +2606,70 @@ function executePacingBarrier(
     snapshot.status = "waiting";
     return;
   }
+  advance(snapshot);
+}
+
+/**
+ * Shows a permanent button after the shown ones, as background work that waits for clicks. Its block runs for the
+ * activation that showed it, like a timer's, and the script continues at once.
+ */
+function showPermanentButton(
+  instruction: Extract<Instruction, { kind: "showPermanentButton" }>,
+  snapshot: RuntimeSnapshot,
+  evaluator: Evaluator,
+  events: InterpreterEvent[],
+): void {
+  const span = copySpan(instruction.span);
+  const text = fieldText(
+    evaluator.evaluate(instruction.text),
+    span,
+    currentTemporalContext(snapshot),
+  );
+  if (
+    !Number.isSafeInteger(snapshot.nextActionId) ||
+    snapshot.nextActionId >= Number.MAX_SAFE_INTEGER
+  ) {
+    throw fault("TSR051", "Runtime action ID space is exhausted.", instruction.span);
+  }
+  assertCounterCanAdvance(snapshot.nextPermanentButtonId, "nextPermanentButtonId");
+  // The request, its eventual removal, and the other active actions' completions must stay representable.
+  assertEventSequenceCapacity(
+    snapshot,
+    2 + requiredFutureActionCompletionEvents(snapshot),
+    instruction.span,
+  );
+  const sequence = takeSequence(snapshot);
+  const buttonId = snapshot.nextPermanentButtonId;
+  const action: RuntimePermanentButtonActionSnapshot = {
+    kind: "permanentButton",
+    actionId: snapshot.nextActionId,
+    owningInstruction: snapshot.nextInstruction,
+    createdAtMs: snapshot.currentSessionTimeMs,
+    requestEventSequence: sequence,
+    button: {
+      buttonId,
+      text,
+      persist: instruction.persist,
+      handlerFunctionId: instruction.handlerFunctionId,
+      rootScopeId: contextRootId(snapshot),
+    },
+  };
+  snapshot.nextActionId += 1;
+  snapshot.nextPermanentButtonId += 1;
+  snapshot.backgroundActions.push(action);
+  if (instruction.destinationTemporary !== null)
+    setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, {
+      kind: "permanentButtonHandle",
+      buttonId,
+    });
+  events.push(
+    Object.freeze({
+      kind: "actionRequested",
+      sequence,
+      action: { ...action, button: { ...action.button } },
+      span,
+    } satisfies ActionRequestedEvent),
+  );
   advance(snapshot);
 }
 

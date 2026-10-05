@@ -409,9 +409,11 @@ class Lexer {
     const previousKind = previous?.kind;
     if (
       previousKind === TokenKind.Identifier &&
-      // `load` takes an operand, such as `"${load "k", default: "none"}"`, and so does the bare `default` of the
-      // earlier form, lexed so that `load` can name the fix; a member such as `obj.load` does not.
-      (((previous?.lexeme === "load" || previous?.lexeme === "default") &&
+      // `load` takes an operand, such as `"${load "k", default: "none"}"`, and so do `showPermanentButton` and the bare
+      // `default` of the earlier form, lexed so that `load` can name the fix; a member such as `obj.load` does not.
+      (((previous?.lexeme === "load" ||
+        previous?.lexeme === "default" ||
+        previous?.lexeme === "showPermanentButton") &&
         this.#tokens[index - 1]?.kind !== TokenKind.Dot) ||
         isInteractionCommand(previous?.lexeme) ||
         (this.#tokens[index - 1]?.kind === TokenKind.KeywordAs &&

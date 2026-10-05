@@ -77,3 +77,45 @@ say "Good. That's enough looking for now.", instant
 showButton "Thank you, Mistress"
 exit
 `;
+
+// Development permanent buttons content: the script shows buttons beside the Stage and continues. A click runs the
+// button's block, while the button stays in place, inactive; a block may remove a button, Pause interrupts the waiting
+// story and returns to it, and Stop leaves the file entry that showed the buttons, so only the persistent Pause stays
+// until `exit` removes it too.
+export const permanentButtonsScenarioSource = `
+speaker mistressVera {
+    title: "Mistress"
+    firstName: "Vera"
+    color: "#c2185b"
+    avatar: "avatars/mistress-vera.svg"
+}
+speaker mistressVera
+showImage "images/playroom.svg"
+let count = 0
+showPermanentButton "Count one" {
+    count += 1
+    say "That makes \${count}.", instant
+    wait 2
+}
+let hint = showPermanentButton "Give me a hint" {
+    removePermanentButton(hint)
+    say "Count out loud. That was your only hint.", instant
+}
+showPermanentButton "Pause" {
+    persist: true
+    say "Catch your breath. Tell me when you are ready.", instant
+    showButton "Ready, Mistress"
+}
+showPermanentButton "Stop" {
+    goto stopped
+}
+say "Count for me with the buttons beside the Stage. Press Stop when you want to stop.", instant
+showButton "Done counting"
+say "\${count}, then. Good.", instant
+showButton "Thank you, Mistress"
+exit
+label stopped
+say "Stopped at \${count}. Only Pause stays now.", instant
+showButton "Yes, Mistress"
+exit
+`;

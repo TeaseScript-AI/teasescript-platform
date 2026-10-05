@@ -14,7 +14,13 @@ import PlayerApp from "./PlayerApp.vue";
 import type { PlayerTool } from "./PlayerToolsShell.vue";
 import { resolveDemoAsset } from "./demoHost";
 import { resolveDevelopmentAsset } from "./developmentMedia";
-import { cameraScenarioSource, openingScenario, viewfinderScenarioSource } from "./runtimeScenario";
+import {
+  cameraScenarioSource,
+  openingScenario,
+  permanentButtonsScenarioSource,
+  viewfinderScenarioSource,
+} from "./runtimeScenario";
+import PermanentButtons from "./PermanentButtons.vue";
 import { stageFixtures } from "./stageFixtures";
 import StageRightRail from "./StageRightRail.vue";
 import ThemeLab from "./ThemeLab.vue";
@@ -45,14 +51,16 @@ const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
 
 const props = defineProps<{ capturedMediaRepository?: CapturedMediaRepository | null }>();
 // `?scenario=camera` opens the camera scenario with the session camera capability and persistent script storage, so
-// a saved photo is shown again in a later run. `?scenario=viewfinder` opens the viewfinder scenario with the camera.
+// a saved photo is shown again in a later run. `?scenario=viewfinder` opens the viewfinder scenario with the camera,
+// and `?scenario=buttons` the permanent buttons scenario.
 const scenario = new URLSearchParams(window.location.search).get("scenario");
 const cameraScenario = scenario === "camera";
 const viewfinderScenario = scenario === "viewfinder";
+const buttonsScenario = scenario === "buttons";
 const player = usePlayerSession({
   // The camera scenarios speak as the repository demo's Mistress and use its images and sounds.
   resolveAsset:
-    cameraScenario || viewfinderScenario
+    cameraScenario || viewfinderScenario || buttonsScenario
       ? (path) => resolveDevelopmentAsset(path) ?? resolveDemoAsset(path)
       : resolveDevelopmentAsset,
   capabilities: { camera: cameraScenario || viewfinderScenario },
@@ -89,6 +97,8 @@ if (cameraScenario)
     );
 else if (viewfinderScenario)
   player.prepare(() => createPlayerRuntimeSession(viewfinderScenarioSource, startOptions()));
+else if (buttonsScenario)
+  player.prepare(() => createPlayerRuntimeSession(permanentButtonsScenarioSource, startOptions()));
 else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptions()));
 </script>
 
@@ -161,7 +171,7 @@ else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptio
         </fieldset>
       </div>
     </template>
-    <template #right-rail="{ timers }">
+    <template #right-rail="{ timers, buttons, press }">
       <StageRightRail>
         <!-- Fixtures fill the rail only while no runtime timer is presented. -->
         <template v-if="timers.length" #timers>
@@ -175,7 +185,11 @@ else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptio
             :paused="timerPaused"
           />
         </template>
-        <template #controls>
+        <!-- Likewise the fixture buttons, only while the script shows no permanent button. -->
+        <template v-if="buttons.length" #controls>
+          <PermanentButtons :buttons="buttons" @press="press" />
+        </template>
+        <template v-else #controls>
           <BackgroundControlsFixture :key="backgroundControlsReset" />
         </template>
       </StageRightRail>

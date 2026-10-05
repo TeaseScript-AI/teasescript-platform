@@ -15,6 +15,7 @@ import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import type {
   SerializableMediaHandle,
+  SerializablePermanentButtonHandle,
   SerializableCameraViewHandle,
   SerializableRuntimeTemporal,
   SerializableRuntimeValue,
@@ -26,6 +27,7 @@ import {
   isDuration,
   isList,
   isMediaHandle,
+  isPermanentButton,
   isCameraView,
   isObject,
   isRange,
@@ -137,14 +139,18 @@ export function fieldText(
 /**
  * Code-like notation of any value, as `say` shows a value that is not a scalar: `["pet", 2.5, { name: "Bo" }]`,
  * `dict{ "collar": "leather" }`, `1..=5`, or `<speaker mistress>`. Nested text and dict keys are quoted with the
- * string-literal escapes, other scalars use `visibleText`, and `handleNotation` describes a timer or media handle from
- * its current state.
+ * string-literal escapes, other scalars use `visibleText`, and `handleNotation` describes a handle from its current
+ * state.
  */
 export function valueNotation(
   value: SerializableRuntimeValue,
   span: SourceSpan,
   handleNotation: (
-    handle: SerializableTimerHandle | SerializableMediaHandle | SerializableCameraViewHandle,
+    handle:
+      | SerializableTimerHandle
+      | SerializableMediaHandle
+      | SerializablePermanentButtonHandle
+      | SerializableCameraViewHandle,
   ) => string,
 ): string {
   const output: string[] = [];
@@ -198,7 +204,12 @@ export function valueNotation(
         `${plainScalarText(current.start, span)}${current.inclusive ? "..=" : ".."}${plainScalarText(current.end, span)}`,
       );
     else if (isSpeakerReference(current)) output.push(`<speaker ${current.identifier}>`);
-    else if (isTimerHandle(current) || isMediaHandle(current) || isCameraView(current))
+    else if (
+      isTimerHandle(current) ||
+      isMediaHandle(current) ||
+      isPermanentButton(current) ||
+      isCameraView(current)
+    )
       output.push(handleNotation(current));
     else if (isTemporal(current)) output.push(temporalNotation(current));
     else output.push(plainScalarText(current, span));

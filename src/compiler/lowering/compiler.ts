@@ -11,6 +11,7 @@ import type {
   Statement,
   InteractionExpression,
   ShowButtonParts,
+  ShowPermanentButtonParts,
   SpeakerDeclaration,
   SwitchCase,
   SwitchStatement,
@@ -90,10 +91,10 @@ export interface ProjectFunctions {
   readonly foreignCalls: { readonly instruction: number; readonly name: string }[];
 }
 
-/** A timer expiry block or media cue block, compiled after the file's functions. */
+/** A timer expiry block, media cue block, or permanent button block, compiled after the file's functions. */
 interface RegisteredHandler {
   readonly block: Block;
-  readonly owner: "timer" | "media";
+  readonly owner: "timer" | "media" | "button";
   readonly selfHandle: string | null;
   /** Whether it is in a global function, directly or through other blocks. */
   readonly global: boolean;
@@ -443,6 +444,9 @@ export class InstructionCompiler {
       }
       case "timerStatement":
         yield* compileChild(this.#lowerTimerTask(statement, false));
+        return;
+      case "showPermanentButtonStatement":
+        yield* compileChild(this.#lowerPermanentButtonTask(statement, false));
         return;
       case "playMediaStatement":
         yield* compileChild(this.#lowerMediaTask(statement, false));
@@ -958,6 +962,34 @@ export class InstructionCompiler {
   }
 
   /**
+   * `showPermanentButton <text> { ... }` evaluates its text and shows the button; the block becomes a parameterless
+   * handler region that a click runs. Used as a value, it gives the button's identifier.
+   */
+  *#lowerPermanentButtonTask(
+    button: ShowPermanentButtonParts,
+    value: boolean,
+  ): CompileTask<LoweredExpression | null> {
+    const text = yield* compileChild(this.#lowerExpressionTask(button.text));
+    const span = createSourceSpan(button.commandSpan.start, button.text.span.end);
+    const destinationTemporary = value ? this.#allocateTemporary() : null;
+    this.instructions.push({
+      kind: "showPermanentButton",
+      text: text.plan,
+      persist: button.persist,
+      handlerFunctionId: this.#registerHandler(button.handler, "button", null),
+      destinationTemporary,
+      span: copySpan(span),
+    });
+    this.#emitTemporaryCleanup(text.temporaryIds, span);
+    return destinationTemporary === null
+      ? null
+      : {
+          plan: { kind: "temporary", temporaryId: destinationTemporary, span: copySpan(span) },
+          temporaryIds: [destinationTemporary],
+        };
+  }
+
+  /**
    * Lowers a play command. A pacing barrier comes first, so main-story media waits for the previous message's
    * pacing; operands then evaluate in source order.
    */
@@ -1080,7 +1112,11 @@ export class InstructionCompiler {
   }
 
   /** Reserves the next function ID; the region is compiled after all user functions. */
-  #registerHandler(block: Block, owner: "timer" | "media", selfHandle: string | null): number {
+  #registerHandler(
+    block: Block,
+    owner: "timer" | "media" | "button",
+    selfHandle: string | null,
+  ): number {
     const id = this.#functionIdBase + this.declarations.length + this.#handlers.length + 1;
     this.#handlers.push({ block, owner, selfHandle, global: this.#global });
     return id;
@@ -1110,7 +1146,12 @@ export class InstructionCompiler {
       handler: registered.owner,
       global: registered.global,
       selfHandle: registered.selfHandle,
-      name: registered.owner === "timer" ? "timer expiry" : "media cue",
+      name:
+        registered.owner === "timer"
+          ? "timer expiry"
+          : registered.owner === "media"
+            ? "media cue"
+            : "permanent button",
       declarationSpan: copySpan(handler.span),
       parameters: [],
       entryInstruction,
@@ -1230,6 +1271,12 @@ export class InstructionCompiler {
     if (expression.kind === "showCameraExpression") {
       const lowered = this.#lowerShowCamera(expression.placement, true, expression.span);
       if (lowered === null) throw new TypeError("A camera view lowered without a handle.");
+      return lowered;
+    }
+    if (expression.kind === "showPermanentButtonExpression") {
+      const lowered = yield* compileChild(this.#lowerPermanentButtonTask(expression, true));
+      if (lowered === null)
+        throw new TypeError("A permanent button lowered without an identifier.");
       return lowered;
     }
     if (isTakePhotoCall(expression)) {
@@ -2202,7 +2249,8 @@ export class InstructionCompiler {
         current.expression.kind === "showButtonExpression" ||
         current.expression.kind === "timerExpression" ||
         current.expression.kind === "playMediaExpression" ||
-        current.expression.kind === "showCameraExpression"
+        current.expression.kind === "showCameraExpression" ||
+        current.expression.kind === "showPermanentButtonExpression"
       ) {
         this.#instructionEmissionByExpression.set(current.expression, true);
         continue;
@@ -2579,8 +2627,9 @@ function assembleExpression(
     case "timerExpression":
     case "playMediaExpression":
     case "showCameraExpression":
+    case "showPermanentButtonExpression":
       throw new TypeError(
-        "Interactions, timers, media, and camera views must be lowered before expression-plan compilation.",
+        "Interactions, timers, media, camera views, and permanent buttons must be lowered before expression-plan compilation.",
       );
     case "typeTestExpression":
       return typeTestPlan(expression, child(expression.value));

@@ -10,6 +10,7 @@ import type {
 import type { MessageMarkup } from "../../message-markup.js";
 import type { RuntimeTimerSnapshot } from "../timers.js";
 import type { RuntimeMediaSnapshot } from "../media.js";
+import type { RuntimePermanentButtonSnapshot } from "../permanent-buttons.js";
 import type { SerializableRuntimeValue } from "../serializable-values.js";
 
 /** Shared serializable pending-action and settlement contracts. */
@@ -115,6 +116,21 @@ export interface RuntimeMediaActionSnapshot {
 }
 
 /**
+ * One shown permanent button as background work, which waits for clicks until it is removed. Its action identity
+ * spans every click; the script-visible identifier uses the separate `buttonId`. A Player click targets the button ID
+ * through `pressPermanentButton`; `completeAction` cannot.
+ */
+export interface RuntimePermanentButtonActionSnapshot {
+  readonly kind: "permanentButton";
+  readonly actionId: number;
+  /** The `showPermanentButton` instruction, for provenance and source location. */
+  readonly owningInstruction: number;
+  readonly createdAtMs: number;
+  readonly requestEventSequence: number;
+  readonly button: RuntimePermanentButtonSnapshot;
+}
+
+/**
  * The script waits on media: an async play until the Player reports the load result, a blocking play until playback
  * finishes, stops, or fails. Like a delay it is interruptible and settles through runtime work, never through
  * `completeAction`.
@@ -207,7 +223,8 @@ export type RuntimePendingActionSnapshot =
   | RuntimeStorageWriteActionSnapshot
   | RuntimeCaptureActionSnapshot
   | RuntimeTimerActionSnapshot
-  | RuntimeMediaActionSnapshot;
+  | RuntimeMediaActionSnapshot
+  | RuntimePermanentButtonActionSnapshot;
 
 /** Completion events that an active action must still be able to publish. */
 export function requiredActionCompletionEvents(action: { readonly kind?: unknown } | null): number {
@@ -223,7 +240,8 @@ export function requiredActionCompletionEvents(action: { readonly kind?: unknown
     action?.kind === "chatPacingGate" ||
     action?.kind === "timer" ||
     action?.kind === "media" ||
-    action?.kind === "mediaPlayback"
+    action?.kind === "mediaPlayback" ||
+    action?.kind === "permanentButton"
   )
     return 1;
   return 0;
@@ -253,6 +271,21 @@ export interface RuntimeMediaSettlementSnapshot {
   readonly actionKind: "media";
   readonly settlementKind: "finished" | "stopped";
   readonly mediaId: number;
+  readonly owningInstruction: number;
+  readonly requestEventSequence: number;
+  readonly completionEventSequence: number;
+  readonly completedAtMs: number;
+}
+
+/**
+ * Published with `actionCompleted` when a permanent button is removed. Like a timer settlement it is not retained as
+ * `lastSettlement`.
+ */
+export interface RuntimePermanentButtonSettlementSnapshot {
+  readonly actionId: number;
+  readonly actionKind: "permanentButton";
+  readonly settlementKind: "removed";
+  readonly buttonId: number;
   readonly owningInstruction: number;
   readonly requestEventSequence: number;
   readonly completionEventSequence: number;

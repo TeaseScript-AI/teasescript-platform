@@ -58,8 +58,8 @@ specification may lead the implementation. The Player presents supported transcr
 pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds Visual
 Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The default
 build plays the repository demo without that preview; the development server or explicit `?dev` URL opt-in loads it.
-Runtime timers, the Stage image, and audio are wired; browser video playback and production host integration remain
-separate work. Values marked for retesting remain provisional tuning baselines.
+Runtime timers, permanent buttons, the Stage image, and audio are wired; browser video playback and production host
+integration remain separate work. Values marked for retesting remain provisional tuning baselines.
 
 A current implementation detail is not a durable requirement merely because it exists. Owner-confirmed behavior here is
 the target unless higher authority conflicts with it.
@@ -70,10 +70,11 @@ This temporary checklist records Owner-decided behavior that still needs synchro
 Library, persistence, or accepted-language owner. It is not a second permanent authority layer. Remove an item when its
 controlling source adopts it; remove this section and its router references when empty.
 
-- **Long-lived control presentation:** the maintained right-rail sections below currently choose busy-in-place and
-  visible-history behavior that still needs final visual testing and later accepted-language/Standard-Library
-  synchronization. Runtime value, scheduling, stale-event, media-continuity, lifecycle, and provenance semantics are
-  maintained in [`RUNTIME.md`](../RUNTIME.md); exact public API names and author syntax remain open.
+- **Long-lived control presentation:** for the toggles, selects, and status items beyond permanent buttons, the
+  maintained right-rail sections below choose inactive-in-place and visible-history behavior that still needs final
+  visual testing and later accepted-language/Standard-Library synchronization. Runtime value, scheduling, stale-event,
+  media-continuity, lifecycle, and provenance semantics are maintained in [`RUNTIME.md`](../RUNTIME.md); exact public
+  API names and author syntax remain open.
 - **Timer presentation metadata:** the maintained timer section below defines visible/mystery/hidden presentation and
   optional labeling. Authored timers carry visible/mystery/hidden display and optional labels (see
   [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time)); `player/runtime-adapter.ts` derives presented timers and
@@ -771,8 +772,9 @@ region.
 
 ### Background controls and status
 
-Runtime-backed long-lived controls/status are not yet implemented in the Player; the development preview demonstrates
-only local button/toggle/disabled presentation.
+Permanent buttons ([V30 §28](../specifications/accepted-syntaxes-v30.md#28-permanent-buttons)) are the implemented
+momentary buttons. Toggles, selects, and status items are not yet implemented; the development preview demonstrates
+them only as local fixtures while the script shows no permanent button.
 
 The Standard rail presentation supports:
 
@@ -786,16 +788,15 @@ not styled or exposed as a disabled button. A switch exposes toggle semantics; a
 single-choice semantics. Determinate progress/fill may be shown on a status item and may also be used on an interactive
 control when the explicit progress data is meaningful and does not obscure the control state.
 
-Interactive right-rail controls remain in place while their handlers execute and expose a distinct busy state without
-changing the control's committed value or implying that the control was disabled or removed. This target supersedes the
-accepted V30 permanent-button disappear-while-handler-runs presentation once the controlling runtime/Standard-Library
-contract is synchronized. Exact busy animation remains an unresolved visual-tuning detail; it should use a familiar
-indeterminate-activity cue, must not require control reflow, and must remain distinguishable from keyboard focus and
-disabled/inert presentation. Programmatic updates visibly change the same control state but must remain recognizable as
-script-initiated rather than user input. They add a neutral session event to transcript history rather than a speaker
-message. Momentary buttons do not generate explanatory text on their own; narrative responses come from the script.
-Feedback for programmatic updates is transient and must not add permanent text to the control or change rail geometry.
-Explicit removal is a separate lifecycle operation.
+From an activation until its handler finishes, an interactive right-rail control stays in place and is inactive (Owner
+decision on #610): it uses the disabled presentation without a separate busy animation, cannot be activated, and is
+exposed as disabled (`aria-disabled`) while it keeps keyboard focus; its committed value does not change. It becomes
+active again when the handler finishes, unless the script removed it. When a focused control is removed, focus moves to
+the control that takes its place. Programmatic updates visibly change the same control state but must remain
+recognizable as script-initiated rather than user input. They add a neutral session event to transcript history rather
+than a speaker message. Momentary buttons do not generate explanatory text on their own; narrative responses come from
+the script. Feedback for programmatic updates is transient and must not add permanent text to the control or change rail
+geometry. Explicit removal is a separate lifecycle operation.
 
 Ordering is stable and deterministic at the presentation level:
 

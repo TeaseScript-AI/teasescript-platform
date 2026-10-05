@@ -19,6 +19,8 @@ import {
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeCameraView,
   playerRuntimeMedia,
+  playerRuntimePermanentButtons,
+  pressPlayerRuntimePermanentButton,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
@@ -349,6 +351,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function update(next: PlayerRuntimeSession) {
     session.value = next;
   }
+  const permanentButtons = computed(() =>
+    session.value === null ? [] : playerRuntimePermanentButtons(session.value.snapshot),
+  );
+  /** Clicks a permanent button at the observed time, like other input; a click it does not accept changes nothing. */
+  function pressPermanentButton(buttonId: number) {
+    const current = clock.observe();
+    if (current === null) return;
+    const result = pressPlayerRuntimePermanentButton(current, buttonId);
+    if (result.outcome.kind === "pressed") session.value = result.session;
+  }
   /**
    * Shows the explicit Start control for a new session; `create` runs only on activation, so no statement executes
    * on page load and the click is the user activation later audible playback relies on.
@@ -450,6 +462,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     diagnostics: computed(() => diagnostics.value),
     /** Presented runtime timers; hidden timers have no entry. */
     timers: clock.timers,
+    /** The permanent buttons the script shows, in creation order; a busy one is inactive until its block ends. */
+    permanentButtons,
+    pressPermanentButton,
     /** Observes elapsed time and media progress, runs the session, and returns the published session. */
     observe: clock.observe,
     start,
