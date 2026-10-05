@@ -1308,21 +1308,19 @@ export function lowerParsedFile(
       : lowered;
   let stripsTags = false;
   if (body !== null) walkAst(body, (node) => (stripsTags ||= regexWorkaround(node) === "tags"));
+  // A module's `object.name`, without its receiver, is the script object's member, not a binding variable. A name of
+  // the loading script's object, such as a field, is that object's member too (Groovy read the field where the
+  // module's binding had no value).
+  const members =
+    mixin === null
+      ? undefined
+      : new Set([...mixin.receiverMembers, ...(options.globalTypes?.keys() ?? [])]);
   const typedStatements = withLegacyMarkup(
     withEnforcedTypes(
       [
-        // A module's `object.name`, without its receiver, is the script object's member, not a binding variable.
-        // A name of the loading script's object, such as a field, is that object's member too (Groovy read the field
-        // where the module's binding had no value).
-        ...bindingDeclarations(
-          body,
-          context,
-          mixin === null
-            ? undefined
-            : new Set([...mixin.receiverMembers, ...(options.globalTypes?.keys() ?? [])]),
-        ),
+        ...bindingDeclarations(body, context, members),
         ...context.closureFunctions,
-        ...authoredStatements,
+        ...withScriptBindings(authoredStatements, body, context, members),
       ],
       context,
     ),
@@ -14829,6 +14827,102 @@ function bindingDeclarations(
       span: null,
     })),
   ];
+}
+
+/**
+ * Declares the variables the script body assigns outside closures without declaring them: Groovy kept them in the
+ * script's binding. The first of the script's statements that uses one declares it when it assigns it; otherwise a
+ * declaration with its type's empty value comes just before that statement. Functions do not count as uses, since
+ * they read the variable only when called.
+ */
+function withScriptBindings(
+  statements: IrStatement[],
+  body: AstNode | null,
+  context: LowerContext,
+  members: ReadonlySet<string> = new Set(),
+): IrStatement[] {
+  if (body === null || context.functionDepth > 0) return statements;
+  const declared = new Set<string>();
+  const assigned = new Set<string>();
+  const collect = (node: AstNode): void => {
+    if (node.kind === "closure") return;
+    if (node.kind === "declaration") {
+      const name = variableName(node.left);
+      if (name !== null) declared.add(name);
+    } else if (node.kind === "for") {
+      const name = text(node.variable);
+      if (name !== null) declared.add(name);
+    } else if (node.kind === "binary" && node.operator === "=") {
+      const name = variableName(node.left);
+      if (name !== null) assigned.add(name);
+    }
+    for (const child of nodeChildren(node)) collect(child);
+  };
+  collect(body);
+  const names = [...assigned].filter(
+    (name) =>
+      !declared.has(name) &&
+      !members.has(name) &&
+      !context.functions.has(name) &&
+      !context.packageFunctions.has(name) &&
+      !isLegacyGetterProperty(name),
+  );
+  if (names.length === 0) return statements;
+  const mentions = (value: unknown, name: string): boolean => {
+    if (Array.isArray(value)) return value.some((item) => mentions(item, name));
+    if (!isRecord(value)) return false;
+    if (value.kind === "variable" && value.name === name) return true;
+    return Object.values(value).some((child) => mentions(child, name));
+  };
+  // A name the conversion already declares, such as a destructured variable, keeps its declaration.
+  const lets = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(visit);
+    else if (isRecord(value)) {
+      if (value.kind === "let" && typeof value.name === "string") lets.add(value.name);
+      Object.values(value).forEach(visit);
+    }
+  };
+  visit(statements);
+  const before = new Map<number, string[]>();
+  const replaced = new Map<number, IrStatement>();
+  for (const name of names) {
+    if (lets.has(name)) continue;
+    const index = statements.findIndex(
+      (statement) => statement.kind !== "function" && mentions(statement, name),
+    );
+    if (index < 0) continue;
+    const first = replaced.get(index) ?? statements[index]!;
+    if (
+      first.kind === "assign" &&
+      first.operator === "=" &&
+      first.target.kind === "variable" &&
+      first.target.name === name &&
+      !mentions(first.value, name)
+    ) {
+      replaced.set(index, { kind: "let", name, value: first.value, span: first.span });
+      continue;
+    }
+    before.set(index, [...(before.get(index) ?? []), name]);
+  }
+  return statements.flatMap((statement, index) => {
+    const empty = before.get(index) ?? [];
+    if (empty.length === 0) return [replaced.get(index) ?? statement];
+    const message = `Groovy kept ${empty.join(", ")}, which the script assigns without a declaration, in the script's binding; ${empty.length === 1 ? "it is" : "they are"} declared here with an empty value.`;
+    context.diagnostics.push({ code: "SX_BINDING_VARIABLE", severity: "warning", message, span: null });
+    return [
+      { kind: "comment", text: `// NOTE SX_BINDING_VARIABLE: ${message}`, trailing: false, span: null },
+      ...empty.map(
+        (name): IrStatement => ({
+          kind: "let",
+          name,
+          value: neutralValue(context.types.variables.get(name) ?? UNKNOWN),
+          span: null,
+        }),
+      ),
+      replaced.get(index) ?? statement,
+    ];
+  });
 }
 
 function neutralValue(type: number): IrExpression {

@@ -27,3 +27,9 @@ def again = { it = "x"; show(it) }
 setMood()
 describe(level)
 again()
+// A variable the script assigns without a declaration lived in the binding too: its first assignment declares it,
+// or, where a branch assigns it first, it starts empty before the branch.
+total = 2
+total = total + 1
+if (getBoolean("Again?")) bonus = 1 else bonus = 2
+show("Total " + total + ", bonus " + bonus)

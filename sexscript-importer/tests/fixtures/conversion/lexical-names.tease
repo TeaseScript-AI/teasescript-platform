@@ -66,4 +66,17 @@ function again(it = null) {
 setMood()
 describe(level)
 again()
+// A variable the script assigns without a declaration lived in the binding too: its first assignment declares it,
+// or, where a branch assigns it first, it starts empty before the branch.
+let total = 2
+total += 1
+say "Again?"
+// NOTE SX_BINDING_VARIABLE: Groovy kept bonus, which the script assigns without a declaration, in the script's binding; it is declared here with an empty value.
+let bonus = 0
+if (choose yes: "Yes", no: "No") == "yes" {
+  bonus = 1
+} else {
+  bonus = 2
+}
+say "Total ${total}, bonus ${bonus}"
 exit
