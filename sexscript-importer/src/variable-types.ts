@@ -1415,6 +1415,8 @@ export function expressionType(
       );
     case "range":
       return { kind: "range" };
+    case "typeTest":
+      return scalar("boolean");
     case "unary": {
       if (value.operator === "not") return scalar("boolean");
       const operand = nonNull(type(value.value));
@@ -1641,6 +1643,7 @@ function mapChildren(
     case "range":
       return { ...value, from: map(value.from), to: map(value.to) };
     case "unary":
+    case "typeTest":
       return { ...value, value: map(value.value) };
     case "binary":
       return { ...value, left: map(value.left), right: map(value.right) };

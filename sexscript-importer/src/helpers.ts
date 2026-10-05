@@ -66,6 +66,7 @@ export type HelperName =
   | "fixed"
   | "packagePath"
   | "pathTag"
+  | "items"
   | "sendImage"
   | "switchButton"
   | "switchButtonId"
@@ -137,6 +138,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "fixed",
   "packagePath",
   "pathTag",
+  "items",
   "tokenize",
   "sendImage",
   "switchButtonId",
@@ -524,6 +526,21 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
             ],
           ),
           ret(v("tag")),
+        ],
+      ),
+  },
+  // The items a Groovy loop visited: the characters of text, the elements of anything else.
+  items: {
+    name: "sexscriptLegacyItems",
+    build: () =>
+      fn(
+        "sexscriptLegacyItems",
+        ["value"],
+        [
+          ifS({ kind: "typeTest", value: v("value"), type: "string" }, [
+            ret({ kind: "methodCall", target: v("value"), name: "split", arguments: [lit("")] }),
+          ]),
+          ret(v("value")),
         ],
       ),
   },

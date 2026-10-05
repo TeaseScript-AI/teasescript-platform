@@ -304,6 +304,8 @@ export function emitExpression(expression: IrExpression): string {
       return expression.operator === "not"
         ? `not ${operand(expression.value, NOT)}`
         : `${expression.operator}${operand(expression.value, UNARY)}`;
+    case "typeTest":
+      return `${operand(expression.value, COMPARISON + 1)} is ${expression.type}`;
     case "binary": {
       const level = precedence(expression);
       // Left-associative operators need parentheses for an equal-precedence right operand, and comparisons
@@ -374,6 +376,8 @@ function precedence(expression: IrExpression): number {
       }
     case "unary":
       return expression.operator === "not" ? NOT : UNARY;
+    case "typeTest":
+      return COMPARISON;
     case "range":
       return RANGE;
     case "index":

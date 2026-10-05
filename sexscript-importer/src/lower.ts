@@ -1692,6 +1692,7 @@ function hasIrCall(expression: IrExpression): boolean {
     case "range":
       return hasIrCall(expression.from) || hasIrCall(expression.to);
     case "unary":
+    case "typeTest":
       return hasIrCall(expression.value);
     case "binary":
       return hasIrCall(expression.left) || hasIrCall(expression.right);
@@ -4735,7 +4736,11 @@ function lowerEachStatement(
       ),
     ];
   }
-  if (receiverNode.kind !== "range" && !isKnownListExpression(receiverNode, context)) {
+  if (
+    receiverNode.kind !== "range" &&
+    !isKnownListExpression(receiverNode, context) &&
+    !onlyOf(inferType(receiverNode, context.types), STRING | NULL)
+  ) {
     return [
       unsupportedStatement(
         context,
@@ -5139,7 +5144,11 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
     loopBody !== null && loopBody.kind !== "block" && loopBody.kind !== "empty"
       ? { kind: "block", span: loopBody.span, statements: [loopBody] }
       : loopBody;
-  const collection = collectionNode === null ? null : lowerIterated(collectionNode, context);
+  // A loop that removes its element from the collection proves it a list (elementRemovals).
+  let removes = false;
+  if (body !== null) walkAst(body, (child) => (removes ||= context.elementRemovals.has(child)));
+  const collection =
+    collectionNode === null ? null : lowerIterated(collectionNode, context, removes);
   if (variable === null || collection === null || body?.kind !== "block") {
     return [
       unsupportedStatement(
@@ -5171,10 +5180,34 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
  * A collection a loop iterates. Groovy iterated a range up to the whole number at or below a fractional upper bound,
  * where TeaseScript stops, so a bound that may hold a fraction is floored.
  */
-function lowerIterated(node: AstNode, context: LowerContext): IrExpression | null {
+function lowerIterated(
+  node: AstNode,
+  context: LowerContext,
+  provenList = false,
+): IrExpression | null {
   const collection = lowerExpression(node, context);
+  if (collection === null) return null;
+  // Groovy iterated text by character.
+  const type = node.kind === "range" || provenList ? 0 : inferType(node, context.types);
+  if ((type & STRING) !== 0) {
+    if (onlyOf(type, STRING | NULL))
+      return {
+        kind: "methodCall",
+        target: collection,
+        name: "split",
+        arguments: [{ kind: "literal", value: "" }],
+      };
+    addDiagnostic(
+      context,
+      "SX_ITEMS_OF_TEXT",
+      "info",
+      "Groovy iterated text by character and a list by element; this value is not proven to be one of them, so a helper splits text into its characters.",
+      node.span,
+    );
+    return useHelper(context, "items", [collection]);
+  }
   const toNode = node.kind === "range" ? asNode(node.to) : null;
-  if (collection?.kind !== "range" || toNode === null || !mayBeFractional(toNode, context))
+  if (collection.kind !== "range" || toNode === null || !mayBeFractional(toNode, context))
     return collection;
   addDiagnostic(
     context,

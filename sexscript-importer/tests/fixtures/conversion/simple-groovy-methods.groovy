@@ -24,3 +24,12 @@ Check:
   if (answer) ready = true
 }
 show("Ready: ${ready}, points ${points}")
+// Groovy iterated text by character; a value not proven to be text or a list goes through a helper.
+def word = "abc"
+for (letter in word) show(letter)
+def spell = { text ->
+  def shown = ""
+  for (c in text) shown += c
+  return shown
+}
+show(spell(word))

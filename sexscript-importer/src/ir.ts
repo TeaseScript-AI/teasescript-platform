@@ -204,6 +204,8 @@ export type IrExpression =
   | { kind: "index"; target: IrExpression; index: IrExpression; dict?: true }
   /** `dict` marks a member of a dict (#536). */
   | { kind: "property"; target: IrExpression; name: string; dict?: true }
+  /** `value is type`, a type test (#530). */
+  | { kind: "typeTest"; value: IrExpression; type: string }
   /** A dict `get` has the key and the default as its arguments: `dict.get(key, default: value)` (#536). */
   | {
       kind: "methodCall";

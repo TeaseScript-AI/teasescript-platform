@@ -1,3 +1,9 @@
+function sexscriptLegacyItems(value) {
+  if value is string {
+    return value.split("")
+  }
+  return value
+}
 // equals() compares values like ==.
 let name = "Anna"
 if name == "Anna" {
@@ -31,4 +37,17 @@ if true {
   }
 }
 say "Ready: ${ready}, points ${points}"
+// Groovy iterated text by character; a value not proven to be text or a list goes through a helper.
+let word = "abc"
+for letter in word.split("") {
+  say letter
+}
+function spell(text) {
+  let shown = ""
+  for c in sexscriptLegacyItems(text) {
+    shown = "${shown}${c}"
+  }
+  return shown
+}
+say spell(word)
 exit
