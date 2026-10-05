@@ -377,8 +377,9 @@ platform Debugger remains future work described in [DEBUGGER.md](../DEBUGGER.md)
 
 ## Session start and user activation
 
-The Player does not run a script on page load. Before the first runtime entry of a new session, it shows an explicit
-Start control; after a page load that restores an existing session, it shows an explicit Continue control before
+The Player does not run a script on page load. A script that does not compile cannot start: instead of Start, the
+Player lists its diagnostics, each with its file, line, and message. Before the first runtime entry of a new session, it
+shows an explicit Start control; after a page load that restores an existing session, it shows an explicit Continue control before
 execution resumes. The player's activation of that control is the user activation that later audible media playback
 relies on, so scripts may play audio from their first statement without a separate unlock step. Start and Continue
 also record the wall clock and the player's time zone and numeric date and time presentation, resolved again at each:

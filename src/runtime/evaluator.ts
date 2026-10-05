@@ -16,9 +16,9 @@ import type {
   AssignmentTargetPlan,
   BinaryExpressionPlan,
   ExpressionPlan,
-  PlanImage,
   InstructionPlan,
   PlanSourceLocation,
+  PlanTag,
   TagQueryExpressionPlan,
   TagQueryStepPlan,
   TypeCheckPlan,
@@ -1933,21 +1933,23 @@ export class Evaluator {
       if (step.kind === "tagCompare") bounds.set(step, this.#tagBound(value, span));
       else lists.set(step, tagNames(value, step.option, span));
     }
-    const matches = this.plan.images
-      .filter((image) => {
-        const tags = imageTags(image);
-        return evaluateTagSteps(query.steps, (step) => {
-          if (step.kind === "tag") return tags.has(step.name);
-          if (step.kind === "tagCompare")
-            return compareTagValue(tags.get(step.name), step.operator, bounds.get(step)!);
-          if (step.kind === "tagList") return passesTagList(step.option, lists.get(step)!, tags);
-          return null;
-        });
-      })
-      .map((image) => image.path);
-    if (query.select === "list") return { kind: "list", items: matches };
-    if (matches.length === 0) throw fault("TSR082", "No image has these tags.", query.span);
-    return matches[Math.floor(this.#findRandom(query.span) * matches.length)]!;
+    const matches = (tags: ReadonlyMap<string, number | null>) =>
+      evaluateTagSteps(query.steps, (step) => {
+        if (step.kind === "tag") return tags.has(step.name);
+        if (step.kind === "tagCompare")
+          return compareTagValue(tags.get(step.name), step.operator, bounds.get(step)!);
+        if (step.kind === "tagList") return passesTagList(step.option, lists.get(step)!, tags);
+        return null;
+      });
+    // The package images in path order, then the photos taken with tags in capture order.
+    const found: string[] = [];
+    for (const image of this.plan.images) if (matches(imageTags(image))) found.push(image.path);
+    for (const image of this.snapshot.capturedImages) {
+      if (matches(imageTags(image))) found.push(image.reference);
+    }
+    if (query.select === "list") return { kind: "list", items: found };
+    if (found.length === 0) throw fault("TSR082", "No image has these tags.", query.span);
+    return found[Math.floor(this.#findRandom(query.span) * found.length)]!;
   }
 
   #tagBound(value: SerializableRuntimeValue, span: SourceSpan): number {
@@ -2699,10 +2701,12 @@ function mayRunCall(expression: ExpressionPlan): boolean {
   return callingExpressions.get(expression)!;
 }
 
-const imageTagMaps = new WeakMap<PlanImage, ReadonlyMap<string, number | null>>();
+const imageTagMaps = new WeakMap<object, ReadonlyMap<string, number | null>>();
 
-/** An image's tags by name, built once per validated plan image. */
-function imageTags(image: PlanImage): ReadonlyMap<string, number | null> {
+/** An image's tags by name, built once per catalog entry: a plan image or a photo taken with tags. */
+function imageTags(image: {
+  readonly tags: readonly PlanTag[];
+}): ReadonlyMap<string, number | null> {
   let tags = imageTagMaps.get(image);
   if (tags === undefined) {
     tags = new Map(image.tags.map((tag) => [tag.name, tag.value]));

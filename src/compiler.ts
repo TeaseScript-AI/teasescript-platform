@@ -9,6 +9,7 @@ import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutabl
 import { planLocationToSourceSpan } from "./plan/source-location.js";
 import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
 import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
+import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
 import { CORE_RUNTIME_BUILTINS } from "./protected-names.js";
 import { validateProjectSemantics, type SemanticValidationOptions } from "./semantic.js";
@@ -23,6 +24,7 @@ export interface CompileOptions extends SemanticValidationOptions {
 /** What every file of a project is checked with: the options, the built-ins, and the image catalog when given. */
 interface ProjectCheckOptions extends CompileOptions {
   readonly imageCatalog?: readonly PlanImage[];
+  readonly capturesTaggedPhotos?: boolean;
 }
 
 export interface CompilationResult {
@@ -107,7 +109,10 @@ function compileProjectFiles(
   };
   const files = inventory.files.map(({ path, source }) => parseFile(path, source));
   let plan: InstructionPlan | null = null;
-  const checked = checkProject(files, validationOptions);
+  const checked = checkProject(files, {
+    ...validationOptions,
+    capturesTaggedPhotos: capturesTaggedPhotos(files.map((file) => file.result.program)),
+  });
   if (inventory.diagnostics.length === 0 && !hasErrors(catalog.diagnostics) && checked !== null) {
     if (checked.reachesExit) {
       plan = lowerProject(files, checked.typeChecks, catalog.images);

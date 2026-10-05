@@ -1,0 +1,4 @@
+global function cellar {
+    say "It is dark here."
+    say candle
+}

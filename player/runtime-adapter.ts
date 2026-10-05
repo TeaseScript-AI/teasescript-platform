@@ -1,12 +1,13 @@
 import {
   captureTemporalContext,
-  compileSource,
+  compileProject,
   completeAction,
   createCheckpoint,
   createFreshRuntimeSnapshot,
   DEFAULT_TEMPORAL_CONTEXT,
   deserializeCheckpoint,
   interactionDeadlineMs,
+  MAIN_FILE_PATH,
   mediaPlaybackProjection,
   observeTime,
   recordContinueCapture,
@@ -25,6 +26,8 @@ import {
   type MediaReportOutcome,
   type StageProjection,
   type PendingActionOperationResult,
+  type ProjectImageFile,
+  type ProjectSourceFile,
   type RuntimeInteractionActionSnapshot,
   type CapturedMediaAdmission,
   type CaptureUnavailableReason,
@@ -111,27 +114,87 @@ export interface PlayerRuntimeControlResult<T = ActionCompletionOutcome | TimeOb
   readonly outcome: T;
 }
 
+/** The `.tease` files of a package and its images; a session starts at the top of `main.tease` (ADR 0022). */
+export interface PlayerProject {
+  readonly files: readonly ProjectSourceFile[];
+  /** The package images that tag queries search; none by default. */
+  readonly images?: readonly ProjectImageFile[];
+}
+
+/** A diagnostic as the Player lists it: the file or image it belongs to, its one-based line and column, its message. */
+export interface PlayerScriptDiagnostic {
+  readonly path: string;
+  readonly line: number;
+  readonly column: number;
+  readonly severity: "error" | "warning";
+  readonly code: string;
+  readonly message: string;
+}
+
+/** The plan of a script, or `null` when it does not compile; with every diagnostic of its files and images. */
+export interface PlayerCompilation {
+  readonly plan: InstructionPlan | null;
+  readonly diagnostics: readonly PlayerScriptDiagnostic[];
+}
+
+/** Compiles a project, or a single source as the `main.tease` of a one-file project, without running it. */
+export function compilePlayerProject(script: string | PlayerProject): PlayerCompilation {
+  const project =
+    typeof script === "string" ? { files: [{ path: MAIN_FILE_PATH, source: script }] } : script;
+  const compilation = compileProject(
+    project.files,
+    project.images === undefined ? {} : { images: project.images },
+  );
+  return Object.freeze({
+    plan: compilation.plan,
+    diagnostics: Object.freeze(
+      compilation.diagnostics.map((diagnostic) =>
+        Object.freeze({
+          path: diagnostic.path,
+          line: diagnostic.span.start.line + 1,
+          column: diagnostic.span.start.column + 1,
+          severity: diagnostic.severity,
+          code: diagnostic.code,
+          message: diagnostic.message,
+        }),
+      ),
+    ),
+  });
+}
+
+/**
+ * Starts a session of a script: a project, a single source as the `main.tease` of a one-file project, or the plan
+ * `compilePlayerProject` made of one. A script that does not compile throws with its first error.
+ */
 export function createPlayerRuntimeSession(
-  source: string,
+  script: string | PlayerProject | InstructionPlan,
   options: PlayerRuntimeSessionOptions = {},
 ): PlayerRuntimeSession {
-  const compilation = compileSource(source);
-  if (compilation.plan === null) {
-    const diagnostic = compilation.diagnostics[0];
-    throw new Error(diagnostic?.message ?? "Player source did not compile.");
-  }
-  const snapshot = createFreshRuntimeSnapshot(compilation.plan, {
+  const plan = isInstructionPlan(script) ? script : compiledPlan(script);
+  const snapshot = createFreshRuntimeSnapshot(plan, {
     ...(options.scriptStorage === undefined ? {} : { scriptStorage: options.scriptStorage }),
     persistentScriptStorage: options.persistentScriptStorage ?? false,
     ...(options.temporalContext === undefined ? {} : { temporalContext: options.temporalContext }),
     ...(options.wallClockMs === undefined ? {} : { wallClockMs: options.wallClockMs }),
   });
-  const operation = run(compilation.plan, snapshot);
-  return applyOperation(
-    emptySession(compilation.plan, snapshot),
-    operation.snapshot,
-    operation.events,
-    false,
+  const operation = run(plan, snapshot);
+  return applyOperation(emptySession(plan, snapshot), operation.snapshot, operation.events, false);
+}
+
+function isInstructionPlan(
+  script: string | PlayerProject | InstructionPlan,
+): script is InstructionPlan {
+  return typeof script !== "string" && "instructions" in script;
+}
+
+function compiledPlan(script: string | PlayerProject): InstructionPlan {
+  const compilation = compilePlayerProject(script);
+  if (compilation.plan !== null) return compilation.plan;
+  const error = compilation.diagnostics.find((diagnostic) => diagnostic.severity === "error");
+  throw new Error(
+    error === undefined
+      ? "The script did not compile."
+      : `${error.path}:${error.line}:${error.column}: ${error.message}`,
   );
 }
 

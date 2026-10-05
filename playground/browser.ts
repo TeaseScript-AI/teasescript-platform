@@ -1,10 +1,12 @@
 import {
   CheckpointError,
+  MAIN_FILE_PATH,
   type InstructionPlan,
   type InterpreterEvent,
   type ProjectImageFile,
   type RuntimeSnapshot,
 } from "../src/index.js";
+import { compareProjectPaths } from "../src/project-paths.js";
 import {
   checkpointStorageKey,
   exampleUrl,
@@ -13,7 +15,14 @@ import {
   type PlaygroundExampleName,
 } from "./examples.js";
 import {
+  developmentPackageFileUrl,
+  fetchDevelopmentPackage,
+  loadDevelopmentPackage,
+  type PackageCatalog,
+} from "./package-catalog.js";
+import {
   activateWorkspaceButton,
+  compileWorkspaceProject,
   compileWorkspaceSource,
   decodeWorkspaceSourceBytes,
   executeValidatedWorkspaceSnapshot,
@@ -54,6 +63,8 @@ const elements = {
   imageCatalogStatus: requiredElement("image-catalog-status"),
   actionStatus: requiredElement("action-status"),
   loadedExampleName: requiredElement("loaded-example-name"),
+  packageFileRow: requiredElement("package-file-row"),
+  fileSelect: requiredSelect("file-select"),
   sourceRevision: requiredElement("source-revision"),
   exampleSelect: requiredSelect("example-select"),
   compile: requiredButton("compile"),
@@ -72,8 +83,17 @@ const elements = {
 
 let sourceRevision = 0;
 let compiledRevision: number | null = null;
-/** The images of the server's development package folder (#572), or `undefined` when it offers none. */
+/** The images of the server's development package (#572), or `undefined` when it offers none. */
 let images: readonly ProjectImageFile[] | undefined;
+/** The package of the server's package root that `?package=` opened (#570), or `null` for its single package folder. */
+const packageId = new URLSearchParams(window.location.search).get("package");
+/**
+ * The files of that package by path, `main.tease` first, while the workspace holds it; edits stay in this page. `null`
+ * while the workspace holds one source.
+ */
+let packageFiles: Map<string, string> | null = null;
+/** The package file the source editor shows. */
+let activePath = MAIN_FILE_PATH;
 let plan: InstructionPlan | null = null;
 let snapshot: RuntimeSnapshot | null = null;
 let eventLog: InterpreterEvent[] = [];
@@ -122,8 +142,12 @@ elements.exampleSelect.addEventListener("change", () => {
     void reloadExample();
   }
 });
+elements.fileSelect.addEventListener("change", () => {
+  showPackageFile(elements.fileSelect.value);
+});
 elements.source.addEventListener("input", () => {
-  sourceEdited();
+  if (packageFiles !== null) packageFiles.set(activePath, elements.source.value);
+  sourceEdited(packageFiles === null);
 });
 elements.source.addEventListener("scroll", () => {
   elements.sourceLines.scrollTop = elements.source.scrollTop;
@@ -143,60 +167,67 @@ new ResizeObserver(() => {
   updateChoicePresentation();
 }).observe(elements.sourcePanel);
 new ResizeObserver(updateChoicePresentation).observe(elements.playerPanel);
-void loadPackageFolder().then(loadInitialSource);
+void (packageId === null ? loadPackageFolder().then(loadInitialSource) : openPackage(packageId));
 
 /** Offers the images of the server's development package folder to tag queries and the Stage preview. */
 async function loadPackageFolder(): Promise<void> {
   try {
-    const response = await fetch("/dev-package/catalog.json", { cache: "no-store" });
-    if (!response.ok) return;
-    const catalog = packageFolderCatalog(await response.json());
-    if (catalog === null) {
-      elements.stagePanel.hidden = false;
-      elements.imageCatalogStatus.textContent = "The server's package catalog is malformed.";
-      return;
-    }
-    images = catalog.images;
-    elements.stagePanel.hidden = false;
-    elements.imageCatalogStatus.textContent = [
-      `${catalog.images.length} images from the server's development package folder.`,
-      ...catalog.problems.map((problem) => `${problem.path}: ${problem.message}`),
-    ].join("\n");
-  } catch {
+    const catalog = await fetchDevelopmentPackage(null);
     // Without the folder, tag queries search no images.
+    if (catalog !== null) showCatalog(catalog, "the server's development package folder");
+  } catch (error) {
+    elements.stagePanel.hidden = false;
+    elements.imageCatalogStatus.textContent = errorMessage(error);
   }
 }
 
-/** The catalog the server sent, or `null` when it does not have the expected shape. */
-function packageFolderCatalog(
-  value: unknown,
-): {
-  readonly images: readonly ProjectImageFile[];
-  readonly problems: readonly { readonly path: string; readonly message: string }[];
-} | null {
-  if (!isRecord(value)) return null;
-  const { images: listed, problems } = value;
-  if (!Array.isArray(listed) || !Array.isArray(problems)) return null;
-  const parsedImages: ProjectImageFile[] = [];
-  for (const image of listed) {
-    if (!isRecord(image)) return null;
-    const { path, keywords } = image;
-    if (typeof path !== "string" || !Array.isArray(keywords)) return null;
-    if (!keywords.every((keyword) => typeof keyword === "string")) return null;
-    parsedImages.push({ path, keywords });
+/** Opens a package of the server's package root as the workspace project, at its `main.tease` (#570). */
+async function openPackage(id: string): Promise<void> {
+  const label = `Package ${id}`;
+  setActionStatus(`Loading ${label}…`);
+  let catalog: PackageCatalog;
+  try {
+    catalog = await loadDevelopmentPackage(id);
+  } catch (error) {
+    replaceSource("", errorMessage(error), label, false);
+    return;
   }
-  const parsedProblems: { path: string; message: string }[] = [];
-  for (const problem of problems) {
-    if (!isRecord(problem)) return null;
-    const { path, message } = problem;
-    if (typeof path !== "string" || typeof message !== "string") return null;
-    parsedProblems.push({ path, message });
-  }
-  return { images: parsedImages, problems: parsedProblems };
+  showCatalog(catalog, `package ${id}`);
+  const files = catalog.sources.toSorted((left, right) =>
+    compareProjectPaths(left.path, right.path),
+  );
+  replaceSource("", "Package loaded.", label, false);
+  packageFiles = new Map(files.map((file) => [file.path, file.source]));
+  elements.fileSelect.replaceChildren(
+    ...files.map((file) => {
+      const option = document.createElement("option");
+      option.value = file.path;
+      option.textContent = file.path;
+      return option;
+    }),
+  );
+  elements.packageFileRow.hidden = false;
+  showPackageFile(files[0]?.path ?? MAIN_FILE_PATH);
+  compileAndReset();
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
+function showCatalog(catalog: PackageCatalog, source: string): void {
+  images = catalog.images;
+  elements.stagePanel.hidden = false;
+  elements.imageCatalogStatus.textContent = [
+    `${catalog.images.length} images from ${source}.`,
+    ...catalog.problems.map((problem) => `${problem.path}: ${problem.message}`),
+  ].join("\n");
+}
+
+/** Shows a file of the open package in the source editor; the project and its runtime stay as they are. */
+function showPackageFile(path: string): void {
+  if (packageFiles === null) return;
+  activePath = path;
+  elements.fileSelect.value = path;
+  elements.source.value = packageFiles.get(path) ?? "";
+  elements.source.scrollTop = 0;
+  renderSourceLines();
 }
 
 async function loadInitialSource(): Promise<void> {
@@ -232,7 +263,11 @@ async function reloadExample(): Promise<void> {
   }
 }
 
+/** Replaces the workspace with one source, which closes an open package. */
 function replaceSource(value: string, message: string, label: string, saveDraft = true): void {
+  packageFiles = null;
+  activePath = MAIN_FILE_PATH;
+  elements.packageFileRow.hidden = true;
   elements.source.value = value;
   elements.loadedExampleName.textContent = label;
   sourceEdited(saveDraft);
@@ -257,10 +292,14 @@ function sourceEdited(saveDraft = true): void {
 
 function compileAndReset(): void {
   try {
-    const result = compileWorkspaceSource(elements.source.value, {
-      wallClockMs: Date.now(),
-      ...(images === undefined ? {} : { images }),
-    });
+    const options = { wallClockMs: Date.now(), ...(images === undefined ? {} : { images }) };
+    const result =
+      packageFiles === null
+        ? compileWorkspaceSource(elements.source.value, options)
+        : compileWorkspaceProject(
+            [...packageFiles].map(([path, source]) => ({ path, source })),
+            options,
+          );
     compiledRevision = result.plan === null ? null : sourceRevision;
     applyResult(result, true);
     setActionStatus(
@@ -324,7 +363,7 @@ function saveCheckpoint(): void {
       plan as InstructionPlan,
       snapshot as RuntimeSnapshot,
     );
-    const storageKey = checkpointStorageKey(currentExample);
+    const storageKey = checkpointStorageKey(checkpointScope());
     localStorage.setItem(storageKey, checkpoint.outcome.json);
     checkpointEventLogs.set(
       storageKey,
@@ -342,7 +381,7 @@ function restoreSavedCheckpoint(): void {
     return;
   }
   try {
-    const storageKey = checkpointStorageKey(currentExample);
+    const storageKey = checkpointStorageKey(checkpointScope());
     const serialized = localStorage.getItem(storageKey);
     if (serialized === null) {
       setActionStatus("No saved checkpoint exists.");
@@ -377,7 +416,7 @@ function restoreSavedCheckpoint(): void {
 
 function clearSavedCheckpoint(): void {
   try {
-    const storageKey = checkpointStorageKey(currentExample);
+    const storageKey = checkpointStorageKey(checkpointScope());
     localStorage.removeItem(storageKey);
     checkpointEventLogs.delete(storageKey);
     setActionStatus("Saved checkpoint cleared.");
@@ -404,14 +443,23 @@ async function importSource(): Promise<void> {
   }
 }
 
+/** The checkpoints of the open package are kept apart from those of each example. */
+function checkpointScope(): string {
+  return packageFiles !== null && packageId !== null ? `package/${packageId}` : currentExample;
+}
+
 function exportSource(): void {
+  const name =
+    packageFiles === null
+      ? "teasescript-workspace.tease"
+      : (activePath.split("/").at(-1) ?? activePath);
   const blob = new Blob([elements.source.value], { type: "text/plain;charset=utf-8" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = "teasescript-workspace.tease";
+  link.download = name;
   link.click();
   URL.revokeObjectURL(link.href);
-  setActionStatus("Source exported as teasescript-workspace.tease.");
+  setActionStatus(`Source exported as ${name}.`);
 }
 
 async function refreshAutomationWorkspace(): Promise<void> {
@@ -747,6 +795,7 @@ function clearPlayerFeedback(): void {
 
 function renderDiagnostics(
   diagnostics: readonly {
+    path: string;
     code: string;
     message: string;
     line: number;
@@ -766,8 +815,11 @@ function renderDiagnostics(
   for (const diagnostic of diagnostics) {
     const button = document.createElement("button");
     button.className = "diagnostic-button";
-    button.textContent = `${diagnostic.code} (${diagnostic.line}:${diagnostic.column}) ${diagnostic.message}`;
+    button.textContent = `${diagnostic.code} ${diagnostic.path} (${diagnostic.line}:${diagnostic.column}) ${diagnostic.message}`;
     button.addEventListener("click", () => {
+      // A diagnostic of another package file opens that file; one of an image has no source position.
+      if (packageFiles?.has(diagnostic.path) === true) showPackageFile(diagnostic.path);
+      if (diagnostic.path !== activePath) return;
       const start = offsetAt(elements.source.value, diagnostic.line, diagnostic.column);
       elements.source.focus();
       elements.source.setSelectionRange(start, start + Math.max(1, diagnostic.length));
@@ -831,7 +883,7 @@ function renderStageImage(path: string | null): void {
   const known = path !== null && images?.some((image) => image.path === path) === true;
   elements.stageImage.hidden = !known;
   if (known) {
-    const url = `/dev-package/files/${path.split("/").map(encodeURIComponent).join("/")}`;
+    const url = developmentPackageFileUrl(packageId, path);
     if (elements.stageImage.getAttribute("src") !== url) elements.stageImage.src = url;
   } else {
     elements.stageImage.removeAttribute("src");

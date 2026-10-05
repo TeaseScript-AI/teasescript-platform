@@ -67,9 +67,21 @@ test("references are found in every stored value shape, and nothing else counts"
         },
       },
       { name: "range", value: { kind: "range", start: 1, end: 2, inclusive: true } },
+      {
+        name: "album",
+        value: {
+          kind: "dict",
+          entries: [
+            { key: "captured-media:dk:1", value: "plain" },
+            { key: "shot", value: "captured-media:dv:1" },
+          ],
+        },
+      },
     ],
   };
   assert.deepEqual([...capturedMediaReferences(value)].sort(), [
+    "captured-media:dk:1",
+    "captured-media:dv:1",
     "captured-media:k:1",
     "captured-media:l:1",
     "captured-media:s:1",
@@ -94,6 +106,11 @@ test("a save stores its photo durably before the value is persisted", async () =
   await storage.write("album", { kind: "list", items: [photo] });
   assert.deepEqual(persistedBefore, [1]);
   assert.deepEqual(provider.entries.get("album"), { kind: "list", items: [photo] });
+
+  // A photo saved as a dict value is stored durably too.
+  const inDict = media.add("image", png("in a dict")).reference;
+  await storage.write("named", { kind: "dict", entries: [{ key: "shot", value: inDict }] });
+  assert.deepEqual(persistedBefore, [1, 2]);
 });
 
 test("a save whose photo cannot be stored is not persisted and keeps the previous value", async () => {

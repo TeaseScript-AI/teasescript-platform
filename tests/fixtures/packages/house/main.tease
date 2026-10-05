@@ -1,0 +1,8 @@
+---
+title: "The house"
+---
+showImage "images/hall.svg"
+welcome("guest")
+playAudio async "sounds/chime.wav"
+showButton "Leave"
+exit

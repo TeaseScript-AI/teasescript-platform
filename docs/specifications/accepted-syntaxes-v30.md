@@ -3108,6 +3108,7 @@ File, folder, and camera APIs return engine-managed string references or `null` 
 let file: string? = chooseFile()
 let folder: string? = chooseFolder()
 let photo: string? = takePhoto()
+let tagged: string? = takePhoto(tags: ["bedroom"])    // joins the image catalog, see §41
 ```
 
 The returned string may be passed directly to compatible APIs:
@@ -4440,9 +4441,9 @@ if photos.length > 0 { showImage photos.random }
 - Comparison bounds and tag lists are evaluated once, in written order, before any candidate is matched. Matching draws
   no random number. `showImage tagged` draws once from the session random generator, and restoring a checkpoint never
   draws again.
-- When the compilation is given the package images, a `showImage tagged` whose tag tests and literal tag lists match
-  none of them is a compile error; comparisons and computed lists are not evaluated for this. Any other pick that finds
-  no image is a runtime error.
+- When the compilation is given the package images and no file takes photos with tags, a `showImage tagged` whose tag
+  tests and literal tag lists match none of them is a compile error; comparisons and computed lists are not evaluated
+  for this. Any other pick that finds no image is a runtime error.
 
 ### Image tags
 
@@ -4453,6 +4454,20 @@ if photos.length > 0 { showImage photos.random }
   beside `punishment: 4`; two different numbers for one tag are an error.
 - The catalog that tag queries search is generated from the images when the project compiles. It is part of the plan,
   so a checkpoint keeps it and a restored session searches the same images.
+- A photo taken with `takePhoto(tags: [...])` joins the catalog with these tags, under the reference `takePhoto`
+  returns ([§33](#33-browser-api-file-folder-camera-and-url-references)):
+
+  ```text
+  let photo = takePhoto(tags: ["bedroom", "punishment: ${level}"])
+  showImage tagged "bedroom", "punishment" >= 3       // may pick the photo
+  ```
+
+  The tags are texts such as `"bedroom"` or `"punishment: 4"`, read with the rules of [Tags](#tags) before the photo is
+  taken; a text that is not a tag, or two numbers for one tag, is an error then, and no photo is taken. A repeated tag
+  counts once. A photo taken without `tags:`, or no photo because the camera is unavailable, joins nothing. Tag
+  queries search the package images in path order, then the photos in the order they were taken. The session keeps
+  these entries, so a checkpoint restores them; a photo stays as available as its reference
+  ([§33](#33-browser-api-file-folder-camera-and-url-references)).
 
 ## Remaining open decisions
 The accepted core syntax is consolidated in this document. Remaining work is primarily detailed API payloads and engine/account behavior.

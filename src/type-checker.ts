@@ -40,7 +40,7 @@ import {
 import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
 import { isTakePhotoCall } from "./capture-call.js";
 import { evaluateTagSteps, passesTagList } from "./tag-query.js";
-import { normalizeTagName } from "./tags.js";
+import { addTag, normalizeTagName, readTagText, type Tag } from "./tags.js";
 import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js";
 import {
   builtinCallProblems,
@@ -149,6 +149,8 @@ export interface TypeCheckOptions {
   readonly builtins?: readonly string[];
   /** The package images that tag queries search, when the compilation was given them. */
   readonly imageCatalog?: readonly PlanImage[];
+  /** Whether some file of the project takes photos with tags, which join the catalog at runtime. */
+  readonly capturesTaggedPhotos?: boolean;
 }
 
 export interface TypeCheckResult {
@@ -195,6 +197,7 @@ const typeCode = {
   mixedTypes: "TSV044",
   impossibleCase: "TSV049",
   emptyTagQuery: "TST002",
+  invalidCaptureTag: "TST005",
   randomStartValue: "TSV055",
 } as const;
 
@@ -395,6 +398,8 @@ class TypeChecker {
   /** The tags of each package image, by name; `null` when the compilation was not given the images. */
   readonly #imageTags: readonly ReadonlyMap<string, number | null>[] | null;
 
+  readonly #capturesTaggedPhotos: boolean;
+
   /** The project's names: host globals, globals, speakers, and global functions. */
   readonly #project = new Scope(null);
 
@@ -521,6 +526,7 @@ class TypeChecker {
   ) {
     this.fileDiagnostics = Array.from({ length: files }, () => []);
     this.#widened = widened;
+    this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
     this.#imageTags =
       options.imageCatalog?.map(
         (image) => new Map(image.tags.map((tag) => [tag.name, tag.value])),
@@ -2472,12 +2478,44 @@ class TypeChecker {
     }
   }
 
+  /** Each written tag of a literal `takePhoto(tags: [...])` list is a tag, and no tag has two different numbers. */
+  #checkLiteralCaptureTags(tags: Expression): void {
+    const list = unwrapGrouping(tags);
+    if (list.kind !== "listLiteral") return;
+    const seen = new Map<string, Tag>();
+    for (const element of list.elements) {
+      if (
+        element.kind !== "stringLiteral" ||
+        element.parts.some((part) => part.kind !== "stringText")
+      )
+        continue;
+      const text = element.parts
+        .map((part) => (part.kind === "stringText" ? part.value : ""))
+        .join("");
+      const tag = readTagText(text);
+      if (tag === null) {
+        this.#report(
+          typeCode.invalidCaptureTag,
+          `'${text}' is not a tag: use lowercase letters a–z, digits, and hyphens, with an optional number, such as "punishment: 4".`,
+          element.span,
+        );
+      } else if (addTag(seen, tag) === "conflict") {
+        this.#report(
+          typeCode.invalidCaptureTag,
+          `The tag '${tag.name}' has two different numbers.`,
+          element.span,
+        );
+      }
+    }
+  }
+
   /**
    * A pick from the given images that no image can match by its tag tests and literal tag lists alone is an error
    * (ADR 0023). Comparisons and other values count as possibly true: this check does no value reasoning.
    */
   #checkTagQueryCanMatch(query: TagQueryExpression): void {
-    if (query.select !== "random" || this.#imageTags === null) return;
+    // A photo taken with tags may match at runtime, so only a project without them can be proven empty.
+    if (query.select !== "random" || this.#imageTags === null || this.#capturesTaggedPhotos) return;
     // Each literal tag list is read once for all images.
     const lists = new Map<TagQueryStep, readonly string[] | null>();
     for (const step of query.steps) {
@@ -3036,6 +3074,19 @@ class TypeChecker {
     let callee = expression.callee;
     while (callee.kind === "parenthesizedExpression") callee = callee.expression;
     if (isTakePhotoCall(expression)) {
+      const tags = expression.arguments[0]?.value;
+      if (tags !== undefined) {
+        const type = yield* compileChild(this.#expressionTask(tags, scope));
+        this.#reportUnless(
+          type,
+          (member) =>
+            (member.kind === "list" || member.kind === "set") &&
+            (!isKnown(member.element) || isScalar(member.element, "string")),
+          tags,
+          '\'tags:\' takes a list of tags, such as ["bedroom", "punishment: 4"]',
+        );
+        this.#checkLiteralCaptureTags(tags);
+      }
       // A capture waits for the Player like an interaction, and gives a photo reference, or null without a camera.
       this.#suspend();
       return optional(STRING_TYPE);

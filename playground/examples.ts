@@ -28,6 +28,7 @@ export function exampleUrl(name: PlaygroundExampleName): string {
   return `/examples/playground/${PLAYGROUND_EXAMPLES[name].file}`;
 }
 
-export function checkpointStorageKey(name: PlaygroundExampleName): string {
-  return `teasescript-playground-checkpoint-v${CHECKPOINT_VERSION}:${name}`;
+/** The storage key of the saved checkpoint of an example, by its name, or of a package, by `package/<id>`. */
+export function checkpointStorageKey(scope: string): string {
+  return `teasescript-playground-checkpoint-v${CHECKPOINT_VERSION}:${scope}`;
 }

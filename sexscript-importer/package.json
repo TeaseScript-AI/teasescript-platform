@@ -10,6 +10,8 @@
     "inventory": "node src/cli.ts inventory",
     "report": "node src/cli.ts report",
     "convert": "node src/cli.ts convert",
-    "convert-package": "node src/cli.ts convert-package"
+    "convert-package": "node src/cli.ts convert-package",
+    "convert-corpus": "node tools/convert-corpus.ts",
+    "catalog": "node tools/catalog.ts"
   }
 }

@@ -1199,14 +1199,24 @@ export class InstructionCompiler {
       return lowered;
     }
     if (isTakePhotoCall(expression)) {
+      // `takePhoto(tags: …)`: the tags are evaluated first; the capture reads them before it asks the Player.
+      const tagsArgument =
+        expression.kind === "callExpression" ? expression.arguments[0] : undefined;
+      const tags =
+        tagsArgument === undefined
+          ? null
+          : yield* compileChild(this.#lowerExpressionTask(tagsArgument.value));
       const transientTemporary = this.#allocateTemporary();
       this.instructions.push({
         kind: "capture",
         capture: "photo",
+        tags: tags?.plan ?? null,
         destinationTemporary: transientTemporary,
         span: copySpan(expression.span),
       });
-      return this.#consumeInteractionResult(transientTemporary, expression.span);
+      const result = this.#consumeInteractionResult(transientTemporary, expression.span);
+      if (tags !== null) this.#emitTemporaryCleanup(tags.temporaryIds, expression.span);
+      return result;
     }
     if (
       expression.kind === "callExpression" &&

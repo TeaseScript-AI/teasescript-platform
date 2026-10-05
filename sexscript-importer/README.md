@@ -92,6 +92,42 @@ Mapping decisions and their rationale are in [`docs/POC-SCOPE.md`](docs/POC-SCOP
 [`docs/COMPATIBILITY-GAPS.md`](docs/COMPATIBILITY-GAPS.md), and language changes proposed from it are tracked in
 [`docs/PROPOSED-LANGUAGE-CHANGES.md`](docs/PROPOSED-LANGUAGE-CHANGES.md).
 
+## Corpus catalog
+
+A page that opens every converted package of a legacy corpus in the Player:
+
+```sh
+node tools/convert-corpus.ts [--jobs N] [--only id,id] [--report-only] /path/to/corpus external/converted
+node tools/catalog.ts [--player https://host:port] external/converted external/catalog/index.html
+# from the repository root, after npm run build:
+HOST=127.0.0.1 PORT=4182 PLAYGROUND_PACKAGES=$PWD/sexscript-importer/external/converted node dist/playground/server.js
+node sexscript-importer/tools/serve-catalog.ts --catalog sexscript-importer/external/catalog \
+  --upstream http://127.0.0.1:4182 --cert cert.pem --key key.pem --port 4443 [--http-port 4180]
+```
+
+`convert-corpus` takes one corpus folder per package, each with `scripts/`, `images/`, and `sounds/`. It runs
+`convert-package` on each folder whose `scripts/` holds Groovy, then `report --run`, whose JSON it keeps as
+`.report.json`. Legacy scripts name media relative to `images/` and `sounds/`, and package paths start at the package
+root, so both trees are hard-linked into the package root. Media are never copied, so the corpus and the output must
+share one filesystem. A resource pack (a folder without scripts) is linked into each script package whose source names
+one of its top media folders, narrowed to the packages that name its subfolder when any do. Each package
+folder records the conversion in `.conversion.json` and `.conversion.log`; `.conversion-summary.json` in the root
+records the importer commit and the date.
+
+`catalog` writes one HTML page and reads each package as the Player does: the playground server's package scan, then
+`compileProject` with the package images. A summary table counts the packages that convert fully, compile, run to the
+end, stop during the run, need unbuilt commands, or do not compile. Each table row shows the `---` header of
+`main.tease`, or of the first script that a generated `main.tease` menu goes to: title (the Player link), author,
+keywords, and description. The status column shows what the Player does with the package and how the report's smoke run
+from `main.tease` ended, with a `partly converted` mark for unconverted code; click a status for details. The source
+column links the legacy Groovy and converted `.tease` files, which `catalog` hard-links under `source/` next to the
+page. A Pin button keeps favourites in `localStorage` and lists them at the top.
+
+The Player needs a secure context (HTTPS or localhost) on another machine, and the playground server serves its own
+page at `/`. `serve-catalog` therefore puts the catalog page and the Player on one HTTPS origin. It serves `/` and
+`/source/` itself, with the sources as UTF-8 plain text, and forwards the other GET requests to the playground server
+on loopback. A self-signed certificate works once its browser warning is accepted.
+
 ## Tests
 
 ```sh
