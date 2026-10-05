@@ -17,6 +17,7 @@ import {
   continuePlayerRuntimeSession,
   playerTemporalContext,
   pendingPlayerRuntimeStorageWrite,
+  playerRuntimeCameraView,
   playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
@@ -122,12 +123,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const interactionReset = ref(0);
   const activation = shallowRef<Activation | null>(null);
   const audioBlocked = ref(false);
-  // The viewfinder previews the session camera while the host shows it. Hiding it leaves the camera open for
-  // `takePhoto()`; without an available camera there is nothing to show.
-  const viewfinderShown = ref(false);
+  // The script places the camera view with `showCamera [stage]` and hides it with `hideCamera`; the view only previews
+  // the session camera, which stays open for `takePhoto()`. Without an available camera there is nothing to show.
+  const viewfinderPlacement = computed(() => {
+    const current = session.value;
+    return current === null ? null : playerRuntimeCameraView(current.snapshot);
+  });
   const viewfinder = computed(() => {
     void cameraRevision.value;
-    return viewfinderShown.value ? camera.previewTrack : null;
+    return viewfinderPlacement.value === null ? null : camera.previewTrack;
   });
 
   const pendingLoadCount = ref(0);
@@ -317,7 +321,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // Starts or restores a session; its scene time continues from the persisted observation, so a
   // gap while no Player ran is not consumed.
   function start(next: PlayerRuntimeSession) {
-    viewfinderShown.value = false;
     device.reset();
     loads.clear();
     pendingLoadCount.value = 0;
@@ -415,13 +418,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     loadScriptStorage,
     scriptStorageOptions,
     resolveAsset,
-    /** The session camera's live track while the viewfinder is shown and the camera is available, else `null`. */
+    /** The session camera's live track while the script shows a camera view and the camera is available, else `null`. */
     viewfinder,
-    /**
-     * Shows or hides the viewfinder, a live local preview that never captures; `takePhoto()` alone takes photos. A new
-     * session starts with it hidden. Hosts drive it until the language can request it.
-     */
-    showViewfinder: (shown: boolean) => void (viewfinderShown.value = shown),
+    /** Where the script shows the camera view, `"window"` or `"stage"`, or `null` while it shows none. */
+    viewfinderPlacement,
     /** Bounded developer diagnostics, for example an unavailable session camera. */
     diagnostics: computed(() => diagnostics.value),
     /** Presented runtime timers; hidden timers have no entry. */

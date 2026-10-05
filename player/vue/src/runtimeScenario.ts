@@ -44,8 +44,8 @@ showButton "Yes, Mistress"
 exit
 `;
 
-// Development viewfinder content: the preview shows the viewfinder while the script waits on "Take photo", standing in
-// for a viewfinder request the language cannot express yet. The script alone takes the photo, right after the press.
+// Development camera view content: the script shows the camera in the floating window while the player gets into frame,
+// takes the photo, moves the camera view over the Stage image, and hides it. The script alone takes the photo.
 export const viewfinderScenarioSource = `
 speaker mistressVera {
     title: "Mistress"
@@ -56,6 +56,7 @@ speaker mistressVera {
 speaker mistressVera
 showImage "images/playroom.svg"
 say "Time for your picture. Get into the frame and look at me.", instant
+let view = showCamera
 showButton "I'm ready, Mistress"
 let photo: string? = takePhoto()
 if photo != null {
@@ -64,6 +65,10 @@ if photo != null {
 } else {
     say "No camera? Then you stay unseen, for now. We go on without a photo.", instant
 }
+showButton "Put me on your Stage"
+view.placement = "stage"
+say "Now you are on my Stage, over your picture.", instant
 showButton "Yes, Mistress"
+hideCamera
 exit
 `;

@@ -1,15 +1,41 @@
 <script setup lang="ts">
-import { watch } from "vue";
+import { ref, watch } from "vue";
+import Viewfinder from "./Viewfinder.vue";
+import ViewfinderMirrorButton from "./ViewfinderMirrorButton.vue";
 const props = defineProps<{
   media: { src: string; alt: string } | undefined;
+  /** The session camera's track while the script shows the camera view over the Stage (`showCamera stage`). */
+  camera?: MediaStreamTrack | null;
 }>();
 const emit = defineEmits<{ mediaAspect: [ratio: number] }>();
+const cameraMirrored = defineModel<boolean>("cameraMirrored", { default: true });
+// The camera view covers the Stage image without replacing it: the image stays loaded underneath, and the Stage follows
+// the camera's aspect while the view is shown. The image's own aspect is kept for when the view goes.
+let imageAspect = 0;
+const cameraRatio = ref(4 / 3);
 // Only a new source needs measuring again; an equal source keeps its loaded image and aspect.
-watch(() => props.media?.src, () => emit("mediaAspect", 0));
+watch(
+  () => props.media?.src,
+  () => {
+    imageAspect = 0;
+    if (!props.camera) emit("mediaAspect", 0);
+  },
+);
+watch(
+  () => props.camera,
+  (track) => {
+    if (!track) emit("mediaAspect", imageAspect);
+  },
+);
 function mediaLoaded(event: Event) {
   const image = event.currentTarget;
-  if (image instanceof HTMLImageElement && image.naturalHeight)
-    emit("mediaAspect", image.naturalWidth / image.naturalHeight);
+  if (!(image instanceof HTMLImageElement) || !image.naturalHeight) return;
+  imageAspect = image.naturalWidth / image.naturalHeight;
+  if (!props.camera) emit("mediaAspect", imageAspect);
+}
+function cameraMeasured(ratio: number) {
+  cameraRatio.value = ratio;
+  emit("mediaAspect", ratio);
 }
 </script>
 
@@ -17,6 +43,12 @@ function mediaLoaded(event: Event) {
   <section class="player-stage" aria-label="Primary stage">
     <div class="stage-media-frame">
       <img v-if="media" :src="media.src" :alt="media.alt" class="stage-media" @load="mediaLoaded" />
+      <div v-if="camera" class="stage-camera" data-stage-camera :style="{ '--viewfinder-ratio': cameraRatio }">
+        <Viewfinder :track="camera" :mirrored="cameraMirrored" @aspect="cameraMeasured" />
+        <div class="stage-camera-mirror">
+          <ViewfinderMirrorButton v-model="cameraMirrored" />
+        </div>
+      </div>
     </div>
   </section>
 </template>
@@ -35,4 +67,14 @@ function mediaLoaded(event: Event) {
   left: var(--content-offset); width: var(--content-width);
 }
 .stage-media { display: block; width: 100%; height: 100%; object-fit: contain; }
+/* Over the image, at the camera's aspect, as large as the Stage allows. */
+.stage-camera {
+  position: absolute; inset: 0; margin: auto;
+  width: min(100%, 100cqh * var(--viewfinder-ratio)); max-height: 100%;
+}
+.stage-camera-mirror {
+  position: absolute; top: 8px; right: 8px; display: flex;
+  border: 1px solid var(--media-border); border-radius: 8px; color: var(--media-text);
+  background: var(--media-surface); box-shadow: 0 1px 3px var(--media-shadow); backdrop-filter: blur(3px);
+}
 </style>

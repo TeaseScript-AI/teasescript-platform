@@ -538,6 +538,11 @@ export function reportPlayerRuntimeMediaLoad(
   });
 }
 
+/** Where the script shows the camera view now: in the floating window, over the Stage, or not at all (`null`). */
+export function playerRuntimeCameraView(snapshot: RuntimeSnapshot): "window" | "stage" | null {
+  return snapshot.cameraView?.shown === true ? snapshot.cameraView.placement : null;
+}
+
 /** The Stage image and active media the Player presents and plays; see `MediaPlaybackProjection`. */
 export function playerRuntimeMedia(snapshot: RuntimeSnapshot): {
   readonly stage: StageProjection;

@@ -154,29 +154,44 @@ async function checks(page, url) {
   );
   check((await savedPhoto(tab)) === second, "A camera without frames replaced the saved photo");
   await tab.close();
-  // The viewfinder plays the same camera, also when its first frames have no size yet, and the photo follows. Its frame
-  // adopts the wide camera's aspect once the frames have a size.
+  // The script's camera view plays the same camera, also when its first frames have no size yet, and the photo follows.
+  // In the window and over the Stage, the view adopts the wide camera's aspect once the frames have a size.
   ({ tab, messages } = await start(1_500, {
     scenario: url.replace("scenario=camera", "scenario=viewfinder"),
     video: { width: 1280, height: 720 },
   }));
-  await tab.waitForFunction(() => {
-    const video = document.querySelector("[data-viewfinder] video");
-    const frame = document.querySelector("[data-viewfinder]")?.getBoundingClientRect();
-    return (
-      video?.videoWidth === 1280 &&
-      !video.paused &&
-      getComputedStyle(video).transform === "matrix(-1, 0, 0, 1, 0, 0)" &&
-      Math.abs(frame.width / frame.height - 16 / 9) < 0.02
-    );
-  });
+  const wide = (selector) =>
+    tab.waitForFunction((selector) => {
+      const video = document.querySelector(`${selector} [data-viewfinder] video`);
+      const frame = document
+        .querySelector(`${selector} [data-viewfinder]`)
+        ?.getBoundingClientRect();
+      return (
+        video?.videoWidth === 1280 &&
+        !video.paused &&
+        getComputedStyle(video).transform === "matrix(-1, 0, 0, 1, 0, 0)" &&
+        Math.abs(frame.width / frame.height - 16 / 9) < 0.02
+      );
+    }, selector);
+  await wide("[data-floating-viewfinder]");
   await tab.locator("button", { hasText: "I'm ready, Mistress" }).click();
   await shows(tab, "There you are. I'll keep that one.");
   await tab.waitForFunction(decodedPhotos);
-  check(
-    (await tab.locator("[data-viewfinder]").count()) === 0,
-    "The viewfinder stayed after the photo",
+  await tab.locator("button", { hasText: "Put me on your Stage" }).click();
+  await wide("[data-stage-camera]");
+  await tab.waitForFunction(
+    () =>
+      Math.abs(
+        Number(
+          getComputedStyle(document.querySelector("#player-shell")).getPropertyValue(
+            "--media-aspect",
+          ),
+        ) -
+          16 / 9,
+      ) < 0.01,
   );
+  await tab.locator("button", { hasText: "Yes, Mistress" }).click();
+  await tab.waitForFunction(() => document.querySelectorAll("[data-viewfinder]").length === 0);
   check(messages.length === 0, `The viewfinder run reported: ${messages.join(" | ")}`);
   await tab.close();
   return "PASS a late-sized first frame with an aborted play(), the saved photo in a new run, a camera without frames, and the viewfinder";
