@@ -18,8 +18,9 @@ accept syntax, architecture, or implementation details.
 - **Language foundation:** values including elapsed durations and date, time, datetime, and timestamp values,
   variables, assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated
   single-line and block strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion,
-  control flow, deterministic random, rounding, and `min`/`max` built-ins, text operations and list `join`, the
-  `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `sort`/`shuffle` and set operations, top-level
+  control flow, deterministic random, rounding, and `min`/`max` built-ins, text operations and list `join`, `+` on two
+  texts or two lists, the `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `addAll`, `sort`/`shuffle` and
+  set operations, top-level
   user-defined functions, labels and `goto`, and explicit endings with a required `exit` (ADR 0022). Projects of several
   `.tease` files compile into one plan, with globals, global functions, and speakers shared by all files, `goto`,
   `call`, and `end` between files with a `fallback`, glob targets, and computed targets from `script(...)` references.

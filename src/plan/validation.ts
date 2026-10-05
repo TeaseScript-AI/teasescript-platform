@@ -1997,7 +1997,8 @@ function validateExpressionNode(
           isRecord(value.callee) &&
           value.callee.kind === "property" &&
           Array.isArray(value.arguments) &&
-          ((value.callee.name === "add" && value.arguments.length === 1) ||
+          (((value.callee.name === "add" || value.callee.name === "addAll") &&
+            value.arguments.length === 1) ||
             (value.callee.name === "get" &&
               value.arguments.length === 2 &&
               isRecord(value.arguments[1]) &&
@@ -2008,7 +2009,7 @@ function validateExpressionNode(
         errors.push(
           planError(
             "TSC002",
-            "Only a list or set 'add' call with one argument, or a dict 'get' call with a 'default:', checks a type.",
+            "Only a list or set 'add' or list 'addAll' call with one argument, or a dict 'get' call with a 'default:', checks a type.",
             `${path}.typeCheck`,
           ),
         );

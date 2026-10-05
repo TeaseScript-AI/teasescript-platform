@@ -108,8 +108,14 @@ test("an operation on a union needs every member to support it, and the message 
   assert.deepEqual(codes("let ratio: integer | number = 1\nlet half = ratio / 2\nexit"), []);
   // The test is named also when the other operand is of unknown type.
   assert.deepEqual(
-    diagnostics("function f(n: (integer | string)?, other) {\n    return n + other\n}\nexit"),
-    [["TSV043", "'n' may be text (string). Check it first: if n is integer { ... }", "n"]],
+    diagnostics("function f(n: (integer | boolean)?, other) {\n    return n + other\n}\nexit"),
+    [
+      [
+        "TSV043",
+        "'n' may be true or false (boolean). Check it first: if n is integer { ... }",
+        "n",
+      ],
+    ],
   );
   // A method on a union receiver takes its arguments as each member would, and the results join.
   const either = (type: string, first: string, second: string) =>
