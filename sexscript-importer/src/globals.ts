@@ -138,6 +138,15 @@ export function promoteGlobalFunctions(
   const reads = new Map(
     [...candidates].map(([name, { statement }]) => [name, freeNames(statement)]),
   );
+  // The scripts whose promoted functions read a file-level value: only they share it as a global, and any other script
+  // keeps its own variable of that name, renamed apart from the global.
+  const readers = (variable: string): Set<number> =>
+    new Set(
+      [...candidates].flatMap(([name, candidate]) =>
+        reads.get(name)?.variables.has(variable) === true ? candidate.scripts : [],
+      ),
+    );
+
   const tableValues = new Map<string, LetStatement>();
   const reassigned = new Map<string, LetStatement>();
   for (let changed = true; changed;) {
@@ -179,8 +188,9 @@ export function promoteGlobalFunctions(
       const types = new Set(declarations.map((declaration) => declaration!.type ?? ""));
       if (types.size > 1)
         return `reads ${variable}, which the scripts declare with different types`;
+      const sharing = readers(variable);
       const everywhere = scripts.flatMap((_, script) => {
-        const declaration = fileLets[script]!.get(variable);
+        const declaration = sharing.has(script) ? fileLets[script]!.get(variable) : undefined;
         return declaration === undefined ? [] : [declaration];
       });
       if (everywhere.some((declaration) => (declaration.type ?? "") !== [...types][0]))
@@ -203,7 +213,9 @@ export function promoteGlobalFunctions(
       if (
         constantValue(first.value) &&
         everywhere.every((declaration) => sameValue(declaration.value, first.value)) &&
-        !scripts.some((program) => changes(program.statements, variable))
+        !scripts.some(
+          (program, script) => sharing.has(script) && changes(program.statements, variable),
+        )
       )
         tableValues.set(variable, first);
       else reassigned.set(variable, first);
@@ -225,8 +237,20 @@ export function promoteGlobalFunctions(
         if (candidate !== undefined && candidate.scripts.includes(script)) return [];
         return [statement];
       }
-      if (statement.kind === "let" && tableValues.has(statement.name)) return [];
-      if (statement.kind === "let" && reassigned.has(statement.name)) {
+      // A script whose promoted functions do not read a global keeps its own variable of that name, unless it is the
+      // same constant table, which it can read from the global as well.
+      const shares = statement.kind === "let" && readers(statement.name).has(script);
+      const table = statement.kind === "let" ? tableValues.get(statement.name) : undefined;
+      if (
+        statement.kind === "let" &&
+        table !== undefined &&
+        (shares ||
+          (sameValue(statement.value, table.value) &&
+            (statement.type ?? "") === (table.type ?? "") &&
+            !changes(program.statements, statement.name)))
+      )
+        return [];
+      if (statement.kind === "let" && shares && reassigned.has(statement.name)) {
         // The global starts from the script's own value where the script declared it, as Groovy's variable did.
         return [
           {

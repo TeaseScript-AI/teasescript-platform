@@ -116,9 +116,11 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
 - `say` text is message markup: legacy `*emphasis*` renders as formatting and URLs become links. Line-start list,
   heading, or quote markers and backslash escapes get a `NOTE` (`escapeMarkup()` keeps text literal).
 - Single-field input prefilled its field with the default, also when the default was null (the field showed "null")
-  or empty. TeaseScript prefills with `default:` but rejects a null or blank default when the input opens, so a
-  default that may be either gets a note (`SX_INPUT_PREFILL`); a literal empty or null default is dropped. A text
-  default that is not text becomes text (`"${level}"`), and a list becomes `"[${list.join(", ")}]"`, as Groovy printed
+  or empty. TeaseScript prefills with `default:`, and a null or blank default at runtime opens the input without a
+  prefill (#618), so such a default converts as written; a literal empty or null default, which TeaseScript rejects
+  as written (`TSV039`), is dropped. A number input's default that may be no number, or a fraction for `askInteger`,
+  goes through a helper with a note (`SX_INPUT_PREFILL`). A text default that may be no text becomes text
+  (`"${level}"`, null staying null), and a list becomes `"[${list.join(", ")}]"`, as Groovy printed
   it; a map default is reported (`SX_INPUT_PREFILL_VALUE`). A default
   computed with side effects stays manual work for text and number input (`SX_INPUT_PREFILL_EFFECT`): legacy computed
   it before showing the question, and the converted question is a `say` before the input.
@@ -517,7 +519,9 @@ pixel size, or an image-size query.
   clothes the player owns; a package that reads such keys and never saves them asks the missing ones once at the start
   of `main.tease`, with the distribution's questions, and saves them under the legacy keys (`SX_LEGACY_PROFILE`).
 - `show("")` only cleared the legacy text area and is dropped; an empty or blank image path clears the image.
-- Lists join with TeaseScript `+`, `+=`, and `addAll` (#609); the concatenation helper remains only for ranges.
+- Lists join with TeaseScript `+`, `+=`, and `addAll` (#609); the concatenation helper remains only for ranges. A right
+  side not proven to be a list or one element (`[] + impl` with a parameter) goes through a generated helper that
+  returns a list as it is and wraps any other value, also null, as Groovy appended it (63 corpus sites, 26 in Toy).
 
 - Actions a browser cannot do (owner decision 2026-10-05): questions and notices that the importer adds come from a
   global speaker `system` (title "System"), declared once in `helpers.tease` or in a lone script. Device commands kept
@@ -637,7 +641,7 @@ Patterns the four-package corpus did not show: null-start numbers read in functi
 scripts (`TSV043`, `TSV039`; the empty-list decision covers only lists); function parameters have no type, so
 `list -= value` on a parameter stays numeric and a variable widened by `parameter / 30` stays an integer for the
 compiler (smoke failures `TSR027`, `TSR058`); `for (c in text)` iterated characters (`split("")`); an empty computed
-`getString` default fails `askText` (`TSR052`); `isInteger()`, `isNumber()`, and `isFloat()` text checks (8, 6, and 3
+`getString` default failed `askText` (`TSR052`, no longer since #618); `isInteger()`, `isNumber()`, and `isFloat()` text checks (8, 6, and 3
 packages) have no direct form.
 
 ## Open importer work

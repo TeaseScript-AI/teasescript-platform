@@ -125,11 +125,15 @@ export function analyzeText(root: AstNode): TextAnalysis {
     if (tree.parameters.has(name)) continue;
     const reads = tree.reads.get(name) ?? [];
     const members = reads.map((read) => memberOf(read, tree));
+    // Every value is a new Random, also where blocks declare the name again.
     if (
-      values.length === 1 &&
-      values[0]?.kind === "constructorCall" &&
-      RANDOM_TYPES.has(String(values[0].type)) &&
-      argumentsOf(values[0]).length === 0 &&
+      values.length > 0 &&
+      values.every(
+        (value) =>
+          value?.kind === "constructorCall" &&
+          RANDOM_TYPES.has(String(value.type)) &&
+          argumentsOf(value).length === 0,
+      ) &&
       members.every(
         (member) => member !== null && !member.property && RANDOM_DRAWS.has(member.name),
       )

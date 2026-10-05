@@ -143,4 +143,13 @@ let section = randomInteger(0..2)
 if not skipped.contains(sections[section]) {
   say "Section ${sections[section]}"
 }
+// A loop over a map's entries visits a dict's keys: entry.key is the key and entry.value its value.
+let needed = dict{ rope: "rope", rubber_bands: "rubber bands" }
+let missing = ""
+for toyValue in needed {
+  if (load "toys.${toyValue}") != true {
+    missing = "${missing}${needed[toyValue]} "
+  }
+}
+say "Missing: ${missing}"
 exit

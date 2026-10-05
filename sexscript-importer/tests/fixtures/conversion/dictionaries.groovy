@@ -84,3 +84,10 @@ skipped["Random-Thong"] = true
 def sections = ["Random-Thong", "Random-Panties"]
 def section = getRandom(2)
 if (skipped[sections[section]] == null) show("Section " + sections[section])
+// A loop over a map's entries visits a dict's keys: entry.key is the key and entry.value its value.
+def needed = ["rope": "rope", "rubber_bands": "rubber bands"]
+def missing = ""
+for (toy in needed) {
+	if (!loadBoolean("toys." + toy.key)) missing += toy.value + " "
+}
+show("Missing: " + missing)

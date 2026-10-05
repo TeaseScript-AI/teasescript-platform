@@ -1,3 +1,18 @@
+function sexscriptLegacyListPart(value) {
+  if value is list {
+    return value
+  }
+  return [value]
+}
+function sexscriptLegacyRepeatList(items, times) {
+  let result = []
+  let roundValue = 0
+  while roundValue < times {
+    result += items
+    roundValue += 1
+  }
+  return result
+}
 let text = "Start"
 text = "${text} and more"
 let menu = ["Back"]
@@ -27,4 +42,14 @@ say "Status of ${stamp} at ${getTime().formatTime()}, day ${dayOfYear} ${sameDay
 let lockedSince = load "training.lockedSince", default: 1790000000
 // NOTE SX_DATE_FROM_SECONDS line 24: Workaround: TeaseScript builds no timestamp from a Unix number (#532), so the moment is the current timestamp minus the seconds since then; Java's pattern "dd, MMM, yyyy" becomes the player's local date form.
 say "Locked since ${(getTimestamp() - (getTimestamp().toSeconds() - toInteger(lockedSince)) * 1 s).formatDate()}"
+// A list + a value that may be a list or one element appends at runtime what Groovy appended.
+function pickAll(impl) {
+  return ([] + sexscriptLegacyListPart(impl)).length
+}
+say "Picked ${pickAll(["paddle", "cane"])} ${pickAll("belt")}"
+// Groovy text * n and list * n repeat the text or the list's elements, a fractional n cut to whole times.
+let chant = sexscriptLegacyRepeatList(["toy"], 2) + ["pet"]
+let laughs = 2.5
+// NOTE SX_LIST_JOIN line 31: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say "${chant.join(" ")} ${"ha".repeat(toInteger(laughs))}"
 exit

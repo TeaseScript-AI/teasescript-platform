@@ -171,7 +171,7 @@ Legacy semantics below are verified against the API contract (`ss/IScript.java`)
 | `showPopup(x)` | `showPopup x` | Accepted, not implemented yet; a used elapsed result is measured with `getTimestamp().toSeconds()`. |
 | `getBoolean(text[, yes, no])` | `say text` + `(choose yes: ..., no: ...) == "yes"` | First button means true; default labels Yes/No. |
 | `getSelectedValue(text, [a, b])` | `say text` + `choose 0: a, 1: b` | Numeric values return the zero-based index. A runtime list becomes `{ value, text }` choice objects (PR #515). |
-| `getString` / `getFloat` | `say text` + `askText default: d` / `askNumber default: d` | A null or blank default fails when the input opens; legacy showed it. Cancel-to-null is lost. |
+| `getString` / `getFloat` | `say text` + `askText default: d` / `askNumber default: d` | A null or blank default opens the input without a prefill (#618); legacy showed it. Cancel-to-null is lost. |
 | `getInteger(text, d)` | `say text` + `askInteger default: d` | Compact integer input (#548); a null default fails when the input opens. |
 | `getImage(text)` | `takePhoto()` | Camera only (V30 §33, not implemented yet); the legacy file-chooser fallback is dropped. |
 | `getBooleans(t, values, defaults)` | `askBooleans(message:, texts:, defaults:)` | Accepted, not implemented yet. |

@@ -1,0 +1,25 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
+// Calls the function an action ID names. Unlike Groovy, extra arguments are ignored and an unknown action returns null.
+function sexscriptLegacyCall(action, args) {
+  if action == "announceCallback1" {
+    return announceCallback1(args[0])
+  }
+  return null
+}
+function announceCallback1(t) {
+  say "Count ${t}"
+}
+// A closure kept in a local of a function becomes an action; one that captures the function's locals cannot convert
+// and stays declared without an action, so the code that calls it still compiles.
+function countdown(n) {
+  let announce = "announceCallback1"
+  // TODO SX_CAPTURING_CLOSURE line 5: This closure value captures local announce, n of its enclosing function; TeaseScript has no closures, so pass that state explicitly.
+  // | final twice = { t -> announce(t); announce(t + n) }
+  let twice = null
+  sexscriptLegacyCall(announce, [n])
+  sexscriptLegacyCall(twice, [1])
+}
+countdown(2)
+exit

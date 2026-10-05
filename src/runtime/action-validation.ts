@@ -1424,10 +1424,11 @@ function preparedInteractionUiMatchesAction(
       prepared.hintTemporary === null
         ? null
         : runtimeTemporaryValue(temporaries, prepared.hintTemporary);
+    // A field without a prefill left `null` in the temporary of its empty default.
     const prefill =
       prepared.prefillTemporary === undefined
         ? undefined
-        : runtimeTemporaryValue(temporaries, prepared.prefillTemporary);
+        : (runtimeTemporaryValue(temporaries, prepared.prefillTemporary) ?? undefined);
     return (
       hint === actual.hint &&
       prefill === actual.prefill &&
@@ -1442,7 +1443,7 @@ function preparedInteractionUiMatchesAction(
     const prefill =
       prepared.prefillTemporary === undefined
         ? undefined
-        : runtimeTemporaryValue(temporaries, prepared.prefillTemporary);
+        : (runtimeTemporaryValue(temporaries, prepared.prefillTemporary) ?? undefined);
     return (
       actual.temporalKind === prepared.temporalKind &&
       hint === actual.hint &&
@@ -1957,14 +1958,15 @@ function preparedUiFitsPresentedUi(
   if (prepared.kind === "text" || prepared.kind === "number")
     return (
       (ui.hint === null) === (prepared.hintTemporary === null) &&
-      "prefill" in ui === (prepared.prefillTemporary !== undefined) &&
+      // Only a default prefills, and one that was empty when the field opened did not.
+      (!("prefill" in ui) || prepared.prefillTemporary !== undefined) &&
       ui.integer === (prepared.kind === "number" ? prepared.integer : undefined)
     );
   if (prepared.kind === "temporal")
     return (
       ui.temporalKind === prepared.temporalKind &&
       (ui.hint === null) === (prepared.hintTemporary === null) &&
-      "prefill" in ui === (prepared.prefillTemporary !== undefined)
+      (!("prefill" in ui) || prepared.prefillTemporary !== undefined)
     );
   return Array.isArray(ui.options) && buttonsFitWrittenValues(prepared.values, ui.options);
 }
