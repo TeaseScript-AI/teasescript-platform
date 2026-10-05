@@ -68,7 +68,6 @@ export type HelperName =
   | "sendImage"
   | "switchButton"
   | "switchButtonId"
-  | "switchState"
   | "tokenize"
   | "backgroundSounds"
   | "concat"
@@ -140,7 +139,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "sendImage",
   "switchButtonId",
   "switchButton",
-  "switchState",
 ];
 
 const v = (name: string): IrExpression => ({ kind: "variable", name });
@@ -554,19 +552,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         ],
       ),
   },
-  // Workaround for a permanent switch button: the switch state of a device command in the chat.
-  switchState: {
-    name: "sexscriptLegacySwitchState",
-    build: () =>
-      fn(
-        "sexscriptLegacySwitchState",
-        ["command"],
-        switchStateBody([
-          (state) => [{ kind: "say", value: lit(`Power switch: ${state}`), span: null }],
-        ]),
-      ),
-  },
-  // The accepted form: a permanent button that shows the switch state and replaces the previous one.
+  // A persistent permanent button that shows a device's switch state and replaces the previous one.
   switchButtonId: {
     name: "sexscriptLegacySwitchButton",
     build: () => letS("sexscriptLegacySwitchButton", lit(null)),
@@ -595,6 +581,7 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
               kind: "permanentButton",
               target: v("sexscriptLegacySwitchButton"),
               label: lit(`Power: ${state}`),
+              persist: true,
               span: null,
             },
           ],

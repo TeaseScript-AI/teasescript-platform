@@ -12132,7 +12132,8 @@ function useFileStatements(
 
 /**
  * `command.execute()` started a program of the player's computer. A device switch program, whose command ends with
- * on or off (also `ein`, `an`, `aus`), shows the switch state; it runs at runtime for a computed command.
+ * on or off (also `ein`, `an`, `aus`), shows the switch state as a persistent permanent button (V30 §28), since the
+ * device state spans scripts; the state is read at runtime for a computed command.
  */
 function switchCommand(
   targetNode: AstNode,
@@ -12156,18 +12157,12 @@ function switchCommand(
   if (command === null) return null;
   addDiagnostic(
     context,
-    "SX_SWITCH_WORKAROUND",
+    "SX_SWITCH_BUTTON",
     "warning",
-    context.accepted.has("permanentButton")
-      ? "The legacy script ran a device switch program; the switch state is a permanent button, replaced when the state changes."
-      : "Workaround for a permanent switch button (showPermanentButton, which main does not implement yet): the legacy script ran a device switch program, which a package cannot start; the chat shows the switch state instead. Switch back to the permanent button when it is implemented.",
+    "The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.",
     node.span,
   );
-  return useHelper(
-    context,
-    context.accepted.has("permanentButton") ? "switchButton" : "switchState",
-    [command],
-  );
+  return useHelper(context, "switchButton", [command]);
 }
 
 /** ON or OFF for a device switch command by its last word, or null for another command. */

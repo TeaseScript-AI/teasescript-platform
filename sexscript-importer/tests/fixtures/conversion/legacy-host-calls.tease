@@ -6,13 +6,24 @@ function sexscriptLegacySendImage(reference) {
   save reference as "sexscript.image.${codeValue}"
   return codeValue
 }
-function sexscriptLegacySwitchState(command) {
+let sexscriptLegacySwitchButton = null
+function sexscriptLegacyShowSwitch(command) {
   let last = command.trim().split(" ").last.lowercase()
   if ["on", "ein", "an"].contains(last) {
-    say "Power switch: ON"
+    if sexscriptLegacySwitchButton != null {
+      removePermanentButton(sexscriptLegacySwitchButton)
+    }
+    sexscriptLegacySwitchButton = showPermanentButton "Power: ON" {
+      persist: true
+    }
   }
   if ["off", "aus"].contains(last) {
-    say "Power switch: OFF"
+    if sexscriptLegacySwitchButton != null {
+      removePermanentButton(sexscriptLegacySwitchButton)
+    }
+    sexscriptLegacySwitchButton = showPermanentButton "Power: OFF" {
+      persist: true
+    }
   }
 }
 // The legacy online service becomes the package's storage, and isConnected() is always true.
@@ -44,10 +55,10 @@ playAudio async "bell.mp3"
 // | useFile("tools/device.exe")
 // A device switch program shows the switch state.
 let switchOn = "SwitchBox.exe 7 ein"
-// NOTE SX_SWITCH_WORKAROUND line 15: Workaround for a permanent switch button (showPermanentButton, which main does not implement yet): the legacy script ran a device switch program, which a package cannot start; the chat shows the switch state instead. Switch back to the permanent button when it is implemented.
-sexscriptLegacySwitchState(switchOn)
-// NOTE SX_SWITCH_WORKAROUND line 16: Workaround for a permanent switch button (showPermanentButton, which main does not implement yet): the legacy script ran a device switch program, which a package cannot start; the chat shows the switch state instead. Switch back to the permanent button when it is implemented.
-sexscriptLegacySwitchState("SwitchBox.exe 7 aus")
+// NOTE SX_SWITCH_BUTTON line 15: The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.
+sexscriptLegacyShowSwitch(switchOn)
+// NOTE SX_SWITCH_BUTTON line 16: The legacy script ran a device switch program, which a package cannot start; a persistent permanent button shows the switch state instead and is replaced when the state changes.
+sexscriptLegacyShowSwitch("SwitchBox.exe 7 aus")
 say "Best score ${best}"
 // Deleting the file of a photo the script took clears the reference.
 // NOTE SX_CAMERA_FALLBACK line 19: getImage() fell back to a file chooser titled with its message when no webcam worked; takePhoto() only uses the camera and returns null instead, and the Player decides how the photo is taken.

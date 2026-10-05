@@ -83,6 +83,7 @@ function emitStatement(statement: IrStatement, lines: string[], depth: number): 
     case "permanentButton":
       lines.push(
         `${pad}${emitExpression(statement.target)} = showPermanentButton ${emitExpression(statement.label)} {`,
+        ...(statement.persist ? [`${pad}  persist: true`] : []),
         `${pad}}`,
       );
       return;

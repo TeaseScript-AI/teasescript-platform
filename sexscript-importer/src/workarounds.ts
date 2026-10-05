@@ -8,7 +8,6 @@ export const ACCEPTED_FORMS = [
   "showPopup",
   "openUrl",
   "chooseFile",
-  "permanentButton",
   "layeredScene",
 ] as const;
 

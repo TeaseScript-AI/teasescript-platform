@@ -49,6 +49,7 @@ const ACCEPTED_EXTERNAL_CALLS = new Set([
   "openUrl",
   "random",
   "randomInteger",
+  "removePermanentButton",
   "round",
   "showButton",
   "takePhoto",

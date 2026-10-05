@@ -454,8 +454,8 @@ Emily persona; the code's default owner `ancilla` is not included.
 File transfers (`goto "file.tease"`, `goto script(...)`), `global function` and `global` in `helpers.tease` (ADR 0022,
 #570), and `takePhoto()` (#475, camera in the runtime and the Player) are native on `main` now, as are `dict` (#555),
 date and time (#532), `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger` (#548),
-rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526), and
-`load "key", default:` (#545).
+rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526),
+`load "key", default:` (#545), and permanent buttons (#612).
 
 What remains accepted but unimplemented becomes a workaround in implemented TeaseScript, with a `// NOTE` naming it at
 every site (owner decision 2026-10-05), so converted packages play natively; `--accepted=<forms>` emits the accepted
@@ -466,7 +466,6 @@ form instead once `main` implements it:
 | `askBooleans(message:, texts:, defaults:)` | the message, one yes/no `choose` per item with the preset marked in its button, then "Confirm" or "Change answers", which starts over (`SX_ASK_BOOLEANS_WORKAROUND`) | one form with every option; changing a single answer |
 | `showPopup` | the message in the chat and an OK button (`SX_POPUP_WORKAROUND`) | the popup presentation |
 | `openUrl(url)` | "Open this link: …" in the chat, where message markup makes an `http(s)` address a link, and a Continue button (`SX_OPEN_URL_WORKAROUND`) | opening the page itself |
-| `showPermanentButton` (V30 §28, #610 in progress) for a device switch command (`"SwitchBox.exe 7 ein".execute()`) | "Power switch: ON" or "OFF" in the chat, by the command's last word (`SX_SWITCH_WORKAROUND`); `--accepted=permanentButton` shows a permanent button and removes the previous one | a lasting on-screen switch state |
 | layered scene (`showBackgroundImage`, `showOverlayImage`) for an image composed in memory and shown with `setImage(bytes, n)` | the base image the function read (`SX_IMAGE_COMPOSITION`); `--accepted=layeredScene` places the base as background and each drawn image as an overlay at percentages of the canvas (`SX_LAYERED_SCENE`, or `SX_LAYERED_SCENE_PARTIAL` for source rectangles, text, shapes, pixel edits, and transformations) | the composition |
 | none: listing a package images folder | the counts of the package's images at conversion time, a number or a `dict` of the matching folders (`SX_IMAGE_COUNT_WORKAROUND`) | images added later; entries other than image files |
 
@@ -491,6 +490,9 @@ pixel size, or an image-size query.
   `getDataFolder()` is the package root (`SX_FILE_EXISTS`, `SX_DATA_FOLDER`). Deleting the file of a photo the script
   took clears the reference (`SX_PHOTO_DELETE`). `useFile(path)` plays an audio file (`SX_USE_FILE_AUDIO`); any other
   file, such as a device control program, stays reported as a program a package cannot start (`SX_EXTERNAL_PROGRAM`).
+  A device switch program (`"SwitchBox.exe 7 ein".execute()`, a command ending with `on`, `ein`, `an`, `off`, or
+  `aus`) becomes a persistent permanent button, "Power: ON" or "Power: OFF", which replaces the previous one; the
+  button ID is a `global` in `helpers.tease` when several scripts switch (`SX_SWITCH_BUTTON`).
 - Media paths: a literal image or sound path names the file the package holds when the legacy player found it ignoring
   letter case, around spaces, or below a repeated folder name (`SX_MEDIA_PATH`); several files that match apart from
   case get a note (`SX_MEDIA_PATH_CASE`). A MIDI file becomes an MP3 rendered at conversion (fluidsynth with a General

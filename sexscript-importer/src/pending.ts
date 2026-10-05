@@ -16,7 +16,6 @@ const PENDING_CALLS = new Map<string, string>([
   ["askBooleans", "askBooleans()"],
   ["openUrl", "openUrl()"],
   ["chooseFile", "chooseFile()"],
-  ["removePermanentButton", "showPermanentButton"],
   ["showBackgroundImage", "layered scene"],
   ["showOverlayImage", "layered scene"],
 ]);
@@ -199,15 +198,7 @@ export function shimPendingCapabilities(generated: MigrationProgram): PendingShi
           callStatement(call("showPopup", "showPopup", [expression(item.message)]), item.span),
         ];
       case "permanentButton":
-        return [
-          {
-            kind: "assign",
-            target: item.target,
-            operator: "=",
-            value: call("showPermanentButton", "showPermanentButton", [expression(item.label)]),
-            span: item.span,
-          },
-        ];
+        return [{ ...item, label: expression(item.label) }];
       case "showButton":
         return [
           {
@@ -332,8 +323,6 @@ export function pendingHostFunctions(
       },
     ],
     ["showPopup", () => null],
-    ["showPermanentButton", () => "button"],
-    ["removePermanentButton", () => null],
     ["showBackgroundImage", () => null],
     ["showOverlayImage", () => null],
     ["askBoolean", () => next("askBoolean", [true, false])],

@@ -64,8 +64,16 @@ export type IrStatement =
   | (IrBase & { kind: "wait"; duration: IrExpression; visible: boolean; unit: "s" | "ms" })
   | (IrBase & { kind: "showButton"; label: IrExpression; timeout: IrExpression | null })
   | (IrBase & { kind: "showPopup"; message: IrExpression })
-  /** `target = showPermanentButton label { }` (V30 §28): a button without an action, its ID kept in `target`. */
-  | (IrBase & { kind: "permanentButton"; target: IrExpression; label: IrExpression })
+  /**
+   * `target = showPermanentButton label { }` (V30 §28): a button without an action, its ID kept in `target`; `persist`
+   * keeps it across files until `exit`.
+   */
+  | (IrBase & {
+      kind: "permanentButton";
+      target: IrExpression;
+      label: IrExpression;
+      persist: boolean;
+    })
   | (IrBase & { kind: "showImage"; file: IrExpression })
   | (IrBase & { kind: "hideImage" })
   | (IrBase & {
