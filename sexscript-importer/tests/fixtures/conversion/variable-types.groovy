@@ -48,3 +48,13 @@ show(toys[0])
 def words = ["Rub", "Caress"]
 if (getBoolean("More?")) words = [["Pinch", "Twist"], ["them!"]]
 show("${words.size()}")
+// A variable declared String converted every value stored in it to text, and kept null.
+def startDelay = loadInteger("training.startDelay")
+String delayText
+if (startDelay == null) {
+  delayText = "(not set)"
+} else {
+  delayText = startDelay
+}
+String roundCount = 3
+show("Delay " + delayText + ", " + roundCount + " rounds")

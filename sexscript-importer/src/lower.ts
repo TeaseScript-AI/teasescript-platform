@@ -219,6 +219,8 @@ interface LowerContext {
   bindings: BindingKeys;
   /** Bindings declared with a Groovy integer type (`int`, `long`, ...), which store whole numbers. */
   integerVariables: ReadonlySet<string>;
+  /** Bindings declared with the Groovy type String, which converted every value stored in them to text. */
+  textVariables: ReadonlySet<string>;
   /** Initializers of variables assigned once, by their declaration (staticNumber). */
   constantInitializers: ReadonlyMap<string, AstNode>;
   /** Dict keys known present where the lowering is (presenceFact), from surrounding tests. */
@@ -969,6 +971,7 @@ export function lowerParsedFile(
     mapUses: mapUsesOf([]),
     bindings: new Map(),
     integerVariables: new Set(),
+    textVariables: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -1054,6 +1057,7 @@ export function lowerParsedFile(
     context.compoundValues = compoundValues(body, context.bindings);
     context.constantInitializers = declarationInitializers(body, context.types);
     context.integerVariables = integerVariables(body, context.bindings);
+    context.textVariables = textVariables(body, context.bindings);
     context.mapUses =
       options.mapUses ?? mapUsesOf([{ body, types: context.types, keys: context.bindings }]);
     context.elementRemovals = elementRemovals(body);
@@ -1705,6 +1709,7 @@ function lowerHelperMethod(
     mapUses: baseContext.mapUses,
     bindings: new Map(),
     integerVariables: new Set(),
+    textVariables: new Set(),
     constantInitializers: new Map(),
     knownKeys: [],
     writeTargets: new Set(),
@@ -3337,7 +3342,7 @@ function lowerDeclaration(
     {
       kind: "let",
       name,
-      value,
+      value: TEXT_TYPES.has(declaredType) ? asStoredText(value, right, context) : value,
       span,
       ...(optionalType === null ? {} : { type: `${optionalType}?` }),
       ...(INTEGER_TYPES.has(declaredType) ? { integer: true as const } : {}),
@@ -4256,8 +4261,19 @@ function lowerAssignment(
     operator === "=" &&
     context.integerVariables.has(bindingKey(targetNode, context.bindings) ?? "") &&
     mayBeText(right, context);
+  const stored =
+    operator === "=" && context.textVariables.has(bindingKey(targetNode, context.bindings) ?? "")
+      ? asStoredText(value, right, context)
+      : value;
   return [
-    { kind: "assign", target, operator, value, span, ...(textInteger ? { maybeText: true } : {}) },
+    {
+      kind: "assign",
+      target,
+      operator,
+      value: stored,
+      span,
+      ...(textInteger ? { maybeText: true } : {}),
+    },
   ];
 }
 
@@ -10057,6 +10073,34 @@ export function withUncalledNotes(
         : diagnostic,
     ),
   };
+}
+
+/** Bindings declared with the Groovy type String. */
+function textVariables(body: AstNode, keys: BindingKeys): Set<string> {
+  const names = new Set<string>();
+  walkAst(body, (node) => {
+    const left = node.kind === "declaration" ? asNode(node.left) : null;
+    const key = bindingKey(left, keys);
+    if (key !== null && TEXT_TYPES.has(text(left?.originType) ?? "")) names.add(key);
+  });
+  return names;
+}
+
+const TEXT_TYPES = new Set(["String", "java.lang.String"]);
+
+/**
+ * A value stored in a Groovy String variable, which Groovy converted to its text: interpolated, and through a helper
+ * that keeps null where the value may be null. Text, and a value of unknown type, stay as they are.
+ */
+function asStoredText(value: IrExpression, node: AstNode, context: LowerContext): IrExpression {
+  if (value.kind === "literal")
+    return typeof value.value === "number" || typeof value.value === "boolean"
+      ? { kind: "literal", value: String(value.value) }
+      : value;
+  // A value of unknown type, such as a call's result, is taken to be the text that the declaration names.
+  const type = inferType(node, context.types);
+  if (type === UNKNOWN || onlyOf(type, STRING | NULL)) return value;
+  return (type & NULL) === 0 ? templateOrLiteral([{ value }]) : useHelper(context, "text", [value]);
 }
 
 /** Bindings declared with a Groovy integer type. */

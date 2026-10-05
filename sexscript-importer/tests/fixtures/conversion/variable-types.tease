@@ -1,3 +1,9 @@
+function sexscriptLegacyText(value) {
+  if value == null {
+    return null
+  }
+  return "${value}"
+}
 // A variable that starts with a whole number and later holds fractions widens to a number by itself (#504 option B).
 let tempo = 1
 tempo = 0.75
@@ -56,4 +62,14 @@ if (choose yes: "Yes", no: "No") == "yes" {
   words = [["Pinch", "Twist"], ["them!"]]
 }
 say "${words.length}"
+// A variable declared String converted every value stored in it to text, and kept null.
+let startDelay = load "training.startDelay"
+let delayText: string? = null
+if startDelay == null {
+  delayText = "(not set)"
+} else {
+  delayText = sexscriptLegacyText(startDelay)
+}
+let roundCount = "3"
+say "Delay ${delayText}, ${roundCount} rounds"
 exit

@@ -75,6 +75,7 @@ export type HelperName =
   | "items"
   | "itemAt"
   | "truth"
+  | "text"
   | "askText"
   | "compare"
   | "replaceChars"
@@ -157,6 +158,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "items",
   "itemAt",
   "truth",
+  "text",
   "askText",
   "compare",
   "replaceChars",
@@ -690,6 +692,16 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ifS(bin(">=", v("position"), prop(v("list"), "length")), [ret(lit(null))]),
           ret(at(v("list"), v("position"))),
         ],
+      ),
+  },
+  // A value stored in a Groovy String variable: its text, and null stays null.
+  text: {
+    name: "sexscriptLegacyText",
+    build: () =>
+      fn(
+        "sexscriptLegacyText",
+        ["value"],
+        [ifS(bin("==", v("value"), lit(null)), [ret(lit(null))]), ret(template(v("value")))],
       ),
   },
   // Groovy truth: false for null, false, zero, empty text, and an empty list, set, dict, or map.
