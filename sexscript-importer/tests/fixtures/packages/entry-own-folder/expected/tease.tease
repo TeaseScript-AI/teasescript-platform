@@ -1,0 +1,7 @@
+---
+title: "The Tease"
+---
+// Legacy setInfos(): API version 9, status "working", color 0x000000, language "EN"
+
+say "Welcome"
+goto "tease/part.tease"
