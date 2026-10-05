@@ -78,7 +78,7 @@ switch n {
   }
   case 1 {
     say "One"
-    say "One or two"
+    say "or two"
   }
   case 2 {
     say "One or two"

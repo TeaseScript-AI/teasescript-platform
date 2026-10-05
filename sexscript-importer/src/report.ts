@@ -154,6 +154,11 @@ export interface FeasibilityReport {
   diagnosticsByCode: Record<string, number>;
   rootDiagnosticsByCode: Record<string, number>;
   /**
+   * Texts that repeated the text just before them because the legacy display replaced it (repeated-text.ts): dropped,
+   * shortened to what they add, and kept because their interpolated values differ.
+   */
+  repeatedText: { dropped: number; shortened: number; kept: number };
+  /**
    * Compiler diagnostics that remain after pending-capability placeholders, grouped by code and message.
    * These point at importer output rather than at known TeaseScript implementation gaps.
    */
@@ -273,6 +278,7 @@ export function analyzeFeasibility(
     rootMigrationErrors: 0,
     diagnosticsByCode: emptyCounts(),
     rootDiagnosticsByCode: emptyCounts(),
+    repeatedText: { dropped: 0, shortened: 0, kept: 0 },
     compilerDiagnosticsByMessage: emptyCounts(),
     pendingCapabilityFileCounts: emptyCounts(),
     blockingPendingCapabilityFileCounts: emptyCounts(),
@@ -367,6 +373,11 @@ export function analyzeFeasibility(
     report.rootMigrationErrors += roots.length;
     for (const diagnostic of errors) increment(report.diagnosticsByCode, diagnostic.code);
     for (const diagnostic of roots) increment(report.rootDiagnosticsByCode, diagnostic.code);
+    for (const { code } of program.diagnostics) {
+      if (code === "SX_REPEATED_TEXT_DROPPED") report.repeatedText.dropped += 1;
+      else if (code === "SX_REPEATED_TEXT_SHORTENED") report.repeatedText.shortened += 1;
+      else if (code === "SX_REPEATED_TEXT_KEPT") report.repeatedText.kept += 1;
+    }
 
     report.files.push({
       sourceName: file.sourceName,
