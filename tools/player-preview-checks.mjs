@@ -2202,6 +2202,7 @@ async function developmentTimeChecks(page) {
   const badge = page.locator("[data-development-time-badge]");
   const announcement = page.locator('[role="status"]').filter({ hasText: "Debug log" });
   const logLines = page.locator("[data-debug-log] li");
+  const logTab = page.getByRole("tab", { name: "Log", exact: true });
   const autoSkip = page.getByRole("switch", { name: "Auto-skip", exact: true });
   const aboutAutoSkip = page.getByRole("button", { name: "About auto-skip", exact: true });
   const aboutJumps = page.getByRole("button", { name: "About time jumps", exact: true });
@@ -2298,8 +2299,15 @@ async function developmentTimeChecks(page) {
   check(!(await autoSkip.isChecked()), "Tapping the label switched auto-skip");
 
   // Skip ends the wait at once and logs the jump; a waiting button offers +10 s and +1 min, but nothing to skip.
+  // Now is the first tab; the log keeps its lines while another tab shows.
+  check(
+    (await page.getByRole("tab", { name: "Now", exact: true }).getAttribute("aria-selected")) ===
+      "true",
+    "The Debug panel must open on Now",
+  );
   await skip.click();
   await foreground("Done").waitFor({ timeout: 5_000 });
+  await logTab.click();
   // What really elapsed before Skip is not skipped.
   await logLines
     .first()
@@ -2354,6 +2362,7 @@ async function developmentTimeChecks(page) {
   );
   await launcher.click();
   check(await autoSkip.isChecked(), "time=skip must switch auto-skip on");
+  await logTab.click();
   await logLines
     .first()
     .filter({ hasText: /^⏩ 1[45] s skipped$/ })

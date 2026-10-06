@@ -229,13 +229,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   );
   // The Stage source the browser could not load, as the Stage reports it while it shows that source, or `null`. The
   // Stage keeps that image hidden while its source stays, also into a new session, which then gets no new browser error.
-  let failedStageSource: string | null = null;
+  const failedStageSource = shallowRef<string | null>(null);
+  // The Stage source the browser has loaded and decoded, as the Stage reports it, or `null`; for Debug's Now view.
+  const loadedStageSource = shallowRef<string | null>(null);
   // A Stage image that is no package file, or one the Stage shows as failed when a session starts.
   watch([generation, stageImage], ([, image]) => {
     if (image === null) return;
     if (resolvePackageAsset(image) === null)
       reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "missing"));
-    else if (failedStageSource !== null && resolveAsset(image) === failedStageSource)
+    else if (failedStageSource.value !== null && resolveAsset(image) === failedStageSource.value)
       reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "failed"));
   });
 
@@ -730,12 +732,21 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     resolveAsset,
     /** The authored Stage image of the session, or `null` for an empty Stage. */
     stageImage,
+    /** What the Stage reports about the source it shows: loaded and decoded, or failed; for Debug's Now view. */
+    stageImageObservation: computed(() => ({
+      loaded: loadedStageSource.value,
+      failed: failedStageSource.value,
+    })),
+    /** The Stage source the browser has loaded and decoded, or `null` while it loads, failed, or shows none. */
+    stageImageLoad(src: string | null) {
+      loadedStageSource.value = src;
+    },
     /**
      * The Stage source the browser could not load or decode, or `null` once the Stage shows another source. A failure is
      * reported only while `src` is still the session's Stage image.
      */
     stageImageFailure(src: string | null) {
-      failedStageSource = src;
+      failedStageSource.value = src;
       const image = stageImage.value;
       if (src === null || image === null || resolveAsset(image) !== src) return;
       reportUnusableMedia(image, playerNotices.unusableMedia("image", image, "failed"));
