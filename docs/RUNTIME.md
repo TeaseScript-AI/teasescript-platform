@@ -1235,6 +1235,13 @@ A checkpoint is currently a self-contained plan-and-snapshot bundle. Restore val
 
 Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action, `currentSessionTimeMs`, settlement, and event identities. Restore does not read time or silently complete a deadline. After the restored-session activation gate, the Player application submits an explicit observation; the atomic observation operation persists the nondecreasing effective coordinate before settling due actions.
 
+Without host builtins or a random source, as the Player runs it, execution reads no clock, randomness, or host state
+outside the snapshot and the arguments of each operation, except a media store's answer whether it holds a
+captured-media reference. Running the same operations with the same arguments
+and store answers from a restored snapshot therefore reaches the same state and events; a debug export's replay relies
+on this ([`DEBUGGER.md`](DEBUGGER.md#debug-export)). The Player records its operations beside the session, outside
+runtime state, and recording never changes them.
+
 ## Format evolution
 
 The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `CHECKPOINT_VERSION` are authoritative for the numeric revisions accepted by the runtime. Accepted ADRs and canonical specifications remain authoritative for format semantics, architecture, and compatibility policy. This table is the single general human-readable summary of the current revisions:

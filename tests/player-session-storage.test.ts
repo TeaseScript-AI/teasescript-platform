@@ -12,6 +12,7 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import type { DebugRecorder } from "../player/debug-recorder.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import {
   compileSource,
@@ -40,7 +41,8 @@ interface StorageHost {
   withdrawNotice(key: string): void;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
-  prepare(create: () => PlayerRuntimeSession): void;
+  prepare(create: (recording: { readonly recorder: DebugRecorder }) => PlayerRuntimeSession): void;
+  debugRecording(): { readonly operations: readonly { readonly kind: string }[] } | null;
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): void;
   update(session: PlayerRuntimeSession): void;
@@ -577,4 +579,33 @@ test("Vue host keeps a recovery notice until its condition resolves", async (con
   // Its producer withdraws it once the condition resolves.
   host.withdrawNotice("needs-action");
   assert.deepEqual(host.notices.value, []);
+});
+
+test("Vue host records every session from Start and from Continue for a debug export", async (context) => {
+  const { host } = createHost(context, {
+    scope: "test",
+    load: async () => [],
+    write: async () => {},
+    replace: async () => {},
+    clear: async () => {},
+  });
+  assert.equal(host.debugRecording(), null, "nothing is recorded before Start");
+  await host.loadScriptStorage();
+  host.prepare((recording) =>
+    createPlayerRuntimeSession('let name = askText "Name"\nexit', recording),
+  );
+  host.activate();
+  assert.deepEqual(
+    host.debugRecording()?.operations.map((operation) => operation.kind),
+    ["run"],
+  );
+  const started = host.session.value;
+  assert.ok(started);
+  host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(started)));
+  host.activate();
+  assert.deepEqual(
+    host.debugRecording()?.operations.map((operation) => operation.kind),
+    ["recordContinueCapture", "run"],
+    "a Continue starts a new recording from the restored state",
+  );
 });
