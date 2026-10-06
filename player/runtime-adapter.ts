@@ -46,6 +46,8 @@ import {
   type SerializableRuntimeValue,
   type TemporalContext,
   type TimeObservationOutcome,
+  updateInteraction,
+  type InteractionUpdateOutcome,
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import { instructionSourcePath } from "../src/plan/model.js";
@@ -61,6 +63,8 @@ import type { RuntimeTimerSnapshot } from "../src/runtime/timers.js";
 import type { DebugRecorder } from "./debug-recorder.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
 import type {
+  PlayerFormFieldPresentation,
+  PlayerFormPresentation,
   PlayerForegroundPresentation,
   PlayerPermanentButtonPresentation,
   PlayerTimerPresentation,
@@ -141,7 +145,9 @@ export interface PlayerRuntimeRestorePoint {
   readonly events: readonly InterpreterEvent[];
 }
 
-export interface PlayerRuntimeControlResult<T = ActionCompletionOutcome | TimeObservationOutcome> {
+export interface PlayerRuntimeControlResult<
+  T = ActionCompletionOutcome | TimeObservationOutcome | InteractionUpdateOutcome,
+> {
   readonly session: PlayerRuntimeSession;
   readonly outcome: T;
 }
@@ -315,9 +321,13 @@ export function playerRuntimeForeground(
   if (action === null) return null;
   const accessibleName = interactionAccessibleName(action.ui.accessibleName);
   switch (action.ui.kind) {
-    // The Player presents forms in a later slice of #512.
+    // The fields change with each edit; `playerRuntimeForm` presents them.
     case "form":
-      return null;
+      return Object.freeze({
+        kind: "form",
+        accessibleName,
+        hint: action.ui.hint ?? "Type your response…",
+      });
     case "button":
       return Object.freeze({
         kind: "show-button",
@@ -812,12 +822,21 @@ function actionRequest(
 export function submitPlayerRuntimeComposer(
   session: PlayerRuntimeSession,
   submittedText: string,
-): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
+): PlayerRuntimeControlResult<ActionCompletionOutcome | InteractionUpdateOutcome> | null {
   const action = activeInteraction(session.snapshot);
   if (action?.ui.kind === "button") {
     return submittedText !== "" && submittedText === action.ui.buttonLabel
       ? completePlayerAction(session, action, { kind: "activate" })
       : null;
+  }
+  // A form takes the exact text of one visible button: a field's label steps it, the submit label submits.
+  if (action?.ui.kind === "form") {
+    const fields = action.ui.fields.filter((field) => field.text === submittedText);
+    const submits = action.ui.submit.text === submittedText ? 1 : 0;
+    if (submittedText === "" || fields.length + submits !== 1) return null;
+    return submits === 1
+      ? submitPlayerRuntimeForm(session)
+      : stepPlayerRuntimeFormField(session, fields[0]!.id);
   }
   if (
     action === null ||
@@ -866,6 +885,117 @@ export function answerPlayerRuntimeImage(
       operation.events,
       operation.outcome.kind === "completed",
     ),
+    outcome: operation.outcome,
+  });
+}
+
+/** One presentation per form state: an edit replaces the state, and nothing else re-renders the form. */
+const formPresentations = new WeakMap<object, PlayerFormPresentation>();
+
+/** The controls of the pending form as its answers stand, or `null` without a pending form. */
+export function playerRuntimeForm(session: PlayerRuntimeSession): PlayerFormPresentation | null {
+  const action = activeInteraction(session.snapshot);
+  if (action?.ui.kind !== "form" || action.form === undefined) return null;
+  const cached = formPresentations.get(action.form);
+  if (cached !== undefined) return cached;
+  const { ui, form } = action;
+  const fields = ui.fields.flatMap((field, index): PlayerFormFieldPresentation[] => {
+    const value = form.values[index];
+    const option =
+      field.kind === "cycle"
+        ? typeof value === "number"
+          ? field.options[value]
+          : undefined
+        : field.kind === "boolean"
+          ? field.options?.find((candidate) => candidate.value === value)
+          : undefined;
+    if (field.kind !== "boolean" && field.kind !== "cycle") return [];
+    const authoredFill = option?.background ?? field.background;
+    return [
+      Object.freeze({
+        id: field.id,
+        label: field.text,
+        kind: field.kind === "boolean" ? "toggle" : "cycle",
+        pressed: value === true,
+        state: option?.text ?? null,
+        ...(authoredFill === undefined ? {} : { authoredFill }),
+      }),
+    ];
+  });
+  const total = ui.fields.length;
+  const status = ui.fields.every((field) => field.kind === "boolean")
+    ? `${form.values.filter((value) => value === true).length} of ${total} selected`
+    : `${form.values.filter((value) => value !== null).length} of ${total} set`;
+  const presentation = Object.freeze({
+    actionId: action.actionId,
+    fields: Object.freeze(fields),
+    submit: Object.freeze({
+      label: ui.submit.text,
+      ...(ui.submit.background === undefined ? {} : { authoredFill: ui.submit.background }),
+    }),
+    status,
+  });
+  formPresentations.set(action.form, presentation);
+  return presentation;
+}
+
+/**
+ * Advances a form field one step: a toggle switches, and a cycle shows its next option, wrapping around. The edit names
+ * the option it selects, so a repeated report selects the same option again.
+ */
+export function stepPlayerRuntimeFormField(
+  session: PlayerRuntimeSession,
+  fieldId: string,
+): PlayerRuntimeControlResult<InteractionUpdateOutcome> | null {
+  const action = activeInteraction(session.snapshot);
+  if (action?.ui.kind !== "form" || action.form === undefined) return null;
+  const index = action.ui.fields.findIndex((field) => field.id === fieldId);
+  const field = action.ui.fields[index];
+  const value = action.form.values[index];
+  let optionIndex: number;
+  if (field?.kind === "cycle" && typeof value === "number")
+    optionIndex = (value + 1) % field.options.length;
+  else if (field?.kind === "boolean" && typeof value === "boolean")
+    optionIndex =
+      field.options === null
+        ? value
+          ? 0
+          : 1
+        : field.options.findIndex((option) => option.value === !value);
+  else return null;
+  return updatePlayerRuntimeForm(session, action, { kind: "select", fieldId, optionIndex });
+}
+
+/** Submits the pending form with its answers, then continues the session. */
+export function submitPlayerRuntimeForm(
+  session: PlayerRuntimeSession,
+): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
+  const action = activeInteraction(session.snapshot);
+  if (action?.ui.kind !== "form") return null;
+  return completePlayerAction(session, action, { kind: "submit" });
+}
+
+function updatePlayerRuntimeForm(
+  session: PlayerRuntimeSession,
+  action: RuntimeInteractionActionSnapshot,
+  update: Record<string, unknown>,
+): PlayerRuntimeControlResult<InteractionUpdateOutcome> {
+  const request = {
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: "form",
+    update,
+  };
+  const operation = recorded(
+    session.recorder,
+    "updateInteraction",
+    session.snapshot,
+    [request],
+    () =>
+      updateInteraction(session.plan, session.snapshot, request, traceOptions(session.debugTrace)),
+  );
+  return Object.freeze({
+    session: applyOperation(session, operation.snapshot, operation.events, false),
     outcome: operation.outcome,
   });
 }
@@ -1327,14 +1457,15 @@ function appendRuntimeEvents(
   // EVIDENCE: emptySession creates an unfrozen adapter-owned transcript accumulator for every session.
   const transcriptEntries = session.transcriptEntries as PlayerTranscriptEntryPresentation[];
   for (const event of events) retainedEvents.push(event);
-  const responseKinds = new Map<number, "choice" | "button">();
+  const responseKinds = new Map<number, "choice" | "button" | "form">();
   for (const event of events) {
     if (
       event.kind === "actionCompleted" &&
       event.settlement.actionKind === "interaction" &&
       event.settlement.transcriptEventSequence !== null &&
       (event.settlement.interactionKind === "choice" ||
-        event.settlement.interactionKind === "button")
+        event.settlement.interactionKind === "button" ||
+        event.settlement.interactionKind === "form")
     ) {
       responseKinds.set(event.settlement.transcriptEventSequence, event.settlement.interactionKind);
     }

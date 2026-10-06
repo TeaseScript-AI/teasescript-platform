@@ -1,4 +1,10 @@
-import type { Block, FileTarget, FunctionDeclaration, Program } from "../ast.js";
+import type {
+  Block,
+  FileTarget,
+  FunctionDeclaration,
+  InteractionExpression,
+  Program,
+} from "../ast.js";
 import {
   INSTRUCTION_PLAN_FORMAT,
   INSTRUCTION_PLAN_VERSION,
@@ -9,6 +15,7 @@ import {
   type PlanImage,
   type PlanTag,
   type TypeCheckPlan,
+  type PreparedFormShape,
 } from "../plan/model.js";
 import { freezeInstructionPlan } from "../plan/freeze.js";
 import { MAIN_FILE_PATH } from "../project-paths.js";
@@ -58,6 +65,7 @@ export function compileStableProject(
   typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> = new Map(),
   onFile: (fileIndex: number) => void = () => {},
   images: readonly PlanImage[] = [],
+  formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape> = new Map(),
 ): InstructionPlan {
   const instructions: Instruction[] = [];
   const functions: CompiledFunctionDefinition[] = [];
@@ -85,6 +93,7 @@ export function compileStableProject(
       path,
       picks,
       captures,
+      formShapes,
     );
     const startInstruction = instructions.length;
     if (fileIndex === 0)

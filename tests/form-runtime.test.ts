@@ -492,7 +492,7 @@ test("a form that cannot be built fails when it opens, with a message that names
     ],
     [
       `{ name: { value: "Ada", label: "Name" } }`,
-      "askForm field 'name': unknown property 'label'. A field has type, value, text, options, optional, min, max, hint, and background.",
+      "askForm field 'name': unknown property 'label'. A field has type, value, text, options, optional, min, max, hint, background, and description.",
     ],
     [
       `{ when: { type: "date", value: "2026-10-05" } }`,

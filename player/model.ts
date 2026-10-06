@@ -38,8 +38,8 @@ export interface PlayerMessagePresentation {
   readonly text: string;
   /** Present only for authored runtime output; player-authored entries remain plain text. */
   readonly content?: MessageMarkup;
-  /** Completed choice/button, distinct from a free-text or numeric response. */
-  readonly responseKind?: "choice" | "button";
+  /** Completed choice, button, or form, distinct from a free-text or numeric response. */
+  readonly responseKind?: "choice" | "button" | "form";
   readonly presentation?: MessagePresentation;
 }
 
@@ -86,6 +86,12 @@ export type PlayerForegroundPresentation =
       readonly isoText?: true;
     }
   | {
+      /** `askForm`: its fields and answers, which change with each edit, are `PlayerFormPresentation`. */
+      readonly kind: "form";
+      readonly accessibleName: string;
+      readonly hint: string;
+    }
+  | {
       /** `askImage`: the player answers with an image file, through the file picker or by dropping it. */
       readonly kind: "ask-image";
       readonly accessibleName: string;
@@ -98,3 +104,24 @@ export type PlayerForegroundPresentation =
       readonly types: readonly string[] | null;
       readonly mime: readonly string[] | null;
     };
+
+/**
+ * The controls of a pending form as its answers stand: each field by its ID, the submit button, and a status such as
+ * `3 of 5 selected`. A toggle is `pressed` while on; a toggle with options and a cycle show their current option as
+ * `state`, whose colour wins over the field's.
+ */
+export interface PlayerFormPresentation {
+  readonly actionId: number;
+  readonly fields: readonly PlayerFormFieldPresentation[];
+  readonly submit: { readonly label: string; readonly authoredFill?: string };
+  readonly status: string;
+}
+
+export interface PlayerFormFieldPresentation {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: "toggle" | "cycle";
+  readonly pressed: boolean;
+  readonly state: string | null;
+  readonly authoredFill?: string;
+}

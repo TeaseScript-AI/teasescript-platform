@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ForegroundControls from "./ForegroundControls.vue";
+import FormControls from "./FormControls.vue";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { useEventListener } from "@vueuse/core";
 import {
@@ -7,10 +8,13 @@ import {
   activatePlayerRuntimeButton,
   answerPlayerRuntimeImage,
   playerRuntimeForeground,
+  playerRuntimeForm,
   playerRuntimePacingGate,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
+  stepPlayerRuntimeFormField,
   submitPlayerRuntimeComposer,
+  submitPlayerRuntimeForm,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
@@ -81,6 +85,8 @@ const foreground = computed(() => {
     id === undefined ? null : { plan: session.plan, reset: props.reset, actionId: id, value };
   return value;
 });
+// A form's answers change with each edit, unlike the rest of its presentation.
+const form = computed(() => (props.session ? playerRuntimeForm(props.session) : null));
 const pacing = computed(() => {
   const gate = props.session ? playerRuntimePacingGate(props.session) : null;
   return gate?.skippable ? gate : null;
@@ -247,13 +253,20 @@ async function complete(
       showFeedback(
         foreground.value?.kind === "show-button"
           ? "Type the exact button text or activate it above."
-          : imageTextFeedback.value,
+          : foreground.value?.kind === "form"
+            ? "Type the exact text of one button, or use the buttons above."
+            : imageTextFeedback.value,
       );
       if (refocusInput) focusInput();
       return;
     }
     emit("update:session", result.session);
-    if (result.outcome.kind === "completed") {
+    // A form edit, also an unchanged one, succeeds without completing the form.
+    if (
+      result.outcome.kind === "completed" ||
+      result.outcome.kind === "updated" ||
+      result.outcome.kind === "unchanged"
+    ) {
       draft.value = "";
       clearFeedback();
     } else {
@@ -397,7 +410,17 @@ function submit(source: "input" | "button") {
           :bottom-inset="bottomInset"
         >
           <template #foreground>
+            <FormControls
+              v-if="form && foreground?.kind === 'form'"
+              :key="actionId ?? 0"
+              :form="form"
+              :accessible-name="foreground.accessibleName"
+              :disabled="submitting"
+              @step="(fieldId) => complete((session) => stepPlayerRuntimeFormField(session, fieldId), false)"
+              @submit="complete(submitPlayerRuntimeForm)"
+            />
             <ForegroundControls
+              v-else
               :key="actionId ?? 0"
               :foreground="foreground"
               :disabled="submitting"

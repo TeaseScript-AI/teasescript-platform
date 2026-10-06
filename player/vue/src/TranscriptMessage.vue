@@ -123,7 +123,7 @@ const avatarStyle = computed(() => ({
               aria-hidden="true"
               >&rsaquo; </span
             ><span v-if="entry.kind === 'message' && entry.responseKind" class="sr-only"
-              >Selected option: </span
+              >{{ entry.responseKind === "form" ? "Submitted form: " : "Selected option: " }}</span
             >{{ entry.text }}</template
           >
         </BubbleContent>

@@ -18,7 +18,18 @@ import {
   mainSourceSpan,
 } from "../plan/model.js";
 import { addTag, readTagText, type Tag } from "../tags.js";
-import { cloneMessageMarkup, parseMessageMarkup, type MessageMarkup } from "../message-markup.js";
+import {
+  cloneMessageMarkup,
+  messageMarkupVisibleText,
+  parseMessageMarkup,
+  type MessageMarkup,
+} from "../message-markup.js";
+
+/** The presentation a form's prose takes: prose, with the asking speaker's prose defaults. */
+const PROSE_PRESENTATION: SerializableRuntimeValue = Object.freeze({
+  kind: "object",
+  properties: [{ name: "kind", value: "prose" }],
+});
 import { isBlankTextAnswer, numberAnswerText, temporalAnswerText } from "../interaction-answers.js";
 import {
   boundedInteractionUtf8ByteLength,
@@ -847,6 +858,19 @@ function executePlannedInstruction(
           events,
         );
       }
+      // A form's descriptions and outro are said as one prose message as it opens, after its question.
+      if (materialized.prose !== undefined) {
+        assertEventSequenceCapacity(snapshot, requiredEventSequences + 1, instruction.span);
+        emitSay(
+          snapshot,
+          events,
+          instruction.span,
+          speaker === null ? null : evaluator.outputSpeaker(speaker, instruction.span, events),
+          parseMessageMarkup(materialized.prose),
+          messageMarkupVisibleText(parseMessageMarkup(materialized.prose)),
+          resolveMessagePresentation(PROSE_PRESENTATION, speaker, copySpan(instruction.span)),
+        );
+      }
       const sequence = snapshot.nextEventSequence;
       const action: RuntimeInteractionActionSnapshot = Object.freeze({
         kind: "interaction",
@@ -1050,6 +1074,8 @@ interface MaterializedInteractionUi {
   readonly ui: InteractionUiPayload;
   /** A form's starting answers. */
   readonly form?: RuntimeFormStateSnapshot;
+  /** The prose a form's speaker says as it opens. */
+  readonly prose?: string;
   readonly stagedWrites: readonly {
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
@@ -1088,6 +1114,7 @@ function materializeInteractionUi(
 
   let ui: InteractionUiPayload;
   let form: RuntimeFormStateSnapshot | undefined;
+  let prose: string | undefined;
   if (prepared.kind === "button") {
     ui = {
       kind: "button",
@@ -1149,6 +1176,7 @@ function materializeInteractionUi(
     stagedWrites.push({ temporaryId: request.id, value: formRequestValue(materialized.ui) });
     ui = materialized.ui;
     form = materialized.state;
+    prose = materialized.prose ?? undefined;
   } else {
     const source = read(prepared.optionsTemporary);
     if (!isList(source.value) || source.value.items.length !== prepared.values.length) {
@@ -1169,6 +1197,7 @@ function materializeInteractionUi(
   return Object.freeze({
     ui,
     ...(form === undefined ? {} : { form }),
+    ...(prose === undefined ? {} : { prose }),
     stagedWrites: Object.freeze(
       stagedWrites.map((staged) =>
         Object.freeze({

@@ -45,6 +45,13 @@ import {
   isTime,
 } from "../value-predicates.js";
 import { fieldText } from "../value-text.js";
+import { escapeMarkup } from "../../message-markup.js";
+import {
+  FORM_FIELD_PROPERTIES,
+  FORM_FIELD_PROPERTIES_TEXT,
+  isFormFieldKind,
+  unknownFormTypeMessage,
+} from "../../form-fields.js";
 import type {
   InteractionResultValue,
   RuntimeFormStateSnapshot,
@@ -53,33 +60,16 @@ import type {
 
 type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
-const FIELD_KINDS: readonly FormFieldKind[] = [
-  "boolean",
-  "cycle",
-  "integer",
-  "number",
-  "text",
-  "date",
-  "time",
-  "datetime",
-];
-const DESCRIPTOR_PROPERTIES = [
-  "type",
-  "value",
-  "text",
-  "options",
-  "optional",
-  "min",
-  "max",
-  "hint",
-  "background",
-];
 const DEFAULT_SUBMIT_TEXT = "OK";
 
-/** A form as it opens: its definition and the starting answers. */
+/**
+ * A form as it opens: its definition, the starting answers, and the prose the asking speaker says as it opens: a line
+ * `<label> — <description>` for each field with a description, then the outro, or `null` without either.
+ */
 export interface MaterializedForm {
   readonly ui: FormUi;
   readonly state: RuntimeFormStateSnapshot;
+  readonly prose: string | null;
 }
 
 /**
@@ -99,6 +89,7 @@ export function materializeForm(
   let texts: SerializableRuntimeValue | undefined;
   let defaults: SerializableRuntimeValue | undefined;
   let hint: string | null = null;
+  let outro: string | null = null;
   let submit: FormUi["submit"] = { text: DEFAULT_SUBMIT_TEXT };
   for (const { name, value } of request.properties) {
     if (name === "message") continue;
@@ -106,12 +97,14 @@ export function materializeForm(
     else if (name === "texts") texts = value;
     else if (name === "defaults") defaults = value;
     else if (name === "hint") hint = fieldText(value, span, context);
+    else if (name === "outro") outro = fieldText(value, span, context);
     else if (name === "submit") submit = formButton(name, value, context, span);
     else throw fault("The prepared form request is malformed.", span);
   }
 
   const fields: FormField[] = [];
   const values: RuntimeFormValue[] = [];
+  const descriptions: string[] = [];
   // Fields and their options share the interaction's entry limit, checked as each field is added.
   let entries = 0;
   const add = (field: FormField, value: RuntimeFormValue) => {
@@ -173,12 +166,17 @@ export function materializeForm(
         materializeField(id, value, numericKind, context, span),
       );
       add(field.field, field.value);
+      // The label is shown as written; the description is said as `say` says text.
+      if (field.description !== null)
+        descriptions.push(`${escapeMarkup(field.field.text)} — ${field.description}`);
     }
   }
   if (fields.length === 0) throw fault("A form needs at least one field.", span);
+  const prose = [descriptions.join("\n"), outro ?? ""].filter((part) => part !== "").join("\n\n");
   return {
     ui: { kind: "form", shape: prepared.kind, fields, hint, submit, accessibleName },
     state: { values, editor: null },
+    prose: prose === "" ? null : prose,
   };
 }
 
@@ -199,16 +197,18 @@ function materializeField(
   numericKind: "integer" | "number" | null,
   context: TemporalContext,
   span: SourceSpan,
-): { readonly field: FormField; readonly value: RuntimeFormValue } {
+): {
+  readonly field: FormField;
+  readonly value: RuntimeFormValue;
+  readonly description: string | null;
+} {
   const problem = (message: string) => fault(`askForm field '${id}': ${message}`, span);
   const descriptor: SerializableRuntimeObject | null = isObject(raw) ? raw : null;
   const unknown = descriptor?.properties.find(
-    (property) => !DESCRIPTOR_PROPERTIES.includes(property.name),
+    (property) => !FORM_FIELD_PROPERTIES.includes(property.name),
   );
   if (unknown !== undefined)
-    throw problem(
-      `unknown property '${unknown.name}'. A field has type, value, text, options, optional, min, max, hint, and background.`,
-    );
+    throw problem(`unknown property '${unknown.name}'. ${FORM_FIELD_PROPERTIES_TEXT}`);
   const read = (name: string): SerializableRuntimeValue | undefined =>
     descriptor === null ? undefined : getSerializableProperty(descriptor, name);
   const start = descriptor !== null ? read("value") : isList(raw) ? undefined : raw;
@@ -217,7 +217,12 @@ function materializeField(
 
   let kind: FormFieldKind;
   if (typeValue !== undefined) {
-    if (!isFieldKind(typeValue)) throw problem(unknownTypeMessage(typeValue));
+    if (!isFormFieldKind(typeValue))
+      throw problem(
+        typeof typeValue === "string"
+          ? unknownFormTypeMessage(typeValue)
+          : `type: must be text such as "integer", not ${describeRuntimeValue(typeValue)}.`,
+      );
     kind = typeValue;
   } else if (options !== undefined) kind = typeof start === "boolean" ? "boolean" : "cycle";
   else if (start === undefined || start === null)
@@ -243,6 +248,9 @@ function materializeField(
     background = normalized;
   }
   const base = { id, text, ...(background === undefined ? {} : { background }) };
+  const descriptionValue = read("description");
+  const description =
+    descriptionValue === undefined ? null : fieldText(descriptionValue, span, context);
 
   if (kind === "boolean" || kind === "cycle") {
     for (const name of ["optional", "min", "max", "hint"])
@@ -270,7 +278,7 @@ function materializeField(
         )
       )
         throw problem("a toggle's options are one with value: false and one with value: true.");
-      return { field: { ...base, kind, options: buttons }, value: start ?? false };
+      return { field: { ...base, kind, options: buttons }, value: start ?? false, description };
     }
     if (buttons === null) throw problem("a cycle needs options:.");
     const valueKind = cycleValueKind(buttons[0]!.value);
@@ -283,7 +291,7 @@ function materializeField(
         ? 0
         : buttons.findIndex((option) => serializableEquals(option.value, start));
     if (index === -1) throw problem(`its value is not one of its options.`);
-    return { field: { ...base, kind, options: buttons }, value: index };
+    return { field: { ...base, kind, options: buttons }, value: index, description };
   }
 
   if (options !== undefined) throw problem(`options: is for a toggle or a cycle, not a ${kind}.`);
@@ -323,7 +331,7 @@ function materializeField(
     );
   if (typeof value === "number" && !withinBounds(field, value))
     throw problem(`its value ${numberAnswerText(value)} is outside ${boundsText(field)}.`);
-  return { field, value };
+  return { field, value, description };
 }
 
 /** A typed field's starting value, `null` when it starts without one, or `undefined` when it does not fit. */
@@ -358,35 +366,6 @@ function scalarStart(
     case "datetime":
       return isDateTime(start) ? { ...start } : undefined;
   }
-}
-
-function isFieldKind(value: unknown): value is FormFieldKind {
-  return FIELD_KINDS.some((kind) => kind === value);
-}
-
-function unknownTypeMessage(value: SerializableRuntimeValue): string {
-  if (typeof value !== "string")
-    return `type: must be text such as "integer", not ${describeRuntimeValue(value)}.`;
-  const suggestion = FIELD_KINDS.find((kind) => editDistance(kind, value.toLowerCase()) <= 2);
-  return suggestion === undefined
-    ? `unknown type '${value}' (use ${FIELD_KINDS.map((kind) => `'${kind}'`).join(", ")}).`
-    : `unknown type '${value}' (use '${suggestion}').`;
-}
-
-function editDistance(a: string, b: string): number {
-  if (Math.abs(a.length - b.length) > 2 || b.length > 16) return 3;
-  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
-  for (let i = 1; i <= a.length; i += 1) {
-    const current = [i];
-    for (let j = 1; j <= b.length; j += 1)
-      current[j] = Math.min(
-        previous[j]! + 1,
-        current[j - 1]! + 1,
-        previous[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
-      );
-    previous = current;
-  }
-  return previous[b.length]!;
 }
 
 /** The type a cycle option's value has, which all options of one cycle share. */
@@ -873,7 +852,7 @@ export function validFormUi(
       !count(field.id) ||
       typeof field.text !== "string" ||
       (field.text !== field.id && !count(field.text)) ||
-      !isFieldKind(field.kind) ||
+      !isFormFieldKind(field.kind) ||
       ("background" in field && !isNormalizedOpaqueColor(field.background))
     )
       return false;

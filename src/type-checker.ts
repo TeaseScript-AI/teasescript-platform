@@ -46,7 +46,20 @@ import {
   isValidInteractionPrefill,
   numberAnswerText,
 } from "./interaction-answers.js";
-import type { PlanImage, PlanTag, TypeCheckPlan } from "./plan/model.js";
+import type {
+  FormFieldKind,
+  FormNumericKind,
+  PlanImage,
+  PlanTag,
+  PreparedFormShape,
+  TypeCheckPlan,
+} from "./plan/model.js";
+import {
+  FORM_FIELD_PROPERTIES,
+  FORM_FIELD_PROPERTIES_TEXT,
+  isFormFieldKind,
+  unknownFormTypeMessage,
+} from "./form-fields.js";
 import type { VariableSite } from "./semantic.js";
 import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
 import {
@@ -191,6 +204,8 @@ export interface TypeCheckResult {
   readonly diagnostics: readonly (readonly Diagnostic[])[];
   /** The runtime checks of values the compiler cannot know, by the source of the instruction that stores them. */
   readonly runtimeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
+  /** The result shape the runtime needs for each `askForm`. */
+  readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
   /** Whether a file of the project has an `exit` that execution can reach; a project needs one (ADR 0022). */
   readonly reachesExit: boolean;
   /** Which statements run, for the checks that follow this flow. */
@@ -280,6 +295,7 @@ export function checkTypes(
           ),
         ),
         runtimeChecks: checker.runtimeChecks(),
+        formShapes: checker.formShapes(),
         reachesExit: checker.reachesExit,
         flow: Object.freeze({ unreachable: checker.unreachable, continuing: checker.continuing }),
       });
@@ -678,6 +694,18 @@ class TypeChecker {
   /** The variable names of unannotated `let` statements by initializer, for messages that suggest a declaration. */
   readonly #declaredBy = new Map<Expression, string>();
 
+  /**
+   * The fields of each `askForm` with the type of the number that decides a field's kind, kept until every type is
+   * decided, as for the runtime checks below.
+   */
+  readonly #forms = new Map<
+    InteractionExpression,
+    {
+      readonly kind: "object";
+      readonly fields: readonly { readonly name: string; readonly start: StaticType }[];
+    }
+  >();
+
   /** Stores of values the compiler cannot know, kept until every type they depend on is decided. */
   readonly #runtimeChecks: {
     readonly site: RuntimeCheckSite;
@@ -1021,6 +1049,21 @@ class TypeChecker {
    * The recorded runtime checks in plan form. Call it after {@link check}: a place can still be decided after a store
    * into it was checked, as by a later first value or a property that assignment adds.
    */
+  /** The result shape of each `askForm`, with whether each numeric field is an integer or a number field. */
+  public formShapes(): ReadonlyMap<InteractionExpression, PreparedFormShape> {
+    const shapes = new Map<InteractionExpression, PreparedFormShape>();
+    for (const [expression, form] of this.#forms) {
+      const numericKinds: { readonly name: string; readonly numericKind: FormNumericKind }[] = [];
+      for (const { name, start } of form.fields) {
+        const type = resolved(nonNullType(start));
+        if (isScalar(type, "integer")) numericKinds.push({ name, numericKind: "integer" });
+        else if (isScalar(type, "number")) numericKinds.push({ name, numericKind: "number" });
+      }
+      shapes.set(expression, { kind: form.kind, numericKinds });
+    }
+    return shapes;
+  }
+
   public runtimeChecks(): ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> {
     const checks = new Map<RuntimeCheckSite, TypeCheckPlan>();
     for (const check of this.#runtimeChecks) {
@@ -2936,6 +2979,154 @@ class TypeChecker {
   }
 
   /**
+   * `askForm` (V30 §20): the question, `hint:`, and `outro:` are shown text, `submit:` is text or a button object, and
+   * `fields:` is an object of fields. The result has a property per field, typed as the field's kind gives it, and the
+   * shape the runtime needs is recorded for the lowering.
+   */
+  *#formTask(expression: InteractionExpression, scope: Scope): CompileTask<StaticType> {
+    if (expression.question !== null) {
+      const type = yield* compileChild(this.#expressionTask(expression.question, scope));
+      this.#checkShownText(expression.question, type, "an ask question");
+    }
+    let fields: { readonly expression: Expression; readonly type: StaticType } | null = null;
+    for (const { name, value } of expression.formArguments) {
+      const type = yield* compileChild(this.#expressionTask(value, scope));
+      if (name.name === "fields") fields = { expression: value, type };
+      else if (name.name === "submit") {
+        if (unwrap(value).kind !== "objectLiteral")
+          this.#reportUnless(
+            type,
+            (member) => isShowable(member) || resolved(member).kind === "object",
+            value,
+            "'submit:' takes text or a button object { text, background? }",
+          );
+      } else
+        this.#checkShownText(value, type, name.name === "hint" ? "an input hint" : "a form outro");
+    }
+    if (fields === null) return UNKNOWN_TYPE;
+    const container = resolved(nonNullType(fields.type));
+    if (container.kind === "dict") {
+      this.#report(
+        typeCode.invalidOperand,
+        "A dict of fields is not supported yet; write the fields as an object, such as 'fields: { enabled: false }'.",
+        fields.expression.span,
+      );
+      return UNKNOWN_TYPE;
+    }
+    if (container.kind !== "object") {
+      if (isKnown(container))
+        this.#report(
+          typeCode.invalidOperand,
+          `'fields:' takes an object of fields, such as 'fields: { enabled: false }', not ${describeValue(container)}.`,
+          fields.expression.span,
+        );
+      this.#forms.set(expression, { kind: "object", fields: [] });
+      return UNKNOWN_TYPE;
+    }
+    const literal = unwrap(fields.expression);
+    const written = new Map(
+      literal.kind === "objectLiteral"
+        ? literal.properties.map((property) => [property.name.name, property.value] as const)
+        : [],
+    );
+    const result: PropertyTable = new Map();
+    const recorded: { readonly name: string; readonly start: StaticType }[] = [];
+    for (const [name, type] of container.properties ?? []) {
+      const field = this.#formField(name, type, written.get(name), fields.expression);
+      result.set(name, field.result);
+      if (field.start !== null) recorded.push({ name, start: field.start });
+    }
+    this.#forms.set(expression, { kind: "object", fields: recorded });
+    return container.properties === null ? UNKNOWN_TYPE : { kind: "object", properties: result };
+  }
+
+  /**
+   * The answer type of one field of `askForm`, and the type of the number that decides its kind when it has no
+   * `type:`: its start, or its descriptor's `value:`, `min:`, or `max:`. A written descriptor is also checked for
+   * unknown properties and types.
+   */
+  #formField(
+    name: string,
+    type: StaticType,
+    written: Expression | undefined,
+    fields: Expression,
+  ): { readonly result: StaticType; readonly start: StaticType | null } {
+    const value = resolved(nonNullType(type));
+    const at = written ?? fields;
+    let kind: FormFieldKind | null;
+    let nullable = false;
+    let start: StaticType | null = null;
+    let options: StaticType | undefined;
+    if (value.kind === "object") {
+      const descriptor = written === undefined ? null : unwrap(written);
+      const properties = value.properties ?? new Map<string, StaticType>();
+      let tag: FormFieldKind | undefined;
+      if (descriptor?.kind === "objectLiteral") {
+        for (const property of descriptor.properties) {
+          if (!FORM_FIELD_PROPERTIES.includes(property.name.name))
+            this.#report(
+              typeCode.invalidOperand,
+              `askForm field '${name}': unknown property '${property.name.name}'. ${FORM_FIELD_PROPERTIES_TEXT}`,
+              property.name.span,
+            );
+          const text = staticText(property.value);
+          if (property.name.name === "type" && text !== undefined) {
+            if (isFormFieldKind(text)) tag = text;
+            else
+              this.#report(
+                typeCode.invalidOperand,
+                `askForm field '${name}': ${unknownFormTypeMessage(text)}`,
+                property.value.span,
+              );
+          }
+          // A written `optional: false` keeps the answer required; any other value may make it optional.
+          if (property.name.name === "optional")
+            nullable = property.value.kind !== "booleanLiteral" || property.value.value;
+        }
+      } else nullable = properties.has("optional");
+      const valueType = properties.get("value");
+      options = properties.get("options");
+      start =
+        [valueType, properties.get("min"), properties.get("max")].find(
+          (part) => part !== undefined && isNumeric(resolved(nonNullType(part))),
+        ) ?? null;
+      kind =
+        tag !== undefined
+          ? tag
+          : properties.has("type")
+            ? null
+            : options !== undefined
+              ? valueType !== undefined && isScalar(resolved(nonNullType(valueType)), "boolean")
+                ? "boolean"
+                : "cycle"
+              : valueType === undefined
+                ? null
+                : formKindOfStart(resolved(nonNullType(valueType)));
+    } else {
+      kind = formKindOfStart(value);
+      if (value.kind === "list") options = value;
+      if (kind === "integer" || kind === "number") start = value;
+    }
+    if (kind !== null && kind !== "boolean" && kind !== "cycle")
+      this.#report(
+        typeCode.invalidOperand,
+        `askForm field '${name}': fields typed in the composer are not supported yet; use toggles and cycles.`,
+        at.span,
+      );
+    if (kind === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start };
+    const result =
+      kind === "cycle"
+        ? cycleAnswerType(options)
+        : kind === "boolean"
+          ? BOOLEAN_TYPE
+          : formAnswerType(kind);
+    return {
+      result: nullable && kind !== "boolean" && kind !== "cycle" ? optional(result) : result,
+      start,
+    };
+  }
+
+  /**
    * The message (question) and hint of `askImage` are shown text, the sources are booleans, and `types:` and `mime:` are lists of texts. Written
    * values must be valid, and written sources must leave the player a way to answer.
    */
@@ -4449,6 +4640,8 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "interactionExpression" }>,
     scope: Scope,
   ): CompileTask<StaticType> {
+    if (expression.interactionKind === "form")
+      return yield* compileChild(this.#formTask(expression, scope));
     if (expression.interactionKind !== "choice") {
       for (const operand of askOperands(expression)) {
         const type = yield* compileChild(this.#expressionTask(operand, scope));
@@ -7101,9 +7294,68 @@ function textResultType(member: TextMember): StaticType {
     : scalarType(member.result);
 }
 
+/** The answer of an `askForm` field whose kind only the runtime knows. */
+const GENERIC_FORM_ANSWER_TYPE = union([
+  BOOLEAN_TYPE,
+  NUMBER_TYPE,
+  STRING_TYPE,
+  DATE_TYPE,
+  TIME_TYPE,
+  DATETIME_TYPE,
+]);
+
+/** The kind of an `askForm` field that starts with a value of `type`, or `null` when its kind is not known. */
+function formKindOfStart(type: StaticType): FormFieldKind | null {
+  if (type.kind === "list") return "cycle";
+  if (type.kind !== "scalar") return null;
+  switch (type.name) {
+    case "boolean":
+      return "boolean";
+    case "integer":
+    case "number":
+    case "date":
+    case "time":
+    case "datetime":
+      return type.name;
+    case "string":
+      return "text";
+    default:
+      return null;
+  }
+}
+
+function formAnswerType(kind: Exclude<FormFieldKind, "boolean" | "cycle">): StaticType {
+  return kind === "text" ? STRING_TYPE : interactionResultType(kind);
+}
+
+/**
+ * What a cycle returns for options of `type`: an option's value, or the text of a choice object without one, as a
+ * `choose` button returns it.
+ */
+function cycleAnswerType(type: StaticType | undefined): StaticType {
+  const options = type === undefined ? undefined : resolved(nonNullType(type));
+  if (options?.kind !== "list") return UNKNOWN_TYPE;
+  return union(
+    members(resolved(options.element)).map((member) => {
+      const option = resolved(member);
+      if (option.kind !== "object") return plainType(option);
+      const returned = option.properties?.get("value") ?? option.properties?.get("text");
+      return returned === undefined ? UNKNOWN_TYPE : plainType(returned);
+    }),
+  );
+}
+
+/** The text of a string literal without interpolation, or `undefined`. */
+function staticText(expression: Expression): string | undefined {
+  const literal = unwrap(expression);
+  if (literal.kind !== "stringLiteral" || literal.parts.some((part) => part.kind !== "stringText"))
+    return undefined;
+  return literal.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("");
+}
+
 /** The type of the answer an `ask...` interaction returns. */
 function interactionResultType(
-  kind: Exclude<InteractionExpression["interactionKind"], "choice">,
+  kind: Exclude<InteractionExpression["interactionKind"], "choice" | "form">,
 ): StaticType {
   switch (kind) {
     case "number":

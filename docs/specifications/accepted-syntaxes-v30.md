@@ -1940,8 +1940,9 @@ button is chosen.
 
 ### Forms
 
-**Status:** Accepted (Owner decisions on #512, 2026-10-06). The engine's form interaction is implemented
-([RUNTIME.md](../RUNTIME.md#forms)); the `askForm` source form and `askBooleans` are not yet.
+**Status:** Accepted (Owner decisions on #512, 2026-10-06). `askForm` is implemented for an object of toggles and
+cycles, with descriptions and `outro:` ([RUNTIME.md](../RUNTIME.md#forms)); typed fields, a dict of fields, `cancel:`,
+`askBooleans`, and `timeout:` are not yet, and the compiler reports them.
 
 `askForm` asks for several values at once. Its buttons stay in place while the player changes them, and nothing is
 returned until the player submits:

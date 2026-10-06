@@ -793,6 +793,17 @@ used, such as on a page that is not a secure context, a request that allows only
   accepted validation/retry behavior. A future LLM clarification/interpretation layer may consume non-matching text
   without silently changing the deterministic choice, but that is outside the current POC contract.
 
+`askForm` presents one group of controls after the latest message that stays in place while the player edits it, named
+by the form's accessible name. Its field buttons wrap in authored order inside a scroll region bounded to a third of the
+viewport height (at most `24rem`), and the submit button and a polite status badge (`3 of 43 selected`, or `5 of 6
+set` when not every field is a toggle) stay below it. A toggle is a Player action button with toggle semantics
+(`aria-pressed`), its label behind a check or cross mark, and pressed in while on; with authored options it shows
+`label: option` instead of the mark. A cycle shows `label: option` with a cycle mark, and a press shows the next option.
+The shown option's authored colour wins over the field's; the submit button takes its own. Every control keeps the
+action button geometry above, also among 43 toggles on a phone. An edit keeps focus on its control and adds nothing to
+the transcript; submitting adds the summary line with the `›` response marker. Exact unambiguous text of one field
+label or of the submit button activates it from the composer, as for `choose`.
+
 This is distinct from a skippable `say` pacing gate: when no foreground interactive control owns the input, a primary
 click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.
 A click/tap settles only the gate presented when the press began; if that gate ended while the press was held, the

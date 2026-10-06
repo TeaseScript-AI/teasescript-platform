@@ -12,6 +12,11 @@ import type {
  * written.
  */
 export function askOperands(expression: InteractionExpression): readonly Expression[] {
+  if (expression.interactionKind === "form")
+    return [
+      ...(expression.question === null ? [] : [expression.question]),
+      ...expression.formArguments.map((argument) => argument.value),
+    ];
   const named = [expression.hint, expression.defaultValue].filter(
     (operand): operand is Expression => operand !== null,
   );

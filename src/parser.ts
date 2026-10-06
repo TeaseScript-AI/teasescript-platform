@@ -33,6 +33,7 @@ import type {
   SayStatement,
   ShowButtonParts,
   ShowButtonStatement,
+  FormArgument,
   InteractionExpression,
   InteractionChoiceOption,
   WaitStatement,
@@ -172,7 +173,11 @@ const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionK
   ["askDate", "date"],
   ["askTime", "time"],
   ["askDateTime", "datetime"],
+  ["askForm", "form"],
 ]);
+/** The named arguments of each basic ask and of `askForm`, in the order the message suggests them. */
+const ASK_OPTIONS: readonly string[] = ["default", "hint"];
+const FORM_OPTIONS: readonly string[] = ["fields", "hint", "submit", "outro"];
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
 /** Expressions that end at their own last token, so a following `, name:` cannot belong to them. */
 const SELF_DELIMITED_EXPRESSIONS: ReadonlySet<Expression["kind"]> = new Set([
@@ -3321,6 +3326,7 @@ class Parser {
       this.#checkIdentifier("askDate") ||
       this.#checkIdentifier("askTime") ||
       this.#checkIdentifier("askDateTime") ||
+      this.#checkIdentifier("askForm") ||
       this.#checkIdentifier("choose")
     ) {
       return yield* parseChild(this.#parseInteractionExpression());
@@ -3447,27 +3453,44 @@ class Parser {
     }
 
     if (interactionKind !== "choice") {
+      const names = interactionKind === "form" ? FORM_OPTIONS : ASK_OPTIONS;
       const question =
         isExpressionStart(this.#peek()) &&
         !(this.#blockEndsCompactInteraction && this.#check(TokenKind.LeftBrace)) &&
         !this.#atStorageDelimiter() &&
-        this.#askOptionAt(0) === null
+        this.#askOptionAt(0, names) === null
           ? yield* parseChild(this.#parseOr())
           : null;
-      // `hint:` and `default:` follow in either order, each after a comma, or first without a question.
-      const named = new Map<string, Expression>();
+      // The named options follow in any order, each after a comma, or first without a question.
+      const named: FormArgument[] = [];
       let end = question?.span ?? speaker?.span ?? command.span;
       let offset = question === null ? 0 : this.#offsetAfterComma();
       for (;;) {
-        if (offset === null && this.#askOptionAt(0) !== null) {
+        if (offset === null && this.#askOptionAt(0, names) !== null) {
           this.#reportInsertion(
             parserDiagnosticCode.expectedDelimiter,
             `Expected ',' before '${this.#peek().lexeme}:'.`,
           );
           offset = 0;
         }
-        const option = offset === null ? null : this.#askOptionAt(offset);
-        if (option === null) break;
+        const option = offset === null ? null : this.#askOptionAt(offset, names);
+        if (option === null) {
+          // A form names every argument, so another `name:` after a comma is a misspelled one.
+          const unknown = offset === null ? null : this.#peek(offset);
+          if (
+            interactionKind === "form" &&
+            unknown?.kind === TokenKind.Identifier &&
+            this.#peek(offset! + 1).kind === TokenKind.Colon
+          ) {
+            this.#reportSpan(
+              parserDiagnosticCode.unsupportedInteractionForm,
+              `Unknown askForm option '${unknown.lexeme}'; use ${names.map((known) => `'${known}:'`).join(", ")}.`,
+              unknown.span,
+            );
+            this.#synchronizeStatement();
+          }
+          break;
+        }
         for (let skipped = 0; skipped < offset!; skipped += 1) this.#advance();
         const name = this.#advance();
         this.#advance();
@@ -3477,19 +3500,21 @@ class Parser {
             parserDiagnosticCode.expectedInteractionText,
             option === "default"
               ? "Expected a default answer after 'default:'."
-              : "Expected hint text after 'hint:'.",
+              : option === "hint"
+                ? "Expected hint text after 'hint:'."
+                : `Expected a value after '${option}:'.`,
           );
           if (this.#previous().kind === TokenKind.Newline && this.#atStatementStart())
             this.#recoveredAtStatementBoundary = true;
           break;
         }
-        if (named.has(option)) {
+        if (named.some((argument) => argument.name.name === option)) {
           this.#reportSpan(
             parserDiagnosticCode.unsupportedInteractionForm,
             `Duplicate ${command.lexeme} option '${option}'.`,
             name.span,
           );
-        } else named.set(option, value);
+        } else named.push(Object.freeze({ name: this.#identifier(name), value }));
         end = value.span;
         offset = this.#offsetAfterComma();
       }
@@ -3501,18 +3526,15 @@ class Parser {
         );
         this.#synchronizeStatement();
       }
-      return Object.freeze({
-        kind: "interactionExpression",
+      return this.#askExpression(
+        command,
         interactionKind,
-        commandSpan: copySpan(command.span),
         asSpan,
         speaker,
         question,
-        hint: named.get("hint") ?? null,
-        defaultValue: named.get("default") ?? null,
-        options: Object.freeze([]),
-        span: spanFrom(command.span, end),
-      });
+        named,
+        spanFrom(command.span, end),
+      );
     }
 
     const options: InteractionChoiceOption[] = [];
@@ -3612,6 +3634,7 @@ class Parser {
       hint: null,
       defaultValue: null,
       options: Object.freeze(options),
+      formArguments: Object.freeze([]),
       span: spanFrom(command.span, end),
     });
   }
@@ -3632,7 +3655,7 @@ class Parser {
     const parts = this.#boundedArguments(
       command,
       call,
-      ["default", "hint"],
+      interactionKind === "form" ? FORM_OPTIONS : ASK_OPTIONS,
       parserDiagnosticCode.unsupportedInteractionForm,
     );
     if (this.#check(TokenKind.KeywordAs) && !this.#atStorageDelimiter()) {
@@ -3644,18 +3667,21 @@ class Parser {
       this.#synchronizeStatement();
     }
     if (parts === null) return null;
-    return Object.freeze({
-      kind: "interactionExpression",
+    // The arguments were checked to be known and unique, so the named ones are the options in written order.
+    const named = call.arguments.flatMap((argument) =>
+      argument.kind === "namedArgument"
+        ? [Object.freeze({ name: argument.name, value: argument.value })]
+        : [],
+    );
+    return this.#askExpression(
+      command,
       interactionKind,
-      commandSpan: copySpan(command.span),
       asSpan,
       speaker,
-      question: parts.value,
-      hint: parts.options.get("hint") ?? null,
-      defaultValue: parts.options.get("default") ?? null,
-      options: Object.freeze([]),
-      span: spanFrom(command.span, call.span),
-    });
+      parts.value,
+      named,
+      spanFrom(command.span, call.span),
+    );
   }
 
   #isInteractionChoiceTerminator(): boolean {
@@ -3670,12 +3696,49 @@ class Parser {
     );
   }
 
-  /** The named option of a basic ask, `hint:` or `default:`, at `offset` tokens ahead, or `null`. */
-  #askOptionAt(offset: number): "hint" | "default" | null {
+  /** The named option of an ask among `names`, such as `hint:` or `default:`, at `offset` tokens ahead, or `null`. */
+  #askOptionAt(offset: number, names: readonly string[]): string | null {
     const token = this.#peek(offset);
     if (token.kind !== TokenKind.Identifier || this.#peek(offset + 1).kind !== TokenKind.Colon)
       return null;
-    return token.lexeme === "hint" || token.lexeme === "default" ? token.lexeme : null;
+    return names.includes(token.lexeme) ? token.lexeme : null;
+  }
+
+  /**
+   * A basic ask or `askForm` from its question and named options in written order. A basic ask keeps `hint:` and
+   * `default:`; a form keeps every option and needs `fields:`, or `texts:` and `defaults:` for `askBooleans`.
+   */
+  #askExpression(
+    command: Token,
+    interactionKind: Exclude<InteractionExpression["interactionKind"], "choice">,
+    asSpan: SourceSpan | null,
+    speaker: Identifier | null,
+    question: Expression | null,
+    named: readonly FormArgument[],
+    span: SourceSpan,
+  ): InteractionExpression {
+    const form = interactionKind === "form";
+    if (form && !named.some((argument) => argument.name.name === "fields"))
+      this.#reportSpan(
+        parserDiagnosticCode.unsupportedInteractionForm,
+        "askForm needs its fields, as in 'fields: { enabled: false }'.",
+        command.span,
+      );
+    const option = (name: string) =>
+      form ? null : (named.find((argument) => argument.name.name === name)?.value ?? null);
+    return Object.freeze({
+      kind: "interactionExpression",
+      interactionKind,
+      commandSpan: copySpan(command.span),
+      asSpan,
+      speaker,
+      question,
+      hint: option("hint"),
+      defaultValue: option("default"),
+      options: Object.freeze([]),
+      formArguments: Object.freeze(form ? [...named] : []),
+      span,
+    });
   }
 
   /** `default:` at `offset` tokens ahead, the named default answer of `askText` or `askNumber`. */

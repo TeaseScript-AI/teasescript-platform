@@ -503,6 +503,7 @@ function locateCompactCommand(
     },
     interaction(node) {
       if (!containsOffset(node.span, offset)) return;
+      if (node.interactionKind === "form") return;
       const command = INTERACTION_COMMANDS[node.interactionKind];
       best = { command, range: node.commandSpan };
     },

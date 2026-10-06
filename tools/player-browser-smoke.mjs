@@ -148,8 +148,9 @@ async function main() {
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
+      await formsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, missing, late and overlapping media, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, missing, late and overlapping media, and the camera, viewfinder, permanent buttons, and askForm scenarios",
       );
     } finally {
       cdp.close();
@@ -3775,6 +3776,80 @@ async function permanentButtonsScenario(cdp, origin) {
   await waitFor(cdp, `document.body.innerText.includes("Stopped at 1. Only Pause stays now.")`);
   await clickButton("Yes, Mistress");
   await waitFor(cdp, `${rail} === ""`, 8_000, "exit did not remove the persistent button");
+}
+
+/**
+ * `askForm` on a phone: 43 toggles wrap and scroll inside the form, so its submit button stays on screen above the
+ * composer; a toggle is a pressed button with a polite status count, a cycle steps through authored colours, and
+ * submitting adds one summary line.
+ */
+async function formsScenario(cdp, origin) {
+  await setViewport(cdp, 390, 700);
+  await navigate(cdp, `${origin}/player/?package=forms`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const fields = `[...document.querySelectorAll('[data-form-fields] button')]`;
+  const status = `document.querySelector('[data-form-controls] [role=status]')?.textContent.trim()`;
+  await waitFor(cdp, `${fields}.length === 43`, 15_000, "The 43 toggles did not appear");
+  assertEqual(await value(cdp, status), "1 of 43 selected", "The status does not count the start");
+  // Every control keeps its touch height; following the latest content shows the submit button above the composer
+  // while the fields scroll.
+  assertEqual(
+    await value(cdp, `${fields}.every((button) => button.getBoundingClientRect().height >= 44)`),
+    true,
+    "A toggle is shorter than a touch target",
+  );
+  const submit = `[...document.querySelectorAll('[data-form-actions] button')].find((button) => button.textContent.trim() === "OK")`;
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const rect = ${submit}.getBoundingClientRect(); const composer = document.querySelector('[data-composer-input]').getBoundingClientRect(); return rect.top >= 0 && rect.bottom <= composer.top; })()`,
+    ),
+    true,
+    "The submit button is not visible above the composer",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const viewport = document.querySelector('[data-form-fields] [data-reka-scroll-area-viewport]'); return viewport.scrollHeight > viewport.clientHeight; })()`,
+    ),
+    true,
+    "The fields do not scroll inside the form",
+  );
+  // The last toggle scrolls into reach and turns on.
+  await evaluate(cdp, `${fields}.at(-1).scrollIntoView({ block: "center" })`);
+  await evaluate(cdp, `${fields}.at(-1).setAttribute("data-smoke-last", "")`);
+  await physicalClick(cdp, "[data-smoke-last]");
+  await waitFor(cdp, `${status} === "2 of 43 selected"`, 8_000, "The toggle did not turn on");
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-smoke-last]').getAttribute('aria-pressed')`),
+    "true",
+    "The toggle is not pressed",
+  );
+  await evaluate(cdp, `${submit}.click()`);
+  await waitFor(cdp, `document.body.innerText.includes("2 of 43 selected")`);
+  await waitFor(cdp, `${fields}.length === 3`, 15_000, "The second form did not appear");
+  const intensity = `${fields}.find((button) => button.textContent.includes("Intensity"))`;
+  const fill = `getComputedStyle(${intensity}).backgroundImage`;
+  const low = await value(cdp, fill);
+  await evaluate(cdp, `${intensity}.click()`);
+  await waitFor(
+    cdp,
+    `${intensity}.textContent.includes("Medium")`,
+    8_000,
+    "The cycle did not step",
+  );
+  assertEqual((await value(cdp, fill)) !== low, true, "The cycle did not take its option's colour");
+  await evaluate(
+    cdp,
+    `[...document.querySelectorAll('[data-form-actions] button')].find((button) => button.textContent.trim() === "Continue").click()`,
+  );
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes("Rope: true. Access: false. Intensity: Medium, pace Slow.")`,
+    15_000,
+    "The answers did not reach the script",
+  );
 }
 
 async function click(cdp, selector) {

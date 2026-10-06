@@ -39,7 +39,10 @@ import {
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
+  stepPlayerRuntimeFormField,
   submitPlayerRuntimeComposer,
+  submitPlayerRuntimeForm,
+  playerRuntimeForm,
 } from "../player/runtime-adapter.js";
 
 test("a Player session starts at main.tease of a project, or of a single source", () => {
@@ -943,4 +946,72 @@ test("a session records the account's zone and presentation, falling back to the
       .format(Date.UTC(2026, 9, 4, 18, 30))
       .replace(/[\u00a0\u202f]/gu, " "),
   );
+});
+
+test("a form presents its fields as their answers stand, takes edits, and survives a restore", () => {
+  const session = createPlayerRuntimeSession(
+    [
+      "let answers = askForm fields: {",
+      '  rope: { value: true, text: "Rope" }, cuffs: false,',
+      '  pace: { text: "Pace", options: [{ text: "Slow", background: "seagreen" }, { text: "Fast" }] }',
+      '}, submit: { text: "Continue", background: "red" }',
+      'say "${answers.cuffs} ${answers.pace}", instant',
+      'showButton "Done"',
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(playerRuntimeForeground(session), {
+    kind: "form",
+    accessibleName: "Answer",
+    hint: "Type your response…",
+  });
+  const form = playerRuntimeForm(session)!;
+  assert.deepEqual(
+    form.fields.map((field) => [field.id, field.label, field.kind, field.pressed, field.state]),
+    [
+      ["rope", "Rope", "toggle", true, null],
+      ["cuffs", "cuffs", "toggle", false, null],
+      ["pace", "Pace", "cycle", false, "Slow"],
+    ],
+  );
+  assert.equal(form.fields[2]!.authoredFill, normalizeColor("seagreen"));
+  assert.deepEqual(form.submit, { label: "Continue", authoredFill: normalizeColor("red") });
+  assert.equal(form.status, "3 of 3 set");
+  // The same answers keep the same presentation, so frequent observations do not re-render the form.
+  assert.equal(playerRuntimeForm(session), form);
+
+  const stepped = stepPlayerRuntimeFormField(session, "cuffs")!;
+  assert.equal(stepped.outcome.kind, "updated");
+  // A cycle steps through its options by exact composer text too, and wraps around.
+  const cycled = submitPlayerRuntimeComposer(stepped.session, "Pace")!;
+  assert.equal(cycled.outcome.kind, "updated");
+  const presented = playerRuntimeForm(cycled.session)!;
+  assert.deepEqual(
+    presented.fields.map((field) => [field.pressed, field.state]),
+    [
+      [true, null],
+      [true, null],
+      [false, "Fast"],
+    ],
+  );
+  assert.equal(presented.fields[2]!.authoredFill, undefined);
+  // Ambiguous or unknown text is not an edit, and edits add nothing to the transcript.
+  assert.equal(submitPlayerRuntimeComposer(cycled.session, "Slow"), null);
+  assert.deepEqual(cycled.session.transcriptEntries, session.transcriptEntries);
+
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(cycled.session));
+  assert.deepEqual(playerRuntimeForm(restored), presented);
+  const done = submitPlayerRuntimeForm(restored)!;
+  assert.equal(done.outcome.kind, "completed");
+  assert.deepEqual(
+    done.session.transcriptEntries.map((entry) => [
+      entry.text,
+      entry.kind === "message" ? (entry.responseKind ?? null) : null,
+    ]),
+    [
+      ["3 of 3 fields set", "form"],
+      ["true Fast", null],
+    ],
+  );
+  assert.equal(playerRuntimeForm(done.session), null);
 });
