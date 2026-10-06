@@ -63,7 +63,7 @@ import {
   unknownFormTypeMessage,
 } from "./form-fields.js";
 import type { VariableSite } from "./semantic.js";
-import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
+import { isAskBooleansCall, isAskImageCall, isTakePhotoCall } from "./capture-call.js";
 import {
   emptyImageFilterMessage,
   IMAGE_NO_SOURCE_MESSAGE,
@@ -3306,6 +3306,65 @@ class TypeChecker {
   }
 
   /**
+   * `askBooleans(...)`: the message is shown text, `texts:` a list of texts, `defaults:` a list of booleans of the same
+   * length when both are written, and `cancel:` a button. Returns whether the form may be cancelled.
+   */
+  *#askBooleansTask(expression: CallExpression, scope: Scope): CompileTask<boolean> {
+    let cancellable = false;
+    const written = new Map<string, Expression>();
+    for (const argument of expression.arguments) {
+      const type = yield* compileChild(this.#expressionTask(argument.value, scope));
+      const name = argument.kind === "namedArgument" ? argument.name.name : "message";
+      written.set(name, argument.value);
+      if (name === "message") this.#checkShownText(argument.value, type, "an ask question");
+      else if (name === "texts")
+        this.#reportUnless(
+          type,
+          (member) =>
+            member.kind === "list" && (!isKnown(member.element) || isShowable(member.element)),
+          argument.value,
+          "'texts:' takes a list of texts",
+        );
+      else if (name === "defaults")
+        this.#reportUnless(
+          type,
+          (member) =>
+            member.kind === "list" &&
+            (!isKnown(member.element) || isScalar(member.element, "boolean")),
+          argument.value,
+          "'defaults:' takes a list of true or false",
+        );
+      else if (name === "cancel") {
+        cancellable = true;
+        if (unwrap(argument.value).kind !== "objectLiteral")
+          this.#reportUnless(
+            type,
+            (member) => isShowable(member) || resolved(member).kind === "object",
+            argument.value,
+            "'cancel:' takes text or a button object { text, background? }",
+          );
+      }
+    }
+    const texts = written.get("texts");
+    const defaults = written.get("defaults");
+    const textsList = texts === undefined ? undefined : unwrap(texts);
+    const defaultsList = defaults === undefined ? undefined : unwrap(defaults);
+    if (textsList?.kind === "listLiteral" && textsList.elements.length === 0)
+      this.#report(typeCode.invalidOperand, "askBooleans needs at least one text.", textsList.span);
+    else if (
+      textsList?.kind === "listLiteral" &&
+      defaultsList?.kind === "listLiteral" &&
+      textsList.elements.length !== defaultsList.elements.length
+    )
+      this.#report(
+        typeCode.invalidOperand,
+        `askBooleans has ${textsList.elements.length} texts but ${defaultsList.elements.length} defaults; give one default for each text.`,
+        defaultsList.span,
+      );
+    return cancellable;
+  }
+
+  /**
    * The message (question) and hint of `askImage` are shown text, the sources are booleans, and `types:` and `mime:` are lists of texts. Written
    * values must be valid, and written sources must leave the player a way to answer.
    */
@@ -4055,6 +4114,13 @@ class TypeChecker {
       // A capture waits for the Player like an interaction, and gives a photo reference, or null without a camera.
       this.#suspend();
       return optional(STRING_TYPE);
+    }
+    if (isAskBooleansCall(expression)) {
+      const cancellable = yield* compileChild(this.#askBooleansTask(expression, scope));
+      // A form of toggles: one boolean per text, or `null` when the player cancels it.
+      this.#suspend();
+      const answers: StaticType = { kind: "list", element: BOOLEAN_TYPE };
+      return cancellable ? optional(answers) : answers;
     }
     if (isAskImageCall(expression)) {
       yield* compileChild(this.#askImageTask(expression, scope));

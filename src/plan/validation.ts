@@ -2171,14 +2171,18 @@ function validateExpressionNode(
           planError("TSC002", "takePhoto() must be lowered to a capture instruction.", path),
         );
       }
-      // `askImage(...)` waits for the player's image; it lowers to an interaction.
+      // `askImage(...)` and `askBooleans(...)` wait for the player; they lower to an interaction.
       if (
         isRecord(value.callee) &&
         value.callee.kind === "identifier" &&
-        value.callee.name === "askImage"
+        (value.callee.name === "askImage" || value.callee.name === "askBooleans")
       ) {
         errors.push(
-          planError("TSC002", "askImage() must be lowered to an interaction instruction.", path),
+          planError(
+            "TSC002",
+            `${value.callee.name}() must be lowered to an interaction instruction.`,
+            path,
+          ),
         );
       }
       validateOptionalTypeCheck(value, path, errors);

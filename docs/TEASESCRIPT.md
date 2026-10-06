@@ -82,7 +82,8 @@ The current compiler implements the compact interaction forms in this section, a
 asks as the same interactions, through explicit versioned interaction instructions and the canonical resumable runtime.
 The broader parenthesized V30 APIs and their advanced parameters remain deferred, except `askImage(...)`, which is
 implemented in its V30 call form (`let picture = askImage("Add an image")`; see [Image input](RUNTIME.md#image-input)),
-and `askForm`, which is an ask in both forms ([V30 §20](specifications/accepted-syntaxes-v30.md#forms));
+and `askForm`, which is an ask in both forms, with `askBooleans(...)` on the same form
+([V30 §20](specifications/accepted-syntaxes-v30.md#forms));
 this slice does not treat compact syntax as a runtime library call. Another parenthesized interaction-call spelling,
 such as `showButton(...)` or `choose(...)`, is never interpreted as compact syntax; until those APIs are implemented,
 the parser reports it with focused diagnostic `TSP032`. An `as speaker` clause placed after the payload receives the

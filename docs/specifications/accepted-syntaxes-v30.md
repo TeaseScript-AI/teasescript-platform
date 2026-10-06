@@ -1935,14 +1935,15 @@ let selected = askBooleans(
 
 It returns `boolean[]`. It is a [form](#forms) of one toggle per text, in order, that returns the toggles' states in the
 same order, so texts may repeat; the lists must have the same non-zero length. With `cancel:` it returns `boolean[]?`,
-`null` only when cancelled. `askBoolean(...)` stays a separate two-button question that completes when either
-button is chosen.
+`null` only when cancelled. The message, as the form's question, may also come first without a name, and the form is
+implemented with `cancel:` ([RUNTIME.md](../RUNTIME.md#forms)). `askBoolean(...)` stays a separate two-button question
+that completes when either button is chosen.
 
 ### Forms
 
 **Status:** Accepted (Owner decisions on #512, 2026-10-06). `askForm` is implemented for an object or a dict of fields of
-every kind, with descriptions, `outro:`, and `cancel:` ([RUNTIME.md](../RUNTIME.md#forms)); `askBooleans` and
-`timeout:` are not yet, and the compiler reports them.
+every kind, with descriptions, `outro:`, and `cancel:`, and `askBooleans` is implemented on it
+([RUNTIME.md](../RUNTIME.md#forms)); `timeout:` is not yet.
 
 `askForm` asks for several values at once. Its buttons stay in place while the player changes them, and nothing is
 returned until the player submits:
