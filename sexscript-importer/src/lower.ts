@@ -6359,8 +6359,10 @@ function imageNameFilter(
     return null;
   const images = lowerExpression(listing, context);
   if (images === null) return null;
-  const image: IrExpression = { kind: "variable", name: freshName("image", context) };
-  const fileName: IrExpression = { kind: "variable", name: freshName("fileName", context) };
+  const imageName = freshName("image", context);
+  const fileNameName = freshName("fileName", context);
+  const image: IrExpression = { kind: "variable", name: imageName };
+  const fileName: IrExpression = { kind: "variable", name: fileNameName };
   const list: IrExpression = { kind: "variable", name: target };
   const empty: IrExpression = { kind: "list", items: [] };
   const start: IrStatement[] =
@@ -6373,12 +6375,12 @@ function imageNameFilter(
     ...start,
     {
       kind: "for",
-      variable: (image as { name: string }).name,
+      variable: imageName,
       collection: images,
       body: [
         {
           kind: "let",
-          name: (fileName as { name: string }).name,
+          name: fileNameName,
           value: {
             kind: "methodCall",
             target: image,
