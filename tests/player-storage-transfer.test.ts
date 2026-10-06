@@ -4,7 +4,9 @@ import { gunzipSync, gzipSync } from "node:zlib";
 
 import { CapturedMediaStore } from "../player/captured-media.js";
 import {
+  checkStorageTransferImages,
   collectStorageTransfer,
+  remapCapturedMediaReferences,
   parseStorageTransfer,
   readStorageTransferFile,
   readStorageTransferText,
@@ -14,7 +16,7 @@ import {
   StorageTransferError,
   type StorageTransfer,
 } from "../player/storage-transfer.js";
-import type { RuntimeScriptStorageEntrySnapshot } from "../src/index.js";
+import type { RuntimeScriptStorageEntrySnapshot, SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 
 const photo = "captured-media:11111111-1111-4111-8111-111111111111:1";
@@ -308,5 +310,83 @@ test("an export reads the saved values fresh with each stored photo once, never 
   assert.deepEqual(
     await readStorageTransferFile(await bytesOf(await storageTransferFile(collected))),
     collected,
+  );
+});
+
+test("an import remaps a photo reference wherever a value can hold one, and nothing else", () => {
+  const fresh = "captured-media:99999999-9999-4999-8999-999999999999:1";
+  const references = new Map([[photo, fresh]]);
+  const value: SerializableRuntimeValue = {
+    kind: "object",
+    properties: [
+      { name: photo, value: photo },
+      {
+        name: "items",
+        value: { kind: "list", items: [photo, { kind: "set", items: [photo, second] }] },
+      },
+      {
+        name: "named",
+        value: { kind: "dict", entries: [{ key: photo, value: { kind: "list", items: [photo] } }] },
+      },
+      { name: "script", value: { kind: "script", path: photo, label: null } },
+    ],
+  };
+  const original = structuredClone(value);
+  assert.deepEqual(remapCapturedMediaReferences(value, references), {
+    kind: "object",
+    properties: [
+      { name: fresh, value: fresh },
+      {
+        name: "items",
+        value: { kind: "list", items: [fresh, { kind: "set", items: [fresh, second] }] },
+      },
+      {
+        name: "named",
+        value: { kind: "dict", entries: [{ key: fresh, value: { kind: "list", items: [fresh] } }] },
+      },
+      // A script path is no place for a photo reference.
+      { name: "script", value: { kind: "script", path: photo, label: null } },
+    ],
+  });
+  assert.deepEqual(value, original, "the imported value is not changed in place");
+  assert.equal(remapCapturedMediaReferences(photo, references), fresh);
+  assert.equal(remapCapturedMediaReferences(second, references), second);
+  assert.equal(remapCapturedMediaReferences(3, references), 3);
+
+  // Nesting deeper than a recursive copy could go.
+  let deep: SerializableRuntimeValue = photo;
+  for (let depth = 0; depth < 200_000; depth += 1) deep = { kind: "list", items: [deep] };
+  let remapped = remapCapturedMediaReferences(deep, references);
+  for (let depth = 0; depth < 200_000; depth += 1) {
+    assert.ok(remapped !== null && typeof remapped === "object" && remapped.kind === "list");
+    remapped = remapped.items[0]!;
+  }
+  assert.equal(remapped, fresh);
+});
+
+test("an import's photos are checked by their bytes and decoded, one damaged photo refusing all", async () => {
+  const decode = async (data: Blob) => {
+    assert.equal(data.type, "image/png", "the type comes from the bytes");
+    return { width: 3, height: 2 };
+  };
+  const [checked, ...rest] = await checkStorageTransferImages(
+    { ...transfer, images: transfer.images.slice(0, 1) },
+    decode,
+  );
+  assert.equal(rest.length, 0);
+  assert.equal(checked?.reference, photo);
+  assert.deepEqual([checked?.width, checked?.height], [3, 2]);
+  assert.deepEqual(new Uint8Array(await checked!.data.arrayBuffer()), pngBytes);
+  // The second photo's bytes are no image.
+  await rejects(
+    checkStorageTransferImages(transfer, decode).then(() => transfer),
+    /Saved photo 2 is damaged/,
+  );
+  // An image the browser cannot decode.
+  await rejects(
+    checkStorageTransferImages({ ...transfer, images: transfer.images.slice(0, 1) }, async () => {
+      throw new Error("cannot decode");
+    }).then(() => transfer),
+    /Saved photo 1 is damaged/,
   );
 });

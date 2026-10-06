@@ -3,6 +3,7 @@ import { tryOnScopeDispose, useIntervalFn } from "@vueuse/core";
 import { createBrowserCaptureHost, browserMediaUrls } from "../../browser-capture.js";
 import { CaptureDevice } from "../../capture-device.js";
 import {
+  CapturedMediaNotStoredError,
   CapturedMediaStore,
   isCapturedMediaReference,
   type CapturedMediaRepository,
@@ -34,7 +35,14 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
 import type { ScriptStorageProvider } from "../../script-storage.js";
-import { collectStorageTransfer } from "../../storage-transfer.js";
+import {
+  checkStorageTransferImages,
+  collectStorageTransfer,
+  remapCapturedMediaReferences,
+  StorageTransferError,
+  type CheckedTransferImage,
+  type StorageTransfer,
+} from "../../storage-transfer.js";
 import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../../session-camera.js";
 import {
   PlayerNotices,
@@ -346,6 +354,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
 
   let activationToken = 0;
+  // The latest Start, offered again after an import replaced the saved data.
+  let lastStart: (() => PlayerRuntimeSession) | null = null;
   let disposed = false;
   tryOnScopeDispose(() => {
     disposed = true;
@@ -430,11 +440,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // A Start or Continue waiting for the camera already owns its view of the stored values, although its session is not
   // published yet; a restored one may still write them.
   const openingCamera = ref(false);
+  // While an import replaces the saved data, no Start, Continue, or clear begins.
+  const importing = ref(false);
   const canClearScriptStorage = computed(
     () =>
       scriptStorage !== undefined &&
       storedEntries.value !== null &&
       !clearing.value &&
+      !importing.value &&
       !openingCamera.value &&
       activation.value?.kind !== "continue" &&
       (session.value === null ||
@@ -454,6 +467,112 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     } finally {
       clearing.value = false;
     }
+  }
+
+  /**
+   * Checks exported saved data for an import into this script and compares it with what is saved now; nothing changes
+   * yet. Rejects with a `StorageTransferError` naming the problem, such as data of another script or a damaged photo.
+   */
+  async function reviewScriptStorageImport(
+    transfer: StorageTransfer,
+  ): Promise<ScriptStorageImportReview> {
+    if (!scriptStorage || storedEntries.value === null)
+      throw new StorageTransferError(
+        "This browser's saved data cannot be read, so nothing can be imported.",
+      );
+    if (transfer.scope !== scriptStorage.scope)
+      throw new StorageTransferError(
+        "This saved data belongs to another script. Open that script and import it there.",
+      );
+    // Without durable captured media, imported photos would not outlive this page.
+    if (transfer.images.length > 0 && capturedMediaPersistence === undefined)
+      throw new StorageTransferError(
+        "This Player cannot keep saved photos, so it cannot import them.",
+      );
+    const images = await checkStorageTransferImages(transfer, decodeImage);
+    const incoming = new Set(transfer.entries.map((entry) => entry.key));
+    let current: readonly RuntimeScriptStorageEntrySnapshot[];
+    try {
+      current = await scriptStorage.load();
+    } catch {
+      throw new StorageTransferError(
+        "This browser's saved data cannot be read, so nothing can be imported.",
+      );
+    }
+    return {
+      transfer,
+      images,
+      currentCount: current.length,
+      removedKeys: current.map((entry) => entry.key).filter((key) => !incoming.has(key)),
+    };
+  }
+  /**
+   * Replaces this script's saved data with a reviewed import, ending a running, waiting, or starting session first; the
+   * next Start uses the imported data. Imported photos get new references, stored before any value. When it rejects,
+   * the saved data is unchanged; a session it ended stays ended, and Start is offered either way.
+   */
+  async function importScriptStorage(review: ScriptStorageImportReview): Promise<void> {
+    if (!scriptStorage || importing.value || clearing.value)
+      throw new StorageTransferError("Saved data cannot be replaced right now.");
+    importing.value = true;
+    const added: string[] = [];
+    try {
+      if (sessionInProgress.value) endSession();
+      const references = new Map<string, string>();
+      for (const image of review.images) {
+        const stored = capturedMedia.add("image", image.data, {
+          width: image.width,
+          height: image.height,
+        });
+        references.set(image.reference, stored.reference);
+        added.push(stored.reference);
+      }
+      const entries = review.transfer.entries.map((entry) => ({
+        key: entry.key,
+        value: remapCapturedMediaReferences(entry.value, references),
+      }));
+      // Issued saves of an ended session finish first: storage runs its operations in issue order.
+      await scriptStorage.replace(entries);
+    } catch (error) {
+      // Media that was stored before the failure is reclaimed later, as no saved value references it.
+      for (const reference of added) capturedMedia.discard(reference);
+      throw new StorageTransferError(
+        error instanceof CapturedMediaNotStoredError
+          ? "The photos could not be stored in this browser. The saved data is unchanged."
+          : "The import could not be saved in this browser, for example because its storage is full. The saved data is unchanged.",
+      );
+    } finally {
+      await loadScriptStorage();
+      importing.value = false;
+      if (lastStart !== null && !sessionInProgress.value) prepare(lastStart);
+    }
+  }
+  /** Whether a session runs, waits for Continue, or is starting; its own view of the saved values is in use. */
+  const sessionInProgress = computed(
+    () =>
+      openingCamera.value ||
+      activation.value?.kind === "continue" ||
+      (session.value !== null &&
+        session.value.snapshot.status !== "halted" &&
+        session.value.snapshot.status !== "failed"),
+  );
+  /**
+   * Ends the session without running any more of it: its clock, captures, cameras, and media stop, a pending Start or
+   * Continue is discarded, and any late answer belongs to an older session generation and is ignored.
+   */
+  function endSession() {
+    activationToken++;
+    openingCamera.value = false;
+    activation.value = null;
+    captures.reset();
+    camera.release();
+    captureCamera.release();
+    device.reset();
+    loads.clear();
+    pendingLoadCount.value = 0;
+    generation.value++;
+    interactionReset.value++;
+    session.value = null;
   }
 
   // Starts or restores a session; its scene time continues from the persisted observation, so a
@@ -498,6 +617,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * on page load and the click is the user activation later audible playback relies on.
    */
   function prepare(create: () => PlayerRuntimeSession) {
+    lastStart = create;
     activationToken++;
     openingCamera.value = false;
     // A new session needs its own camera; a superseded acquisition never stays open.
@@ -532,7 +652,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   async function activate() {
     const pending = activation.value;
-    if (!pending || clearing.value) return;
+    if (!pending || clearing.value || importing.value) return;
     activation.value = null;
     const token = ++activationToken;
     if (options.capabilities?.camera !== true) {
@@ -566,8 +686,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session: computed(() => session.value),
     generation: computed(() => generation.value),
     interactionReset: computed(() => interactionReset.value),
-    /** The prepared Start or Continue, or `null` once the session runs or while saved data is being cleared. */
-    activation: computed(() => (clearing.value ? null : (activation.value?.kind ?? null))),
+    /** The prepared Start or Continue, or `null` once the session runs or while saved data is cleared or imported. */
+    activation: computed(() =>
+      clearing.value || importing.value ? null : (activation.value?.kind ?? null),
+    ),
     /** Current Player notices, such as blocked audio; a notice's action runs from the player's click. */
     notices: computed(() => noticeList.value),
     /** Reports a host condition to the player; publishing the same key again replaces that notice. */
@@ -591,6 +713,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       scriptStorage
         ? collectStorageTransfer(scriptStorage, capturedMedia)
         : Promise.reject(new Error("This script keeps no saved data.")),
+    /** Whether saved data can be imported now: the host persists it, it can be read, and no import or clear runs. */
+    canImportScriptStorage: computed(
+      () =>
+        scriptStorage !== undefined &&
+        storedEntries.value !== null &&
+        !clearing.value &&
+        !importing.value,
+    ),
+    /** Whether an import must end the session first. */
+    sessionInProgress,
+    reviewScriptStorageImport,
+    importScriptStorage,
     loadScriptStorage,
     scriptStorageOptions,
     resolveAsset,
@@ -658,3 +792,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
 }
 
 export type PlayerSessionHost = ReturnType<typeof usePlayerSession>;
+
+/** A checked import and how it changes the saved data, shown before the player confirms it. */
+export interface ScriptStorageImportReview {
+  readonly transfer: StorageTransfer;
+  readonly images: readonly CheckedTransferImage[];
+  /** How many values are saved now. */
+  readonly currentCount: number;
+  /** Saved keys that the import removes. */
+  readonly removedKeys: readonly string[];
+}

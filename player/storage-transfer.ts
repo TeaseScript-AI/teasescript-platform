@@ -1,9 +1,11 @@
 import {
   validateScriptStorageEntries,
   type RuntimeScriptStorageEntrySnapshot,
+  type SerializableRuntimeValue,
 } from "../src/index.js";
 import { isWellFormedCapturedMediaReference, type CapturedMediaStore } from "./captured-media.js";
 import { capturedMediaReferences } from "./captured-media-persistence.js";
+import { checkImageFile, type ImageDecoder } from "./image-file.js";
 import type { ScriptStorageProvider } from "./script-storage.js";
 
 /**
@@ -23,7 +25,7 @@ export interface StorageTransfer {
 
 export interface StorageTransferImage {
   readonly reference: string;
-  readonly bytes: Uint8Array;
+  readonly bytes: Uint8Array<ArrayBuffer>;
 }
 
 /** Why exported data cannot be read; the message is written for the player. */
@@ -168,6 +170,87 @@ export function parseStorageTransfer(json: string): StorageTransfer {
     decoded.push(parseImage(images[index], `Saved photo ${index + 1}`, referenced, seen));
   }
   return { scope, entries: valid, images: decoded };
+}
+
+/** A photo of an import, checked like a chosen image: its type read from its bytes, and decoded by the browser. */
+export interface CheckedTransferImage {
+  readonly reference: string;
+  readonly data: Blob;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Checks every photo of an import, one at a time; rejects with the first that is not a usable image. */
+export async function checkStorageTransferImages(
+  transfer: StorageTransfer,
+  decode: ImageDecoder,
+): Promise<readonly CheckedTransferImage[]> {
+  const checked: CheckedTransferImage[] = [];
+  for (const [index, image] of transfer.images.entries()) {
+    const result = await checkImageFile(
+      new File([image.bytes], "imported-image"),
+      { types: null, mime: null },
+      decode,
+    );
+    if (!result.ok)
+      throw new StorageTransferError(`Saved photo ${index + 1} is damaged: ${result.message}`);
+    checked.push({
+      reference: image.reference,
+      data: result.data,
+      width: result.width,
+      height: result.height,
+    });
+  }
+  return checked;
+}
+
+/**
+ * The value with each captured-media reference `references` maps replaced by its new reference, wherever a reference
+ * can be held: as text, a list or set item, an object property name or value, or a dict key or value. Other text, such
+ * as a script path, is kept. Iterative, so a deeply nested value cannot exhaust the stack.
+ */
+export function remapCapturedMediaReferences(
+  value: SerializableRuntimeValue,
+  references: ReadonlyMap<string, string>,
+): SerializableRuntimeValue {
+  const swap = (text: string) => references.get(text) ?? text;
+  const pending: SerializableRuntimeValue[] = [];
+  // A copy of a list, set, object, or dict whose direct text is remapped; its nested containers are copied later.
+  const copy = (item: SerializableRuntimeValue): SerializableRuntimeValue => {
+    if (typeof item === "string") return swap(item);
+    if (item === null || typeof item !== "object") return item;
+    let copied: SerializableRuntimeValue;
+    if (item.kind === "list" || item.kind === "set")
+      copied = { kind: item.kind, items: item.items.slice() };
+    else if (item.kind === "object")
+      copied = {
+        kind: "object",
+        properties: item.properties.map((property) => ({
+          name: swap(property.name),
+          value: property.value,
+        })),
+      };
+    else if (item.kind === "dict")
+      copied = {
+        kind: "dict",
+        entries: item.entries.map((entry) => ({ key: swap(entry.key), value: entry.value })),
+      };
+    else return item;
+    pending.push(copied);
+    return copied;
+  };
+  const root = copy(value);
+  for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
+    if (current === null || typeof current !== "object") continue;
+    if (current.kind === "list" || current.kind === "set")
+      for (let index = 0; index < current.items.length; index += 1)
+        current.items[index] = copy(current.items[index]!);
+    else if (current.kind === "object")
+      for (const property of current.properties) property.value = copy(property.value);
+    else if (current.kind === "dict")
+      for (const entry of current.entries) entry.value = copy(entry.value);
+  }
+  return root;
 }
 
 function parseImage(

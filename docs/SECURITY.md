@@ -48,7 +48,9 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
   links. The Player renders this structure without a raw-HTML path and opens links with opener isolation.
 - Saved script data moves between browsers only by the player's own hand ([transfer](DATA-AND-API.md#saved-data-transfer)):
   an export stays in the browser until the player downloads or copies it, with no upload, URL, or clipboard read. It is
-  neither encrypted nor signed and can contain private photos, which the Player says when exporting.
+  neither encrypted nor signed and can contain private photos, which the Player says when exporting. An import is
+  external data: it is decoded and validated completely, photos included, before the player confirms, applies only to
+  the script whose storage scope it names, and gets media references only from the trusted media store.
 
 ## Accepted pending-action boundary
 
