@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, type ShallowRef } from "vue";
-import { Activity, Bug, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
+import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../captured-media.js";
 import type { PlayerTimerKind } from "../../model.js";
@@ -9,8 +9,6 @@ import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
-import DebugPanel from "./DebugPanel.vue";
-import DebugStatus from "./DebugStatus.vue";
 import { prepareHostedScript, type ScriptHost } from "./hostedScript";
 import LayoutDebug from "./LayoutDebug.vue";
 import PlayerApp from "./PlayerApp.vue";
@@ -31,19 +29,16 @@ import ThemeLab from "./ThemeLab.vue";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
 import TimerRegion from "./TimerRegion.vue";
 import { browserStorage } from "./usePlayerPreference";
-import { useDebugLog } from "./useDebugLog";
-import { useDevelopmentTime } from "./useDevelopmentTime";
 import { usePlayerSession } from "./usePlayerSession";
 import { defaultPlayerThemeIntents } from "./usePlayerTheme";
 
 // Development preview root; main.ts loads it on the development server or with `?dev`.
 // Visual Lab holds temporary Owner A/B settings only; runtime content comes from a real script.
 const query = new URLSearchParams(window.location.search);
-// The Debug tool exists only with the explicit `?dev` opt-in, also on the development server; `time=skip` starts its
-// time controls with auto-skip on.
-const debugTool = query.has("dev");
+// The explicit `?dev` opt-in starts with the Debug menu on, also on the development server; `time=skip` starts Debug
+// with auto-skip on.
+const debug = { menu: query.has("dev"), autoSkip: query.get("time") === "skip" };
 const tools: readonly PlayerTool[] = [
-  ...(debugTool ? [{ name: "Debug", icon: Bug }] : []),
   { name: "Visual Lab", icon: FlaskConical },
   { name: "Layout Debug", icon: ScanLine },
   // Panels that exercise multi-panel arrangement and drawer behavior; Playback Diagnostics also lists the Player's
@@ -94,10 +89,6 @@ const player = usePlayerSession(
         }),
       },
 );
-const log = debugTool ? useDebugLog() : null;
-const time = log
-  ? useDevelopmentTime(player, { autoSkip: query.get("time") === "skip" }, log.add)
-  : null;
 
 // Notice preview: the Player's own wording for real conditions, plus an error sample that no condition reports yet.
 const sampleNotices: readonly PlayerNotice[] = [
@@ -142,12 +133,9 @@ else player.prepare(() => createPlayerRuntimeSession(openingScenario, startOptio
     :title="packageHost === null ? 'Evening by the coast' : ''"
     :failure="failure ?? null"
     :media="mediaFixture === 'Runtime' ? undefined : stageFixtures[mediaFixture]"
+    :debug="debug"
   >
-    <template #overlay>
-      <DebugStatus v-if="time && log" :time="time" :log="log" />
-    </template>
     <template #tool="{ tool, player: playerElement }">
-      <DebugPanel v-if="tool === 'Debug' && time && log" :time="time" :log="log" />
       <LayoutDebug v-if="tool === 'Layout Debug' && playerElement" :player="playerElement" />
       <ul
         v-if="tool === 'Playback Diagnostics' && player.diagnostics.value.length > 0"

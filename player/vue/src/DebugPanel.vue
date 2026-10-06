@@ -9,14 +9,31 @@ import Switch from "@/components/ui/switch/Switch.vue";
 import type { DebugLog } from "./useDebugLog";
 import type { DevelopmentTime } from "./useDevelopmentTime";
 
-// The Debug tool of the Player with `?dev`: development time controls (#615) and the Debug log, newest line first.
-// An explanation opens from its label, by click, tap or keyboard; any number may be open.
-defineProps<{ time: DevelopmentTime; log: DebugLog }>();
+// The Debug panel (DEBUGGER.md "Player Debug"): its Debug switch, the time controls (#615) while Debug is on, a
+// reserved place for the saved-data tools, and the Debug log, newest line first. An explanation opens from its label,
+// by click, tap or keyboard; any number may be open.
+defineProps<{ time: DevelopmentTime | null; log: DebugLog }>();
+const active = defineModel<boolean>("active", { required: true });
 </script>
 
 <template>
   <div class="grid gap-4 p-4 text-xs" data-debug-panel>
-    <section aria-labelledby="debug-time" class="grid gap-2">
+    <Collapsible v-slot="{ open }" class="grid gap-1">
+      <div class="flex min-h-9 items-center justify-between gap-2">
+        <CollapsibleTrigger as-child>
+          <Button variant="ghost" size="xs" aria-label="About Debug">
+            Debug
+            <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
+          </Button>
+        </CollapsibleTrigger>
+        <Switch v-model="active" aria-label="Debug" data-debug-active />
+      </div>
+      <CollapsibleContent class="text-muted-foreground">
+        Countdowns and time controls for testing this script. Turn Debug off to play normally for a while; Debug menu
+        in Settings removes this panel.
+      </CollapsibleContent>
+    </Collapsible>
+    <section v-if="time" aria-labelledby="debug-time" class="grid gap-2">
       <h3 id="debug-time" class="font-semibold">Time</h3>
       <Collapsible v-slot="{ open }" class="grid gap-1">
         <div class="flex items-center justify-between gap-2">
@@ -77,6 +94,8 @@ defineProps<{ time: DevelopmentTime; log: DebugLog }>();
         </Button>
       </div>
     </section>
+    <!-- Reserved for the saved-data overview and editor, which a host supplies. -->
+    <slot name="storage" />
     <section aria-labelledby="debug-log" class="grid gap-2">
       <h3 id="debug-log" class="font-semibold">Debug log</h3>
       <div class="h-32 rounded-md border">

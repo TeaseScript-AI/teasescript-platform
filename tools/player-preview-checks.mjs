@@ -2219,13 +2219,41 @@ async function developmentTimeChecks(page) {
     return ![...texts, ...toasts].some((text) => text.includes("⏩"));
   };
 
-  // The development server opens the preview without `?dev`, but not the Debug tool.
+  // The development server opens the preview without `?dev`, with the Debug menu off.
   await page.reload();
   await page.locator("[data-launcher]").waitFor();
   check(
     (await launcher.count()) === 0 && (await badge.count()) === 0,
-    "The Debug tool exists without ?dev",
+    "The Debug menu starts on without ?dev",
   );
+  // Settings' Debug menu offers the panel, whose Debug switch starts on; turning the menu off removes even a pinned
+  // panel from every panel state, and turning it on again offers a fresh closed launcher.
+  const settings = page.getByRole("dialog", { name: "Player Settings" });
+  const debugMenu = settings.getByRole("switch", { name: "Debug menu", exact: true });
+  const debugSwitch = page.getByRole("switch", { name: "Debug", exact: true });
+  const toggleDebugMenu = async () => {
+    await page.locator("[data-settings-trigger]").click();
+    await debugMenu.click();
+    await page.keyboard.press("Escape");
+    await settings.waitFor({ state: "hidden" });
+  };
+  await toggleDebugMenu();
+  await launcher.click();
+  await page.locator('[data-tool="Debug"] [data-panel-pin]').click();
+  check(await debugSwitch.isChecked(), "The panel's Debug switch must start on");
+  await debugSwitch.click();
+  await autoSkip.waitFor({ state: "detached" });
+  await toggleDebugMenu();
+  await page.locator('[data-tool="Debug"]').waitFor({ state: "detached" });
+  check((await launcher.count()) === 0, "Turning the Debug menu off left its launcher");
+  await toggleDebugMenu();
+  check(
+    (await page.locator('[data-tool="Debug"]').count()) === 0,
+    "A removed Debug panel came back open",
+  );
+  await launcher.click();
+  await autoSkip.waitFor();
+  check(await debugSwitch.isChecked(), "Turning the Debug menu on must switch Debug on");
 
   // `?dev` starts with auto-skip off and the controls active; explanations start collapsed.
   await page.goto(`${base}?dev`);
@@ -2333,7 +2361,7 @@ async function developmentTimeChecks(page) {
   await autoSkip.click();
   await badge.waitFor({ state: "detached" });
   check(await outsideTranscript(), "A jump marker reached the transcript or a notice");
-  return "PASS Debug tool only with ?dev, collapsed explanations by click, key and tap, one button row, Debug log, announcements, auto-skip";
+  return "PASS Debug menu off without ?dev and pruned when turned off, Debug switch, collapsed explanations by click, key and tap, one button row, Debug log, announcements, auto-skip";
 }
 
 const groups = [

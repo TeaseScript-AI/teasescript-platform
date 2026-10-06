@@ -17,3 +17,23 @@ export function formatTimer(totalSeconds: number): string {
   const minutes = Math.floor((safeSeconds % 3600) / 60);
   return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
+
+/**
+ * The text of a Player Debug countdown at display scene time `nowMs`: whole seconds rounded up, and an elapsed deadline
+ * whose action has not settled yet says so instead of counting below zero.
+ */
+export function debugCountdownText(
+  countdown: { readonly kind: "wait" | "button" | "pacing"; readonly deadlineMs: number },
+  nowMs: number,
+): string {
+  const seconds = Math.ceil(Math.max(0, countdown.deadlineMs - nowMs) / 1000);
+  if (seconds === 0) return "Wait elapsed · waiting for script";
+  switch (countdown.kind) {
+    case "wait":
+      return `Debug · Continues in ${seconds} s`;
+    case "button":
+      return `Debug · Press within ${seconds} s`;
+    case "pacing":
+      return `Debug · Pacing: ${seconds} s remaining`;
+  }
+}

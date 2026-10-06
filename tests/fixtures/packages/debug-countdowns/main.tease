@@ -1,0 +1,9 @@
+say "Start", instant
+wait 30 s
+timer 30 s
+say "A", 20
+say "B", 2
+let pressed = showButton "Go", timeout: 40
+say "Pressed", instant
+let done = showButton "Done"
+exit
