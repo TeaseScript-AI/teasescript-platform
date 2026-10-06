@@ -168,4 +168,10 @@ if remembered != null and remembered.length > 0 {
 for entry, value in owned {
   say "${entry}: ${value}"
 }
+// A value that the loop body sets again is a variable of its own, apart from the key.
+for name, count in owned {
+  if count > 2 {
+    count = 2
+  }
+}
 exit

@@ -118,6 +118,9 @@ interface Binding {
 /** What declares a binding: a `let`, a `for` loop, a media handle, or a function parameter. */
 type BindingKey = IrStatement | IrFunctionParameter;
 
+/** The binding key of each two-variable loop's value variable, stable across analysis rounds. */
+const valueKeys = new WeakMap<IrStatement, IrFunctionParameter>();
+
 interface Conflict {
   binding: Binding;
   statement: IrStatement;
@@ -1032,9 +1035,16 @@ function analyse(
             ? scalar("string")
             : (elementType(typeOf(item.collection, scope)) ?? UNKNOWN);
         inner.names.set(item.variable, variable);
-        // The value of each entry has the dict's value type, which the analysis does not follow.
-        if (item.valueVariable !== undefined)
-          inner.names.set(item.valueVariable, binding(item, item.valueVariable, null, UNKNOWN));
+        // The value of each entry has the dict's value type, which the analysis does not follow; it is a variable of
+        // its own, apart from the key.
+        if (item.valueVariable !== undefined) {
+          let key = valueKeys.get(item);
+          if (key === undefined) {
+            key = { name: item.valueVariable, defaultValue: null };
+            valueKeys.set(item, key);
+          }
+          inner.names.set(item.valueVariable, binding(key, item.valueVariable, null, UNKNOWN));
+        }
         for (const child of item.body) statement(child, inner);
         return;
       }
