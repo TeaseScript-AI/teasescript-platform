@@ -58,6 +58,9 @@ const active = defineModel<boolean>("active", { required: true });
       <Download />
       Download debug export…
     </Button>
+    <p v-if="!exportAvailable" class="text-muted-foreground" data-debug-export-unavailable>
+      Available once a session has started.
+    </p>
     <section v-if="time" aria-labelledby="debug-time" class="grid gap-2">
       <h3 id="debug-time" class="font-semibold">Time</h3>
       <Collapsible v-slot="{ open }" class="grid gap-1">
