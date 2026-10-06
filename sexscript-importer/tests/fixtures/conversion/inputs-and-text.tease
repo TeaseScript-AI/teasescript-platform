@@ -49,4 +49,20 @@ let ready = (choose yes: "Yes", no: "No") == "yes"
 // A character of a text is its one-character substring, also counted from the end.
 let code = askText "Square?", default: "B4"
 say "Row ${code.substring(0, 1)}, column ${code.substring(code.length - 1)}"
+// Button texts that call a function are computed before the question, in order, as Groovy evaluated them first.
+function honorific {
+  return "Miss"
+}
+let question2 = "Ready, ${honorific()}?"
+let option = "Yes, ${honorific()}"
+say question2
+if (choose yes: option, no: "No") == "yes" {
+  say "Good."
+}
+// A range goes through its values with their positions.
+let position = 0
+for value in 5..=6 {
+  say "${position}: ${value}"
+  position += 1
+}
 exit

@@ -6314,6 +6314,40 @@ function lowerCollectionStatement(
         ]
       : [{ kind: "repeat", count, body: loopBody, span }];
   }
+  // `(a..b).eachWithIndex { v, i -> }` goes through the range, counting its position.
+  if (call.name === "eachWithIndex" && receiver.kind === "range") {
+    const argument = closureArgument(call.arguments);
+    if (
+      argument === null ||
+      argument.parameters.length !== 2 ||
+      containsReturnForCurrentClosure(body(argument.closure))
+    ) {
+      return null;
+    }
+    const range = lowerExpression(receiver, context);
+    if (range === null) return null;
+    const item = argument.parameters[0]!;
+    const index = argument.parameters[1]!;
+    return [
+      { kind: "let", name: index, value: { kind: "literal", value: 0 }, span },
+      {
+        kind: "for",
+        variable: item,
+        collection: range,
+        body: [
+          ...lowerBlock(body(argument.closure), context),
+          {
+            kind: "assign",
+            target: { kind: "variable", name: index },
+            operator: "+=",
+            value: { kind: "literal", value: 1 },
+            span,
+          },
+        ],
+        span,
+      },
+    ];
+  }
   if (
     call.name === "eachWithIndex" &&
     isKnownListExpression(receiver, context) &&
@@ -12925,9 +12959,11 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         );
       }
       // Legacy getBoolean shows its text like show() and then two buttons; the first button means true.
-      if (!pushPrompt(context, node, call.arguments[0]!, args[0]!)) return null;
-      const yes = args[1] ?? { kind: "literal", value: "Yes" };
-      const no = args[2] ?? { kind: "literal", value: "No" };
+      const labels = args.slice(1);
+      const computed = { nodes: call.arguments.slice(1), values: labels };
+      if (!pushPrompt(context, node, call.arguments[0]!, args[0]!, null, computed)) return null;
+      const yes = labels[0] ?? { kind: "literal", value: "Yes" };
+      const no = labels[1] ?? { kind: "literal", value: "No" };
       return {
         kind: "binary",
         operator: "==",
@@ -13305,17 +13341,39 @@ function pushPrompt(
   message: IrExpression,
   /** An argument whose statements already run before the prompt, such as the loop that builds a menu's options. */
   evaluated: AstNode | null = null,
+  /**
+   * The lowered button texts or options and their nodes: one with effects, such as `"Yes, ${dommeTitle()}"`, is
+   * computed into a temporary before the question, in order after the question's own text, as Groovy evaluated every
+   * argument before showing it; `values` then holds the temporary.
+   */
+  computed: { nodes: readonly AstNode[]; values: IrExpression[] } | null = null,
 ): boolean {
   if (isNullConstant(messageNode)) return true;
   const root = context.statementRoot;
+  const effects = computed?.nodes.filter((node) => !isPure(node, context)) ?? [];
   // Groovy evaluates all arguments before showing the message, so other arguments must not have effects.
   const otherArguments = (callParts(inputNode)?.arguments ?? []).filter(
-    (argument) => argument !== messageNode && argument !== evaluated,
+    (argument) =>
+      argument !== messageNode &&
+      argument !== evaluated &&
+      !effects.includes(argument) &&
+      !(argument.kind === "list" && nodeArray(argument.items).every((item) => isPure(item, context) || effects.includes(item))),
   );
   const ordered =
     root !== null &&
     isHoistable(root, inputNode, context, messageNode) &&
     otherArguments.every((argument) => isPure(argument, context));
+  if (ordered && effects.length > 0 && computed !== null) {
+    const temporary = (value: IrExpression, base: string): IrExpression => {
+      const name = freshName(base, context);
+      context.prelude.push({ kind: "let", name, value, span: inputNode.span });
+      return { kind: "variable", name };
+    };
+    if (!isPure(messageNode, context)) message = temporary(message, "question");
+    computed.nodes.forEach((node, index) => {
+      if (effects.includes(node)) computed.values[index] = temporary(computed.values[index]!, "option");
+    });
+  }
   if (!ordered) {
     addDiagnostic(
       context,
@@ -13398,7 +13456,8 @@ function lowerSelectedValue(
       "getSelectedValue() has no choices.",
     );
   }
-  if (!pushPrompt(context, node, args[0]!, message)) return null;
+  const computed = { nodes: nodeArray(optionsNode.items), values: options };
+  if (!pushPrompt(context, node, args[0]!, message, null, computed)) return null;
   return { kind: "choice", options };
 }
 

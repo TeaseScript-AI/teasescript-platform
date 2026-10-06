@@ -1,6 +1,3 @@
-// MIGRATION INCOMPLETE: 1 error diagnostic.
-// Review diagnostics before treating this file as behaviorally equivalent.
-
 let value = "old"
 function change {
   value = "new"
@@ -16,9 +13,9 @@ function yesText {
   say "Before"
   return "Yes"
 }
-// TODO SX_PROMPT_POSITION line 5: This input's question cannot be shown at the right moment: the input is guarded by && / || / ?:, follows side effects in the same statement, or has arguments with side effects. Split the statement so the input comes first.
-// | def result = getBoolean("Question", yesText(), "No")
-let result = false
+let option = yesText()
+say "Question"
+let result = (choose yes: option, no: "No") == "yes"
 function getRandom(maxValue) {
   return maxValue - 1
 }

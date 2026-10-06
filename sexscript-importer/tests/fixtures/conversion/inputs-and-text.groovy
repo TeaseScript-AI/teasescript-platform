@@ -29,3 +29,8 @@ def ready = getBoolean(stored)
 // A character of a text is its one-character substring, also counted from the end.
 def code = getString("Square?", "B4")
 show("Row " + code[0] + ", column " + code[-1])
+// Button texts that call a function are computed before the question, in order, as Groovy evaluated them first.
+def honorific = { -> return "Miss" }
+if (getBoolean("Ready, ${honorific()}?", "Yes, ${honorific()}", "No")) show("Good.")
+// A range goes through its values with their positions.
+(5..6).eachWithIndex { value, position -> show("${position}: ${value}") }
