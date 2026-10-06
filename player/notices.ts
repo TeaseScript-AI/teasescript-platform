@@ -59,6 +59,7 @@ export const playerNoticeKeys = {
   storageWriteFailed: "storage-write-failed",
   imageNeedsCamera: "image-needs-camera",
   sessionError: "session-error",
+  rewindNotAdopted: "rewind-not-adopted",
 } as const;
 
 const mediaNames = { image: "Image", audio: "Audio", video: "Video" } as const;
@@ -84,6 +85,13 @@ export const playerNotices = {
     key: playerNoticeKeys.storageWriteFailed,
     level: "warning",
     message: "Some progress could not be saved in this browser.",
+  }),
+  /** Debug's rewind could not adopt the inspected state: its saved data could not replace the browser's. */
+  rewindNotAdopted: (): PlayerNotice => ({
+    key: playerNoticeKeys.rewindNotAdopted,
+    level: "warning",
+    message:
+      "The saved data of this earlier state could not be restored in this browser, so the session did not go on from it.",
   }),
   imageNeedsCamera: (): PlayerNotice => ({
     key: playerNoticeKeys.imageNeedsCamera,

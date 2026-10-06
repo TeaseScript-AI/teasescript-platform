@@ -1,5 +1,7 @@
 import {
   applyExternalStorageEdit,
+  CHECKPOINT_FORMAT,
+  CHECKPOINT_VERSION,
   captureTemporalContext,
   compileProject,
   completeAction,
@@ -15,6 +17,7 @@ import {
   pressPermanentButton,
   recordContinueCapture,
   reportMediaLoad,
+  restoreCheckpoint,
   stageProjection,
   run,
   serializeCheckpoint,
@@ -46,6 +49,7 @@ import {
 } from "../src/index.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import { instructionSourcePath } from "../src/plan/model.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import { runValidatedState } from "../src/runtime/engine.js";
 import {
   mediaTerminalProgressMs,
@@ -258,6 +262,36 @@ export function restorePlayerRuntimeSession(
   return appendRuntimeEvents(
     emptySession(checkpoint.plan, checkpoint.snapshot, recorder, debugTrace),
     restorePoint.events,
+  );
+}
+
+/** The session's state as JSON, validated first, for Debug's rewind history to keep. */
+export function playerRuntimeSnapshotJson(session: PlayerRuntimeSession): string {
+  return serializeValidatedRuntimeJson(createCheckpoint(session.plan, session.snapshot).snapshot);
+}
+
+/**
+ * Restores Debug's rewind history position: the state `snapshotJson` holds, validated against `plan`, with the
+ * transcript rebuilt from the `events` that led to it. Nothing runs; the recorder and the value trace begin anew there.
+ */
+export function restorePlayerRuntimeSessionAt(
+  plan: InstructionPlan,
+  snapshotJson: string,
+  events: readonly InterpreterEvent[],
+  recorder: DebugRecorder | null = null,
+  debugTrace: RuntimeDebugContext | null = null,
+): PlayerRuntimeSession {
+  const checkpoint = restoreCheckpoint({
+    format: CHECKPOINT_FORMAT,
+    version: CHECKPOINT_VERSION,
+    plan,
+    snapshot: JSON.parse(snapshotJson),
+  });
+  recorder?.begin(checkpoint.plan, checkpoint.snapshot);
+  debugTrace?.reset("restore");
+  return appendRuntimeEvents(
+    emptySession(checkpoint.plan, checkpoint.snapshot, recorder, debugTrace),
+    events,
   );
 }
 

@@ -150,6 +150,7 @@ class Recording {
         hostError: null,
       },
       editedWhileDebugging: null,
+      rewoundWhileDebugging: null,
       selection: allSelected,
       omissions: [],
       checkpoint: createCheckpoint(this.plan, this.snapshot),
@@ -436,6 +437,16 @@ test("an export is validated as untrusted data, and another version is unsupport
     /firstEditSceneTimeMs/,
   );
   invalid(
+    changed(["rewoundWhileDebugging"], { restoredSceneTimeMs: 0, rewindCount: 0 }),
+    "invalid",
+    /rewindCount/,
+  );
+  invalid(
+    changed(["rewoundWhileDebugging"], { restoredSceneTimeMs: 0, rewindCount: 1, extra: 1 }),
+    "invalid",
+    /extra/,
+  );
+  invalid(
     changed(["checkpoint", "snapshot", "nextInstruction"], -5),
     "invalid",
     /\$\.checkpoint is not a valid checkpoint/,
@@ -537,6 +548,7 @@ test("the offline tool inspects without values, replays in a worker, and refuses
     assert.equal(inspected.status, 0, inspected.stderr);
     assert.match(inspected.stdout, /incident: runtimeFailure TSR036 at fault\.tease:1:/);
     assert.match(inspected.stdout, /edited while debugging: no/);
+    assert.match(inspected.stdout, /rewound while debugging: no/);
     assert.match(
       inspected.stdout,
       /replay: 7 call\(s\) \[run 4, observeTime 2, completeAction 1\]/,
@@ -547,6 +559,7 @@ test("the offline tool inspects without values, replays in a worker, and refuses
       "marked.teasedebug.json.gz",
       failedRecording("0").export({
         editedWhileDebugging: { firstEditSceneTimeMs: 123.5, editCount: 2 },
+        rewoundWhileDebugging: { restoredSceneTimeMs: 40.5, rewindCount: 3 },
       }),
     );
     const markedInspected = cli("inspect", marked);
@@ -554,6 +567,10 @@ test("the offline tool inspects without values, replays in a worker, and refuses
     assert.match(
       markedInspected.stdout,
       /edited while debugging: yes, 2 saved-value edit\(s\) from scene time 123\.5 ms/,
+    );
+    assert.match(
+      markedInspected.stdout,
+      /rewound while debugging: yes, 3 rewind\(s\), the latest to scene time 40\.5 ms/,
     );
 
     const reproduced = cli("replay", failed);

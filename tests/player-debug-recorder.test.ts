@@ -55,6 +55,7 @@ async function replay(recorder: DebugRecorder): Promise<DebugReplayResult> {
       hostError: null,
     },
     editedWhileDebugging: null,
+    rewoundWhileDebugging: null,
     selection: {
       savedValues: true,
       answers: true,

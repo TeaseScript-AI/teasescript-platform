@@ -37,6 +37,8 @@ const MODEL_PATHS_CATALOG = {
 const LAN_HOST = "player-lan.test";
 // The late-image scenario holds the first response for this image until the scenario releases it.
 const LATE_IMAGE_URL = "/dev-package/late-image/files/images/late.png";
+// The compiled spill store of Debug's rewind history, which the smoke runs against the browser's real IndexedDB.
+const DEBUG_HISTORY_MODULE_URL = "/smoke/debug-history-indexeddb.js";
 const lateImage = { hold: false, release: null };
 
 await main();
@@ -59,6 +61,15 @@ async function main() {
     if (request.url === LATE_IMAGE_URL && lateImage.hold) {
       lateImage.hold = false;
       lateImage.release = () => handleRequest(request, response);
+      return;
+    }
+    if (request.url === DEBUG_HISTORY_MODULE_URL) {
+      void readFile(new URL("../dist/player/debug-history-indexeddb.js", import.meta.url)).then(
+        (module) => {
+          response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+          response.end(module);
+        },
+      );
       return;
     }
     if (request.url !== "/dev-package/model-paths/catalog.json")
@@ -129,6 +140,7 @@ async function main() {
       await debugNowScenario(cdp, origin);
       await debugStorageScenario(cdp, origin, profile);
       await debugStorageEditScenario(cdp, origin);
+      await debugHistoryStorageScenario(cdp, origin);
       await missingMediaScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
@@ -136,7 +148,7 @@ async function main() {
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -3647,6 +3659,76 @@ async function setViewport(cdp, width, height) {
     deviceScaleFactor: 1,
     mobile: width < 600,
   });
+}
+
+/**
+ * The spill store of Debug's rewind history in the browser's IndexedDB: it keeps and deletes rows, and a sweep removes
+ * the history databases of pages that ended without deleting theirs and, once its page closes it, a live one, but never
+ * its own page's, a live database's rows meanwhile, or a database it did not name.
+ */
+async function debugHistoryStorageScenario(cdp, origin) {
+  await navigate(cdp, `${origin}/`);
+  const result = await evaluate(
+    cdp,
+    `return (async () => {
+      const spill = await import(${JSON.stringify(`${origin}${DEBUG_HISTORY_MODULE_URL}`)});
+      const prefix = "teasescript-debug-history-";
+      const names = async () =>
+        (await indexedDB.databases()).map((info) => info.name).filter((name) => name.startsWith(prefix));
+      const open = (name) =>
+        new Promise((resolve, reject) => {
+          const request = indexedDB.open(name, 1);
+          request.onupgradeneeded = () => request.result.createObjectStore("snapshots");
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      const pause = () => new Promise((resolve) => setTimeout(resolve, 300));
+      const crashed = prefix + crypto.randomUUID();
+      (await open(crashed)).close();
+      const live = prefix + crypto.randomUUID();
+      const liveConnection = await open(live);
+      const unnamed = prefix + "not-a-history";
+      (await open(unnamed)).close();
+      // Earlier scenarios left Player pages without unmounting them, which leaves their histories as a crash does.
+      const before = await names();
+      const store = await spill.openDebugHistorySpill();
+      await store.put(1, "one");
+      await store.put(2, "two");
+      await store.delete([1]);
+      const rows = [(await store.get(1)) ?? null, await store.get(2)];
+      const own = (await names()).filter((name) => !before.includes(name));
+      await spill.sweepDebugHistories();
+      await pause();
+      const afterSweep = await names();
+      const liveWrites = await new Promise((resolve) => {
+        const transaction = liveConnection.transaction("snapshots", "readwrite");
+        transaction.objectStore("snapshots").put("kept", 1);
+        transaction.oncomplete = () => resolve(true);
+        transaction.onerror = transaction.onabort = () => resolve(false);
+      });
+      const ownReads = (await store.get(2)) === "two";
+      liveConnection.close();
+      await pause();
+      const afterLiveClosed = await names();
+      await store.destroy();
+      const afterDestroy = await names();
+      indexedDB.deleteDatabase(unnamed);
+      return { rows, own, crashed, live, unnamed, afterSweep, liveWrites, ownReads, afterLiveClosed, afterDestroy };
+    })()`,
+  );
+  const { rows, own, crashed, live, unnamed } = result;
+  const sorted = (names) => [...names].sort();
+  if (
+    JSON.stringify(rows) !== JSON.stringify([null, "two"]) ||
+    own.length !== 1 ||
+    JSON.stringify(sorted(result.afterSweep)) !== JSON.stringify(sorted([own[0], live, unnamed])) ||
+    !result.liveWrites ||
+    !result.ownReads ||
+    JSON.stringify(sorted(result.afterLiveClosed)) !== JSON.stringify(sorted([own[0], unnamed])) ||
+    JSON.stringify(result.afterDestroy) !== JSON.stringify([unnamed]) ||
+    result.afterSweep.includes(crashed)
+  )
+    throw new Error(`Debug history IndexedDB store: ${JSON.stringify(result)}`);
 }
 
 async function navigate(cdp, url) {

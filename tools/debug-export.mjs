@@ -192,6 +192,12 @@ function describe(exported, values) {
       ? "edited while debugging: no"
       : `edited while debugging: yes, ${edited.editCount} saved-value edit(s) from scene time ${edited.firstEditSceneTimeMs} ms`,
   );
+  const rewound = exported.rewoundWhileDebugging;
+  lines.push(
+    rewound === null
+      ? "rewound while debugging: no"
+      : `rewound while debugging: yes, ${rewound.rewindCount} rewind(s), the latest to scene time ${rewound.restoredSceneTimeMs} ms`,
+  );
   lines.push(
     `selected: ${Object.entries(selection)
       .map(([name, on]) => `${name} ${on ? "on" : "off"}`)
