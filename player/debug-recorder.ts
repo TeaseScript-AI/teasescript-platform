@@ -16,6 +16,11 @@ export interface DebugRecording {
   readonly plan: InstructionPlan;
   readonly anchorSnapshot: RuntimeSnapshot;
   readonly operations: readonly DebugOperation[];
+  /**
+   * The state the recorded calls reach: the session's state, or, once the recording froze, the state at its last call,
+   * although the session may have observed more time since.
+   */
+  readonly endSnapshot: RuntimeSnapshot;
   /** Whether every call since the anchor is recorded; otherwise `reason` says why not. */
   readonly complete: boolean;
   readonly reason: string | null;
@@ -50,6 +55,7 @@ export class DebugRecorder {
   readonly #limits: DebugRecorderLimits;
   #plan: InstructionPlan | null = null;
   #anchor: RuntimeSnapshot | null = null;
+  #end: RuntimeSnapshot | null = null;
   #operations: DebugOperation[] = [];
   #argumentBytes = 0;
   #frozen = false;
@@ -63,6 +69,7 @@ export class DebugRecorder {
   begin(plan: InstructionPlan, anchor: RuntimeSnapshot): void {
     this.#plan = plan;
     this.#anchor = anchor;
+    this.#end = anchor;
     this.#operations = [];
     this.#argumentBytes = 0;
     this.#frozen = false;
@@ -71,11 +78,12 @@ export class DebugRecorder {
 
   /** The recording so far, or `null` before any session began. */
   recording(): DebugRecording | null {
-    if (this.#plan === null || this.#anchor === null) return null;
+    if (this.#plan === null || this.#anchor === null || this.#end === null) return null;
     return {
       plan: this.#plan,
       anchorSnapshot: this.#anchor,
       operations: [...this.#operations],
+      endSnapshot: this.#end,
       complete: this.#problem === null,
       reason: this.#problem,
     };
@@ -96,8 +104,15 @@ export class DebugRecorder {
     const prepared = this.#prepare(input, args, continuation);
     const queries: DebugAdmissionQuery[] = [];
     const admission = (store: CapturedMediaAdmission): CapturedMediaAdmission => ({
-      holds(reference, mediaKind) {
-        const result = store.holds(reference, mediaKind);
+      holds: (reference, mediaKind) => {
+        let result: boolean;
+        try {
+          result = store.holds(reference, mediaKind);
+        } catch (error) {
+          // The recording keeps only the store's answers, so a store that throws cannot be replayed.
+          this.#problem ??= "The media store failed during a recorded call.";
+          throw error;
+        }
         queries.push({ reference, kind: mediaKind, result });
         return result;
       },
@@ -145,6 +160,7 @@ export class DebugRecorder {
           this.#argumentBytes + bytes > this.#limits.argumentBytes)
       ) {
         this.#anchor = input;
+        this.#end = input;
         this.#operations = [];
         this.#argumentBytes = 0;
       }
@@ -179,6 +195,7 @@ export class DebugRecorder {
       status: after.status,
       thrown,
     });
+    this.#end = after;
     if (thrown !== null || after.status === "failed") this.#frozen = true;
   }
 }

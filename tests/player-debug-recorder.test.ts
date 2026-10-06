@@ -12,6 +12,7 @@ import {
 import { DebugRecorder } from "../player/debug-recorder.js";
 import {
   activePlayerRuntimeCapture,
+  advancePlayerRuntimeTime,
   answerPlayerRuntimeCapture,
   answerPlayerRuntimeImage,
   completePlayerRuntimeStorageWrite,
@@ -36,10 +37,7 @@ const reference = "captured-media:11111111-1111-4111-8111-111111111111:1";
 const store = { holds: (asked: string, kind: string) => asked === reference && kind === "image" };
 
 /** Exports the recorder's recording with the session's current checkpoint, writes and reads it, and replays it. */
-async function replay(
-  session: PlayerRuntimeSession,
-  recorder: DebugRecorder,
-): Promise<DebugReplayResult> {
+async function replay(recorder: DebugRecorder): Promise<DebugReplayResult> {
   const recording = recorder.recording();
   assert.ok(recording);
   const exported: DebugExport = {
@@ -64,7 +62,8 @@ async function replay(
       player: false,
     },
     omissions: [],
-    checkpoint: createCheckpoint(session.plan, session.snapshot),
+    // The export checkpoints the state the recorded calls reach.
+    checkpoint: createCheckpoint(recording.plan, recording.endSnapshot),
     checkpointRole: "current",
     replay: {
       anchorSnapshot: recording.anchorSnapshot,
@@ -149,7 +148,7 @@ test("the recorder records every Player engine seam so that a replay reproduces 
     "reportMediaLoad",
     "run",
   ]);
-  assert.equal(await replay(session, recorder).then((result) => result.kind), "reproduced");
+  assert.equal(await replay(recorder).then((result) => result.kind), "reproduced");
 
   session = restorePlayerRuntimeSession(restorePoint, recorder);
   session = continuePlayerRuntimeSession(session, {
@@ -166,7 +165,7 @@ test("the recorder records every Player engine seam so that a replay reproduces 
     "recordContinueCapture",
     "a restored session records from its Continue",
   );
-  assert.deepEqual(await replay(session, recorder), {
+  assert.deepEqual(await replay(recorder), {
     kind: "reproduced",
     failure: null,
     operations: continued.operations.length,
@@ -234,7 +233,7 @@ test("a recording outgrowing its limits starts again before a Player call and st
   const recording = recorder.recording()!;
   assert.equal(recording.complete, true);
   assert.notEqual(recording.anchorSnapshot.observedSessionTimeMs, 0, "the anchor moved forward");
-  assert.equal((await replay(session, recorder)).kind, "reproduced");
+  assert.equal((await replay(recorder)).kind, "reproduced");
 });
 
 test("a failure freezes the recording, from the first run on, and a too large call makes it incomplete", async () => {
@@ -243,25 +242,43 @@ test("a failure freezes the recording, from the first run on, and a too large ca
     recorder,
   });
   assert.equal(failed.snapshot.status, "failed");
-  observePlayerRuntimeTime(failed, 1_000);
+  // The Player still observes time after a failure, as on hiding the page; the published state moves on.
+  const latest = observePlayerRuntimeTime(failed, 1_000).session;
+  assert.equal(latest.snapshot.observedSessionTimeMs, 1_000);
   assert.deepEqual(
     recorder.recording()!.operations.map((operation) => [operation.kind, operation.status]),
     [["run", "failed"]],
     "later calls do not replace the evidence",
   );
-  const result = await replay(failed, recorder);
+  assert.equal(
+    recorder.recording()!.endSnapshot,
+    failed.snapshot,
+    "the recording ends where it froze",
+  );
+  const result = await replay(recorder);
   assert.ok(result.kind === "reproduced" && result.failure?.code === failed.snapshot.failure?.code);
 
-  const small = new DebugRecorder({ argumentBytes: 50 });
-  const waiting = createPlayerRuntimeSession('let name = askText "Name"\nexit', {
-    recorder: small,
+  // A development time jump past a failure: the recording reaches the failure, not the later observed time.
+  const jumped = new DebugRecorder();
+  const waiting = createPlayerRuntimeSession("wait 1\nlet zero = 0\nlet result = 1 / zero\nexit", {
+    recorder: jumped,
   });
-  submitPlayerRuntimeComposer(waiting, "x".repeat(100));
+  const advanced = advancePlayerRuntimeTime(waiting, 5_000);
+  assert.equal(advanced.snapshot.status, "failed");
+  const jumpedResult = await replay(jumped);
+  assert.ok(
+    jumpedResult.kind === "reproduced" && jumpedResult.failure !== null,
+    JSON.stringify(jumpedResult),
+  );
+
+  const small = new DebugRecorder({ argumentBytes: 50 });
+  const asking = createPlayerRuntimeSession('let name = askText "Name"\nexit', { recorder: small });
+  submitPlayerRuntimeComposer(asking, "x".repeat(100));
   assert.deepEqual(
     [small.recording()!.complete, small.recording()!.reason],
     [false, "A recorded call was larger than the recording keeps."],
   );
-  assert.equal((await replay(waiting, small)).kind, "incomplete");
+  assert.equal((await replay(small)).kind, "incomplete");
 });
 
 test("a call the recorder cannot copy still runs exactly as without it", () => {
@@ -279,5 +296,23 @@ test("a call the recorder cannot copy still runs exactly as without it", () => {
   assert.deepEqual(
     [recorder.recording()!.complete, recorder.recording()!.reason],
     [false, "The recorder could not copy a call."],
+  );
+});
+
+test("a media store that throws during a recorded call leaves the recording incomplete", () => {
+  const recorder = new DebugRecorder();
+  const session = createPlayerRuntimeSession(
+    'let picture = askImage("Picture", allowCamera: false)\nexit',
+    { recorder },
+  );
+  const failing = {
+    holds: (): boolean => {
+      throw new Error("store unavailable");
+    },
+  };
+  assert.throws(() => answerPlayerRuntimeImage(session, reference, failing), /store unavailable/);
+  assert.deepEqual(
+    [recorder.recording()!.complete, recorder.recording()!.reason],
+    [false, "The media store failed during a recorded call."],
   );
 });
