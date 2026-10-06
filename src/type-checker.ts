@@ -702,14 +702,15 @@ class TypeChecker {
    */
   readonly #forms = new Map<
     InteractionExpression,
-    {
-      readonly kind: "object";
-      readonly fields: readonly {
-        readonly name: string;
-        readonly start: StaticType | null;
-        readonly answer: StaticType;
-      }[];
-    }
+    | {
+        readonly kind: "object";
+        readonly fields: readonly {
+          readonly name: string;
+          readonly start: StaticType | null;
+          readonly answer: StaticType;
+        }[];
+      }
+    | { readonly kind: "dict"; readonly start: StaticType | null; readonly answer: StaticType }
   >();
 
   /** Stores of values the compiler cannot know, kept until every type they depend on is decided. */
@@ -1058,20 +1059,35 @@ class TypeChecker {
   /** The result shape of each `askForm`, with whether each numeric field is an integer or a number field. */
   public formShapes(): ReadonlyMap<InteractionExpression, PreparedFormShape> {
     const shapes = new Map<InteractionExpression, PreparedFormShape>();
+    const numericKind = (start: StaticType | null): FormNumericKind | null => {
+      const type = start === null ? null : resolved(nonNullType(start));
+      return type === null
+        ? null
+        : isScalar(type, "integer")
+          ? "integer"
+          : isScalar(type, "number")
+            ? "number"
+            : null;
+    };
     for (const [expression, form] of this.#forms) {
+      if (form.kind === "dict") {
+        shapes.set(expression, {
+          kind: "dict",
+          numericKind: numericKind(form.start),
+          answer: typePlan(form.answer),
+        });
+        continue;
+      }
       const numericKinds: { readonly name: string; readonly numericKind: FormNumericKind }[] = [];
       const answers: { readonly name: string; readonly type: TypePlan }[] = [];
       for (const { name, start, answer } of form.fields) {
-        const type = start === null ? null : resolved(nonNullType(start));
-        if (type !== null && isScalar(type, "integer"))
-          numericKinds.push({ name, numericKind: "integer" });
-        else if (type !== null && isScalar(type, "number"))
-          numericKinds.push({ name, numericKind: "number" });
+        const kind = numericKind(start);
+        if (kind !== null) numericKinds.push({ name, numericKind: kind });
         // The form checks when it opens that each field answers within the type given here.
         const checked = typePlan(answer);
         if (checked !== null) answers.push({ name, type: checked });
       }
-      shapes.set(expression, { kind: form.kind, numericKinds, answers });
+      shapes.set(expression, { kind: "object", numericKinds, answers });
     }
     return shapes;
   }
@@ -3018,18 +3034,49 @@ class TypeChecker {
     if (fields === null) return UNKNOWN_TYPE;
     const container = resolved(nonNullType(fields.type));
     if (container.kind === "dict") {
-      this.#report(
-        typeCode.invalidOperand,
-        "A dict of fields is not supported yet; write the fields as an object, such as 'fields: { enabled: false }'.",
-        fields.expression.span,
-      );
-      return UNKNOWN_TYPE;
+      // A written dict shows every field, so its answers are typed field by field.
+      const literal = unwrap(fields.expression);
+      if (literal.kind === "dictLiteral" && literal.entries.length > 0) {
+        const entries = literal.entries.map((entry) => ({
+          entry,
+          field: this.#formField(
+            staticText(entry.key) ?? "?",
+            this.#typeOf(entry.value),
+            entry.value,
+          ),
+        }));
+        // The form has one number kind for the dict's fields without `type:`.
+        const starts = entries.filter(({ field }) => field.start !== null);
+        const kinds = new Set(
+          starts.map(({ field }) =>
+            isScalar(resolved(nonNullType(field.start!)), "integer") ? "integer" : "number",
+          ),
+        );
+        if (kinds.size > 1)
+          for (const { entry } of starts)
+            this.#report(
+              typeCode.invalidOperand,
+              `askForm field '${staticText(entry.key) ?? "?"}': its dict mixes whole and decimal numbers; add type: "integer" or type: "number".`,
+              entry.value.span,
+            );
+        const element = union(entries.map(({ field }) => field.result));
+        this.#forms.set(expression, {
+          kind: "dict",
+          start: kinds.size === 1 ? starts[0]!.field.start : null,
+          answer: element,
+        });
+        return { kind: "dict", element };
+      }
+      // Otherwise every field has the type of the dict's values.
+      const field = this.#formField("?", container.element, undefined);
+      this.#forms.set(expression, { kind: "dict", start: field.start, answer: field.result });
+      return { kind: "dict", element: field.result };
     }
     if (container.kind !== "object") {
       if (isKnown(container))
         this.#report(
           typeCode.invalidOperand,
-          `'fields:' takes an object of fields, such as 'fields: { enabled: false }', not ${describeValue(container)}.`,
+          `'fields:' takes an object or dict of fields, such as 'fields: { enabled: false }', not ${describeValue(container)}.`,
           fields.expression.span,
         );
       this.#forms.set(expression, { kind: "object", fields: [] });

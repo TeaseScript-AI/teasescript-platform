@@ -1114,7 +1114,8 @@ temporary then holds the canonical definition, so restore checks the pending for
 speaker says the fields' descriptions and the outro in one `say` event with prose presentation, a line
 `<label> — <description>` per described field and the outro as the last paragraph, before `actionRequested`; a
 description is text shown as `say` shows it, and nothing is said without either. The compiler's type check gives the
-result its type: a property per field, typed by the field's start or written descriptor.
+result its type: a property per field, typed by the field's start or written descriptor, or for a dict of fields a dict
+of the answer type its values give every field, or of the generic answer union when that kind is not known.
 
 The action's UI is the definition: `shape`, `fields`, `hint`, and `submit`. A field has a unique `id` (the property
 name or dict key; `askBooleans` numbers its fields `0`, `1`, ...), a `text` label, a `kind` (`boolean`, `cycle`,

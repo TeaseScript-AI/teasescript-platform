@@ -1940,9 +1940,9 @@ button is chosen.
 
 ### Forms
 
-**Status:** Accepted (Owner decisions on #512, 2026-10-06). `askForm` is implemented for an object of fields of every
-kind, with descriptions and `outro:` ([RUNTIME.md](../RUNTIME.md#forms)); a dict of fields, `cancel:`, `askBooleans`,
-and `timeout:` are not yet, and the compiler reports them.
+**Status:** Accepted (Owner decisions on #512, 2026-10-06). `askForm` is implemented for an object or a dict of fields of
+every kind, with descriptions and `outro:` ([RUNTIME.md](../RUNTIME.md#forms)); `cancel:`, `askBooleans`, and
+`timeout:` are not yet, and the compiler reports them.
 
 `askForm` asks for several values at once. Its buttons stay in place while the player changes them, and nothing is
 returned until the player submits:
@@ -2037,10 +2037,20 @@ When the compiler can prove that every field of a dict has one kind, from the di
 written `type:` or `value:`, the result is a dict of that answer type, such as an `integer dict`; it is an
 `integer? dict` when a field may be `optional:`. Otherwise, as for an `object dict` of descriptors of different kinds
 with explicit `type:`, the result is a
-`(boolean | number | string | date | time | datetime | duration | timestamp | null) dict`, since a cycle may return
-any choice value but `null`; read an answer into a local and narrow it with `is`
-([§13](#13-explicit-types)). A dict of fields must not be empty, and each of its descriptors is checked when the form
-opens; an invalid one is an error that names its key.
+`(boolean | number | string | date | time | datetime | duration | timestamp | null) dict` (a cycle may return any
+choice value); read an answer into a local and narrow it with `is` ([§13](#13-explicit-types)):
+
+```text
+let menu: object dict = dict {}
+menu["impact"] = { type: "number", value: 2.5, min: 1, max: 10 }
+menu["day"] = { type: "date", optional: true }
+let answers = askForm "Adjust", fields: menu
+let impact = answers["impact"]
+if impact is number { say impact + 1 }
+```
+
+A dict of fields must not be empty, and each of its descriptors is checked when the form opens; an invalid one is an
+error that names its key.
 
 Remembered settings are loaded as the starts, and the result is saved:
 
