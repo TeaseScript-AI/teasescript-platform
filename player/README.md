@@ -144,13 +144,18 @@ the `Debug` and `Auto-skip` switches, the `Skip event`, `+10 s` and `+1 min` but
 `-calls` (and `-calls-toggle`), `-image` (its badge's `data-status`), `-image-path`, `-media`, and `-timers` (and
 `-timers-toggle`), the tabs by `[data-debug-tab]`, the Storage tab's `[data-debug-storage]` with `-summary`, `-row`
 (`-key`), `-photos` and `-refresh`, each value's `[data-storage-preview]`, `[data-storage-expand]` and
-`[data-storage-more]`, a thumbnail's
+`[data-storage-more]`, the editor's `-add`, `-edit` and `-delete` buttons, its `[data-storage-editor]` dialog with
+`-key`, `-type`, `-value`, `-flag`, `-problem` and `-save`, the result in `[data-debug-storage-saved]`, the
+`[data-debug-storage-edited]` mark, a thumbnail's
 `[data-storage-photo]` with its `data-state` (`loading`, `ready`, `missing`), the log lines under `[data-debug-log]` in
 the Log tab, and the latest announcement in `[data-debug-announcement]`. The Storage tab (`DebugStorage.vue`) reads
 the saved values through the session host's `readSavedData`, refreshes on its `savedDataRevision` and on `storage`
 events for its `savedDataScope`, renders each value as the flat, paged outline of `storageOutline`
 (`player/storage-preview.ts`, `StorageValue.vue`), and loads a thumbnail through `savedPhoto` only once it is in view,
-keyed by its reference.
+keyed by its reference. `StorageEditDialog.vue` edits through the host's `editSavedData`, which stores the edit through
+the provider first, then applies it with the recorded `applyPlayerRuntimeStorageEdit`; a script write waiting for the
+host is settled with `completePlayerRuntimeStorageWrite(..., { continueRun: false })` before it, and the edit runs the
+session on. `debugEdits` holds the Edited-while-debugging mark for the debug export's `editedWhileDebugging`.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
 [`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's

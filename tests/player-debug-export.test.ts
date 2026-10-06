@@ -149,6 +149,7 @@ class Recording {
         column: failure === null ? null : failure.span.start.column + 1,
         hostError: null,
       },
+      editedWhileDebugging: null,
       selection: allSelected,
       omissions: [],
       checkpoint: createCheckpoint(this.plan, this.snapshot),
@@ -425,6 +426,11 @@ test("an export is validated as untrusted data, and another version is unsupport
   invalid(changed(["checkpoint", "version"], 1), "unsupported", /checkpoint of another revision/);
   invalid(changed(["extra"], 1), "invalid", /unknown field "extra"/);
   invalid(
+    changed(["editedWhileDebugging"], { firstEditSceneTimeMs: 0, editCount: 0 }),
+    "invalid",
+    /editCount/,
+  );
+  invalid(
     changed(["checkpoint", "snapshot", "nextInstruction"], -5),
     "invalid",
     /\$\.checkpoint is not a valid checkpoint/,
@@ -525,6 +531,7 @@ test("the offline tool inspects without values, replays in a worker, and refuses
     const inspected = cli("inspect", failed);
     assert.equal(inspected.status, 0, inspected.stderr);
     assert.match(inspected.stdout, /incident: runtimeFailure TSR036 at fault\.tease:1:/);
+    assert.match(inspected.stdout, /edited while debugging: no/);
     assert.match(
       inspected.stdout,
       /replay: 7 call\(s\) \[run 4, observeTime 2, completeAction 1\]/,
@@ -738,7 +745,12 @@ test("a Debug storage edit replays from its recorded request, refused ones inclu
       ["run", "ran"],
     ],
   );
-  const result = replayDebugExport(await roundTrip(recording.export()));
+  // The mark says the session was edited, also for edits before the anchor, which the calls cannot show.
+  const marked = await roundTrip(
+    recording.export({ editedWhileDebugging: { firstEditSceneTimeMs: 0, editCount: 1 } }),
+  );
+  assert.deepEqual(marked.editedWhileDebugging, { firstEditSceneTimeMs: 0, editCount: 1 });
+  const result = replayDebugExport(marked);
   assert.equal(result.kind, "reproduced");
   // Without the edit the session would not fail: the edit is part of what reproduces it.
   const unedited = new Recording(compiled.plan);

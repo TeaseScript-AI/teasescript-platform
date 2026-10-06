@@ -1075,11 +1075,14 @@ export function playerRuntimePermanentButtons(
 
 /**
  * Applies a debugging tool's edit of one script-storage key to the session's view (`applyExternalStorageEdit`):
- * `value: null` removes the key. It runs no instruction, so nothing continues; the host persists the edit first.
+ * `value: null` removes the key. It runs no instruction, so nothing continues, unless `continueRun` asks to run the
+ * session on after an applied edit: after a write settled without running on, the script then continues only once the
+ * edit is in its view. The host persists the edit first.
  */
 export function applyPlayerRuntimeStorageEdit(
   session: PlayerRuntimeSession,
   edit: { readonly key: string; readonly value: SerializableRuntimeValue },
+  options: { readonly continueRun?: boolean } = {},
 ): PlayerRuntimeControlResult<ExternalStorageEditOutcome> {
   const operation = recorded(
     session.recorder,
@@ -1095,7 +1098,12 @@ export function applyPlayerRuntimeStorageEdit(
       ),
   );
   return Object.freeze({
-    session: applyOperation(session, operation.snapshot, operation.events, false),
+    session: applyOperation(
+      session,
+      operation.snapshot,
+      operation.events,
+      operation.outcome.kind === "applied" && options.continueRun === true,
+    ),
     outcome: operation.outcome,
   });
 }
@@ -1208,6 +1216,8 @@ export function completePlayerRuntimeStorageWrite(
   session: PlayerRuntimeSession,
   actionId: number,
   stored: boolean,
+  /** `false` settles the write without running on, so a Debug storage edit can come first; see `applyPlayerRuntimeStorageEdit`. */
+  options: { readonly continueRun?: boolean } = {},
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> {
   const request = {
     actionId,
@@ -1222,7 +1232,7 @@ export function completePlayerRuntimeStorageWrite(
       session,
       operation.snapshot,
       operation.events,
-      operation.outcome.kind === "completed",
+      operation.outcome.kind === "completed" && options.continueRun !== false,
     ),
     outcome: operation.outcome,
   });

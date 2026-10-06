@@ -411,8 +411,8 @@ the stage-shape goal remain provisional visual inputs, not additional device mod
 `Visual Lab` and `Layout Debug` are development-preview tools, not Standard Player product tools. The Debug panel is
 the Standard Player's platform Debugger tool ([DEBUGGER.md](../DEBUGGER.md#player-debug)); it appears first in the
 tools menu while Player Settings' Debug menu is on, and turning that menu off removes it from every panel state. Its
-time controls stand above its tabs (shadcn-vue Tabs): Now, Log, and Storage when the host persists script storage; Now
-and Storage wrap long paths, keys, and values so they fit the narrow drawer.
+time controls stand above its tabs (shadcn-vue Tabs): Now, Log, and Storage, with its saved-value editor in a Dialog,
+when the host persists script storage; Now and Storage wrap long paths, keys, and values so they fit the narrow drawer.
 
 ## Session start and user activation
 

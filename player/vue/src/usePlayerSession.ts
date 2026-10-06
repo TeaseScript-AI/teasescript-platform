@@ -22,6 +22,7 @@ import { MediaDevice, MediaLoadQueue, type MediaDeviceElement } from "../../medi
 import {
   activePlayerRuntimeInteraction,
   completePlayerRuntimeStorageWrite,
+  applyPlayerRuntimeStorageEdit,
   continuePlayerRuntimeSession,
   playerTemporalContext,
   pendingPlayerRuntimeStorageWrite,
@@ -60,11 +61,14 @@ import {
   playerNotices,
   type PlayerNotice,
 } from "../../notices.js";
-import type {
-  CapturedMediaAdmission,
-  RuntimeScriptStorageEntrySnapshot,
-  TemporalContext,
+import {
+  validateScriptStorageEntries,
+  type CapturedMediaAdmission,
+  type RuntimeScriptStorageEntrySnapshot,
+  type SerializableRuntimeValue,
+  type TemporalContext,
 } from "../../../src/index.js";
+import { serializeValidatedRuntimeJson } from "../../../src/runtime/checkpoint.js";
 import { silence } from "./generatedAudio";
 import { useImageCapture } from "./useImageCapture";
 import { useRuntimeSceneClock } from "./useRuntimeSceneClock";
@@ -458,13 +462,17 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       function report(stored: boolean) {
         writesInFlight.delete(flight);
         // A write that settles after unmount must not continue the session.
-        if (disposed) return;
+        if (disposed) return handOffWrite(null);
         const latest = session.value;
         // The report must belong to the session that requested it.
-        if (generation.value !== sessionGeneration || latest === null) return;
-        if (pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write!.actionId) return;
+        if (generation.value !== sessionGeneration || latest === null) return handOffWrite(null);
+        if (pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write!.actionId)
+          return handOffWrite(null);
         if (!stored) notices.publish(playerNotices.storageWriteFailed());
         else savedDataRevision.value++;
+        // A Debug storage edit waiting for this write settles it itself, before the script continues.
+        if (handOffWrite({ actionId: write!.actionId, stored, generation: sessionGeneration }))
+          return;
         session.value = completePlayerRuntimeStorageWrite(latest, write!.actionId, stored).session;
       }
     },
@@ -478,6 +486,153 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const openingCamera = ref(false);
   // While an import replaces the saved data, no Start, Continue, or clear begins.
   const importing = ref(false);
+  // Debug storage edits (DEBUGGER.md "Player Debug"), one at a time. An edit is persisted first and reaches the running
+  // session only once that succeeded, through the engine's storage-edit input. While the script's own write waits for
+  // the host, the edit waits for that write's result: the write is then settled without running on, the edit follows,
+  // and only then does the script continue, so its next `load` returns the edit.
+  type SettledWrite = {
+    readonly actionId: number;
+    readonly stored: boolean;
+    readonly generation: number;
+  };
+  let writeWaiter: ((write: SettledWrite | null) => void) | null = null;
+  /** Gives a settled write to a waiting edit; `null` when that write no longer belongs to the session. */
+  function handOffWrite(write: SettledWrite | null): boolean {
+    const waiter = writeWaiter;
+    if (waiter === null) return false;
+    writeWaiter = null;
+    waiter(write);
+    return write !== null;
+  }
+  let editChain: Promise<unknown> = Promise.resolve();
+  // Which session Debug changed the saved values of, for its debug export: when and how often.
+  const debugEdits = shallowRef<{
+    readonly firstEditSceneTimeMs: number;
+    readonly editCount: number;
+  } | null>(null);
+  /** Whether a running or waiting session takes an edit now; one that waits for Continue or the camera does not. */
+  const liveSession = () =>
+    session.value !== null &&
+    (session.value.snapshot.status === "running" || session.value.snapshot.status === "waiting") &&
+    activation.value === null &&
+    !openingCamera.value;
+
+  /**
+   * Changes one saved value for Debug: `value: null` deletes the key. `expected` is the value the editor started from,
+   * `undefined` for a new key; a saved value that changed meanwhile is reported, not overwritten. The edit is persisted
+   * first; a running session's next `load` then returns it, and values it already loaded keep what they loaded.
+   */
+  function editSavedData(edit: {
+    readonly key: string;
+    readonly value: SerializableRuntimeValue;
+    readonly expected: SerializableRuntimeValue | undefined;
+  }): Promise<SavedDataEditResult> {
+    const result = editChain.then(() => applySavedDataEdit(edit));
+    editChain = result.catch(() => undefined);
+    return result;
+  }
+  async function applySavedDataEdit({
+    key,
+    value,
+    expected,
+  }: {
+    readonly key: string;
+    readonly value: SerializableRuntimeValue;
+    readonly expected: SerializableRuntimeValue | undefined;
+  }): Promise<SavedDataEditResult> {
+    const failed = (message: string) => ({ kind: "failed", message }) as const;
+    if (!scriptStorage || storedEntries.value === null)
+      return failed("This browser's saved data cannot be read.");
+    if (
+      importing.value ||
+      clearing.value ||
+      openingCamera.value ||
+      activation.value?.kind === "continue"
+    )
+      return failed("Saved data cannot be changed right now.");
+    if (value !== null) {
+      const problem = validateScriptStorageEntries([{ key, value }], "value");
+      if (problem !== null) return failed(problem);
+    }
+    let current: readonly RuntimeScriptStorageEntrySnapshot[];
+    try {
+      current = await scriptStorage.load();
+    } catch {
+      return failed("This browser's saved data cannot be read.");
+    }
+    const now = current.find((entry) => entry.key === key)?.value;
+    if (!sameSavedValue(now, expected)) return { kind: "changed" };
+
+    const sessionGeneration = generation.value;
+    const waitForWrite = () =>
+      new Promise<SettledWrite | null>((resolve) => {
+        writeWaiter = resolve;
+      });
+    let settled: SettledWrite | null = null;
+    for (;;) {
+      if (liveSession() && pendingPlayerRuntimeStorageWrite(session.value!.snapshot))
+        settled = await waitForWrite();
+      try {
+        await scriptStorage.write(key, value);
+      } catch {
+        if (settled !== null) settle(settled, true);
+        return failed("The change could not be saved in this browser. Nothing changed.");
+      }
+      savedDataRevision.value++;
+      if (!liveSession() || generation.value !== sessionGeneration) {
+        if (settled !== null) settle(settled, true);
+        void loadScriptStorage();
+        return { kind: "saved", live: false };
+      }
+      // Acknowledge the waiting write without running on, then edit, then run, in one step.
+      let latest = session.value!;
+      let settledWithoutRun = false;
+      if (settled !== null) {
+        if (pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId === settled.actionId) {
+          latest = completePlayerRuntimeStorageWrite(latest, settled.actionId, settled.stored, {
+            continueRun: false,
+          }).session;
+          settledWithoutRun = true;
+        }
+        settled = null;
+      }
+      const edited = applyPlayerRuntimeStorageEdit(
+        latest,
+        { key, value },
+        { continueRun: settledWithoutRun },
+      );
+      // A write the script issued while this edit was being stored settles first; the edit is stored again after it.
+      if (edited.outcome.kind === "storageWritePending") {
+        session.value = latest;
+        continue;
+      }
+      session.value = edited.session;
+      if (edited.outcome.kind === "applied") {
+        const count = debugEdits.value?.editCount ?? 0;
+        debugEdits.value = {
+          firstEditSceneTimeMs:
+            debugEdits.value?.firstEditSceneTimeMs ?? latest.snapshot.observedSessionTimeMs,
+          editCount: count + 1,
+        };
+      }
+      void loadScriptStorage();
+      return { kind: "saved", live: edited.outcome.kind === "applied" };
+    }
+
+    /** Settles a write that waited for this edit as it would have been without it, running on. */
+    function settle(write: SettledWrite, run: boolean) {
+      const latest = session.value;
+      if (
+        latest === null ||
+        generation.value !== write.generation ||
+        pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write.actionId
+      )
+        return;
+      session.value = completePlayerRuntimeStorageWrite(latest, write.actionId, write.stored, {
+        continueRun: run,
+      }).session;
+    }
+  }
   const canClearScriptStorage = computed(
     () =>
       scriptStorage !== undefined &&
@@ -649,6 +804,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // A failed write concerns the run it happened in.
     notices.dismiss(playerNoticeKeys.storageWriteFailed);
     reportedMedia = new Set();
+    debugEdits.value = null;
     device.reset();
     loads.clear();
     pendingLoadCount.value = 0;
@@ -805,6 +961,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         ? scriptStorage.load()
         : Promise.reject(new Error("This script keeps no saved data.")),
     savedDataRevision: computed(() => savedDataRevision.value),
+    editSavedData,
+    /** Whether Debug can change saved values now, and whether a running session takes the change too. */
+    savedDataEditing: computed(() => ({
+      available:
+        scriptStorage !== undefined &&
+        storedEntries.value !== null &&
+        !importing.value &&
+        !clearing.value &&
+        !openingCamera.value &&
+        activation.value?.kind !== "continue",
+      live: liveSession(),
+    })),
+    /** Whether Debug changed this session's saved values: from which scene time and how often; for its debug export. */
+    debugEdits: computed(() => debugEdits.value),
     /** The host's storage scope of this script's saved values, or `null` without script storage. */
     savedDataScope: scriptStorage?.scope ?? null,
     /** A saved photo, loaded on first use: its URL once ready, or whether it still loads or is missing. */
@@ -1006,4 +1176,20 @@ export interface SavedDataImportScript {
   readonly currentValues: number;
   /** Whether it is the script this Player shows, whose session an import ends. */
   readonly shown: boolean;
+}
+
+/** What a Debug storage edit did: saved (and taken by the running session when `live`), not saved, or overtaken. */
+export type SavedDataEditResult =
+  | { readonly kind: "saved"; readonly live: boolean }
+  /** The saved value changed since the editor read it; nothing was written. */
+  | { readonly kind: "changed" }
+  | { readonly kind: "failed"; readonly message: string };
+
+/** Whether two saved values are the same, comparing their stored form; `undefined` is an absent key. */
+function sameSavedValue(
+  left: SerializableRuntimeValue | undefined,
+  right: SerializableRuntimeValue | undefined,
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return serializeValidatedRuntimeJson(left) === serializeValidatedRuntimeJson(right);
 }

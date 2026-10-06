@@ -617,7 +617,10 @@ timer, and the Stage image as unresolved, failed, hidden, and displayed in turn,
 tab on the `debug-storage` package lists the saved values in key order with typed previews, keeps reference-shaped text
 visible and says when it names no saved photo, shows the saved photo once with both keys that use it and expands a list
 to it, updates after a later save without reading a changed photo reference before it is in view, hides with Debug
-off, and fits the narrow drawer. With auto-skip, the `missing-media` package, which refers to a
+off, and fits the narrow drawer. Its editor on the `debug-storage-edit` package refuses a malformed number inline and
+stores nothing, stores an added value that the running session's next load returns while the earlier load stays,
+marks the session edited, changes the value to text and deletes it, fits a narrow screen, and after the session ended
+stores a deletion for the next Start. With auto-skip, the `missing-media` package, which refers to a
 missing and an invalid image and sound, reaches its end at once, with one warning notice per path and a valid image
 restoring the Stage; in `late-image`, an invalid image that fails only after the script hid it and showed a valid one
 neither hides that image nor is reported.

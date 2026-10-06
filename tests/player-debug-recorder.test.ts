@@ -54,6 +54,7 @@ async function replay(recorder: DebugRecorder): Promise<DebugReplayResult> {
       column: null,
       hostError: null,
     },
+    editedWhileDebugging: null,
     selection: {
       savedValues: true,
       answers: true,
@@ -376,4 +377,32 @@ test("a value the engine produced, such as a saved list, is recorded as an argum
   assert.ok(
     result.kind === "reproduced" && result.failure?.code === session.snapshot.failure?.code,
   );
+});
+
+test("a write settled without running on, then an edit that runs on, record in that order and replay", async () => {
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(
+    'save 1 as "k"\nlet loaded = load("k")\nsay "Loaded ${loaded}"\nexit',
+    { recorder, persistentScriptStorage: true },
+  );
+  const write = pendingPlayerRuntimeStorageWrite(session.snapshot);
+  assert.ok(write);
+  session = completePlayerRuntimeStorageWrite(session, write.actionId, true, {
+    continueRun: false,
+  }).session;
+  assert.equal(session.snapshot.status, "running");
+  const edited = applyPlayerRuntimeStorageEdit(
+    session,
+    { key: "k", value: 2 },
+    { continueRun: true },
+  );
+  assert.equal(edited.outcome.kind, "applied");
+  assert.equal(edited.session.snapshot.status, "halted");
+  const last = edited.session.transcriptEntries.at(-1);
+  assert.equal(last?.kind === "message" ? last.text : undefined, "Loaded 2");
+  assert.deepEqual(
+    recorder.recording()!.operations.map((operation) => operation.kind),
+    ["run", "completeAction", "applyExternalStorageEdit", "run"],
+  );
+  assert.equal((await replay(recorder)).kind, "reproduced");
 });
