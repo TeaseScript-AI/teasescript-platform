@@ -33,10 +33,11 @@ import {
  * ({@link explore}).
  *
  * - States are deduplicated by `stateKeys`: a hash of the snapshot without what a script cannot observe.
- * - Search order: directed states first ({@link DIRECTED_STEPS}), then states whose step reached new instructions,
- *   then states that differ from every explored one in more than clock, random state, and settled handles (their loop
- *   key), then the rest, least repeated first; within each, play before seeded and the newest first.
- * - Directed search ({@link Directed}) aims at each condition that a step reached but left only one way.
+ * - Search order: states of a directed attempt first ({@link Lead}), then play states, then seeded ones; within each,
+ *   states whose step reached new instructions first, then states that differ from every explored one in more than
+ *   clock, random state, and settled handles (their loop key), then the rest, least repeated first; and the newest
+ *   first.
+ * - Directed search (see {@link explore}) aims at each condition that a step reached but left only one way.
  * - Traps are described at {@link findTraps}.
  * - Coverage labels: a line is `play` when a play step executed it, `seeded` when only steps after a seeded input or
  *   from a seeded start did, `unreachable` when no execution can reach it from the session start (constant conditions
@@ -51,8 +52,15 @@ function list(value: unknown): Data[] {
   return Array.isArray(value) ? value.filter(isRecord) : [];
 }
 
-/** Steps after a directed input that keep the first place in the search order. */
-const DIRECTED_STEPS = 20;
+/** Expansions the states of one directed attempt keep the first place in the search order for, in all. */
+const ATTEMPT_EXPANSIONS = 20;
+/** Expansions, in all, that states closer to a target's comparison keep the first place for. */
+const CLOSER_EXPANSIONS = 40;
+/**
+ * The part of all steps that directed work may take: directed attempts, and expansions of states in the first place.
+ * Above it, play goes first again until it has caught up.
+ */
+const DIRECTED_SHARE = 1 / 3;
 /** Expansions between two passes of directed search over the conditions left one way, or a tenth of the budget. */
 const ANALYZE_EVERY = 50;
 /** Directed attempts per condition way. */
@@ -87,8 +95,10 @@ interface Node {
   readonly setup: number;
   /** Whether the path started seeded or contains a seeded input. */
   readonly seeded: boolean;
-  /** Steps it and its descendants keep the first place in the search order. */
-  directed: number;
+  /** The directed attempt, or closeness to a comparison, whose first place it shares; null for none. */
+  readonly lead: Lead | null;
+  /** Its place in the search order apart from a lead: the tier, how often its loop key was seen, and its ID. */
+  readonly rank: readonly number[];
   status: NodeStatus;
   readonly edges: number[];
   readonly texts: readonly string[];
@@ -345,6 +355,15 @@ function before(left: readonly number[], right: readonly number[]): boolean {
   return false;
 }
 
+/**
+ * The first place in the search order, shared by the states of one directed attempt (or by the states closer to one
+ * target's comparison) for a number of expansions in all, and only until the target is reached.
+ */
+interface Lead {
+  remaining: number;
+  readonly target: number;
+}
+
 /** A condition way that directed search aims at. */
 interface Target {
   readonly instruction: number;
@@ -393,8 +412,9 @@ interface Witness {
  * - the clock: the player continues at other wall clock times before the witness step (`seeded`);
  * - a variable the code counts or sets: states closer to the comparison, by `distance`, take the first place.
  *
- * Each attempt's states keep the first place for {@link DIRECTED_STEPS} steps. Directed attempts and the rest of the
- * search take turns, by steps.
+ * An attempt's states share the first place for {@link ATTEMPT_EXPANSIONS} expansions in all, until the target is
+ * reached; states closer to a variable's comparison share it for {@link CLOSER_EXPANSIONS}. Directed work takes at
+ * most {@link DIRECTED_SHARE} of all steps.
  */
 export function explore(engine: Engine, plan: Data, options: ExploreOptions): ExploreResult {
   const started = performance.now();
@@ -421,7 +441,10 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   /** Values play stored, by key, for seeding a key elsewhere. */
   const observed = new Map<string, Map<string, StoredValue>>();
   let transitions = 0;
+  /** Steps of directed attempts. */
   let directedTransitions = 0;
+  /** Steps of directed attempts and of expansions in the first place. */
+  let directedWork = 0;
   let attemptCount = 0;
   let expanded = 0;
   let rejectedInputs = 0;
@@ -436,14 +459,24 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   };
 
   /** Adds the state a step reached, or finds it among the explored ones; records witnesses, targets, and crashes. */
+  const withinShare = () => directedWork <= transitions * DIRECTED_SHARE;
+  const active = (lead: Lead | null): lead is Lead =>
+    lead !== null && lead.remaining > 0 && targets.get(lead.target)?.reach == null && withinShare();
+  /** The order of a state: directed first, then play, then seeded; within those by tier, repeats, and newest. */
+  const order = (node: Node): readonly number[] => [
+    active(node.lead) ? 0 : node.seeded ? 2 : 1,
+    ...node.rank,
+  ];
+
   const transition = (
     parent: Node | null,
     input: ExplorerInput | null,
     step: Step,
     setup: number,
-    directed: number,
+    lead: Lead | null,
   ): Node => {
     const seeded = (parent?.seeded ?? setup !== 0) || (input !== null && isSeeding(input));
+    const inherited = lead ?? (parent !== null && active(parent.lead) ? parent.lead : null);
     for (const way of step.ways) {
       const instruction = way >> 1;
       if (!witnesses.has(instruction))
@@ -460,7 +493,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       )
         target.reach = {
           label,
-          via: directed > 0 || (parent?.directed ?? 0) > 0 ? "directed" : "search",
+          via: inherited !== null ? "directed" : "search",
           repro: reproOf(parent, input),
         };
     }
@@ -472,15 +505,18 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       return node;
     }
     const status = step.snapshot.status;
+    const repeats = loopSeen.get(keys.loop) ?? 0;
+    const id = nodes.length;
     const node: Node = {
-      id: nodes.length,
+      id,
       parent: parent?.id ?? null,
       input,
       depth: parent === null ? 0 : parent.depth + 1,
       loop: keys.loop,
       setup,
       seeded,
-      directed: Math.max(directed, (parent?.directed ?? 0) - 1),
+      lead: inherited,
+      rank: [step.newInstructions > 0 ? 0 : repeats === 0 ? 1 : 2, repeats, -id],
       status: status === "halted" ? "completed" : status === "failed" ? "failed" : "open",
       edges: [],
       texts: step.texts,
@@ -499,9 +535,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         if (waiting.length < 5) waiting.push(node.id);
         askNodes.set(ask, waiting);
       }
-      const repeats = loopSeen.get(keys.loop) ?? 0;
-      const tier = node.directed > 0 ? -1 : step.newInstructions > 0 ? 0 : repeats === 0 ? 1 : 2;
-      frontier.push(node.id, [tier, seeded ? 1 : 0, repeats, -node.id]);
+      frontier.push(node.id, order(node));
     }
     loopSeen.set(keys.loop, (loopSeen.get(keys.loop) ?? 0) + 1);
     return node;
@@ -580,6 +614,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     return values;
   };
 
+  /** Per distance target, the lead its closer states share. */
+  const closerLeads = new Map<number, Lead>();
+  const closerLead = (index: number): Lead => {
+    const target = distanceTargets[index]!.target;
+    const known = closerLeads.get(target) ?? { remaining: CLOSER_EXPANSIONS, target };
+    closerLeads.set(target, known);
+    return known;
+  };
+
   const distances = (snapshot: Data): number[] => {
     const values = bindings(snapshot);
     return distanceTargets.map((goal) => {
@@ -592,13 +635,15 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const target = targets.get(attempt.target);
     if (target === undefined || target.reach !== null) return;
     attemptCount += 1;
+    const lead: Lead = { remaining: ATTEMPT_EXPANSIONS, target: attempt.target };
     let node: Node;
     let snapshot: Data | null;
     if (attempt.setup !== null) {
       setups.push(attempt.setup);
       const start = session.start(attempt.setup);
       directedTransitions += 1;
-      node = transition(null, null, start, setups.length - 1, DIRECTED_STEPS);
+      directedWork += 1;
+      node = transition(null, null, start, setups.length - 1, lead);
       snapshot = start.snapshot.status === "waiting" ? start.snapshot : null;
     } else {
       node = nodes[attempt.from ?? 0]!;
@@ -609,7 +654,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       const next = step(node, snapshot, input);
       if (next === null) break;
       directedTransitions += 1;
-      node = transition(node, input, next, node.setup, DIRECTED_STEPS);
+      directedWork += 1;
+      node = transition(node, input, next, node.setup, lead);
       snapshot = next.snapshot.status === "waiting" ? next.snapshot : null;
     }
   };
@@ -734,7 +780,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     return plan.length > 0;
   };
 
-  transition(null, null, session.start(), 0, 0);
+  transition(null, null, session.start(), 0, null);
   let stoppedBy: ExploreResult["search"]["stoppedBy"] = "exhausted";
   const outOfBudget = () => performance.now() - started >= options.budgetMs;
   let sinceAnalysis = 0;
@@ -755,10 +801,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     // Directed attempts and the rest of the search take turns, by steps.
     const pending = playAttempts.length > 0 ? playAttempts : seededAttempts;
-    if (
-      pending.length > 0 &&
-      (frontier.size === 0 || directedTransitions <= transitions - directedTransitions)
-    ) {
+    if (pending.length > 0 && (frontier.size === 0 || withinShare())) {
       runAttempt(pending.shift()!);
       continue;
     }
@@ -768,6 +811,18 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     }
     const node = nodes[frontier.pop()!]!;
     if (node.status !== "open") continue;
+    // A lead that was spent, or whose target was reached, gives its states back their own place.
+    if (node.lead !== null && !active(node.lead) && frontier.size > 0) {
+      const own = order(node);
+      const next = frontier.pop()!;
+      frontier.push(next, order(nodes[next]!));
+      if (before(order(nodes[next]!), own)) {
+        frontier.push(node.id, own);
+        continue;
+      }
+    }
+    const leading = active(node.lead);
+    if (leading) node.lead.remaining -= 1;
     const snapshot = snapshotOf(node);
     if (snapshot === null) {
       node.status = "expanded";
@@ -782,7 +837,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     expanded += 1;
     sinceAnalysis += 1;
     node.status = "partial";
-    const before = distanceTargets.length === 0 ? [] : distances(snapshot);
+    const closeness = distanceTargets.length === 0 ? [] : distances(snapshot);
     for (const input of inputs) {
       if (outOfBudget()) {
         stoppedBy = "budget";
@@ -790,10 +845,11 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       }
       const next = step(node, snapshot, input);
       if (next === null) continue;
-      // A step that brings a variable closer to a comparison a target needs is directed.
-      const after = before.length === 0 ? [] : distances(next.snapshot);
-      const closer = after.some((value, index) => value < (before[index] ?? Infinity));
-      transition(node, input, next, node.setup, closer ? DIRECTED_STEPS : 0);
+      if (leading) directedWork += 1;
+      // A step that brings a variable closer to a comparison a target needs shares that target's lead.
+      const after = closeness.length === 0 ? [] : distances(next.snapshot);
+      const closer = after.findIndex((value, index) => value < (closeness[index] ?? Infinity));
+      transition(node, input, next, node.setup, closer < 0 ? null : closerLead(closer));
     }
     node.status = "expanded";
   }

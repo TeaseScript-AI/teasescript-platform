@@ -276,8 +276,9 @@ that ask wherever the search meets it. A stored value is set from outside right 
 edit), or a new session starts with it in storage and replays the path; without a solved value it takes the values
 play stored under the key. For the clock the player continues at other wall clock times (times of day, weekdays, later
 dates) before that step. For a variable the code counts or sets, states that bring it closer to the comparison go
-first. An attempt's states keep the first place for 20 steps; directed attempts and the rest of the search take turns.
-Setting storage or the clock from outside is seeded: it makes state that playing this session alone does not.
+first. An attempt's states share the first place for 20 expansions in all, until the condition takes the missed way;
+directed attempts and the rest of the search take turns. Setting storage or the clock from outside is seeded: it makes
+state that playing this session alone does not, and seeded states otherwise come after all play states.
 
 Coverage counts executed plan instructions and maps them to the lines they start on, as the runtime's instruction
 trace reports them (`docs/RUNTIME.md#instruction-trace`): each step's executions are one `run` with
