@@ -118,8 +118,16 @@ import type {
   RuntimePermanentButtonActionSnapshot,
   RuntimeMediaPlaybackActionSnapshot,
   RuntimeStorageWriteActionSnapshot,
+  RuntimeFormStateSnapshot,
 } from "./actions/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
+import {
+  cloneFormState,
+  cloneFormUi,
+  formRequestValue,
+  formUiTexts,
+  materializeForm,
+} from "./actions/form.js";
 import {
   buttonTimeoutMilliseconds,
   cloneImageUi,
@@ -852,6 +860,7 @@ function executePlannedInstruction(
         createdAtMs: snapshot.currentSessionTimeMs,
         timeoutMs,
         requestEventSequence: sequence,
+        ...(materialized.form === undefined ? {} : { form: cloneFormState(materialized.form) }),
       });
       commitInteractionMaterialization(snapshot, materialized.stagedWrites);
       const committedSequence = takeSequence(snapshot);
@@ -1034,6 +1043,8 @@ function preparedInteractionSpeaker(
 
 interface MaterializedInteractionUi {
   readonly ui: InteractionUiPayload;
+  /** A form's starting answers. */
+  readonly form?: RuntimeFormStateSnapshot;
   readonly stagedWrites: readonly {
     readonly temporaryId: number;
     readonly value: SerializableRuntimeValue;
@@ -1071,6 +1082,7 @@ function materializeInteractionUi(
   };
 
   let ui: InteractionUiPayload;
+  let form: RuntimeFormStateSnapshot | undefined;
   if (prepared.kind === "button") {
     ui = {
       kind: "button",
@@ -1119,6 +1131,19 @@ function materializeInteractionUi(
     // The request keeps what it shows, so a restore can check the open request against it.
     stagedWrites.push({ temporaryId: request.id, value: imageRequestValue(image) });
     ui = image;
+  } else if (prepared.kind === "form") {
+    const request = read(prepared.requestTemporary);
+    const materialized = materializeForm(
+      request.value,
+      prepared.shape,
+      prepared.accessibleName,
+      temporalContext,
+      span,
+    );
+    // Like an image request, the request keeps the definition, so a restore can check the open form against it.
+    stagedWrites.push({ temporaryId: request.id, value: formRequestValue(materialized.ui) });
+    ui = materialized.ui;
+    form = materialized.state;
   } else {
     const source = read(prepared.optionsTemporary);
     if (!isList(source.value) || source.value.items.length !== prepared.values.length) {
@@ -1138,6 +1163,7 @@ function materializeInteractionUi(
   assertInteractionUiLimits(ui, span);
   return Object.freeze({
     ui,
+    ...(form === undefined ? {} : { form }),
     stagedWrites: Object.freeze(
       stagedWrites.map((staged) =>
         Object.freeze({
@@ -1305,7 +1331,10 @@ function assertInteractionUiLimits(ui: InteractionUiPayload, span: SourceSpan): 
   const strings: string[] = [];
   if (ui.accessibleName.kind === "text") strings.push(ui.accessibleName.text);
   if (ui.kind === "button") strings.push(ui.buttonLabel);
-  else if (ui.kind === "image") {
+  else if (ui.kind === "form") {
+    // Item by item, as for an image filter: a large form must reach the limit below, not a native argument limit.
+    for (const text of formUiTexts(ui)) strings.push(text);
+  } else if (ui.kind === "image") {
     if (ui.question !== null) strings.push(ui.question);
     if (ui.hint !== null) strings.push(ui.hint);
     // Item by item: a long computed filter must reach the limit below, not the native argument limit of a spread.
@@ -1911,6 +1940,7 @@ function cloneInteractionUi(
       accessibleName,
     };
   if (ui.kind === "image") return cloneImageUi(ui, accessibleName);
+  if (ui.kind === "form") return cloneFormUi(ui, accessibleName);
   return {
     kind: ui.kind,
     hint: ui.hint,
@@ -1940,6 +1970,7 @@ function cloneInteractionAction(
     createdAtMs: action.createdAtMs,
     timeoutMs: action.timeoutMs,
     requestEventSequence: action.requestEventSequence,
+    ...(action.form === undefined ? {} : { form: cloneFormState(action.form) }),
   };
 }
 

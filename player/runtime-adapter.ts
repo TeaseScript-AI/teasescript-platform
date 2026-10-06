@@ -281,6 +281,9 @@ export function playerRuntimeForeground(
   if (action === null) return null;
   const accessibleName = interactionAccessibleName(action.ui.accessibleName);
   switch (action.ui.kind) {
+    // The Player presents forms in a later slice of #512.
+    case "form":
+      return null;
     case "button":
       return Object.freeze({
         kind: "show-button",

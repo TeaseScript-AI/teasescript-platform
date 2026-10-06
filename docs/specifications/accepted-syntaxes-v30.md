@@ -1933,7 +1933,128 @@ let selected = askBooleans(
 - `texts`: `string[]`
 - `defaults`: `boolean[]`
 
-It returns `boolean[]`.
+It returns `boolean[]`. It is a [form](#forms) of one toggle per text, in order, that returns the toggles' states in the
+same order, so texts may repeat; the lists must have the same non-zero length. With `cancel:` it returns `boolean[]?`,
+`null` only when cancelled. `askBoolean(...)` stays a separate two-button question that completes when either
+button is chosen.
+
+### Forms
+
+**Status:** Accepted (Owner decisions on #512, 2026-10-06). The engine's form interaction is implemented
+([RUNTIME.md](../RUNTIME.md#forms)); the `askForm` source form and `askBooleans` are not yet.
+
+`askForm` asks for several values at once. Its buttons stay in place while the player changes them, and nothing is
+returned until the player submits:
+
+```text
+let settings = askForm as mistress "Adjust your settings", hint: "Change values, then continue", fields: {
+    enabled: false, intensity: ["Low", "Medium", "High"], impact: 5, restraint: 5,
+    name: "Ada", day: toDate("2026-10-05"), start: toTime("20:00")
+}, submit: "Continue"
+say "${settings.name}: impact ${settings.impact}"
+```
+
+As for a basic ask, the compact and parenthesized forms mean the same, the optional question is said once by the asking
+speaker before the form opens, and `hint:` is help shown in the composer only. `fields:` is an object or a dict of
+fields. `submit:` (default `"OK"`) and `cancel:` take text or a button object `{ text, background? }`, and `outro:` takes
+text. The arguments are evaluated once, in written order, before the question is said; an edit or a restore does not
+evaluate them again.
+
+A field is a starting value or a descriptor object. A start decides the field's kind:
+
+| Start | Field |
+|---|---|
+| `true` or `false` | a toggle; returns `boolean` |
+| a list | a cycle through the list's options, starting at the first; returns the option's value |
+| an `integer` or a `number` | a number typed in the composer: `5` gives an `integer` field, `5.0` a `number` field |
+| text | text typed in the composer; ISO-looking text stays text |
+| a `date`, `time`, or `datetime` | the matching value typed in the composer |
+| an object | a descriptor |
+
+A descriptor has `value:` (the start), `text:` (the label, by default the field's name or key), `type:`, `options:`,
+`optional:`, `min:`, `max:`, `hint:`, `background:`, and `description:`. `type:` is `"boolean"`, `"cycle"`, `"integer"`,
+`"number"`, `"text"`, `"date"`, `"time"`, or `"datetime"`. It is needed when no start shows the kind, as in
+`{ type: "date" }`; an unknown type is an error that suggests a likely one, such as `unknown type 'intger' (use 'integer')`.
+
+```text
+let access = askForm("Access?", fields: { enabled: { value: false, options: [{ value: false, text: "Off", background: "firebrick" }, { value: true, text: "On", background: "seagreen" }] } })
+let level = askForm("Intensity?", fields: { intensity: [{ text: "Low", background: "seagreen" }, { text: "Medium", background: "orange" }, { text: "High", background: "red" }] })
+let details = askForm("Details?", fields: { impact: { type: "integer", optional: true, min: 1, max: 10, hint: "1 to 10" }, name: "Ada", day: { type: "date" } }, submit: "Continue")
+```
+
+Rules:
+
+- A toggle shows its label with a check mark. With `options:` it shows the option of its state instead: choice objects,
+  exactly one with `value: false` and one with `value: true`, in either order. `{ type: "boolean" }` starts `false`.
+- A cycle's `options:` are values or choice objects as for `choose` ([§19](#19-choices)), whose values are not `null` and
+  share one type. A press shows the next option and wraps around; `value:` starts at the first option equal to it.
+- Every field may set `background:`; the `background:` of a toggle's or cycle's shown option wins. Author colours keep
+  their contrast rule ([§37](#authored-colours)).
+- A typed field (`integer`, `number`, `text`, or a date or time) opens in the composer with its value, which Enter keeps
+  and typing replaces, and its answer is read as the matching ask reads it. A typed field is required. With
+  `optional: true` it may be submitted without a value and returns `null`; a toggle or cycle cannot be optional. A start
+  that is `null` or blank text gives no value, as an ask's empty default prefills nothing.
+- `min:` and `max:` bound an `integer` or `number` field inclusively. They only validate: an answer outside them is
+  refused and stays in the composer; nothing is clamped. A start outside them, or `min:` above `max:`, is an error.
+- A field's `hint:` is the composer's help while that field is edited.
+- A `description:` is not shown on the buttons. When the form opens, the asking speaker says one prose block after the
+  question: a line `<label> — <description>` for each field that has one, in field order, followed by `outro:`. Without
+  descriptions and `outro:` nothing more is said.
+- The composer edits one field at a time. Selecting another field first commits the text being edited; invalid text,
+  also blank text for a required field, keeps it open. Back or Escape drops the text and keeps the field's value.
+- Submitting commits the text being edited, as selecting another field does, and requires a value for every required
+  field; otherwise the form stays open. The author's starting values are never changed.
+- Edits add nothing to the transcript. Submitting adds one player line: `12 of 43 selected` when every field is a
+  toggle, otherwise `5 of 6 fields set`, which does not count an optional field without a value.
+- With `cancel:` the player may cancel the whole form, which returns `null`, so the form's type is optional. A field's
+  `null` is not a cancelled form. Without `cancel:` the player cannot cancel the form.
+- A timer, media, or permanent-button block may interrupt a form; the form then resumes with its answers and the text
+  being edited.
+
+The result is a fresh object with a property per field, or for a dict of fields a dict with an entry per key, in field
+order. Its types follow the fields: `settings.enabled` is a `boolean`, `settings.impact` an `integer`, `details.impact`
+an `integer?`, and a cycle has the type of its options' values.
+
+A dict of fields builds a form from data. A key identifies a field and its answer; `text:` is only the label, so a
+translated label keeps its saved value:
+
+```text
+let toys = dict {}
+for id in toyIds {
+    let owned: boolean = load "toys.${id}", default: false
+    toys[id] = { value: owned, text: toyNames[id] }
+}
+let selected = askForm "Which toys do you own?", fields: toys   // a boolean dict
+for id in selected { save selected[id] as "toys.${id}" }
+```
+
+When the compiler can prove that every field of a dict has one kind, from the dict's type and, for descriptors, a
+written `type:` or `value:`, the result is a dict of that answer type, such as an `integer dict`; it is an
+`integer? dict` when a field may be `optional:`. Otherwise, as for an `object dict` of descriptors of different kinds
+with explicit `type:`, the result is a `(boolean | number | string | date | time | datetime | null) dict`; read an answer into a local and narrow it with `is`
+([§13](#13-explicit-types)). A dict of fields must not be empty, and each of its descriptors is checked when the form
+opens; an invalid one is an error that names its key.
+
+Remembered settings are loaded as the starts, and the result is saved:
+
+```text
+let saved = load "settings", default: { enabled: false, impact: 5 }
+let settings = askForm "Settings", fields: { enabled: saved.enabled, impact: saved.impact }
+save settings as "settings"
+```
+
+A response time needs no syntax: compare `getTimestamp()` before and after the form
+([§35](#35-date-time-durations-and-timestamps)):
+
+```text
+let asked = getTimestamp()
+let answers = askForm "Ready?", fields: { ready: false }
+let took = getTimestamp() - asked
+```
+
+`timeout:` with `onTimeout: "submit"` or `onTimeout: "cancel"` follows in a later slice. `"submit"` returns the values
+at the timeout and needs a start for every field, which the compiler checks for written fields and the form checks for
+dict fields when it opens; `"cancel"` returns `null`.
 
 ### Date and time input
 
@@ -2224,7 +2345,9 @@ The developer instruction controls tone and wording. It does not need to repeat 
 
 ### General input rules
 
-- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askDate(...)`, `askTime(...)`, `askDateTime(...)`, `askBoolean(...)`, `askBooleans(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`.
+- `askText(...)`, `askTyping(...)`, `askNumber(...)`, `askNumbers(...)`, `askInteger(...)`, `askIntegers(...)`, `askDate(...)`, `askTime(...)`, `askDateTime(...)`, `askBoolean(...)`, `askFile(...)`, `askFiles(...)`, `askFolder(...)`, `askImage(...)`, `askVideo(...)`, and `askAudio(...)` do not return `null`. A [form](#forms), `askForm(...)` or
+  `askBooleans(...)`, returns `null` only when it is cancelled: by the player when written with `cancel:`, or by its
+  timeout with `onTimeout: "cancel"`.
 - Input functions complete only after valid input has been supplied.
 - Cancelling a file, folder, camera, microphone, image, audio, or video picker does not complete the input request.
 - `askInteger(...)` and `askIntegers(...)` reject decimal values.

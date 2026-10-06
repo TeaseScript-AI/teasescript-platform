@@ -20,12 +20,13 @@ import type {
   RuntimeInteractionActionSnapshot,
   RuntimePendingActionSnapshot,
   RuntimePreparedSayOutputSnapshot,
+  InteractionResultValue,
 } from "./actions/model.js";
+import { cloneFormState, cloneFormUi } from "./actions/form.js";
 import {
   type CompiledFunctionDefinition,
   type Instruction,
   type InstructionPlan,
-  type InteractionChoiceValue,
   type InteractionUiPayload,
   type PlanTag,
   startupDeclarations,
@@ -33,7 +34,7 @@ import {
 } from "../plan/model.js";
 import { interactionStringFits } from "../interaction-limits.js";
 import { isCanonicalTagList } from "../tags.js";
-import { cloneInteractionChoiceValue } from "../choice-values.js";
+import { cloneInteractionChoiceValue, cloneInteractionResult } from "../choice-values.js";
 import { cloneMessageMarkup } from "../message-markup.js";
 import { cloneImageUi } from "./actions/interaction.js";
 import { captureOrReuseInstructionPlan } from "../plan/capture.js";
@@ -111,7 +112,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 52;
+export const RUNTIME_SNAPSHOT_VERSION = 53;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -352,7 +353,7 @@ export interface RuntimeInteractionResultHandoffSnapshot {
   readonly ownerCallFrameId: number | null;
   readonly destinationTemporary: number;
   /** A capture's result is its captured-media reference, or `null` when its camera was unavailable. */
-  readonly result: InteractionChoiceValue;
+  readonly result: InteractionResultValue;
 }
 
 export interface ChatPacingSettings {
@@ -808,7 +809,7 @@ function cloneInteractionResultHandoff(
     continuationInstruction: handoff.continuationInstruction,
     ownerCallFrameId: handoff.ownerCallFrameId,
     destinationTemporary: handoff.destinationTemporary,
-    result: cloneInteractionChoiceValue(handoff.result),
+    result: cloneInteractionResult(handoff.result),
   };
 }
 
@@ -893,6 +894,7 @@ function clonePendingAction(action: RuntimePendingActionSnapshot): RuntimePendin
     createdAtMs: action.createdAtMs,
     timeoutMs: action.timeoutMs,
     requestEventSequence: action.requestEventSequence,
+    ...(action.form === undefined ? {} : { form: cloneFormState(action.form) }),
   };
 }
 
@@ -927,6 +929,7 @@ export function cloneInteractionUi(ui: InteractionUiPayload): InteractionUiPaylo
       accessibleName,
     };
   if (ui.kind === "image") return cloneImageUi(ui, accessibleName);
+  if (ui.kind === "form") return cloneFormUi(ui, accessibleName);
   return {
     kind: ui.kind,
     hint: ui.hint,
@@ -970,7 +973,7 @@ function cloneSettlement(
     requestEventSequence: settlement.requestEventSequence,
     transcriptEventSequence: settlement.transcriptEventSequence,
     completionEventSequence: settlement.completionEventSequence,
-    result: cloneInteractionChoiceValue(settlement.result),
+    result: cloneInteractionResult(settlement.result),
     transcriptText: settlement.transcriptText,
     ui: cloneInteractionUi(settlement.ui),
   };

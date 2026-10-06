@@ -12,6 +12,9 @@ import { RuntimeFault } from "./errors.js";
 import {
   serializableEquals,
   validateCapturedSerializableValue,
+  type SerializableRuntimeDict,
+  type SerializableRuntimeList,
+  type SerializableRuntimeObject,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
 import { isOneOf } from "../plan/validation-support.js";
@@ -37,6 +40,13 @@ import { isMessageMarkup } from "../message-markup.js";
 import type { RuntimeChatPacingGateSettlementSnapshot } from "./actions/model.js";
 import { CAPTURE_UNAVAILABLE_REASONS, requiredActionCompletionEvents } from "./actions/model.js";
 import { buttonTimeoutMilliseconds, imageRequestValue } from "./actions/interaction.js";
+import {
+  formRequestValue,
+  isFormUi,
+  validFormResult,
+  validFormState,
+  validFormUi,
+} from "./actions/form.js";
 import { IMAGE_ANSWER_TRANSCRIPT_TEXT, validImageRequestFields } from "../image-input.js";
 import { recordValidationTestWork } from "../validation-testing.js";
 import { validMediaAction } from "./media-validation.js";
@@ -976,8 +986,9 @@ export function validateInteractionResultHandoffState(
         (typeof handoff.result === "string" &&
           handoff.result.length > 0 &&
           interactionStringFits(handoff.result))
-      : isInteractionChoiceValue(handoff.result) &&
-        (typeof handoff.result !== "string" || interactionStringFits(handoff.result))) ||
+      : isFormResult(handoff.result) ||
+        (isInteractionChoiceValue(handoff.result) &&
+          (typeof handoff.result !== "string" || interactionStringFits(handoff.result)))) ||
     !positiveSafeInteger(snapshot.nextActionId) ||
     handoff.actionId >= snapshot.nextActionId ||
     snapshot.foregroundAction !== null ||
@@ -1146,6 +1157,18 @@ function validInteractionResultForInstruction(
   }
   if (instruction.interactionKind === "image")
     return instruction.expectedResult === "string" && isImageReference(result);
+  // The form's fields were cleared with its request; its settlement checks the answers against them.
+  if (instruction.interactionKind === "form")
+    return (
+      instruction.expectedResult === "form" &&
+      "preparedUi" in instruction &&
+      instruction.preparedUi.kind === "form" &&
+      isFormResult(result) &&
+      result.kind ===
+        (instruction.preparedUi.shape.kind === "booleanList"
+          ? "list"
+          : instruction.preparedUi.shape.kind)
+    );
   return (
     instruction.expectedResult === "string" &&
     instruction.interactionKind === "text" &&
@@ -1244,6 +1267,7 @@ function validInteractionAction(
       "createdAtMs",
       "timeoutMs",
       "requestEventSequence",
+      ...(action.interactionKind === "form" ? ["form"] : []),
     ])
   )
     return false;
@@ -1264,7 +1288,9 @@ function validInteractionAction(
           ? "choice"
           : action.interactionKind === "temporal"
             ? "temporal"
-            : "string";
+            : action.interactionKind === "form"
+              ? "form"
+              : "string";
   if (
     action.expectedResult !== expected ||
     (action.speakerId !== null && !positiveSafeInteger(action.speakerId))
@@ -1291,6 +1317,12 @@ function validInteractionAction(
   )
     return false;
   if (!validInteractionUiShape(action.interactionKind, action.ui)) return false;
+  // EVIDENCE: validation: validInteractionUiShape accepted the form definition above.
+  if (
+    action.interactionKind === "form" &&
+    !(isFormUi(action.ui) && validFormState(action.ui, action.form))
+  )
+    return false;
   if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
   const instruction = plan.instructions[action.owningInstruction];
   if (
@@ -1454,6 +1486,16 @@ function preparedInteractionUiMatchesAction(
       prefill === actual.prefill
     );
   }
+  if (prepared.kind === "form") {
+    // The open form keeps its definition in its request temporary.
+    const request = runtimeTemporaryValue(temporaries, prepared.requestTemporary);
+    if (!isFormUi(actual) || validateCapturedSerializableValue(request) !== null) return false;
+    // EVIDENCE: validation: validateCapturedSerializableValue accepted the captured request above.
+    const captured = request as SerializableRuntimeValue;
+    return (
+      actual.shape === prepared.shape.kind && serializableEquals(captured, formRequestValue(actual))
+    );
+  }
   if (prepared.kind === "image") {
     // The open request keeps what it shows in its request temporary.
     const request = runtimeTemporaryValue(temporaries, prepared.requestTemporary);
@@ -1518,7 +1560,9 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
               "types",
               "mime",
             ]
-          : ["kind", "options", "accessibleName"];
+          : kind === "form"
+            ? ["kind", "shape", "fields", "hint", "submit", "accessibleName"]
+            : ["kind", "options", "accessibleName"];
   if (
     !hasExactKeys(value, expectedUiKeys) ||
     ("integer" in value && value.integer !== true) ||
@@ -1573,6 +1617,7 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
       (!("background" in value) || isNormalizedOpaqueColor(value.background))
     );
   }
+  if (kind === "form") return validFormUi(value, count) && !measurementExhausted;
   if (kind === "image")
     return (
       (value.question === null || count(value.question)) &&
@@ -1653,6 +1698,8 @@ function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): bo
       textsEqual(expected.types, actual.types) &&
       textsEqual(expected.mime, actual.mime)
     );
+  // A form is always prepared.
+  if (expected.kind === "form") return false;
   return choiceOptionsEqual(expected.options, actual.options);
 }
 
@@ -1890,6 +1937,9 @@ function validSettlementKindData(
       typeof settlement.result === "number" &&
       Number.isFinite(settlement.result) &&
       !Object.is(settlement.result, -0);
+  } else if (settlement.interactionKind === "form") {
+    // `settlementMatchesPresentedUi` checked the answers against the recorded form above.
+    resultValid = true;
   } else if (settlement.interactionKind === "image") {
     resultValid =
       isImageReference(settlement.result) &&
@@ -1979,7 +2029,18 @@ function validSettlementKindData(
 }
 
 function isInteractionKind(value: unknown): value is InteractionKind {
-  return isOneOf(value, ["button", "text", "number", "choice", "temporal", "image"]);
+  return isOneOf(value, ["button", "text", "number", "choice", "temporal", "image", "form"]);
+}
+
+/** A form's answers: an object, dict, or list of runtime values. Its recorded UI decides which. */
+function isFormResult(
+  value: unknown,
+): value is SerializableRuntimeObject | SerializableRuntimeDict | SerializableRuntimeList {
+  return (
+    isPlainRecord(value) &&
+    isOneOf(value.kind, ["object", "dict", "list"]) &&
+    validateCapturedSerializableValue(value) === null
+  );
 }
 
 /** An image answer: the reference of a stored image, which only the host that stored it resolves. */
@@ -2013,6 +2074,8 @@ function settlementMatchesPresentedUi(settlement: Record<string, unknown>): bool
       settlement.transcriptText ===
       (settlement.settlementKind === "timedOut" ? null : ui.buttonLabel)
     );
+  if (ui.kind === "form")
+    return isFormUi(ui) && validFormResult(ui, settlement.result, settlement.transcriptText);
   if (ui.kind !== "choice") return true;
   const result = settlement.result;
   if (!isInteractionChoiceValue(result)) return false;
@@ -2059,6 +2122,7 @@ function preparedUiFitsPresentedUi(
     );
   // The request temporary is cleared after completion; the recorded request was checked by its shape.
   if (prepared.kind === "image") return true;
+  if (prepared.kind === "form") return ui.shape === prepared.shape.kind;
   return Array.isArray(ui.options) && buttonsFitWrittenValues(prepared.values, ui.options);
 }
 
@@ -2193,6 +2257,11 @@ function sameCanonicalSettlementResult(destination: unknown, result: unknown): b
       typeof destination === "number" &&
       typeof result === "number" &&
       Object.is(destination, result)
+    );
+  }
+  if (isFormResult(destination) || isFormResult(result)) {
+    return (
+      isFormResult(destination) && isFormResult(result) && serializableEquals(destination, result)
     );
   }
   return (

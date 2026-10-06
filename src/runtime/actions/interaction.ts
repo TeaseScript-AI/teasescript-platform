@@ -10,14 +10,14 @@ import { IMAGE_ANSWER_TRANSCRIPT_TEXT } from "../../image-input.js";
 import type {
   InteractionAccessibleName,
   InteractionChoiceOption,
-  InteractionChoiceValue,
   InteractionUiPayload,
 } from "../../plan/model.js";
 import type { SerializableRuntimeValue } from "../serializable-values.js";
 import type { CapturedMediaAdmission } from "./capture.js";
 import { presentDate, presentDateTime, presentTime, type TemporalContext } from "../../temporal.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
-import type { RuntimeInteractionActionSnapshot } from "./model.js";
+import type { InteractionResultValue, RuntimeInteractionActionSnapshot } from "./model.js";
+import { submitForm } from "./form.js";
 
 /**
  * The milliseconds of a `showButton` timeout: a number of seconds or an elapsed duration that is finite and greater
@@ -34,7 +34,7 @@ export function buttonTimeoutMilliseconds(value: unknown): number | null {
 }
 
 export type ResolvedInteraction =
-  | { readonly ok: true; readonly result: InteractionChoiceValue; readonly transcriptText: string }
+  | { readonly ok: true; readonly result: InteractionResultValue; readonly transcriptText: string }
   | { readonly ok: false; readonly message: string };
 
 /**
@@ -49,6 +49,12 @@ export function resolveInteractionCompletion(
 ): ResolvedInteraction {
   if (!isPlainRecord(payload)) {
     return { ok: false, message: "Interaction completion payload must be an object." };
+  }
+  // A form is submitted with the answers its edits gave it; the payload carries none.
+  if (action.ui.kind === "form") {
+    if (payload.kind !== "submit" || Object.keys(payload).length !== 1 || action.form === undefined)
+      return { ok: false, message: "Form completion payload must be { kind: 'submit' }." };
+    return submitForm(action.ui, action.form);
   }
   if (action.interactionKind === "button") {
     return payload.kind === "activate" && action.ui.kind === "button"

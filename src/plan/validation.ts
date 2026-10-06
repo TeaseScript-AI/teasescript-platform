@@ -1298,9 +1298,12 @@ function validateInteractionInstruction(
     errors.push(planError("TSC002", "Interaction instruction contains unsupported fields.", path));
   }
   const kind = value.interactionKind;
-  if (!isOneOf(kind, ["button", "text", "number", "choice", "temporal", "image"])) {
+  if (!isOneOf(kind, ["button", "text", "number", "choice", "temporal", "image", "form"])) {
     errors.push(planError("TSC002", "Interaction kind is invalid.", `${path}.interactionKind`));
   }
+  // A form reads its fields when it opens, so it is always prepared.
+  if (kind === "form" && !prepared)
+    errors.push(planError("TSC002", "A form interaction must be prepared.", path));
   if (value.target !== "standardChat")
     errors.push(planError("TSC002", "Interaction target is invalid.", `${path}.target`));
 
@@ -1316,7 +1319,9 @@ function validateInteractionInstruction(
           ? "choice"
           : kind === "temporal"
             ? "temporal"
-            : "string";
+            : kind === "form"
+              ? "form"
+              : "string";
   if (value.expectedResult !== expected) {
     errors.push(
       planError(
@@ -1567,7 +1572,9 @@ function validatePreparedInteractionUi(
           ]
         : kind === "image"
           ? ["kind", "requestTemporary", "accessibleName"]
-          : ["kind", "optionsTemporary", "values", "accessibleName"];
+          : kind === "form"
+            ? ["kind", "requestTemporary", "shape", "accessibleName"]
+            : ["kind", "optionsTemporary", "values", "accessibleName"];
   if (
     !hasExactKeys(ui, keys) ||
     ("integer" in ui && ui.integer !== true) ||
@@ -1656,6 +1663,12 @@ function validatePreparedInteractionUi(
     addTemporary(ui.requestTemporary, `${path}.requestTemporary`);
     return;
   }
+  if (kind === "form") {
+    addTemporary(ui.requestTemporary, `${path}.requestTemporary`);
+    if (!validPreparedFormShape(ui.shape))
+      errors.push(planError("TSC002", "Prepared form shape is invalid.", `${path}.shape`));
+    return;
+  }
   if (kind !== "choice") return;
   addTemporary(ui.optionsTemporary, `${path}.optionsTemporary`);
   if (
@@ -1684,6 +1697,37 @@ function validatePreparedInteractionUi(
       errors.push(planError("TSC002", "Prepared choice value is invalid.", valuePath));
     }
   }
+}
+
+/**
+ * An object form names each numeric field once by its unique name; a dict form has one numeric kind or `null`; a
+ * boolean list has none.
+ */
+function validPreparedFormShape(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const numericKind = (kind: unknown) => kind === "integer" || kind === "number";
+  if (value.kind === "booleanList") return hasExactKeys(value, ["kind"]);
+  if (value.kind === "dict")
+    return (
+      hasExactKeys(value, ["kind", "numericKind"]) &&
+      (value.numericKind === null || numericKind(value.numericKind))
+    );
+  if (value.kind !== "object" || !hasExactKeys(value, ["kind", "numericKinds"])) return false;
+  const kinds = value.numericKinds;
+  if (!Array.isArray(kinds) || kinds.length > MAX_INTERACTION_OPTION_ENTRIES) return false;
+  const names = new Set<unknown>();
+  return kinds.every((entry: unknown) => {
+    if (
+      !isRecord(entry) ||
+      !hasExactKeys(entry, ["name", "numericKind"]) ||
+      typeof entry.name !== "string" ||
+      names.has(entry.name) ||
+      !numericKind(entry.numericKind)
+    )
+      return false;
+    names.add(entry.name);
+    return true;
+  });
 }
 
 function validateInteractionAccessibleName(

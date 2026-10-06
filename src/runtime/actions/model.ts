@@ -11,7 +11,13 @@ import type { MessageMarkup } from "../../message-markup.js";
 import type { RuntimeTimerSnapshot } from "../timers.js";
 import type { RuntimeMediaSnapshot } from "../media.js";
 import type { RuntimePermanentButtonSnapshot } from "../permanent-buttons.js";
-import type { SerializableRuntimeValue } from "../serializable-values.js";
+import type {
+  SerializableRuntimeDict,
+  SerializableRuntimeList,
+  SerializableRuntimeObject,
+  SerializableRuntimeValue,
+} from "../serializable-values.js";
+import type { TemporalAnswer } from "../../interaction-answers.js";
 
 /** Shared serializable pending-action and settlement contracts. */
 export interface RuntimeDelayActionSnapshot {
@@ -54,7 +60,28 @@ export interface RuntimeInteractionActionSnapshot {
   /** A button's timeout; it times out at `createdAtMs + timeoutMs`. Always `null` for other interactions. */
   readonly timeoutMs: number | null;
   readonly requestEventSequence: number;
+  /** The answers of a form so far; present exactly for a form. */
+  readonly form?: RuntimeFormStateSnapshot;
 }
+
+/**
+ * The answers of an open form, which change with each edit until it is submitted. `values` holds one value per field,
+ * in field order: a toggle's boolean, the index of a cycle's selected option, or a typed field's value, `null` while it
+ * has none. `editor` is the field the composer edits with its unsubmitted text, or `null`.
+ */
+export interface RuntimeFormStateSnapshot {
+  readonly values: readonly RuntimeFormValue[];
+  readonly editor: { readonly fieldId: string; readonly text: string } | null;
+}
+
+export type RuntimeFormValue = boolean | number | string | TemporalAnswer | null;
+
+/** What an interaction returns: a choice value, or a form's object, dict, or list of answers. */
+export type InteractionResultValue =
+  | InteractionChoiceValue
+  | SerializableRuntimeObject
+  | SerializableRuntimeDict
+  | SerializableRuntimeList;
 
 /** The scene time at which a button with a timeout times out, or `null`. */
 export function interactionDeadlineMs(action: RuntimeInteractionActionSnapshot): number | null {
@@ -352,7 +379,7 @@ export interface RuntimeInteractionActionSettlementSnapshot {
    * `null` for a button used as a statement; a choice may also return `null` as an option's value, and a button used
    * as a value records its elapsed waiting time.
    */
-  readonly result: InteractionChoiceValue;
+  readonly result: InteractionResultValue;
   readonly transcriptText: string | null;
   /** The UI the player answered, so the settlement validates against what was presented. */
   readonly ui: InteractionUiPayload;
