@@ -546,3 +546,78 @@ test("askForm with cancel: may return null, which the script checks before readi
     ["'a' may be null. Check it first: if a != null { ... }"],
   );
 });
+
+test("askBooleans asks with one toggle per text and returns their states in order, or null when cancelled", () => {
+  const plan = compileValidPlan(
+    [
+      'let selected = askBooleans(message: "Choose all that apply", texts: ["A", "B", "A"], defaults: [true, false, false])',
+      "let last: boolean = selected[2]",
+      'let again = askBooleans("Again?", texts: ["X"], defaults: [false], cancel: "Back")',
+      "exit",
+    ].join("\n"),
+  );
+  const { snapshot, ui, events } = opened(plan);
+  assert.deepEqual(said(events), ["bubble nobody: Choose all that apply", "form opens"]);
+  // Repeated texts are separate toggles, numbered in order.
+  assert.deepEqual(
+    ui.fields.map((field) => [field.id, field.text, field.kind]),
+    [
+      ["0", "A", "boolean"],
+      ["1", "B", "boolean"],
+      ["2", "A", "boolean"],
+    ],
+  );
+  const first = submitted(plan, select(plan, snapshot, "2", 1));
+  assert.deepEqual(
+    first.events.flatMap((event) => (event.kind === "playerTranscript" ? [event.text] : [])),
+    ["2 of 3 selected"],
+  );
+  const binding = (state: RuntimeSnapshot, name: string) =>
+    state.frames[0]!.bindings.find((candidate) => candidate.name === name)?.value;
+  assert.deepEqual(binding(first.finished.snapshot, "selected"), {
+    kind: "list",
+    items: [true, false, true],
+  });
+  const second = first.finished.snapshot;
+  const cancelled = completeAction(plan, second, {
+    actionId: second.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "form",
+    payload: { kind: "cancel" },
+  });
+  assert.equal(binding(runUntilExit(plan, cancelled.snapshot).snapshot, "again"), null);
+
+  const errors = (source: string) =>
+    compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);
+  assert.deepEqual(errors('let a = askBooleans(texts: ["A", "B"], defaults: [true])'), [
+    "askBooleans has 2 texts but 1 defaults; give one default for each text.",
+  ]);
+  assert.deepEqual(errors('let a = askBooleans("Q", texts: ["A"])'), [
+    'askBooleans() needs defaults:, such as askBooleans("Choose", texts: ["A", "B"], defaults: [true, false]).',
+  ]);
+  assert.deepEqual(
+    errors(
+      'let a = askBooleans(texts: ["A"], defaults: [true], cancel: "Back")\nlet b: boolean[] = a',
+    ),
+    [
+      "'b' is declared as boolean[], so it cannot start as a list (boolean[]) or null. Check it first: if a != null { ... }",
+    ],
+  );
+  // Lists of different lengths that the compiler cannot see fail when the form opens.
+  const computed = compileValidPlan(
+    'let texts = ["A", "B"]\nlet defaults = [true]\nlet a = askBooleans(texts: texts, defaults: defaults)\nexit',
+  );
+  const failure = run(computed, createImmediatePacingRuntimeSnapshot(computed)).snapshot.failure;
+  assert.deepEqual(
+    [failure?.code, failure?.message],
+    ["TSR058", "askBooleans has 2 texts but 1 defaults; give one default for each text."],
+  );
+  // A host cannot configure the engine's name as its own.
+  for (const option of ["builtins", "globals"] as const)
+    assert.ok(
+      compileSource('let a = askBooleans(texts: ["A"], defaults: [true])\nexit', {
+        [option]: ["askBooleans"],
+      }).diagnostics.some((diagnostic) => diagnostic.code === "TSV001"),
+      option,
+    );
+});

@@ -24,6 +24,18 @@ export function isAskImageCall(expression: Expression): boolean {
   );
 }
 
+/**
+ * Whether an expression is the accepted `askBooleans(...)` call (V30 §20): a form of one toggle per text, which lowers
+ * to a form interaction.
+ */
+export function isAskBooleansCall(expression: Expression): boolean {
+  return (
+    expression.kind === "callExpression" &&
+    expression.callee.kind === "identifier" &&
+    expression.callee.name === "askBooleans"
+  );
+}
+
 /** Whether any of the programs takes a photo with `tags:`, which joins the image catalog at runtime (ADR 0023). */
 export function capturesTaggedPhotos(programs: readonly Program[]): boolean {
   const work: unknown[] = [...programs];
