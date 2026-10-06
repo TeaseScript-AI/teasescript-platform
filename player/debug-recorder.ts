@@ -4,6 +4,7 @@ import type {
   InterpreterEvent,
   RuntimeSnapshot,
 } from "../src/index.js";
+import { captureExternalData } from "../src/external-data-capture.js";
 import {
   debugExportJson,
   type DebugAdmissionQuery,
@@ -144,6 +145,13 @@ export class DebugRecorder {
   ): { readonly args: unknown[]; readonly bytes: number } | null {
     if (this.#frozen || this.#plan === null) return null;
     try {
+      // JSON would turn a value such as NaN into null and replay a different call, and a cycle has no JSON form, so
+      // such a call is not recorded; the engine's own validation then still refuses or admits it.
+      if (!captureExternalData(args).ok) {
+        this.#problem ??= "A call's arguments could not be copied exactly.";
+        this.#frozen = true;
+        return null;
+      }
       // Written without recursion, so a deeply nested argument is recorded like any other.
       const json = debugExportJson(args);
       const bytes = json.length;

@@ -22,14 +22,30 @@ export function gzipSupported(): boolean {
 
 /** A JSON document written from `pieces`: compressed with gzip, or plain without `gzip`. */
 export async function jsonFile(pieces: Iterable<string>, gzip: boolean): Promise<Blob> {
-  if (!gzip) return new Blob([...batched(pieces)], { type: "application/json;charset=utf-8" });
+  return (await measuredJsonFile(pieces, gzip)).file;
+}
+
+/** `jsonFile`, with the size of the uncompressed JSON in UTF-8 bytes. */
+export async function measuredJsonFile(
+  pieces: Iterable<string>,
+  gzip: boolean,
+): Promise<{ readonly file: Blob; readonly jsonBytes: number }> {
+  if (!gzip) {
+    const file = new Blob([...batched(pieces)], { type: "application/json;charset=utf-8" });
+    return { file, jsonBytes: file.size };
+  }
   const compression = new CompressionStream("gzip");
   const compressed = new Response(compression.readable).blob();
   const writer = compression.writable.getWriter();
   const encoder = new TextEncoder();
-  for (const piece of batched(pieces)) await writer.write(encoder.encode(piece));
+  let jsonBytes = 0;
+  for (const piece of batched(pieces)) {
+    const bytes = encoder.encode(piece);
+    jsonBytes += bytes.length;
+    await writer.write(bytes);
+  }
   await writer.close();
-  return new Blob([await compressed], { type: "application/gzip" });
+  return { file: new Blob([await compressed], { type: "application/gzip" }), jsonBytes };
 }
 
 /** Joins small pieces into ones of about `PIECE_LENGTH` characters. */

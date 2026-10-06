@@ -296,7 +296,7 @@ test("a call the recorder cannot copy still runs exactly as without it", () => {
   assert.deepEqual(withRecorder.session.snapshot, without.session.snapshot);
   assert.deepEqual(
     [recorder.recording()!.complete, recorder.recording()!.reason],
-    [false, "The recorder could not copy a call."],
+    [false, "A call's arguments could not be copied exactly."],
   );
 });
 
@@ -335,4 +335,45 @@ test("a debugging tool's storage edit is recorded, so a replay applies it again"
     ["run", "applyExternalStorageEdit", "completeAction", "run"],
   );
   assert.equal((await replay(recorder)).kind, "reproduced");
+});
+
+test("an argument JSON cannot copy exactly leaves the recording incomplete instead of recording another call", async () => {
+  const cyclic: { readonly name: string; self: unknown } = { name: "loop", self: null };
+  cyclic.self = cyclic;
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: test: values JSON cannot copy, which the engine refuses as invalid edits.
+  const values = [Number.NaN, cyclic as unknown as number];
+  for (const value of values) {
+    const recorder = new DebugRecorder();
+    const session = createPlayerRuntimeSession('let name = askText "Name"\nexit', { recorder });
+    const refused = applyPlayerRuntimeStorageEdit(session, { key: "k", value });
+    assert.equal(refused.outcome.kind, "invalidEdit");
+    assert.deepEqual(
+      [recorder.recording()!.complete, recorder.recording()!.reason],
+      [false, "A call's arguments could not be copied exactly."],
+    );
+    assert.equal((await replay(recorder)).kind, "incomplete");
+  }
+});
+
+test("a value the engine produced, such as a saved list, is recorded as an argument and replays", async () => {
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(
+    'save [1, null] as "a"\nlet name = askText "Name"\nlet copy = load("b", default: [])\nlet zero = 0\nlet result = 1 / zero\nexit',
+    { recorder, persistentScriptStorage: true, scriptStorage: [] },
+  );
+  session = completePlayerRuntimeStorageWrite(
+    session,
+    pendingPlayerRuntimeStorageWrite(session.snapshot)!.actionId,
+    true,
+  ).session;
+  const saved = createCheckpoint(session.plan, session.snapshot).snapshot.scriptStorage[0]!.value;
+  const edited = applyPlayerRuntimeStorageEdit(session, { key: "b", value: saved });
+  assert.equal(edited.outcome.kind, "applied");
+  session = submitPlayerRuntimeComposer(edited.session, "Ada")!.session;
+  assert.equal(session.snapshot.status, "failed");
+  assert.equal(recorder.recording()!.complete, true);
+  const result = await replay(recorder);
+  assert.ok(
+    result.kind === "reproduced" && result.failure?.code === session.snapshot.failure?.code,
+  );
 });

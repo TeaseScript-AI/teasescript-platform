@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, ref, watch } from "vue";
+import { computed, onErrorCaptured, provide, ref, watch } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
 import { Bug } from "@lucide/vue";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
@@ -28,6 +28,10 @@ import TimerRegion from "./TimerRegion.vue";
 import { speakerAvatarSource } from "./speakerAvatar";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
 import { usePlayerDebug } from "./usePlayerDebug";
+import DebugExportDialog from "./DebugExportDialog.vue";
+import RuntimeFailure from "./RuntimeFailure.vue";
+import { useDebugExport } from "./useDebugExport";
+import { playerNoticeKeys, playerNotices } from "../../notices.js";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
 import { usePlayerNotifications } from "./usePlayerNotifications";
 import { usePlayerPreference } from "./usePlayerPreference";
@@ -102,6 +106,47 @@ function toggleThemeMode() {
 const session = computed(() => props.player.session.value);
 // The Debug menu adds the Debug panel first in the tools menu.
 const debug = usePlayerDebug(props.player, props.debug);
+// A debug export for a developer, from the failure card, its notice, or Settings (DEBUGGER.md "Debug export").
+const debugExport = useDebugExport(
+  props.player,
+  () => props.title,
+  () => ({
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+    devicePixelRatio: window.devicePixelRatio,
+    coarsePointer: window.matchMedia("(any-pointer: coarse)").matches,
+    hover: window.matchMedia("(any-hover: hover)").matches,
+    theme: themeIntent.value.mode,
+    contrast: themeIntent.value.contrast,
+    activation: props.player.activation.value,
+    notices: props.player.notices.value.map((notice) => notice.key).join(", "),
+    userAgent: navigator.userAgent,
+    language: navigator.language,
+  }),
+);
+// Each opening mounts the dialog anew: a dialog stacks by when it was mounted, so it then stays above one mounted since
+// the page loaded, such as Settings in the narrow tools drawer, which it opens from.
+const debugExportOpening = ref(0);
+function openDebugExport() {
+  if (!debugExport.open.value) debugExportOpening.value += 1;
+  debugExport.open.value = true;
+}
+// An exception in the Player's own interface is a Player error: it is reported and can be exported, and still logged.
+onErrorCaptured((error) => {
+  props.player.reportHostError(error);
+});
+// After an error the notice offers the export too, until a new session starts.
+watch(
+  () => [session.value?.snapshot.failure ?? null, props.player.hostError.value] as const,
+  ([failure, hostError]) => {
+    if (failure === null && hostError === null)
+      props.player.withdrawNotice(playerNoticeKeys.sessionError);
+    else
+      props.player.publishNotice(
+        playerNotices.sessionError(failure === null ? "player" : "script", openDebugExport),
+      );
+  },
+);
 const debugTool: PlayerTool = { name: "Debug", icon: Bug };
 const tools = computed(() => (debug.menu.value ? [debugTool, ...props.tools] : props.tools));
 const savedData = computed(() =>
@@ -188,6 +233,7 @@ async function toggleFullscreen() {
     :media-aspect="mediaAspect"
     :fullscreen="fullscreen"
     :saved-data="savedData"
+    :debug-export="{ available: debugExport.available.value, open: openDebugExport }"
     v-model:contrast="contrast"
     v-model:titlebar-option="titlebarOption"
     v-model:debug-menu="debug.menu.value"
@@ -279,6 +325,11 @@ async function toggleFullscreen() {
           </FloatingViewfinder>
           <ScriptProblems v-if="failure" :failure="failure" />
           <SessionActivation v-else :activation="player.activation.value" @activate="player.activate" />
+          <DebugExportDialog
+            :key="debugExportOpening"
+            :exporter="debugExport"
+            :photo-url="player.resolveAsset"
+          />
           <PlayerToasts
             :notifications="notifications.notifications.value"
             :seen-sequence="notifications.seenSequence.value"
@@ -320,7 +371,16 @@ async function toggleFullscreen() {
           :images="player.images"
           :debug-countdown="debug.countdownText.value"
           @update:session="player.update"
-        />
+        >
+          <template #end>
+            <RuntimeFailure
+              v-if="!failure && player.activation.value === null"
+              :snapshot="session?.snapshot ?? null"
+              :host-error="player.hostError.value"
+              @export="openDebugExport"
+            />
+          </template>
+        </RuntimeInteraction>
       </PlayerComposition>
     </template>
   </PlayerToolsShell>

@@ -34,8 +34,14 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
+import {
+  debugPhotoUses,
+  type DebugExportCandidate,
+  type DebugPhotoCandidate,
+} from "../../debug-export-assembly.js";
 import { DebugRecorder } from "../../debug-recorder.js";
 import type { SavedDataHost } from "../../saved-data.js";
+import { playerBuildIdentity } from "./buildIdentity";
 import type { ScriptStorageProvider } from "../../script-storage.js";
 import {
   checkStorageTransferImages,
@@ -97,6 +103,8 @@ export interface PlayerSessionOptions {
    * player's own; without it they cover only the script this Player shows.
    */
   savedData?: SavedDataHost;
+  /** What the trusted host knows of the script, for debug exports; unknown fields are `null`. */
+  debugPackage?: { readonly id: string | null; readonly version: string | null };
   /** Decodes a chosen image file before it is stored; the browser's decoder by default. */
   decodeImage?: ImageDecoder;
   /**
@@ -128,6 +136,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   };
   // Records every session's engine calls from Start, in every build, for a debug export (DEBUGGER.md "Debug export").
   const recorder = new DebugRecorder();
+  // The error name of an exception of the Player itself, such as one at Start; it stays until the next Start.
+  const hostError = ref<string | null>(null);
+  function reportHostError(error: unknown) {
+    hostError.value = error instanceof Error ? error.name : "Error";
+    console.error("[player] host error", error);
+  }
   // Bumped when a stored photo finished loading, so presentation resolves its reference again.
   const mediaRevision = ref(0);
   const capturedMedia = new CapturedMediaStore(
@@ -721,7 +735,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       // session starts within the activating click.
       void camera.open(false);
       captures.reset();
-      start(pending.begin());
+      startFrom(pending);
       return;
     }
     // Retire the previous session first: its elements return to the pool before priming, so the new session never
@@ -740,7 +754,19 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     // Replaced, re-prepared, or unmounted while the browser answered: an obsolete session never starts.
     if (!opened || disposed || token !== activationToken) return;
     captures.reset();
-    start(pending.begin());
+    startFrom(pending);
+  }
+  /** Starts the prepared session; an exception of the Player while it begins is reported, with what was recorded. */
+  function startFrom(pending: Activation) {
+    hostError.value = null;
+    let next: PlayerRuntimeSession;
+    try {
+      next = pending.begin();
+    } catch (error) {
+      reportHostError(error);
+      return;
+    }
+    start(next);
   }
 
   return {
@@ -803,6 +829,52 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     importSavedData,
     /** The current or last session's recorded engine calls for a debug export, or `null` before any Start. */
     debugRecording: () => recorder.recording(),
+    /** The error name of an exception of the Player itself, or `null`. */
+    hostError: computed(() => hostError.value),
+    reportHostError,
+    /**
+     * What a debug export can contain now, frozen: the session, its recording, and the photos it used. `player` adds
+     * the presentation details only the Player's interface knows.
+     */
+    async debugExportCandidate(
+      player: DebugExportCandidate["player"],
+    ): Promise<DebugExportCandidate> {
+      // Everything is taken before the first photo is read, so play continuing meanwhile cannot mix in later state.
+      const current = session.value;
+      const frozen = {
+        build: playerBuildIdentity,
+        package: options.debugPackage ?? { id: null, version: null },
+        session:
+          current === null
+            ? null
+            : {
+                plan: current.plan,
+                snapshot: current.snapshot,
+                events: [...current.events],
+                transcriptEntries: [...current.transcriptEntries],
+              },
+        recording: recorder.recording(),
+        hostError: hostError.value,
+        player,
+      };
+      const storage =
+        current?.snapshot.scriptStorage ?? frozen.recording?.endSnapshot.scriptStorage ?? [];
+      const photos: DebugPhotoCandidate[] = [];
+      for (const [reference, usedBy] of debugPhotoUses(frozen.recording, storage)) {
+        const record = await capturedMedia.read(reference);
+        if (record === null || record.kind !== "image") continue;
+        photos.push({
+          reference,
+          mimeType: record.mimeType,
+          byteLength: record.size,
+          width: record.width ?? null,
+          height: record.height ?? null,
+          usedBy,
+          read: async () => new Uint8Array(await record.data.arrayBuffer()),
+        });
+      }
+      return { ...frozen, photos };
+    },
     loadScriptStorage,
     scriptStorageOptions,
     resolveAsset,
