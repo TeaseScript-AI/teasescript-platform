@@ -104,6 +104,13 @@
       "category": "b",
       "reason": "The lounge menu passes opts[opt].arg to the chosen request, but the request records have no arg; Groovy read the missing key as null, while a TeaseScript record has fixed properties, so choosing any request stopped the script. Give the request records arg: null, the value Groovy read.",
       "diff": "menu-record-args.diff"
+    },
+    {
+      "id": "native-sessions",
+      "layer": "source",
+      "category": "b",
+      "reason": "sessionPlay ran the four session plans of images/toy/domme.groovy by evaluating their require and number expression strings with Eval.me in a scope of closures, which does not convert, so the first summon stopped the script (owner decision 2026-10-05: native code instead of eval emulation). Each plan becomes a method of a new module toy/domme.groovy (the data file under images is no script the converter reads): its phases are plain calls in the same order, with the conditions as ifs and the numbers as arguments; sessionChoices lists the sessions whose condition holds with their probabilities for the same weighted pick, and runSession calls one by its theme. The runner in play.groovy keeps Toy's older rules: wildcards expand by tags after the named entries, a null interval entry stays a chance of no interval, 'repeat' draws a random activity each time and 'take' draws its activities without repetition before running them (as shuffling and taking did), each followed by a random interval when there are any, and punishMultiply/punishApply apply numeric results; the session reads the punishment once at its start. The DEBUG self-check of the expression strings is dropped.",
+      "diff": "native-sessions.diff"
     }
   ]
 }
