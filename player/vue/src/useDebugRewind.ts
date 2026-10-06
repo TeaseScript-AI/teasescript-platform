@@ -6,7 +6,11 @@ import {
   type DebugHistoryMarks,
   type DebugHistoryRestore,
 } from "../../debug-history.js";
-import { restorePlayerRuntimeSessionAt, type PlayerRuntimeSession } from "../../runtime-adapter.js";
+import {
+  restorePlayerRuntimeSessionAt,
+  withPlayerRuntimeDebugTrace,
+  type PlayerRuntimeSession,
+} from "../../runtime-adapter.js";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 /**
@@ -84,7 +88,7 @@ export function useDebugRewind(player: PlayerSessionHost) {
     try {
       const restored = await restore(current);
       if (history.value !== current) return false;
-      publish(restored, player.session.value?.debugTrace ?? null, current.plan);
+      publish(restored, player.debugTrace.value, current.plan);
       return true;
     } catch (error) {
       if (history.value === current)
@@ -119,8 +123,9 @@ export function useDebugRewind(player: PlayerSessionHost) {
       rewind.publish(
         ({ recorder }) => {
           recorder.begin(parked.session.plan, parked.session.snapshot);
-          parked.session.debugTrace?.reset("restore");
-          return parked.session;
+          const trace = player.debugTrace.value;
+          trace?.reset("restore");
+          return withPlayerRuntimeDebugTrace(parked.session, trace);
         },
         { paused: false, marks: parked.marks },
       );

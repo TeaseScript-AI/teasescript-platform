@@ -903,7 +903,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     } finally {
       adopting.value = false;
     }
-    if (disposed || generation.value !== owner || session.value !== shown) return false;
+    // Turning the value trace on or off rewraps the shown session; only a rewind or a new session replaces it.
+    if (disposed || generation.value !== owner || !inspecting.value) return false;
     notices.dismiss(playerNoticeKeys.rewindNotAdopted);
     storedEntries.value = shown.snapshot.scriptStorage;
     savedDataRevision.value++;

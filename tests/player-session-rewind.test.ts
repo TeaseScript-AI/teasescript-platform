@@ -14,6 +14,7 @@ import {
 } from "../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../src/index.js";
+import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
 
 // Debug's rewind through the Player's real session host (DEBUGGER.md "Rewind"): Back shows an earlier state for
 // inspection without running it or touching saved data; new input adopts it as the session, with its saved data.
@@ -28,10 +29,17 @@ interface RewindHost {
   };
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
-  prepare(create: (recording: { readonly recorder: DebugRecorder }) => PlayerRuntimeSession): void;
+  prepare(
+    create: (recording: {
+      readonly recorder: DebugRecorder;
+      readonly debugTrace?: RuntimeDebugContext;
+    }) => PlayerRuntimeSession,
+  ): void;
   activate(): void;
   update(session: PlayerRuntimeSession): void;
   prepareInput(): true | Promise<boolean>;
+  setDebugTracing(on: boolean): void;
+  readonly debugTrace: Readonly<Ref<{ status(): { readonly epoch: number } } | null>>;
   editSavedData(edit: {
     key: string;
     value: SerializableRuntimeValue;
@@ -204,8 +212,8 @@ const script = [
 
 async function start(context: TestContext, host: RewindHost) {
   await host.loadScriptStorage();
-  host.prepare(({ recorder }) =>
-    createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), recorder }),
+  host.prepare((recording) =>
+    createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
   );
   host.activate();
   await settle(context);
@@ -447,4 +455,30 @@ test("an unmounted Player whose adoption fails publishes nothing", async (contex
   release();
   await chosen;
   assert.equal(host.generation.value, generation);
+});
+
+test("every restored state begins a new epoch of the value trace, which may turn off while a state is adopted", async (context) => {
+  const storage = memoryStorage();
+  const { host, rewind } = createHost(context, storage.provider);
+  host.setDebugTracing(true);
+  await start(context, host);
+  await choose(context, host, "One");
+  const trace = host.debugTrace.value!;
+  const epoch = trace.status().epoch;
+  assert.equal(await rewind.back(0), true);
+  assert.equal(host.session.value?.debugTrace, trace);
+  assert.equal(trace.status().epoch, epoch + 1);
+  assert.equal(await rewind.forward(), true);
+  assert.equal(trace.status().epoch, epoch + 2);
+
+  // Turning the trace off rewraps the inspected session; the adoption under way still completes.
+  assert.equal(await rewind.back(0), true);
+  const release = storage.holdReplaces();
+  const chosen = choose(context, host, "Two");
+  host.setDebugTracing(false);
+  release();
+  await chosen;
+  assert.equal(host.rewind.inspecting.value, false);
+  assert.deepEqual(said(host), ["Two", "first Two"]);
+  assert.deepEqual(storage.saved(), { k: 1, pick: "Two" });
 });
