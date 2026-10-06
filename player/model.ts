@@ -38,6 +38,8 @@ export interface PlayerMessagePresentation {
   readonly text: string;
   /** Present only for authored runtime output; player-authored entries remain plain text. */
   readonly content?: MessageMarkup;
+  /** For a script's message, the runtime event whose content it shows, which Debug's Explain values explains. */
+  readonly contentSequence?: number;
   /** Completed choice, button, or form, distinct from a free-text or numeric response. */
   readonly responseKind?: "choice" | "button" | "form";
   readonly presentation?: MessagePresentation;

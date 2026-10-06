@@ -146,7 +146,7 @@ export function usePlayerDebug(
 export interface PlayerDebugExplained {
   readonly trace: RuntimeDebugContext;
   readonly epoch: number;
-  /** The event sequence of its `say` event. */
+  /** The event sequence of the `say` event that created it. */
   readonly sequence: number;
   /** Its transcript entry ID. */
   readonly entryId: string;

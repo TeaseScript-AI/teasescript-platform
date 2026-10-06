@@ -174,8 +174,10 @@ Variables tab (`DebugVariables.vue`,
 provides Explain values (`explainValues.ts`) to the transcript: a message offers it while Debug runs if
 `playerRuntimeTranscriptEventSequence` reads a runtime event sequence from its entry ID, and choosing it stores the
 selection in `usePlayerDebug` with the trace and epoch it belongs to, selects the Variables tab, and opens the panel
-through `PlayerToolsShell`'s exposed `showTool`. `playerDebugMessageOrigin` gives the message's output record or why
-there is none, from the trace status's `firstEventSequence`.
+through `PlayerToolsShell`'s exposed `showTool`. The tab finds the selected message with
+`playerRuntimeTranscriptMessage` in each published session and explains its `contentSequence`, the event whose content
+it shows; `playerDebugMessageOrigin` gives that event's output record or why there is none, from the trace status's
+`firstEventSequence`.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
 [`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's
