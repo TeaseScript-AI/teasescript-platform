@@ -220,9 +220,9 @@ function writeNotation(
       if (next.index === next.properties.length) continue;
       const property = next.properties[next.index]!;
       next.index += 1;
-      const name = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(property.name)
-        ? property.name
-        : quotedText(prefix(property.name, limit));
+      // Every part is cut to the limit before it is written, so no part is built in full.
+      const cut = prefix(property.name, limit);
+      const name = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(cut) ? cut : quotedText(cut);
       work.push(
         next,
         { value: property.value },
@@ -258,7 +258,8 @@ function writeNotation(
       output.push(
         `${plainScalarText(current.start, span)}${current.inclusive ? "..=" : ".."}${plainScalarText(current.end, span)}`,
       );
-    else if (isSpeakerReference(current)) output.push(`<speaker ${current.identifier}>`);
+    else if (isSpeakerReference(current))
+      output.push(`<speaker ${prefix(current.identifier, limit)}>`);
     else if (
       isTimerHandle(current) ||
       isMediaHandle(current) ||

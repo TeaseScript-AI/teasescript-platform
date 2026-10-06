@@ -385,7 +385,7 @@ export class Evaluator {
           : isCameraView(value)
             ? "camera"
             : "permanent button";
-    this.trace!.write(kind, key, `${owner}.${property}`, assigned, span);
+    this.trace!.writeState(kind, key, `${owner}.${property}`, assigned, span);
   }
 
   /** A collection method changed the variable its receiver names; the call's value comes from that change. */

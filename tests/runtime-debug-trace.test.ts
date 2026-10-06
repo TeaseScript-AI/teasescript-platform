@@ -596,9 +596,13 @@ test("speaker and handle properties are state that every name for them reads", (
       "let alias = guide",
       'let renamed = "Bea"',
       "alias.firstName = renamed",
+      'let family = "Jones"',
+      "guide.lastName = family",
       "let t = timer async 10 s",
       "let changed = 2 s",
       "t.remaining = changed",
+      "let same = t",
+      "same.pause()",
       "speaker guide",
       'say "${guide.firstName} ${speaker.firstName} ${t.remaining}"',
       "exit",
@@ -613,10 +617,13 @@ test("speaker and handle properties are state that every name for them reads", (
       "the alias's assignment explains the speaker's name",
     );
     assert.ok(steps.some((step) => step.target === "renamed"));
+    // A later change to another property keeps the earlier one's causes.
+    assert.ok(steps.some((step) => step.target === "guide.lastName"));
   }
   const timer = lineage(played.trace, remaining!.id);
   assert.ok(timer.some((step) => step.kind === "assignment" && step.target === "timer.remaining"));
   assert.ok(timer.some((step) => step.target === "changed"));
+  assert.ok(timer.some((step) => step.kind === "mutation" && step.target === "timer.pause()"));
 });
 
 test("answers, loads, and saves explain values, and refused or repeated reports record nothing", () => {
@@ -1061,10 +1068,75 @@ test("oversized values, wide staged messages, and rollbacks stay within the boun
     [],
   );
 
+  // A staged message reading many distinct variables keeps its rollback bookkeeping within the bounds too.
+  const names = Array.from({ length: 3000 }, (_, index) => `v${index}`);
+  const manyCompiled = compileSource(
+    [
+      ...names.map((name, index) => `let ${name} = ${index}`),
+      `say "${names.map((name) => `\${${name}}`).join(" ")}\${probe()}", instant`,
+      "exit",
+    ].join("\n"),
+    { builtins: ["probe"] },
+  );
+  assert.deepEqual(manyCompiled.diagnostics, []);
+  const many = new RuntimeDebugContext({ maxAccountedBytes: 4096 });
+  const manySizes: number[] = [];
+  run(
+    manyCompiled.plan!,
+    createImmediatePacingRuntimeSnapshot(manyCompiled.plan!, { seed: SEED }),
+    {
+      builtins: {
+        probe: () => {
+          manySizes.push(many.status().accountedBytes);
+          return "";
+        },
+      },
+    },
+    { debugTrace: many },
+  );
+  assert.equal(manySizes.length, 1);
+  assert.ok(manySizes[0]! <= 4096, "staged bookkeeping counts toward the bounds");
+
+  // Outputs larger than the budget are dropped at once, and no index entry outlives them.
+  const loud = compile(
+    ["for i in 1..=50 {", `    say "${"x".repeat(1024)}", instant`, "}", "exit"].join("\n"),
+  );
+  const small = new RuntimeDebugContext({ maxAccountedBytes: 1024 });
+  const loudPlayed = play(loud, { trace: small });
+  for (const event of loudPlayed.events)
+    if (event.kind === "say") assert.equal(small.outputRecord(event.sequence), null);
+
   const draw = compile("let r = random()\nexit");
   const tiny = new RuntimeDebugContext({ maxAccountedBytes: 180 });
   play(draw, { trace: tiny });
   assert.ok(tiny.status().accountedBytes <= 180);
+});
+
+test("previews cut long property names before writing them", () => {
+  const plan = compile(['let row = load "row"', "exit"].join("\n"));
+  const longest = { length: 0 };
+  const join = Array.prototype.join;
+  // Observe the longest text notation assembles while the traced run writes its preview.
+  Array.prototype.join = function (this: unknown[], separator?: string) {
+    const joined = join.call(this, separator);
+    longest.length = Math.max(longest.length, joined.length);
+    return joined;
+  };
+  try {
+    const trace = new RuntimeDebugContext();
+    play(plan, {
+      trace,
+      scriptStorage: [
+        {
+          key: "row",
+          value: { kind: "object", properties: [{ name: "a".repeat(100_000), value: 1 }] },
+        },
+      ],
+    });
+  } finally {
+    Array.prototype.join = join;
+  }
+  assert.ok(longest.length <= 4 * RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters);
 });
 
 test("previews cut long keys and labels before writing them", () => {

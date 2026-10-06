@@ -402,7 +402,7 @@ export class TraceStore {
   close(snapshot: RuntimeSnapshot): void {
     if (this.#failure !== null) return;
     this.#last = new WeakRef(snapshot);
-    this.#stage = null;
+    if (this.#stage !== null) this.#endStage(this.#stage);
   }
 
   #clear(): void {
@@ -478,7 +478,9 @@ export class TraceStore {
   }
 
   readStorage(key: string): boolean {
-    if (this.#failure !== null) return false;
+    // A key longer than a preview is never indexed, so it is not looked up either.
+    if (this.#failure !== null || key.length > RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters)
+      return false;
     const id = this.#versions.get(storageKeyOf(key));
     if (id !== undefined) this.#add(this.acc, id);
     return id !== undefined;
@@ -592,6 +594,23 @@ export class TraceStore {
   }
 
   /**
+   * A change of runtime state outside variables, such as one property of a speaker or timer: a new version of the whole
+   * state, so it depends on the previous version as well as on the causes collected so far.
+   */
+  writeState(
+    kind: "declaration" | "assignment" | "mutation",
+    key: string,
+    target: string,
+    value: SerializableRuntimeValue,
+    span: TraceSpan | null = null,
+  ): void {
+    if (this.#failure !== null) return;
+    const previous = this.#versions.get(key);
+    if (previous !== undefined) this.#add(this.acc, previous);
+    this.write(kind, key, target, value, span);
+  }
+
+  /**
    * A read of runtime state outside variables, such as a speaker's or a timer's properties: its last recorded change,
    * if any. With `unknown`, an unrecorded state reads as an unrecorded origin; otherwise it adds nothing, because the
    * value naming the state already explains its creation.
@@ -615,8 +634,10 @@ export class TraceStore {
   /** Points `key` at record `id`, undone with a rolled-back stage. */
   #index(key: string, id: number): void {
     const stage = this.#stage;
-    if (stage !== null && !stage.versions.has(key))
+    if (stage !== null && !stage.versions.has(key)) {
       stage.versions.set(key, this.#versions.get(key));
+      this.#bytes += undoBytes(key);
+    }
     if (!this.#versions.has(key)) this.#bytes += INDEX_OVERHEAD_BYTES + key.length * 2;
     this.#versions.set(key, id);
   }
@@ -823,7 +844,8 @@ export class TraceStore {
       Object.freeze({ kind: "output", eventSequence }),
       deps,
     );
-    if (id === null) return;
+    // An output larger than the budget is dropped at once and gets no index entry.
+    if (id === null || this.#find(id) === undefined) return;
     this.#outputs.set(eventSequence, id);
     this.#stage?.outputs.push(eventSequence);
   }
@@ -875,7 +897,7 @@ export class TraceStore {
 
   commit(stage: Stage | null): void {
     if (stage === null || this.#stage !== stage) return;
-    this.#stage = null;
+    this.#endStage(stage);
     if (this.#failure !== null) return;
     try {
       this.#evict();
@@ -886,7 +908,7 @@ export class TraceStore {
 
   rollback(stage: Stage | null): void {
     if (stage === null || this.#stage !== stage) return;
-    this.#stage = null;
+    this.#endStage(stage);
     if (this.#failure !== null) return;
     try {
       // Staged records still retained are the newest; older ones the bounds dropped meanwhile stay dropped.
@@ -968,10 +990,12 @@ export class TraceStore {
       this.#truncated = true;
       this.#bytes -= record.bytes;
       for (const key of record.aliases === null ? [record.key] : [record.key, ...record.aliases]) {
-        if (key !== null && this.#versions.get(key) === record.id) {
+        if (key === null) continue;
+        if (this.#versions.get(key) === record.id) {
           this.#versions.delete(key);
           this.#bytes -= INDEX_OVERHEAD_BYTES + key.length * 2;
         }
+        this.#forgetUndo(key, record.id);
       }
       if (record.detail?.kind === "output") this.#outputs.delete(record.detail.eventSequence);
       if (this.#stageImageId === record.id) this.#stageImageId = null;
@@ -982,6 +1006,31 @@ export class TraceStore {
       this.#records = this.#records.slice(this.#head);
       this.#head = 0;
     }
+  }
+
+  /**
+   * Keeps a stage's undo entries bounded by what the trace retains: once `key` is no longer indexed and its earlier
+   * version is gone, rollback has nothing to restore or remove for it. A key the stage indexes again records a new
+   * entry.
+   */
+  #forgetUndo(key: string, dropped: number): void {
+    const undo = this.#stage?.versions;
+    if (undo === undefined || !undo.has(key)) return;
+    const previous = undo.get(key);
+    const gone =
+      previous === undefined || previous === dropped || this.#find(previous) === undefined;
+    if (!gone) return;
+    if (this.#versions.has(key)) undo.set(key, undefined);
+    else {
+      undo.delete(key);
+      this.#bytes -= undoBytes(key);
+    }
+  }
+
+  /** Ends a stage: its undo entries stop counting. */
+  #endStage(stage: Stage): void {
+    this.#stage = null;
+    for (const key of stage.versions.keys()) this.#bytes -= undoBytes(key);
   }
 
   #limit(): number {
@@ -1120,6 +1169,11 @@ function addDependency(deps: DebugDependencies, id: number, limit: number): void
 function addAll(target: DebugDependencies, source: DebugDependencies, limit: number): void {
   for (const id of source.ids) addDependency(target, id, limit);
   target.omitted += source.omitted;
+}
+
+/** Bytes counted for a stage's undo entry of `key`, which it keeps while the stage lasts. */
+function undoBytes(key: string): number {
+  return INDEX_OVERHEAD_BYTES + key.length * 2;
 }
 
 /** Text the trace keeps as a label, cut like a preview. */

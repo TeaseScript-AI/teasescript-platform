@@ -353,7 +353,7 @@ function completeCapture(
   if (reference !== null && action.tags !== null) {
     current.capturedImages.push({ reference, tags: action.tags.map((tag) => ({ ...tag })) });
     trace?.replace(input ?? null);
-    trace?.write("mutation", stateKey("photos"), "tagged photos", reference);
+    trace?.writeState("mutation", stateKey("photos"), "tagged photos", reference);
   }
   const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   const events: InterpreterEvent[] = [];
