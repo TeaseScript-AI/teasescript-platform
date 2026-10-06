@@ -2,7 +2,9 @@
 
 This document separates importer limitations from actual TeaseScript design questions. SexScript compatibility is not
 a reason by itself to copy Groovy or the old runtime. Corpus counts come from the dated snapshot in
-[`CORPUS-INVENTORY.md`](CORPUS-INVENTORY.md); the target policy is in [`POC-SCOPE.md`](POC-SCOPE.md).
+[`CORPUS-INVENTORY.md`](CORPUS-INVENTORY.md) unless a section names its own measurement; the current results on the
+selected large corpus are in [Current state and remaining gaps](#current-state-and-remaining-gaps). The target policy
+is in [`POC-SCOPE.md`](POC-SCOPE.md).
 
 ## Classification
 
@@ -71,7 +73,7 @@ implemented):
 | `list + other`, `list << x`, `list.push(x)`, `list += other` | a generated concatenation helper and `add()` |
 | `list - other`, `list -= other` | a generated helper that keeps every element `other` does not hold, repeated ones too, as Groovy did (`difference()` keeps each once); a right side not proven a list or one value is decided at runtime |
 | `x instanceof Number` (`String`, `Boolean`, `List`, `Map`) | `x is number` (`string`, `boolean`, `list`, `dict` or `object`) (#530) |
-| a map used as a lookup table: `[(KEY): v]`, `map[key]`, `containsKey`, `keySet`, `values`, `size`, `put`, `remove`, `clear`, `each { k, v -> }` | a `dict` (#536): `dict{ [KEY]: v }`, `map[key]`, `contains`, `keys`, `values`, `length`, `map[key] = v`, a guarded `remove`, `clear`, `for k in map` |
+| a map used as a lookup table: `[(KEY): v]`, `map[key]`, `containsKey`, `keySet`, `values`, `size`, `put`, `remove`, `clear`, `each { k, v -> }` | a `dict` (#536): `dict{ [KEY]: v }`, `map[key]`, `contains`, `keys`, `values`, `length`, `map[key] = v`, a guarded `remove`, `clear`, `for k, v in map` (#639) |
 | a map with fixed names that gains fields later, and its `clear()` | an object literal that declares every used field (null when added later); `clear()` reassigns it with null fields, so a map that `clear()` empties starts every field as null and sets its values right after, since a property keeps the type of its first value (ADR 0021 rule 1.4) |
 | `list.remove(index)`, `list.remove(value)` | `list.removeAt(index)`, also as a value; `list.remove(value)` with structural equality (#517) |
 | Groovy string methods (`size()`, `trim()`, `toUpperCase()`, `replace()`, `split()`, ...) | text operations (`text.length`, `trim()`, `uppercase()`, ...; #518) |
@@ -89,7 +91,7 @@ implemented):
 | a script-level `return "name"`, the next script of the legacy chain | `goto "path.tease"`, with the path from the package root (ADR 0022); a name the package has no script for ended the legacy chain quietly, so it becomes `exit` with a note (`SX_MISSING_SCRIPT`, 8 sites) |
 | `return name` with a computed name | `goto script(name)` (#570), after `exit` when the name is null or empty (`SX_DYNAMIC_SCRIPT`, DisciplineClinic's `returnPoint`) |
 | `return null`, `return`, or the end of a script | `exit`: every file ends with a transfer or `exit` (ADR 0022 §4); parameters and return points passed through storage stay `save` and `load` |
-| the scripts the legacy player listed | a generated `main.tease` that asks the legacy profile and goes to the entry: the script of `scripts/` that calls `setInfos`, is no internal script, and that no other script chains to, or without one there such a script one folder down (teachertrouble's `Banjo/teachertrouble`); a menu labelled by setInfos title and language where there are several (`SX_ENTRY_MENU`); a legacy `main.groovy` is `main.tease` itself. Every other file keeps its legacy folder and name (owner decisions 2026-10-05) |
+| the scripts the legacy player listed | a generated `main.tease` that asks the legacy profile and goes to the entry: the script of `scripts/` that calls `setInfos`, is no internal script, and that no other script chains to, or without one there such a script one folder down (teachertrouble's `Banjo/teachertrouble`); a menu labelled by setInfos title and language where there are several (`SX_ENTRY_MENU`, 31 selected units), leaving out the scripts a unit lists as internal; a legacy `main.groovy` is `main.tease` itself. Every other file keeps its legacy folder and name (owner decisions 2026-10-05) |
 | mixin modules a script loads at runtime (`Eval.me` of each file of a folder, Toy's `toy/*.groovy`) | each module its own file, its injected methods and loader `global function`s, with what they use of the loading script global too (its fields as `global`s, assigned where the script declared them); a module folder that several scripts load is composed into each |
 | a function several scripts define, as authors copied it between scripts | a function in each file, as in the legacy package (owner decision 2026-10-05) |
 | the methods of a package-local helper class, such as `Domme3Class` | `global function`s in the class's own file (`Domme3/Domme3Class.tease`), with its static fields of literal values as `global`s, where other files call them; a method that reads other state or dispatches closure values is copied into each script that calls it |
@@ -121,9 +123,10 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   dropped. Input functions showed their text like `show()`; a `null` text kept the current text. A text input's text
   becomes the question of its ask, which the Player says before the field opens (#634): `askInteger "How many?",
   default: 3`, also inside an expression as `askInteger("How many?", default: 3)`, where the text is said right before
-  the ask with the ask's speaker; otherwise it stays a `say` before the statement (counted as `askQuestions` in the
-  report). The same holds for the photo that `askImage` asks for (#636): a text said right before it fills a missing
-  message, and one that its message repeats goes.
+  the ask with the ask's speaker; otherwise it stays a `say` before the statement. The report counts the asks that
+  took their question (`askQuestions`, `SX_ASK_QUESTION`; 890 in 108 selected units). The same holds for the photo
+  that `askImage` asks for (#636): a text said right before it fills a missing message, and one that its message
+  repeats goes.
 - `say` text is message markup: legacy `*emphasis*` renders as formatting and URLs become links. Line-start list,
   heading, or quote markers and backslash escapes get a `NOTE` (`escapeMarkup()` keeps text literal).
 - Single-field input prefilled its field with the default, also when the default was null (the field showed "null")
@@ -334,9 +337,9 @@ showed:
   lookups become text (`dict{ "1": 1.25, ... }["${getLevel(DENIAL)}"]`, 4 `SX_DICT_KEY_TEXT` notes). The deferred
   non-text keys would keep such tables as written.
 - **Closures over entries stay manual:** `toys.any { s, t -> ... }` and `findAll` chains over maps (with method
-  chains on looked-up values, 14 Toy statements) need loops; only `each { key, value -> }` converts, to
-  `for key in map` with a lookup, since #536 has no two-variable `for` (1 site). `funcMap`, a dict of closures, stays
-  manual like other closures kept as values (2).
+  chains on looked-up values, 14 Toy statements) need loops; `each { key, value -> }` converts to
+  `for key, value in map` (#639), as does a loop over entries that reads `e.key` and `e.value` and does not change the
+  map. `funcMap`, a dict of closures, stays manual like other closures kept as values (2).
 - **Open maps versus fixed properties:** Groovy maps used as records gained fields later (`sessionParams.aborted = r`);
   with fixed properties the importer declares every field the package uses, null until set (6 literals), and turns
   `clear()` into a reassignment with null fields. Deciding dict or object needs the uses of a variable in the script
@@ -348,12 +351,14 @@ Evidence for owner evaluation, ordered by corpus weight. Choices from runtime li
 operations (#508, PR #518), single-field prefill (#510, merged as #514), and dictionaries (D1, decided as `dict` in
 #536) were candidates here and are now accepted; the importer emits them by default.
 
-1. **Regular expressions.** Toy's `replaceAll(/<[^>]*>/, "")` and a pattern `split` remain manual work, as does a
-   locale argument (`toLowerCase(Locale.ENGLISH)`); a synchronous `.ts` text library, once package-library linkage
-   exists, would cover the patterns.
+1. **Regular expressions.** Two patterns have marked workarounds (`split(/\s+/)` and `replaceAll(/<[^>]*>/, "")`,
+   `SX_REGEX_WORKAROUND`); 39 other pattern sites in 14 selected units remain manual work, as does a locale argument
+   (`toLowerCase(Locale.ENGLISH)`). A synchronous `.ts` text library, once package-library linkage exists, would cover
+   the patterns.
 2. **Localized script variants.** The distribution ships language variants per script (`intro`, `intro_de`,
    `intro_fr`, ...) selected by the legacy player. The repository has no localization decision; this is a package-level
-   product question, not syntax.
+   product question, not syntax. Meanwhile the player's language (`Locale.getDefault().getLanguage()`) becomes English,
+   `"en"`, with a note (`SX_LOCALE_WORKAROUND`, 5 sites), which loses the font configuration offer for other languages.
 
 Not candidates on current evidence: first-class closures, metaprogramming, and runtime evaluation. Toy uses all
 three, and the converted Toy output expresses them with functions, action IDs plus one dispatcher, and direct module
@@ -466,10 +471,13 @@ Emily persona; the code's default owner `ancilla` is not included.
 File transfers (`goto "file.tease"`, `goto script(...)`), `global function` and `global` (ADR 0022, #570), and `takePhoto()` (#475, camera in the runtime and the Player) are native on `main` now, as are `dict` (#555),
 date and time (#532), `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger` (#548),
 rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526),
-`load "key", default:` (#545), permanent buttons (#612), and image tags with `findImages` (#572): a legacy count of
-an images folder becomes a query for one generated tag of the folder's full path, which an XMP sidecar gives each image
-(`SX_IMAGE_TAGS`, owner decision 2026-10-05); only a count filtered by file name stays counted at conversion time
-(`SX_IMAGE_COUNT_WORKAROUND`).
+`load "key", default:` (#545), permanent buttons (#612), `for key, value in dict` (#639), and image tags with
+`findImages` (#572): a legacy count of an images folder becomes a query for one generated tag of the folder's full
+path, which an XMP sidecar gives each image (`SX_IMAGE_TAGS`, owner decision 2026-10-05); only a count filtered by file
+name stays counted at conversion time (`SX_IMAGE_COUNT_WORKAROUND`). Timer, permanent-button, and media blocks share
+the local variables around them since #645; the importer needed no change for it, since it never moved a local to a
+global only for a handler, and its generated globals (device and switch buttons, background sounds) are shared across
+files on purpose.
 
 What remains accepted but unimplemented becomes a workaround in implemented TeaseScript, with a `// NOTE` naming it at
 every site (owner decision 2026-10-05), so converted packages play natively; `--accepted=<forms>` emits the accepted
@@ -482,12 +490,13 @@ form instead once `main` implements it:
 | `openUrl(url)` | "Open this link: …" in the chat, where message markup makes an `http(s)` address a link, and a Continue button (`SX_OPEN_URL_WORKAROUND`) | opening the page itself |
 | layered scene (`showBackgroundImage`, `showOverlayImage`) for an image composed in memory and shown with `setImage(bytes, n)` | the base image the function read (`SX_IMAGE_COMPOSITION`); `--accepted=layeredScene` places the base as background and each drawn image as an overlay at percentages of the canvas (`SX_LAYERED_SCENE`, or `SX_LAYERED_SCENE_PARTIAL` for source rectangles, text, shapes, pixel edits, and transformations) | the composition |
 
-In the 211 merged corpus2 units (2026-10-05), 41 functions that only compose an image fall back to their base image,
-and 46 `setImage(bytes)` sites stay TODOs because their function also shows text, waits, saves, or changes outer
-variables. None of them maps cleanly to the layered scene: all 211 composing closures in the sources size their canvas
-from a loaded image's `getWidth()` and `getHeight()`, so overlay percentages are unknown at conversion time; 27 draw in
-loops, and only 6 read a literal base path. A clean mapping needs overlay positions relative to the background's own
-pixel size, or an image-size query.
+In the 210 selected units (2026-10-06) the workarounds stand at 63 `askBooleans` menus in 32 units, 419 popups in 23,
+and 403 links in 37. 24 functions that only compose an image fall back to their base image (12 units), and 28
+`setImage(bytes)` sites stay TODOs (16 units) because their function also shows text, waits, saves, or changes outer
+variables. None of them maps cleanly to the layered scene: all 211 composing closures in the merged sources size their
+canvas from a loaded image's `getWidth()` and `getHeight()`, so overlay percentages are unknown at conversion time; 27
+draw in loops, and only 6 read a literal base path. A clean mapping needs overlay positions relative to the
+background's own pixel size, or an image-size query.
 
 `askBoolean` with custom labels already converts to a two-option `choose` compared with its first label. Legacy
 `getFile(title)` was used for a photo of the player, so it becomes `askImage(title)` (#608), which the player answers
@@ -512,8 +521,9 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   letter case, around spaces, or below a repeated folder name (`SX_MEDIA_PATH`); several files that match apart from
   case get a note (`SX_MEDIA_PATH_CASE`), and a path that no file matches stays as written with a note, since the
   legacy player showed nothing there either unless the script created the file while running (`SX_MEDIA_MISSING`,
-  counted as `missingMedia` in the report; a photo the package copies to the path is no missing file). A MIDI file becomes an MP3 rendered at conversion (fluidsynth with a General
-  MIDI soundfont, then ffmpeg).
+  counted as `missingMedia` in the report, 190 paths in 18 selected units; a photo the package copies to the path is
+  no missing file). A MIDI file becomes an MP3 rendered at conversion (fluidsynth with a General MIDI soundfont, then
+  ffmpeg).
 - Pacing: legacy `show()` displayed its text at once and a `wait()` right after it set the timing, so text shown
   directly before a wait becomes `say …, instant`; other text keeps TeaseScript's reading time (converter owner,
   2026-10-05).
@@ -526,9 +536,10 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   other statement, a nested block, or a call in an image or sound starts over. The display also kept the last text
   across a chain to the next script: before a `goto` to a script whose start shows the same literal texts again, with
   a confirm button of the same label (ignoring case), the caller drops them, while the target keeps them for other
-  callers. The report counts the dropped, shortened, and kept texts and those dropped across a chain (`repeatedText`;
-  `SX_REPEATED_TEXT_DROPPED`, `SX_REPEATED_TEXT_SHORTENED`, `SX_REPEATED_TEXT_KEPT` where the interpolated values
-  differ, `SX_REPEATED_TEXT_ACROSS_CHAIN`).
+  callers. The report counts the dropped, shortened, and kept texts, the animations, and those dropped across a chain
+  (`repeatedText`; `SX_REPEATED_TEXT_DROPPED`, `SX_REPEATED_TEXT_SHORTENED`, `SX_REPEATED_TEXT_KEPT` where the
+  interpolated values differ, `SX_REPEATED_TEXT_ANIMATION`, `SX_REPEATED_TEXT_ACROSS_CHAIN`): in the selected units 38
+  dropped and 171 shortened in 39 units, 68 animations in 11, and 5 across a chain in 4.
 - Launch markers: the legacy player saved `<script>.launch.firsttime`, `.lasttime`, and `.nb` at every script start
   (`FullScript.groovytemplate`); a script whose markers the package reads saves them first (`SX_LAUNCH_MARKERS`).
 - Java text: `String.format` with `%s`, `%d`, `%f`, a `0` flag, a width, and a precision becomes interpolation,
@@ -541,10 +552,10 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   (`system/...`, `welcome`, `exit`) ends the session (`SX_DESKTOP_SCRIPT`).
 - The legacy player profile: the distribution's intro saved the player's name and gender, and its options the toys and
   clothes the player owns; a package that reads such keys and never saves them asks the missing ones once at the start
-  of `main.tease`, with the distribution's questions, and saves them under the legacy keys (`SX_LEGACY_PROFILE`).
+  of `main.tease`, with the distribution's questions, and saves them under the legacy keys (`SX_LEGACY_PROFILE`, 141 selected units).
 - `show("")` only cleared the legacy text area and is dropped, as is any other empty text, such as a question in a
-  variable that only ever holds `""` (`SX_BLANK_TEXT`, counted as `blankTexts`); an empty or blank image path clears
-  the image.
+  variable that only ever holds `""` (`SX_BLANK_TEXT`, counted as `blankTexts`, 56 in 13 selected units); an empty or
+  blank image path clears the image.
 - Lists join with TeaseScript `+`, `+=`, and `addAll` (#609); the concatenation helper remains only for ranges. A right
   side not proven to be a list or one element (`[] + impl` with a parameter) goes through a generated helper that
   returns a list as it is and wraps any other value, also null, as Groovy appended it (63 corpus sites, 26 in Toy).
@@ -566,110 +577,73 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   settings are dropped (`SX_JVM_SETTING`), and a function that reads photo pixels to answer yes or no answers false
   (`SX_PHOTO_PIXELS`). A try block without fallible calls runs without its catch (`SX_TRY_WITHOUT_CATCH`).
 
-## Remaining gaps by workaround class
+## Current state and remaining gaps
 
-What still blocks conversion, ranked by whether current TeaseScript can express it. Counts are root errors or blocked scripts in default mode after
-the merge of `main` at `242ada7a`; the column "Before" gives the count at the `dict` round.
+Measured on the selected large corpus on 2026-10-06, at importer `05f83665` with `main` `c5c20888` merged in.
+- **The selection** follows the owner decisions of 2026-10-05. It takes corpus2's merged units with one revision per
+  title.
+  - The largest revision, checked by hand, is the package. Earlier revisions are listed in the catalog as earlier
+    versions and are not converted.
+  - Three units whose revisions carry two titles are split into two units each: Toy and ToyExpanded, jewell and
+    JewellMistressMiley, and Lines and LinesV2.
+- **Script-specific fixes** are unit patches (32 units), not converter rules.
 
-**Expressible in current TeaseScript (importer work).** The language already has a clean form.
+| Result | Units of 210 |
+| --- | ---: |
+| Converted without a failed step | 210 |
+| Compile as one project | 138 |
+| Compile and play to the end from `main.tease` in the smoke run | 119 |
+| Smoke run from `main.tease`: halted, blocked at a file that does not compile, step limit, failed, no run | 120, 70, 16, 3, 1 |
 
-| Gap | Before | Now | Clean form |
-| --- | --- | --- | --- |
-| Conditional expressions (`?:`, Elvis) inside larger expressions and conditions | Toy about 40 | 0 | a temporary computed before the statement, with earlier parts first (done) |
-| Inputs on the right of `&&`/`\|\|`, `&`/`\|` with effects on the right | Toy about 10, distribution 2 | Toy 1 (`goodToy & ...`, left side not proven boolean) | temporaries and an `if` (done) |
-| Collection methods with closures inside larger expressions; `times`, `isEmpty`, `sort` | Toy 36 of 59 dynamic calls | Toy 27 of 53, all on receivers the importer cannot prove to be lists | loops (done where the receiver is a list or range) |
-| Collection methods on unproven receivers: closure parameters (`texts.collect`), persona data (`DOMME.sessions.forEach`), map entries (`toys.any { s, t -> }`), plus `each`, `sum`, list appends | (in the row above) | Toy 27 dynamic calls, 7 `each`, 4 `sum`, 3 appends, 2 other | a loop once inference proves the list, or a key loop with a lookup for a dict |
-| Menus built inside larger expressions | Toy 6 | Toy 2 (option lists not proven) | the menu into a temporary first (done) |
-| Variables that hold values of two types (valid dynamic Groovy) | DisciplineClinic 8 | 0 | an empty-text placeholder starts with the later type's empty value (done, 5); one variable per type in straight-line code (done, none in the corpus); otherwise a declared union (done, DisciplineClinic 3, Toy 1; #530) |
-| Closures that capture local state | Toy 10 | Toy 10 | explicit state parameters: feasible for 2 local helpers that call sibling local closures (`suck`, `suckBeat`); the other 8 are stored in registries, returned, or evaluate persona expressions |
-| Method pointers; calls of closures kept in data (`it.cond()`, `e.event.func(...)`) | Toy 3 and 4 | Toy 3 and 5 | action IDs with a dispatcher |
-| Persona data files with Groovy expression strings | Toy | Toy | data converted at import time |
-| Behaviour kept as data with code strings evaluated at runtime (`Eval.me`, expression strings in plan or config records, Toy's 9 session plans with 26 expression strings in `images/toy/domme.groovy`, run by `sessionPlay`) | Toy | Toy | owner decision 2026-10-05: native TeaseScript, in per-unit patches and in converter rules where the pattern is general: each behaviour an ordinary function, its conditions plain `if`s, and the choice among them a small selection list or `switch` (Toy: a function per session, and session choice as a list of conditions with weights). Eval is not emulated with a lookup table of expression texts |
-| `instanceof`; `asBoolean()`; `Math.floorDiv` | Toy 1 each | Toy 1 each | `is` (#530); Groovy truth; `floor(a / b)` |
+Of the 575 scripts, 426 are lowered without a root error and 404 compile; 1,467 root errors remain.
 
-**Workaround possible, but a hack.** Works with current TeaseScript but differs from the intended behavior; the
-accepted implementation is still wanted. Each workaround the importer emits carries a note that names it
-(`SX_REGEX_WORKAROUND`, `SX_LOCALE_WORKAROUND`).
+**Smoke runs:**
+- **The step limit is inconclusive** (16 units). Most of these are loops that wait for a typed text or a time.
+- **The 3 failed runs:** ToyExpanded (`TSR008`, an index on a value that is no list), ashleyYHBS (`TSR058`, a missing
+  setting stored in an `int`), and tabata (`TSR036`, a division by zero).
+- **Isolated runs** of scripts that no entry run reaches fail mostly on settings that an introduction saves:
+  `TSR058` 21 times and `TSR027` 17 times. Groovy compared and computed with such a missing setting as null.
 
-| Gap | Corpus | Workaround | What the workaround loses |
-| --- | --- | --- | --- |
-| `askBooleans` | blocked 8 scripts | emitted since 2026-10-05 (see Accepted but not implemented): one yes/no `choose` per item, then a confirmation | one form with every option; changing an earlier answer |
-| `showPopup` | blocked 4 scripts | emitted since 2026-10-05: `say` plus `showButton "OK"` | the popup presentation |
-| Media selected by tags (M1), including Toy's imagery folders with tag files | Domme3 3, Toy imagery | emitted since 2026-10-05 for counts of a listed images folder: the counts at conversion time | packs added after conversion |
-| Regular expressions | Toy 2 converted, `tokenize` and Java patterns left | emitted: a loop over the parts between spaces for `split(/\s+/)`, and one removing each `<...>` for `replaceAll(/<[^>]*>/, "")` | readability, and exactness for other whitespace and a leading space |
-| The player's language (`Locale.getDefault().getLanguage()`) | distribution 2 converted | emitted: English, `"en"` | the font configuration offer for other languages |
+### Unconverted code by class
 
-**No reasonable workaround.**
+Of the 72 units that do not compile:
+- 61 hold unconverted code (`// TODO`);
+- 11 fail on compile errors alone.
 
-| Gap | Corpus | Why |
-| --- | --- | --- |
-| Desktop and Java APIs: `java.time` formatting and zones (5), files (4), `java.util.Random` (4), JSON and Base64 (2), `Eval.me`, `java.util.function.Function`, `System.getProperty`, OS processes (1 each), Java objects, the Cornertime exchange | Toy 19 of its 53 dynamic calls and 8 constructors, distribution | Outside the product boundary by design (see Legacy baggage). `Random.nextInt(n)` alone could become `randomInteger()`, without the seed. |
-| Legacy bugs (variables nothing assigns, helpers without the script host) | Domme3 3 and 7, DisciplineClinic 1 | Need an author's repair; reporting them is correct. Six more sit in functions nothing calls and are notes now. |
+The TODO sites of the leading root codes, classified by their original Groovy line:
 
-### Left after the step-4 rounds (corpus2-merged, 2026-10-05)
+| Class | TODO sites | Units (not compiling) | Workaround class |
+| --- | ---: | ---: | --- |
+| In-memory image composition (`ImageIO`, `BufferedImage`, `drawImage`, `getWidth`, `setImage(bytes)`) | 441 | 20 (10) | Language gap: the layered scene is accepted but not implemented, and placing overlays needs the base image's size (see Accepted but not implemented) |
+| List, text, and map methods on receivers not proven, operators, and other idioms | 358 | 67 (47) | Importer work where inference can prove the receiver; otherwise per unit |
+| Files and folders (`new File`, listings, writes, `eachFile`) outside the decided substitutes | 196 | 54 (36) | Legacy baggage. Substitutes cover existence checks, photos, stored text files, audio, and video |
+| Closures that capture local state | 58 | 9 (8) | Per unit, since TeaseScript has no closures |
+| Java formatting, dates, JSON, and Base64 | 46 | 22 (18) | Importer work where TeaseScript has the form (the `String.format` subset is done); otherwise baggage |
+| Dynamic code (`Eval.me`, `inspect`, expression strings in data, per-script property objects) | 32 | 3 (3) | Owner decision 2026-10-05: native TeaseScript, in per-unit patches and in converter rules where the pattern is general. Each behaviour is an ordinary function, its conditions plain `if`s, and the choice among them a small selection list or `switch`. Toy's session plans are patched that way. Eval is not emulated with a lookup table of expression texts |
+| `try`/`catch` around fallible calls | 27 | 18 (14) | No exceptions. A try block without fallible calls runs without its catch |
+| Network, processes, and system properties | 16 | 4 (4) | Legacy baggage. The online service, device commands, and OS information have decided substitutes |
+| Legacy bugs: calls of functions that no file defines, and names that nothing assigns | 27 | 9 (7) | Reported for the author's repair (see Legacy baggage) |
 
-At converter `884339a3`/`a2fadae4`, 2,249 root errors remained in 103 of the 209 merged units; 105 units played to
-the end. The classes below are what the last round deliberately left; counts are TODO sites and units.
+### Compile errors
 
-| Class | Sites, units | Why it stays |
-| --- | --- | --- |
-| In-memory image composition (`ImageIO`, `BufferedImage`, `Graphics.drawImage`, `setImage(bytes, 0)`) | 546, about 21 | A language gap; waits for an owner decision on layered scenes or composition. Unlocks about 7 units alone. |
-| Closures that capture local state | 84, 9 | TeaseScript has no closures; a rewrite with explicit state is per unit. |
-| `try`/`catch` around fallible calls (number parsing, files, network, programs) | part of 56, 27 | No exceptions; only try blocks without fallible calls run without their catch. |
-| Questions in other positions (arguments with effects, `?:`) | about 25, 6 | Only `while` conditions are rewritten; an `if` already computes its guarded question first. |
-| Nullable values that flow through unproven values (`+` of possible text, ternaries of nullable loads, loads tested for null elsewhere) | compile errors in about 10 units (Escape, OwlSays, gunfighter, questionnaire, scatslut, ashleyYHBS, spinthebottle, MatchDares, Stay, fapioh) | Each case needs its own type flow; returned parameters and function locals are typed now. |
-| The action dispatcher returning values of several types | RileyReid | Needs a declared union result type, which the IR does not write. |
-| A closure declared inside a top-level block (`if (estim) { def shock = { ... } }`) | NoPeeking 9 | The prepass finds closures at the top level only. |
-| Per-unit object models and data | Toy 456 compile errors, DungeonTrials 84, Farkel 28 | Patches, not rules. |
-| Units with many small idioms on unproven receivers | ScarlettsBlackmail 60, SpankingParty 32, OwlGames 24, Bondage_Fun beyond its switch | Each site needs its own proof of type. |
-| Dynamic code (`Eval.me`, `inspect`, per-script property objects) | 81, 9 | Patches. |
-| File metadata and other system calls without a decided substitute (`lastModified`, `traverse`, threads, zip, sockets) | about 20, 15 | Outside a browser package; reported as TODO. |
-| Legacy bugs (names nothing defines, `assert`, `throw`) | 31, 9 | Correctly reported. |
+Null-related errors are the largest compile error class left: 1,538 errors in 47 of the 72 units. "Null-related" means
+may be null, no property of null, null indexed, combined, or compared.
 
-### Third-round findings
+| Class | Errors | Units | Route |
+| --- | ---: | ---: | --- |
+| A script variable that starts as null, read in functions (565) or at the top level after a call, wait, or loop start (62) | 627 | 22 | Per-unit patches that start it with a value. A declaration assigned later, like Kotlin `lateinit`, would cover 511 of these errors. Together with the locals below, such a declaration would make 3 units compile by itself (gunfighter, jeuxdemain_femme, SpankingParty), because the other units have more blockers |
+| A function local that starts as null and is set before its reads, but whose narrowing ends at a loop start | 285 | 15 | About 100 are number counters that miss the zero start (owner decision 2026-10-05), because closure locals are typed by name across the file (see Open importer work). The rest are per unit |
+| Values that really may be null, read in other functions: function results, and storage reads whose default is set elsewhere | 504 | 21 | The compiler keeps a null check within one function. About 210 come from one input helper's local that starts as null and that a loop sets (the Owl family's `atleast()`, a one-line patch per script); the rest are per unit |
+| Nullable function results, fields, and list items read directly | 122 | 19 | Per unit |
 
-Smoke runs that go further surface problems the static gates do not:
-
-- **Groovy lists grow on a write past their end.** DisciplineClinic fills `assignmentArrayList = []` by position
-  (`assignmentArrayList[i] = [...]`), which Groovy grows, padding with null; a TeaseScript position must exist
-  (`TSR025`). The importer appends at the end with a note (`SX_LIST_GROWTH`, 2 sites); a position beyond the end
-  stays different.
-- **Accepted list `sort()` was missing on `main`.** V30 §16 lists `items.sort()`; `main` compiled it but its runtime
-  rejected the method (`TSR016`) until #546, so the gate stood in for it (1 Toy site).
-- **`main` compiled method calls its runtime did not implement.** Text operations such as `trim()` passed the compiler
-  and failed only at runtime (`TSR016`) until #518 merged, so only the smoke runs caught them.
-- **Unreachable legacy code blocked whole scripts.** Test functions nothing references held class loading and reads of
-  never-assigned variables (DisciplineClinic's `testAllImages` and `test`); they are notes now. Which functions are
-  unreferenced has to come from the generated program together with the legacy code: module loads and setups run
-  module code that no legacy name refers to, and an unconverted caller still calls.
-- **Variables reused for several types cross function boundaries.** DisciplineClinic's `dialog` and `response` are
-  written by many functions, each assigning before it reads, so a split by type would need flow analysis across calls,
-  `break`, and loops; with #530 they get declared unions (see the union findings above). Five empty-text placeholders
-  later hold lists or yes/no answers and convert with a note.
-- **Isolated runs still fail on settings the introductions save** (Domme3 7 scripts, DisciplineClinic `WaitRoom`):
-  Groovy compared a missing setting as null, which TeaseScript comparisons reject, and `main` now also rejects a missing
-  setting stored in a Groovy `int` when it is read.
-
-### Large-corpus ranking (corpus2)
-
-The 289-package corpus ([`CORPUS-INVENTORY.md`](CORPUS-INVENTORY.md#large-corpus-corpus2), 2026-10-04) changes the
-ranking above. Of its 8,512 root errors, about 4,770 (142 packages) are legacy baggage: the old online service
-(`send`/`receive*`, 2,000 sites in 33 packages), in-memory image composition shown with `setImage(bytes, 0)` (Java
-`BufferedImage`, `ImageIO`, `drawImage`; 30–40 packages), files (`new File` in 70 packages), HTTP, OS processes, and
-`try`/`catch` around them. About 2,740 (131 packages) are importer work, led by list and text methods on receivers not
-proven to be lists or text (about 1,500, such as `contains`, `add`, `count`, `join`), `<<` on such receivers (226 in 24
-packages), list methods without a direct form (`add(index, value)`, `collect()`, `pop`), menus from computed option
-lists (117), typed and empty `for` loops (93), and `list - value` with an unproven value (75). About 490 (64 packages)
-need workarounds, mostly regular expressions in `replaceAll` (239) and `String.format` (104); about 370 (36 packages)
-are legacy bugs, such as 144 calls of functions no file defines. File transfers remain the largest pending blocker (190
-otherwise clean scripts), then `global function` (118), `askBooleans()` (33), `openUrl()` (15), and `showPopup` (14).
-
-Patterns the four-package corpus did not show: null-start numbers read in functions block about 20 otherwise clean
-scripts (`TSV043`, `TSV039`; the empty-list decision covers only lists); function parameters have no type, so
-`list -= value` on a parameter stays numeric and a variable widened by `parameter / 30` stays an integer for the
-compiler (smoke failures `TSR027`, `TSR058`); `for (c in text)` iterated characters (`split("")`); an empty computed
-`getString` default failed `askText` (`TSR052`, no longer since #618); `isInteger()`, `isNumber()`, and `isFloat()` text checks (8, 6, and 3
-packages) have no direct form.
+**The 11 units without unconverted code:**
+- Null-related errors only: Escape, OwlSays, gunfighter, questionnaire, and scatslut.
+- Mostly null-related: 8Puzzle and spinthebottle.
+- Other errors:
+  - Banjo_SpankedHeroRPG (45): a union variable without type tests, and text subtraction;
+  - worstpicture (8): numbers added to a text list;
+  - SpanishIntro: an unknown name;
+  - log: a session that never reaches `exit`.
 
 ## Open importer work
 
@@ -680,8 +654,9 @@ Found while evaluating the proposals, besides the importer work listed above; no
 - **Safe navigation:** `x?.size()` converts like `x.size()`, which fails where Groovy gave null (0 corpus sites).
 - **Concatenation that starts with possibly null text:** `dialog + count + ...` with `dialog: string?` keeps a numeric
   `+` for its first pair, which the type pass rejects (1 `Punish` site).
-- **Groovy type inference is per file and flow-insensitive:** a name used in two functions shares one type set, which
-  hides lists (the Toy appends above) and makes `size()` on values of unknown type look like possible maps. The
-  never-assigned-variable check is name-based in the same way. Local closure results now have types, also across the
-  script and its modules, but closure parameters stay unknown, which keeps most remaining Toy collection methods
-  unconverted.
+- **Groovy type inference is per file and flow-insensitive:** a name used in two functions shares one type set. That
+  hides lists (Toy's appends) and makes `size()` on values of unknown type look like possible maps, and a function's
+  number counter (`def i`, then `i = 0` and a loop) misses the zero start when another function's `i` has an unproven
+  type: about 100 compile errors in SlideLadderDare, Escape, and Stay. The never-assigned-variable check is name-based
+  in the same way. Local closure results now have types, also across the script and its modules, but closure
+  parameters stay unknown, which keeps most remaining Toy collection methods unconverted.
