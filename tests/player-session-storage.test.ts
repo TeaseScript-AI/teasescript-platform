@@ -824,3 +824,52 @@ test("an edit stored while Start is prepared is what that Start loads", async (c
   host.activate();
   assert.deepEqual(said(host.session.value), ["2"]);
 });
+
+test("an unmounted Player whose edit fails to store never runs the session on", async (context) => {
+  const editWrite = deferred();
+  const storage = memoryStorage({ k: 1 }, async (_key, value) => {
+    if (value === 2) await editWrite.promise;
+  });
+  const { host, scope } = createHost(context, storage.provider);
+  const pending = await start(
+    host,
+    'save 1 as "k"\nlet loaded = load("k")\nsay "${loaded}", instant\nexit',
+  );
+  const edit = host.editSavedData({ key: "k", value: 2, expected: 1 });
+  await settleTasks(context);
+  scope.stop();
+  editWrite.reject(new Error("quota"));
+  assert.equal((await edit).kind, "failed");
+  assert.equal(host.session.value?.snapshot, pending.snapshot);
+  assert.deepEqual(said(host.session.value), []);
+});
+
+test("an earlier run's late write report leaves the edit waiting for the current run's write", async (context) => {
+  const currentWrite = deferred();
+  const editWrite = deferred();
+  const storage = memoryStorage({}, async (_key, value) => {
+    if (value === 3) await currentWrite.promise;
+    if (value === 2) await editWrite.promise;
+  });
+  const { host } = createHost(context, storage.provider);
+  const saveThenLoad = (saved: number) =>
+    `save ${saved} as "k"\nlet loaded = load("k")\nsay "\${loaded}", instant\nexit`;
+  // The earlier run's write is stored; its report waits for a later task.
+  await start(host, saveThenLoad(1));
+  for (let turn = 0; turn < 5; turn += 1) await nextTick();
+  // A new run starts from the values already read, and its own write waits for the host.
+  host.prepare(() => createPlayerRuntimeSession(saveThenLoad(3), host.scriptStorageOptions()));
+  host.activate();
+  const edit = host.editSavedData({ key: "k", value: 2, expected: 1 });
+  for (let turn = 0; turn < 5; turn += 1) await nextTick();
+  // The earlier run's report arrives while the edit waits for the current run's write.
+  context.mock.timers.tick(0);
+  // The current run's write is stored and reported while the edit would otherwise be storing its own value.
+  currentWrite.resolve();
+  await settleTasks(context);
+  editWrite.resolve();
+  await settleTasks(context);
+  assert.deepEqual(await edit, { kind: "saved", live: true });
+  assert.deepEqual(said(host.session.value), ["2"]);
+  assert.deepEqual([...storage.entries], [["k", 2]]);
+});

@@ -396,7 +396,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   tryOnScopeDispose(() => {
     disposed = true;
     // A Debug storage edit waiting for a script write gives up; the retired session never runs on.
-    handOffWrite(null);
+    releaseWriteWaiter();
     activationToken++;
     loads.clear();
     device.reset();
@@ -465,14 +465,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         // A write that settles after unmount must not continue the session.
         if (disposed) return void writesInFlight.delete(flight);
         const latest = session.value;
-        // The report must belong to the session that requested it.
+        // The report must belong to the session that requested it; an edit waiting for this write gives up.
         if (
           generation.value !== sessionGeneration ||
           latest === null ||
           pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write!.actionId
         ) {
           writesInFlight.delete(flight);
-          return void handOffWrite(null);
+          return releaseWriteWaiter({ generation: sessionGeneration, actionId: write!.actionId });
         }
         if (!stored) notices.publish(playerNotices.storageWriteFailed());
         else savedDataRevision.value++;
@@ -510,14 +510,28 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /** Its entry in `writesInFlight`, removed once the write is acknowledged. */
     readonly flight: string;
   };
-  let writeWaiter: ((write: SettledWrite | null) => void) | null = null;
-  /** Gives a settled write to a waiting edit; `null` when that write no longer belongs to the session. */
-  function handOffWrite(write: SettledWrite | null): boolean {
+  // The edit waiting for one script write: only that write, of that session, settles or releases it.
+  let writeWaiter: {
+    readonly generation: number;
+    readonly actionId: number;
+    readonly resolve: (write: SettledWrite | null) => void;
+  } | null = null;
+  /** Gives a settled write to the edit waiting for exactly that write; whether one took it. */
+  function handOffWrite(write: SettledWrite): boolean {
     const waiter = writeWaiter;
-    if (waiter === null) return false;
+    if (waiter?.generation !== write.generation || waiter.actionId !== write.actionId) return false;
     writeWaiter = null;
-    waiter(write);
-    return write !== null;
+    waiter.resolve(write);
+    return true;
+  }
+  /** Releases the waiting edit, or only the one waiting for the given write, without a settled write. */
+  function releaseWriteWaiter(only?: { readonly generation: number; readonly actionId: number }) {
+    const waiter = writeWaiter;
+    if (waiter === null) return;
+    if (only && (waiter.generation !== only.generation || waiter.actionId !== only.actionId))
+      return;
+    writeWaiter = null;
+    waiter.resolve(null);
   }
   let editChain: Promise<unknown> = Promise.resolve();
   /** Puts a stored edit into the values the next Start loads, as the provider now holds them. */
@@ -594,14 +608,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const now = current.find((entry) => entry.key === key)?.value;
     if (!sameSavedValue(now, expected)) return { kind: "changed" };
 
-    const waitForWrite = () =>
+    const waitForWrite = (actionId: number) =>
       new Promise<SettledWrite | null>((resolve) => {
-        writeWaiter = resolve;
+        writeWaiter = { generation: owner, actionId, resolve };
       });
     let settled: SettledWrite | null = null;
     for (;;) {
-      if (liveSession() && pendingPlayerRuntimeStorageWrite(session.value!.snapshot)) {
-        settled = await waitForWrite();
+      const pending = liveSession() && pendingPlayerRuntimeStorageWrite(session.value!.snapshot);
+      if (pending) {
+        settled = await waitForWrite(pending.actionId);
         if (retired()) {
           if (settled !== null) writesInFlight.delete(settled.flight);
           return overtaken();
@@ -659,6 +674,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     /** Settles a write that waited for this edit as it would have been without it, running on. */
     function settle(write: SettledWrite, run: boolean) {
       writesInFlight.delete(write.flight);
+      // An unmounted Player never runs a session on.
+      if (disposed) return;
       const latest = session.value;
       if (
         latest === null ||
@@ -844,7 +861,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     reportedMedia = new Set();
     debugEdits.value = null;
     // A Debug storage edit waiting for the previous session's write is for that session only.
-    handOffWrite(null);
+    releaseWriteWaiter();
     device.reset();
     loads.clear();
     pendingLoadCount.value = 0;
