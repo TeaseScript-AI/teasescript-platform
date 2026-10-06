@@ -4,18 +4,22 @@
  * plain text); every other GET goes to the playground server that offers the converted packages, which should listen
  * on loopback only. `--http-port` adds a plain-HTTP port that redirects to the HTTPS origin. With `--verified-root`
  * and `--verified-upstream`, a package that has a verified copy in that folder is served by the playground server
- * that offers the verified copies instead.
+ * that offers the verified copies instead, and the package id `latest~<id>` stands for its latest conversion, from the
+ * other server. With `--pins <file>`, `/pins.json` keeps the catalog page's pins in that file: GET answers 204 until
+ * the first PUT of a JSON array of package ids.
  *
  * Usage: node tools/serve-catalog.ts --catalog <folder> --upstream <http://127.0.0.1:port> --cert <pem> --key <pem>
  *   --port <https-port> [--http-port <port>] [--host <address>] [--verified-root <dir> --verified-upstream <url>]
+ *   [--pins <file>]
  */
 import { createReadStream } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, rename, stat, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import path from "node:path";
 import { parseArgs } from "node:util";
+import { LATEST_PREFIX } from "./catalog.ts";
 
 const CONTENT_TYPES: Readonly<Record<string, string>> = {
   ".html": "text/html; charset=utf-8",
@@ -34,6 +38,7 @@ const { values } = parseArgs({
     host: { type: "string", default: "0.0.0.0" },
     "verified-root": { type: "string" },
     "verified-upstream": { type: "string" },
+    pins: { type: "string" },
   },
 });
 if (
@@ -44,7 +49,7 @@ if (
   values.port === undefined
 ) {
   process.stderr.write(
-    "Usage: node tools/serve-catalog.ts --catalog <folder> --upstream <url> --cert <pem> --key <pem> --port <port> [--http-port <port>] [--host <address>]\n",
+    "Usage: node tools/serve-catalog.ts --catalog <folder> --upstream <url> --cert <pem> --key <pem> --port <port> [--http-port <port>] [--host <address>] [--verified-root <dir> --verified-upstream <url>] [--pins <file>]\n",
   );
   process.exit(2);
 }
@@ -54,6 +59,12 @@ const verifiedRoot =
   values["verified-root"] === undefined ? null : path.resolve(values["verified-root"]);
 const verifiedUpstream =
   values["verified-upstream"] === undefined ? null : new URL(values["verified-upstream"]);
+const pinsFile = values.pins === undefined ? null : path.resolve(values.pins);
+/** Limits of a pin list: it names packages of one catalog. */
+const MAX_PINS_BYTES = 64 * 1024;
+const MAX_PIN_LENGTH = 300;
+/** Numbers the temporary files of pin writes, so that two requests at once never write the same one. */
+let pinWrites = 0;
 const httpsPort = Number(values.port);
 const host = values.host;
 
@@ -85,8 +96,10 @@ if (values["http-port"] !== undefined) {
 }
 
 async function handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const url = request.url ?? "/";
+  const rawPath = url.split("?", 1)[0]!;
+  if (rawPath === "/pins.json" && pinsFile !== null) return pins(pinsFile, request, response);
   if (request.method !== "GET" && request.method !== "HEAD") return send(response, 405);
-  const rawPath = (request.url ?? "/").split("?", 1)[0]!;
   let pathname: string;
   try {
     pathname = decodeURIComponent(rawPath);
@@ -97,11 +110,21 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
     return serveFile(pathname === "/" ? "/index.html" : pathname, request, response);
   // The playground's workspace automation trusts loopback clients, which every proxied request would be.
   if (pathname.startsWith("/api/")) return send(response, 404);
-  // A package's files and catalog come from its verified copy when it has one.
-  const packageId = /^\/dev-package\/([^/]+)\//u.exec(pathname)?.[1];
+  // A package's files and catalog come from its verified copy when it has one; `latest~<id>`, from its conversion.
+  // The whole path decoded above, so its first segment decodes too.
+  const packageSegment = /^\/dev-package\/([^/]+)\//u.exec(rawPath);
+  const requestedId = packageSegment === null ? null : decodeURIComponent(packageSegment[1]!);
+  const latest = requestedId?.startsWith(LATEST_PREFIX) === true;
+  const packageId = latest ? requestedId!.slice(LATEST_PREFIX.length) : requestedId;
+  const forwarded =
+    latest && packageId !== null
+      ? `/dev-package/${encodeURIComponent(packageId)}/${url.slice(packageSegment![0].length)}`
+      : url;
   const verified =
-    packageId !== undefined &&
+    !latest &&
+    packageId !== null &&
     !packageId.startsWith(".") &&
+    !/[/\\\0]/u.test(packageId) &&
     verifiedRoot !== null &&
     verifiedUpstream !== null &&
     (await stat(path.join(verifiedRoot, packageId)).then(
@@ -114,7 +137,7 @@ async function handle(request: IncomingMessage, response: ServerResponse): Promi
       hostname: target.hostname,
       port: target.port,
       method: request.method,
-      path: request.url,
+      path: forwarded,
       headers: { ...request.headers, host: target.host },
     },
     (upstreamResponse) => {
@@ -153,6 +176,54 @@ async function serveFile(
     createReadStream(file)
       .on("error", () => response.destroy())
       .pipe(response);
+}
+
+/**
+ * `/pins.json`: GET answers the stored JSON array of package ids, or 204 before the first PUT; PUT replaces it with the
+ * request's array, written to a temporary file and renamed so that a crash never leaves half a list.
+ */
+async function pins(
+  file: string,
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  if (request.method === "GET" || request.method === "HEAD") {
+    const stored = await readFile(file).catch(() => null);
+    if (stored === null) return send(response, 204);
+    response.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Content-Length": stored.length,
+      "Cache-Control": "no-store",
+    });
+    response.end(request.method === "HEAD" ? undefined : stored);
+    return;
+  }
+  // A PUT is never a simple cross-origin request, so another site's page cannot send one without CORS approval.
+  if (request.method !== "PUT") return send(response, 405);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    // EVIDENCE: an IncomingMessage without an encoding set yields Buffer chunks.
+    const buffer = chunk as Buffer;
+    size += buffer.length;
+    if (size > MAX_PINS_BYTES) return send(response, 413);
+    chunks.push(buffer);
+  }
+  let list: unknown;
+  try {
+    list = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    return send(response, 400);
+  }
+  if (
+    !Array.isArray(list) ||
+    !list.every((id) => typeof id === "string" && id.length > 0 && id.length <= MAX_PIN_LENGTH)
+  )
+    return send(response, 400);
+  const temporary = `${file}.${process.pid}.${(pinWrites += 1)}.tmp`;
+  await writeFile(temporary, `${JSON.stringify([...new Set(list)])}\n`);
+  await rename(temporary, file);
+  return send(response, 204);
 }
 
 function send(response: ServerResponse, status: number): void {

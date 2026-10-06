@@ -171,7 +171,7 @@ test(
 
       const page = renderCatalogPage(entries, {
         playerOrigin: "https://example.test:4443",
-        measurement: { importerCommit: "abc1234", measuredAt: "2026-10-05T01:00:00.000Z" },
+        updatedAt: "2026-10-07T12:32:00.000Z",
       });
       assert.match(
         page,
@@ -186,10 +186,39 @@ test(
           '<details class="earlier"><summary>Earlier versions (1)</summary><ul><li>Night Walk 1.0 &middot; finished &middot; 2013-05-01 &middot; replaced by 1.1<br>Groovy: <a href="source/Night%20Walk/earlier/1/scripts/walk__old.groovy">scripts/walk__old.groovy</a></li></ul></details>',
         ),
       );
+      // The first four counts always show, the others only when they count something.
+      assert.deepEqual(
+        [...page.matchAll(/<dt>([^<]*)<\/dt><dd>(\d+)<\/dd>/gu)].map(([, label, value]) => [
+          label,
+          Number(value),
+        ]),
+        [
+          ["Listed", 8],
+          ["Convert fully", 7],
+          ["Compile", 5],
+          ["Play to the end", 3],
+          ["Played on an older conversion", 1],
+          ["Parked (step limit)", 1],
+          ["Do not start", 1],
+          ["Do not compile", 2],
+          ["Verified", 1],
+          ["Owner-approved", 1],
+          ["Unfinished stubs", 1],
+          ["Explored", 3],
+          ["Explorer found crashes", 1],
+          ["Explorer found traps", 2],
+          ["Explorer result stale", 1],
+        ],
+      );
       assert.ok(
         page.includes(
-          '<dl class="summary"><div><dt>Listed</dt><dd>8</dd></div><div><dt>Convert fully</dt><dd>7</dd></div><div><dt>Compile</dt><dd>5</dd></div><div><dt>Play to the end</dt><dd>3</dd></div><div><dt>Played to the end on an older conversion</dt><dd>1</dd></div><div><dt>Stop during play</dt><dd>0</dd></div><div><dt>Parked (step limit)</dt><dd>1</dd></div><div><dt>Do not start</dt><dd>1</dd></div><div><dt>Do not compile</dt><dd>2</dd></div><div><dt>Not played in the Player</dt><dd>0</dd></div><div><dt>Blocked by unbuilt commands</dt><dd>0</dd></div><div><dt>Verified</dt><dd>1</dd></div><div><dt>Owner-approved</dt><dd>1</dd></div><div><dt>Unfinished stubs</dt><dd>1</dd></div><div><dt>Explored</dt><dd>3</dd></div><div><dt>Explorer found crashes</dt><dd>1</dd></div><div><dt>Explorer found traps</dt><dd>2</dd></div><div><dt>Explorer result stale</dt><dd>1</dd></div></dl>',
+          '<p class="updated">Updated <time datetime="2026-10-07T12:32:00.000Z" data-local>2026-10-07 12:32 UTC</time></p>',
         ),
+      );
+      // The search box and the explorer's coverage range and sort order read the row's data.
+      assert.match(
+        page,
+        /<tr data-id="Night Walk" data-order="4" data-search="night &lt;walk&gt; &amp; talk\nann\nwalk, night\na short walk\." data-coverage="50" data-crashes="1" data-traps="1">/u,
       );
       assert.ok(
         page.includes(
@@ -210,11 +239,18 @@ test(
       );
       assert.match(
         page,
-        /<details title="Explored the unit&#39;s newer conversion, not the verified copy listed here\. [^"]*"><summary><span class="status plays">100% &middot; 0 crashes &middot; 0 traps \(newer conversion\)<\/span>/u,
+        /<details title="Explored the latest conversion, not the verified copy\. [^"]*"><summary><span class="status plays">100% &middot; 0 crashes &middot; 0 traps \(latest conversion\)<\/span>/u,
       );
-      assert.match(
-        page,
-        /Measured 2026-10-05 with importer commits abc1234 \(7 units\), def5678 \(1 units\)/u,
+      // A verified copy is offered beside its latest conversion, to play and to read.
+      assert.ok(
+        page.includes(
+          '<td class="title"><b>Garden</b><br><span class="play"><a href="https://example.test:4443/player/?package=garden">Play (verified copy)</a><br><a href="https://example.test:4443/player/?package=latest~garden">Play (latest conversion)</a></span></td>',
+        ),
+      );
+      assert.ok(
+        page.includes(
+          '<a href="source/garden/tease/main.tease">TeaseScript (verified copy)</a> &middot; <a href="source/garden/latest/main.tease">TeaseScript (latest conversion)</a>',
+        ),
       );
       // A stub is listed without a Player link.
       assert.match(page, /<td class="title"><b>Stub<\/b><\/td>/u);
@@ -235,6 +271,10 @@ test(
       assert.match(
         await readFile(path.join(work, "catalog/source/garden/tease/main.tease"), "utf8"),
         /say "Green"/u,
+      );
+      assert.match(
+        await readFile(path.join(work, "catalog/source/garden/latest/main.tease"), "utf8"),
+        /say "Greener"/u,
       );
     } finally {
       await rm(work, { recursive: true, force: true });
