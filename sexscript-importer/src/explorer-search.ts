@@ -275,12 +275,14 @@ export interface ExploreResult {
 class SnapshotStore {
   peakBytes = 0;
   evicted = 0;
-  readonly #entries = new Map<number, Buffer>();
+  readonly #entries = new Map<number, Uint8Array>();
   readonly #pinned = new Set<number>();
   #bytes = 0;
 
   put(id: number, snapshot: Data, pinned = false): void {
-    const data = deflateRawSync(JSON.stringify(snapshot), { level: 1 });
+    // zlib's result, like a pooled Buffer copy, shares a larger memory block that one kept entry would keep alive;
+    // a plain copy has a block of its own size.
+    const data = new Uint8Array(deflateRawSync(JSON.stringify(snapshot), { level: 1 }));
     this.#entries.set(id, data);
     this.#bytes += data.length;
     if (pinned) this.#pinned.add(id);
@@ -462,9 +464,13 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
   const withinShare = () => directedWork <= transitions * DIRECTED_SHARE;
   const active = (lead: Lead | null): lead is Lead =>
     lead !== null && lead.remaining > 0 && targets.get(lead.target)?.reach == null && withinShare();
-  /** The order of a state: directed first, then play, then seeded; within those by tier, repeats, and newest. */
+  /**
+   * The order of a state: play states with a lead first, then play, then seeded; within those by tier, repeats, and
+   * newest. A seeded attempt takes its own steps but no first place after them, so that play goes first.
+   */
+  const leads = (node: Node): boolean => !node.seeded && active(node.lead);
   const order = (node: Node): readonly number[] => [
-    active(node.lead) ? 0 : node.seeded ? 2 : 1,
+    leads(node) ? 0 : node.seeded ? 2 : 1,
     ...node.rank,
   ];
 
@@ -812,7 +818,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
     const node = nodes[frontier.pop()!]!;
     if (node.status !== "open") continue;
     // A lead that was spent, or whose target was reached, gives its states back their own place.
-    if (node.lead !== null && !active(node.lead) && frontier.size > 0) {
+    if (node.lead !== null && !leads(node) && frontier.size > 0) {
       const own = order(node);
       const next = frontier.pop()!;
       frontier.push(next, order(nodes[next]!));
@@ -821,8 +827,8 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
         continue;
       }
     }
-    const leading = active(node.lead);
-    if (leading) node.lead.remaining -= 1;
+    const leading = leads(node);
+    if (leading && node.lead !== null) node.lead.remaining -= 1;
     const snapshot = snapshotOf(node);
     if (snapshot === null) {
       node.status = "expanded";
