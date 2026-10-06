@@ -86,3 +86,27 @@ for (n in span) show("N " + n)
 // A float parameter with a whole default takes fractions.
 def fade = { float seconds = 0.0 -> show("Fade " + seconds) }
 fade(0.5)
+// A function that ends in an endless loop returns only what its returns give.
+def pickPage = { ->
+	for (;;) {
+		def page = getInteger("Page?", 1)
+		if (page > 0) return page
+	}
+}
+def page = 9
+page = pickPage()
+show("Page ${page + 1}")
+// A local that a null test rules out in a branch holds no null there.
+def joinNames = { ->
+	def all = "0"
+	def next = "0"
+	for (def i = 0; next != null; i++) {
+		next = loadString("names." + i)
+		if (next == null) show("End")
+		else if (all == "0") all = next
+		else all = all + ", " + next
+	}
+	return all
+}
+def joined = joinNames()
+show("Names ${joined.length()}")

@@ -604,12 +604,17 @@ function declarationMessage(items: Conflict[]): string {
 
 class Scope {
   readonly names = new Map<string, Binding>();
+  /** Local bindings that a null test of the enclosing `if` rules out null for in this branch. */
+  readonly nonNull = new Set<Binding>();
   readonly parent: Scope | null;
   constructor(parent: Scope | null) {
     this.parent = parent;
   }
   resolve(name: string): Binding | undefined {
     return this.names.get(name) ?? this.parent?.resolve(name);
+  }
+  rulesOutNull(binding: Binding): boolean {
+    return this.nonNull.has(binding) || (this.parent?.rulesOutNull(binding) ?? false);
   }
 }
 
@@ -693,7 +698,9 @@ function analyse(
       value,
       (name) => {
         const found = scope.resolve(name);
-        return found === undefined ? UNKNOWN : (bindingType(found) ?? UNKNOWN);
+        if (found === undefined) return UNKNOWN;
+        const type = bindingType(found) ?? UNKNOWN;
+        return scope.rulesOutNull(found) ? nonNull(type) : type;
       },
       (name) => results.get(name),
     );
@@ -1018,8 +1025,27 @@ function analyse(
             neverNull(typeOf(before.value, scope));
           if (assigned || neverNull(typeOf(tested, scope))) analysis.unguarded.add(item);
         }
-        block(item.then, scope);
-        block(item.else, scope);
+        // `if x == null { ... } else { ... }` rules out null for a local x in the else branch, and `x != null` in the
+        // then branch, where the branch does not assign x.
+        const thenScope = new Scope(scope);
+        const elseScope = new Scope(scope);
+        const test = item.condition.kind === "binary" ? item.condition : null;
+        const variable =
+          test !== null &&
+          (test.operator === "==" || test.operator === "!=") &&
+          test.left.kind === "variable" &&
+          test.right.kind === "literal" &&
+          test.right.value === null
+            ? test.left.name
+            : null;
+        const local = variable === null ? undefined : scope.resolve(variable);
+        if (variable !== null && local !== undefined && root.names.get(variable) !== local) {
+          const branch = test!.operator === "==" ? item.else : item.then;
+          if (!assignsVariable(branch, variable))
+            (test!.operator === "==" ? elseScope : thenScope).nonNull.add(local);
+        }
+        walk(item.then, thenScope);
+        walk(item.else, elseScope);
         return;
       }
       case "while":
@@ -1115,16 +1141,87 @@ function analyse(
     returns = [];
     walk(item.body, scope);
     // A function that may end without `return` may return nothing (#526: an optional result).
-    if (
-      item.body.findLast((child) => child.kind !== "comment" && child.kind !== "blank")?.kind !==
-      "return"
-    )
-      returns.push(NULL);
+    if (mayFallOff(item.body)) returns.push(NULL);
     analysis.results.set(item.name, resultType(returns));
     analysis.returned.set(item.name, returns);
     returns = null;
   }
   return analysis;
+}
+
+/**
+ * Whether running the statements can go past their end: no `return`, `exit`, or transfer ends every path, and no
+ * endless loop (`while true` without a `break` of its own, as from Groovy `for (;;)`) keeps them from it.
+ */
+function mayFallOff(statements: readonly IrStatement[]): boolean {
+  const last = statements.findLast(
+    (statement) => !["comment", "blank", "function"].includes(statement.kind),
+  );
+  switch (last?.kind) {
+    case "return":
+    case "exit":
+    case "goto":
+      return false;
+    case "if":
+      return last.else.length === 0 || mayFallOff(last.then) || mayFallOff(last.else);
+    case "switch":
+      return (
+        last.default.length === 0 ||
+        mayFallOff(last.default) ||
+        last.cases.some((item) => mayFallOff(item.body))
+      );
+    case "while":
+      return !(
+        last.condition.kind === "literal" &&
+        last.condition.value === true &&
+        !breaksLoop(last.body)
+      );
+    default:
+      return true;
+  }
+}
+
+/** Whether the loop body holds a `break` of this loop, outside the loops nested in it. */
+function breaksLoop(body: readonly IrStatement[]): boolean {
+  return body.some((statement) => {
+    switch (statement.kind) {
+      case "break":
+        return true;
+      case "if":
+        return breaksLoop(statement.then) || breaksLoop(statement.else);
+      case "switch":
+        return (
+          breaksLoop(statement.default) || statement.cases.some((item) => breaksLoop(item.body))
+        );
+      default:
+        return false;
+    }
+  });
+}
+
+/** Whether the statements assign or declare `name`, also in nested blocks. */
+function assignsVariable(statements: readonly IrStatement[], name: string): boolean {
+  return statements.some((statement) => {
+    switch (statement.kind) {
+      case "assign":
+        return statement.target.kind === "variable" && statement.target.name === name;
+      case "let":
+        return statement.name === name;
+      case "if":
+        return assignsVariable(statement.then, name) || assignsVariable(statement.else, name);
+      case "while":
+      case "repeat":
+      case "for":
+        return assignsVariable(statement.body, name);
+      case "switch":
+        return (
+          assignsVariable(statement.default, name) ||
+          statement.cases.some((item) => assignsVariable(item.body, name))
+        );
+      default:
+        return false;
+    }
+  });
 }
 
 /** The statements with each of the `guards` replaced by its `then` statements. */

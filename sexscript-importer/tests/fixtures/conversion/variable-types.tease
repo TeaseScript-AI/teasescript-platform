@@ -129,4 +129,38 @@ function fade(seconds: number = 0) {
   say "Fade ${seconds}"
 }
 fade(0.5)
+// A function that ends in an endless loop returns only what its returns give.
+function pickPage {
+  while true {
+    let pageValue = askInteger "Page?", default: 1
+    if pageValue > 0 {
+      return pageValue
+    }
+  }
+}
+let page = 9
+page = pickPage()
+// NOTE SX_PLUS_OPERAND_TYPE line 98: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+say "Page ${page + 1}"
+// A local that a null test rules out in a branch holds no null there.
+function joinNames {
+  let all = "0"
+  let next: string? = "0"
+  let i = 0
+  while next != null {
+    next = load "names.${i}"
+    if next == null {
+      say "End"
+    } else if all == "0" {
+      all = next
+    } else {
+      all += ", ${next}"
+    }
+    i += 1
+  }
+  return all
+}
+let joined = joinNames()
+// NOTE SX_LENGTH_RECEIVER line 112: Groovy length() also worked on a map; text, lists, and dicts have a length, but if this value is an object with fixed properties, length stops the script.
+say "Names ${joined.length}"
 exit
