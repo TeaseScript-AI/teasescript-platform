@@ -9,7 +9,6 @@ import {
 } from "../src/index.js";
 import { instructionSourcePath, type InstructionPlan } from "../src/plan/model.js";
 import { quotedText } from "../src/runtime/value-text.js";
-import { playerRuntimeTranscriptMessage, type PlayerRuntimeSession } from "./runtime-adapter.js";
 
 /**
  * Player Debug's Variables view (DEBUGGER.md "Player Debug"): live variables grouped by where they live, and the trace's
@@ -136,27 +135,6 @@ function livePreview(
     text: `<message ${value.messageId} ${quotedText(text.slice(0, limit))}>`,
     truncated: text.length > limit,
   };
-}
-
-/**
- * The Variables view's recent chat: the newest `limit` messages the trace recorded, newest first, each as the record of
- * the content it shows now, so that a changed message is explained by its latest change while the trace keeps that.
- */
-export function playerDebugRecentChat(
-  trace: RuntimeDebugContext,
-  session: PlayerRuntimeSession,
-  limit: number,
-): readonly number[] {
-  return trace.outputs(limit).map((id) => {
-    const detail = trace.record(id)?.detail;
-    const message =
-      detail?.kind === "output"
-        ? playerRuntimeTranscriptMessage(session, `runtime-event-${detail.eventSequence}`)
-        : null;
-    const latest =
-      message?.contentSequence === undefined ? null : trace.outputRecord(message.contentSequence);
-    return latest ?? id;
-  });
 }
 
 /** A row of the derivation tree: a record, a dropped record, a record shown above, or a summary of hidden causes. */
@@ -320,7 +298,10 @@ export function playerDebugTraceRows(
 /** The value a live variable has now, for comparison with an earlier recorded version. */
 export type PlayerDebugLiveValue = (scope: number | "global", name: string) => string | null;
 
-/** The live value of a variable in `snapshot`, previewed as the trace previews it; `null` once it no longer exists. */
+/**
+ * The live value of a variable in `snapshot`, previewed as the trace previews it, a message handle with its message's
+ * text now; `null` once it no longer exists.
+ */
 export function playerDebugLiveValue(snapshot: RuntimeSnapshot): PlayerDebugLiveValue {
   return (scope, name) => {
     const bindings =
@@ -331,7 +312,7 @@ export function playerDebugLiveValue(snapshot: RuntimeSnapshot): PlayerDebugLive
             snapshot.retainedScopes.find((frame) => frame.id === scope)
           )?.bindings;
     const binding = bindings?.find((candidate) => candidate.name === name);
-    return binding === undefined ? null : runtimeDebugPreview(binding.value).text;
+    return binding === undefined ? null : livePreview(snapshot, binding.value).text;
   };
 }
 
@@ -473,12 +454,15 @@ export function playerDebugRecordText(
       break;
   }
   const variable = record.variable;
+  const current = variable === null || live === null ? null : live(variable.scope, variable.name);
+  // The current version of a variable shows its value now only where that reads differently, as a message handle
+  // whose message has new text.
   const now =
     variable === null ||
-    live === null ||
-    trace.variableRecord(variable.scope, variable.name) === record.id
+    (trace.variableRecord(variable.scope, variable.name) === record.id &&
+      current === record.preview)
       ? null
-      : live(variable.scope, variable.name);
+      : current;
   return Object.freeze({
     title,
     value: record.preview,

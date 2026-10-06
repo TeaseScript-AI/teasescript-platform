@@ -65,8 +65,8 @@ tabs **Now** (first), **Variables**, **Log**, and **Storage**, which appears whe
   message as **Selected message**, which stays above the recent chat until another is chosen or **Back to recent chat**;
   the message is found by its event, never by its text, and one shown before the current recording began, or whose
   record was dropped, says so. A message whose text changed in place is explained by its latest change, the `.text`
-  write with its causes, also when it changes while selected. **Recent chat** lists recorded messages, newest first, 20
-  at a time, each once, by the text it shows now; the newest is open until the player opens or closes one. A variable
+  write with its causes, also when it changes while selected. **Recent chat** lists the messages whose `say` or latest
+  change the trace recorded most recently, 20 at a time, newest message first, each once by the text it shows now; the newest is open until the player opens or closes one. A variable
   that holds a message handle shows the message's current text beside its identity. An open message shows each value it displays (a placeholder that shows one value
   gives way to it, and a variable, argument, or parameter that only passes the message on opens too), and each row
   opens to its own causes, one level at a time, by click, keyboard, or tap. A row names what happened, with

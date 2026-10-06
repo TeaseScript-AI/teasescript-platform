@@ -30,7 +30,7 @@ export class MessageUpdateAnnouncer {
   readonly #pending = new Map<number, PendingChange>();
   readonly #spokenAt = new Map<number, number>();
   #lastSpokenAt = Number.NEGATIVE_INFINITY;
-  #cancel: (() => void) | null = null;
+  #scheduled: { readonly at: number; readonly cancel: () => void } | null = null;
 
   constructor(options: MessageUpdateAnnouncerOptions) {
     this.#options = options;
@@ -51,8 +51,8 @@ export class MessageUpdateAnnouncer {
 
   /** Forgets every change and cancels the next announcement, as for a new session or a restored state. */
   reset(): void {
-    this.#cancel?.();
-    this.#cancel = null;
+    this.#scheduled?.cancel();
+    this.#scheduled = null;
     this.#pending.clear();
     this.#spokenAt.clear();
     this.#lastSpokenAt = Number.NEGATIVE_INFINITY;
@@ -65,17 +65,22 @@ export class MessageUpdateAnnouncer {
     );
   }
 
+  // Schedules the next announcement for the first moment a queued change may be spoken; a change that may be spoken
+  // sooner than the one scheduled moves it earlier.
   #plan(): void {
-    if (this.#cancel !== null || this.#pending.size === 0) return;
+    if (this.#pending.size === 0) return;
     let at = Number.POSITIVE_INFINITY;
     for (const messageId of this.#pending.keys()) at = Math.min(at, this.#eligibleAt(messageId));
-    this.#cancel = this.#options.schedule(
-      () => {
-        this.#cancel = null;
+    at = Math.max(at, this.#options.now());
+    if (this.#scheduled !== null && this.#scheduled.at <= at) return;
+    this.#scheduled?.cancel();
+    this.#scheduled = {
+      at,
+      cancel: this.#options.schedule(() => {
+        this.#scheduled = null;
         this.#flush();
-      },
-      Math.max(0, at - this.#options.now()),
-    );
+      }, at - this.#options.now()),
+    };
   }
 
   // Speaks the first queued change that may be spoken now, dropping those that changed nothing visible.

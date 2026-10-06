@@ -67,6 +67,23 @@ test("a busy message does not hold back another one, and each keeps its place in
   ]);
 });
 
+test("a message that may be spoken now is not held back by another one's wait", () => {
+  const { subject, spoken, advance } = announcer();
+  advance(100);
+  subject.update(1, "Vera", "a0", "a1");
+  advance(100);
+  advance(200);
+  subject.update(1, "Vera", "a1", "a2");
+  advance(1_100);
+  subject.update(2, "Coach", "b0", "b1");
+  advance(10_000);
+  assert.deepEqual(spoken, [
+    [100, "Vera: a1"],
+    [1_100, "Coach: b1"],
+    [5_100, "Vera: a2"],
+  ]);
+});
+
 test("a change back to the text last seen, or one that keeps the visible text, is not spoken", () => {
   const { subject, spoken, advance, pending } = announcer();
   subject.update(1, "Vera", "Waiting", "Waiting.");

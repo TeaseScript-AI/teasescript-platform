@@ -7,7 +7,6 @@ import { useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../model.js";
-import { playerRuntimeTranscriptEventSequence } from "../../runtime-adapter.js";
 import TranscriptMessage from "./TranscriptMessage.vue";
 import { recordSpeakerAvatarMessage, speakerAvatarPalette } from "./speakerAvatar";
 import { backdropBehind, resolveColour } from "./messageContrast";
@@ -132,22 +131,25 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
   }),
 );
 // TanStack compensates a remeasured row above the view except while the reader scrolls up. A message whose text changed
-// while it was out of view is remeasured as it comes back into view, so it is compensated then too; otherwise the text
-// being read would move by the change. Every other measurement keeps TanStack's own rule.
+// since its size was last taken is measured anew as it comes back into view, so it is compensated then too; otherwise
+// the text being read would move by the change. Every other measurement keeps TanStack's own rule.
+const measuredContent = new Map<string | number | bigint, number | undefined>();
+let measuredEntries = props.entries;
 virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+  if (props.entries !== measuredEntries) {
+    measuredEntries = props.entries;
+    measuredContent.clear();
+  }
+  const entry = props.entries[item.index];
+  const content = entry?.kind === "message" ? entry.contentSequence : undefined;
+  const changed = measuredContent.has(item.key) && measuredContent.get(item.key) !== content;
+  measuredContent.set(item.key, content);
   const offset = (instance.scrollOffset ?? 0) + instance.scrollAdjustments;
   const measured = instance.itemSizeCache.get(item.key);
   if (measured === undefined) return item.start < offset;
   if (item.start + measured > offset) return false;
-  return instance.scrollDirection !== "backward" || changedInPlace(props.entries[item.index]);
+  return instance.scrollDirection !== "backward" || changed;
 };
-function changedInPlace(entry: PlayerTranscriptEntryPresentation | undefined): boolean {
-  return (
-    entry?.kind === "message" &&
-    entry.contentSequence !== undefined &&
-    entry.contentSequence !== playerRuntimeTranscriptEventSequence(entry.id)
-  );
-}
 watch(endInset, (inset, previous) => {
   const instance = virtualizer.value;
   const previousDistance =
