@@ -136,4 +136,38 @@ let odds: number = 0
 let parts = [3, 4]
 odds = parts[0] / parts[1]
 say "Odds ${odds}"
+// Positions computed from values of unknown type, and a literal position past a literal list, grow the list.
+function joinDecks(first, second, offset) {
+  let joined = []
+  let i = 0
+  while i < 2 {
+    // NOTE SX_LIST_GROWTH line 41: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+    if i < joined.length {
+      joined[i] = first[i]
+    } else {
+      joined.add(first[i])
+    }
+    i += 1
+  }
+  i = 0
+  while i < 2 {
+    // NOTE SX_PLUS_OPERAND_TYPE line 42: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+    // NOTE SX_LIST_GROWTH line 42: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+    if i + offset < joined.length {
+      joined[i + offset] = second[i]
+    } else {
+      joined.add(second[i])
+    }
+    i += 1
+  }
+  return joined
+}
+let labels = ["< Previous", "Next >"]
+// NOTE SX_LIST_GROWTH line 46: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+if 2 < labels.length {
+  labels[2] = "Exit"
+} else {
+  labels.add("Exit")
+}
+say "Decks ${joinDecks([1, 2], [3, 4], 2).length} ${labels.length}"
 exit

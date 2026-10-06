@@ -39,7 +39,7 @@ def fill = { n ->
 	def marks = []
 	i = 0
 	while (i < n) {
-		marks.add(i)
+		marks[i] = i * 2
 		i += 1
 	}
 	show("Marks ${marks.size()}")

@@ -1305,12 +1305,21 @@ export function lowerParsedFile(
     }
     // A number that starts at 0 instead of null holds no null.
     const variables = new Map(context.types.variables);
+    const bindingTypes = new Map(context.types.bindingTypes ?? []);
     for (const key of context.mapUses.zeroStartNumbers) {
       const name = bindingName(key);
       const type = variables.get(name);
       if (type !== undefined) variables.set(name, type & ~NULL);
+      // A function's own variable has its own type too.
+      const scoped = bindingTypes.get(key);
+      if (scoped !== undefined) bindingTypes.set(key, scoped & ~NULL);
     }
-    context.types = { ...context.types, variables, listElements };
+    context.types = {
+      ...context.types,
+      variables,
+      listElements,
+      ...(context.types.bindingTypes === undefined ? {} : { bindingTypes }),
+    };
     const helpers = collectLegacyHelperBindings(body);
     context.classLoaderVariables = helpers.classLoaders;
     context.legacyHelperClasses = helpers.helperClasses;
@@ -2086,11 +2095,22 @@ function lowerStatementList(
     }
   };
   let added = 0;
+  // Null defaults that moved to their read further up (laterReadDefault).
+  const consumed = new Set<number>();
   for (let index = 0; index < statements.length; index += 1) {
+    if (consumed.has(index)) continue;
     // Read-then-default code becomes one read with a default; the `if` is consumed.
-    const merged = readThenDefault(statements[index]!, statements[index + 1], context);
-    const statement = merged ?? statements[index]!;
+    let merged = consumed.has(index + 1)
+      ? null
+      : readThenDefault(statements[index]!, statements[index + 1], context);
     if (merged !== null) index += 1;
+    else {
+      const later = laterReadDefault(statements, index, consumed, context);
+      merged =
+        later < 0 ? null : readThenDefault(statements[index]!, statements[later], context, false);
+      if (merged !== null) consumed.add(later);
+    }
+    const statement = merged ?? statements[index]!;
     const span = statementSpan(statement);
     emitComments(takeCommentsBefore(context, span));
     if (span !== null) result.push(...paragraphBreak(context, previousEndLine, span.line));
@@ -9533,6 +9553,7 @@ function readThenDefault(
   statement: AstNode,
   next: AstNode | undefined,
   context: LowerContext,
+  adjacent = true,
 ): AstNode | null {
   const expression = statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
   const assigns =
@@ -9582,11 +9603,90 @@ function readThenDefault(
   )
     return null;
   const merged: AstNode = { kind: "readDefault", span: read.span, read, fallback };
+  // A default that moved up from further down keeps the read's own lines.
   const span =
-    statement.span === null || next.span === null
+    !adjacent || statement.span === null || next.span === null
       ? statement.span
       : { ...statement.span, endLine: next.span.endLine, endColumn: next.span.endColumn };
   return { ...statement, span, expression: { ...expression!, right: merged } };
+}
+
+/**
+ * The position of the null default that a typed storage read gets further down, for readThenDefault: settings code
+ * often reads several values first and defaults them after (`a = loadInteger(ka)`, `b = loadInteger(kb)`, then
+ * `if (a == null) a = 1`). The statements between may neither use the variable, nor call script code that could read
+ * it, nor leave the block, so the default can move to its read. -1 when there is none.
+ */
+function laterReadDefault(
+  statements: readonly AstNode[],
+  index: number,
+  consumed: ReadonlySet<number>,
+  context: LowerContext,
+): number {
+  const read = typedReadAssignment(statements[index]!, context);
+  if (read === null) return -1;
+  // Whether code between could see the variable before its default, or skip the default.
+  const interferes = (statement: AstNode): boolean => {
+    let found = false;
+    walkAst(statement, (child) => {
+      if (child.kind === "variable" && variableName(child) === read.name) found = true;
+      else if (["return", "break", "continue", "throw"].includes(child.kind)) found = true;
+      else if (child.kind === "methodCall" && callParts(child)?.inherited === true)
+        found ||= legacyApiCall(child, context) === null;
+    });
+    return found;
+  };
+  for (let later = index + 1; later < statements.length; later += 1) {
+    if (consumed.has(later)) continue;
+    const statement = statements[later]!;
+    if (nullDefault(statement)?.name === read.name) return later;
+    if (interferes(statement)) return -1;
+  }
+  return -1;
+}
+
+/** `x = loadInteger(k)` and the other typed storage and online reads, as the variable and the read; else null. */
+function typedReadAssignment(
+  statement: AstNode,
+  context: LowerContext,
+): { name: string; read: AstNode } | null {
+  const expression = statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+  if (
+    expression === null ||
+    !(
+      expression.kind === "declaration" ||
+      (expression.kind === "binary" && expression.operator === "=")
+    )
+  )
+    return null;
+  const name = variableName(expression.left);
+  const read = asNode(expression.right);
+  const call = read === null ? null : (legacyApiCall(read, context)?.name ?? null);
+  if (name === null || read === null || call === null) return null;
+  return TYPED_STORAGE_LOADS.has(call) || TYPED_ONLINE_LOADS.has(call) ? { name, read } : null;
+}
+
+/** `if (x == null) x = d` without an else, as the variable and the default; else null. */
+function nullDefault(statement: AstNode): { name: string; fallback: AstNode } | null {
+  if (statement.kind !== "if") return null;
+  const otherwise = asNode(statement.else);
+  if (otherwise !== null && otherwise.kind !== "empty") return null;
+  const condition = asNode(statement.condition);
+  const tested =
+    condition?.kind === "binary" && condition.operator === "=="
+      ? isNullConstant(asNode(condition.right) ?? undefined)
+        ? asNode(condition.left)
+        : isNullConstant(asNode(condition.left) ?? undefined)
+          ? asNode(condition.right)
+          : null
+      : null;
+  const [only, ...others] = branchStatements(statement.then);
+  const fill = only?.kind === "expressionStatement" ? asNode(only.expression) : null;
+  const name = variableName(tested);
+  if (others.length > 0 || name === null || fill?.kind !== "binary" || fill.operator !== "=")
+    return null;
+  const fallback = asNode(fill.right);
+  return variableName(fill.left) === name && fallback !== null ? { name, fallback } : null;
 }
 
 /** A read with a default (readThenDefault): `dict.get(key, default: d)` or `load key, default: d`. */
@@ -11548,6 +11648,22 @@ function closureContains(closure: AstNode, node: AstNode): boolean {
 }
 
 /**
+ * Whether a list write's position is a number: proven so, or arithmetic whose operands are numbers or of unknown type,
+ * `join[i + offset]`, since Groovy failed on a list position of another type.
+ */
+function listGrowthIndex(indexNode: AstNode, context: LowerContext): boolean {
+  if (onlyOf(inferType(indexNode, context.types), NUMBER)) return true;
+  if (isRepeatableExpression(indexNode)) return false;
+  let numeric = true;
+  walkAst(indexNode, (node) => {
+    if (node.kind !== "variable" && node.kind !== "constant") return;
+    const type = inferType(node, context.types);
+    if (!onlyOf(type, NUMBER) && type !== UNKNOWN) numeric = false;
+  });
+  return numeric;
+}
+
+/**
  * A write at a position of a list that starts empty and is filled by position: Groovy grew the list, padding with
  * null up to the position, where a TeaseScript list index must exist. The write appends at the end instead, which is
  * Groovy's result whenever the position is the length; a note says so.
@@ -11571,13 +11687,21 @@ function growingListWrite(
     node?.kind === "list" && nodeArray(node.items).length === 0;
   const startsEmpty =
     isEmptyList(initializer) || (assigned.length > 0 && assigned.every(isEmptyList));
+  // A literal position at or past the end of the literal list the variable starts as, `label = ["<", ">"]` then
+  // `label[2] = exit`, grows it too.
+  const position = indexNode === null ? undefined : constantValue(indexNode);
+  const literalLists = [initializer, ...assigned].filter((node) => node !== undefined);
+  const pastLiteral =
+    typeof position === "number" &&
+    literalLists.length > 0 &&
+    literalLists.every((node) => node.kind === "list" && position >= nodeArray(node.items).length);
   if (
     target.kind !== "index" ||
     target.dict === true ||
     indexNode === null ||
     !(isRepeatableExpression(indexNode) || isPlainArithmetic(indexNode)) ||
-    !startsEmpty ||
-    !onlyOf(inferType(indexNode, context.types), NUMBER)
+    !(startsEmpty || pastLiteral) ||
+    !listGrowthIndex(indexNode, context)
   )
     return null;
   addDiagnostic(

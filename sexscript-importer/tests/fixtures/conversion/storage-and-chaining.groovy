@@ -38,4 +38,14 @@ if (loadString("training.version") == "2") show("Version 2")
 def best = receiveInteger("training.best")
 if (best == null) best = 0
 show("Best ${best + 1}")
+// Settings read first and defaulted after, with only other reads and defaults between, read with their defaults; a
+// default that a read in between uses stays a test.
+def shocks = loadInteger("training.shocks")
+def tempo = loadFloat("training.tempo")
+def suffix = loadString("training.suffix")
+if (shocks == null) shocks = 3
+if (tempo == null) tempo = 0.5
+def keyed = loadString("training.key." + suffix)
+if (suffix == null) suffix = "a"
+show("Settings ${shocks} ${tempo} ${suffix} ${keyed}")
 return null

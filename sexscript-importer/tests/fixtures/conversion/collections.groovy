@@ -35,3 +35,13 @@ def odds = 0
 def parts = [3, 4]
 odds = parts[0] / parts[1]
 show("Odds " + odds)
+// Positions computed from values of unknown type, and a literal position past a literal list, grow the list.
+def joinDecks = { first, second, offset ->
+	def joined = []
+	for (int i = 0; i < 2; i++) joined[i] = first[i]
+	for (int i = 0; i < 2; i++) joined[i + offset] = second[i]
+	return joined
+}
+def labels = ["< Previous", "Next >"]
+labels[2] = "Exit"
+show("Decks ${joinDecks([1, 2], [3, 4], 2).size()} ${labels.size()}")

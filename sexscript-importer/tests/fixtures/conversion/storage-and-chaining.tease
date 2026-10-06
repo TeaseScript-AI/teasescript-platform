@@ -89,4 +89,14 @@ if sexscriptLegacyText(load("training.version")) == "2" {
 let best = load "training.best", default: 0
 // NOTE SX_PLUS_OPERAND_TYPE line 40: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 say "Best ${best + 1}"
+// Settings read first and defaulted after, with only other reads and defaults between, read with their defaults; a
+// default that a read in between uses stays a test.
+let shocks = load "training.shocks", default: 3
+let tempo = load "training.tempo", default: 0.5
+let suffix = load "training.suffix"
+let keyed = load "training.key.${suffix}"
+if suffix == null {
+  suffix = "a"
+}
+say "Settings ${shocks} ${tempo} ${suffix} ${keyed}"
 exit
