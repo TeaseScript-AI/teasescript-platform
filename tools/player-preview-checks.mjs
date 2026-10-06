@@ -2378,6 +2378,66 @@ async function debugVariablesChecks(page) {
   return "PASS Debug Now image origin, Variables two-level view, click, key and tap expansion, hidden-panel recording, long values, state across tabs, Debug off and on, fit in Small dock and narrow drawer";
 }
 
+// With Storage, all four Debug tabs fit the Small dock and the narrow drawer: they wrap inside the tab list, each a full
+// touch target, without widening the panel.
+async function debugTabsFitChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const base = page.url().split("?")[0];
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // The camera scenario's host persists script storage, so the panel offers Storage.
+  await page.goto(`${base}?dev&scenario=camera`);
+  const panel = page.locator('[data-tool="Debug"]');
+  await page.locator('[data-launcher] button[aria-label="Debug"]').click();
+  await panel.locator("[data-panel-pin]").click();
+  await panel.locator('[data-debug-tab="storage"]').waitFor();
+  await panel.getByRole("button", { name: "Panel settings", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Width", exact: true }).hover();
+  await page.getByRole("menuitemradio", { name: "Small", exact: true }).click();
+  await page.keyboard.press("Escape");
+  const fits = async (where) => {
+    const layout = await panel.evaluate((element) => {
+      const body = element.querySelector("[data-tool-body]");
+      const list = element.querySelector('[role="tablist"]').getBoundingClientRect();
+      const tabs = [...element.querySelectorAll('[role="tab"]')].map((tab) =>
+        tab.getBoundingClientRect(),
+      );
+      return {
+        width: [body.scrollWidth, body.clientWidth],
+        inside: tabs.every(
+          (tab) =>
+            tab.left >= list.left - 1 &&
+            tab.right <= list.right + 1 &&
+            tab.top >= list.top - 1 &&
+            tab.bottom <= list.bottom + 1 &&
+            tab.height >= 43,
+        ),
+      };
+    });
+    check(
+      layout.width[0] <= layout.width[1] + 1 && layout.inside,
+      `The Debug tabs do not fit ${where}: ${JSON.stringify(layout)}`,
+    );
+  };
+  await fits("the Small dock");
+  await page.setViewportSize({ width: 320, height: 700 });
+  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
+  if (await show.isVisible()) await show.click();
+  if (!(await panel.locator('[data-debug-tab="storage"]').isVisible()))
+    await page.locator('[data-launcher] button[aria-label="Debug"]').click();
+  await panel.locator('[data-debug-tab="storage"]').waitFor();
+  await fits("the narrow drawer");
+  // Arrow keys still move between the wrapped tabs.
+  await panel.locator('[data-debug-tab="log"]').click();
+  await page.keyboard.press("ArrowRight");
+  check(
+    (await panel.locator('[data-debug-tab="storage"]').getAttribute("aria-selected")) === "true",
+    "ArrowRight no longer reaches the wrapped Storage tab",
+  );
+  return "PASS Debug's four tabs wrap inside the Small dock and the narrow drawer, as touch targets reachable by arrow keys";
+}
+
 async function developmentTimeChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -2604,6 +2664,7 @@ const groups = [
   developmentTimeChecks,
   debugNowOverrideChecks,
   debugVariablesChecks,
+  debugTabsFitChecks,
   timerChecks,
   transcriptNativeWheelChecks,
   contentContainmentChecks,

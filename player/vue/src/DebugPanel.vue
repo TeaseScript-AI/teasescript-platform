@@ -132,11 +132,12 @@ const tab = ref("now");
       </div>
     </section>
     <Tabs v-model="tab">
-      <TabsList class="h-auto w-full">
-        <TabsTrigger value="now" class="min-h-11" data-debug-tab="now">Now</TabsTrigger>
-        <TabsTrigger value="variables" class="min-h-11" data-debug-tab="variables">Variables</TabsTrigger>
-        <TabsTrigger value="log" class="min-h-11" data-debug-tab="log">Log</TabsTrigger>
-        <TabsTrigger v-if="$slots.storage" value="storage" class="min-h-11" data-debug-tab="storage"
+      <!-- The tabs wrap to a second row in the narrowest panel; each keeps its own 44 px height. -->
+      <TabsList class="h-auto w-full min-w-0 flex-wrap">
+        <TabsTrigger value="now" class="h-auto min-h-11" data-debug-tab="now">Now</TabsTrigger>
+        <TabsTrigger value="variables" class="h-auto min-h-11" data-debug-tab="variables">Variables</TabsTrigger>
+        <TabsTrigger value="log" class="h-auto min-h-11" data-debug-tab="log">Log</TabsTrigger>
+        <TabsTrigger v-if="$slots.storage" value="storage" class="h-auto min-h-11" data-debug-tab="storage"
           >Storage</TabsTrigger
         >
       </TabsList>
