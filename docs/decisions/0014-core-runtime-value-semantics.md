@@ -48,5 +48,8 @@ When the identifier fallback is first used for a speaker, the runtime emits one
 structured developer warning with a source span. Later messages using the same
 fallback speaker do not repeat that warning.
 
+A timer, media, or button block shares variables with the code that creates it (ADR 0024). It shares the variable, not
+its value: every copy rule above still applies.
+
 This decision adds no syntax and does not define function parameter semantics,
 opaque engine-reference copying, or other deferred runtime features.

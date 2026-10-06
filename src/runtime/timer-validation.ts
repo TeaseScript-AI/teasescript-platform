@@ -1,6 +1,7 @@
 import type { InstructionPlan } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import { anchoredDeadlineMs } from "./timers.js";
+import { sameCaptures } from "./capture-validation.js";
 import { catchUpPaused } from "./action-validation.js";
 import {
   fileOfInstruction,
@@ -21,6 +22,7 @@ const TIMER_KEYS = [
   "persist",
   "handlerFunctionId",
   "rootScopeId",
+  "captures",
   "range",
   "repeatDurationMs",
   "roundDurationMs",
@@ -352,6 +354,7 @@ export function validateTimerState(
         "timerId",
         "handlerFunctionId",
         "rootScopeId",
+        "captures",
         "dueAtMs",
         "count",
       ]) ||
@@ -359,6 +362,7 @@ export function validateTimerState(
       !positiveSafeInteger(invocation.handlerFunctionId) ||
       invocation.handlerFunctionId !== record.handlerFunctionId ||
       invocation.rootScopeId !== record.rootScopeId ||
+      !sameCaptures(invocation.captures, record.captures) ||
       !rootFitsFunction(plan, roots, invocation.rootScopeId, invocation.handlerFunctionId) ||
       !positiveSafeInteger(invocation.count) ||
       !isValidSessionTime(invocation.dueAtMs) ||
@@ -397,6 +401,7 @@ export function validateTimerState(
         record === undefined ||
         record.handlerFunctionId !== frame.functionId ||
         record.rootScopeId !== frame.rootScopeId ||
+        !sameCaptures(frame.captures, record.captures) ||
         (typeof dueAtMs === "number" &&
           positiveSafeInteger(record.timerId) &&
           dueAtMs < (createdAt.get(record.timerId) ?? 0))

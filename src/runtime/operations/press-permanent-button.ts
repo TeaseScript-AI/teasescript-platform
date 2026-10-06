@@ -1,4 +1,5 @@
 import { type InstructionPlan, mainSourceSpan } from "../../plan/model.js";
+import { cloneCaptures } from "../captures.js";
 import type { PermanentButtonPressedEvent } from "../events.js";
 import { permanentButtonBusy, shownPermanentButton } from "../permanent-buttons.js";
 import type { RuntimeSnapshot } from "../state.js";
@@ -74,6 +75,7 @@ export function pressPermanentButton(
     buttonId,
     handlerFunctionId: action.button.handlerFunctionId,
     rootScopeId: action.button.rootScopeId,
+    captures: cloneCaptures(action.button.captures),
     dueAtMs: current.currentSessionTimeMs,
     count: 1,
   });

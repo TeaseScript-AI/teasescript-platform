@@ -11,6 +11,7 @@ import type {
 } from "../../plan/model.js";
 import { runsNothing } from "../activation-validation.js";
 import { innermostFileCallIndex } from "../activations.js";
+import { leaveScopes, sweepRetainedScopes } from "../captures.js";
 import { RuntimeFault } from "../errors.js";
 import type { Evaluator } from "../evaluator.js";
 import { nextXorShift32 } from "../random.js";
@@ -67,7 +68,7 @@ export function executeGoto(
   if (segment !== undefined) resetActivation(snapshot, segment);
   else replaceCurrentRoot(snapshot, snapshot.retainedScopes.splice(retained, 1)[0]!);
   snapshot.nextInstruction = instruction.target;
-  sweepRetainedScopes(snapshot);
+  sweepRetainedScopes(snapshot, true);
 }
 
 /** `goto` or `call` naming a file, or `call label`: a fresh activation of the destination's file. */
@@ -120,7 +121,7 @@ export function executeTransfer(
     snapshot.temporaries.length = 0;
   }
   snapshot.nextInstruction = destination.target;
-  sweepRetainedScopes(snapshot);
+  sweepRetainedScopes(snapshot, true);
 }
 
 /**
@@ -156,7 +157,7 @@ export function executeEnd(
     for (const temporary of call.callerTemporaries) snapshot.temporaries.push({ ...temporary });
     snapshot.nextInstruction = call.returnInstruction;
   }
-  sweepRetainedScopes(snapshot);
+  sweepRetainedScopes(snapshot, true);
 }
 
 /**
@@ -227,36 +228,6 @@ function drawDestination(
   return destination.pick[Math.floor(nextXorShift32(snapshot.rng) * destination.pick.length)]!;
 }
 
-/**
- * Drops the roots no block can reach anymore: a retained root stays while a running or queued block, a block of a
- * running timer or media, a shown permanent button, or a function frame refers to it.
- */
-function sweepRetainedScopes(snapshot: RuntimeSnapshot): void {
-  if (snapshot.retainedScopes.length === 0) return;
-  const referenced = new Set<number>();
-  for (const frame of snapshot.callFrames)
-    if (frame.kind === "function") referenced.add(frame.rootScopeId);
-  for (const invocation of snapshot.pendingTimerHandlers) referenced.add(invocation.rootScopeId);
-  for (const action of snapshot.backgroundActions) {
-    const owner =
-      action.kind === "timer"
-        ? action.timer.handlerFunctionId === null
-          ? null
-          : action.timer.rootScopeId
-        : action.kind === "media"
-          ? action.media.handlerRootScopeId
-          : action.kind === "permanentButton"
-            ? action.button.rootScopeId
-            : null;
-    if (owner !== null) referenced.add(owner);
-  }
-  let kept = 0;
-  for (const root of snapshot.retainedScopes) {
-    if (referenced.has(root.id)) snapshot.retainedScopes[kept++] = root;
-  }
-  snapshot.retainedScopes.length = kept;
-}
-
 /** The index of the file call whose activation has this root, -1 for the base activation, or none when left. */
 function activationIndex(snapshot: RuntimeSnapshot, rootId: number): number | undefined {
   for (let index = snapshot.callFrames.length - 1; index >= 0; index -= 1) {
@@ -274,7 +245,8 @@ function resetActivation(snapshot: RuntimeSnapshot, index: number): void {
     const frame = snapshot.frames[depth]!;
     if (frame.file !== null) snapshot.retainedScopes.push(frame);
   }
-  snapshot.frames.length = rootDepth + 1;
+  // A block, loop, or function scope stays while a resource or queued block shares its variables.
+  leaveScopes(snapshot, rootDepth + 1);
   snapshot.callFrames.length = index + 1;
   snapshot.loopFrames.length = call?.loopBaseDepth ?? 0;
   snapshot.temporaries.length = 0;

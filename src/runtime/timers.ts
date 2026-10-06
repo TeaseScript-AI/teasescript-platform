@@ -1,5 +1,6 @@
 import type { DelayDisplay } from "../plan/model.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
+import { cloneCaptures, type RuntimeCaptureSnapshot } from "./captures.js";
 
 /**
  * Asynchronous timer state. The enclosing background action owns an ADR 0016 action ID for ordering and events; the
@@ -28,6 +29,8 @@ export interface RuntimeTimerSnapshot {
    * activation is left; the expiry block runs in it.
    */
   readonly rootScopeId: number;
+  /** The variables its expiry block shares with the code that started it; kept after it settles, owning nothing. */
+  readonly captures: readonly RuntimeCaptureSnapshot[];
   /** Present only for a repeating range without a `repeatDuration` override. */
   range: RuntimeTimerRangeSnapshot | null;
   /** Duration of later rounds for a repeating fixed duration or after `repeatDuration` assignment. */
@@ -63,6 +66,8 @@ export interface RuntimeTimerHandlerInvocationSnapshot {
   readonly handlerFunctionId: number;
   /** The activation root of its timer's block. */
   readonly rootScopeId: number;
+  /** Its timer's shared variables, which the queued block keeps even when the timer goes. */
+  readonly captures: readonly RuntimeCaptureSnapshot[];
   readonly dueAtMs: number;
   count: number;
 }
@@ -322,6 +327,10 @@ function settledWarning(timer: RuntimeTimerSnapshot, operation: string): TimerWa
 }
 
 export function cloneTimer(timer: RuntimeTimerSnapshot): RuntimeTimerSnapshot {
-  // Every field is a primitive except `range`.
-  return { ...timer, range: timer.range === null ? null : { ...timer.range } };
+  // Every field is a primitive except `range` and `captures`.
+  return {
+    ...timer,
+    captures: cloneCaptures(timer.captures),
+    range: timer.range === null ? null : { ...timer.range },
+  };
 }

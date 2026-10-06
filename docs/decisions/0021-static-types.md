@@ -122,7 +122,7 @@ the compiler cannot know. Experienced authors may opt into union types, type tes
 3. Tests can overlap, because an integer is also a number. An `else` branch keeps only what the test provably excludes.
 4. Only plain variables narrow; `door.locked` and `items[0]` do not.
 5. A `wait`, an interaction, a function call, or another suspension cancels narrowed facts for every variable that a
-   handler or function could change in the meantime. A loop condition is tested anew on each iteration, so an
+   handler or function could change in the meantime, including a local that a block shares and assigns (ADR 0024). A loop condition is tested anew on each iteration, so an
    assignment inside the loop cancels narrowing at its start. A function or handler body does not inherit narrowed
    facts from the code around it.
 

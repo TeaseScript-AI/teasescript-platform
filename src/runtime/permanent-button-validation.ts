@@ -1,6 +1,7 @@
 import type { InstructionPlan } from "../plan/model.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import { rootFitsFunction, serializedRootFiles } from "./activation-validation.js";
+import { sameCaptures } from "./capture-validation.js";
 
 /** Restore validation for permanent buttons, their identifiers, and their queued or running blocks. */
 
@@ -13,12 +14,20 @@ const ACTION_KEYS = [
   "button",
 ] as const;
 
-const BUTTON_KEYS = ["buttonId", "text", "persist", "handlerFunctionId", "rootScopeId"] as const;
+const BUTTON_KEYS = [
+  "buttonId",
+  "text",
+  "persist",
+  "handlerFunctionId",
+  "rootScopeId",
+  "captures",
+] as const;
 
 const INVOCATION_KEYS = [
   "buttonId",
   "handlerFunctionId",
   "rootScopeId",
+  "captures",
   "dueAtMs",
   "count",
 ] as const;
@@ -126,6 +135,7 @@ export function validatePermanentButtonState(
       !hasExactKeys(invocation, INVOCATION_KEYS) ||
       invocation.handlerFunctionId !== entry.button.handlerFunctionId ||
       invocation.rootScopeId !== entry.button.rootScopeId ||
+      !sameCaptures(invocation.captures, entry.button.captures) ||
       invocation.count !== 1 ||
       typeof invocation.dueAtMs !== "number" ||
       typeof entry.createdAtMs !== "number" ||
@@ -157,7 +167,9 @@ export function validatePermanentButtonState(
       queued.has(id) ||
       (plan !== undefined && definition?.handler !== "button") ||
       (button !== undefined &&
-        (button.handlerFunctionId !== frame.functionId || button.rootScopeId !== frame.rootScopeId))
+        (button.handlerFunctionId !== frame.functionId ||
+          button.rootScopeId !== frame.rootScopeId ||
+          !sameCaptures(button.captures, frame.captures)))
     ) {
       errors.push("Runtime permanent button block frame does not belong to its button.");
     }
