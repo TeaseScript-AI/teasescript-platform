@@ -99,7 +99,7 @@ implemented):
 | `int t = showPopup(m)` (seconds until closed) | `getTimestamp().toSeconds()` before and after `showPopup m`, in whole seconds |
 | `showButton(text, s)` used as a value (seconds until the click) | `(showButton text, timeout: s) / 1 s` (#531) |
 | `showButton(text, 0)` (the button stayed for its 10 ms safety margin; the result was 0) | `showButton text, timeout: 10 ms`, with a note, also for a timeout known before the run (`def t = 0`, `1 - 1`); a used result is `0` |
-| `x = loadInteger(k)` followed by `if (x == null) x = d` | `x = load k, default: d` (#541; also `loadString`, `loadBoolean`, `loadFloat`) |
+| `x = loadInteger(k)` followed by `if (x == null) x = d`, also further down a settings block where the code between neither uses `x`, nor calls script code, nor leaves the block | `x = load k, default: d` (#541; also `loadString`, `loadBoolean`, `loadFloat`, and the online `receive*` reads) |
 | `loadString(k)` of a key under which the package saves a number or a boolean (legacy read it as text) | the text helper around `load k`, with a note (`SX_LOAD_STRING_TEXT`) |
 | `m[k] ?: d`, `m.containsKey(k) ? m[k] : d`, `x = m[k]` followed by `if (x == null) x = d` on a dict | `m.get(k, default: d)` (#536) |
 | `getImage(message)` (webcam picture path or null) | `takePhoto()`, with a note (V30 §33) |
@@ -184,9 +184,11 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   bindings, so a closure's own `def m` is apart from a script `m`.
 - An empty-text placeholder that later holds one other type (`def lineArray = ""`, later a list) starts with that
   type's empty value (`let lineArray: string[] = []`), which differs only where the empty text was read
-  (`SX_PLACEHOLDER_TYPE`, 5 DisciplineClinic sites). A write by position into a list that starts empty grew the Groovy
-  list, padding with null; the conversion appends when the position is the length and notes the difference beyond it
-  (`SX_LIST_GROWTH`, DisciplineClinic's `assignmentArrayList`).
+  (`SX_PLACEHOLDER_TYPE`, 5 DisciplineClinic sites). A write by position into a list that starts empty, or at a
+  literal position past the end of the literal list it starts as (`label[2] = exit` after `label = ["<", ">"]`), grew
+  the Groovy list, padding with null; the conversion appends when the position is the length and notes the difference
+  beyond it (`SX_LIST_GROWTH`, DisciplineClinic's `assignmentArrayList`). A computed position counts as a number where
+  its operands are numbers or of unknown type, since Groovy failed on a list position of another type.
 - What a function cannot convert does not block the script when nothing references the function: no call, action ID, or
   use as a value in the generated program, which counts module loaders, setups, and the action dispatcher, and no
   reference in the legacy code either, so a caller the conversion left unconverted still counts. Groovy never ran such a
@@ -578,72 +580,74 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 
 ## Current state and remaining gaps
 
-Measured on the selected large corpus on 2026-10-06, at importer `05f83665` with `main` `c5c20888` merged in; the 15
-units that the zero-start fix for closure locals changes were converted again at `5556a7d9`.
+Measured on the selected large corpus on 2026-10-06, at importer `24e930b2` with the unit patches of `03469a07` and
+`main` `0ab0fac9` merged in.
 - **The selection** follows the owner decisions of 2026-10-05. It takes corpus2's merged units with one revision per
   title.
   - The largest revision, checked by hand, is the package. Earlier revisions are listed in the catalog as earlier
     versions and are not converted.
   - Two units whose revisions carry two titles are split into two units each: Toy and ToyExpanded, and jewell and
     JewellMistressMiley. Lines v2 counts as a revision of Lines.
-- **Script-specific fixes** are unit patches (32 units), not converter rules.
+- **Script-specific fixes** are unit patches (49 units), not converter rules.
 
 | Result | Units of 210 |
 | --- | ---: |
 | Converted without a failed step | 210 |
-| Compile as one project | 138 |
-| Compile and play to the end from `main.tease` in the smoke run | 119 |
-| Smoke run from `main.tease`: halted, blocked at a file that does not compile, step limit, failed, no run | 120, 70, 16, 3, 1 |
+| Compile as one project | 155 |
+| Compile and play to the end from `main.tease` in the smoke run | 128 |
+| Smoke run from `main.tease`: halted, blocked at a file that does not compile, step limit, failed, no run | 128, 54, 21, 6, 1 |
 
-Of the 575 scripts, 426 are lowered without a root error and 404 compile; 1,465 root errors remain.
+Of the 575 scripts, 426 are lowered without a root error and 411 compile; 1,469 root errors remain.
 
 **Smoke runs:**
-- **The step limit is inconclusive** (16 units). Most of these are loops that wait for a typed text or a time.
-- **The 3 failed runs:** ToyExpanded (`TSR008`, an index on a value that is no list), ashleyYHBS (`TSR058`, a missing
-  setting stored in an `int`), and tabata (`TSR036`, a division by zero).
+- **The step limit is inconclusive** (21 units). Most of these are loops that wait for a typed text or a time.
+- **The 6 failed runs:**
+  - Escape, OwlSays, and SpankingParty (`TSR025`): a list read or written past its end. Groovy read null there, and
+    padded the list with null when it wrote beyond its end (`SX_LIST_GROWTH`).
+  - ShockYourself (`TSR058`): settings lists filled with missing values, which the script replaces with defaults
+    only after loading.
+  - ashleyYHBS (`TSR058`): a missing setting stored in an `int`.
+  - tabata (`TSR036`): a division by zero.
 - **Isolated runs** of scripts that no entry run reaches fail mostly on settings that an introduction saves:
   `TSR058` 21 times and `TSR027` 17 times. Groovy compared and computed with such a missing setting as null.
 
 ### Unconverted code by class
 
-Of the 72 units that do not compile:
-- 61 hold unconverted code (`// TODO`);
-- 11 fail on compile errors alone.
+Of the 55 units that do not compile:
+- 51 hold unconverted code (`// TODO`);
+- 4 fail on compile errors alone.
 
 The TODO sites of the leading root codes, classified by their original Groovy line:
 
 | Class | TODO sites | Units (not compiling) | Workaround class |
 | --- | ---: | ---: | --- |
-| In-memory image composition (`ImageIO`, `BufferedImage`, `drawImage`, `getWidth`, `setImage(bytes)`) | 441 | 20 (10) | Language gap: the layered scene is accepted but not implemented, and placing overlays needs the base image's size (see Accepted but not implemented) |
-| List, text, and map methods on receivers not proven, operators, and other idioms | 358 | 67 (47) | Importer work where inference can prove the receiver; otherwise per unit |
-| Files and folders (`new File`, listings, writes, `eachFile`) outside the decided substitutes | 196 | 54 (36) | Legacy baggage. Substitutes cover existence checks, photos, stored text files, audio, and video |
-| Closures that capture local state | 58 | 9 (8) | Per unit, since TeaseScript has no closures |
-| Java formatting, dates, JSON, and Base64 | 46 | 22 (18) | Importer work where TeaseScript has the form (the `String.format` subset is done); otherwise baggage |
-| Dynamic code (`Eval.me`, `inspect`, expression strings in data, per-script property objects) | 32 | 3 (3) | Owner decision 2026-10-05: native TeaseScript, in per-unit patches and in converter rules where the pattern is general. Each behaviour is an ordinary function, its conditions plain `if`s, and the choice among them a small selection list or `switch`. Toy's session plans are patched that way. Eval is not emulated with a lookup table of expression texts |
-| `try`/`catch` around fallible calls | 27 | 18 (14) | No exceptions. A try block without fallible calls runs without its catch |
+| In-memory image composition (`ImageIO`, `BufferedImage`, `drawImage`, `getWidth`, `setImage(bytes)`) | 441 | 20 (8) | Language gap: the layered scene is accepted but not implemented, and placing overlays needs the base image's size (see Accepted but not implemented) |
+| List, text, and map methods on receivers not proven, operators, and other idioms | 358 | 67 (41) | Importer work where inference can prove the receiver; otherwise per unit |
+| Files and folders (`new File`, listings, writes, `eachFile`) outside the decided substitutes | 198 | 55 (31) | Legacy baggage. Substitutes cover existence checks, photos, stored text files, audio, and video |
+| Closures that capture local state | 58 | 9 (7) | Per unit, since TeaseScript has no closures |
+| Java formatting, dates, JSON, and Base64 | 52 | 22 (15) | Importer work where TeaseScript has the form (the `String.format` subset is done); otherwise baggage |
+| Dynamic code (`Eval.me`, `inspect`, expression strings in data, per-script property objects) | 32 | 3 (2) | Owner decision 2026-10-05: native TeaseScript, in per-unit patches and in converter rules where the pattern is general. Each behaviour is an ordinary function, its conditions plain `if`s, and the choice among them a small selection list or `switch`. Toy's session plans are patched that way. Eval is not emulated with a lookup table of expression texts |
+| `try`/`catch` around fallible calls | 26 | 17 (11) | No exceptions. A try block without fallible calls runs without its catch |
 | Network, processes, and system properties | 16 | 4 (4) | Legacy baggage. The online service, device commands, and OS information have decided substitutes |
-| Legacy bugs: calls of functions that no file defines, and names that nothing assigns | 27 | 9 (7) | Reported for the author's repair (see Legacy baggage) |
+| Legacy bugs: calls of functions that no file defines, and names that nothing assigns | 27 | 9 (6) | Reported for the author's repair (see Legacy baggage) |
 
 ### Compile errors
 
-Null-related errors are the largest compile error class left: 932 errors in 47 of the 72 units. "Null-related" means
+Null-related errors are the largest compile error class left: 840 errors in 39 of the 55 units. "Null-related" means
 may be null, no property of null, null indexed, combined, or compared.
 
 | Class | Errors | Units | Route |
 | --- | ---: | ---: | --- |
-| A script variable that starts as null, read in functions (363) or at the top level after a call, wait, or loop start (62) | 425 | 22 | Per-unit patches that start it with a value. A declaration assigned later, like Kotlin `lateinit`, would cover 309 of these errors. Together with the locals below, such a declaration would make 3 units compile by itself (gunfighter, jeuxdemain_femme, SpankingParty), because the other units have more blockers |
-| A function local that starts as null and is set before its reads, but whose narrowing ends at a loop start | 91 | 13 | Per unit; a declaration assigned later would cover 65. Number counters start at 0 (owner decision 2026-10-05) |
-| Values that really may be null, read in other functions: function results that may be null (151), storage reads whose default is set elsewhere (58), and copies of them (79) | 288 | 21 | Per unit; the compiler keeps a null check within one function |
-| Nullable function results, fields, and list items read directly | 128 | 19 | Per unit |
+| A script variable that starts as null, read in functions (354) or at the top level after a call, wait, or loop start (63) | 417 | 21 | Per-unit patches that start it with a value. A declaration assigned later, like Kotlin `lateinit`, would cover 296 of these errors. Together with the locals below, such a declaration would make 3 units compile by itself (gunfighter, jeuxdemain_femme, SpankingParty), because the other units have more blockers |
+| A function local that starts as null and is set before its reads, but whose narrowing ends at a loop start | 97 | 15 | Per unit; a declaration assigned later would cover 64. Number counters start at 0 (owner decision 2026-10-05) |
+| Values that really may be null, read in other functions: function results that may be null (70), storage reads whose default is set elsewhere (45), and copies of them (78) | 193 | 13 | Per unit; the compiler keeps a null check within one function. Defaults set further down a settings block are merged into the read |
+| Nullable function results, fields, and list items read directly | 133 | 17 | Per unit |
 
-**The 11 units without unconverted code:**
-- Null-related errors only: Escape, OwlSays, gunfighter, questionnaire, and scatslut.
-- Mostly null-related: 8Puzzle and spinthebottle.
-- Other errors:
-  - Banjo_SpankedHeroRPG (45): a union variable without type tests, and text subtraction;
-  - worstpicture (8): numbers added to a text list;
-  - SpanishIntro: an unknown name;
-  - log: a session that never reaches `exit`.
+**The 4 units without unconverted code:**
+- questionnaire: null-related errors only (5).
+- spinthebottle: mostly null-related (15 of 24).
+- Banjo_SpankedHeroRPG (45): a union variable without type tests, and text subtraction.
+- worstpicture (8): numbers added to a text list.
 
 ## Open importer work
 
