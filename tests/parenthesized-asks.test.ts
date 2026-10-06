@@ -176,11 +176,11 @@ test("a parenthesized ask takes one question and the options 'hint:' and 'defaul
   for (const [source, error] of [
     [
       'let v = askText("a", "b")',
-      "TSP032 0:21 askText(...) takes one unnamed value; name the others, such as 'hint:'.",
+      "TSP032 0:21 askText(...) takes one unnamed value; name the others, such as 'default:'.",
     ],
     [
       'let v = askNumber("a", help: "b")',
-      "TSP032 0:23 Unknown askNumber option 'help'; use 'hint:' or 'default:'.",
+      "TSP032 0:23 Unknown askNumber option 'help'; use 'default:' or 'hint:'.",
     ],
     [
       'let v = askDate("a", default: 1, default: 2)',
