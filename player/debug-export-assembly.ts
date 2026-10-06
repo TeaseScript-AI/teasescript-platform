@@ -11,6 +11,7 @@ import {
   DEBUG_EXPORT_VERSION,
   debugBuildRevisions,
   type DebugBuild,
+  type DebugEditedWhileDebugging,
   type DebugExport,
   type DebugIncident,
   type DebugPackage,
@@ -39,6 +40,8 @@ export interface DebugExportCandidate {
   readonly recording: DebugRecording | null;
   /** The error name of an exception of the Player itself that stopped the session. */
   readonly hostError: string | null;
+  /** The session's "Edited while debugging" mark from Debug's storage editor; `null` when it was not edited. */
+  readonly editedWhileDebugging: DebugEditedWhileDebugging | null;
   readonly photos: readonly DebugPhotoCandidate[];
   /** Player settings, geometry, and browser details, exported only when chosen. */
   readonly player: Readonly<Record<string, string | number | boolean | null>>;
@@ -248,6 +251,7 @@ export async function assembleDebugExport(
     build: { ...candidate.build, ...debugBuildRevisions() },
     package: { ...candidate.package, contentHash: plan === null ? null : await planHash(plan) },
     incident,
+    editedWhileDebugging: candidate.editedWhileDebugging,
     selection: {
       savedValues: choices.savedValues,
       answers: choices.answers,

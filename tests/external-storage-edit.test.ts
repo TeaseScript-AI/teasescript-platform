@@ -9,6 +9,7 @@ import {
   deserializeCheckpoint,
   observeTime,
   run,
+  RuntimeDataError,
   serializeCheckpoint,
   type InstructionPlan,
   type InterpreterEvent,
@@ -170,4 +171,29 @@ test("a checkpoint after an edit restores the edited view without applying it ag
   const resumed = run(restored.plan, observeTime(restored.plan, restored.snapshot, 5_000).snapshot);
   assert.deepEqual(resumed.snapshot, direct.snapshot);
   assert.deepEqual(said(resumed.events), ["1 2"]);
+});
+
+test("an edit while a timer block waits reaches that block's next load", () => {
+  const session = start(
+    'timer async 1 {\n  wait 5 s\n  let seen = load("k", default: 0)\n  say "block ${seen}", instant\n}\nlet go = showButton "Go"\nexit',
+  );
+  // At 1 s the block runs and waits inside itself, with the button suspended behind it.
+  const running = run(session.plan, observeTime(session.plan, session.snapshot, 1_000).snapshot);
+  assert.equal(running.snapshot.foregroundAction?.kind, "delay");
+  const edited = edit(session.plan, running.snapshot, { key: "k", value: 3 });
+  assert.equal(edited.outcome.kind, "applied");
+  const later = run(session.plan, observeTime(session.plan, edited.snapshot, 6_000).snapshot);
+  assert.deepEqual(said(later.events), ["block 3"]);
+});
+
+test("without event sequence space left, an edit is refused as malformed state and changes nothing", () => {
+  const session = start(twoLoads, [{ key: "k", value: 1 }]);
+  const crowded = structuredClone(session.snapshot);
+  crowded.nextEventSequence = Number.MAX_SAFE_INTEGER;
+  const before = structuredClone(crowded);
+  assert.throws(
+    () => edit(session.plan, crowded, { key: "k", value: 2 }),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
+  );
+  assert.deepEqual(crowded, before);
 });

@@ -55,13 +55,24 @@ auto-skip and ends a jump at its next yield. The time controls stand above the t
     playhead, and the statement that started it.
   - A collapsed **Timers** list shows every timer, hidden ones included: blocking or async, display, running, paused, or
     suspended behind a block, remaining time, and the statement that started it.
-- **Storage** lists what the script saved in this browser, read-only: every key in UTF-16 order, its value's type and a
+- **Storage** lists what the script saved in this browser: every key in UTF-16 order, its value's type and a
   short preview, and, once expanded, a list, set, object, or dict's members, 20 at a time, as one flat outline. Text
   stays text: when it has the exact shape of a photo reference, a thumbnail beside it shows the photo this browser
   saved under it, read only once it is in view, or says No saved photo. Each such reference also appears once under
   Photo references with the keys whose values contain it. The tab reads the saved values freshly when it opens, after
   this Player saved, cleared, or imported them, after another tab of this browser changed this script's values, and on
-  Refresh. The running session keeps the copy it loaded at Start.
+  Refresh. The running session keeps the copy it loaded at Start, apart from its own edits:
+  - **Edit**, **Delete**, and **Add a value** open an editor with the value's type (Text, Number, Integer, Yes/no, or
+    Advanced: the stored JSON form), checked before it is stored. A value changed meanwhile is reported, not
+    overwritten. The edit is stored in this browser first, showing Saving…; only once that succeeded does a running
+    session take it through `applyExternalStorageEdit`, so its next `load` returns it while values it already loaded
+    stay; when storing fails, nothing changes. While the script's own save waits for the browser, Save is disabled
+    ("The script is saving… try again in a moment"). A script save made while the edit is being stored settles first;
+    the session then takes the value the browser kept, and when that is the script's, the editor says so. Without a
+    running session, the edit is for the next Start. Editing waits while the session waits for Continue, the camera
+    opens, or an import or clear runs.
+  - The first applied edit marks the session **Edited while debugging** (with the scene time of the first edit and
+    the number of edits) in the Player's own session data, which a debug export carries.
 
 ## Debug export
 
@@ -75,9 +86,10 @@ copies saved values, answers, and session text, so it requires all three.
 
 `player/debug-export.ts` owns the format: a versioned JSON document (`format: "teasescript-debug-export"`,
 `version: 2`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
-(unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name); the
-selection and omissions; the canonical checkpoint and its role, `current` or `lastGood`; the replay data; photos; and
-readable sections. Replay data is the anchor snapshot from an earlier boundary, or the last good checkpoint itself, and
+(unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name);
+`editedWhileDebugging`, the Debug storage editor's mark (`firstEditSceneTimeMs` and `editCount`, or `null`), which also
+covers edits before the replay anchor and which `inspect` prints; the selection and omissions; the canonical checkpoint
+and its role, `current` or `lastGood`; the replay data; photos; and readable sections. Replay data is the anchor snapshot from an earlier boundary, or the last good checkpoint itself, and
 every elementary engine call the Player made since, in order: `run` with its options, `observeTime`, `completeAction`
 with the media store's recorded answers, `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and
 `applyExternalStorageEdit` with the edit, each with its plain arguments, outcome, emitted event range, resulting
@@ -94,8 +106,8 @@ cannot copy, or a media store that throws during a call, marks it incomplete.
 The Player assembles an export when its dialog opens ([Player UI](ui/PLAYER-UI.md#session-end-and-failure)), from the
 session, the record, and the photos frozen then (`player/debug-export-assembly.ts`), so play may continue meanwhile.
 The technical report carries the build and its revisions, the package's storage scope and a SHA-256 of its compiled plan
-where the browser can hash, the incident as the session's actual state shows it, and the sequence and kind of the last
-256 events. Saved values add the session's
+where the browser can hash, the incident as the session's actual state shows it, the storage editor's mark, and the
+sequence and kind of the last 256 events. Saved values add the session's
 storage view; answers add the recorded interaction completions; session text adds the last 50 transcript messages and
 the events with their content: messages, the player's own transcript text, and button labels always, but the details of
 requests, settlements, warnings, failures, and storage edits, which can hold saved values, answers, or storage keys,

@@ -128,6 +128,7 @@ async function main() {
       await debugCountdownScenario(cdp, origin);
       await debugNowScenario(cdp, origin);
       await debugStorageScenario(cdp, origin, profile);
+      await debugStorageEditScenario(cdp, origin);
       await missingMediaScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
@@ -135,7 +136,7 @@ async function main() {
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -1468,6 +1469,162 @@ async function debugCountdownScenario(cdp, origin) {
  * the call chain and the timers, and fits a narrow drawer.
  */
 /**
+ * Debug's Storage editor on the `debug-storage-edit` package: a malformed value is refused inline and stores nothing;
+ * an added value is stored and the running session's next load returns it, while the value loaded before stays; it can
+ * be changed to another type and deleted; the editor fits a narrow screen; and after the session ends an edit is
+ * stored for the next Start.
+ */
+async function debugStorageEditScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const entry = (text) =>
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes(${JSON.stringify(text)}))`;
+  const rows = `[...document.querySelectorAll('[data-debug-storage-row]')].map((row) => [row.querySelector('[data-debug-storage-key]').textContent, row.querySelector('[data-storage-preview]').textContent.trim()])`;
+  const setField = async (selector, text) => {
+    await evaluate(
+      cdp,
+      `const field = document.querySelector(${JSON.stringify(selector)}); field.value = ''; field.dispatchEvent(new Event('input', { bubbles: true }));`,
+    );
+    await physicalClick(cdp, selector);
+    await cdp.call("Input.insertText", { text });
+  };
+  const choose = (type) =>
+    evaluate(
+      cdp,
+      `const select = document.querySelector('[data-storage-editor-type]'); select.value = ${JSON.stringify(type)}; select.dispatchEvent(new Event('change', { bubbles: true }));`,
+    );
+  const save = async (expected, failure) => {
+    await physicalClick(cdp, "[data-storage-editor-save]");
+    await waitFor(cdp, expected, 5_000, failure);
+  };
+  // A closed editor leaves the page before the next control is pressed.
+  const closed = () => waitFor(cdp, `!document.querySelector('[data-storage-editor]')`);
+  await navigate(cdp, `${origin}/player/?dev&package=debug-storage-edit`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, entry("first 0"));
+  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+  await physicalClick(cdp, '[data-debug-tab="storage"]');
+  await waitFor(
+    cdp,
+    `/Nothing saved yet/.test(document.querySelector('[data-debug-storage]')?.textContent ?? '')`,
+  );
+
+  // A malformed number is refused in the editor, and nothing is stored.
+  await physicalClick(cdp, "[data-debug-storage-add]");
+  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
+  await setField("[data-storage-editor-key]", "k");
+  await choose("integer");
+  await setField("[data-storage-editor-value]", "5x");
+  await save(
+    `/Enter a number/.test(document.querySelector('[data-storage-editor-problem]')?.textContent ?? '')`,
+    "A malformed number was not refused",
+  );
+  assertEqual(
+    await value(cdp, `document.querySelectorAll('[data-debug-storage-row]').length`),
+    0,
+    "A refused value was stored",
+  );
+  // A valid value is stored, and the session's next load returns it; the value loaded before stays.
+  await setField("[data-storage-editor-value]", "5");
+  await save(
+    `!document.querySelector('[data-storage-editor]') && /next load returns it/.test(document.querySelector('[data-debug-storage-saved]')?.textContent ?? '')`,
+    "The added value was not saved for the running session",
+  );
+  await waitFor(cdp, `JSON.stringify(${rows}) === JSON.stringify([['"k"', '5']])`);
+  await closed();
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-debug-storage-edited]')`),
+    true,
+    "The session was not marked edited while debugging",
+  );
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, entry("second 5"), 5_000, "The next load did not return the edit");
+  assertEqual(await value(cdp, entry("first 0")), true, "An earlier load changed");
+
+  // Another type, then deletion.
+  await physicalClick(cdp, "[data-debug-storage-edit]");
+  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
+  await choose("text");
+  await setField("[data-storage-editor-value]", "hi");
+  await save(
+    `JSON.stringify(${rows}) === JSON.stringify([['"k"', '"hi"']])`,
+    "The edit to text was not shown",
+  );
+  await closed();
+  await physicalClick(cdp, "[data-debug-storage-delete]");
+  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
+  await save(
+    `document.querySelectorAll('[data-debug-storage-row]').length === 0 && /Deleted "k"; the running session's next load gets its default/.test(document.querySelector('[data-debug-storage-saved]')?.textContent ?? '')`,
+    "The deleted value was still listed",
+  );
+  await closed();
+
+  // The editor fits a narrow, short screen: within the viewport, scrolling to reach Save.
+  await setViewport(cdp, 390, 480);
+  await waitFor(
+    cdp,
+    `document.querySelector('#player-shell')?.dataset.playerHorizontal === 'constrained'`,
+  );
+  if (
+    await value(cdp, `!!document.querySelector('[data-player-top-bar] [data-sidebar="trigger"]')`)
+  )
+    await physicalClick(cdp, '[data-player-top-bar] [data-sidebar="trigger"]');
+  // The drawer may open on its tools menu; Debug then shows its panel.
+  await delay(400);
+  if (await value(cdp, visible('.tools-drawer [data-launcher] button[aria-label="Debug"]')))
+    await physicalClick(cdp, '.tools-drawer [data-launcher] button[aria-label="Debug"]');
+  await waitFor(cdp, `!!document.querySelector('.tools-drawer [data-debug-storage-add]')`);
+  await evaluate(
+    cdp,
+    `document.querySelector('.tools-drawer [data-debug-storage-add]').scrollIntoView()`,
+  );
+  // The drawer may still slide in.
+  await waitFor(cdp, visible(".tools-drawer [data-debug-storage-add]"));
+  await delay(400);
+  await physicalClick(cdp, ".tools-drawer [data-debug-storage-add]");
+  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const box = document.querySelector('[data-storage-editor]').getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight; })()`,
+    ),
+    true,
+    "The editor overflows a narrow, short screen",
+  );
+  await choose("advanced");
+  await evaluate(
+    cdp,
+    `document.querySelector('[data-storage-editor-save]').scrollIntoView({ block: "nearest" })`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const save = document.querySelector('[data-storage-editor-save]').getBoundingClientRect(); return save.top >= 0 && save.bottom <= innerHeight; })()`,
+    ),
+    true,
+    "Save is out of reach on a short screen",
+  );
+  await choose("text");
+  await setField("[data-storage-editor-key]", "after");
+  await setField("[data-storage-editor-value]", "later");
+  await save(
+    `/Saved "after"; the running session's next load returns it/.test(document.querySelector('[data-debug-storage-saved]')?.textContent ?? '')`,
+    "The value added in the narrow layout was not saved",
+  );
+  await closed();
+  // With the session ended, an edit is stored for the next Start.
+  await setViewport(cdp, 1440, 900);
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, `!document.querySelector('[data-foreground-controls] button')`);
+  await physicalClick(cdp, "[data-debug-storage-delete]");
+  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
+  await save(
+    `/Deleted "after" for the next Start/.test(document.querySelector('[data-debug-storage-saved]')?.textContent ?? '')`,
+    "An edit after the session ended was not stored for the next Start",
+  );
+}
+
+/**
  * Debug's Storage tab on the `debug-storage` package: it lists the script's saved values in key order with typed
  * previews and the saved photo, once per photo with the keys that use it; a member list expands to the shared photo;
  * a later save updates it; Debug off hides it; and it fits the narrow drawer.
@@ -1567,6 +1724,9 @@ async function debugStorageScenario(cdp, origin, profile) {
     "The button did not come into view at the short height",
   );
   await evaluate(cdp, `document.querySelector('[data-debug-active]').scrollIntoView()`);
+  // The resized Player settles before its button is pressed.
+  await waitFor(cdp, visible("[data-foreground-controls] button"));
+  await delay(300);
   await physicalClick(cdp, "[data-foreground-controls] button");
   await waitFor(
     cdp,

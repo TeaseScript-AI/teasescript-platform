@@ -143,7 +143,9 @@ or land in a displaced generation and be lost.
 Providers treat values as ordinary TeaseScript values and never interpret them, for example as media references; a
 layer such as durable captured media wraps a provider instead and stores the media that written or replacing values
 reference before persisting them. Clearing or replacing a scope affects only that script's stored values, never a
-running session's own view. Storage quotas are not enforced yet; all writes pass through the provider, so quota policy
+running session's own view. Debug's storage editor writes one key through the same provider and captured-media layer,
+as a script `save` does; only once that write succeeded does it change a running session's view
+([DEBUGGER.md](DEBUGGER.md#player-debug)). Storage quotas are not enforced yet; all writes pass through the provider, so quota policy
 can be added there.
 
 ### Saved-data transfer

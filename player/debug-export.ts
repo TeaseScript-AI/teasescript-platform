@@ -42,6 +42,12 @@ export interface DebugExport {
   readonly build: DebugBuild;
   readonly package: DebugPackage;
   readonly incident: DebugIncident;
+  /**
+   * Whether Debug's storage editor changed the session's saved values (DEBUGGER.md "Player Debug"), which makes it a
+   * diagnostic fork: the scene time of the first edit and how many there were; `null` when none. An edit before the
+   * replay anchor is not among the recorded calls, so only this says so.
+   */
+  readonly editedWhileDebugging: DebugEditedWhileDebugging | null;
   /** The player's choices; `replay` requires `savedValues`, `answers`, and `sessionText`, because state copies them. */
   readonly selection: DebugSelection;
   /** Why parts are missing, in words for the developer. */
@@ -74,6 +80,11 @@ export interface DebugPackage {
   readonly id: string | null;
   readonly version: string | null;
   readonly contentHash: string | null;
+}
+
+export interface DebugEditedWhileDebugging {
+  readonly firstEditSceneTimeMs: number;
+  readonly editCount: number;
 }
 
 export interface DebugIncident {
@@ -247,7 +258,14 @@ export function measuredDebugExportFile(
 function* pieces(exported: DebugExport): Generator<string> {
   const { checkpoint, replay, photos, sections } = exported;
   yield `{"format":${JSON.stringify(DEBUG_EXPORT_FORMAT)},"version":${DEBUG_EXPORT_VERSION},`;
-  for (const field of ["build", "package", "incident", "selection", "omissions"] as const)
+  for (const field of [
+    "build",
+    "package",
+    "incident",
+    "editedWhileDebugging",
+    "selection",
+    "omissions",
+  ] as const)
     yield `\n${JSON.stringify(field)}:${JSON.stringify(exported[field])},`;
   yield `\n"checkpoint":${checkpoint === null ? "null" : serializeCheckpoint(checkpoint)},`;
   yield `\n"checkpointRole":${JSON.stringify(exported.checkpointRole)},`;
@@ -318,6 +336,7 @@ function parseDocument(json: string): DebugExport {
     "build",
     "package",
     "incident",
+    "editedWhileDebugging",
     "selection",
     "omissions",
     "checkpoint",
@@ -352,6 +371,7 @@ function parseDocument(json: string): DebugExport {
     build,
     package: parsePackage(root["package"]),
     incident: parseIncident(root["incident"]),
+    editedWhileDebugging: parseEditedWhileDebugging(root["editedWhileDebugging"]),
     selection,
     omissions: strings(root["omissions"], "$.omissions"),
     checkpoint,
@@ -391,6 +411,19 @@ function parsePackage(value: unknown): DebugPackage {
     id: nullableString(found["id"], "$.package.id"),
     version: nullableString(found["version"], "$.package.version"),
     contentHash: nullableString(found["contentHash"], "$.package.contentHash"),
+  };
+}
+
+function parseEditedWhileDebugging(value: unknown): DebugEditedWhileDebugging | null {
+  if (value === null) return null;
+  const edited = record(value, "$.editedWhileDebugging");
+  exactly(edited, "$.editedWhileDebugging", ["firstEditSceneTimeMs", "editCount"]);
+  return {
+    firstEditSceneTimeMs: sceneTime(
+      edited["firstEditSceneTimeMs"],
+      "$.editedWhileDebugging.firstEditSceneTimeMs",
+    ),
+    editCount: count(edited["editCount"], "$.editedWhileDebugging.editCount"),
   };
 }
 
@@ -857,6 +890,13 @@ function strings(value: unknown, path: string): string[] {
 
 function boolean(value: unknown, path: string): boolean {
   if (typeof value !== "boolean") fail(path, "must be true or false");
+  return value;
+}
+
+/** A scene time in milliseconds: finite and not negative, fractions included, as the Player's clock observes it. */
+function sceneTime(value: unknown, path: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+    fail(path, "must be a finite, non-negative number of milliseconds");
   return value;
 }
 
