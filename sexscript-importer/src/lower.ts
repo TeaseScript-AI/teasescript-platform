@@ -3817,11 +3817,22 @@ function lowerDeclaration(
   const startsNull = value.kind === "literal" && value.value === null;
   // A list that starts as null starts empty where no code tests it for null: Groovy truth treats null and an empty list
   // alike, and without an optional type its reads need no null tests after the calls that cancel narrowing.
+  // A range is no list, so a variable that later holds one keeps its null start.
+  const holdsRange = (assigned: AstNode, depth = 0): boolean => {
+    if (assigned.kind === "range") return true;
+    const assignedKey = depth < 2 ? bindingKey(assigned, context.bindings) : null;
+    return (
+      assignedKey !== null &&
+      assigned.kind === "variable" &&
+      (context.assignedValues.get(assignedKey) ?? []).some((other) => holdsRange(other, depth + 1))
+    );
+  };
   if (
     startsNull &&
     key !== null &&
     !context.mapUses.nullTested.has(key) &&
-    isListType(context.types.variables.get(name) ?? UNKNOWN)
+    isListType(context.types.variables.get(name) ?? UNKNOWN) &&
+    !(context.assignedValues.get(key) ?? []).some((assigned) => holdsRange(assigned))
   ) {
     const listType = nullableValueType(name, context);
     return [
@@ -4004,7 +4015,20 @@ function lowerClosureDeclaration(
           ),
         ];
       }
-      parameters.push({ name: record.name, defaultValue });
+      // A `float` parameter with a whole default, `float t = 0.0`, takes fractions, which the default alone would not
+      // allow in TeaseScript.
+      const raw = (Array.isArray(closure.parameters) ? closure.parameters : []).find(
+        (item: unknown) => isRecord(item) && item.name === record.name,
+      );
+      const declared = isRecord(raw) ? text(raw.type)?.replace(/^java\.(lang|math)\./u, "") : null;
+      const fractional =
+        declared !== null &&
+        declared !== undefined &&
+        ["float", "double", "Float", "Double", "BigDecimal", "Number"].includes(declared) &&
+        defaultValue?.kind === "literal" &&
+        typeof defaultValue.value === "number" &&
+        Number.isInteger(defaultValue.value);
+      parameters.push({ name: record.name, defaultValue, ...(fractional ? { type: "number" } : {}) });
     }
   }
 
@@ -4131,8 +4155,25 @@ function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): Ir
     }
   });
   if (address === null || !opens) return null;
-  const url = lowerExpression(address, context);
-  if (url === null) return null;
+  // The body that declared a local address goes, so the notice shows its literal value, or no address.
+  const addressName = variableName(address);
+  let declared: AstNode | null | undefined;
+  if (addressName !== null)
+    walkAst(body, (child) => {
+      if (
+        declared === undefined &&
+        child.kind === "declaration" &&
+        variableName(child.left) === addressName
+      ) {
+        const value = asNode(child.right);
+        declared = value !== null && isLiteralData(value) ? value : null;
+      }
+      // An address the body assigns again has no one literal value.
+      if (child.kind === "binary" && child.operator === "=" && variableName(child.left) === addressName)
+        declared = null;
+    });
+  const url = declared === null ? null : lowerExpression(declared ?? address, context);
+  if (url === null && declared !== null) return null;
   addDiagnostic(
     context,
     "SX_ONLINE_REQUEST",
@@ -4141,17 +4182,23 @@ function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): Ir
     node.span,
   );
   const shown =
-    url.kind === "literal" && typeof url.value === "string"
-      ? { text: maskedUrl(url.value) }
-      : { value: useHelper(context, "maskUrl", [url]) };
+    url === null
+      ? null
+      : url.kind === "literal" && typeof url.value === "string"
+        ? { text: maskedUrl(url.value) }
+        : { value: useHelper(context, "maskUrl", [url]) };
   return [
     systemSay(
-      templateOrLiteral([
-        {
-          text: `Online feature not available here. The original would have requested: ${method} `,
-        },
-        shown,
-      ]),
+      templateOrLiteral(
+        shown === null
+          ? [{ text: `Online feature not available here. The original would have made a ${method} request.` }]
+          : [
+              {
+                text: `Online feature not available here. The original would have requested: ${method} `,
+              },
+              shown,
+            ],
+      ),
       node.span,
       context,
     ),
@@ -8035,6 +8082,20 @@ function lowerExpression(node: AstNode, context: LowerContext): IrExpression | n
     case "range": {
       const fromNode = asNode(node.from);
       const toNode = asNode(node.to);
+      // `"A".."Z"` ranged over characters, which a TeaseScript range does not: the characters are written out.
+      const first = constantString(fromNode ?? undefined);
+      const last = constantString(toNode ?? undefined);
+      if (first !== null && last !== null && [...first].length === 1 && [...last].length === 1) {
+        // A Groovy range runs in either direction, and an exclusive one stops before its last character.
+        const start = first.codePointAt(0)!;
+        const stop = last.codePointAt(0)!;
+        const step = stop < start ? -1 : 1;
+        const end = node.inclusive === true ? stop : stop - step;
+        const items: IrExpression[] = [];
+        for (let code = start; step * (end - code) >= 0 && items.length < 1000; code += step)
+          items.push({ kind: "literal", value: String.fromCodePoint(code) });
+        return { kind: "list", items };
+      }
       const from = fromNode === null ? null : lowerExpression(fromNode, context);
       const to = toNode === null ? null : lowerExpression(toNode, context);
       if (from === null || to === null) return null;

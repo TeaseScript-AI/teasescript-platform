@@ -20,4 +20,19 @@ let strokes = toInteger(typed)
 let pace = toNumber(typed) / 2
 let ratio = toNumber("1.5")
 say "Count ${count + strokes} at ${pace * ratio}"
+// A classic loop counter that a later block declares again gets another name there.
+let row = 0
+while row < 2 {
+  say "Row ${row}"
+  row += 1
+}
+say "Again?"
+if (choose yes: "Yes", no: "No") == "yes" {
+  let rowValue = 5
+  say "Row ${rowValue}"
+}
+// Groovy ranged over characters too.
+let letters = ["A", "B", "C"] + ["x", "y"]
+// NOTE SX_LIST_JOIN line 23: The element types of this list are not proven; if it holds lists or maps, TeaseScript join() stops the script, where Groovy printed them as [a, b].
+say letters.join("")
 exit

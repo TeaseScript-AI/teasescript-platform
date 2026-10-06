@@ -599,7 +599,7 @@ function declarationMessage(items: Conflict[]): string {
     lines.length === 0
       ? ""
       : ` (line${lines.length === 1 ? "" : "s"} ${lines.slice(0, 5).join(", ")}${lines.length > 5 ? ", ..." : ""})`;
-  return `${first}${where}. A TeaseScript variable keeps one type (V30 §12), while Groovy let '${binding.name}' change type, and the importer declares unions only of text, numbers, booleans, durations, lists, and objects. Use a separate variable for the other values, or give all values one type.`;
+  return `${first}${where}. A TeaseScript variable keeps one type (V30 §12), while Groovy let '${binding.name}' change type, and the importer declares unions only of text, numbers, booleans, durations, dates and times, lists, dicts, ranges, and objects. Use a separate variable for the other values, or give all values one type.`;
 }
 
 class Scope {
@@ -1383,10 +1383,23 @@ function annotation(type: TeaseType): string | null {
   const value = nonNull(type);
   const writable =
     value.kind === "scalar" ||
+    value.kind === "temporal" ||
     (value.kind === "list" && value.element.kind === "scalar") ||
     (value.kind === "union" && value.members.every(isWritableMember)) ||
-    (value.kind === "list" && hasUnion(value) && writableElements(value.element));
+    (value.kind === "list" && hasUnion(value) && writableElements(value.element)) ||
+    // Any list, object, dict, or range is written by its kind, which an optional one needs: `list | null`.
+    (type.kind === "optional" && isKindMember(value));
   return writable ? typeName(type) : null;
+}
+
+/** A type an annotation names by its kind alone: any list, object, dict, or range. */
+function isKindMember(type: TeaseType): boolean {
+  return (
+    (type.kind === "list" && type.element.kind === "unknown") ||
+    type.kind === "object" ||
+    type.kind === "dict" ||
+    type.kind === "range"
+  );
 }
 
 /** Whether a list's elements, possibly lists themselves, end in scalars or unions an annotation can name. */
@@ -1405,8 +1418,12 @@ function hasUnion(type: TeaseType): boolean {
 function isWritableMember(type: TeaseType): boolean {
   return (
     type.kind === "scalar" ||
+    type.kind === "temporal" ||
     type.kind === "object" ||
-    (type.kind === "list" && (type.element.kind === "scalar" || type.element.kind === "unknown"))
+    (type.kind === "list" &&
+      (type.element.kind === "scalar" ||
+        type.element.kind === "temporal" ||
+        type.element.kind === "unknown"))
   );
 }
 
@@ -1451,7 +1468,7 @@ function typeName(type: TeaseType): string {
           ? `(${typeName(type.element)})[]`
           : `${typeName(type.element)}[]`;
     case "optional":
-      return type.value.kind === "union"
+      return type.value.kind === "union" || isKindMember(type.value)
         ? `${typeName(type.value)} | null`
         : `${typeName(type.value)}?`;
     case "union":
@@ -1644,6 +1661,9 @@ const CALL_RESULTS = new Map<string, TeaseType>([
   ["askInteger", scalar("integer")],
   ["askBoolean", scalar("boolean")],
   ["showButton", scalar("duration")],
+  // A photo reference, or null where the camera took none (V30 §33); a requested image always arrives.
+  ["takePhoto", { kind: "optional", value: scalar("string") }],
+  ["askImage", scalar("string")],
 ]);
 
 /** Legacy helpers whose result their parameters do not show, such as the key of the first stored `true`, or null. */

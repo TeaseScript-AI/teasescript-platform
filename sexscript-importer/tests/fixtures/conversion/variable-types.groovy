@@ -71,3 +71,18 @@ def pick = chanceOrFlag
 def picked = false
 picked = pick(3)
 show("P " + picked)
+// A list that may become null, of elements no code shows, and a value that is first a number and then a date, are
+// declared with types an annotation can write.
+def picks = []
+if (getBoolean("Clear?")) picks = null
+show("Cleared " + (picks == null))
+def stamp = 0
+stamp = new Date()
+show("Stamped")
+// A variable that holds one of two ranges starts as null, not as a list.
+def span
+if (getBoolean("Low?")) span = 1..3 else span = 4..6
+for (n in span) show("N " + n)
+// A float parameter with a whole default takes fractions.
+def fade = { float seconds = 0.0 -> show("Fade " + seconds) }
+fade(0.5)

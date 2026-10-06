@@ -183,16 +183,20 @@ test("keeps a switch with an empty range as an if chain and reports a text range
   const empty = lower(1, 1, false);
   assert.deepEqual(empty.diagnostics, []);
   assert.doesNotMatch(emitTease(empty), /^switch /mu);
-  // Groovy's "a".."c" holds "a", "b", and "c", not "ba"; "c".."a" holds the same texts.
+  // Groovy's "a".."c" holds "a", "b", and "c", not "ba"; "c".."a" holds the same texts. A range of single characters
+  // is written out, so its case lists the characters; longer texts have no such list.
   for (const [from, to] of [
     ["a", "c"],
     ["c", "a"],
   ] as const) {
-    assert.deepEqual(
-      lower(from, to, true).diagnostics.map((diagnostic) => diagnostic.code),
-      ["SX_SWITCH_CASE_MATCH"],
-    );
+    const characters = lower(from, to, true);
+    assert.deepEqual(characters.diagnostics, []);
+    assert.match(emitTease(characters), /^ {2}case "[ac]", "b", "[ac]" \{$/mu);
   }
+  assert.deepEqual(
+    lower("aa", "ac", true).diagnostics.map((diagnostic) => diagnostic.code),
+    ["SX_SWITCH_CASE_MATCH"],
+  );
 });
 
 test("lowers nullable legacy scalar storage reads to read-only TeaseScript load", () => {
