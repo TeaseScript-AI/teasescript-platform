@@ -442,6 +442,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // previous value when it failed (warning TSW014). Every published session is observed, whichever operation made it.
   // Keyed by session generation too: a newer session reuses action IDs.
   const writesInFlight = new Set<string>();
+  // For each Debug edit being stored: the script writes stored meanwhile, by key, which then stand over the edit.
+  const scriptWritesStored = new Set<Map<string, SerializableRuntimeValue>>();
   watch(
     session,
     (current) => {
@@ -468,7 +470,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         if (generation.value !== sessionGeneration || latest === null) return;
         if (pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write!.actionId) return;
         if (!stored) notices.publish(playerNotices.storageWriteFailed());
-        else savedDataRevision.value++;
+        else {
+          savedDataRevision.value++;
+          for (const stored of scriptWritesStored) stored.set(write!.key, write!.value);
+        }
         session.value = completePlayerRuntimeStorageWrite(latest, write!.actionId, stored).session;
       }
     },
@@ -508,10 +513,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   /** Whether the running session's own write waits for the host, so it takes no edit until that settled. */
   const scriptSaving = () =>
     liveSession() && pendingPlayerRuntimeStorageWrite(session.value!.snapshot) !== null;
-  // Edits that wait for the session's write to settle, each released when it settled or the session went.
+  // Edits that wait for the session's write to settle; each published session or new run wakes them to look again.
   const writeSettledWaiters = new Set<() => void>();
-  watch(session, () => {
-    if (scriptSaving()) return;
+  watch([session, generation], () => {
     for (const resolve of writeSettledWaiters) resolve();
     writeSettledWaiters.clear();
   });
@@ -576,32 +580,31 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const now = current.find((entry) => entry.key === key)?.value;
     if (!sameSavedValue(now, expected)) return { kind: "changed" };
     if (scriptSaving()) return { kind: "busy" };
+    // A script write issued from here on is stored after the edit: the Player's providers store writes in the order
+    // they were issued. Once those settled, a stored one of this key stands, in storage as in the session.
+    const stored = new Map<string, SerializableRuntimeValue>();
+    scriptWritesStored.add(stored);
     try {
-      await scriptStorage.write(key, value);
-    } catch {
-      return failed("The change could not be saved in this browser. Nothing changed.");
-    }
-    savedDataRevision.value++;
-    // The next Start loads the stored values as they are now.
-    seedNextStart(key, value);
-    // A script write issued meanwhile settles first; storage then says whose value stands, and the session follows it.
-    let stored: SerializableRuntimeValue | undefined;
-    for (;;) {
-      while (!retired() && scriptSaving())
-        await new Promise<void>((resolve) => writeSettledWaiters.add(resolve));
-      if (retired()) return { kind: "saved", live: false };
       try {
-        stored = (await scriptStorage.load()).find((entry) => entry.key === key)?.value;
+        await scriptStorage.write(key, value);
       } catch {
-        return failed(
-          "The change was saved, but the session could not be updated; the next Start loads it.",
-        );
+        return failed("The change could not be saved in this browser. Nothing changed.");
       }
-      if (retired()) return { kind: "saved", live: false };
-      if (!scriptSaving()) break;
+      savedDataRevision.value++;
+      // The next Start loads the stored values as they are now.
+      seedNextStart(key, value);
+      while (
+        !retired() &&
+        session.value !== null &&
+        pendingPlayerRuntimeStorageWrite(session.value.snapshot) !== null
+      )
+        await new Promise<void>((resolve) => writeSettledWaiters.add(resolve));
+    } finally {
+      scriptWritesStored.delete(stored);
     }
-    if (!sameSavedValue(stored, value === null ? undefined : value)) {
-      seedNextStart(key, stored ?? null);
+    if (retired()) return { kind: "saved", live: false };
+    if (stored.has(key)) {
+      seedNextStart(key, stored.get(key)!);
       return { kind: "overtaken" };
     }
     if (!liveSession()) return { kind: "saved", live: false };

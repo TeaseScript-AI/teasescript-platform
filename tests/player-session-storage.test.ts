@@ -839,3 +839,65 @@ test("an unmounted Player never publishes an edit it was storing", async (contex
     });
   }
 });
+
+test("a new run releases an edit that waits for the old run's write, also while the new run saves", async (context) => {
+  const holds = new Map([2, 1, 3].map((value) => [value, deferred()]));
+  const storage = memoryStorage({ k: 0 }, async (_key, value) => {
+    if (typeof value === "number") await holds.get(value)?.promise;
+  });
+  let queue = Promise.resolve();
+  const ordered: ScriptStorageProvider = {
+    ...storage.provider,
+    write: (key, value) => (queue = queue.then(() => storage.provider.write(key, value))),
+  };
+  const { host } = createHost(context, ordered);
+  await start(
+    host,
+    'let go = showButton "Go"\nsave 1 as "other"\nlet again = showButton "Again"\nexit',
+  );
+  let result: unknown;
+  void host
+    .editSavedData({ key: "k", value: 2, expected: 0 })
+    .then((settled) => (result = settled));
+  for (let turn = 0; turn < 5; turn += 1) await nextTick();
+  host.update(activatePlayerRuntimeButton(host.session.value!)!.session);
+  holds.get(2)!.resolve();
+  await settleTasks(context);
+  assert.equal(result, undefined);
+  host.prepare(() =>
+    createPlayerRuntimeSession('save 3 as "newer"\nexit', host.scriptStorageOptions()),
+  );
+  host.activate();
+  for (let turn = 0; turn < 5 && result === undefined; turn += 1) await settleTasks(context);
+  assert.deepEqual(result, { kind: "saved", live: false });
+  assert.deepEqual(await host.editSavedData({ key: "k", value: 4, expected: 2 }), { kind: "busy" });
+  // Neither edit wrote again; the new run's own write waits behind the old run's in the provider.
+  assert.deepEqual(storage.writes, [
+    ["k", 2],
+    ["other", 1],
+  ]);
+});
+
+test("a stored edit reaches the session even when storage cannot be read afterwards", async (context) => {
+  let reads = 0;
+  const storage = memoryStorage(
+    { k: 0 },
+    async () => {},
+    async () => {
+      reads += 1;
+      if (reads > 2) throw new Error("unreadable");
+    },
+  );
+  const { host } = createHost(context, storage.provider);
+  await start(
+    host,
+    'let go = showButton "Go"\nlet loaded = load("k")\nsay "${loaded}", instant\nexit',
+  );
+  assert.deepEqual(await host.editSavedData({ key: "k", value: 2, expected: 0 }), {
+    kind: "saved",
+    live: true,
+  });
+  host.update(activatePlayerRuntimeButton(host.session.value!)!.session);
+  assert.deepEqual(said(host.session.value), ["2"]);
+  assert.equal(storage.entries.get("k"), 2);
+});
