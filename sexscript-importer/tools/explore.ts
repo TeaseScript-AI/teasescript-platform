@@ -13,7 +13,8 @@
  * Every crash, trap, and way directed search reached has the input list from the start that reaches it (with the
  * seeded start, if any), and so does the first input whose runtime operation threw (an explorer or runtime problem,
  * not a script failure). `--replay` plays it again with the seed of the run, prints the transcript, and for a crash or
- * error exits 0 only when the same failure or error comes back. Each report also has a compact `catalog` block.
+ * error exits 0 only when the same failure or error comes back. The report of a unit that compiles also has a compact
+ * `catalog` block for the importer catalog's Explorer column.
  * Needs the repository build (`npm run build:typescript` in the repository root).
  */
 import { execFileSync, spawn } from "node:child_process";
@@ -139,8 +140,9 @@ async function main(args: string[]): Promise<void> {
       const file = path.join(out, `${header.unit}.json`);
       const report = {
         ...header,
-        catalog: catalogBlock(header, result),
-        ...(result === null ? {} : withReplayCommands(result, file)),
+        ...(result === null
+          ? {}
+          : { catalog: catalogBlock(result), ...withReplayCommands(result, file) }),
       };
       await writeFile(file, `${JSON.stringify(report, null, 2)}\n`);
       const seconds = Math.round((performance.now() - started) / 1000);
@@ -280,40 +282,24 @@ function withReplayCommands(result: ExploreResult, file: string) {
 }
 
 /**
- * The compact view of a unit that the importer catalog shows in its own column: coverage by play, the coverable lines
- * by reach label, crashes that play reaches (with the first) and how many more only seeded state reaches, traps,
- * completed paths, why the search stopped, and what was explored with what.
+ * The compact view of an explored unit that the importer catalog shows in its Explorer column, in the shape the
+ * catalog reads: coverage by play, crashes that play reaches (a crash only seeded state reaches may need state no
+ * player makes, such as a value of another type), traps, the first of each, and the coverable lines by reach label. A
+ * unit that does not compile has no block; the catalog reads the rest of the report.
  */
-function catalogBlock(header: ReportHeader, result: ExploreResult | null) {
-  // A crash that only seeded state reaches may need state no player makes, such as a value of another type.
-  const crashes = (result?.crashes ?? []).filter((crash) => !crash.seeded);
-  const first = crashes[0];
-  const traps = result?.traps ?? [];
+function catalogBlock(result: ExploreResult) {
+  const crash = result.crashes.find((entry) => !entry.seeded);
+  const location = result.traps.flatMap((trap) => trap.locations)[0];
   return {
-    compiled: result !== null,
-    coverage: result?.coverage.percent ?? null,
-    reach: result?.coverage.reach ?? null,
-    crashes: {
-      count: crashes.length,
-      seeded: (result?.crashes ?? []).filter((crash) => crash.seeded).length,
-      first:
-        first === undefined
-          ? null
-          : {
-              code: first.code,
-              path: first.path,
-              line: first.line,
-              column: first.column,
-              endLine: first.endLine,
-              endColumn: first.endColumn,
-            },
-    },
-    traps: { count: traps.length, first: traps[0]?.locations[0] ?? null },
-    completed: result?.endStates.completed ?? 0,
-    stoppedBy: result?.search.stoppedBy ?? null,
-    converter: header.converter,
-    explorer: header.explorer,
-    contentHash: header.contentHash,
+    coveragePercent: result.coverage.percent,
+    crashes: result.crashes.filter((entry) => !entry.seeded).length,
+    traps: result.traps.length,
+    firstCrash:
+      crash === undefined
+        ? null
+        : { code: crash.code, path: crash.path, line: crash.line, message: crash.message },
+    firstTrap: location === undefined ? null : { location },
+    reach: result.coverage.reach,
   };
 }
 

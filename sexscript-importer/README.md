@@ -299,9 +299,9 @@ no line is labelled `unreachable` (`staticContradictions`).
 
 The report `<out>/<unit>.json` has these parts:
 
-- a `catalog` block for the importer catalog: coverage by play, the lines by label, crashes that play reaches (with the
-  first) and how many more only seeded state reaches, traps (with the first location), completed paths, why the search
-  stopped, the converter and explorer commits, and the content hash;
+- for a unit that compiles, a `catalog` block for the importer catalog's Explorer column: `coveragePercent` by play,
+  the counts of `crashes` that play reaches and of `traps`, `firstCrash` (`code`, `path`, `line`, `message`) and
+  `firstTrap` (`location`) or `null`, and `reach`, the coverable lines by label;
 - per file: the lines that hold instructions, the ones play visited, the percentage, and the other line ranges with
   their label;
 - each condition and loop that play reached but left only one way, with its source, the missed way, its first line,
