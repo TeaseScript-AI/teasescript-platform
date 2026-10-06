@@ -28,6 +28,8 @@ import TimerRegion from "./TimerRegion.vue";
 import { speakerAvatarSource } from "./speakerAvatar";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
 import { usePlayerDebug } from "./usePlayerDebug";
+import { debugStageImage } from "./debugStageImage";
+import { playerRuntimeDebugNow } from "../../runtime-adapter.js";
 import DebugExportDialog from "./DebugExportDialog.vue";
 import RuntimeFailure from "./RuntimeFailure.vue";
 import { useDebugExport } from "./useDebugExport";
@@ -111,17 +113,43 @@ const debugExport = useDebugExport(
   props.player,
   () => props.title,
   () => ({
-    viewportWidth: window.innerWidth,
-    viewportHeight: window.innerHeight,
-    devicePixelRatio: window.devicePixelRatio,
-    coarsePointer: window.matchMedia("(any-pointer: coarse)").matches,
-    hover: window.matchMedia("(any-hover: hover)").matches,
-    theme: themeIntent.value.mode,
-    contrast: themeIntent.value.contrast,
-    activation: props.player.activation.value,
-    notices: props.player.notices.value.map((notice) => notice.key).join(", "),
-    userAgent: navigator.userAgent,
-    language: navigator.language,
+    player: {
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio,
+      coarsePointer: window.matchMedia("(any-pointer: coarse)").matches,
+      hover: window.matchMedia("(any-hover: hover)").matches,
+      theme: themeIntent.value.mode,
+      contrast: themeIntent.value.contrast,
+      activation: props.player.activation.value,
+      userAgent: navigator.userAgent,
+      language: navigator.language,
+    },
+    // What the Player observed, as Debug's Now view and the notices show it, also with the Debug panel closed.
+    host: {
+      stage: (({ status, path }) => ({ status, path }))(
+        debugStageImage(props.player, {
+          covered: stageCamera.value !== null,
+          overridden: props.media !== undefined,
+        }),
+      ),
+      media: (session.value === null
+        ? []
+        : playerRuntimeDebugNow(session.value, props.player.sceneTimeMs.value).media
+      ).map(({ mediaId, media, loaded, state, source }) => ({
+        mediaId,
+        media,
+        loaded,
+        state,
+        source,
+      })),
+      notices: props.player.notices.value.map(({ key, level, message }) => ({
+        key,
+        level,
+        message,
+      })),
+      debugLog: debug.log.value?.lines.value.map((line) => line.text) ?? null,
+    },
   }),
 );
 // Each opening mounts the dialog anew: a dialog stacks by when it was mounted, so it then stays above one mounted since
@@ -247,6 +275,8 @@ async function toggleFullscreen() {
         :player="player"
         :stage-covered="stageCamera !== null"
         :stage-overridden="media !== undefined"
+        :export-available="debugExport.available.value"
+        @export="openDebugExport"
       >
         <template v-if="player.hasScriptStorage" #storage>
           <DebugStorage :player="player" />
@@ -309,7 +339,10 @@ async function toggleFullscreen() {
         </template>
         <template #overlay>
           <FloatingViewfinder
-            v-if="player.viewfinderPlacement.value === 'window' && (captureInWindow || player.viewfinder.value)"
+            v-if="
+              player.viewfinderPlacement.value === 'window' &&
+              (captureInWindow || player.viewfinder.value)
+            "
             v-model:place="floatingPlace"
             v-model:mirrored="viewfinderMirrored"
             :track="captureInWindow ? capture!.track : player.viewfinder.value"
@@ -324,7 +357,11 @@ async function toggleFullscreen() {
             />
           </FloatingViewfinder>
           <ScriptProblems v-if="failure" :failure="failure" />
-          <SessionActivation v-else :activation="player.activation.value" @activate="player.activate" />
+          <SessionActivation
+            v-else
+            :activation="player.activation.value"
+            @activate="player.activate"
+          />
           <DebugExportDialog
             :key="debugExportOpening"
             :exporter="debugExport"
@@ -346,7 +383,9 @@ async function toggleFullscreen() {
             :buttons="player.permanentButtons.value"
             :press="player.pressPermanentButton"
           >
-            <StageRightRail v-if="player.timers.value.length || player.permanentButtons.value.length">
+            <StageRightRail
+              v-if="player.timers.value.length || player.permanentButtons.value.length"
+            >
               <template v-if="player.timers.value.length" #timers>
                 <TimerRegion :timers="player.timers.value" />
               </template>

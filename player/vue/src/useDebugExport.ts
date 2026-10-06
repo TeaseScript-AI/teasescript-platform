@@ -43,7 +43,7 @@ export interface PreparedDebugExport {
 export function useDebugExport(
   player: PlayerSessionHost,
   name: () => string,
-  details: () => DebugExportCandidate["player"],
+  details: () => Pick<DebugExportCandidate, "player" | "host">,
 ) {
   const open = ref(false);
   const candidate = shallowRef<DebugExportCandidate | null>(null);

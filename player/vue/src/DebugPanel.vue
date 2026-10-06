@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDown, ChevronUp } from "@lucide/vue";
+import { ChevronDown, ChevronUp, Download } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
@@ -12,9 +12,9 @@ import type { DebugLog } from "./useDebugLog";
 import type { DevelopmentTime } from "./useDevelopmentTime";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
-// The Debug panel (DEBUGGER.md "Player Debug"): its Debug switch and, while Debug is on, the time controls (#615) above
-// the tabs: Now, the Debug log, newest line first, and Storage when the host persists script storage. An explanation
-// opens from its label, by click, tap or keyboard; any number may be open.
+// The Debug panel (DEBUGGER.md "Player Debug"): its Debug switch and the debug export, and, while Debug is on, the time
+// controls (#615) above the tabs: Now, the Debug log, newest line first, and Storage when the host persists script
+// storage. An explanation opens from its label, by click, tap or keyboard; any number may be open.
 defineProps<{
   time: DevelopmentTime | null;
   log: DebugLog;
@@ -23,7 +23,10 @@ defineProps<{
   stageCovered: boolean;
   /** Whether the development preview shows a Stage media fixture instead of the session's image. */
   stageOverridden: boolean;
+  /** Whether there is a session or a Player error to export. */
+  exportAvailable: boolean;
 }>();
+const emit = defineEmits<{ export: [] }>();
 const active = defineModel<boolean>("active", { required: true });
 </script>
 
@@ -40,10 +43,24 @@ const active = defineModel<boolean>("active", { required: true });
         <Switch v-model="active" aria-label="Debug" data-debug-active />
       </div>
       <CollapsibleContent class="text-muted-foreground">
-        Countdowns and time controls for testing this script. Turn Debug off to play normally for a while; Debug menu
-        in Settings removes this panel.
+        Countdowns and time controls for testing this script. Turn Debug off to play normally for a
+        while; Debug menu in Settings removes this panel.
       </CollapsibleContent>
     </Collapsible>
+    <Button
+      variant="outline"
+      size="sm"
+      class="min-h-11 justify-self-start"
+      :disabled="!exportAvailable"
+      data-debug-export-open
+      @click="emit('export')"
+    >
+      <Download />
+      Download debug export…
+    </Button>
+    <p v-if="!exportAvailable" class="text-muted-foreground" data-debug-export-unavailable>
+      Available once a session has started.
+    </p>
     <section v-if="time" aria-labelledby="debug-time" class="grid gap-2">
       <h3 id="debug-time" class="font-semibold">Time</h3>
       <Collapsible v-slot="{ open }" class="grid gap-1">
@@ -57,19 +74,25 @@ const active = defineModel<boolean>("active", { required: true });
           <Switch v-model="time.autoSkip.value" aria-label="Auto-skip" />
         </div>
         <CollapsibleContent class="text-muted-foreground">
-          Waits, timers and pacing pauses complete at once; while the script waits for your input, time runs normally.
+          Waits, timers and pacing pauses complete at once; while the script waits for your input,
+          time runs normally.
         </CollapsibleContent>
       </Collapsible>
       <Collapsible v-slot="{ open }" class="grid gap-1">
         <CollapsibleTrigger as-child>
-          <Button variant="ghost" size="xs" class="justify-self-start" aria-label="About time jumps">
+          <Button
+            variant="ghost"
+            size="xs"
+            class="justify-self-start"
+            aria-label="About time jumps"
+          >
             Jumps
             <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
           </Button>
         </CollapsibleTrigger>
         <CollapsibleContent class="text-muted-foreground">
-          Skip event jumps to the next wait, timer, pacing pause, or audio cue or end. +10 s and +1 min advance time while
-          the script waits for your input.
+          Skip event jumps to the next wait, timer, pacing pause, or audio cue or end. +10 s and +1
+          min advance time while the script waits for your input.
         </CollapsibleContent>
       </Collapsible>
       <div class="grid grid-cols-3 gap-2">
@@ -109,7 +132,9 @@ const active = defineModel<boolean>("active", { required: true });
       <TabsList class="h-auto w-full">
         <TabsTrigger value="now" class="min-h-11" data-debug-tab="now">Now</TabsTrigger>
         <TabsTrigger value="log" class="min-h-11" data-debug-tab="log">Log</TabsTrigger>
-        <TabsTrigger v-if="$slots.storage" value="storage" class="min-h-11" data-debug-tab="storage">Storage</TabsTrigger>
+        <TabsTrigger v-if="$slots.storage" value="storage" class="min-h-11" data-debug-tab="storage"
+          >Storage</TabsTrigger
+        >
       </TabsList>
       <TabsContent value="now">
         <DebugNow

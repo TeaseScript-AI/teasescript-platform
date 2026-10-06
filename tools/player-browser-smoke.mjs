@@ -1809,6 +1809,55 @@ async function debugNowScenario(cdp, origin) {
     "Domme/Domme43.jpg",
     "Now did not name the authored image path",
   );
+  // The debug export from the Debug panel reports what Now shows: the state always, the path with session text only.
+  const exportPreview = async (categories = []) => {
+    await physicalClick(cdp, "[data-debug-export-open]");
+    await waitFor(cdp, `!!document.querySelector('[data-debug-export-download]')`);
+    const into = (selector) =>
+      evaluate(
+        cdp,
+        `document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: 'center', behavior: 'instant' })`,
+      );
+    for (const category of categories) {
+      await into(`[data-debug-export-category="${category}"]`);
+      await physicalClick(cdp, `[data-debug-export-category="${category}"] [role=switch]`);
+      await waitFor(
+        cdp,
+        `document.querySelector('[data-debug-export-category="${category}"] [role=switch]')?.getAttribute('aria-checked') === 'true' && !!document.querySelector('[data-debug-export-download]')`,
+      );
+    }
+    await into("[data-debug-export-preview-toggle]");
+    await physicalClick(cdp, "[data-debug-export-preview-toggle]");
+    await waitFor(cdp, `!!document.querySelector('[data-debug-export-preview]')`);
+    const preview = JSON.parse(
+      await value(cdp, `document.querySelector('[data-debug-export-preview]').textContent`),
+    );
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+      });
+    await waitFor(
+      cdp,
+      `!document.querySelector('[data-debug-export]') && document.activeElement?.matches('[data-debug-export-open]')`,
+      5_000,
+      "Closing the debug export did not return to the Debug panel",
+    );
+    return preview;
+  };
+  const structural = await exportPreview();
+  assertEqual(
+    JSON.stringify(structural.media.stage),
+    JSON.stringify({ status: "unresolved" }),
+    "The debug export's Stage state",
+  );
+  assertEqual(
+    (await exportPreview(["sessionText"])).media.stage.path,
+    "Domme/Domme43.jpg",
+    "The debug export's Stage path with session text",
+  );
   assertEqual(
     await value(cdp, text("[data-debug-now-waiting]")),
     "Button · Domme3/spanking.tease:3",
@@ -1844,6 +1893,11 @@ async function debugNowScenario(cdp, origin) {
     "Now did not list the hidden timer",
   );
   await next("failed", "The undecodable image was not a load failure");
+  assertEqual(
+    (await exportPreview()).media.stage.status,
+    "failed",
+    "The debug export did not report the load failure",
+  );
   await next("hidden", "hideImage did not hide the Stage image");
   await next("displayed", "The valid image was not displayed");
   assertEqual(

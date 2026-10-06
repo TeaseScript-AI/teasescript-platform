@@ -85,6 +85,21 @@ function candidate(
       read,
     })),
     player: { viewportWidth: 390, userAgent: "Test Browser" },
+    host: {
+      stage: { status: "unresolved", path: "images/missing-room.png" },
+      media: [
+        { mediaId: 1, media: "audio", loaded: true, state: "running", source: "sounds/theme.mp3" },
+      ],
+      notices: [
+        {
+          key: "unusable-media:sounds/gone.mp3",
+          level: "warning",
+          message: "Audio not found: sounds/gone.mp3",
+        },
+        { key: "audio-blocked", level: "warning", message: "The browser blocked audio." },
+      ],
+      debugLog: ["Skipped the wait at main.tease:3"],
+    },
   };
 }
 
@@ -116,10 +131,21 @@ test("by default an export holds the technical report and no personal content", 
   assert.ok(!text.includes(SECRET), "no answer, saved value, or message text");
   assert.ok(!text.includes(reference), "no photo reference");
   assert.ok(!text.includes("Test Browser"), "no browser details");
+  for (const scriptText of ["missing-room", "theme.mp3", "gone.mp3", "Skipped the wait"])
+    assert.ok(!text.includes(scriptText), `no ${scriptText}`);
   assert.equal(exported.checkpoint, null);
   assert.equal(exported.replay, null);
   assert.deepEqual(exported.photos, []);
-  assert.deepEqual(Object.keys(exported.sections), ["eventsTail"]);
+  assert.deepEqual(Object.keys(exported.sections), ["eventsTail", "media", "errors"]);
+  // What the Player observed is in the technical report as states and kinds.
+  assert.deepEqual(exported.sections["media"], {
+    stage: { status: "unresolved" },
+    media: [{ mediaId: 1, media: "audio", loaded: true, state: "running" }],
+  });
+  assert.deepEqual(exported.sections["errors"], [
+    { kind: "unusable-media", level: "warning" },
+    { kind: "audio-blocked", level: "warning" },
+  ]);
   const tail = exported.sections["eventsTail"];
   assert.ok(
     Array.isArray(tail) && tail.every((event) => Object.keys(event).join() === "sequence,kind"),
@@ -191,6 +217,7 @@ test("with everything chosen, the export replays the failure and carries the pho
     [
       "Technical report",
       "Session text",
+      "Debug log",
       "Saved script values",
       "Submitted answers",
       "Player and browser details",
@@ -416,4 +443,24 @@ test("a network path the script says, as message markup shows it, is removed fro
   const choices = chooseDebugCategory(NO_PERSONAL_CONTENT, frozen, "sessionText", true);
   const text = await fileText((await assembleDebugExport(frozen, choices)).exported);
   assert.ok(!text.includes("marker-in-a-path"), "the path is in the file");
+});
+
+test("session text adds the Stage path, media sources, notice messages, and the Debug log", async () => {
+  const { session, recorder } = failedSession();
+  const frozen = candidate(session, recorder);
+  const choices = chooseDebugCategory(NO_PERSONAL_CONTENT, frozen, "sessionText", true);
+  const { exported, parts } = await assembleDebugExport(frozen, choices);
+  assert.deepEqual(exported.sections["media"], {
+    stage: frozen.host.stage,
+    media: frozen.host.media,
+  });
+  assert.deepEqual(exported.sections["errors"], frozen.host.notices);
+  assert.deepEqual(exported.sections["debugLog"], frozen.host.debugLog);
+  assert.ok(parts.some((part) => part.name === "Debug log"));
+  // Without the Debug menu there is no Debug log, and the export does not pretend one.
+  const withoutLog = await assembleDebugExport(
+    { ...frozen, host: { ...frozen.host, debugLog: null } },
+    choices,
+  );
+  assert.equal(withoutLog.exported.sections["debugLog"], undefined);
 });

@@ -44,7 +44,7 @@ const categories: readonly {
   {
     key: "sessionText",
     label: "Session text and debug details",
-    help: "Recent chat messages and the kinds of recent events; with saved values and answers too, every event detail.",
+    help: "Recent chat messages, media paths, notices, and the Debug log; with saved values and answers too, every event detail.",
   },
   {
     key: "replay",
@@ -106,7 +106,8 @@ function uses(photo: (typeof photos.value)[number]): string {
           <div>
             <p class="font-medium">Technical report</p>
             <p class="text-muted-foreground">
-              Versions, the error and where it happened, and the kinds of recent events.
+              Versions, the error and where it happened, the kinds of recent events, and whether the
+              Stage image and media loaded.
             </p>
           </div>
           <Badge variant="secondary">Included</Badge>
@@ -169,9 +170,9 @@ function uses(photo: (typeof photos.value)[number]): string {
 
         <Alert>
           <AlertDescription>
-            The file is not encrypted. Only what you turn on is included. Removing credentials and
-            file paths from text is best effort and cannot catch everything: check the preview
-            before sharing.
+            The file is not encrypted. Personal content is included only when you turn it on.
+            Removing credentials and file paths from text is best effort and cannot catch
+            everything: check the preview before sharing.
           </AlertDescription>
         </Alert>
 

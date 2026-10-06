@@ -441,7 +441,7 @@ until a new session starts. An ordinary end shows only "Session ended.", and med
 The transcript and Stage stay for inspection, with the transcript's end scrolling clear of the card, and nothing opens
 by itself.
 
-The card, its notice, and Player Settings open one **Download debug export** dialog for a developer
+The card, its notice, Player Settings, and the Debug panel open one **Download debug export** dialog for a developer
 ([`DEBUGGER.md`](../DEBUGGER.md#debug-export)). The technical report is always included; each personal category is a
 labelled switch with its help text, off whenever the dialog opens, and engine replay data can be turned on only after
 saved values, answers, and session text, which its state copies. With photos on, the photos the session used are listed

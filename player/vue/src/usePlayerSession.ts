@@ -991,11 +991,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     hostError: computed(() => hostError.value),
     reportHostError,
     /**
-     * What a debug export can contain now, frozen: the session, its recording, and the photos it used. `player` adds
-     * the presentation details only the Player's interface knows.
+     * What a debug export can contain now, frozen: the session, its recording, and the photos it used. `shown` adds
+     * what only the Player's interface knows: its presentation details and what it observed of the Stage and media.
      */
     async debugExportCandidate(
-      player: DebugExportCandidate["player"],
+      shown: Pick<DebugExportCandidate, "player" | "host">,
     ): Promise<DebugExportCandidate> {
       // Everything is taken before the first photo is read, so play continuing meanwhile cannot mix in later state.
       const current = session.value;
@@ -1014,7 +1014,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         recording: recorder.recording(),
         hostError: hostError.value,
         editedWhileDebugging: debugEdits.value,
-        player,
+        ...shown,
       };
       const storage =
         current?.snapshot.scriptStorage ?? frozen.recording?.endSnapshot.scriptStorage ?? [];
