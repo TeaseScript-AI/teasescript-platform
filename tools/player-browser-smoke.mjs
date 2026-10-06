@@ -1360,6 +1360,7 @@ async function debugCountdownScenario(cdp, origin) {
     await physicalClick(cdp, '[data-player-settings] [data-slot="dialog-close"]');
     await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
   };
+  // Scene time runs on in real time between steps, so a countdown may have passed its first seconds.
   const skip = async (expected, failure) => {
     await physicalClick(cdp, '[data-development-time-action="skip"]');
     await waitFor(cdp, expected, 5_000, failure);
@@ -1381,7 +1382,7 @@ async function debugCountdownScenario(cdp, origin) {
   await toggleDebugMenu();
   await waitFor(
     cdp,
-    shows("/^Debug · Continues in (30|29) s$/"),
+    shows("/^Debug · Continues in (30|2\\d) s$/"),
     5_000,
     "No countdown for the wait",
   );
@@ -1394,16 +1395,16 @@ async function debugCountdownScenario(cdp, origin) {
   await waitFor(cdp, `!!document.querySelector('[data-debug-panel]')`);
   // Skip event ends the wait: the blocking timer is a timer, never a wait.
   await skip(none, "A blocking timer showed a countdown");
-  await skip(shows("/^Debug · Pacing: 20 s remaining$/"), "No countdown for pacing");
+  await skip(shows("/^Debug · Pacing: (20|1\\d) s remaining$/"), "No countdown for pacing");
   // The timed button consumes the pacing of the message before it.
-  await skip(shows("/^Debug · Press within 40 s$/"), "No countdown for the timed button");
+  await skip(shows("/^Debug · Press within (40|3\\d) s$/"), "No countdown for the timed button");
   // The panel's Debug switch and the Debug menu hide and show it, also while the panel is closed.
   await physicalClick(cdp, "[data-debug-active]");
   await waitFor(cdp, none, 2_000, "Debug off left the countdown");
   await physicalClick(cdp, "[data-debug-active]");
   await waitFor(
     cdp,
-    shows("/^Debug · Press within 40 s$/"),
+    shows("/^Debug · Press within (40|3\\d) s$/"),
     2_000,
     "Debug on did not restore the countdown",
   );
