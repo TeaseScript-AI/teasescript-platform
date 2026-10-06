@@ -15,6 +15,7 @@ import {
   advancePlayerRuntimeTime,
   answerPlayerRuntimeCapture,
   answerPlayerRuntimeImage,
+  applyPlayerRuntimeStorageEdit,
   completePlayerRuntimeStorageWrite,
   continuePlayerRuntimeSession,
   createPlayerRuntimeRestorePoint,
@@ -42,7 +43,7 @@ async function replay(recorder: DebugRecorder): Promise<DebugReplayResult> {
   assert.ok(recording);
   const exported: DebugExport = {
     format: "teasescript-debug-export",
-    version: 1,
+    version: 2,
     build: { commit: null, dirty: null, mode: null, appVersion: null, ...debugBuildRevisions() },
     package: { id: null, version: null, contentHash: null },
     incident: {
@@ -315,4 +316,23 @@ test("a media store that throws during a recorded call leaves the recording inco
     [recorder.recording()!.complete, recorder.recording()!.reason],
     [false, "The media store failed during a recorded call."],
   );
+});
+
+test("a debugging tool's storage edit is recorded, so a replay applies it again", async () => {
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(
+    'let name = askText "Name"\nlet visits = load("visits", default: 1)\nsay "Visit ${visits}"\nexit',
+    { recorder },
+  );
+  const edited = applyPlayerRuntimeStorageEdit(session, { key: "visits", value: 5 });
+  assert.equal(edited.outcome.kind, "applied");
+  session = submitPlayerRuntimeComposer(edited.session, "Ada")!.session;
+  assert.equal(session.snapshot.status, "halted");
+  const last = session.transcriptEntries.at(-1);
+  assert.equal(last?.kind === "message" ? last.text : undefined, "Visit 5");
+  assert.deepEqual(
+    recorder.recording()!.operations.map((operation) => operation.kind),
+    ["run", "applyExternalStorageEdit", "completeAction", "run"],
+  );
+  assert.equal((await replay(recorder)).kind, "reproduced");
 });

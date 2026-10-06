@@ -1,4 +1,5 @@
 import {
+  applyExternalStorageEdit,
   captureTemporalContext,
   compileProject,
   completeAction,
@@ -19,6 +20,7 @@ import {
   serializeCheckpoint,
   type ActionCompletionOutcome,
   type ContinueCaptureOutcome,
+  type ExternalStorageEditOutcome,
   type InstructionPlan,
   type InteractionAccessibleName,
   type InterpreterEvent,
@@ -38,6 +40,7 @@ import {
   type RuntimeScriptStorageEntrySnapshot,
   type RuntimeSnapshot,
   type RuntimeStorageWriteActionSnapshot,
+  type SerializableRuntimeValue,
   type TemporalContext,
   type TimeObservationOutcome,
 } from "../src/index.js";
@@ -1017,6 +1020,27 @@ export function playerRuntimePermanentButtons(
       Object.freeze({ buttonId: button.buttonId, label: button.text, busy: button.busy }),
     ),
   );
+}
+
+/**
+ * Applies a debugging tool's edit of one script-storage key to the session's view (`applyExternalStorageEdit`):
+ * `value: null` removes the key. It runs no instruction, so nothing continues; the host persists the edit first.
+ */
+export function applyPlayerRuntimeStorageEdit(
+  session: PlayerRuntimeSession,
+  edit: { readonly key: string; readonly value: SerializableRuntimeValue },
+): PlayerRuntimeControlResult<ExternalStorageEditOutcome> {
+  const operation = recorded(
+    session.recorder,
+    "applyExternalStorageEdit",
+    session.snapshot,
+    [edit],
+    () => applyExternalStorageEdit(session.plan, session.snapshot, edit),
+  );
+  return Object.freeze({
+    session: applyOperation(session, operation.snapshot, operation.events, false),
+    outcome: operation.outcome,
+  });
 }
 
 /** Clicks a permanent button, then runs the session, which starts the button's block. */
