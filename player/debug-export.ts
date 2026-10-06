@@ -22,7 +22,12 @@ import {
 import { instructionSourcePath } from "../src/plan/model.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import { isWellFormedCapturedMediaReference } from "./captured-media.js";
-import { base64urlSlices, decodeBase64url, jsonFile } from "./transfer-encoding.js";
+import {
+  base64urlSlices,
+  decodeBase64url,
+  jsonFile,
+  measuredJsonFile,
+} from "./transfer-encoding.js";
 
 /**
  * A debug export: what a developer needs to find why a Player session failed, gathered with the player's consent. The
@@ -228,6 +233,14 @@ export function debugExportFileName(name: string, gzip: boolean): string {
 /** The export as a file: gzip, or plain JSON without `gzip`. Its checkpoint and anchor are validated on the way. */
 export function debugExportFile(exported: DebugExport, gzip: boolean): Promise<Blob> {
   return jsonFile(pieces(exported), gzip);
+}
+
+/** `debugExportFile`, with the size of the uncompressed JSON in UTF-8 bytes. */
+export function measuredDebugExportFile(
+  exported: DebugExport,
+  gzip: boolean,
+): Promise<{ readonly file: Blob; readonly jsonBytes: number }> {
+  return measuredJsonFile(pieces(exported), gzip);
 }
 
 /** The document in pieces: deep runtime state is written without recursion, photo data slice by slice. */

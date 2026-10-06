@@ -1,0 +1,11 @@
+---
+title: "Debug failure"
+---
+let name: string = askText(hint: "Your name")
+let picture: string = askImage(hint: "A picture")
+save name as "name"
+save picture as "picture"
+say "Thanks, ${name}."
+let zero = 0
+let result = 1 / zero
+exit

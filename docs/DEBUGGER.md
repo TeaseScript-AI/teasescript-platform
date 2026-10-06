@@ -91,6 +91,18 @@ call that fails the session or throws freezes the record, which keeps the state 
 checkpoint, so that later observations, such as on hiding the page, cannot evict or outdate it; a call the recorder
 cannot copy, or a media store that throws during a call, marks it incomplete.
 
+The Player assembles an export when its dialog opens ([Player UI](ui/PLAYER-UI.md#session-end-and-failure)), from the
+session, the record, and the photos frozen then (`player/debug-export-assembly.ts`), so play may continue meanwhile.
+The technical report carries the build and its revisions, the package's storage scope and a SHA-256 of its compiled plan
+where the browser can hash, the incident, and the sequence and kind of the last 256 events. Saved values add the session's
+storage view; answers add the recorded interaction completions; session text adds the last 50 transcript messages and
+the events with their content; replay data adds the checkpoint of the state the record reaches, or of its anchor as the
+last good state when that state cannot be checkpointed; photos add the chosen originals and their uses (a recorded image
+answer or capture, or a saved value); Player and browser details add the presentation settings, screen geometry,
+pointer, language, and user agent. Text that looks like a credential or an absolute file path is replaced in readable
+sections, and replay data containing it is left out entirely, since changing it would change the replay; such
+detection cannot prove text safe, so the export is never called anonymous.
+
 After `npm run build:typescript`, `node tools/debug-export.mjs inspect <file>` summarizes an export without runtime
 values (`--values` prints the recorded arguments and readable sections), and `replay <file>` runs the calls again from
 the anchor in a worker and compares each result and the final state. It reports a reproduced engine failure (exit 0),

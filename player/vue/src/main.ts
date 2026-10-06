@@ -42,6 +42,8 @@ const app = developmentPreview
           capturedMedia: { repository: capturedMediaRepository },
           // Export and import of saved data cover every script this browser has played.
           savedData: browserSavedData(browserStorage(), capturedMediaRepository),
+          // The script's storage scope identifies it; development packages and the demo have no release version.
+          debugPackage: { id: host.storageScope, version: null },
         });
         const failure = prepareHostedScript(player, host);
         return () => h(PlayerApp, { player, failure: failure.value });

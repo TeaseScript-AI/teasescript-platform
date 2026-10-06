@@ -78,6 +78,8 @@ const props = defineProps<{
     /** Clearing the shown script's saved data, when the host keeps it; possible only while no session runs. */
     readonly clear: { readonly available: boolean; readonly run: () => Promise<boolean> } | null;
   } | null;
+  /** Whether a session or a Player error can be exported for a developer; the action opens the export dialog. */
+  debugExport?: { readonly available: boolean; readonly open: () => void } | null;
 }>();
 // User-facing Player Settings: owned by PlayerApp and available in every build.
 const contrast = defineModel<"standard" | "high">("contrast", { required: true });
@@ -925,6 +927,25 @@ async function updateSidebarVisibility(open: boolean) {
                         Adds the Debug panel to the tools menu until the page is reloaded. It shows how the script
                         runs and may reveal what comes next.
                       </p>
+                      <template v-if="debugExport">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          class="min-h-11 justify-self-start"
+                          :disabled="!debugExport.available"
+                          data-player-setting="debug-export"
+                          @click="debugExport.open"
+                        >
+                          Download debug export…
+                        </Button>
+                        <p class="text-muted-foreground">
+                          {{
+                            debugExport.available
+                              ? "A file that helps a developer find what went wrong; you choose what it includes."
+                              : "Available once a session has started."
+                          }}
+                        </p>
+                      </template>
                     </section>
                     <section
                       v-if="savedData"

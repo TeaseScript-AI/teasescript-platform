@@ -266,6 +266,8 @@ available in every build to every user. It currently offers:
   treatment and is kept when switching light/dark;
 - **Title bar on short screens · A/B test:** variant A or B above;
 - **Testing · Debug menu:** adds the Debug panel to the tools menu ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)).
+  **Download debug export…** beside it opens the [debug export dialog](#session-end-and-failure) once a session has
+  started, also with the Debug menu off.
 
 Apart from the Debug menu, these are presentation preferences, not canonical runtime state. The Player keeps them in this browser's local storage
 across reloads, treats stored text as external input that falls back to the default when unknown, and works without
@@ -430,6 +432,24 @@ click. In the Player the
 session is created only when Start is activated; the Continue path applies to a session the host restores. Durable
 checkpoint storage and automatic resume across page reloads are tracked in #469.
 
+## Session end and failure
+
+When a script error stops the session, a card above the composer says "The session stopped because of an error.", names
+the error code and its file and line, and offers **Download debug export**; an exception of the Player itself says "The
+Player ran into an error." with the error's name instead. An error notice with the same action supplements the card
+until a new session starts. An ordinary end shows only "Session ended.", and media warnings are notices, never failures.
+The transcript and Stage stay for inspection, and nothing opens by itself.
+
+The card, its notice, and Player Settings open one **Download debug export** dialog for a developer
+([`DEBUGGER.md`](../DEBUGGER.md#debug-export)). The technical report is always included; each personal category is a
+labelled switch with its help text, off whenever the dialog opens, and engine replay data can be turned on only after
+saved values, answers, and session text, which its state copies. With photos on, the photos the session used are listed
+with a thumbnail, size, and where they were used, each with its own checkbox. The dialog warns that the file is not
+encrypted, states the file's size and whether the error can be replayed exactly, and previews what the file contains;
+every change prepares the file again, and **Download debug export** saves exactly that file from the player's press. An
+export larger than an issue attachment allows is not offered. The dialog fits narrow screens and scrolls, and its rows
+and buttons are at least 44px tall.
+
 ## Player notices
 
 Player notices tell the player that something about the session's environment matters, such as blocked audio,
@@ -457,8 +477,9 @@ audio, is labelled **Needs action**, offers no dismiss control, and disappears o
 The current conditions are blocked audio (warning, with **Enable audio**), browser storage unavailable at session start
 (info: saved progress is not kept), a failed script-storage write (warning, for the run it happened in; a new
 Start withdraws it), an image request that allows only the camera where no camera can be used (warning,
-withdrawn when the request ends), and a media file the script refers to that the Player cannot use (warning, see
-[Stage and media presentation](#stage-and-media-presentation)). Each level also has a theme status colour, following
+withdrawn when the request ends), a media file the script refers to that the Player cannot use (warning, see
+[Stage and media presentation](#stage-and-media-presentation)), and a session stopped by an error (error, with
+**Download debug export**; see [Session end and failure](#session-end-and-failure)). Each level also has a theme status colour, following
 the usual convention: info blue, warning orange, error red. A toast uses the level's soft tint as its surface and its
 solid tone for the border and icon; a panel entry uses the same tint with a solid mark along its start edge and a solid
 icon; and the bell's dot takes the most severe level that needs attention. The development preview's Visual Lab shows every level.

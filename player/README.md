@@ -37,7 +37,8 @@ This is a local inspection route, not the production cross-origin Player/host pr
   than an accepted author-facing API.
 - `transfer-encoding.ts` holds the base64url and gzip encoding of the files players move by hand: saved-data transfers
   (`storage-transfer.ts`) and debug exports (`debug-export.ts`, read offline by `tools/debug-export.mjs`; see
-  [`DEBUGGER.md`](../docs/DEBUGGER.md#debug-export)).
+  [`DEBUGGER.md`](../docs/DEBUGGER.md#debug-export)). `debug-recorder.ts` records each session's engine calls, and
+  `debug-export-assembly.ts` builds an export from the player's choices.
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
 presentation state in the Player; Tailwind CSS 4 is integrated through Vite as a foundation layer,

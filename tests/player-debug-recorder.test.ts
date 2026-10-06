@@ -296,7 +296,7 @@ test("a call the recorder cannot copy still runs exactly as without it", () => {
   assert.deepEqual(withRecorder.session.snapshot, without.session.snapshot);
   assert.deepEqual(
     [recorder.recording()!.complete, recorder.recording()!.reason],
-    [false, "The recorder could not copy a call."],
+    [false, "A call's arguments could not be copied exactly."],
   );
 });
 
@@ -335,4 +335,16 @@ test("a debugging tool's storage edit is recorded, so a replay applies it again"
     ["run", "applyExternalStorageEdit", "completeAction", "run"],
   );
   assert.equal((await replay(recorder)).kind, "reproduced");
+});
+
+test("an argument JSON cannot copy exactly leaves the recording incomplete instead of recording another call", async () => {
+  const recorder = new DebugRecorder();
+  const session = createPlayerRuntimeSession('let name = askText "Name"\nexit', { recorder });
+  const refused = applyPlayerRuntimeStorageEdit(session, { key: "k", value: Number.NaN });
+  assert.equal(refused.outcome.kind, "invalidEdit");
+  assert.deepEqual(
+    [recorder.recording()!.complete, recorder.recording()!.reason],
+    [false, "A call's arguments could not be copied exactly."],
+  );
+  assert.equal((await replay(recorder)).kind, "incomplete");
 });

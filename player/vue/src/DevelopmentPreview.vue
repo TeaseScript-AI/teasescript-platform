@@ -77,6 +77,7 @@ const player = usePlayerSession(
         // As in the default build: an image the script saves a reference to stays in this browser for later runs.
         capturedMedia: { repository: props.capturedMediaRepository ?? null },
         savedData: browserSavedData(browserStorage(), props.capturedMediaRepository ?? null),
+        debugPackage: { id: packageHost.storageScope, version: null },
       }
     : {
         // The camera scenarios speak as the repository demo's Mistress and use its images and sounds.

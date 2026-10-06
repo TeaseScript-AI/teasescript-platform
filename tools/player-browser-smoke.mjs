@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { crc32, deflateSync, gunzipSync } from "node:zlib";
@@ -123,6 +123,7 @@ async function main() {
       await askImageScenario(cdp, origin, profile);
       const exported = await savedDataExportScenario(cdp, origin, profile);
       await savedDataImportScenario(debugPort, origin, exported);
+      await debugExportScenario(cdp, origin, profile);
       await developmentTimeScenario(cdp, origin);
       await debugCountdownScenario(cdp, origin);
       await debugNowScenario(cdp, origin);
@@ -134,7 +135,7 @@ async function main() {
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, development time controls, Debug countdowns, Now and Storage, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -2856,6 +2857,199 @@ async function savedDataImportScenario(debugPort, origin, exported) {
     });
     browser.close();
   }
+}
+
+// A script error in the default build, without Debug: the failure card names the error, and its debug export holds no
+// personal content until the player chooses it; with replay data chosen, the offline tool reproduces the failure.
+async function debugExportScenario(cdp, origin, profile) {
+  const downloads = join(profile, "debug-downloads");
+  await mkdir(downloads, { recursive: true });
+  await cdp.call("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
+  const picture = join(profile, "debug-picture.png");
+  const pictureBytes = solidPng(20, 10, [40, 90, 200]);
+  await writeFile(picture, pictureBytes);
+  const answer = "Ada-private-answer";
+  await setViewport(cdp, 1440, 900);
+  await navigate(cdp, `${origin}/player/?package=debug-failure`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-composer-input]')?.placeholder === 'Your name'`,
+  );
+  await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+  await cdp.call("Input.insertText", { text: answer });
+  await physicalClick(cdp, ".composer-send");
+  await waitFor(
+    cdp,
+    visible("[data-composer-attach]"),
+    8_000,
+    "The image request offered no paperclip",
+  );
+  await openPicker(cdp);
+  await setInputFiles(cdp, "[data-composer-file]", [picture]);
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-runtime-failure]')`,
+    8_000,
+    "No failure card",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('[data-runtime-failure-location]').textContent.trim()`,
+    ),
+    "TSR036 · main.tease, line 10",
+    "The failure card names the error and where it happened",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.body.innerText.includes('The session stopped because of an error.')`,
+    ),
+    true,
+    "The failure is said",
+  );
+
+  const download = async (expectedName) => {
+    const before = new Set(await readdir(downloads));
+    // The dialog scrolls when its content is taller than the screen.
+    await evaluate(
+      cdp,
+      `document.querySelector('[data-debug-export-download]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
+    );
+    await physicalClick(cdp, "[data-debug-export-download]");
+    const deadline = Date.now() + 8_000;
+    while (Date.now() < deadline) {
+      const added = (await readdir(downloads)).filter(
+        (name) => !before.has(name) && !name.endsWith(".crdownload"),
+      );
+      if (added.length === 1) {
+        assertEqual(added[0], expectedName, "Debug export file name");
+        const path = join(downloads, added[0]);
+        const bytes = await readFile(path);
+        await rm(path);
+        return bytes;
+      }
+      await delay(50);
+    }
+    throw new Error("The debug export was not downloaded");
+  };
+  const fileName = "development-package-debug-failure-debug.teasedebug.json.gz";
+  const ready = `!!document.querySelector('[data-debug-export-download]')`;
+
+  // Nothing personal is chosen at first.
+  await physicalClick(cdp, "[data-runtime-failure-export]");
+  await waitFor(cdp, ready, 8_000, "The debug export was not prepared");
+  assertEqual(
+    await value(
+      cdp,
+      `[...document.querySelectorAll('[data-debug-export] [role=switch]')].every((item) => item.getAttribute('aria-checked') === 'false')`,
+    ),
+    true,
+    "Personal content is off by default",
+  );
+  const structural = gunzipSync(await download(fileName)).toString("utf8");
+  assertEqual(structural.includes(answer), false, "The default export contains the answer");
+  assertEqual(
+    structural.includes("captured-media:"),
+    false,
+    "The default export contains a photo reference",
+  );
+  assertEqual(JSON.parse(structural).incident.code, "TSR036", "The default export names the error");
+
+  // With replay data and its prerequisites, the offline tool reproduces the failure; the chosen photo is included.
+  for (const category of ["savedValues", "answers", "sessionText", "replay", "photos"]) {
+    await evaluate(
+      cdp,
+      `document.querySelector('[data-debug-export-category="${category}"]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
+    );
+    await physicalClick(cdp, `[data-debug-export-category="${category}"] [role=switch]`);
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-debug-export-category="${category}"] [role=switch]')?.getAttribute('aria-checked') === 'true'`,
+    );
+  }
+  // The last choice prepares the file again; Download is offered once that preparation is done.
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-debug-export-photo] [role=checkbox]')?.getAttribute('aria-checked') === 'true' &&
+      !!document.querySelector('[data-debug-export-download]') &&
+      document.querySelector('[data-debug-export-summary]')?.textContent.includes('replay the error exactly')`,
+    8_000,
+    "Replay data and the photo were not prepared",
+  );
+  const replayable = join(downloads, "replayable.teasedebug.json.gz");
+  await writeFile(replayable, await download(fileName));
+  const replayed = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL("./debug-export.mjs", import.meta.url)), "replay", replayable],
+    { encoding: "utf8" },
+  );
+  assertEqual(
+    replayed.status,
+    0,
+    `The offline replay failed: ${replayed.stdout}${replayed.stderr}`,
+  );
+  assertEqual(
+    replayed.stdout.startsWith("reproduced engine failure TSR036 at main.tease:10:"),
+    true,
+    "The offline replay",
+  );
+  const document = JSON.parse(gunzipSync(await readFile(replayable)).toString("utf8"));
+  assertEqual(document.photos.length, 1, "The chosen photo is included");
+  assertEqual(
+    Buffer.from(document.photos[0].data, "base64url").equals(pictureBytes),
+    true,
+    "The photo's original bytes",
+  );
+
+  // The dialog fits a narrow screen with touch-sized rows.
+  await cdp.call("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27,
+  });
+  await cdp.call("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27,
+  });
+  await waitFor(cdp, `!document.querySelector('[data-debug-export]')`);
+  await setViewport(cdp, 390, 844);
+  await physicalClick(cdp, "[data-runtime-failure-export]");
+  await waitFor(cdp, ready);
+  await waitFor(
+    cdp,
+    `document.getAnimations().every((animation) => animation.playState !== 'running')`,
+  );
+  const fit = await value(
+    cdp,
+    `(() => {
+      const dialog = document.querySelector('[data-debug-export]').getBoundingClientRect();
+      const problems = [];
+      if (dialog.left < 0 || dialog.right > innerWidth || dialog.top < 0 || dialog.bottom > innerHeight) problems.push('dialog outside the screen');
+      for (const row of document.querySelectorAll('[data-debug-export-category]'))
+        if (row.getBoundingClientRect().height < 44) problems.push(row.dataset.debugExportCategory + ' row');
+      return problems.join('; ') || 'fits';
+    })()`,
+  );
+  assertEqual(fit, "fits", "The debug export dialog on a narrow screen");
+  await cdp.call("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27,
+  });
+  await cdp.call("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27,
+  });
+  await setViewport(cdp, 1440, 900);
 }
 
 async function askImageCameraScenario(cdp, origin, profile) {
