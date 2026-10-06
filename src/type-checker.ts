@@ -3205,7 +3205,8 @@ class TypeChecker {
           : formAnswerType(kind);
     return {
       result: !required && kind !== "boolean" && kind !== "cycle" ? optional(result) : result,
-      start,
+      // Only a number typed in the composer needs the form's number kind.
+      start: kind === "integer" || kind === "number" ? start : null,
     };
   }
 
@@ -3254,7 +3255,13 @@ class TypeChecker {
                 ? optional(formAnswerType(kind))
                 : formAnswerType(kind);
     }
-    return { result: result ?? optional(GENERIC_FORM_ANSWER_TYPE), start };
+    // A toggle or a cycle does not take a number in the composer, so it needs no number kind.
+    const finite =
+      options !== undefined || (valueType !== undefined && isScalar(valueType, "boolean"));
+    return {
+      result: result ?? optional(GENERIC_FORM_ANSWER_TYPE),
+      start: result !== null && finite ? null : start,
+    };
   }
 
   /**

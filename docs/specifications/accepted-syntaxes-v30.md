@@ -2033,10 +2033,10 @@ let selected = askForm "Which toys do you own?", fields: toys   // a boolean dic
 for id in selected { save selected[id] as "toys.${id}" }
 ```
 
-When the compiler can prove that every field of a dict has one kind, from the dict's type and, for descriptors, a
-written `type:` or `value:`, the result is a dict of that answer type, such as an `integer dict`; it is an
-`integer? dict` when a field may be `optional:`. Otherwise, as for an `object dict` of descriptors of different kinds
-with explicit `type:`, the result is a
+A dict written where the form is asked combines the answer types its entries prove. For a computed dict, when its value
+type proves one kind, from a `type:` or `value:` known where its values are created, the result is a dict of that answer
+type, such as an `integer dict`, or an `integer? dict` when a field may be `optional:`. Otherwise, as for an
+`object dict` of descriptors of different kinds with explicit `type:`, the result is a
 `(boolean | number | string | date | time | datetime | duration | timestamp | null) dict` (a cycle may return any
 choice value); read an answer into a local and narrow it with `is` ([§13](#13-explicit-types)):
 

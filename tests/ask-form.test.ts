@@ -482,6 +482,13 @@ test("a written dict of fields types each entry by what it shows", () => {
       ["m", "number"],
     ],
   );
+  // A cycle of numbers takes no number in the composer, so it does not share the dict's number kind.
+  assert.deepEqual(
+    diagnostics(
+      'let r = askForm fields: dict { "cycle": { options: [1.5, 2.5], value: 1.5 }, "level": { value: 2 } }',
+    ),
+    [],
+  );
   // One dict has one number kind for fields without `type:`.
   assert.deepEqual(diagnostics('let r = askForm fields: dict { "a": 1, "b": 2.5 }'), [
     `askForm field 'a': its dict mixes whole and decimal numbers; add type: "integer" or type: "number".`,
