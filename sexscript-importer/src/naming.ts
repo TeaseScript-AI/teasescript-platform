@@ -168,9 +168,18 @@ function renameStatement(
         ? renamer.fresh(statement.variable)
         : declare(statement.variable, loopScope, inFunction, renamer);
       loopScope.set(statement.variable, variable);
+      const valueVariable =
+        statement.valueVariable === undefined
+          ? undefined
+          : scope.has(statement.valueVariable)
+            ? renamer.fresh(statement.valueVariable)
+            : declare(statement.valueVariable, loopScope, inFunction, renamer);
+      if (statement.valueVariable !== undefined && valueVariable !== undefined)
+        loopScope.set(statement.valueVariable, valueVariable);
       return {
         ...statement,
         variable,
+        ...(valueVariable === undefined ? {} : { valueVariable }),
         collection,
         body: renameBlock(statement.body, loopScope, inFunction, renamer),
       };

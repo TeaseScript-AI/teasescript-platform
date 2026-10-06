@@ -95,3 +95,5 @@ show("Missing: " + missing)
 def remembered = load("toy.remembered")
 def slot = "first"
 if (remembered) show("Remembered " + remembered[slot])
+// A map read entry by entry goes through its keys with their values.
+owned.each { entry -> show("${entry.key}: ${entry.value}") }

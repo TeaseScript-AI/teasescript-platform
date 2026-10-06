@@ -253,7 +253,9 @@ function emitStatementAt(statement: IrStatement, lines: string[], depth: number)
       lines.push(`${pad}}`);
       return;
     case "for":
-      lines.push(`${pad}for ${statement.variable} in ${emitExpression(statement.collection)} {`);
+      lines.push(
+        `${pad}for ${statement.variable}${statement.valueVariable === undefined ? "" : `, ${statement.valueVariable}`} in ${emitExpression(statement.collection)} {`,
+      );
       emitStatements(statement.body, lines, depth + 1);
       lines.push(`${pad}}`);
       return;

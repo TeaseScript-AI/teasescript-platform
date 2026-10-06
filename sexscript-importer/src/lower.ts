@@ -6932,15 +6932,24 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
     loopBody !== null && loopBody.kind !== "block" && loopBody.kind !== "empty"
       ? { kind: "block", span: loopBody.span, statements: [loopBody] }
       : loopBody;
-  // Groovy iterated a map's entries; a dict loop visits its keys, so `entry.key` is the key and `entry.value` a lookup.
-  const entries =
+  // Groovy iterated a map's entries; a dict loop visits its keys, so `entry.key` is the key, and `entry.value` the
+  // loop's value variable (#639), or a lookup where the body changes the map and Groovy's entry saw the change.
+  const isMapLoop =
     block !== null &&
     variable !== null &&
     collectionNode !== null &&
     variableName(collectionNode) !== null &&
-    isDictionary(collectionNode, context)
-      ? withEntryReads(block, variable, collectionNode)
+    isDictionary(collectionNode, context);
+  const valueName =
+    isMapLoop && !changesMap(block!, variableName(collectionNode!)!)
+      ? entryValueName(block!, variable!)
       : null;
+  const entries = isMapLoop ? withEntryReads(block!, variable!, collectionNode!, valueName) : null;
+  const readsValue =
+    entries !== null &&
+    valueName !== null &&
+    JSON.stringify(entries).includes(`"name":"${valueName}"`);
+  if (readsValue) context.generatedNames.add(valueName!);
   const body = entries ?? block;
   // A loop that removes its element from the collection proves it a list (elementRemovals).
   let removes = false;
@@ -6976,14 +6985,66 @@ function lowerFor(node: AstNode, context: LowerContext): IrStatement[] {
     context.bindings.get(node) ?? (loopId === null ? undefined : context.bindings.get(loopId));
   const facts = dict === null ? [] : [`${dict}\u0000$${loopKey ?? variable}`];
   const loweredBody = withPresentKeys(facts, body, context, () => lowerBlock(body, context));
-  return [{ kind: "for", variable, collection, body: loweredBody, span: node.span }];
+  return [
+    {
+      kind: "for",
+      variable,
+      ...(readsValue ? { valueVariable: valueName! } : {}),
+      collection,
+      body: loweredBody,
+      span: node.span,
+    },
+  ];
+}
+
+/** The name of an entry loop's value variable: `value`, unless the body names something so. */
+function entryValueName(body: AstNode, entry: string): string {
+  let taken = false;
+  walkAst(
+    body,
+    (node) => (taken ||= variableName(node) === "value" || text(node.name) === "value"),
+  );
+  return taken || entry === "value" ? `${entry}Value` : "value";
+}
+
+/** Whether a loop body writes into the map a variable names: an index or property write, or put/remove/clear. */
+function changesMap(body: AstNode, map: string): boolean {
+  let changes = false;
+  walkAst(body, (node) => {
+    const operator = text(node.operator) ?? "";
+    const target =
+      node.kind === "binary" &&
+      operator.endsWith("=") &&
+      !["==", "!=", "<=", ">="].includes(operator)
+        ? asNode(node.left)
+        : null;
+    if (
+      target !== null &&
+      (target.kind === "property" || (target.kind === "binary" && target.operator === "[")) &&
+      variableName(asNode(target.kind === "property" ? target.object : target.left)) === map
+    )
+      changes = true;
+    if (
+      node.kind === "methodCall" &&
+      variableName(asNode(node.object)) === map &&
+      ["put", "putAll", "putAt", "remove", "clear"].includes(constantString(node.method) ?? "")
+    )
+      changes = true;
+  });
+  return changes;
 }
 
 /**
  * A map loop's body that reads the entry only as `entry.key` and `entry.value` (also `getKey()` and `getValue()`),
  * rewritten to read the key, which a dict loop visits, and `map[key]`; null when the body uses the entry otherwise.
  */
-function withEntryReads(body: AstNode, variable: string, map: AstNode): AstNode | null {
+function withEntryReads(
+  body: AstNode,
+  variable: string,
+  map: AstNode,
+  /** The loop's value variable (#639), which `entry.value` reads where the body does not change the map. */
+  valueName: string | null = null,
+): AstNode | null {
   let other = false;
   const key = (span: SourceSpan | null | undefined): AstNode => ({
     kind: "variable",
@@ -7001,13 +7062,15 @@ function withEntryReads(body: AstNode, variable: string, map: AstNode): AstNode 
     if (variableName(asNode(node.object)) === variable && (member === "key" || member === "value"))
       return member === "key"
         ? key(node.span)
-        : {
-            kind: "binary",
-            span: node.span,
-            operator: "[",
-            left: structuredClone(map),
-            right: key(node.span),
-          };
+        : valueName !== null
+          ? { kind: "variable", span: node.span, name: valueName, type: "java.lang.Object" }
+          : {
+              kind: "binary",
+              span: node.span,
+              operator: "[",
+              left: structuredClone(map),
+              right: key(node.span),
+            };
     if (variableName(node) === variable) other = true;
     const result: AstNode = { ...node };
     for (const [name, child] of Object.entries(node)) {
@@ -12679,6 +12742,32 @@ function dictStatement(
     case "each": {
       const argument = closureArgument(call.arguments);
       const [key, value] = argument?.parameters ?? [];
+      // `map.each { entry -> entry.key, entry.value }` reads each entry as its key and value.
+      const entryBody = argument === null ? null : asNode(argument.closure.body);
+      const entry = argument?.parameters.length === 1 ? argument.parameters[0]! : null;
+      const receiverName = variableName(receiver);
+      if (entry !== null && entryBody !== null && receiverName !== null) {
+        if (containsReturnForCurrentClosure(entryBody)) return null;
+        const valueName = changesMap(entryBody, receiverName)
+          ? null
+          : entryValueName(entryBody, entry);
+        const rewritten = withEntryReads(entryBody, entry, receiver, valueName);
+        if (rewritten === null) return null;
+        const readsValue =
+          valueName !== null && JSON.stringify(rewritten).includes(`"name":"${valueName}"`);
+        if (readsValue) context.generatedNames.add(valueName);
+        return [
+          {
+            kind: "for",
+            variable: entry,
+            ...(readsValue ? { valueVariable: valueName } : {}),
+            collection: dict,
+            dict: true,
+            body: lowerBlock(rewritten, context),
+            span,
+          },
+        ];
+      }
       if (
         argument === null ||
         key === undefined ||
@@ -12688,26 +12777,15 @@ function dictStatement(
         return null;
       const closureBody = asNode(argument.closure.body);
       if (closureBody === null || containsReturnForCurrentClosure(closureBody)) return null;
+      // Each entry's key and value (#639), taken as each iteration starts, as Groovy passed them to the closure.
       return [
         {
           kind: "for",
           variable: key,
+          valueVariable: value,
           collection: dict,
           dict: true,
-          body: [
-            {
-              kind: "let",
-              name: value,
-              value: {
-                kind: "index",
-                target: dict,
-                index: { kind: "variable", name: key },
-                dict: true,
-              },
-              span,
-            },
-            ...lowerBlock(closureBody, context),
-          ],
+          body: lowerBlock(closureBody, context),
           span,
         },
       ];

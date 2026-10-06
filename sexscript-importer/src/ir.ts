@@ -156,10 +156,14 @@ export type IrStatement =
     })
   | (IrBase & { kind: "while"; condition: IrExpression; body: IrStatement[] })
   | (IrBase & { kind: "repeat"; count: IrExpression; body: IrStatement[] })
-  /** `dict` marks a loop over the keys of a dict (#536). */
+  /**
+   * `dict` marks a loop over the keys of a dict (#536); `valueVariable` names each key's value too,
+   * `for key, value in dict` (#639).
+   */
   | (IrBase & {
       kind: "for";
       variable: string;
+      valueVariable?: string;
       collection: IrExpression;
       body: IrStatement[];
       dict?: true;

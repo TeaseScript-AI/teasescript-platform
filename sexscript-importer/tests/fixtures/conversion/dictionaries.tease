@@ -17,8 +17,7 @@ say "You wear the ${toyNames[chosen]}"
 for name in owned.keys {
   say "${name}: ${owned[name]}"
 }
-for name in owned {
-  let count = owned[name]
+for name, count in owned {
   say "${name} counted ${count}"
 }
 say "Toys: ${owned.length}"
@@ -152,9 +151,9 @@ if not skipped.contains(sections[section]) {
 // A loop over a map's entries visits a dict's keys: entry.key is the key and entry.value its value.
 let needed = dict{ rope: "rope", rubber_bands: "rubber bands" }
 let missing = ""
-for toyValue in needed {
+for toyValue, value in needed {
   if load("toys.${toyValue}") != true {
-    missing += "${needed[toyValue]} "
+    missing += "${value} "
   }
 }
 say "Missing: ${missing}"
@@ -164,5 +163,9 @@ let slot = "first"
 // NOTE SX_DICT_MISSING_KEY line 97: Groovy read a missing key as null; a dict lookup of a missing key stops the script (#536). The key is not proven present here; test contains() first, or use get(key, default:).
 if remembered != null and remembered.length > 0 {
   say "Remembered ${remembered[slot]}"
+}
+// A map read entry by entry goes through its keys with their values.
+for entry, value in owned {
+  say "${entry}: ${value}"
 }
 exit

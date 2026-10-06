@@ -1032,6 +1032,9 @@ function analyse(
             ? scalar("string")
             : (elementType(typeOf(item.collection, scope)) ?? UNKNOWN);
         inner.names.set(item.variable, variable);
+        // The value of each entry has the dict's value type, which the analysis does not follow.
+        if (item.valueVariable !== undefined)
+          inner.names.set(item.valueVariable, binding(item, item.valueVariable, null, UNKNOWN));
         for (const child of item.body) statement(child, inner);
         return;
       }
