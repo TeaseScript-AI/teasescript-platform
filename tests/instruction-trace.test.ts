@@ -106,11 +106,13 @@ function traced(
 
 /**
  * What single-stepping the same call observes: the instruction at each step that ran one, rather than starting a timer,
- * media, or button block, and the successor of each that chooses its successor.
+ * media, or button block, and the successor of each that chooses its successor. Like `run`, it steps until nothing is
+ * left to execute, or until `stop` accepts a step.
  */
 function stepped(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
+  stop: (step: RuntimeOperationResult) => boolean = () => false,
 ): { readonly trace: RuntimeInstructionTrace; readonly snapshot: RuntimeSnapshot } {
   const instructions = new Set<number>();
   const branches = new Map<string, readonly [number, number]>();
@@ -121,10 +123,12 @@ function stepped(
     const step = executeInstruction(plan, current);
     if (step.instructionsExecuted === 0) break;
     current = step.snapshot;
-    if (interruptions(current) > blocks) continue;
-    instructions.add(before);
-    if (current.status !== "failed" && DECISIONS.has(plan.instructions[before]!.kind))
-      branches.set(`${before} ${current.nextInstruction}`, [before, current.nextInstruction]);
+    if (interruptions(current) <= blocks) {
+      instructions.add(before);
+      if (current.status !== "failed" && DECISIONS.has(plan.instructions[before]!.kind))
+        branches.set(`${before} ${current.nextInstruction}`, [before, current.nextInstruction]);
+    }
+    if (stop(step)) break;
   }
   return {
     trace: {
@@ -246,26 +250,18 @@ test("a traced run reports every instruction and each branch outcome it took", (
 
 test("stepToEvent and executeInstruction return the trace of what each call executed", () => {
   const plan = compile(CONTROL_FLOW);
-  const [whole] = traced(plan);
-  for (const step of [stepToEvent, executeInstruction]) {
-    const instructions = new Set<number>();
-    const branches = new Set<string>();
+  const calls = [
+    { step: stepToEvent, stop: (step: RuntimeOperationResult) => step.events.length > 0 },
+    { step: executeInstruction, stop: () => true },
+  ];
+  for (const { step, stop } of calls) {
     let snapshot = fresh(plan);
     while (snapshot.status !== "halted") {
       const { instructionTrace, ...result } = step(plan, snapshot, {}, { instructionTrace: true });
       assert.deepEqual(result, step(plan, snapshot));
-      for (const index of instructionTrace!.instructions) instructions.add(index);
-      for (const branch of instructionTrace!.branches) branches.add(branch.join(" "));
+      assert.deepEqual(instructionTrace, stepped(plan, snapshot, stop).trace);
       snapshot = result.snapshot;
     }
-    assert.deepEqual(
-      [...instructions].sort((left, right) => left - right),
-      whole!.instructions,
-    );
-    assert.deepEqual(
-      [...branches].sort(),
-      whole!.branches.map((branch) => branch.join(" ")).sort(),
-    );
   }
 });
 
@@ -369,13 +365,32 @@ test("a failing instruction is in the trace of the run that fails", () => {
   assert.deepEqual([...lines(plan, trace!)], ["main.tease:1", "main.tease:2"]);
 });
 
-test("execution after a checkpoint restore is traced as without the restore", () => {
-  const plan = compile(ASK);
-  const waiting = run(plan, fresh(plan)).snapshot;
-  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, waiting)));
-  const [, direct] = traced(plan, [answer(0)], waiting);
-  const [, afterRestore] = traced(restored.plan, [answer(0)], restored.snapshot);
-  assert.deepEqual(afterRestore, direct);
-  assert.deepEqual(outcomes(restored.plan, afterRestore!), ["main.tease:2 false"]);
-  assert.ok(lines(restored.plan, afterRestore!).has("main.tease:5"));
+test("an ask a timer block suspends resumes after it, also from a checkpoint restored meanwhile", () => {
+  const plan = compile(
+    [
+      "timer async 1 {",
+      '    let inner = choose x: "X", y: "Y"',
+      '    say "inner ${inner}"',
+      "}",
+      'let outer = choose a: "A", b: "B"',
+      'if outer == "b" {',
+      '    say "b"',
+      "}",
+      "exit",
+    ].join("\n"),
+  );
+  const atOneSecond: HostInput = (plan, snapshot) => observeTime(plan, snapshot, 1_000, []);
+  const [, inBlock, afterBlock, resumed] = traced(plan, [atOneSecond, answer(1), answer(1)]);
+  assert.ok(
+    lines(plan, inBlock!).has("main.tease:2") && !lines(plan, inBlock!).has("main.tease:3"),
+  );
+  assert.ok(lines(plan, afterBlock!).has("main.tease:3"));
+  assert.ok(!lines(plan, afterBlock!).has("main.tease:6"));
+  assert.deepEqual(outcomes(plan, resumed!), ["main.tease:6 true"]);
+  assert.ok(lines(plan, resumed!).has("main.tease:7"));
+  // Restored while the block's ask waits and the outer ask is suspended, both asks resume as without the restore.
+  const suspended = run(plan, atOneSecond(plan, run(plan, fresh(plan)).snapshot).snapshot).snapshot;
+  const restored = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, suspended)));
+  const [, ...afterRestore] = traced(restored.plan, [answer(1), answer(1)], restored.snapshot);
+  assert.deepEqual(afterRestore, [afterBlock, resumed]);
 });
