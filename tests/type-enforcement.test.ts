@@ -707,6 +707,22 @@ test("a variable that starts as null takes the type of its first non-null value 
     `let box = { t: null }\nfunction setT(t) {\n    box.t = t\n}\nfunction show {\n    let v = box.t\n    let o = 0\n    if v != null {\n        o = v\n    }\n    say "\${o}"\n}\nshow()\nsetT(${argument})\nshow()\nexit`;
   assert.deepEqual(sayTexts(unknownStore("5")), ["0", "5"]);
   assert.equal(runValidSource(unknownStore('"high"')).snapshot.failure?.code, "TSR058");
+  // Also when the unknown value replaces the whole object, or arrives through a function's result.
+  for (const [store, read] of [
+    ["box = t", "box.t"],
+    ["box.t = t", "get()"],
+  ] as const) {
+    const source = (argument: string) =>
+      `let box = { t: null }\nfunction setT(t) {\n    ${store}\n}\nfunction get {\n    return box.t\n}\nfunction show {\n    let v = ${read}\n    let o: integer = 0\n    if v != null {\n        o = v\n    }\n    say o\n}\nshow()\nsetT(${argument})\nshow()\nexit`;
+    const argument =
+      store === "box = t" ? (value: string) => `{ t: ${value} }` : (value: string) => value;
+    assert.deepEqual(sayTexts(source(argument("5"))), ["0", "5"], store);
+    assert.equal(
+      runValidSource(source(argument('"high"'))).snapshot.failure?.code,
+      "TSR058",
+      store,
+    );
+  }
   // A place that holds itself is never decided further, so the check ends.
   assert.deepEqual(
     codes("let a = []\na.add(a)\nlet b = { n: null }\nlet c = b.n\nb.n = b\nexit"),

@@ -658,10 +658,7 @@ function* settleTask(
 ): CompileTask<void> {
   const source = canonical(sourceType);
   if (source.kind === "unknown") {
-    for (const member of members(target)) {
-      const slot = resolved(member);
-      if (slot.kind === "open") slot.heldUnknown ??= at;
-    }
+    yield* compileChild(heldUnknownTask(target, at));
     return;
   }
   if (source.kind === "never") return;
@@ -708,6 +705,21 @@ function* settleTask(
       else yield* compileChild(settleTask(kept, value, at));
     }
   }
+}
+
+/**
+ * Notes in every undecided slot of a place, also inside its elements and properties, that a value the compiler cannot
+ * know was stored at `at`: such a value may replace any of them (see {@link OpenType.heldUnknown}).
+ */
+function* heldUnknownTask(type: StaticType, at: SourceSpan): CompileTask<void> {
+  if (type.kind === "open") {
+    if (type.resolved === null) type.heldUnknown ??= at;
+    else yield* compileChild(heldUnknownTask(type.resolved, at));
+  } else if (type.kind === "union")
+    for (const member of type.members) yield* compileChild(heldUnknownTask(member, at));
+  else if (isCollection(type)) yield* compileChild(heldUnknownTask(type.element, at));
+  else if (type.kind === "object" && type.properties !== null)
+    for (const value of type.properties.values()) yield* compileChild(heldUnknownTask(value, at));
 }
 
 /**
@@ -1180,7 +1192,13 @@ function* joinTask(
     // No value decided either side yet. An undecided place stays undecided and keeps whether null came first.
     if (left.kind === "never" && right.kind === "never") return NEVER_TYPE;
     if (!members(left).some(isOpen) && !members(right).some(isOpen)) return NULL_TYPE;
-    return nullable ? optional(openType()) : openType();
+    // A slot that a value the compiler cannot know reached keeps that, so a known place still checks what it holds.
+    const slot = openType();
+    const held = [...members(left), ...members(right)].find(
+      (member): member is OpenType => member.kind === "open" && member.heldUnknown !== undefined,
+    );
+    if (held !== undefined) slot.heldUnknown = held.heldUnknown!;
+    return nullable ? optional(slot) : slot;
   }
   const value =
     leftValue.kind === "never"
