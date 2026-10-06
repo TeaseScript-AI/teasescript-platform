@@ -127,22 +127,23 @@ function transfer(scope: string, bytes = PNG): StorageTransfer {
 function createHost(context: TestContext, provider: MemoryProvider) {
   stubBrowser(context);
   const repository = new FakeMediaRepository();
+  const decoded: number[] = [];
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
       scriptStorage: provider,
       capturedMedia: { repository },
-      // Like a browser, only images decode.
+      // Like a browser, which cannot decode an image cut off after its signature.
       decodeImage: async (data) => {
-        const header = new Uint8Array(await data.slice(0, 8).arrayBuffer());
-        if (header[1] !== 0x50) throw new Error("not an image");
+        decoded.push(data.size);
+        if (data.size <= 8) throw new Error("truncated image");
         return { width: 2, height: 2 };
       },
     }),
   );
   assert.ok(host);
   context.after(() => scope.stop());
-  return { host, repository };
+  return { host, repository, decoded };
 }
 
 // The composable runs from Vite's module graph, whose error class is another instance than this test's import.
@@ -214,16 +215,13 @@ test("an import ends the running session, stores its photos under new references
 test("an import is refused before anything changes for another script's data or a damaged photo", async (context) => {
   const provider = new MemoryProvider("script");
   provider.entries.set("kept", 1);
-  const { host, repository } = createHost(context, provider);
+  const { host, repository, decoded } = createHost(context, provider);
   await start(host, 'let answer = askText("Waiting")\nexit');
   const refusals: [StorageTransfer, RegExp][] = [
     [transfer("another script"), /belongs to another script/],
     [transfer("script", Uint8Array.from([1, 2, 3, 4])), /Saved photo 1 is damaged/],
-    // A PNG signature the browser cannot decode.
-    [
-      transfer("script", Uint8Array.from([0x89, 0x51, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
-      /Saved photo 1 is damaged/,
-    ],
+    // A PNG signature, cut off before any image data, that the browser cannot decode.
+    [transfer("script", PNG.slice(0, 8)), /Saved photo 1 is damaged/],
   ];
   for (const [incoming, message] of refusals) {
     await assert.rejects(
@@ -231,6 +229,8 @@ test("an import is refused before anything changes for another script's data or 
       (error: unknown) => isTransferError(error) && message.test(error.message),
     );
   }
+  // Only the truncated PNG passed sniffing and reached the decoder.
+  assert.deepEqual(decoded, [8]);
   assert.ok(host.session.value, "the session continues");
   assert.deepEqual([...provider.entries], [["kept", 1]]);
   assert.equal(repository.size, 0);

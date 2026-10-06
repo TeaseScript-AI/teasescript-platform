@@ -2363,13 +2363,42 @@ async function savedDataImportScenario(debugPort, origin, exported) {
     // A dropped file; confirming ends the session, and the next Start shows the imported photo.
     await openImport();
     const bytes = (await readFile(exported.file)).toString("base64");
+    const drop = (names) =>
+      evaluate(
+        cdp,
+        `const bytes = Uint8Array.from(atob(${JSON.stringify(bytes)}), (character) => character.charCodeAt(0));
+        const transfer = new DataTransfer();
+        for (const name of ${JSON.stringify(names)}) transfer.items.add(new File([bytes], name));
+        document.querySelector('[data-import-drop]').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));`,
+      );
+    // Refusing a drop of two files also discards a file still being read, which never becomes the review.
     await evaluate(
       cdp,
-      `const bytes = Uint8Array.from(atob(${JSON.stringify(bytes)}), (character) => character.charCodeAt(0));
-      const transfer = new DataTransfer();
-      transfer.items.add(new File([bytes], 'saved.teasestorage.json.gz'));
-      document.querySelector('[data-import-drop]').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));`,
+      `const read = File.prototype.arrayBuffer;
+      window.__releaseHeld = null;
+      File.prototype.arrayBuffer = function () {
+        if (this.name !== 'held.teasestorage.json.gz') return read.call(this);
+        return new Promise((resolve) => (window.__releaseHeld = () => resolve(read.call(this))));
+      };`,
     );
+    await drop(["held.teasestorage.json.gz"]);
+    await waitFor(cdp, `typeof window.__releaseHeld === 'function'`);
+    await drop(["first.teasestorage.json.gz", "second.teasestorage.json.gz"]);
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-import-problem]')?.textContent.includes('Drop one exported file.') === true`,
+    );
+    await evaluate(cdp, `window.__releaseHeld();`);
+    await delay(500);
+    assertEqual(
+      await value(
+        cdp,
+        `!document.querySelector('[data-import-confirm]') && document.querySelector('[data-import-problem]')?.textContent.includes('Drop one exported file.') === true`,
+      ),
+      true,
+      "A file read before a refused drop became the import review",
+    );
+    await drop(["saved.teasestorage.json.gz"]);
     await waitFor(
       cdp,
       `!!document.querySelector('[data-import-confirm]')`,
