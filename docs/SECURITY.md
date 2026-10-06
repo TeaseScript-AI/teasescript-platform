@@ -46,6 +46,9 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
 - Authored Standard-chat message markup crosses into the Player as validated typed blocks and spans. Angle-bracket HTML
   remains literal text, controlled style values cannot carry arbitrary CSS, and only canonical HTTP(S) targets become
   links. The Player renders this structure without a raw-HTML path and opens links with opener isolation.
+- Saved script data moves between browsers only by the player's own hand ([transfer](DATA-AND-API.md#saved-data-transfer)):
+  an export stays in the browser until the player downloads or copies it, with no upload, URL, or clipboard read. It is
+  neither encrypted nor signed and can contain private photos, which the Player says when exporting.
 
 ## Accepted pending-action boundary
 

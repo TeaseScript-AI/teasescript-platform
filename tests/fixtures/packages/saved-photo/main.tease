@@ -1,0 +1,15 @@
+---
+title: "Saved photo"
+---
+let previous = load("photo")
+if previous != null {
+    say "Your saved photo is back."
+    showImage previous
+}
+let picture: string = askImage(hint: "Add an image to save")
+save picture as "photo"
+save 3 as "score"
+say "Saved."
+let unsaved: string = askImage(hint: "Add an image that stays unsaved")
+showImage unsaved
+exit
