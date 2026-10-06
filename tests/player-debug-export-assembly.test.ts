@@ -306,11 +306,25 @@ test("replay data is judged by its actual text: escaped whitespace hides nothing
     "\t/srv/private/notes.txt",
     "file:///home/player/notes.txt",
     "https://example.com/?key=ghp_abcdefghijklmnopqrstuvwx",
+    // Each kind of rooted path, also right after a URL.
+    "C:\\private\\notes.txt",
+    "C:/private/notes.txt",
+    "\\\\server\\share\\private.txt",
+    "https://example.com/a/b C:/private/notes.txt",
+    "https://example.com/a/b \\\\server\\share\\private.txt",
+    "https://example.com/a/b /srv/private/notes.txt",
   ]) {
     const exported = await exportOf(saved);
     assert.equal(exported.checkpoint, null, JSON.stringify(saved));
     const text = await fileText(exported);
-    for (const part of ["ghp_abcdefghijklmnopqrstuvwx", "/srv/private", "/home/player"])
+    for (const part of [
+      "ghp_abcdefghijklmnopqrstuvwx",
+      "/srv/private",
+      "/home/player",
+      "private/notes",
+      "private\\\\notes",
+      "share",
+    ])
       assert.ok(!text.includes(part), `${JSON.stringify(saved)} keeps ${part}`);
   }
   for (const saved of [
@@ -349,4 +363,22 @@ test("a recording that stopped early still reports the actual failure, and its i
     kind: "incomplete",
     reason: "A call's arguments could not be copied exactly.",
   });
+});
+
+test("a wide list a script saved is checked and replays", async () => {
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(
+    'let many = []\nrepeat 150000 { many.add(0) }\nsave many as "wide"\nexit',
+    { recorder, persistentScriptStorage: true, scriptStorage: [] },
+  );
+  session = completePlayerRuntimeStorageWrite(
+    session,
+    pendingPlayerRuntimeStorageWrite(session.snapshot)!.actionId,
+    true,
+  ).session;
+  assert.equal(session.snapshot.status, "halted");
+  const frozen = candidate(session, recorder);
+  const { exported } = await assembleDebugExport(frozen, all(frozen));
+  assert.notEqual(exported.checkpoint, null);
+  assert.equal(replayDebugExport(parseDebugExport(await fileText(exported))).kind, "reproduced");
 });

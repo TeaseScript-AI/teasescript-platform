@@ -102,9 +102,10 @@ requests, settlements, warnings, failures, and storage edits, which can hold sav
 only when saved values and answers are chosen too; replay data adds the checkpoint of the state a complete record reaches (of the actual state when the record
 is incomplete), or of its anchor as the last good state when that state cannot be checkpointed; photos add the chosen originals and their uses (a recorded image
 answer or capture, or a saved value); Player and browser details add the presentation settings, screen geometry,
-pointer, language, and user agent. Text that looks like a credential, or a rooted file path or file URL outside another URL, is replaced in
-every readable section, and replay data containing it is left out entirely, since changing it would change the replay; such
-detection cannot prove text safe, so the export is never called anonymous.
+pointer, language, and user agent. Text that looks like a credential, or a rooted, drive, or network file path or a file
+URL outside another URL, is replaced in every readable section, and replay data containing it is left out entirely,
+since changing it would change the replay; such detection cannot prove text safe, so the export is never called
+anonymous.
 
 After `npm run build:typescript`, `node tools/debug-export.mjs inspect <file>` summarizes an export without runtime
 values (`--values` prints the recorded arguments and readable sections), and `replay <file>` runs the calls again from

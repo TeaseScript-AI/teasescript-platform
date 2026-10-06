@@ -441,9 +441,10 @@ const CREDENTIAL_PATTERNS = [
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/gu,
   /\bBearer\s+[A-Za-z0-9._~+/-]{16,}/gu,
 ];
-// A path outside a URL: a rooted one of at least two parts, such as /srv/notes.txt or C:\notes, or a file URL.
+// A path outside a URL: a rooted one of at least two parts such as /srv/notes.txt, a drive path such as C:\notes or
+// C:/notes, a network path such as \\server\share, or a file URL.
 const PATH_PATTERNS = [
-  /(?:^|[\s"'(=])(?:\/[^\s"'()/]+\/[^\s"')]+|[A-Za-z]:\\\\?[^\s"')]+)/gu,
+  /(?:^|[\s"'(=])(?:\/[^\s"'()/]+\/[^\s"')]+|[A-Za-z]:[\\/][^\s"')]+|\\\\[^\s"'()\\]+\\[^\s"')]+)/gu,
   /\b[Ff][Ii][Ll][Ee]:\/\/[^\s"')]+/gu,
 ];
 // A URL other than a file URL, whose path is part of an address, not of this computer.
@@ -477,7 +478,7 @@ function containsSecretText(value: unknown): boolean {
   for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
     if (typeof current === "string") {
       if (scrub(current) !== current) return true;
-    } else if (Array.isArray(current)) pending.push(...current);
+    } else if (Array.isArray(current)) for (const item of current) pending.push(item);
     else if (current !== null && typeof current === "object")
       for (const [key, item] of Object.entries(current)) pending.push(key, item);
   }
