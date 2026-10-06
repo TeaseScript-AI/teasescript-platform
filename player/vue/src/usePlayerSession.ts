@@ -42,7 +42,11 @@ import {
   type DebugPhotoCandidate,
 } from "../../debug-export-assembly.js";
 import type { DebugRewoundWhileDebugging } from "../../debug-export.js";
-import type { DebugHistoryMarks, DebugHistorySpill } from "../../debug-history.js";
+import {
+  DEBUG_HISTORY_MEMORY_BUDGET,
+  type DebugHistoryMarks,
+  type DebugHistorySpill,
+} from "../../debug-history.js";
 import { openDebugHistorySpill, sweepDebugHistories } from "../../debug-history-indexeddb.js";
 import { DebugRecorder } from "../../debug-recorder.js";
 import { RuntimeDebugContext } from "../../../src/index.js";
@@ -123,6 +127,8 @@ export interface PlayerSessionOptions {
   temporalContext?: () => TemporalContext;
   /** Opens where Debug's rewind history spills snapshots; IndexedDB by default, `null` keeps them in memory. */
   debugHistorySpill?: () => Promise<DebugHistorySpill | null>;
+  /** Characters of state JSON a rewind history keeps in memory before it spills; diagnostic tuning for tests. */
+  debugHistoryMemoryBudget?: number;
 }
 
 type Activation = {
@@ -864,21 +870,34 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     debugEdits.value = state.marks.editedWhileDebugging;
     rewound.value = state.marks.rewoundWhileDebugging;
   }
-  const adopting = ref(false);
+  // Debug's rewind does one thing at a time: restoring a state (a step, which may read a spilled snapshot) or adopting
+  // the inspected one (which replaces the saved data). Each holds this until it is done, and neither starts meanwhile.
+  const rewindWork = ref<"step" | "adopt" | null>(null);
   let adoption: Promise<boolean> | null = null;
   const editsInFlight = ref(0);
-  /** Whether Debug's rewind may restore a state now: nothing waits for the host or the player. */
-  const canRewind = computed(
+  /** Whether the session may be left for a restored state now: nothing waits for the host or the player. */
+  const rewindReady = computed(
     () =>
       session.value !== null &&
       activation.value === null &&
       !importing.value &&
       !clearing.value &&
       !openingCamera.value &&
-      !adopting.value &&
       editsInFlight.value === 0 &&
       pendingPlayerRuntimeStorageWrite(session.value.snapshot) === null,
   );
+  /** Whether Debug's rewind may begin a step now: the session may be left, and no other rewind work runs. */
+  const canRewind = computed(() => rewindReady.value && rewindWork.value === null);
+  /** Begins a rewind step, if one may begin now; call the returned function once the step is done. */
+  function beginRewindStep(): (() => void) | null {
+    if (!canRewind.value) return null;
+    rewindWork.value = "step";
+    let held = true;
+    return () => {
+      if (held && rewindWork.value === "step") rewindWork.value = null;
+      held = false;
+    };
+  }
   let rewindAdopted: (() => void) | null = null;
   /**
    * Adopts the inspected state as the session: the saved data are replaced by the state's own, as one validated
@@ -886,14 +905,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    * saved data cannot be replaced, the state stays inspected and nothing changes. Resolves to whether it was adopted.
    */
   function adoptRewound(): Promise<boolean> {
-    if (!inspecting.value || adopting.value || session.value === null)
+    if (!inspecting.value || rewindWork.value !== null || session.value === null)
       return Promise.resolve(false);
     adoption = adoptShown(session.value).finally(() => (adoption = null));
     return adoption;
   }
   async function adoptShown(shown: PlayerRuntimeSession): Promise<boolean> {
     const owner = generation.value;
-    adopting.value = true;
+    rewindWork.value = "adopt";
     try {
       if (scriptStorage && shown.snapshot.scriptStoragePersistent)
         await scriptStorage.replace(shown.snapshot.scriptStorage);
@@ -901,7 +920,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       if (!disposed) notices.publish(playerNotices.rewindNotAdopted());
       return false;
     } finally {
-      adopting.value = false;
+      rewindWork.value = null;
     }
     // Turning the value trace on or off rewraps the shown session; only a rewind or a new session replaces it.
     if (disposed || generation.value !== owner || !inspecting.value) return false;
@@ -1240,12 +1259,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       /** Whether a restored state is shown for inspection, which runs only once input adopts it. */
       inspecting: computed(() => inspecting.value),
       /** Whether a restored state is being adopted: its saved data are being replaced. */
-      adopting: computed(() => adopting.value),
+      adopting: computed(() => rewindWork.value === "adopt"),
+      /** Whether a rewind step or an adoption runs now. */
+      working: computed(() => rewindWork.value !== null),
+      /** Whether the session may be left for a restored state, apart from rewind work under way. */
+      ready: rewindReady,
+      beginStep: beginRewindStep,
       /** Whether the session is a restored state: when, and how many rewinds led to it; for its debug export. */
       rewound: computed(() => rewound.value),
       canRewind,
       /** Opens a new spill store for a rewind history. */
       openSpill: options.debugHistorySpill ?? (() => openDebugHistorySpill()),
+      memoryBudget: options.debugHistoryMemoryBudget ?? DEBUG_HISTORY_MEMORY_BUDGET,
       publish: publishRewound,
       /** Adopts the inspected state without new input, so it runs on; resolves to whether it was adopted. */
       resume: () => adoptRewound(),

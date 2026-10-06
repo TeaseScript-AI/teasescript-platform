@@ -121,9 +121,10 @@ still uses is deleted only once that Player is done with it.
 - New input to the inspected state (an answer, a button, a permanent button, or a time skip), or **Resume**, **adopts**
   it as the session before the input is evaluated: the browser's saved data are first replaced by the state's storage
   view, as one replacement through the provider and its captured-media layer, and then the input applies and the
-  session runs and saves as any session. Other input while the state is being adopted is refused. The parked session, the states kept for Forward, and the points after the adopted state are gone; earlier
-  points stay for a later Back. When the saved data cannot be replaced, for example on quota, the state stays
-  inspected, the Player says so, and nothing changes.
+  session runs and saves as any session. The parked session, the states kept for Forward, and the points after the
+  adopted state are gone; earlier points stay for a later Back. When the saved data cannot be replaced, for example on
+  quota, the state stays inspected, the Player says so, and nothing changes. Rewind does one thing at a time: while a
+  step restores a state or a state is being adopted, input to an inspected state, Return, and another step are refused.
 - Every restored state marks the session **Rewound while debugging**, with the scene time of the state the latest
   rewind restored and how many rewinds led to it, which an adopted state keeps. The debug recorder and the value trace
   begin anew at every restored state, so a replay never mixes branches.

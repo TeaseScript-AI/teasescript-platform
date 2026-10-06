@@ -71,8 +71,13 @@ interface Rewind {
 let usePlayerSession: (options: {
   scriptStorage: ScriptStorageProvider;
   debugHistorySpill: () => Promise<DebugHistorySpill | null>;
+  debugHistoryMemoryBudget?: number;
 }) => RewindHost;
 let useDebugRewind: (player: RewindHost) => Rewind;
+let usePlayerDebug: (
+  player: RewindHost,
+  initial: { readonly menu: boolean; readonly autoSkip: boolean },
+) => { readonly active: Ref<boolean>; readonly rewind: Readonly<Ref<Rewind | null>> };
 
 before(async () => {
   const server = await createServer({
@@ -90,6 +95,12 @@ before(async () => {
     const rewind: Record<string, unknown> = await server.ssrLoadModule(
       "/player/vue/src/useDebugRewind.ts",
     );
+    const debug: Record<string, unknown> = await server.ssrLoadModule(
+      "/player/vue/src/usePlayerDebug.ts",
+    );
+    assert.equal(typeof debug.usePlayerDebug, "function");
+    // EVIDENCE: validation: as above.
+    usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
     assert.equal(typeof session.usePlayerSession, "function");
     assert.equal(typeof rewind.useDebugRewind, "function");
     // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
@@ -151,19 +162,36 @@ function memoryStorage() {
 function memorySpill() {
   const state = { destroyed: 0 };
   const rows = new Map<number, string>();
+  let getHeld: Promise<void> | null = null;
   const spill: DebugHistorySpill = {
     put: async (id, json) => void rows.set(id, json),
-    get: async (id) => rows.get(id),
+    get: async (id) => {
+      await getHeld;
+      return rows.get(id);
+    },
     delete: async (ids) => ids.forEach((id) => rows.delete(id)),
     destroy: async () => {
       rows.clear();
       state.destroyed += 1;
     },
   };
-  return { spill, state };
+  return {
+    spill,
+    state,
+    /** Holds every read until `release` is called. */
+    holdGets() {
+      let release!: () => void;
+      getHeld = new Promise((resolve) => (release = resolve));
+      return () => release();
+    },
+  };
 }
 
-function createHost(context: TestContext, provider: ScriptStorageProvider) {
+function createHost(
+  context: TestContext,
+  provider: ScriptStorageProvider,
+  options: { readonly memoryBudget?: number } = {},
+) {
   // Event targets are the only browser surface these scripts use; no media elements are created.
   for (const name of ["document", "window"]) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, name);
@@ -177,7 +205,13 @@ function createHost(context: TestContext, provider: ScriptStorageProvider) {
   const spill = memorySpill();
   const scope = effectScope();
   const host = scope.run(() =>
-    usePlayerSession({ scriptStorage: provider, debugHistorySpill: async () => spill.spill }),
+    usePlayerSession({
+      scriptStorage: provider,
+      debugHistorySpill: async () => spill.spill,
+      ...(options.memoryBudget === undefined
+        ? {}
+        : { debugHistoryMemoryBudget: options.memoryBudget }),
+    }),
   );
   assert.ok(host);
   // Debug's features have a scope of their own, which turning Debug off stops.
@@ -188,7 +222,7 @@ function createHost(context: TestContext, provider: ScriptStorageProvider) {
     debug.stop();
     scope.stop();
   });
-  return { host, rewind, debug, scope, spill: spill.state };
+  return { host, rewind, debug, scope, spill: spill.state, holdGets: spill.holdGets };
 }
 
 // Lets storage writes report, which the host does in a later task.
@@ -206,7 +240,9 @@ const script = [
   'save first as "pick"',
   'say "first ${first}", instant',
   'let second = choose "Red", "Blue"',
+  'save second as "color"',
   'say "second ${second}", instant',
+  'let third = choose "A", "B"',
   "exit",
 ].join("\n");
 
@@ -481,4 +517,51 @@ test("every restored state begins a new epoch of the value trace, which may turn
   assert.equal(host.rewind.inspecting.value, false);
   assert.deepEqual(said(host), ["Two", "first Two"]);
   assert.deepEqual(storage.saved(), { k: 1, pick: "Two" });
+});
+
+test("turning the Debug switch off while an adoption fails reinstates the session, also as the trace turns off", async (context) => {
+  const storage = memoryStorage();
+  const { host, debug: rewindScope } = createHost(context, storage.provider);
+  // The Player's own Debug features, as the Debug panel's switch turns them on and off.
+  rewindScope.stop();
+  const scope = effectScope();
+  const debug = scope.run(() => usePlayerDebug(host, { menu: true, autoSkip: false }))!;
+  context.after(() => scope.stop());
+  await start(context, host);
+  await choose(context, host, "One");
+  const tip = host.session.value!;
+  assert.equal(await debug.rewind.value!.back(0), true);
+  const release = storage.holdReplaces();
+  storage.failReplaces();
+  const chosen = choose(context, host, "Two");
+  debug.active.value = false;
+  release();
+  await chosen;
+  assert.equal(host.rewind.inspecting.value, false);
+  assert.deepEqual(host.session.value?.snapshot, tip.snapshot);
+  assert.deepEqual(said(host), ["One", "first One"]);
+  assert.deepEqual(storage.saved(), { k: 1, pick: "One" });
+});
+
+test("input is refused while a step reads a spilled state, so the saved data stay as the shown session's", async (context) => {
+  const storage = memoryStorage();
+  // Every point is spilled, so each step reads its state back.
+  const { host, rewind, holdGets } = createHost(context, storage.provider, { memoryBudget: 1 });
+  await start(context, host);
+  await choose(context, host, "One");
+  await choose(context, host, "Red");
+  assert.deepEqual(storage.saved(), { k: 1, pick: "One", color: "Red" });
+  assert.equal(await rewind.back(1), true);
+  const release = holdGets();
+  const back = rewind.back(0);
+  assert.equal(await host.prepareInput(), false);
+  assert.equal(rewind.returnToSession(), false);
+  release();
+  assert.equal(await back, true);
+  assert.deepEqual(storage.saved(), { k: 1, pick: "One", color: "Red" });
+  assert.equal(rewind.returnToSession(), true);
+  const view = Object.fromEntries(
+    host.session.value!.snapshot.scriptStorage.map((entry) => [entry.key, entry.value]),
+  );
+  assert.deepEqual(view, storage.saved());
 });

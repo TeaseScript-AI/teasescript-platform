@@ -40,7 +40,7 @@ export function useDebugRewind(player: PlayerSessionHost) {
   }
   function follow(session: PlayerRuntimeSession | null) {
     if (publishing || session === null) return;
-    history.value ??= new DebugHistory(session.plan, rewind.openSpill());
+    history.value ??= new DebugHistory(session.plan, rewind.openSpill(), rewind.memoryBudget);
     history.value.follow(session, marks());
     revision.value++;
   }
@@ -81,8 +81,10 @@ export function useDebugRewind(player: PlayerSessionHost) {
   // Runs one rewind step; a failure, such as a state that could not be read back, changes nothing and is reported.
   async function step(restore: (history: DebugHistory) => Promise<DebugHistoryRestore>) {
     const current = history.value;
-    const session = player.session.value;
-    if (current === null || session === null || busy.value || !rewind.canRewind.value) return false;
+    if (current === null) return false;
+    // While the step runs, no other step, adoption, or input to an inspected state does.
+    const done = rewind.beginStep();
+    if (done === null) return false;
     busy.value = true;
     problem.value = null;
     try {
@@ -96,6 +98,7 @@ export function useDebugRewind(player: PlayerSessionHost) {
       return false;
     } finally {
       busy.value = false;
+      done();
     }
   }
 
@@ -104,7 +107,7 @@ export function useDebugRewind(player: PlayerSessionHost) {
     step((current) =>
       current.back(index, () => {
         const session = player.session.value;
-        return session === null || !rewind.canRewind.value ? null : { session, marks: marks() };
+        return session === null || !rewind.ready.value ? null : { session, marks: marks() };
       }),
     );
   /** Restores the state the last Back left. */
@@ -113,7 +116,7 @@ export function useDebugRewind(player: PlayerSessionHost) {
   /** Reinstates the session the first Back left, as it was then; the restored states go. */
   function returnToSession() {
     const current = history.value;
-    if (current?.inspection == null || busy.value || rewind.adopting.value) return false;
+    if (current?.inspection == null || rewind.working.value) return false;
     reinstate(current.returnToSession());
     return true;
   }
@@ -136,7 +139,7 @@ export function useDebugRewind(player: PlayerSessionHost) {
   }
 
   // Turning Debug off leaves no restored state inspected: one whose adoption is under way is reinstated only if that
-  // adoption fails.
+  // adoption fails and the session is still that generation; a step under way is abandoned with the history.
   tryOnScopeDispose(() => {
     const current = history.value;
     const adoption = rewind.adoption();
@@ -144,9 +147,9 @@ export function useDebugRewind(player: PlayerSessionHost) {
       const parked = current.returnToSession();
       if (adoption === null) reinstate(parked);
       else {
-        const shown = player.session.value;
+        const generation = player.generation.value;
         void adoption.then((adopted) => {
-          if (!adopted && rewind.inspecting.value && player.session.value === shown)
+          if (!adopted && rewind.inspecting.value && player.generation.value === generation)
             reinstate(parked);
         });
       }
