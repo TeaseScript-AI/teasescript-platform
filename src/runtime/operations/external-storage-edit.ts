@@ -6,6 +6,12 @@ import type { SerializableRuntimeValue } from "../serializable-values.js";
 import type { RuntimeSnapshot } from "../state.js";
 import type { PendingActionOperationResult } from "./model.js";
 import { captureExecutableData, isPlainRecord, pendingResult, takeSequence } from "./support.js";
+import {
+  closeDebugTrace,
+  openDebugTrace,
+  type RuntimeDebugContext,
+  type TraceStore,
+} from "../debug-trace.js";
 
 export type ExternalStorageEditOutcome =
   | { readonly kind: "applied"; readonly key: string; readonly operation: "set" | "delete" }
@@ -27,9 +33,20 @@ export function applyExternalStorageEdit(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   edit: unknown,
+  options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<ExternalStorageEditOutcome> {
   const captured = captureExecutableData(plan, snapshot);
-  const current = captured.snapshot;
+  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
+  const applied = applyCapturedStorageEdit(captured.snapshot, edit, trace);
+  closeDebugTrace(trace, applied);
+  return applied;
+}
+
+function applyCapturedStorageEdit(
+  current: RuntimeSnapshot,
+  edit: unknown,
+  trace: TraceStore | null,
+): PendingActionOperationResult<ExternalStorageEditOutcome> {
   const refuse = (outcome: ExternalStorageEditOutcome) => pendingResult(current, [], outcome);
   const input = captureExternalData(edit);
   if (
@@ -62,6 +79,10 @@ export function applyExternalStorageEdit(
     observedSessionTimeMs: current.observedSessionTimeMs,
   });
   // EVIDENCE: validation: validateScriptStorageEntries accepted a non-null value above; null removes the key.
-  writeScriptStorage(current, key, value as SerializableRuntimeValue);
+  const stored = value as SerializableRuntimeValue;
+  writeScriptStorage(current, key, stored);
+  // A later load reads the edit, which no statement caused.
+  trace?.at(null, current.currentSessionTimeMs);
+  trace?.storage(key, stored, true);
   return pendingResult(current, [event], { kind: "applied", key, operation } as const);
 }

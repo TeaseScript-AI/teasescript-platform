@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  applyExternalStorageEdit,
   compileProject,
   compileSource,
   completeAction,
@@ -653,6 +654,54 @@ test("answers, loads, and saves explain values, and refused or repeated reports 
     defaultEvaluated: true,
   });
   assert.equal(played.trace.storageRecord("lost"), null);
+});
+
+test("a debugging tool's storage edit explains the next load instead of the script's save", () => {
+  const plan = compile(
+    [
+      'save 1 as "level"',
+      'let first = askText "Edit now?"',
+      'let level = load "level"',
+      'say "${level}"',
+      "exit",
+    ].join("\n"),
+  );
+  const trace = new RuntimeDebugContext();
+  const debug = { debugTrace: trace };
+  let snapshot = run(
+    plan,
+    createImmediatePacingRuntimeSnapshot(plan, { seed: SEED }),
+    {},
+    debug,
+  ).snapshot;
+  const save = record(trace, trace.storageRecord("level"));
+  assert.deepEqual(save.detail, { kind: "storage", key: "level", deleted: false, edited: false });
+  const edited = applyExternalStorageEdit(plan, snapshot, { key: "level", value: 7 }, debug);
+  assert.equal(edited.outcome.kind, "applied");
+  const action = edited.snapshot.foregroundAction!;
+  assert.equal(action.kind, "interaction");
+  snapshot = completeAction(
+    plan,
+    edited.snapshot,
+    {
+      actionId: action.actionId,
+      actionKind: "interaction",
+      interactionKind: "text",
+      payload: { kind: "submittedText", submittedText: "yes" },
+    },
+    debug,
+  ).snapshot;
+  const ran = run(plan, snapshot, {}, debug);
+  const said = ran.events.find((event) => event.kind === "say")!;
+  assert.equal(said.kind === "say" && said.text, "7");
+  const load = lineage(trace, trace.outputRecord(said.sequence)).find(
+    (step) => step.kind === "load",
+  )!;
+  assert.deepEqual(
+    causes(trace, load).map((cause) => [cause.preview, cause.detail]),
+    [["7", { kind: "storage", key: "level", deleted: false, edited: true }]],
+  );
+  assert.equal(trace.status().epoch, 1);
 });
 
 test("Stage image changes record where they were set", () => {

@@ -109,7 +109,13 @@ export type RuntimeDebugRecordDetail =
       readonly found: boolean;
       readonly defaultEvaluated: boolean;
     }
-  | { readonly kind: "storage"; readonly key: string; readonly deleted: boolean }
+  | {
+      readonly kind: "storage";
+      readonly key: string;
+      readonly deleted: boolean;
+      /** Set by a debugging tool's edit (`applyExternalStorageEdit`) rather than by the script. */
+      readonly edited: boolean;
+    }
   | { readonly kind: "output"; readonly eventSequence: number }
   | {
       readonly kind: "call";
@@ -744,16 +750,16 @@ export class TraceStore {
     );
   }
 
-  /** A write to the session's storage view. */
-  storage(key: string, value: SerializableRuntimeValue, deps: DebugDependencies = this.acc): void {
+  /** A write to the session's storage view: the script's, or a debugging tool's edit, which has no causes. */
+  storage(key: string, value: SerializableRuntimeValue, edited = false): void {
     this.write(
       "storage",
       storageKeyOf(key),
       key,
       value,
       null,
-      Object.freeze({ kind: "storage", key, deleted: value === null }),
-      deps,
+      Object.freeze({ kind: "storage", key, deleted: value === null, edited }),
+      edited ? emptyDependencies() : this.acc,
     );
   }
 
@@ -775,7 +781,8 @@ export class TraceStore {
     this.pendingStorage = null;
     if (!stored) return;
     this.#instruction = pending.instruction;
-    this.storage(pending.key, pending.value, pending.deps);
+    this.acc = pending.deps;
+    this.storage(pending.key, pending.value);
   }
 
   /** A `say` emitted now with event `sequence`; its text's causes are `deps`. */

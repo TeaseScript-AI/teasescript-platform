@@ -1232,7 +1232,8 @@ The zero-state rule prevents the absorbing xorshift32 state in which every futur
 `RuntimeDebugContext` (`src/runtime/debug-trace.ts`) is an opt-in, host-owned record of why values have the values
 they have. A host passes the same context as `debugTrace` to each operation on a session's successive results: in the
 options of `run`, `stepToEvent`, `executeInstruction`, `runValidatedState`, `completeAction`, `observeTime`,
-`reportMediaLoad`, `pressPermanentButton`, and `recordContinueCapture`, and of every Player adapter session operation.
+`reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and `applyExternalStorageEdit`, and of every Player
+adapter session operation.
 The trace is not part of plans, snapshots, events, or checkpoints and changes no format: an operation returns the same
 snapshot, events, random state, and checkpoint with or without it, and without it execution records nothing.
 
@@ -1245,7 +1246,7 @@ snapshot, events, random state, and checkpoint with or without it, and without i
   supplied and defaulted parameters, and returns; loop sources and loop variables; intermediate values the compiled
   code keeps; accepted answers and button timeouts, only on settlement, so refused and repeated reports record
   nothing; loads, with whether the key was stored and whether a default ran; storage writes, a persistent one once the
-  host reports it stored; random draws, with operation, choices, range, draw numbers, and generator state before and
+  host reports it stored, and a debugging tool's storage edits, which have no causes; random draws, with operation, choices, range, draw numbers, and generator state before and
   after (one record for all draws of a shuffle; no state for an injected random source); the text of each `${...}`;
   each `say` message, by its event sequence; and Stage image changes.
 - **Identity.** A dependency names the record of the version actually read. Variables are keyed by scope ID and name,
