@@ -2055,13 +2055,17 @@ async function savedDataExportScenario(cdp, origin, profile) {
   await openPicker(cdp);
   await setInputFiles(cdp, "[data-composer-file]", [chosen]);
   await waitFor(cdp, text("Saved."), 8_000, "The script did not save its photo");
-  // The second image request waits, and the photo it gets is never saved.
+  // The second image request gets another photo, which is never saved; the session then waits for text.
+  const unsaved = join(profile, "unsaved.png");
+  await writeFile(unsaved, solidPng(24, 16, [200, 30, 30]));
   await waitFor(cdp, visible("[data-composer-attach]"));
   await openPicker(cdp);
-  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await setInputFiles(cdp, "[data-composer-file]", [unsaved]);
   await waitFor(
     cdp,
-    `document.querySelectorAll('.transcript-entry').length > 0 && !${visible("[data-composer-attach]")}`,
+    `!!document.querySelector('[placeholder="Anything else?"]')`,
+    8_000,
+    "The session does not wait after the unsaved photo",
   );
 
   const openExport = async () => {
@@ -2102,6 +2106,12 @@ async function savedDataExportScenario(cdp, origin, profile) {
     await waitFor(cdp, `!document.querySelector(${JSON.stringify(selector)})`);
   };
   await openExport();
+  // Exporting works while the session waits, when clearing does not.
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-clear-saved-data]')?.disabled`),
+    true,
+    "Clearing was offered during the session",
+  );
   const download = await value(
     cdp,
     `(() => { const link = document.querySelector('[data-export-download]'); return { href: link.href, name: link.download }; })()`,
@@ -2217,6 +2227,16 @@ async function savedDataExportScenario(cdp, origin, profile) {
     fit,
     "fits",
     "The export dialog does not fit a narrow screen with touch-sized controls",
+  );
+  await physicalClick(cdp, '[data-export-tab="text"]');
+  await waitFor(cdp, `!!document.querySelector('[data-export-copy]')`);
+  assertEqual(
+    await value(
+      cdp,
+      `[...document.querySelectorAll('[data-export-copy], [data-export-copy] + button')].map((button) => button.getBoundingClientRect().height >= 44).join()`,
+    ),
+    "true,true",
+    "Copy and Select text are not touch-sized",
   );
   await closeDialog("[data-saved-data-export]");
   await closeDialog("[data-player-settings]");

@@ -54,6 +54,7 @@ watch(open, async (isOpen) => {
   tab.value = "file";
   try {
     const { transfer, missingPhotos } = await props.read();
+    if (current !== preparation) return;
     const file = await storageTransferFile(transfer, gzip);
     if (current !== preparation) return;
     state.value = { transfer, missingPhotos, url: URL.createObjectURL(file), size: file.size };
@@ -61,9 +62,11 @@ watch(open, async (isOpen) => {
     if (current === preparation) state.value = "failed";
   }
 });
+// The preparation whose text is being encoded, so switching tabs meanwhile does not encode it again.
+let encoding = -1;
 watch([tab, prepared], async ([selected, ready]) => {
-  if (selected !== "text" || ready === null || text.value !== null) return;
-  const current = preparation;
+  if (selected !== "text" || ready === null || text.value !== null || encoding === preparation) return;
+  const current = (encoding = preparation);
   const result = await storageTransferText(ready.transfer, gzip).catch(() => null);
   if (current !== preparation) return;
   if (result !== null) text.value = result;
@@ -96,14 +99,19 @@ function selectText() {
 }
 async function copyText() {
   if (text.value === null) return;
+  const current = preparation;
+  let copied: boolean;
   try {
     // Unavailable outside secure contexts and refusable; selecting the text then still lets the player copy it.
     await navigator.clipboard.writeText(text.value);
-    copyStatus.value = "copied";
+    copied = true;
   } catch {
-    copyStatus.value = "failed";
-    selectText();
+    copied = false;
   }
+  // A copy that settles after the dialog closed says nothing about a later export.
+  if (current !== preparation) return;
+  copyStatus.value = copied ? "copied" : "failed";
+  if (!copied) selectText();
 }
 
 const count = (amount: number, one: string, many: string) => `${amount} ${amount === 1 ? one : many}`;

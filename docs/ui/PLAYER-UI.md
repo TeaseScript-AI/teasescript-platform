@@ -285,8 +285,8 @@ and includes saves already stored. The dialog counts the values and photos, warn
 photos, and offers two tabs: **File** prepares one file and then downloads it from the player's own press of **Download
 file**; **Text** shows the data in a read-only field with **Copy** and **Select text**, and when copying is refused or
 unavailable it selects the text for copying with the browser. Nothing leaves the browser except through these player
-actions, and closing the dialog releases the prepared file and text. The dialog fits narrow screens, and its controls
-are at least 44px tall.
+actions, and closing the dialog releases the prepared file and text. The dialog fits narrow screens, and its own
+controls are at least 44px tall.
 
 ## Left tools area
 

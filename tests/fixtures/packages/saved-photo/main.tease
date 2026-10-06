@@ -12,4 +12,5 @@ save 3 as "score"
 say "Saved."
 let unsaved: string = askImage(hint: "Add an image that stays unsaved")
 showImage unsaved
+let done = askText(hint: "Anything else?")
 exit
