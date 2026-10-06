@@ -57,3 +57,30 @@ test(
     assert.equal(branch?.targetLine, 8);
   },
 );
+
+test(
+  "a runtime operation that throws is no crash, and its input list replays the throw",
+  { skip: "reason" in engineResult ? engineResult.reason : false },
+  async () => {
+    const { engine } = engineResult as { engine: Engine };
+    // Stands in for a runtime that rejects its own snapshot (TSR101) when the player picks "Stay".
+    const failing: Engine = {
+      ...engine,
+      completeAction: (...args: unknown[]) => {
+        const request = args[2] as { payload?: { optionIndex?: number } };
+        if (request.payload?.optionIndex === 2) throw new Error("TSR101 Malformed runtime snapshot.");
+        return engine.completeAction(...args);
+      },
+    };
+    const source = await readFile(new URL("fixtures/explorer/main.tease", import.meta.url), "utf8");
+    const compiled = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
+    const plan = (compiled as { plan: Readonly<Record<string, unknown>> }).plan;
+    const result = explore(failing, plan, { seed: 1, budgetMs: 30_000, maxStates: 1000, sources: new Map() });
+
+    assert.equal(result.search.engineErrors.count, 1);
+    assert.equal(result.crashes.length, 1);
+    const first = result.search.engineErrors.first!;
+    assert.deepEqual(first.inputs, [{ kind: "option", index: 2, label: "Stay" }]);
+    assert.equal(replay(failing, plan, 1, first.inputs).error, first.message);
+  },
+);

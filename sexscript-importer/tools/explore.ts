@@ -4,14 +4,15 @@
  * `src/explorer.ts`.
  *
  * Usage: node tools/explore.ts [--budget-seconds N] [--max-states N] [--seed N] [--workers 1|2] <unit-dir>... --out <dir>
- *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N)
+ *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
  * per unit and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
  * one worker; two workers explore two units at a time in separate processes.
  *
- * Every crash and trap has the input list from the start that reaches it. `--replay` plays it again with the seed of
- * the run, prints the transcript, and for a crash exits 0 only when the same failure comes back.
+ * Every crash and trap has the input list from the start that reaches it, and so does the first input whose runtime
+ * operation threw (an explorer or runtime problem, not a script failure). `--replay` plays it again with the seed of
+ * the run, prints the transcript, and for a crash or error exits 0 only when the same failure or error comes back.
  * Needs the repository build (`npm run build:typescript` in the repository root).
  */
 import { execFileSync, spawn } from "node:child_process";
@@ -61,11 +62,12 @@ async function main(args: string[]): Promise<void> {
       replay: { type: "string" },
       crash: { type: "string" },
       trap: { type: "string" },
+      error: { type: "boolean", default: false },
       "no-summary": { type: "boolean", default: false },
     },
   });
   if (values.replay !== undefined) {
-    process.exitCode = await replayCommand(values.replay, values.crash, values.trap);
+    process.exitCode = await replayCommand(values.replay, values.crash, values.trap, values.error);
     return;
   }
   const budgetSeconds = Number(values["budget-seconds"]);
@@ -83,7 +85,7 @@ async function main(args: string[]): Promise<void> {
   ) {
     process.stderr.write(
       "Usage: node tools/explore.ts [--budget-seconds N] [--max-states N] [--seed N] [--workers 1|2] <unit-dir>... --out <dir>\n" +
-        "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N)\n",
+        "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --error)\n",
     );
     process.exit(2);
   }
@@ -213,10 +215,22 @@ function explorerCommit(): string {
 }
 
 function withReplayCommands(report: UnitReport, file: string): UnitReport {
-  const command = (flag: string, index: number) =>
-    `node tools/explore.ts --replay ${file} --${flag} ${index}`;
+  const command = (flag: string, index?: number) =>
+    `node tools/explore.ts --replay ${file} --${flag}${index === undefined ? "" : ` ${index}`}`;
+  const error = report.search?.engineErrors.first;
   return {
     ...report,
+    ...(report.search === undefined || error == null
+      ? {}
+      : {
+          search: {
+            ...report.search,
+            engineErrors: {
+              ...report.search.engineErrors,
+              first: Object.assign({}, error, { replay: command("error") }),
+            },
+          },
+        }),
     ...(report.crashes === undefined
       ? {}
       : { crashes: report.crashes.map((crash, index) => ({ ...crash, replay: command("crash", index) })) }),
@@ -292,18 +306,31 @@ function summary(reports: readonly UnitReport[], out: string): string {
     }
     lines.push(`- Branches reached but left only one way: ${coverage.unvisitedBranches.length}`);
     const { engineErrors } = (report as Required<UnitReport>).search;
-    if (engineErrors.count > 0)
-      lines.push(`- Explorer errors: ${engineErrors.count}, first: \`${engineErrors.first}\``);
+    const first = engineErrors.first as { message: string; replay?: string } | null;
+    if (engineErrors.count > 0 && first !== null)
+      lines.push(`- Runtime operations that threw: ${engineErrors.count}, first: ${first.message} (\`${first.replay ?? ""}\`)`);
   }
   return `${lines.join("\n")}\n`;
 }
 
-async function replayCommand(file: string, crash: string | undefined, trap: string | undefined): Promise<number> {
+async function replayCommand(
+  file: string,
+  crash: string | undefined,
+  trap: string | undefined,
+  error: boolean,
+): Promise<number> {
   const report = JSON.parse(await readFile(file, "utf8")) as UnitReport;
   const index = Number(crash ?? trap);
-  const target = crash !== undefined ? report.crashes?.[index] : report.traps?.[index];
-  if ((crash === undefined) === (trap === undefined) || target === undefined) {
-    process.stderr.write("Name one existing --crash N or --trap N of the report.\n");
+  const target =
+    crash !== undefined
+      ? report.crashes?.[index]
+      : trap !== undefined
+        ? report.traps?.[index]
+        : error
+          ? report.search?.engineErrors.first
+          : undefined;
+  if ([crash !== undefined, trap !== undefined, error].filter(Boolean).length !== 1 || target == null) {
+    process.stderr.write("Name one existing --crash N, --trap N, or --error of the report.\n");
     return 2;
   }
   const engine = await loadEngine();
@@ -314,7 +341,8 @@ async function replayCommand(file: string, crash: string | undefined, trap: stri
   }
   if (unit.contentHash !== report.contentHash)
     process.stderr.write("Warning: the package's .tease files changed since the report.\n");
-  const { steps, failure } = replay(engine, unit.plan, report.seed, target.inputs);
+  const replayed = replay(engine, unit.plan, report.seed, target.inputs);
+  const { steps, failure } = replayed;
   for (const step of steps) {
     if (step.input !== null) process.stdout.write(`> ${describeInput(step.input)}\n`);
     for (const text of step.texts) process.stdout.write(`  ${text}\n`);
@@ -324,6 +352,12 @@ async function replayCommand(file: string, crash: string | undefined, trap: stri
   process.stdout.write(
     `Final state: ${last.status}${failure === null ? "" : ` ${failure.code} at ${failure.path}:${failure.line}:${failure.column}: ${failure.message}`}\n`,
   );
+  if (replayed.error !== null) process.stdout.write(`Runtime operation threw: ${replayed.error}\n`);
+  if (error) {
+    const reproduced = replayed.error === report.search!.engineErrors.first!.message;
+    process.stdout.write(reproduced ? "Reproduced.\n" : "Not reproduced.\n");
+    return reproduced ? 0 : 1;
+  }
   if (crash === undefined) return 0;
   const expected = report.crashes![index]!;
   const reproduced =

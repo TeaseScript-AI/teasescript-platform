@@ -721,8 +721,11 @@ export interface ExploreResult {
     expanded: number;
     /** Inputs the runtime did not accept, such as an answer to an interaction inside a running timer block. */
     rejectedInputs: number;
-    /** Inputs whose operation threw: a problem of the explorer, not of the package. */
-    engineErrors: { count: number; first: string | null };
+    /**
+     * Inputs whose operation threw, such as a runtime that rejects a snapshot it produced itself (`TSR101`): a problem
+     * of the explorer or the runtime, not of the package. `first` has the input list from the start that throws.
+     */
+    engineErrors: { count: number; first: { message: string; inputs: ExplorerInput[] } | null };
     untracedRuns: number;
     stoppedBy: "exhausted" | "budget" | "maxStates";
     elapsedMs: number;
@@ -862,7 +865,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       } catch (error) {
         // The runtime refused data it was given (RuntimeDataError): a harness problem, not a script failure.
         engineErrors.count += 1;
-        engineErrors.first ??= `${JSON.stringify(input)}: ${String(error)}`;
+        engineErrors.first ??= { message: String(error), inputs: [...pathTo(nodes, node), input] };
         continue;
       }
       if (step === null) {
@@ -1238,13 +1241,21 @@ export interface ReplayStep {
   readonly status: string;
 }
 
-/** Replays an input list from a fresh session; the last step holds the final state. */
+/**
+ * Replays an input list from a fresh session; the last step holds the final state. An operation that throws ends the
+ * replay with its `error`.
+ */
 export function replay(
   engine: Engine,
   plan: Data,
   seed: number,
   inputs: readonly ExplorerInput[],
-): { steps: ReplayStep[]; snapshot: Data; failure: ReturnType<typeof failureOf> | null } {
+): {
+  steps: ReplayStep[];
+  snapshot: Data;
+  failure: ReturnType<typeof failureOf> | null;
+  error: string | null;
+} {
   const session = new Session(engine, plan, seed);
   let step = session.start();
   const describe = (input: ExplorerInput | null, current: Step): ReplayStep => ({
@@ -1254,8 +1265,15 @@ export function replay(
     status: String(current.snapshot.status),
   });
   const steps = [describe(null, step)];
+  let error: string | null = null;
   for (const input of inputs) {
-    const next = session.apply(step.snapshot, input);
+    let next: Step | null;
+    try {
+      next = session.apply(step.snapshot, input);
+    } catch (thrown) {
+      error = String(thrown);
+      break;
+    }
     if (next === null) throw new Error(`The runtime rejected input ${JSON.stringify(input)} at step ${steps.length}.`);
     step = next;
     steps.push(describe(input, step));
@@ -1264,5 +1282,6 @@ export function replay(
     steps,
     snapshot: step.snapshot,
     failure: step.snapshot.status === "failed" ? failureOf(step.snapshot) : null,
+    error,
   };
 }
