@@ -27,6 +27,7 @@ import {
   type CapturedMediaAdmission,
 } from "../actions/capture.js";
 import { resolveInteractionCompletion } from "../actions/interaction.js";
+import { timedOutFormResult } from "../actions/form.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import { settleBackgroundPacingGate } from "./pacing-gate.js";
@@ -505,8 +506,9 @@ function completeInteraction(
 }
 
 /**
- * A button reaches its timeout during time observation. It completes normally without a player transcript, and a
- * button used as a value yields exactly its timeout.
+ * A button or form reaches its timeout during time observation. It completes normally without a player transcript; a
+ * button used as a value yields exactly its timeout, and a form its answers as they stand or `null`, as its
+ * `onTimeout` says.
  */
 export function timeOutButton(
   plan: InstructionPlan,
@@ -525,9 +527,11 @@ export function timeOutButton(
       transcriptEventSequence: null,
       completionEventSequence: completionSequence,
       result:
-        action.expectedResult === "duration"
-          ? Object.freeze({ kind: "duration" as const, milliseconds: action.timeoutMs })
-          : null,
+        action.ui.kind === "form" && action.form !== undefined
+          ? timedOutFormResult(action.ui, action.form)
+          : action.expectedResult === "duration"
+            ? Object.freeze({ kind: "duration" as const, milliseconds: action.timeoutMs })
+            : null,
       transcriptText: null,
     },
     trace,

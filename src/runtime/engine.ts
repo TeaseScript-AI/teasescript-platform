@@ -845,7 +845,9 @@ function executePlannedInstruction(
               snapshot,
               instruction.span,
             )
-          : null;
+          : materialized.ui.kind === "form" && materialized.ui.timeout !== null
+            ? formTimeoutMs(materialized.ui.timeout.milliseconds, snapshot, instruction.span)
+            : null;
       const backgroundGate = snapshot.backgroundActions.find(
         (action): action is RuntimeChatPacingGateActionSnapshot => action.kind === "chatPacingGate",
       );
@@ -2013,6 +2015,14 @@ function cloneInteractionAction(
  * A `showButton` timeout in milliseconds: a number of seconds or an elapsed duration greater than zero whose deadline
  * is a representable later scene time.
  */
+/** A form's time limit, whose deadline must be a representable later scene time. */
+function formTimeoutMs(timeoutMs: number, snapshot: RuntimeSnapshot, span: SourceSpan): number {
+  const deadlineMs = snapshot.currentSessionTimeMs + timeoutMs;
+  if (!isValidSessionTime(deadlineMs) || deadlineMs <= snapshot.currentSessionTimeMs)
+    throw fault("TSR052", "The askForm timeout is outside the supported session-time range.", span);
+  return timeoutMs;
+}
+
 function buttonTimeoutMs(
   value: SerializableRuntimeValue,
   snapshot: RuntimeSnapshot,

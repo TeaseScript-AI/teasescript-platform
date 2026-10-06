@@ -39,6 +39,7 @@ import {
 import {
   describeRuntimeValue,
   isDate,
+  isDuration,
   isDateTime,
   isDict,
   isList,
@@ -94,6 +95,8 @@ export function materializeForm(
   let outro: string | null = null;
   let submit: FormUi["submit"] = { text: DEFAULT_SUBMIT_TEXT };
   let cancel: FormUi["cancel"] = null;
+  let timeoutValue: SerializableRuntimeValue | undefined;
+  let onTimeout: SerializableRuntimeValue | undefined;
   for (const { name, value } of request.properties) {
     if (name === "message") continue;
     if (name === "fields") fieldsValue = value;
@@ -103,6 +106,8 @@ export function materializeForm(
     else if (name === "outro") outro = fieldText(value, span, context);
     else if (name === "submit") submit = formButton(name, value, context, span);
     else if (name === "cancel") cancel = formButton(name, value, context, span);
+    else if (name === "timeout") timeoutValue = value;
+    else if (name === "onTimeout") onTimeout = value;
     else throw fault("The prepared form request is malformed.", span);
   }
 
@@ -184,9 +189,28 @@ export function materializeForm(
       `askForm field '${mismatch.field.id}' was checked to answer ${describeType(mismatch.type)}, but it can answer ${describeValue(mismatch.answer)}. Write type: where the field's starting object is created, so the compiler sees its kind.`,
       copySpan(span),
     );
+  const timeout = formTimeout(timeoutValue, onTimeout, span);
+  // Submitting at the time limit returns the answers as they stand, so every field needs one from the start.
+  if (timeout?.onTimeout === "submit") {
+    const unset = fields.find((_field, index) => values[index] === null);
+    if (unset !== undefined)
+      throw fault(
+        `askForm field '${unset.id}': onTimeout: "submit" needs a value in every field, but it has none.`,
+        span,
+      );
+  }
   const prose = [descriptions.join("\n"), outro ?? ""].filter((part) => part !== "").join("\n\n");
   return {
-    ui: { kind: "form", shape: prepared.kind, fields, hint, submit, cancel, accessibleName },
+    ui: {
+      kind: "form",
+      shape: prepared.kind,
+      fields,
+      hint,
+      submit,
+      cancel,
+      timeout,
+      accessibleName,
+    },
     state: { values, editor: null },
     prose: prose === "" ? null : prose,
   };
@@ -244,6 +268,38 @@ const SAMPLE_TEMPORAL_TEXT = {
   time: "00:00",
   datetime: "2000-01-01T00:00",
 } as const;
+
+/**
+ * A form's time limit: `timeout:`, a number of seconds or an elapsed duration greater than zero, with `onTimeout:`
+ * `"submit"` or `"cancel"`; each needs the other.
+ */
+function formTimeout(
+  value: SerializableRuntimeValue | undefined,
+  onTimeout: SerializableRuntimeValue | undefined,
+  span: SourceSpan,
+): FormUi["timeout"] {
+  if (value === undefined && onTimeout === undefined) return null;
+  if (onTimeout !== "submit" && onTimeout !== "cancel")
+    throw fault(
+      `askForm onTimeout: takes "submit" or "cancel"${value === undefined ? "" : ", and timeout: needs it"}.`,
+      span,
+    );
+  if (value === undefined)
+    throw fault("askForm onTimeout: needs timeout:, such as 'timeout: 30 s'.", span);
+  // A calendar duration has no fixed length.
+  const milliseconds =
+    typeof value === "number"
+      ? value * 1_000
+      : isDuration(value) && value.months === undefined && value.days === undefined
+        ? value.milliseconds
+        : Number.NaN;
+  if (!(milliseconds > 0) || !Number.isFinite(milliseconds))
+    throw fault(
+      "askForm timeout: must be a number of seconds or a duration greater than zero, such as 'timeout: 30' or 'timeout: 2 min'.",
+      span,
+    );
+  return { milliseconds, onTimeout };
+}
 
 /** Names the field in a failure of its text or options, such as an invalid colour. */
 function fieldWithContext<T>(id: string, build: () => T): T {
@@ -498,6 +554,15 @@ export function formRequestValue(ui: FormUi): SerializableRuntimeValue {
         ["text", ui.submit.text],
         ["background", ui.submit.background],
       ]),
+    ],
+    [
+      "timeout",
+      ui.timeout === null
+        ? null
+        : object([
+            ["milliseconds", ui.timeout.milliseconds],
+            ["onTimeout", ui.timeout.onTimeout],
+          ]),
     ],
     [
       "cancel",
@@ -756,19 +821,44 @@ export function submitForm(ui: FormUi, state: RuntimeFormStateSnapshot): FormSub
   );
   if (missing !== undefined) return refused(`That is wrong. ${missing.text} needs a value.`);
   const answers = ui.fields.map((field, index) => formAnswer(field, values[index]!));
-  const result: InteractionResultValue =
-    ui.shape === "object"
+  return {
+    ok: true,
+    result: formResult(ui, answers),
+    transcriptText: formSummaryText(ui, answers),
+  };
+}
+
+/**
+ * What a form returns when its time limit is reached: `null` for `onTimeout: "cancel"`, or for `"submit"` its answers
+ * as they stand, without the text being edited. Every required field has had a value from the start.
+ */
+export function timedOutFormResult(
+  ui: FormUi,
+  state: RuntimeFormStateSnapshot,
+): InteractionResultValue {
+  if (ui.timeout?.onTimeout !== "submit") return null;
+  return formResult(
+    ui,
+    ui.fields.map((field, index) => formAnswer(field, state.values[index]!)),
+  );
+}
+
+/** The answers as the form's shape: an object, a dict, or a list of booleans. */
+function formResult(
+  ui: FormUi,
+  answers: readonly SerializableRuntimeValue[],
+): InteractionResultValue {
+  return ui.shape === "object"
+    ? {
+        kind: "object",
+        properties: ui.fields.map((field, index) => ({ name: field.id, value: answers[index]! })),
+      }
+    : ui.shape === "dict"
       ? {
-          kind: "object",
-          properties: ui.fields.map((field, index) => ({ name: field.id, value: answers[index]! })),
+          kind: "dict",
+          entries: ui.fields.map((field, index) => ({ key: field.id, value: answers[index]! })),
         }
-      : ui.shape === "dict"
-        ? {
-            kind: "dict",
-            entries: ui.fields.map((field, index) => ({ key: field.id, value: answers[index]! })),
-          }
-        : { kind: "list", items: answers };
-  return { ok: true, result, transcriptText: formSummaryText(ui, answers) };
+      : { kind: "list", items: [...answers] };
 }
 
 /** A field's returned value: a toggle's boolean, a cycle's option value, or a typed value or `null`. */
@@ -866,6 +956,7 @@ export function cloneFormUi(ui: FormUi, accessibleName: InteractionAccessibleNam
             text: ui.cancel.text,
             ...(ui.cancel.background === undefined ? {} : { background: ui.cancel.background }),
           },
+    timeout: ui.timeout === null ? null : { ...ui.timeout },
     accessibleName,
   };
 }
@@ -914,8 +1005,10 @@ export function validFormUi(
       "hint",
       "submit",
       "cancel",
+      "timeout",
       "accessibleName",
     ]) ||
+    !validTimeout(value.timeout) ||
     (value.shape !== "object" && value.shape !== "dict" && value.shape !== "booleanList") ||
     (value.hint !== null && !count(value.hint)) ||
     !validButton(value.submit, count) ||
@@ -987,6 +1080,18 @@ export function validFormUi(
     const { min, max } = field;
     return validBound(min) && validBound(max) && (min === null || max === null || min <= max);
   });
+}
+
+function validTimeout(value: unknown): boolean {
+  return (
+    value === null ||
+    (isPlainRecord(value) &&
+      hasExactKeys(value, ["milliseconds", "onTimeout"]) &&
+      typeof value.milliseconds === "number" &&
+      value.milliseconds > 0 &&
+      Number.isFinite(value.milliseconds) &&
+      (value.onTimeout === "submit" || value.onTimeout === "cancel"))
+  );
 }
 
 /** A submit or cancel button: its text and an optional background. */
@@ -1084,13 +1189,33 @@ function validFieldValue(field: FormField, value: unknown, unset: boolean): bool
  * Whether `result` is what this valid form definition can return, and `transcriptText` its summary: one answer per
  * field, by ID and in order, with only optional fields `null`.
  */
-export function validFormResult(ui: FormUi, result: unknown, transcriptText: unknown): boolean {
+export function validFormResult(
+  ui: FormUi,
+  result: unknown,
+  transcriptText: unknown,
+  timedOut = false,
+): boolean {
+  // At its time limit a form says nothing for the player, and returns `null` or its answers as its limit says.
+  if (timedOut) {
+    if (ui.timeout === null || transcriptText !== null) return false;
+    if (ui.timeout.onTimeout === "cancel") return result === null;
+    return result !== null && formAnswersOf(ui, result) !== null;
+  }
   // A cancelled form returns `null`, with its cancel button's text.
   if (result === null) return ui.cancel !== null && transcriptText === ui.cancel.text;
-  if (!isPlainRecord(result)) return false;
+  const answers = formAnswersOf(ui, result);
+  return answers !== null && transcriptText === formSummaryText(ui, answers);
+}
+
+/**
+ * The answers of `result` in field order when it is what this valid form definition can return: one answer per
+ * field, by ID and in order, with only optional fields `null`; otherwise `null`.
+ */
+function formAnswersOf(ui: FormUi, result: unknown): readonly SerializableRuntimeValue[] | null {
+  if (!isPlainRecord(result)) return null;
   let answers: readonly unknown[];
   if (ui.shape === "object") {
-    if (!hasExactKeys(result, ["kind", "properties"]) || result.kind !== "object") return false;
+    if (!hasExactKeys(result, ["kind", "properties"]) || result.kind !== "object") return null;
     const properties = result.properties;
     if (
       !Array.isArray(properties) ||
@@ -1102,10 +1227,10 @@ export function validFormResult(ui: FormUi, result: unknown, transcriptText: unk
           property.name === ui.fields[index]!.id,
       )
     )
-      return false;
+      return null;
     answers = properties.map((property: Record<string, unknown>) => property.value);
   } else if (ui.shape === "dict") {
-    if (!hasExactKeys(result, ["kind", "entries"]) || result.kind !== "dict") return false;
+    if (!hasExactKeys(result, ["kind", "entries"]) || result.kind !== "dict") return null;
     const entries = result.entries;
     if (
       !Array.isArray(entries) ||
@@ -1117,11 +1242,11 @@ export function validFormResult(ui: FormUi, result: unknown, transcriptText: unk
           entry.key === ui.fields[index]!.id,
       )
     )
-      return false;
+      return null;
     answers = entries.map((entry: Record<string, unknown>) => entry.value);
   } else {
-    if (!hasExactKeys(result, ["kind", "items"]) || result.kind !== "list") return false;
-    if (!Array.isArray(result.items) || result.items.length !== ui.fields.length) return false;
+    if (!hasExactKeys(result, ["kind", "items"]) || result.kind !== "list") return null;
+    if (!Array.isArray(result.items) || result.items.length !== ui.fields.length) return null;
     answers = result.items;
   }
   const valid = ui.fields.every((field, index) => {
@@ -1132,10 +1257,8 @@ export function validFormResult(ui: FormUi, result: unknown, transcriptText: unk
       field.options.some((option) => serializableEquals(option.value, answer))
     );
   });
-  if (!valid) return false;
   // EVIDENCE: validation: every answer was checked as a value of its field above.
-  const checked = answers as readonly SerializableRuntimeValue[];
-  return transcriptText === formSummaryText(ui, checked);
+  return valid ? (answers as readonly SerializableRuntimeValue[]) : null;
 }
 
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {

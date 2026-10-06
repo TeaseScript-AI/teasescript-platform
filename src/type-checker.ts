@@ -3013,11 +3013,74 @@ class TypeChecker {
    */
   *#formTask(expression: InteractionExpression, scope: Scope): CompileTask<StaticType> {
     const answers = yield* compileChild(this.#formAnswersTask(expression, scope));
-    // With `cancel:` the player may cancel the whole form, which then returns `null`.
-    return expression.formArguments.some((argument) => argument.name.name === "cancel") &&
-      isKnown(answers)
-      ? optional(answers)
-      : answers;
+    const argument = (name: string) =>
+      expression.formArguments.find((candidate) => candidate.name.name === name)?.value;
+    const timeout = argument("timeout");
+    const onTimeout = argument("onTimeout");
+    if ((timeout === undefined) !== (onTimeout === undefined))
+      this.#report(
+        typeCode.invalidOperand,
+        timeout === undefined
+          ? "askForm onTimeout: needs timeout:, such as 'timeout: 30 s'."
+          : 'askForm timeout: needs onTimeout: "submit" or onTimeout: "cancel".',
+        expression.span,
+      );
+    const action = onTimeout === undefined ? undefined : staticText(onTimeout);
+    if (action !== undefined && action !== "submit" && action !== "cancel")
+      this.#report(
+        typeCode.invalidOperand,
+        `askForm onTimeout: takes "submit" or "cancel", not ${JSON.stringify(action)}.`,
+        onTimeout!.span,
+      );
+    if (action === "submit") this.#checkFormStarts(expression);
+    // With `cancel:`, or a time limit that may cancel, the whole form may return `null`.
+    const cancellable =
+      argument("cancel") !== undefined || (onTimeout !== undefined && action !== "submit");
+    return cancellable && isKnown(answers) ? optional(answers) : answers;
+  }
+
+  /**
+   * `onTimeout: "submit"` returns the answers as they stand, so every field needs a value from the start. Fields written
+   * where the form is asked are checked here; others are checked when the form opens.
+   */
+  #checkFormStarts(expression: InteractionExpression): void {
+    const fields = expression.formArguments.find((argument) => argument.name.name === "fields");
+    const literal = fields === undefined ? undefined : unwrap(fields.value);
+    const written =
+      literal?.kind === "objectLiteral"
+        ? literal.properties.map((property) => ({
+            name: property.name.name,
+            value: property.value,
+          }))
+        : literal?.kind === "dictLiteral"
+          ? literal.entries.map((entry) => ({
+              name: staticText(entry.key) ?? "?",
+              value: entry.value,
+            }))
+          : [];
+    for (const property of written) {
+      const descriptor = unwrap(property.value);
+      if (descriptor.kind === "nullLiteral" || descriptor.kind === "objectLiteral") {
+        const start =
+          descriptor.kind === "objectLiteral"
+            ? descriptor.properties.find((candidate) => candidate.name.name === "value")?.value
+            : descriptor;
+        const finite =
+          descriptor.kind === "objectLiteral" &&
+          descriptor.properties.some((candidate) => candidate.name.name === "options");
+        const tag =
+          descriptor.kind === "objectLiteral"
+            ? descriptor.properties.find((candidate) => candidate.name.name === "type")
+            : undefined;
+        const toggle = tag !== undefined && staticText(tag.value) === "boolean";
+        if (!finite && !toggle && (start === undefined || unwrap(start).kind === "nullLiteral"))
+          this.#report(
+            typeCode.invalidOperand,
+            `askForm field '${property.name}': onTimeout: "submit" needs a value in every field; give it value:.`,
+            property.value.span,
+          );
+      }
+    }
   }
 
   *#formAnswersTask(expression: InteractionExpression, scope: Scope): CompileTask<StaticType> {
@@ -3037,7 +3100,21 @@ class TypeChecker {
             value,
             `'${name.name}:' takes text or a button object { text, background? }`,
           );
-      } else
+      } else if (name.name === "timeout")
+        this.#reportUnless(
+          type,
+          (member) => isNumeric(member) || isScalar(member, "duration"),
+          value,
+          "'timeout:' takes a number of seconds or a duration, such as 30 s",
+        );
+      else if (name.name === "onTimeout")
+        this.#reportUnless(
+          type,
+          (member) => isScalar(member, "string"),
+          value,
+          `'onTimeout:' takes "submit" or "cancel"`,
+        );
+      else
         this.#checkShownText(value, type, name.name === "hint" ? "an input hint" : "a form outro");
     }
     if (fields === null) return UNKNOWN_TYPE;

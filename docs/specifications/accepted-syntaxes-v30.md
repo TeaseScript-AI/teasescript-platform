@@ -1942,8 +1942,8 @@ that completes when either button is chosen.
 ### Forms
 
 **Status:** Accepted (Owner decisions on #512, 2026-10-06). `askForm` is implemented for an object or a dict of fields of
-every kind, with descriptions, `outro:`, and `cancel:`, and `askBooleans` is implemented on it
-([RUNTIME.md](../RUNTIME.md#forms)); `timeout:` is not yet.
+every kind, with descriptions, `outro:`, `cancel:`, and `timeout:`, and `askBooleans` is implemented on it
+([RUNTIME.md](../RUNTIME.md#forms)).
 
 `askForm` asks for several values at once. Its buttons stay in place while the player changes them, and nothing is
 returned until the player submits:
@@ -2070,9 +2070,16 @@ let answers = askForm "Ready?", fields: { ready: false }
 let took = getTimestamp() - asked
 ```
 
-`timeout:` with `onTimeout: "submit"` or `onTimeout: "cancel"` follows in a later slice. `"submit"` returns the values
-at the timeout and needs a start for every field, which the compiler checks for written fields and the form checks for
-dict fields when it opens; `"cancel"` returns `null`.
+`timeout:`, a number of seconds or an elapsed duration as for `showButton` ([§21](#21-blocking-button)), with
+`onTimeout: "submit"` or `onTimeout: "cancel"`, gives the form a time limit; each needs the other. When it is reached
+the form closes without a transcript line: `"submit"` returns the answers as they stand, without the text still being
+edited, and needs a value in every field from the start, which the compiler checks for fields written where the form
+is asked and the form checks for other fields when it opens; `"cancel"` returns `null`, so the form's type is then
+optional:
+
+```text
+let answers = askForm "Quick, choose", fields: { rope: false, gag: false }, timeout: 20 s, onTimeout: "submit"
+```
 
 ### Date and time input
 
