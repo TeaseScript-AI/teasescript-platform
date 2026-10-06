@@ -118,6 +118,13 @@
       "category": "b",
       "reason": "compose() picked one text per group with a collect/join/capitalize chain, which the converter does not lower, so every composed line came out null. Pick one text per group in a loop and join the parts, with the same random draws and result.",
       "diff": "compose-loop.diff"
+    },
+    {
+      "id": "gag-text-type",
+      "layer": "source",
+      "category": "b",
+      "reason": "gagText reads its text parameter t by character (t[it]); untyped, the parameter cannot be proven text, so the conversion indexes it like a list, which stops the script when the player is gagged. Every caller passes a text, so the parameter is declared String, and the characters convert to substring reads.",
+      "diff": "gag-text-type.diff"
     }
   ]
 }

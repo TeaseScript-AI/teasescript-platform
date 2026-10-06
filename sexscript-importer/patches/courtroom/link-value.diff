@@ -1,0 +1,11 @@
+--- a/scripts/courtroom.groovy
++++ b/scripts/courtroom.groovy
+@@ -2398,7 +2398,7 @@
+ 		// Render Page
+ 		if (values[4][0] == "1") {  
+ 			if(getBoolean(heading,"Open Link","Back")) {
+-  				useUrl(values[i+1].substring(1))
++  				useUrl(values[4].substring(1))
+ 				show("Link opened in external browser.\nPlease be cautious when opening unknown sites or files.")
+ 				showButton("Back")
+ 			}

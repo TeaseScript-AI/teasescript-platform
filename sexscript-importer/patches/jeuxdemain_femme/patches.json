@@ -6,7 +6,7 @@
       "category": "b",
       "reason": "The clitoris, nipple and labia calibration animations start a background Thread whose showButton(text, 60) waits for a click or 60 seconds while the animation plays, then saves the seconds waited (clitoErec, tetonErec, nympheErec, which later scale the automatic rounds), clears jeuxdemain.stopButton so the animation loop ends, and shows the result image. TeaseScript has no threads; a permanent button with a 60-second asynchronous timer does the same. The rounds move into a function so the paused form can remove the button and stop the timer when the animation ends. Coordinator decision: a patch, not a converter rule.",
       "file": "jeuxdemain_femme.tease",
-      "baseHash": "9778d209e282c9d7257111cbf35a33db7321d1b50258cb699ddbac0c65147065",
+      "baseHash": "6fbfd317f82b6570344ac2cc92e31502bdecc23c5082a3a6b58f8fc04d1b1c3f",
       "edits": [
         {
           "find": "let stopJouis = false\n",
@@ -44,6 +44,13 @@
           "count": 1
         }
       ]
+    },
+    {
+      "id": "metronome-start",
+      "layer": "source",
+      "category": "b",
+      "reason": "The metronome sets mStrokes and mBPS only in its strokes and seconds branches and then loops over 1..mStrokes, so TeaseScript sees a value that may be null there. Both start at 0; every caller passes one of the two modes, so the start value is never used.",
+      "diff": "metronome-start.diff"
     }
   ]
 }

@@ -1,0 +1,17 @@
+--- a/scripts/TheSnowyOwl/OwlSays.groovy
++++ b/scripts/TheSnowyOwl/OwlSays.groovy
+@@ -499,10 +499,10 @@
+ def pointslap
+ def seq=[]
+ def nseq=0
+-def spanktotal
+-def spankeach
+-def retry
+-def retryeach
++def spanktotal = 50
++def spankeach = 5
++def retry = 2
++def retryeach = 1
+ def target=4
+ def targetwl=6
+ 

@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "collage-slideshow",
+      "layer": "source",
+      "category": "b",
+      "reason": "The sissy collage was composed in memory with Java2D (ImageIO, BufferedImage, drawImage), written to a file and sent as the profile's collage; TeaseScript cannot compose or write images. The player's exposed images are shown one by one instead, the 50 points are still charged and the profile is sent without a collage, which the gallery already skips.",
+      "diff": "collage-slideshow.diff"
+    }
+  ]
+}

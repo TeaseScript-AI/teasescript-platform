@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "spanker-start",
+      "layer": "source",
+      "category": "b",
+      "reason": "The six spanker names are declared without a value and appended to the seating list after the pairing sets them; TeaseScript sees possibly null names and cannot add them to a text list. They start as ERROR, the placeholder the script already gives the other names (host, redholder, greenholder) before they are set.",
+      "diff": "spanker-start.diff"
+    }
+  ]
+}

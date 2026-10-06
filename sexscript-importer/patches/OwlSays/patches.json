@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "settings-start",
+      "layer": "source",
+      "category": "b",
+      "reason": "spanktotal, spankeach, retry and retryeach are declared without a value and loaded in initialize() through loadIntegerVal, whose result TeaseScript cannot prove to be a number, so their reads in other functions may see null. They start with the defaults initialize() loads them with: 50, 5, 2 and 1.",
+      "diff": "settings-start.diff"
+    }
+  ]
+}

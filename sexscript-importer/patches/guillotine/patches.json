@@ -1,0 +1,11 @@
+{
+  "patches": [
+    {
+      "id": "unix-seconds",
+      "layer": "source",
+      "category": "b",
+      "reason": "currentTime holds a Date here but a number of seconds elsewhere, so its milliseconds (currentTime.time) do not convert. The live-player check and the saved live time use the legacy getTime(), the Unix seconds that currentTime.time / 1000 gave, in whole seconds.",
+      "diff": "unix-seconds.diff"
+    }
+  ]
+}
