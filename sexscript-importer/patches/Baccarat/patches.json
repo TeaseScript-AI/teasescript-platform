@@ -6,6 +6,13 @@
       "category": "b",
       "reason": "The shared clothing-image helper returns \"swipsuitF.png\" for a female swimsuit; the package ships images/Bclothes/swimsuitF.png, and the male entries next to it (speedosM.png, shortsM.png) are spelled correctly. Fix the misspelled file name.",
       "diff": "swimsuit-image-name.diff"
+    },
+    {
+      "id": "deck-folders",
+      "layer": "source",
+      "category": "b",
+      "reason": "ChooseDeck listed the subfolders of images/Bcards with eachFile and isDirectory() to offer the card decks; TeaseScript cannot list folders, and the folder-listing rule only finds images by their folder's tag. DeckNames is the list of the deck folders the package holds.",
+      "diff": "deck-folders.diff"
     }
   ]
 }

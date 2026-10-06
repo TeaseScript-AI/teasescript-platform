@@ -6,6 +6,13 @@
       "category": "b",
       "reason": "Simplified, since it is cosmetic: the Vigenere function e() only decodes one fixed text with the script's fixed key, to hide it from readers of the source, and it needs character codes, which TeaseScript has no function for. The text is shown decoded (Right now edge while I have a look at your computer..) and the function is removed.",
       "diff": "plain-message.diff"
+    },
+    {
+      "id": "country-unknown",
+      "layer": "source",
+      "category": "b",
+      "reason": "country was looked up from the online service ipinfo.io, which a package cannot reach; the conversion read it as empty, and ipInfo[4] then stopped the script. country is Unknown, the script's own value for a country the service could not tell.",
+      "diff": "country-unknown.diff"
     }
   ]
 }

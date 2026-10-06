@@ -103,6 +103,7 @@ implemented):
 | `showButton(text, 0)` (the button stayed for its 10 ms safety margin; the result was 0) | `showButton text, timeout: 10 ms`, with a note, also for a timeout known before the run (`def t = 0`, `1 - 1`); a used result is `0` |
 | `x = loadInteger(k)` followed by `if (x == null) x = d`, also further down a settings block where the code between neither uses `x`, nor calls script code, nor leaves the block | `x = load k, default: d` (#541; also `loadString`, `loadBoolean`, `loadFloat`, and the online `receive*` reads) |
 | `loadString(k)` of a key under which the package saves a number or a boolean (legacy read it as text) | the text helper around `load k`, with a note (`SX_LOAD_STRING_TEXT`) |
+| `loadBoolean(k)` of a key under which the package saves a number or a text (legacy read it as text, true only for "true") | a helper that reads the stored value the same way, a missing one as false, with a note (`SX_LOAD_BOOLEAN_TEXT`); keys match by shape, so `"p" + i + ".chosen"` matches a save under `"p" + 1 + ".chosen"` |
 | `m[k] ?: d`, `m.containsKey(k) ? m[k] : d`, `x = m[k]` followed by `if (x == null) x = d` on a dict | `m.get(k, default: d)` (#536) |
 | `getImage(message)` (webcam picture path or null) | `takePhoto()`, with a note (V30 §33) |
 | `playBackgroundSound(null)`, `stopSoundThreads()` | handles of the async sounds kept in a list and stopped by a generated helper |
@@ -658,7 +659,6 @@ may be null, no property of null, null indexed, combined, or compared.
 - worstpicture (8): numbers added to a text list.
 
 **Script-specific, deferred** (left as they are until an owner or coordinator decision):
-- SpankingParty: null implements when the player owns fewer than six toys (see the failed runs).
 - Locker: a developer tool whose menu always returns to itself, with every action a call of its unconverted Locker
   helper class.
 - courtroom: variables that hold text and numbers in different places, nullable online texts that are indexed, and
