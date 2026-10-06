@@ -3055,6 +3055,7 @@ class TypeChecker {
     let nullable = false;
     let start: StaticType | null = null;
     let options: StaticType | undefined;
+    let writtenOptions: Expression | undefined;
     if (value.kind === "object") {
       const descriptor = written === undefined ? null : unwrap(written);
       const properties = value.properties ?? new Map<string, StaticType>();
@@ -3080,6 +3081,7 @@ class TypeChecker {
           // A written `optional: false` keeps the answer required; any other value may make it optional.
           if (property.name.name === "optional")
             nullable = property.value.kind !== "booleanLiteral" || property.value.value;
+          if (property.name.name === "options") writtenOptions = property.value;
         }
       } else nullable = properties.has("optional");
       const valueType = properties.get("value");
@@ -3102,13 +3104,16 @@ class TypeChecker {
                 : formKindOfStart(resolved(nonNullType(valueType)));
     } else {
       kind = formKindOfStart(value);
-      if (value.kind === "list") options = value;
+      if (value.kind === "list") {
+        options = value;
+        writtenOptions = written;
+      }
       if (kind === "integer" || kind === "number") start = value;
     }
     if (kind === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start };
     const result =
       kind === "cycle"
-        ? cycleAnswerType(options)
+        ? this.#cycleAnswerType(options, writtenOptions)
         : kind === "boolean"
           ? BOOLEAN_TYPE
           : formAnswerType(kind);
@@ -3116,6 +3121,38 @@ class TypeChecker {
       result: nullable && kind !== "boolean" && kind !== "cycle" ? optional(result) : result,
       start,
     };
+  }
+
+  /**
+   * What a cycle returns: each option's value, or the text of a choice object without one, as a `choose` button
+   * returns it. Written options are read one by one; for computed choice objects, whether one has a `value` is not
+   * known, so either may be returned.
+   */
+  #cycleAnswerType(type: StaticType | undefined, written: Expression | undefined): StaticType {
+    const list = written === undefined ? undefined : unwrap(written);
+    if (list?.kind === "listLiteral")
+      return union(
+        list.elements.map((element) => {
+          const option = unwrap(element);
+          if (option.kind !== "objectLiteral") return plainType(this.#typeOf(element));
+          const returned =
+            option.properties.find((property) => property.name.name === "value") ??
+            option.properties.find((property) => property.name.name === "text");
+          return returned === undefined ? UNKNOWN_TYPE : plainType(this.#typeOf(returned.value));
+        }),
+      );
+    const options = type === undefined ? undefined : resolved(nonNullType(type));
+    if (options?.kind !== "list") return UNKNOWN_TYPE;
+    return union(
+      members(resolved(options.element)).map((member) => {
+        const option = resolved(member);
+        if (option.kind !== "object") return plainType(option);
+        const returned = [option.properties?.get("value"), option.properties?.get("text")].filter(
+          (part): part is StaticType => part !== undefined,
+        );
+        return returned.length === 0 ? UNKNOWN_TYPE : union(returned.map(plainType));
+      }),
+    );
   }
 
   /**
@@ -7294,6 +7331,9 @@ const GENERIC_FORM_ANSWER_TYPE = union([
   DATE_TYPE,
   TIME_TYPE,
   DATETIME_TYPE,
+  // A cycle may return any choice value but `null`.
+  DURATION_TYPE,
+  TIMESTAMP_TYPE,
 ]);
 
 /** The kind of an `askForm` field that starts with a value of `type`, or `null` when its kind is not known. */
@@ -7318,23 +7358,6 @@ function formKindOfStart(type: StaticType): FormFieldKind | null {
 
 function formAnswerType(kind: Exclude<FormFieldKind, "boolean" | "cycle">): StaticType {
   return kind === "text" ? STRING_TYPE : interactionResultType(kind);
-}
-
-/**
- * What a cycle returns for options of `type`: an option's value, or the text of a choice object without one, as a
- * `choose` button returns it.
- */
-function cycleAnswerType(type: StaticType | undefined): StaticType {
-  const options = type === undefined ? undefined : resolved(nonNullType(type));
-  if (options?.kind !== "list") return UNKNOWN_TYPE;
-  return union(
-    members(resolved(options.element)).map((member) => {
-      const option = resolved(member);
-      if (option.kind !== "object") return plainType(option);
-      const returned = option.properties?.get("value") ?? option.properties?.get("text");
-      return returned === undefined ? UNKNOWN_TYPE : plainType(returned);
-    }),
-  );
 }
 
 /** The text of a string literal without interpolation, or `undefined`. */

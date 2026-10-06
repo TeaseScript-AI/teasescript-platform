@@ -142,7 +142,7 @@ test("the compact and parenthesized forms mean the same, and evaluate their argu
 test("askForm reports what the compiler can see is wrong", () => {
   const cases: readonly (readonly [string, string])[] = [
     ['askForm "Q"', "askForm needs its fields, as in 'fields: { enabled: false }'."],
-    ['askForm "Q", fields: { on: false }, cancel: "Back"', "Unknown askForm option 'cancel'"],
+    ['askForm "Q", fields: { on: false }, submt: "Go"', "Unknown askForm option 'submt'"],
     [
       'askForm fields: { level: { type: "intger" } }',
       "askForm field 'level': unknown type 'intger' (use 'integer').",
@@ -157,7 +157,6 @@ test("askForm reports what the compiler can see is wrong", () => {
       'askForm fields: { n: { type: "integer", optional: true } }\nlet m: integer = answers.n',
       "cannot start as a whole number (integer) or null",
     ],
-    ['askForm fields: dict { "on": false }', "A dict of fields is not supported yet"],
     ['askForm fields: { on: false }, hint: ["a"]', "A list cannot be an input hint."],
   ];
   for (const [form, message] of cases) {
@@ -245,4 +244,42 @@ test("typed fields take their answers in the composer, with their numeric kind, 
   assert.equal(bindings.get("weight"), 2.5);
   assert.equal(bindings.get("note"), "Later");
   assert.deepEqual(bindings.get("day"), { kind: "date", year: 2026, month: 10, day: 5 });
+});
+
+test("a cycle answer has the type of every option it may return", () => {
+  const errors = (source: string) =>
+    compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);
+  // One option returns its value and another its text, so the answer may be 2.5.
+  assert.notDeepEqual(
+    errors(
+      "let answers = askForm fields: { x: [{ text: 1, value: 7 }, { text: 2.5 }] }\nlet n: integer = answers.x",
+    ),
+    [],
+  );
+  // Computed choice objects may return their value or their text.
+  assert.notDeepEqual(
+    errors(
+      'let options = [{ text: "One", value: 1 }]\nlet answers = askForm fields: { x: options }\nlet n: integer = answers.x',
+    ),
+    [],
+  );
+  assert.deepEqual(
+    errors(
+      'let answers = askForm fields: { x: [{ text: "One", value: 1 }, { text: "Two", value: 2 }] }\nlet n: integer = answers.x',
+    ),
+    [],
+  );
+  // A field whose kind only the runtime knows may be a cycle of durations, so a duration stays possible.
+  assert.deepEqual(
+    errors(
+      'let tag = "cycle"\nlet answers = askForm fields: { x: { type: tag, options: [1 s, 2 s] } }\nlet value = answers.x\nif value is duration { say value }',
+    ),
+    [],
+  );
+  assert.notDeepEqual(
+    errors(
+      'let tag = "cycle"\nlet answers = askForm fields: { x: { type: tag, options: [1 s, 2 s] } }\nlet value = answers.x\nif value is boolean | string | date | time | datetime | null {} else {\n  let n: number = value + 1\n}',
+    ),
+    [],
+  );
 });

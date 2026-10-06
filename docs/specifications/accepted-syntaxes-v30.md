@@ -2032,7 +2032,9 @@ for id in selected { save selected[id] as "toys.${id}" }
 When the compiler can prove that every field of a dict has one kind, from the dict's type and, for descriptors, a
 written `type:` or `value:`, the result is a dict of that answer type, such as an `integer dict`; it is an
 `integer? dict` when a field may be `optional:`. Otherwise, as for an `object dict` of descriptors of different kinds
-with explicit `type:`, the result is a `(boolean | number | string | date | time | datetime | null) dict`; read an answer into a local and narrow it with `is`
+with explicit `type:`, the result is a
+`(boolean | number | string | date | time | datetime | duration | timestamp | null) dict`, since a cycle may return
+any choice value but `null`; read an answer into a local and narrow it with `is`
 ([§13](#13-explicit-types)). A dict of fields must not be empty, and each of its descriptors is checked when the form
 opens; an invalid one is an error that names its key.
 
