@@ -33,3 +33,17 @@ def started
 def mark = { -> started = new Date().getTime() }
 mark()
 show("Took " + (new Date().getTime() - started))
+// A function's own counter starts at 0 too, also where another function names a text the same.
+def fill = { n ->
+	def i
+	def marks = []
+	i = 0
+	while (i < n) {
+		marks.add(i)
+		i += 1
+	}
+	show("Marks ${marks.size()}")
+}
+def spell = { -> for (i in ["a", "b"]) show(i) }
+fill(3)
+spell()

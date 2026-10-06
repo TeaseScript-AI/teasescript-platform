@@ -582,11 +582,19 @@ export function packageMapUses(
     files.flatMap((file) => {
       const body = mapAnalysisBody(file);
       if (body === null) return [];
+      // A closure's own variables keep their own types, apart from other variables of the same name.
+      const keys = bindingKeys(body, file.sourceName);
       const types = withGlobalTypes(
-        inferVariableTypes(body, [], functions, functionResults),
+        inferVariableTypes(
+          body,
+          [],
+          functions,
+          functionResults,
+          variableBindings(keys, file.sourceName),
+        ),
         globalTypes,
       );
-      return [{ body, types, keys: bindingKeys(body, file.sourceName) }];
+      return [{ body, types, keys }];
     }),
   );
 }

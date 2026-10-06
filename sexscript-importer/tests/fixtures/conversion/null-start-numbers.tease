@@ -44,4 +44,22 @@ function mark {
 }
 mark()
 say "Took ${getTimestamp().toMilliseconds() - started}"
+// A function's own counter starts at 0 too, also where another function names a text the same.
+function fill(n) {
+  let i = 0
+  let marks = []
+  i = 0
+  while i < n {
+    marks.add(i)
+    i += 1
+  }
+  say "Marks ${marks.length}"
+}
+function spell {
+  for i in ["a", "b"] {
+    say i
+  }
+}
+fill(3)
+spell()
 exit
