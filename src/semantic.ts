@@ -434,12 +434,22 @@ class SemanticScope {
     return undefined;
   }
 
+  /** Whether `name` is a variable that a block shares with the code that created it. */
+  public isShared(name: string): boolean {
+    for (let scope: SemanticScope | null = this; scope !== null; scope = scope.parent)
+      if (scope.bindings.has(name)) return scope.captured !== null;
+    return false;
+  }
+
   public declare(name: string, binding: Binding): boolean {
     if (this.resolve(name) !== undefined) return false;
     this.bindings.set(name, binding);
     return true;
   }
 }
+
+/** How a message names the resource whose block is validated. */
+const HANDLER_NAMES = { timer: "timer", media: "media", button: "button" } as const;
 
 /** A timer expiry block, media cue block, or permanent button block, validated after the function bodies. */
 interface PendingHandler {
@@ -2431,7 +2441,9 @@ class SemanticValidator {
     }
     this.#report(
       semanticCode.duplicateDeclaration,
-      `Declaration '${name}' duplicates a visible name.`,
+      scope.isShared(name)
+        ? `'${name}' already names a variable of the code that created this ${HANDLER_NAMES[this.#handlerOwner]}, which the block shares. Rename the block's variable.`
+        : `Declaration '${name}' duplicates a visible name.`,
       span,
     );
     return false;

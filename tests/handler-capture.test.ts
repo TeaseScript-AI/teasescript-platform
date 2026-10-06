@@ -494,10 +494,15 @@ test("the compiler shares the variables visible where a block is created, and ch
     ["TSV002"],
   );
   assert.deepEqual(
-    codes(
-      'function f {\n    let x = 1\n    showPermanentButton "a" {\n        let x = 2\n    }\n}\nf()',
-    ),
-    ["TSV001"],
+    compileSource(
+      'function f {\n    let x = 1\n    showPermanentButton "a" {\n        let x = 2\n    }\n}\nf()\nexit',
+    ).diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.message]),
+    [
+      [
+        "TSV001",
+        "'x' already names a variable of the code that created this button, which the block shares. Rename the block's variable.",
+      ],
+    ],
   );
   // A function called from a block sees its own names, not the block's.
   assert.deepEqual(
