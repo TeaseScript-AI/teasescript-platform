@@ -12,6 +12,7 @@ import { run } from "../src/runtime/engine.js";
 import type { InterpreterEvent } from "../src/runtime/events.js";
 import { completeAction } from "../src/runtime/operations/complete-action.js";
 import { updateInteraction } from "../src/runtime/operations/update-interaction.js";
+import { observeTime } from "../src/runtime/operations/observe-time.js";
 import type { RuntimeSnapshot } from "../src/runtime/state.js";
 import { compileValidPlan } from "./helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
@@ -620,4 +621,64 @@ test("askBooleans asks with one toggle per text and returns their states in orde
       }).diagnostics.some((diagnostic) => diagnostic.code === "TSV001"),
       option,
     );
+});
+
+test("a form with a time limit settles by itself, with its answers as they stand or with null", () => {
+  const source = (onTimeout: string) =>
+    [
+      `let answers = askForm fields: { on: false, level: { value: 5, min: 1, max: 10 } }, timeout: 30 s, onTimeout: "${onTimeout}"`,
+      ...(onTimeout === "submit"
+        ? ['let state = "${answers.on} ${answers.level}"']
+        : [
+            'let state = "none"',
+            'if answers != null { state = "${answers.on} ${answers.level}" }',
+          ]),
+      "exit",
+    ].join("\n");
+  const state = (snapshot: RuntimeSnapshot) =>
+    snapshot.frames[0]!.bindings.find((binding) => binding.name === "state")?.value;
+  for (const [onTimeout, expected] of [
+    ["submit", "true 7"],
+    ["cancel", "none"],
+  ] as const) {
+    const plan = compileValidPlan(source(onTimeout));
+    const { snapshot } = opened(plan);
+    assert.equal(
+      snapshot.foregroundAction?.kind === "interaction" && snapshot.foregroundAction.timeoutMs,
+      30_000,
+    );
+    // The answers as they stand, without the text still being edited.
+    let current = edit(plan, select(plan, snapshot, "on", 1), "level", "7").snapshot;
+    current = updateInteraction(plan, current, {
+      actionId: current.foregroundAction!.actionId,
+      actionKind: "interaction",
+      interactionKind: "form",
+      update: { kind: "edit", fieldId: "level" },
+    }).snapshot;
+    current = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, current))).snapshot;
+    const early = run(plan, observeTime(plan, current, 29_999).snapshot);
+    assert.equal(early.snapshot.foregroundAction?.kind, "interaction");
+    const observed = observeTime(plan, early.snapshot, 30_000);
+    const late = run(plan, observed.snapshot);
+    const events = [...observed.events, ...late.events];
+    assert.deepEqual(
+      events.flatMap((event) => (event.kind === "playerTranscript" ? [event.text] : [])),
+      [],
+    );
+    const settled = events.find((event) => event.kind === "actionCompleted");
+    assert.ok(settled?.kind === "actionCompleted");
+    assert.equal(
+      settled.settlement.actionKind === "interaction" && settled.settlement.settlementKind,
+      "timedOut",
+    );
+    assert.equal(state(runUntilExit(plan, late.snapshot).snapshot), expected, onTimeout);
+  }
+  // A field the form cannot see from the start must still have a value when the form opens.
+  const computed = compileValidPlan(
+    'let level = dict {}\nlevel["x"] = { type: "integer" }\nlet a = askForm fields: level, timeout: 5, onTimeout: "submit"\nexit',
+  );
+  assert.equal(
+    run(computed, createImmediatePacingRuntimeSnapshot(computed)).snapshot.failure?.message,
+    `askForm field 'x': onTimeout: "submit" needs a value in every field, but it has none.`,
+  );
 });

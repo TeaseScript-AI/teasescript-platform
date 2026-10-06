@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 65;
+export const INSTRUCTION_PLAN_VERSION = 66;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -664,6 +664,14 @@ export interface FormUi {
   readonly submit: { readonly text: string; readonly background?: string };
   /** The button that cancels the whole form, which then returns `null`; `null` when the form must be submitted. */
   readonly cancel: { readonly text: string; readonly background?: string } | null;
+  /**
+   * The time limit: after `milliseconds` the form settles by itself, with its answers as they stand (`submit`) or with
+   * `null` (`cancel`); `null` without a limit.
+   */
+  readonly timeout: {
+    readonly milliseconds: number;
+    readonly onTimeout: "submit" | "cancel";
+  } | null;
   readonly accessibleName: InteractionAccessibleName;
 }
 
@@ -734,7 +742,7 @@ export type PreparedInteractionUiPayload =
       readonly kind: "form";
       /**
        * An object holding the written arguments of the form by name: `fields`, an object or dict, and optionally `hint`,
-       * `submit`, `cancel`, and `outro`; for `askBooleans`, `texts` and `defaults` instead of `fields`. When the form opens, it holds the
+       * `submit`, `cancel`, `outro`, `timeout`, and `onTimeout`; for `askBooleans`, `texts` and `defaults` instead of `fields`. When the form opens, it holds the
        * form's canonical definition instead.
        */
       readonly requestTemporary: number;

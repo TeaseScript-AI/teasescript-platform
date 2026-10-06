@@ -177,7 +177,15 @@ const INTERACTION_KINDS: ReadonlyMap<string, InteractionExpression["interactionK
 ]);
 /** The named arguments of each basic ask and of `askForm`, in the order the message suggests them. */
 const ASK_OPTIONS: readonly string[] = ["default", "hint"];
-const FORM_OPTIONS: readonly string[] = ["fields", "hint", "submit", "cancel", "outro"];
+const FORM_OPTIONS: readonly string[] = [
+  "fields",
+  "hint",
+  "submit",
+  "cancel",
+  "outro",
+  "timeout",
+  "onTimeout",
+];
 const NO_STORAGE_DELIMITERS: ReadonlySet<StorageDelimiter> = new Set();
 /** Expressions that end at their own last token, so a following `, name:` cannot belong to them. */
 const SELF_DELIMITED_EXPRESSIONS: ReadonlySet<Expression["kind"]> = new Set([

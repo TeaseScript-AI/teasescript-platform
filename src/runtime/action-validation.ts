@@ -354,7 +354,7 @@ function validSettlementShapeAndKind(
     (settlement.actionKind === "chatPacingGate" ||
       settlement.settlementKind === "completed" ||
       (settlement.actionKind === "interaction" &&
-        settlement.interactionKind === "button" &&
+        (settlement.interactionKind === "button" || settlement.interactionKind === "form") &&
         settlement.settlementKind === "timedOut")) &&
     positiveSafeInteger(settlement.actionId) &&
     validSettlementProvenance(settlement, plan) &&
@@ -1232,7 +1232,7 @@ function validInteractionTiming(
     return false;
   if (action.timeoutMs === null) return true;
   if (
-    action.interactionKind !== "button" ||
+    (action.interactionKind !== "button" && action.interactionKind !== "form") ||
     typeof action.timeoutMs !== "number" ||
     !(action.timeoutMs > 0) ||
     !Number.isFinite(action.timeoutMs)
@@ -1381,12 +1381,15 @@ function validPreparedInteractionAction(
   }
   // The action keeps the timeout its prepared temporary held when the button appeared.
   const prepared = instruction.preparedUi;
+  // A form keeps its time limit in its definition, which its request temporary holds.
   const timeoutMs =
     prepared.kind === "button" && prepared.timeoutTemporary !== undefined
       ? buttonTimeoutMilliseconds(
           runtimeTemporaryValue(snapshot.temporaries, prepared.timeoutTemporary),
         )
-      : null;
+      : prepared.kind === "form" && isFormUi(action.ui)
+        ? (action.ui.timeout?.milliseconds ?? null)
+        : null;
   if (
     (prepared.kind === "button" && prepared.timeoutTemporary !== undefined && timeoutMs === null) ||
     action.timeoutMs !== timeoutMs
@@ -1566,7 +1569,7 @@ function validInteractionUiShape(kind: InteractionKind, value: unknown): boolean
               "mime",
             ]
           : kind === "form"
-            ? ["kind", "shape", "fields", "hint", "submit", "cancel", "accessibleName"]
+            ? ["kind", "shape", "fields", "hint", "submit", "cancel", "timeout", "accessibleName"]
             : ["kind", "options", "accessibleName"];
   if (
     !hasExactKeys(value, expectedUiKeys) ||
@@ -2018,13 +2021,16 @@ function validSettlementKindData(
     !ownerFitsInstruction(plan, snapshot, settlement.ownerCallFrameId, settlement.owningInstruction)
   )
     return false;
-  // Only a button written with a timeout can time out.
+  // Only a button written with a timeout, or a form with a time limit, can time out.
   if (
     timedOut &&
     !(
       "preparedUi" in instruction &&
-      instruction.preparedUi.kind === "button" &&
-      instruction.preparedUi.timeoutTemporary !== undefined
+      ((instruction.preparedUi.kind === "button" &&
+        instruction.preparedUi.timeoutTemporary !== undefined) ||
+        (instruction.preparedUi.kind === "form" &&
+          isFormUi(settlement.ui) &&
+          settlement.ui.timeout !== null))
     )
   )
     return false;
@@ -2080,7 +2086,15 @@ function settlementMatchesPresentedUi(settlement: Record<string, unknown>): bool
       (settlement.settlementKind === "timedOut" ? null : ui.buttonLabel)
     );
   if (ui.kind === "form")
-    return isFormUi(ui) && validFormResult(ui, settlement.result, settlement.transcriptText);
+    return (
+      isFormUi(ui) &&
+      validFormResult(
+        ui,
+        settlement.result,
+        settlement.transcriptText,
+        settlement.settlementKind === "timedOut",
+      )
+    );
   if (ui.kind !== "choice") return true;
   const result = settlement.result;
   if (!isInteractionChoiceValue(result)) return false;

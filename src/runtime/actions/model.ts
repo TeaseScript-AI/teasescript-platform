@@ -57,7 +57,10 @@ export interface RuntimeInteractionActionSnapshot {
    * and time presentation in force then.
    */
   readonly createdAtMs: number;
-  /** A button's timeout; it times out at `createdAtMs + timeoutMs`. Always `null` for other interactions. */
+  /**
+   * A button's timeout or a form's time limit; it times out at `createdAtMs + timeoutMs`. Always `null` for other
+   * interactions.
+   */
   readonly timeoutMs: number | null;
   readonly requestEventSequence: number;
   /** The answers of a form so far; present exactly for a form. */
