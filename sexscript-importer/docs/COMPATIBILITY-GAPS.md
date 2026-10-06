@@ -578,7 +578,8 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 
 ## Current state and remaining gaps
 
-Measured on the selected large corpus on 2026-10-06, at importer `05f83665` with `main` `c5c20888` merged in.
+Measured on the selected large corpus on 2026-10-06, at importer `05f83665` with `main` `c5c20888` merged in; the 15
+units that the zero-start fix for closure locals changes were converted again at `5556a7d9`.
 - **The selection** follows the owner decisions of 2026-10-05. It takes corpus2's merged units with one revision per
   title.
   - The largest revision, checked by hand, is the package. Earlier revisions are listed in the catalog as earlier
@@ -594,7 +595,7 @@ Measured on the selected large corpus on 2026-10-06, at importer `05f83665` with
 | Compile and play to the end from `main.tease` in the smoke run | 119 |
 | Smoke run from `main.tease`: halted, blocked at a file that does not compile, step limit, failed, no run | 120, 70, 16, 3, 1 |
 
-Of the 575 scripts, 426 are lowered without a root error and 404 compile; 1,467 root errors remain.
+Of the 575 scripts, 426 are lowered without a root error and 404 compile; 1,465 root errors remain.
 
 **Smoke runs:**
 - **The step limit is inconclusive** (16 units). Most of these are loops that wait for a typed text or a time.
@@ -625,15 +626,15 @@ The TODO sites of the leading root codes, classified by their original Groovy li
 
 ### Compile errors
 
-Null-related errors are the largest compile error class left: 1,538 errors in 47 of the 72 units. "Null-related" means
+Null-related errors are the largest compile error class left: 932 errors in 47 of the 72 units. "Null-related" means
 may be null, no property of null, null indexed, combined, or compared.
 
 | Class | Errors | Units | Route |
 | --- | ---: | ---: | --- |
-| A script variable that starts as null, read in functions (565) or at the top level after a call, wait, or loop start (62) | 627 | 22 | Per-unit patches that start it with a value. A declaration assigned later, like Kotlin `lateinit`, would cover 511 of these errors. Together with the locals below, such a declaration would make 3 units compile by itself (gunfighter, jeuxdemain_femme, SpankingParty), because the other units have more blockers |
-| A function local that starts as null and is set before its reads, but whose narrowing ends at a loop start | 285 | 15 | About 100 are number counters that miss the zero start (owner decision 2026-10-05), because closure locals are typed by name across the file (see Open importer work). The rest are per unit |
-| Values that really may be null, read in other functions: function results, and storage reads whose default is set elsewhere | 504 | 21 | The compiler keeps a null check within one function. About 210 come from one input helper's local that starts as null and that a loop sets (the Owl family's `atleast()`, a one-line patch per script); the rest are per unit |
-| Nullable function results, fields, and list items read directly | 122 | 19 | Per unit |
+| A script variable that starts as null, read in functions (363) or at the top level after a call, wait, or loop start (62) | 425 | 22 | Per-unit patches that start it with a value. A declaration assigned later, like Kotlin `lateinit`, would cover 309 of these errors. Together with the locals below, such a declaration would make 3 units compile by itself (gunfighter, jeuxdemain_femme, SpankingParty), because the other units have more blockers |
+| A function local that starts as null and is set before its reads, but whose narrowing ends at a loop start | 91 | 13 | Per unit; a declaration assigned later would cover 65. Number counters start at 0 (owner decision 2026-10-05) |
+| Values that really may be null, read in other functions: function results that may be null (151), storage reads whose default is set elsewhere (58), and copies of them (79) | 288 | 21 | Per unit; the compiler keeps a null check within one function |
+| Nullable function results, fields, and list items read directly | 128 | 19 | Per unit |
 
 **The 11 units without unconverted code:**
 - Null-related errors only: Escape, OwlSays, gunfighter, questionnaire, and scatslut.
@@ -653,9 +654,7 @@ Found while evaluating the proposals, besides the importer work listed above; no
 - **Safe navigation:** `x?.size()` converts like `x.size()`, which fails where Groovy gave null (0 corpus sites).
 - **Concatenation that starts with possibly null text:** `dialog + count + ...` with `dialog: string?` keeps a numeric
   `+` for its first pair, which the type pass rejects (1 `Punish` site).
-- **Groovy type inference is per file and flow-insensitive:** a name used in two functions shares one type set. That
-  hides lists (Toy's appends) and makes `size()` on values of unknown type look like possible maps, and a function's
-  number counter (`def i`, then `i = 0` and a loop) misses the zero start when another function's `i` has an unproven
-  type: about 100 compile errors in SlideLadderDare, Escape, and Stay. The never-assigned-variable check is name-based
-  in the same way. Local closure results now have types, also across the script and its modules, but closure
+- **Groovy type inference is per file and flow-insensitive:** a closure's parameters and `def` locals have types of
+  their own, but other names share one type set per file. That hides lists (Toy's appends) and makes `size()` on
+  values of unknown type look like possible maps. The never-assigned-variable check is name-based in the same way. Local closure results now have types, also across the script and its modules, but closure
   parameters stay unknown, which keeps most remaining Toy collection methods unconverted.
