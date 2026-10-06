@@ -43,6 +43,11 @@ export interface MediaDeviceHost {
 export const VIDEO_UNSUPPORTED_MESSAGE = "Video playback is not supported by this Player yet.";
 export const SOURCE_UNAVAILABLE_MESSAGE = "This media source is not available to the Player.";
 const LOAD_FAILED_MESSAGE = "The Player could not load this media source.";
+/**
+ * Positions and progress this close count as equal. Measured progress sums many floating-point steps, so it can end a
+ * fraction of a millisecond short of the projected end, which must not replay the range as another pass.
+ */
+const TOLERANCE_MS = 1;
 
 interface Entry {
   readonly mediaId: number;
@@ -205,7 +210,11 @@ export class MediaDevice {
         this.#reportLoad(entry, { kind: "failed", message: LOAD_FAILED_MESSAGE });
     });
     listen("seeked", () => {
-      if (entry.pendingPositionMs === null) entry.lastPositionMs = element.currentTime * 1000;
+      // Only a seek whose target the element did not report at once is measured from where it landed. Otherwise the
+      // element may already have played on from the target, and measuring from its current position would drop that
+      // playback: the range end would then look short of the terminal progress and replay as another pass.
+      if (entry.pendingPositionMs === null && entry.lastPositionMs === null)
+        entry.lastPositionMs = element.currentTime * 1000;
     });
     listen("ended", () => this.#host.requestObservation());
     element.preload = "auto";
@@ -279,10 +288,11 @@ export class MediaDevice {
   }
 
   #position(entry: Entry, element: MediaDeviceElement, positionMs: number): void {
-    // Measure again from the browser's actual position once the seek completes.
+    // Measure from the target when the element reports it at once, otherwise from where the seek lands.
     entry.lastPositionMs = null;
     element.currentTime = positionMs / 1000;
-    if (Math.abs(element.currentTime * 1000 - positionMs) < 1) entry.lastPositionMs = positionMs;
+    if (Math.abs(element.currentTime * 1000 - positionMs) < TOLERANCE_MS)
+      entry.lastPositionMs = positionMs;
   }
 
   #measure(entry: Entry, element: MediaDeviceElement): void {
@@ -306,7 +316,7 @@ export class MediaDevice {
 
   #reachedTerminal(entry: Entry, element: MediaDeviceElement): boolean {
     const terminal = entry.projection.terminalProgressMs;
-    if (terminal === null || entry.progressMs < terminal) return false;
+    if (terminal === null || entry.progressMs < terminal - TOLERANCE_MS) return false;
     // The runtime settles playback from this report; stop audible output at the projected end.
     entry.progressMs = terminal;
     entry.finished = true;
