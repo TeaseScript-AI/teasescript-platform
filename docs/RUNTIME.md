@@ -1102,7 +1102,7 @@ fields the player edits until submitting. It is always prepared: one request tem
 UI carries the result `shape`: `object` with the `numericKinds` of named fields, `dict` with one `numericKind` or `null`,
 or `booleanList`. A runtime number does not record whether it is an `integer` or a `number`, so the compiler supplies the
 kind for a field whose number gives its kind; a field without one needs `type:`. When the form opens, the runtime builds
-and checks every field in order (`TSR052` names an invalid one), and the request temporary then holds the canonical
+and checks every field in order (an invalid one fails, mostly with `TSR052`, and the message names it), and the request temporary then holds the canonical
 definition, so restore checks the pending form against it.
 
 The action's UI is the definition: `shape`, `fields`, `hint`, and `submit`. A field has a unique `id` (the property
@@ -1126,8 +1126,8 @@ update: { kind: "select", fieldId, optionIndex }  // a toggle (false at 0, true 
 ```
 
 Every edit is absolute, so a repeat changes nothing and returns `unchanged`. Opening, selecting, or clearing another
-field first commits the text being edited; invalid text refuses the edit, and blank text for a required field is
-dropped. A refused or malformed edit returns `invalidPayload` with a message and changes nothing. An edit keeps the
+field first commits the text being edited; invalid text, also blank text for a required field, refuses the edit. A
+refused or malformed edit returns `invalidPayload` with a message and changes nothing. An edit keeps the
 action, its continuation, and its destination; it publishes no event, records no settlement, uses no randomness, and
 does not run the script. A suspended form returns `suspendedAction`; otherwise the outcomes are those of
 `completeAction`. Focus, caret, and other browser state stay outside canonical

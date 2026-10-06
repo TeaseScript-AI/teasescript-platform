@@ -245,11 +245,18 @@ test("edits change only the form's answers, absolutely, and refused ones change 
     assert.deepEqual(refused.outcome, { kind: "invalidPayload", message }, text);
     assert.deepEqual(refused.snapshot, drafted, text);
   }
-  // Switching to another field first commits the draft; an invalid draft refuses the switch.
-  let drafted = edited(plan, snapshot, [{ kind: "draft", fieldId: "impact", text: "-" }]);
-  const blocked = update(plan, drafted, { kind: "select", fieldId: "enabled", optionIndex: 0 });
-  assert.equal(blocked.outcome.kind, "invalidPayload");
-  assert.deepEqual(blocked.snapshot, drafted);
+  // Switching to another field or submitting first commits the draft; an invalid draft, also a blank one for a
+  // required field, refuses both, so a cleared value is never submitted unnoticed.
+  let drafted = snapshot;
+  for (const text of ["-", "", "  "]) {
+    drafted = edited(plan, snapshot, [{ kind: "draft", fieldId: "impact", text }]);
+    const blocked = update(plan, drafted, { kind: "select", fieldId: "enabled", optionIndex: 0 });
+    assert.equal(blocked.outcome.kind, "invalidPayload", text);
+    assert.deepEqual(blocked.snapshot, drafted, text);
+    const unsent = submit(plan, drafted);
+    assert.equal(unsent.outcome.kind, "invalidPayload", text);
+    assert.deepEqual(unsent.snapshot, drafted, text);
+  }
   drafted = edited(plan, snapshot, [
     { kind: "draft", fieldId: "impact", text: " 7 " },
     { kind: "edit", fieldId: "weight" },
@@ -491,17 +498,31 @@ test("a form that cannot be built fails when it opens, with a message that names
       `{ when: { type: "date", value: "2026-10-05" } }`,
       "askForm field 'when': a date field cannot start as text (string).",
     ],
+    // A failure inside a field's options also names the field.
+    [
+      `{ level: { type: "cycle", options: [{ text: "Low", background: "not-a-colour" }] } }`,
+      "askForm field 'level': Expected an opaque CSS button background colour.",
+    ],
+    // A text start longer than any answer would make a form that could not be saved.
+    [
+      `{ name: long + "x" }`,
+      "askForm field 'name': its text is longer than an answer may be (65536 UTF-8 bytes).",
+    ],
   ];
   for (const [fields, message] of cases) {
     const plan = formPlan(
       `{ fields: ${fields} }`,
       OBJECT,
-      'let mixed: (string | integer)[] = ["Low", 2]\n',
+      'let mixed: (string | integer)[] = ["Low", 2]\nlet long = "x".repeat(65536)\n',
     );
     const snapshot = run(plan, createFreshRuntimeSnapshot(plan)).snapshot;
     assert.equal(snapshot.status, "failed", fields);
     assert.equal(snapshot.failure?.message, message, fields);
+    roundTrip(plan, snapshot);
   }
+  // The longest text start opens, and the form can be saved.
+  const longest = formPlan(`{ fields: { name: "x".repeat(65536) } }`, OBJECT);
+  roundTrip(longest, started(longest));
   const empty = formPlan(`{ fields: dict {} }`, { kind: "dict", numericKind: null });
   assert.equal(
     run(empty, createFreshRuntimeSnapshot(empty)).snapshot.failure?.message,

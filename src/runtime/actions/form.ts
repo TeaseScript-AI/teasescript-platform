@@ -8,7 +8,11 @@ import {
   temporalAnswer,
   temporalAnswerText,
 } from "../../interaction-answers.js";
-import { interactionStringFits, MAX_INTERACTION_OPTION_ENTRIES } from "../../interaction-limits.js";
+import {
+  interactionStringFits,
+  MAX_INTERACTION_OPTION_ENTRIES,
+  MAX_INTERACTION_STRING_UTF8_BYTES,
+} from "../../interaction-limits.js";
 import type {
   FormField,
   FormFieldKind,
@@ -165,7 +169,9 @@ export function materializeForm(
     for (const { id, value } of written) {
       const numericKind =
         prepared.kind === "dict" ? prepared.numericKind : (numericKinds.get(id) ?? null);
-      const field = materializeField(id, value, numericKind, context, span);
+      const field = fieldWithContext(id, () =>
+        materializeField(id, value, numericKind, context, span),
+      );
       add(field.field, field.value);
     }
   }
@@ -174,6 +180,17 @@ export function materializeForm(
     ui: { kind: "form", shape: prepared.kind, fields, hint, submit, accessibleName },
     state: { values, editor: null },
   };
+}
+
+/** Names the field in a failure of its text or options, such as an invalid colour. */
+function fieldWithContext<T>(id: string, build: () => T): T {
+  try {
+    return build();
+  } catch (error) {
+    const prefix = `askForm field '${id}': `;
+    if (!(error instanceof RuntimeFault) || error.message.startsWith(prefix)) throw error;
+    throw new RuntimeFault(error.code, `${prefix}${error.message}`, error.span);
+  }
 }
 
 function materializeField(
@@ -299,7 +316,11 @@ function materializeField(
   };
   const value = scalarStart(field, start === undefined ? null : start);
   if (value === undefined)
-    throw problem(`a ${kind} field cannot start as ${describeRuntimeValue(start!)}.`);
+    throw problem(
+      kind === "text" && typeof start === "string"
+        ? `its text is longer than an answer may be (${MAX_INTERACTION_STRING_UTF8_BYTES} UTF-8 bytes).`
+        : `a ${kind} field cannot start as ${describeRuntimeValue(start!)}.`,
+    );
   if (typeof value === "number" && !withinBounds(field, value))
     throw problem(`its value ${numberAnswerText(value)} is outside ${boundsText(field)}.`);
   return { field, value };
@@ -326,7 +347,10 @@ function scalarStart(
           : start
         : undefined;
     case "text":
-      return typeof start === "string" ? start.replace(/\r\n?/gu, "\n") : undefined;
+      // A text start must also be an answer the composer could submit.
+      return typeof start === "string" && interactionStringFits(start)
+        ? start.replace(/\r\n?/gu, "\n")
+        : undefined;
     case "date":
       return isDate(start) ? { ...start } : undefined;
     case "time":
@@ -482,7 +506,7 @@ export type FormStep =
  * - `dismiss` closes the composer and drops its text.
  *
  * Opening, selecting, or clearing another field first commits the text being edited; when that text is invalid, the
- * whole edit is refused and nothing changes. Blank text for a required field is then dropped instead.
+ * whole edit is refused and nothing changes. Blank text is invalid for a required field.
  */
 export function applyFormUpdate(
   ui: FormUi,
@@ -512,7 +536,7 @@ export function applyFormUpdate(
         optionIndex >= count
       )
         return refused(`Field ${JSON.stringify(field.id)} has no option ${String(optionIndex)}.`);
-      const committed = commitEditor(ui, state, "switch");
+      const committed = commitEditor(ui, state);
       if (!committed.ok) return committed;
       const value =
         field.kind === "cycle"
@@ -527,7 +551,7 @@ export function applyFormUpdate(
       if (field.kind === "boolean" || field.kind === "cycle")
         return refused(`Field ${JSON.stringify(field.id)} is not typed in the composer.`);
       if (editing) return { ok: true, state };
-      const committed = commitEditor(ui, state, "switch");
+      const committed = commitEditor(ui, state);
       if (!committed.ok) return committed;
       return {
         ok: true,
@@ -553,14 +577,14 @@ export function applyFormUpdate(
       // A repeated commit finds the field already closed.
       if (state.editor === null) return { ok: true, state };
       if (!editing) return refused(`Field ${JSON.stringify(field.id)} is not being edited.`);
-      return commitEditor(ui, state, "enter");
+      return commitEditor(ui, state);
     }
     case "clear": {
       if (!keys(["kind", "fieldId"])) return refused("A clear update has kind and fieldId.");
       if (field.kind === "boolean" || field.kind === "cycle")
         return refused(`Field ${JSON.stringify(field.id)} is not typed in the composer.`);
       if (!field.optional) return refused(`That is wrong. ${field.text} needs a value.`);
-      const committed = editing ? { ok: true as const, state } : commitEditor(ui, state, "switch");
+      const committed = editing ? { ok: true as const, state } : commitEditor(ui, state);
       if (!committed.ok) return committed;
       return {
         ok: true,
@@ -577,14 +601,10 @@ export function applyFormUpdate(
 }
 
 /**
- * Commits the text being edited. `enter` refuses blank text for a required field; `switch`, which runs before another
- * field changes or the form is submitted, drops it and keeps the field's value.
+ * Commits the text being edited, also before another field changes or the form is submitted. Invalid text, and blank
+ * text for a required field, refuse the commit and keep the editor open.
  */
-function commitEditor(
-  ui: FormUi,
-  state: RuntimeFormStateSnapshot,
-  mode: "enter" | "switch",
-): FormStep {
+function commitEditor(ui: FormUi, state: RuntimeFormStateSnapshot): FormStep {
   if (state.editor === null) return { ok: true, state };
   const editorFieldId = state.editor.fieldId;
   const index = ui.fields.findIndex((field) => field.id === editorFieldId);
@@ -593,10 +613,8 @@ function commitEditor(
     throw new Error("A form editor names a typed field.");
   const parsed = parseFormText(field, state.editor.text);
   if (!parsed.ok) return parsed;
-  if (parsed.value === null && !field.optional) {
-    if (mode === "enter") return refused(`That is wrong. ${field.text} needs a value.`);
-    return { ok: true, state: { values: state.values, editor: null } };
-  }
+  if (parsed.value === null && !field.optional)
+    return refused(`That is wrong. ${field.text} needs a value.`);
   return {
     ok: true,
     state: { values: withValue(state, index, parsed.value).values, editor: null },
@@ -673,7 +691,7 @@ export type FormSubmission =
  * returns `null`.
  */
 export function submitForm(ui: FormUi, state: RuntimeFormStateSnapshot): FormSubmission {
-  const committed = commitEditor(ui, state, "switch");
+  const committed = commitEditor(ui, state);
   if (!committed.ok) return committed;
   const values = committed.state.values;
   const missing = ui.fields.find(
