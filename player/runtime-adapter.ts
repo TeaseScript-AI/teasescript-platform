@@ -1626,18 +1626,27 @@ export function playerRuntimeTranscriptEventSequence(entryId: string): number | 
   return /^[1-9]\d*$/u.test(digits) && Number.isSafeInteger(Number(digits)) ? Number(digits) : null;
 }
 
-function appendRuntimeEvents(
-  session: PlayerRuntimeSession,
+/**
+ * The transcript that `events` present, from the start of a session: its entries and the speakers they name. Debug's
+ * rewind shows with it the messages of a state the shown one has not reached yet.
+ */
+export function playerRuntimeTranscript(events: readonly InterpreterEvent[]): {
+  readonly entries: readonly PlayerTranscriptEntryPresentation[];
+  readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
+} {
+  const entries: PlayerTranscriptEntryPresentation[] = [];
+  const speakers: Record<string, PlayerSpeakerPresentation> = { ...DEFAULT_SPEAKERS };
+  appendTranscript(entries, speakers, events);
+  return { entries, speakers };
+}
+
+// Appends the entries `events` present, in order, and the speakers they name. A choice, button, or form answer is
+// marked by its settlement, which the same operation emits.
+function appendTranscript(
+  transcriptEntries: PlayerTranscriptEntryPresentation[],
+  speakers: Record<string, PlayerSpeakerPresentation>,
   events: readonly InterpreterEvent[],
-): PlayerRuntimeSession {
-  if (events.length === 0) return Object.freeze(session);
-  // EVIDENCE: emptySession creates an unfrozen adapter-owned speaker accumulator for every session.
-  const speakers = session.speakers as Record<string, PlayerSpeakerPresentation>;
-  // EVIDENCE: emptySession creates an unfrozen adapter-owned event accumulator for every session.
-  const retainedEvents = session.events as InterpreterEvent[];
-  // EVIDENCE: emptySession creates an unfrozen adapter-owned transcript accumulator for every session.
-  const transcriptEntries = session.transcriptEntries as PlayerTranscriptEntryPresentation[];
-  for (const event of events) retainedEvents.push(event);
+) {
   const responseKinds = new Map<number, "choice" | "button" | "form">();
   for (const event of events) {
     if (
@@ -1679,6 +1688,21 @@ function appendRuntimeEvents(
       );
     }
   }
+}
+
+function appendRuntimeEvents(
+  session: PlayerRuntimeSession,
+  events: readonly InterpreterEvent[],
+): PlayerRuntimeSession {
+  if (events.length === 0) return Object.freeze(session);
+  // EVIDENCE: emptySession creates an unfrozen adapter-owned speaker accumulator for every session.
+  const speakers = session.speakers as Record<string, PlayerSpeakerPresentation>;
+  // EVIDENCE: emptySession creates an unfrozen adapter-owned event accumulator for every session.
+  const retainedEvents = session.events as InterpreterEvent[];
+  // EVIDENCE: emptySession creates an unfrozen adapter-owned transcript accumulator for every session.
+  const transcriptEntries = session.transcriptEntries as PlayerTranscriptEntryPresentation[];
+  for (const event of events) retainedEvents.push(event);
+  appendTranscript(transcriptEntries, speakers, events);
   return Object.freeze({
     ...session,
     events: retainedEvents,

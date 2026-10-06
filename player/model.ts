@@ -41,6 +41,8 @@ export interface PlayerMessagePresentation {
   /** Completed choice, button, or form, distinct from a free-text or numeric response. */
   readonly responseKind?: "choice" | "button" | "form";
   readonly presentation?: MessagePresentation;
+  /** A message of the later state Debug's rewind can restore, which the inspected state has not reached; shown grey. */
+  readonly future?: true;
 }
 
 export interface PlayerSessionEventPresentation {

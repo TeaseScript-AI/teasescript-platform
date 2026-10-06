@@ -674,6 +674,14 @@ controls counts down the current foreground wait, also while the Debug panel is 
 **Debug · Press within 4 s**, or **Debug · Pacing: 4 s remaining**. It is not a timer: it has no card, ring, or
 right-rail entry, takes no input, is not announced each second, and never enters the transcript.
 
+Debug's [rewind](../DEBUGGER.md#rewind) works in the chat. While Debug runs, each of the player's answers to an
+interaction before the state shown has a 44 px **Back to here** button beside its bubble. While a restored state is
+inspected, the transcript ends at that state, its interaction's controls are offered again, and the messages of the
+later state Forward restores follow them grey, under **Future · Forward restores it**, without Back to here or Explain
+values. A bar above the composer, below a failure card when the inspected state failed, shows a **Debug fork** badge,
+what the interaction shown was answered before, and **Forward**, **Resume**, and **Return to session**, each a 44 px
+button with a tooltip; it wraps on a narrow screen. New input or Resume removes the bar and the grey messages.
+
 ### Wide presentation
 
 At normal wide presentation the composer is one integrated component shell containing the expanding input and primary

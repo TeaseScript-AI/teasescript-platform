@@ -6,10 +6,7 @@ import { elementScroll, observeElementRect, useVirtualizer } from "@tanstack/vue
 import { useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import type {
-  PlayerTranscriptEntryPresentation,
-  PlayerSpeakerPresentation,
-} from "../../model.js";
+import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../model.js";
 import TranscriptMessage from "./TranscriptMessage.vue";
 import { recordSpeakerAvatarMessage, speakerAvatarPalette } from "./speakerAvatar";
 import { backdropBehind, resolveColour } from "./messageContrast";
@@ -52,12 +49,21 @@ watch(
   },
   { immediate: true },
 );
+// Whether the entry at `index` is a grey future message of Debug's rewind.
+function future(index: number): boolean {
+  const entry = props.entries[index];
+  return entry?.kind === "message" && entry.future === true;
+}
 const enhancedContrast = inject(enhancedTranscriptContrast, undefined);
 const scrollElement = ref<HTMLDivElement | null>(null);
 const scrollViewport = ref<InstanceType<typeof ScrollAreaViewport> | null>(null);
-watch(() => scrollViewport.value?.viewportElement, (element) => {
-  scrollElement.value = element instanceof HTMLDivElement ? element : null;
-}, { flush: "post" });
+watch(
+  () => scrollViewport.value?.viewportElement,
+  (element) => {
+    scrollElement.value = element instanceof HTMLDivElement ? element : null;
+  },
+  { flush: "post" },
+);
 const touching = ref(false);
 const viewportHeight = ref(0);
 const foregroundElement = ref<HTMLElement | null>(null);
@@ -278,14 +284,26 @@ onMounted(() => {
     <!-- Keep the overlay track inside the native viewport. The section stops
          Reka's document wheel handler without cancelling native scrolling. -->
     <ScrollAreaRoot type="scroll" class="transcript-scroll-area">
-      <ScrollAreaViewport ref="scrollViewport" class="transcript-scroll"
-        :data-scrolled="scrolled" role="region" aria-label="Transcript" :tabindex="0"
-        @keydown="onScrollKeydown" @wheel="onWheel" @scroll="releaseFollow"
-        @touchstart="onTouchStart" @touchend="touching = false" @touchcancel="touching = false">
+      <ScrollAreaViewport
+        ref="scrollViewport"
+        class="transcript-scroll"
+        :data-scrolled="scrolled"
+        role="region"
+        aria-label="Transcript"
+        :tabindex="0"
+        @keydown="onScrollKeydown"
+        @wheel="onWheel"
+        @scroll="releaseFollow"
+        @touchstart="onTouchStart"
+        @touchend="touching = false"
+        @touchcancel="touching = false"
+      >
         <div class="transcript-scroll-content">
           <div class="transcript-native-overlay">
-            <ScrollBar reveal-on-hover
-              :style="{ height: `${Math.max(0, viewportHeight - (bottomInset ?? 0))}px` }" />
+            <ScrollBar
+              reveal-on-hover
+              :style="{ height: `${Math.max(0, viewportHeight - (bottomInset ?? 0))}px` }"
+            />
           </div>
           <div class="transcript-history" :style="{ height: `${virtualizer.getTotalSize()}px` }">
             <div role="list">
@@ -302,8 +320,17 @@ onMounted(() => {
                 class="transcript-entry"
                 :data-continues="continues(item.index)"
                 :data-prose="appearance.placement !== null || undefined"
+                :data-future="future(item.index) || undefined"
                 :style="{ transform: `translateY(${item.start}px)` }"
               >
+                <!-- Debug's rewind: the later messages a restored state has not reached, which Forward restores. -->
+                <p
+                  v-if="future(item.index) && !future(item.index - 1)"
+                  class="future-label"
+                  data-future-label
+                >
+                  Future · Forward restores it
+                </p>
                 <TranscriptMessage
                   :entry="entry"
                   :speakers="speakers"
@@ -385,21 +412,22 @@ onMounted(() => {
    the complete composer height while retaining a faint trace to the bottom. */
 :deep(.transcript-scroll) {
   --transcript-top-fade: 0px;
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    black var(--transcript-top-fade),
-    black max(var(--transcript-top-fade), calc(100% - var(--composer-top-from-bottom, 0px))),
-    rgb(0 0 0 / 20%) calc(100% - var(--composer-bottom-from-bottom, 0px)),
-    rgb(0 0 0 / 20%) 100%
-  ), linear-gradient(
-    /* The thumb retains full opacity inside its existing reading gutter. */
-    to right,
-    transparent calc(var(--conversation-offset) + var(--conversation-width) - 8px),
-    black calc(var(--conversation-offset) + var(--conversation-width) - 8px),
-    black calc(var(--conversation-offset) + var(--conversation-width)),
-    transparent calc(var(--conversation-offset) + var(--conversation-width))
-  );
+  mask-image:
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      black var(--transcript-top-fade),
+      black max(var(--transcript-top-fade), calc(100% - var(--composer-top-from-bottom, 0px))),
+      rgb(0 0 0 / 20%) calc(100% - var(--composer-bottom-from-bottom, 0px)),
+      rgb(0 0 0 / 20%) 100%
+    ),
+    linear-gradient(
+      /* The thumb retains full opacity inside its existing reading gutter. */ to right,
+      transparent calc(var(--conversation-offset) + var(--conversation-width) - 8px),
+      black calc(var(--conversation-offset) + var(--conversation-width) - 8px),
+      black calc(var(--conversation-offset) + var(--conversation-width)),
+      transparent calc(var(--conversation-offset) + var(--conversation-width))
+    );
 }
 :deep(.transcript-scroll[data-scrolled="true"]) {
   --transcript-top-fade: 1rem;
@@ -435,6 +463,17 @@ onMounted(() => {
 .transcript-entry[data-prose] {
   padding-block: 1.75rem 0.75rem;
 }
+.transcript-entry[data-future] {
+  filter: grayscale(1);
+  opacity: 0.72;
+}
+.future-label {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
 .transcript-empty {
   padding: 1rem;
   font-size: 0.875rem;
@@ -443,7 +482,10 @@ onMounted(() => {
 .return-to-latest {
   position: absolute;
   bottom: calc(var(--transcript-bottom-inset, 0px) + 0.5rem);
-  right: calc(100% - var(--conversation-offset) - var(--conversation-width) + var(--conversation-inline-inset) + 0.25rem);
+  right: calc(
+    100% - var(--conversation-offset) - var(--conversation-width) +
+      var(--conversation-inline-inset) + 0.25rem
+  );
   width: 2.75rem;
   height: 2.75rem;
   border: 1px solid var(--border);

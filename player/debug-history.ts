@@ -1,10 +1,15 @@
 import type { InstructionPlan, InterpreterEvent } from "../src/index.js";
 import type { DebugEditedWhileDebugging, DebugRewoundWhileDebugging } from "./debug-export.js";
-import type { PlayerForegroundPresentation } from "./model.js";
+import type {
+  PlayerForegroundPresentation,
+  PlayerSpeakerPresentation,
+  PlayerTranscriptEntryPresentation,
+} from "./model.js";
 import {
   activePlayerRuntimeInteraction,
   playerRuntimeForeground,
   playerRuntimeSnapshotJson,
+  playerRuntimeTranscript,
   type PlayerRuntimeSession,
 } from "./runtime-adapter.js";
 
@@ -428,4 +433,33 @@ export class DebugHistory {
       this.#points = points;
     }
   }
+}
+
+/**
+ * The grey future of Debug's rewind (DEBUGGER.md "Rewind"): the messages of `future`, the state Forward restores, that
+ * the inspected state `shown` has not reached, with the speakers they name. Both are states of one session, so the
+ * shown state's events are the first of the future's. Each entry is marked `future` and keyed apart from the session's
+ * own, which may reuse its sequence once new input adopts the shown state.
+ */
+export function rewindFutureTranscript(
+  shown: DebugHistoryPosition,
+  future: DebugHistoryPosition,
+): {
+  readonly entries: readonly PlayerTranscriptEntryPresentation[];
+  readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
+} {
+  const reached = playerRuntimeTranscript(shown.events.slice(0, shown.eventCount)).entries.length;
+  const later = playerRuntimeTranscript(future.events.slice(0, future.eventCount));
+  return {
+    entries: later.entries
+      .slice(reached)
+      .map((entry) =>
+        Object.freeze(
+          entry.kind === "message"
+            ? { ...entry, id: `future-${entry.id}`, future: true as const }
+            : { ...entry, id: `future-${entry.id}` },
+        ),
+      ),
+    speakers: later.speakers,
+  };
 }

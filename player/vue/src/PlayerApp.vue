@@ -33,6 +33,9 @@ import { debugStageImage } from "./debugStageImage";
 import { playerRuntimeDebugNow } from "../../runtime-adapter.js";
 import DebugExportDialog from "./DebugExportDialog.vue";
 import RuntimeFailure from "./RuntimeFailure.vue";
+import RewindInspection from "./RewindInspection.vue";
+import { rewindFutureTranscript } from "../../debug-history.js";
+import { rewindRows } from "./rewindPresentation";
 import { useDebugExport } from "./useDebugExport";
 import { playerNoticeKeys, playerNotices } from "../../notices.js";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
@@ -185,6 +188,32 @@ provide(explainValues, {
     if (debug.explain(entryId)) void toolsShell.value?.showTool(debugTool.name);
   },
 });
+// Debug's rewind (DEBUGGER.md "Rewind"): each answer to a point before the state shown offers Back to here.
+const rewindPoints = computed(() => {
+  const state = debug.rewind.value?.state.value;
+  const leading = state?.inspection?.points ?? state?.points.length ?? 0;
+  const rows = new Map<string, number>();
+  state?.points.slice(0, leading).forEach((point, index) => {
+    if (point.response?.rowId) rows.set(point.response.rowId, index);
+  });
+  return rows;
+});
+provide(rewindRows, {
+  offers: (entryId) =>
+    rewindPoints.value.has(entryId) &&
+    props.player.rewind.canRewind.value &&
+    debug.rewind.value?.busy.value === false,
+  back(entryId) {
+    const index = rewindPoints.value.get(entryId);
+    if (index !== undefined) void debug.rewind.value?.back(index);
+  },
+});
+// While a restored state is inspected, the messages of the state Forward restores follow it, grey.
+const rewindFuture = computed(() => {
+  const state = debug.rewind.value?.state.value;
+  if (!props.player.rewind.inspecting.value || !state?.shown || !state.future) return null;
+  return rewindFutureTranscript(state.shown, state.future);
+});
 const tools = computed(() => (debug.menu.value ? [debugTool, ...props.tools] : props.tools));
 const savedData = computed(() =>
   props.player.hasSavedData
@@ -206,16 +235,20 @@ const savedData = computed(() =>
     : null,
 );
 const noSpeakers: Readonly<Record<string, PlayerSpeakerPresentation>> = Object.freeze({});
-const transcript = computed(() =>
-  session.value
-    ? {
-        key: `runtime-${props.player.generation.value}`,
-        entries: session.value.transcriptEntries,
-        speakers: session.value.speakers,
-        revision: session.value.transcriptRevision,
-      }
-    : { key: "empty", entries: [], speakers: noSpeakers, revision: 0 },
-);
+const transcript = computed(() => {
+  if (!session.value) return { key: "empty", entries: [], speakers: noSpeakers, revision: 0 };
+  const future = rewindFuture.value;
+  return {
+    key: `runtime-${props.player.generation.value}`,
+    entries:
+      future === null
+        ? session.value.transcriptEntries
+        : [...session.value.transcriptEntries, ...future.entries],
+    speakers:
+      future === null ? session.value.speakers : { ...future.speakers, ...session.value.speakers },
+    revision: session.value.transcriptRevision,
+  };
+});
 
 // The Stage shows the runtime's Stage image; an authored image has no alternative text yet. A development
 // override replaces it for layout comparison only.
@@ -430,6 +463,13 @@ async function toggleFullscreen() {
               :snapshot="session?.snapshot ?? null"
               :host-error="player.hostError.value"
               @export="openDebugExport"
+            />
+            <!-- Closest to the composer, also below a failure the inspected state shows. -->
+            <RewindInspection
+              v-if="debug.rewind.value && player.rewind.inspecting.value"
+              :rewind="debug.rewind.value"
+              :adopting="player.rewind.adopting.value"
+              :working="player.rewind.working.value"
             />
           </template>
         </RuntimeInteraction>

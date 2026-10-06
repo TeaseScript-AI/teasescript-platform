@@ -624,7 +624,11 @@ stores nothing, stores an added value that the running session's next load retur
 marks the session edited, changes the value to text and deletes it, fits a narrow screen, and after the session ended
 stores a deletion for the next Start. The spill store of Debug's rewind history, loaded into the page, keeps and deletes
 rows in IndexedDB; its sweep deletes the history databases of pages that ended, a live one only once its page closes it,
-and neither its own page's nor a database it did not name. With auto-skip, the `missing-media` package, which refers to a
+and neither its own page's nor a database it did not name. On the `debug-rewind` package, Back to here on an answer
+shows the earlier choice with the later messages grey and the earlier answer in the inspection bar; Forward restores the
+later state and Return the session; a different answer adopts the earlier state with its saved data; an inspected failed
+state shows its failure above the bar, which fits a narrow screen with 44 px controls. With auto-skip, the
+`missing-media` package, which refers to a
 missing and an invalid image and sound, reaches its end at once, with one warning notice per path and a valid image
 restoring the Stage; in `late-image`, an invalid image that fails only after the script hid it and showed a valid one
 neither hides that image nor is reported. The `audio-overlap` package, whose `seeked` notifications arrive late as under

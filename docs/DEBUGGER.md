@@ -126,6 +126,9 @@ with it.
   adopted state are gone; earlier points stay for a later Back. When the saved data cannot be replaced, for example on
   quota, the state stays inspected, the Player says so, and nothing changes. Rewind does one thing at a time: while a
   step restores a state or a state is being adopted, input to an inspected state, Return, and another step are refused.
+- In the chat, Back is each earlier answer's **Back to here**; while a state is inspected, the later messages show grey
+  and a bar offers Forward, Resume, and Return to session ([Player
+  UI](ui/PLAYER-UI.md#composer-and-foreground-interactions)).
 - Every restored state marks the session **Rewound while debugging**, with the scene time of the state the latest
   rewind restored and how many rewinds led to it, which an adopted state keeps. The debug recorder and the value trace
   begin anew at every restored state, so a replay never mixes branches.
