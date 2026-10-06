@@ -3,6 +3,8 @@ import test from "node:test";
 import { gunzipSync, gzipSync } from "node:zlib";
 
 import { CapturedMediaStore } from "../player/captured-media.js";
+import { createPlayerRuntimeSession } from "../player/runtime-adapter.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import {
   checkStorageTransferImages,
   collectStorageTransfer,
@@ -389,4 +391,29 @@ test("an import's photos are checked by their bytes and decoded, one damaged pho
     }).then(() => transfer),
     /Saved photo 1 is damaged/,
   );
+});
+
+test("a deeply nested value a script saved moves as a file and as text", async () => {
+  const depth = 5_000;
+  const session = createPlayerRuntimeSession(
+    `let nested = ${"[".repeat(depth)}1${"]".repeat(depth)}\nsave nested as "deep"\nexit`,
+  );
+  assert.equal(session.snapshot.status, "halted");
+  const deep: StorageTransfer = {
+    scope: "script",
+    entries: session.snapshot.scriptStorage,
+    images: [],
+  };
+  // Compared as JSON text written without recursion, since a recursive comparison cannot reach the bottom.
+  const json = (data: StorageTransfer) => serializeValidatedRuntimeJson(data);
+  for (const gzip of [true, false]) {
+    const fromFile = await readStorageTransferFile(
+      await bytesOf(await storageTransferFile(deep, gzip)),
+    );
+    assert.equal(json(fromFile), json(deep));
+    assert.equal(
+      json(await readStorageTransferText(await storageTransferText(deep, gzip))),
+      json(deep),
+    );
+  }
 });

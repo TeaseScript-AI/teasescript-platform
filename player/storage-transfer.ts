@@ -4,6 +4,7 @@ import {
   type SerializableRuntimeValue,
 } from "../src/index.js";
 import { isWellFormedCapturedMediaReference, type CapturedMediaStore } from "./captured-media.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import { capturedMediaReferences } from "./captured-media-persistence.js";
 import { checkImageFile, type ImageDecoder } from "./image-file.js";
 import {
@@ -268,7 +269,7 @@ function parseImage(
 function* pieces(transfer: StorageTransfer): Generator<string> {
   yield `{"format":${JSON.stringify(FORMAT)},"version":${VERSION},"scope":${JSON.stringify(transfer.scope)},\n"entries":[`;
   for (const [index, entry] of transfer.entries.entries())
-    yield `${index === 0 ? "\n" : ",\n"}${JSON.stringify({ key: entry.key, value: entry.value })}`;
+    yield `${index === 0 ? "\n" : ",\n"}${serializeValidatedRuntimeJson({ key: entry.key, value: entry.value })}`;
   yield `\n],\n"images":[`;
   for (const [index, image] of transfer.images.entries()) {
     yield `${index === 0 ? "\n" : ",\n"}{"reference":${JSON.stringify(image.reference)},"byteLength":${image.bytes.length},"data":"`;
