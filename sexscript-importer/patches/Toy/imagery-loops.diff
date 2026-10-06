@@ -1,0 +1,192 @@
+--- a/scripts/toy/imagery.groovy
++++ b/scripts/toy/imagery.groovy
+@@ -1,45 +1,85 @@
+ { toy ->
+-	final IMAGEDATA = {
+-		return new File("${toy.DATAFOLDER}/images/toy")
+-			.listFiles()
+-			.findAll { d -> d.isDirectory(); }
+-			.collectEntries { d -> [
+-				d.getName(), [
+-					domme: d.getName(),
+-					sets: d.listFiles()
+-						.findAll { s -> s.isDirectory(); }
+-						.collect { s -> [ sub: s, f: new File(s.getPath() + "/tags")] }
+-						.findAll { s -> s.f.canRead() }
+-						.collectEntries { s -> [
+-							s.sub.getName(), [
+-								set: s.sub.getName(),
+-								images: s.f
+-									.readLines()
+-									.collect { l ->
+-										def fields = l.split(":");
+-										return [
+-											image: fields[0],
+-											tags: fields[1]
+-												.split(",")
+-												.findAll { t -> !t.isEmpty() }
+-										];
+-									}
+-							]
+-						]}
+-					]
+-				]
+-			};
+-	}();
++	// The tags files of images/toy/<domme>/<set>/tags, one line per image, written out: a package cannot list folders
++	// or read files.
++	final TAGFILES = [
++		"ancilla/corset": "1:dressed,stood;2:dressed,stood;3:dressed,stood;4:dressed,stood;5:dressed,stood;6:dressed,stood;7:dressed,stood,tease;8:dressed,stood,ass;9:dressed,stood,tease;10:dressed,stood,tease;11:kneel,tits;12:kneel,tits,ass;13:kneel,tits,lingerie;14:kneel,tits,lingerie;15:sit,tits,lingerie;16:stood,tits,lingerie",
++		"ancilla/crop": "1:tits,kneel,sssh;2:tits,kneel,mean,crop;3:tits,kneel,crop;4:tease,kneel;5:stood,tits;6:kneel,tits;7:kneel,tits;8:dressed,stood,crop;9:dressed,stood,crop;10:dressed,stood,crop,tease;11:dressed,stood,crop,tease;12:dressed,stood,crop;13:dressed,stood,crop;14:dressed,sit,crop,tease;15:tits,sit;16:tits,stood",
++		"ancilla/dress": "1:tits,stood;2:tits,stood;3:tits,sit;4:tits,sit;5:tits,stood;6:tits,stood,ass;7:dressed,stood;8:dressed,stood;9:dressed,stood,ass;10:dressed,stood,ass;11:dressed,squat;12:dressed,stood,tease;13:dressed,stood,tease;14:tits,stood;15:tits,stood",
++		"ancilla/pink": "1:tits,kneel,lingerie;2:tits,kneel,lingerie;3:tits,kneel,lingerie;4:tits,kneel,lingerie;5:tits,kneel,lingerie;6:tits,kneel;7:dressed,kneel;8:dressed,stood;9:dressed,stood;10:dressed,stood,tease;11:dressed,stood,tease;12:kneel,lingerie;13:tits,kneel,lingerie;14:tits,kneel,lingerie;15:tits,kneel,lingerie",
++		"emily/blackcorsetblack": "1:dressed,stood;2:dressed,stood,mean;3:dressed,stood;4:dressed,stood;5:dressed,stood,tease;7:stood,tits;8:stood,tits,tease;9:stood,ass,tease;12:stood,ass,tease;13:stood,tits,tease",
++		"emily/blackcorsetblack2": "1:dressed,sit,boots;2:dressed,kneel,tease;3:dressed,sit,boots,tease;4:dressed,sit,boots,tease;5:dressed,sit;6:dressed,sit,boots,tease;7:dressed,sit,boots;8:dressed,sit,tease;9:dressed,stood,tease;10:dressed,stood,ass,boots;11:sit;12:stood;13:stood,tits,boots;14:stood,tits,tease;15:stood,tits,tease;16:stood,tits,ass;17:sit,tits,tease;18:dressed,sit,boots;19:sit,boots,tease;20:sit,tits",
++		"emily/blackcorsetstanding": "1:dressed,stood,mean;2:dressed,stood,tease;3:dressed,stood,tease;4:dressed,stood,tease,tits;5:dressed,stood,tease,ass;6:dressed,stood,ass;7:dressed,stood,tease;8:stood,tits,tease;9:squat,tease,tits,pussy;10:squat,tease,tits;11:squat,tease,tits;12:lay,tits,ass;13:lay,tits,ass,tease;14:lay,tits,pussy,mean;15:squat,tits,pussy,tease;16:lay,tits,pussy,tease",
++		"emily/blackcorsetstanding2": "1:dressed,stood;2:dressed,stood;3:dressed,stood,tease,ass;4:dressed,stood,tease,ass;5:dressed,stood;6:dressed,stood,tease;7:dressed,stood,tits,ass;8:dressed,stood,tits,ass;9:stood,tease,tits,pussy;10:stood,tease,tits;11:stood,tease,tits,ass;12:stood,tits,pussy,tease;13:squat,tits,pussy;14:stood,tits,pussy,tease;15:stood,ass,pussy,tease;16:squat,tits,pussy,tease",
++		"emily/blacklatexcorset": "1:dressed,stood,tits;2:dressed,stood,ass;3:dressed,stood,ass,tease;4:dressed,stood,tits,mean;5:stood,tits,tease;6:dressed,sit,tease,tits;7:lay,tits;8:lay,tits,tease;9:kneel,ass,tease;10:kneel,ass,pussy,tease;11:lay,sit,tits,pussy,tease;12:lay,sit,tits,pussy,tease;13:kneel,ass;14:kneel,pussy,tease;15:kneel,tits,tease;16:kneel,tits,ass,pussy;17:kneel,tits,ass,pussy,tease;18:kneel,tits,pussy,tease;19:kneel,tits,pussy,tease;20:kneel,tits,pussy,tease;21:kneel,tits,pussy,tease",
++		"emily/blacklatexcrop": "01:dressed,stood,crop,mean;02:dressed,stood,crop;03:dressed,stood,tease,crop;04:dressed,stood;05:dressed,stood,tits,tease;06:dressed,stood,tits,tease;07:stood,tits;08:stood,crop,tits;09:stood,tits,tease",
++		"emily/blacklatexdress": "1:dressed,stood,tits;2:dressed,stood,mean,ass;3:dressed,stood,tease,tits;4:dressed,stood,tease,ass,pussy;5:squat,stood,ass,tease,dressed;6:dressed,stood;7:dressed,squat,ass;8:dressed,squat,tease,mean,pussy,tits;9:dressed,squat,tease,pussy;10:dressed,squat,tease;11:lay,dressed,tease;12:stood,tease,tits;13:stood,ass,tease;14:squat,tease,tits,pussy;15:squat,pussy,tease,tits",
++		"emily/blacklatexdresscrop": "1:dressed,stood,crop,tits,mean;2:dressed,stood,crop,mean,tits;3:dressed,stood,crop,tease;4:dressed,stood,crop;5:stood,tits,crop,tease;6:stood,tits,crop,mean,tease;7:stood,tits,tease;8:dressed,kneel,tits;9:kneel,tease,tits;10:squat,tease,tits,boots;11:dressed,stood,tits;12:stood,pussy,tease,ass,boots;13:stood,pussy,ass,tease,boots;14:dressed,stood,tease;15:stood,ass,tease,pussy,boots",
++		"emily/blacklatexdressdomme": "1:dressed,stood,crop;2:dressed,stood,crop;3:dressed,stood,tease,tits;4:dressed,stood,tits;5:dressed,stood,tease;6:stood,tease,pussy;7:stood,tease,pussy;8:dressed,stood;9:dressed,stood,mean,tits;10:stood,tease,ass;11:dressed,stood,tits;12:dressed,stood,tits;13:dressed,stood;14:dressed,stood,tease,tits;15:dressed,stood,tease,tits;16:stood,tease,pussy",
++		"emily/blacklatexkitchen": "1:dressed,sit;2:dressed,sit;3:dressed,sit,tease;4:dressed,sit;5:dressed,sit;6:dressed,sit;7:sit,tits,tease;8:sit,tits,tease;9:sit,tits,tease;10:sit,tits,tease;11:sit,tits,tease;12:sit,tease,tits;13:sit,tits,tease;14:sit,tits,tease;15:sit,tits,tease;16:stood,tits,ass;17:stood,tits,ass;18:stood,tits,ass,tease;19:stood,tits,ass,tease;20:stood,tits;21:stood,tits,tease;22:stood,tits,tease,ass;23:stood,tits,tease;24:stood,tits,tease;25:stood,tits,tease;26:stood,tits,tease;27:stood,tits,tease",
++		"emily/blacklatexskirt": "1:dressed,stood;2:dressed,stood,tits,tease;3:dressed,stood,tease,tits;4:dressed,stood,tease,tits;5:dressed,stood,ass;6:dressed,stood,ass;7:dressed,stood,ass,tease;8:dressed,stood,tease,ass;9:dressed,stood,tease,ass;10:dressed,stood;11:stood,tits;12:stood,tease,tits;13:stood,tease,tits,pussy;14:stood,tease,tits,pussy;15:stood,ass;16:stood,ass,tease;17:stood,ass,tease,tits;18:stood,ass,tease,tits;19:stood,tease,tits;20:stood,tits;21:stood,tits,tease;22:stood,tits,tease",
++		"emily/blackleatherdungeon": "01:dressed,stood,crop,mean,boots,tits;02:dressed,stood,crop,mean;03:dressed,stood,tease,boots,tits;04:dressed,stood,tease,boots;05:stood,tits,tease;06:kneel,tits,tease,pussy;07:sit,tits,tease,boots;08:lay,tits,boots,tease",
++		"emily/blacklingerie3": "01:dressed,stood;02:dressed,stood,tease;03:dressed,stood;04:dressed,stood,tease,ass;05:dressed,stood;06:dressed,stood,tease;07:dressed,stood,tease;08:dressed,stood,tease,tits;09:dressed,stood,tits;010:dressed,stood,tease,tits;011:stood,tease,tits;012:stood,tease,tits;013:stood,tits;014:stood,tease,pussy,tits;015:stood,ass;016:stood,tease,ass;017:stood,ass,pussy;018:stood,ass,pussy;019:stood,tease,tits,pussy",
++		"emily/blacklingerie5": "1:dressed,stood,mean;2:dressed,stood,tease,tits;3:dressed,stood,tits;4:dressed,stood,ass;5:dressed,stood,ass;6:dressed,stood,ass;7:dressed,stood,ass,mean;8:dressed,stood,tits;9:dressed,stood;10:stood,tease,tits;11:stood,tease,tits;12:stood,tease,tits;13:stood,tits,tease;14:stood,tease,ass;15:stood,ass,tease;16:stood,tease,ass;17:sit,tits,pussy,tease;18:sit,tits,pussy,tease;19:sit,tease,tits,pussy;20:sit,tease,tits,pussy",
++		"emily/blacklingeriebed": "1:sit,tits,pussy,tease,lingerie,mean;2:lay,dressed,tease,ass,lingerie;4:dressed,stood,ass,lingerie;5:dressed,stood,ass,tease,lingerie;6:tits,tease,lingerie;7:kneel,ass,tits,lingerie,mean;8:stood,tease,tits,lingerie;9:dressed,kneel,tease,lingerie,tits;10:stood,tits,lingerie,mean;11:dressed,kneel,lingerie;12:stood,pussy,tease,lingerie;13:lay,dressed,ass,lingerie;14:lay,dressed,tease,lingerie",
++		"emily/blacklingeriebed2": "01:lay,dressed,lingerie;02:lay,dressed,lingerie,tease;03:lay,dressed,sit,lingerie;04:lay,dressed,sit,lingerie,tease;05:lay,dressed,lingerie;06:dressed,sit,lingerie;07:lay,dressed,lingerie;08:lay,dressed,lingerie,tease;09:dressed,stood,lingerie;010:dressed,stood,lingerie;011:dressed,stood,lingerie,tease;012:dressed,stood,lingerie;013:stood,lingerie,tease,dressed;014:kneel,lingerie,tits,tease;015:kneel,lingerie,tits;016:kneel,lingerie,tits,tease;017:kneel,lingerie,tits;018:kneel,lingerie,tits,tease;019:kneel,lingerie,tits;020:sit,tease,tits,lingerie;021:sit,tits,lingerie;022:lay,tits,lingerie;023:lay,tits,lingerie,;024:lay,tease,tits,lingerie;025:lay,tease,tits,lingerie,pussy;026:sit,tits,lingerie;027:sit,lingerie,tits,pussy;028:sit,lingerie,tits,pussy,tease;029:sit,lingerie,tits,pussy,tease;030:sit,lingerie,tits,pussy",
++		"emily/blacklingeriebed3": "1:dressed,stood,lingerie;2:dressed,lingerie,stood;3:dressed,kneel,ass,tease,lingerie;4:dressed,kneel,ass,lingerie,tease;5:dressed,kneel,tits,tease,lingerie;6:sit,tits,lingerie;7:sit,tits,tease,lingerie;8:sit,tease,tits,lingerie;9:sit,tits,tease,lingerie;10:lay,lingerie,pussy,tease;11:lay,lingerie,pussy,tease;12:lay,lingerie,pussy,tease;13:lay,lingerie,pussy,tease;14:lay,lingerie,pussy,tease;15:lay,lingerie,pussy,tease",
++		"emily/blacklingeriechair2": "1:dressed,stood ;2:dressed,stood,ass;3:dressed,stood,tease,ass;4:dressed,sit,tease,pussy;5:dressed,kneel,ass;6:dressed,sit,tease;7:dressed,kneel,ass,pussy,tease;8:dressed,kneel,ass,pussy,tease;9:sit,tits,pussy;10:kneel,tits,tease;11:sit,tits,tease;12:kneel,tits,pussy;13:lay,pussy;14:lay,pussy,tease;15:stood,pussy,tease",
++		"emily/bronzecorset": "1:dressed,stood,tease ;2:dressed,stood;3:dressed,stood,mean;4:dressed,stood,tits,mean;5:stood,tits,tease;6:stood,tits;7:stood,tits,tease;8:stood,tits,tease;9:stood,ass;10:sit,tits;11:sit,tits,tease;12:sit,tits,tease,pussy;13:sit,ass,tease;14:stood,tits,tease,pussy;15:stood,tits,pussy;16:dressed,stood,mean;17:dressed,stood;18:dressed,stood;19:dressed,stood,tits,tease;20:dressed,stood,ass;21:stood,tits,tease;22:stood,ass;23:stood,tits,pussy;24:sit,tits;25:sit;26:sit,ass;27:stood,ass;28:stood,tits,ass,tease",
++		"emily/corsetcrop": "01:dressed,stood;02:dressed,stood,crop,mean;03:dressed,stood,crop,mean;04:dressed,stood,crop;05:dressed,stood,crop;06:dressed,stood,tease,crop,mean;07:dressed,stood,ass,tease,pussy;08:lay,dressed,ass;09:lay,dressed,tease,ass;10:dressed,squat,tease,mean,pussy;11:dressed,squat,tease,ass;12:dressed,stood,tease;13:stood,tease,tits;14:stood,tease,tits,pussy;15:lay,pussy;16:lay,tits,pussy,tease",
++		"emily/pinkbabydollbed": "1:dressed,lingerie,stood;2:dressed,kneel,tease,lingerie;3:dressed,stood,tease,lingerie;4:dressed,lingerie;5:dressed,tits,tease,lingerie;6:tits,tease,lingerie,kneel;7:dressed,tits,tease,lingerie;8:lay,tits,tease,lingerie;9:kneel,tits,tease,lingerie;10:lay,tease,tits,lingerie;11:lay,tease,pussy,lingerie;12:lay,tease,pussy,lingerie;13:lay,tease,pussy,lingerie,ass;14:lay,tease,tits,pussy,lingerie;15:lay,tits,tease,pussy,lingerie;16:lay,tease,tits,pussy,lingerie",
++		"emily/purplelatexdungeon": "1:dressed,stood,tease;2:dressed,stood,tease;3:dressed,stood,ass;4:dressed,stood,tease,ass;5:dressed,stood;6:dressed,stood;7:dressed,stood,tits,tease;8:dressed,stood,tease;9:stood,tits;10:stood,tits;11:stood,tease,tits,pussy;12:stood,tits,tease;13:stood,tits,tease,pussy;14:stood,tits,tease;15:stood,tits,ass,tease;16:stood,ass;17:stood,tits,tease;18:stood,tits,pussy,tease",
++		"emily/redcorset": "1:dressed,stood;2:dressed,stood;3:dressed,stood,tease;4:dressed,stood;5:dressed,sit;6:dressed,sit;8:dressed,squat;9:dressed,kneel,ass;10:dressed,sit;11:dressed,sit,tease;12:dressed,kneel,tease;13:kneel;14:kneel,tits,tease;15:sit,tits,pussy,tease;16:sit,tits,pussy,tease",
++		"emily/redcorsetkitchen": "1:dressed,stood;2:dressed,sit;3:dressed,stood,mean,tease;4:dressed,stood,tease,ass;5:dressed,stood,tease;6:dressed,lay,ass,tease;7:stood,tits,pussy,tease;8:stood,tits,tease;9:stood,tease,tits;10:stood,ass;11:stood,ass,tits;12:stood,tease,tits;13:stood,tits,tease,ass;14:lay,pussy,ass,tease;15:sit,tits,pussy;16:sit,tits,tease,pussy",
++		"emily/redlatexcorset": "1:dressed,stood;2:dressed,stood;3:dressed,stood,mean;4:dressed,stood,tease;5:dressed,stood,ass;6:dressed,stood,tease;7:dressed,stood;8:dressed,stood,tease;9:dressed,stood,tease,ass;10:dressed,stood,ass;11:dressed,stood,tease;12:stood,tease,tits;13:stood,tits;14:stood,tease,tits;15:stood,tease,tits;16:stood,tits,tease;17:stood,tease,tits;18:stood,tits,pussy;19:stood,tits,pussy;20:stood,ass;21:stood,tits,tease;22:stood,tits,tease;23:stood,ass,tease",
++		"emily/whitelingeriebed": "1:lingerie,dressed,stood,mean;2:lingerie,dressed,kneel,tease;3:lingerie,dressed,stood;4:lingerie,dressed;5:lingerie,dressed,stood,ass,tease;6:lingerie,dressed,kneel,ass,tease;7:lingerie,dressed,kneel;8:lingerie,dressed,stood,tease;9:lingerie,dressed,sit,ass;10:lingerie,sit,tease,tits;11:lingerie,sit,tease;15:lay,lingerie,tits,tease,pussy;16:lay,lingerie,tease,tits,pussy;17:lay,lingerie,tits,tease,pussy;18:lay,lingerie,tits,tease;19:lay,lingerie,tease,pussy;20:lay,lingerie,tease,pussy;21:lay,lingerie,tease;22:lay,lingerie",
++		"emily/whitelingeriefeather": "1:dressed,stood,ass;2:sit,tits,pussy;3:sit,tits,pussy,tease;4:dressed,stood,ass;5:stood,ass,pussy;6:stood,ass;7:dressed,stood,ass;8:stood,tits,pussy;9:dressed,kneel,tits,tease;10:dressed,kneel;11:sit,tits,pussy,mean;12:dressed,stood,ass;13:dressed,stood,ass;14:dressed,kneel,tits,tease;15:sit,tits,pussy,tease;16:dressed,stood,tease"
++	];
++	final IMAGEDATA = [:];
++	for (domme in ["ancilla", "emily", "figures"]) {
++		def sets = [:];
++		for (path in TAGFILES.keySet()) {
++			def parts = path.split("/");
++			if (parts[0] != domme) continue;
++			def images = [];
++			for (l in TAGFILES[path].split(";")) {
++				def fields = l.split(":");
++				images.add([
++					image: fields[0],
++					tags: fields[1]
++						.split(",")
++						.findAll { t -> !t.isEmpty() }
++				]);
++			}
++			sets[parts[1]] = [set: parts[1], images: images];
++		}
++		IMAGEDATA[domme] = [domme: domme, sets: sets];
++	}
++
++	// Toy's matchTags: every tag of the spec must be in the image's tags, and no "!tag" may be.
++	final imageMatches = { tags, spec ->
++		for (t in spec) {
++			if (t.startsWith("!")) {
++				if (tags.contains(t.substring(1))) return false;
++			}
++			else if (!tags.contains(t)) return false;
++		}
++		return true;
++	}
++
++	// A random element of a list, l[getRandom(l.size())]. Through a parameter, the TeaseScript compiler types the
++	// result as unknown; a list built from [] in the function itself gives a result typed as null.
++	final randomItem = { l -> l[getRandom(l.size())] }
+ 
+ 	toy.metaClass.selectImage { domme, set, spec ->
+-		def matches = IMAGEDATA[domme];
+-		if (!matches) return null;
+-		matches = matches.sets[set];
+-		if (!matches) return null;
+-		matches = matches
+-			.images.findAll(matchTags(spec));
++		if (!IMAGEDATA.containsKey(domme)) return null;
++		final sets = IMAGEDATA[domme].sets;
++		if (set == null || !sets.containsKey(set)) return null;
++		def matches = [];
++		for (image in sets[set].images) {
++			if (imageMatches(image.tags, spec)) matches.add(image);
++		}
+ 		if (matches.isEmpty()) return null;
+-		return matches[getRandom(matches.size())];
++		return randomItem(matches);
+ 	};
+ 
+ 	toy.metaClass.showImage { spec ->
+@@ -60,18 +100,32 @@
+ 	};
+ 
+ 	toy.metaClass.selectImageSet { domme, specs ->
+-		def matches = IMAGEDATA[domme];
+-		if (!matches) return null;
+-		matches = matches.sets.values().findAll({ s -> specs.every({ spec -> selectImage(domme, s.set, spec)})});
+-		return matches[getRandom(matches.size())];
++		if (!IMAGEDATA.containsKey(domme)) return null;
++		final sets = IMAGEDATA[domme].sets;
++		def matches = [];
++		for (key in sets.keySet()) {
++			final s = sets[key];
++			def all = true;
++			for (spec in specs) {
++				if (!selectImage(domme, s.set, spec)) {
++					all = false;
++					break;
++				}
++			}
++			if (all) matches.add(s);
++		}
++		if (matches.isEmpty()) return null;
++		return randomItem(matches);
+ 	};
+ 
+ 	toy.metaClass.imageTagsComment { tags ->
+ 		if (!tags || tags.isEmpty()) return null;
+-		tags = tags.intersect([ASS, CROP, BOOTS, PUSSY, SSSH])
+-		if (tags.isEmpty()) return null;
+-		Collections.shuffle(tags);
+-		switch (tags[0]) {
++		def found = [];
++		for (t in tags) {
++			if ([ASS, CROP, BOOTS, PUSSY, SSSH].contains(t) && !found.contains(t)) found.add(t);
++		}
++		if (found.isEmpty()) return null;
++		switch (found[getRandom(found.size())]) {
+ 			case ASS:
+ 				if (!stateIs(GAGGED))
+ 					return compose([
+@@ -112,10 +166,20 @@
+ 		def outfit = loadString("toy.owner.outfit");
+ 		def outfitTime = loadInteger("toy.owner.outfitTime");
+ 		if (outfitTime > getTime() - 7200) { // Recent, check
+-			def prev = IMAGEDATA[DOMME.id];
+-			if (prev) {
+-				prev = prev.sets[outfit];
+-				if (prev && specs.every({ spec -> selectImage(DOMME.id, prev.set, spec)})) {
++			def known = false;
++			if (outfit != null && IMAGEDATA.containsKey(DOMME.id)) {
++				final sets = IMAGEDATA[DOMME.id].sets;
++				known = sets.containsKey(outfit);
++			}
++			if (known) {
++				def all = true;
++				for (spec in specs) {
++					if (!selectImage(DOMME.id, outfit, spec)) {
++						all = false;
++						break;
++					}
++				}
++				if (all) {
+ 					loadDomme(DOMME.id, outfit);
+ 					return outfit;
+ 				}
