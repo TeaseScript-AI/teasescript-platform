@@ -184,6 +184,11 @@ export interface RuntimeDebugTraceStatus {
    * `null` before the first operation.
    */
   readonly rngAnchorState: number | null;
+  /**
+   * The sequence the first event of this epoch has or will have: earlier messages were shown before the epoch began.
+   * `null` before the first operation.
+   */
+  readonly firstEventSequence: number | null;
 }
 
 export interface RuntimeDebugTraceOptions {
@@ -349,6 +354,7 @@ export class TraceStore {
   #truncated = false;
   #draws = 0;
   #rngAnchorState: number | null = null;
+  #firstEventSequence: number | null = null;
   #failure: string | null = null;
   #plan: InstructionPlan | null = null;
   #last: WeakRef<RuntimeSnapshot> | null = null;
@@ -391,6 +397,7 @@ export class TraceStore {
         this.#pendingOrigin = null;
         this.#plan = plan;
         this.#rngAnchorState = snapshot.rng.state;
+        this.#firstEventSequence = snapshot.nextEventSequence;
       }
       this.#sceneTimeMs = snapshot.currentSessionTimeMs;
       this.#instruction = null;
@@ -422,6 +429,7 @@ export class TraceStore {
     this.#truncated = false;
     this.#draws = 0;
     this.#rngAnchorState = null;
+    this.#firstEventSequence = null;
     this.#plan = null;
     this.acc = emptyDependencies();
   }
@@ -1142,6 +1150,7 @@ export class TraceStore {
       truncated: this.#truncated,
       draws: this.#draws,
       rngAnchorState: this.#rngAnchorState,
+      firstEventSequence: this.#firstEventSequence,
     });
   }
 }

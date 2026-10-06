@@ -5,6 +5,7 @@ import { RuntimeDebugContext, type RuntimeDebugRecord } from "../src/index.js";
 import {
   PLAYER_DEBUG_TRACE_PAGE,
   playerDebugLiveValue,
+  playerDebugMessageOrigin,
   playerDebugTraceRows,
   playerDebugVariables,
   type PlayerDebugTraceRow,
@@ -12,7 +13,10 @@ import {
 } from "../player/debug-variables.js";
 import {
   advancePlayerRuntimeTime,
+  createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
+  playerRuntimeTranscriptEventSequence,
+  restorePlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
@@ -34,8 +38,8 @@ function traced(source: string): { session: PlayerRuntimeSession; trace: Runtime
 
 /** The view the Variables tab starts with: roots open, values of messages shown, nothing else. */
 const defaults = (open: ReadonlySet<string> = new Set()): PlayerDebugTraceView => ({
-  expanded: (key: string, record: RuntimeDebugRecord, depth: number) =>
-    open.has(key) || depth === 0 || record.kind === "interpolation",
+  expanded: (key: string, record: RuntimeDebugRecord, depth: number, carried: boolean) =>
+    open.has(key) || depth === 0 || record.kind === "interpolation" || carried,
   pages: () => 1,
 });
 
@@ -208,4 +212,103 @@ test("live variables group by globals, files, calls, and blocks, and filter by n
   const untraced = playerDebugVariables(session.plan, session.snapshot, null);
   assert.equal(untraced[0]!.variables[0]!.value, '"Coach"');
   assert.equal(untraced[0]!.variables[0]!.record, null);
+});
+
+test("Explain values finds a message by its event, through parameters and for any value", () => {
+  const { session, trace } = traced(
+    [
+      "let a = 5",
+      "let b = 2 + 3",
+      "function tell(message) {",
+      "    say message",
+      "}",
+      'tell("You get ${a}")',
+      'tell("You get ${b}")',
+      "let pair = [1, a]",
+      "say pair",
+      "exit",
+    ].join("\n"),
+  );
+  const messages = session.transcriptEntries.filter(
+    (entry) => entry.kind === "message" && entry.speakerId !== "user",
+  );
+  const explained = messages.map((entry) => {
+    const sequence = playerRuntimeTranscriptEventSequence(entry.id);
+    assert.ok(sequence !== null);
+    const origin = playerDebugMessageOrigin(trace, sequence);
+    assert.equal(origin.kind, "record");
+    return summary(
+      playerDebugTraceRows(trace, [origin.kind === "record" ? origin.id : 0], defaults()),
+    );
+  });
+  // Equal texts keep their own causes; the parameter passes the message on, so its placeholder shows too.
+  assert.deepEqual(explained, [
+    [
+      'Message "You get 5"',
+      '  parameter message of tell() "You get 5"',
+      '    argument message of tell() "You get 5"',
+      "      let a 5",
+    ],
+    [
+      'Message "You get 5"',
+      '  parameter message of tell() "You get 5"',
+      '    argument message of tell() "You get 5"',
+      "      let b 5",
+    ],
+    ['Message "[1, 5]"', "  let pair [1, 5]"],
+  ]);
+  assert.equal(playerRuntimeTranscriptEventSequence("fixture-1"), null);
+  assert.equal(playerRuntimeTranscriptEventSequence("runtime-event-01"), null);
+});
+
+test("a message the trace cannot explain says why", () => {
+  const source = 'let count = 1\nsay "${count}"\nlet name = askText "Name?"\nsay "${name}"\nexit';
+  const said = (session: PlayerRuntimeSession) =>
+    session.events.filter((event) => event.kind === "say").map((event) => event.sequence);
+  const reason = (trace: RuntimeDebugContext, sequence: number) => {
+    const origin = playerDebugMessageOrigin(trace, sequence);
+    return origin.kind === "unavailable" ? origin.reason : "recorded";
+  };
+
+  // Turned on mid-session: earlier messages came before recording.
+  const late = new RuntimeDebugContext();
+  const waiting = advancePlayerRuntimeTime(createPlayerRuntimeSession(source), 60_000);
+  const answered = submitPlayerRuntimeComposer(
+    withPlayerRuntimeDebugTrace(waiting, late),
+    "Bo",
+  )!.session;
+  assert.deepEqual(
+    said(answered).map((sequence) => reason(late, sequence)),
+    ["Shown before Debug was turned on", "Shown before Debug was turned on", "recorded"],
+  );
+
+  // Continue of a restored session: its messages came before the restored point.
+  const { session, trace } = traced(source);
+  const restored = restorePlayerRuntimeSession(
+    createPlayerRuntimeRestorePoint(session),
+    null,
+    trace,
+  );
+  const resumed = submitPlayerRuntimeComposer(restored, "Bo")!.session;
+  assert.deepEqual(
+    said(resumed).map((sequence) => reason(trace, sequence)),
+    [
+      "Shown before Continue: a saved point keeps no history",
+      "Shown before Continue: a saved point keeps no history",
+      "recorded",
+    ],
+  );
+
+  // A small budget drops the oldest message.
+  const small = new RuntimeDebugContext({ maxRecords: 4 });
+  const busy = advancePlayerRuntimeTime(
+    createPlayerRuntimeSession('say "one"\nlet a = 1\nlet b = a + 1\nsay "${b}"\nexit', {
+      debugTrace: small,
+    }),
+    60_000,
+  );
+  assert.deepEqual(
+    said(busy).map((sequence) => reason(small, sequence)),
+    ["Expired: older history was dropped", "recorded"],
+  );
 });

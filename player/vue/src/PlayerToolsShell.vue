@@ -590,6 +590,21 @@ function clickTool(tool: Tool, event: MouseEvent) {
   void revealTool(tool);
 }
 
+/** Opens a tool's panel, or keeps it open, and shows it: the tools surface, the drawer in a narrow layout, the panel. */
+async function showTool(tool: Tool) {
+  cancelPendingClose();
+  lastClosedTool = null;
+  if (!openTools.value.includes(tool)) {
+    const index = temporaryTool.value ? openTools.value.indexOf(temporaryTool.value) : -1;
+    if (index >= 0) openTools.value.splice(index, 1, tool);
+    else openTools.value.push(tool);
+    temporaryTool.value = tool;
+  }
+  if (!sidebarVisible.value) setSidebarVisible(true);
+  await revealTool(tool);
+}
+defineExpose({ showTool });
+
 function setPinned(tool: Tool, pinned: boolean) {
   if (pendingToolClose?.tool === tool) cancelPendingClose();
   if (pinned) {

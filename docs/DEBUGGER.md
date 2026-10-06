@@ -59,9 +59,13 @@ tabs **Now** (first), **Variables**, **Log**, and **Storage**, which appears whe
     suspended behind a block, remaining time, and the statement that started it.
 - **Variables** explains values from the session's [value trace](RUNTIME.md#debug-trace), which runs while Debug is
   on, also with the panel closed; Start and Continue begin its history, and Debug turned on mid-session records from
-  then on. **Recent chat** lists recorded messages, newest first, 20 at a time; the newest is open until the player opens
-  or closes one. An open message shows each value it displays (a placeholder that shows one value gives way to it), and
-  each row opens to its own causes, one level at a time, by click, keyboard, or tap. A row names what happened, with
+  then on. **Explain values**, a button beside each script message in the chat while Debug runs, opens the tab on that
+  message as **Selected message**, which stays above the recent chat until another is chosen or **Back to recent chat**;
+  the message is found by its event, never by its text, and one shown before the current recording began, or whose
+  record was dropped, says so. **Recent chat** lists recorded messages, newest first, 20 at a time; the newest is open
+  until the player opens or closes one. An open message shows each value it displays (a placeholder that shows one value
+  gives way to it, and a variable, argument, or parameter that only passes the message on opens too), and each row
+  opens to its own causes, one level at a time, by click, keyboard, or tap. A row names what happened, with
   its value then, its statement, and, for an earlier version of a variable, its value now; a record that appears again
   in the same tree links to its first row. Unknown origins say why (supplied by the host, Not recorded before Debug,
   Restored value, or no longer retained), a dropped cause reads **Expired**, and causes beyond the trace's limit are

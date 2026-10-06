@@ -155,12 +155,31 @@ export type PlayerDebugTraceRow =
       readonly remaining: number;
     };
 
+/** Records that can pass a value on unchanged. */
+const CARRIERS: ReadonlySet<RuntimeDebugRecord["kind"]> = new Set([
+  "declaration",
+  "assignment",
+  "argument",
+  "parameter",
+  "return",
+  "temporary",
+]);
+
 /** Children shown per page under one row. */
 export const PLAYER_DEBUG_TRACE_PAGE = 20;
 
 export interface PlayerDebugTraceView {
-  /** Whether a row is expanded: the player's choice, else the default for its depth and kind. */
-  readonly expanded: (key: string, record: RuntimeDebugRecord, depth: number) => boolean;
+  /**
+   * Whether a row is expanded: the player's choice, else the default for its depth and kind. `carried` is whether the
+   * record only passes on the value of the row above: a variable, argument, parameter, or return value with the same
+   * value, such as the parameter and the argument that brought a message into a function.
+   */
+  readonly expanded: (
+    key: string,
+    record: RuntimeDebugRecord,
+    depth: number,
+    carried: boolean,
+  ) => boolean;
   /** How many pages of a row's causes are shown; one by default. */
   readonly pages: (key: string) => number;
 }
@@ -179,7 +198,8 @@ export function playerDebugTraceRows(
   const shown = new Map<number, string>();
   // Records to visit, and summary rows already made, popped in order.
   const pending: (
-    { id: number; key: string; depth: number; shownAs?: string | null } | PlayerDebugTraceRow
+    | { id: number; key: string; depth: number; shownAs?: string | null; carried?: boolean }
+    | PlayerDebugTraceRow
   )[] = [];
   for (let index = roots.length - 1; index >= 0; index -= 1)
     pending.push({ id: roots[index]!, key: `${roots[index]}`, depth: 0 });
@@ -189,7 +209,7 @@ export function playerDebugTraceRows(
       rows.push(next);
       continue;
     }
-    const { id, key, depth, shownAs = null } = next;
+    const { id, key, depth, shownAs = null, carried = false } = next;
     const record = trace.record(id);
     if (record === null) {
       rows.push({ kind: "expired", key, depth, id });
@@ -204,7 +224,7 @@ export function playerDebugTraceRows(
     shown.set(id, key);
     const causes = record.dependencies;
     const expandable = causes.length > 0 || record.omittedDependencies > 0;
-    const expanded = expandable && view.expanded(key, record, depth);
+    const expanded = expandable && view.expanded(key, record, depth, carried);
     rows.push({ kind: "record", key, depth, id, text, expandable, expanded });
     if (!expanded) continue;
     const limit = PLAYER_DEBUG_TRACE_PAGE * Math.max(1, view.pages(key));
@@ -237,7 +257,15 @@ export function playerDebugTraceRows(
           : null;
       pending.push(
         single === null
-          ? { id: cause, key: `${key}/${cause}`, depth: depth + 1 }
+          ? {
+              id: cause,
+              key: `${key}/${cause}`,
+              depth: depth + 1,
+              carried:
+                placeholder !== null &&
+                CARRIERS.has(placeholder.kind) &&
+                placeholder.preview === record.preview,
+            }
           : { id: single, key: `${key}/${cause}`, depth: depth + 1, shownAs: placeholder!.preview },
       );
     }
@@ -417,4 +445,36 @@ export function playerDebugRecordText(
         ? null
         : shownAs,
   });
+}
+
+/** Why a chat message has no record to explain, or its output record. */
+export type PlayerDebugMessageOrigin =
+  | { readonly kind: "record"; readonly id: number }
+  | { readonly kind: "unavailable"; readonly reason: string };
+
+const BEFORE_EPOCH = {
+  start: "Shown before recording began",
+  restore: "Shown before Continue: a saved point keeps no history",
+  attach: "Shown before Debug was turned on",
+} as const;
+
+/**
+ * The output record of the `say` event with this sequence, found by the event's identity and never by its text, or why
+ * the trace has none: the message came before the current recording began, its record was dropped, or recording stopped.
+ */
+export function playerDebugMessageOrigin(
+  trace: RuntimeDebugContext,
+  eventSequence: number,
+): PlayerDebugMessageOrigin {
+  const id = trace.outputRecord(eventSequence);
+  if (id !== null) return Object.freeze({ kind: "record", id });
+  const status = trace.status();
+  const reason = !status.recording
+    ? "Recording stopped"
+    : status.firstEventSequence === null || eventSequence < status.firstEventSequence
+      ? BEFORE_EPOCH[status.origin]
+      : status.truncated
+        ? "Expired: older history was dropped"
+        : "Not recorded";
+  return Object.freeze({ kind: "unavailable", reason });
 }

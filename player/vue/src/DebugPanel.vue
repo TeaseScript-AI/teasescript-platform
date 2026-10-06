@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ref } from "vue";
 import { ChevronDown, ChevronUp, Download } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
@@ -12,6 +11,7 @@ import DebugNow from "./DebugNow.vue";
 import DebugVariables from "./DebugVariables.vue";
 import type { DebugLog } from "./useDebugLog";
 import type { DevelopmentTime } from "./useDevelopmentTime";
+import type { PlayerDebugExplained } from "./usePlayerDebug";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 // The Debug panel (DEBUGGER.md "Player Debug"): its Debug switch and the debug export, and, while Debug is on, the time
@@ -27,10 +27,12 @@ defineProps<{
   stageOverridden: boolean;
   /** Whether there is a session or a Player error to export. */
   exportAvailable: boolean;
+  /** The message Explain values selected, for the Variables tab. */
+  explained?: PlayerDebugExplained | null;
 }>();
 const emit = defineEmits<{ export: [] }>();
 const active = defineModel<boolean>("active", { required: true });
-const tab = ref("now");
+const tab = defineModel<string>("tab", { default: "now" });
 </script>
 
 <template>
@@ -152,7 +154,12 @@ const tab = ref("now");
       </TabsContent>
       <!-- Kept mounted, so opened rows, the filter, and pages survive another tab; it computes only while shown. -->
       <TabsContent value="variables" force-mount class="data-[state=inactive]:hidden">
-        <DebugVariables v-if="time" :player="player" :active="tab === 'variables'" />
+        <DebugVariables
+          v-if="time"
+          :player="player"
+          :active="tab === 'variables'"
+          :explained="explained ?? null"
+        />
         <p v-else class="text-muted-foreground">Debug is off.</p>
       </TabsContent>
       <!-- Kept mounted, so new lines arrive while another tab shows. -->

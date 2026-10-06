@@ -151,7 +151,9 @@ the `Debug` and `Auto-skip` switches, the `Skip event`, `+10 s` and `+1 min` but
 with `[data-debug-trace-status]`, each derivation list `[data-debug-trace]` with rows `[data-trace-row]` (their
 `data-trace-kind` and enclosing `data-trace-depth`), toggles `[data-trace-toggle]`, `[data-trace-value]`,
 `[data-trace-more]`, `[data-trace-expired]` and `[data-trace-reference]`, `[data-debug-background-toggle]`,
-`[data-debug-variable-filter]`, `[data-debug-variable-group]` and `[data-debug-variable]`, the log lines under
+`[data-debug-variable-filter]`, `[data-debug-variable-group]` and `[data-debug-variable]`, the selected message's
+`[data-debug-selected-message]` with `[data-debug-selected-dismiss]` and `[data-debug-selected-unavailable]`, each chat
+message's `[data-explain-values]`, the log lines under
 `[data-debug-log]` in
 the Log tab, and the latest announcement in `[data-debug-announcement]`. The Storage tab (`DebugStorage.vue`) reads
 the saved values through the session host's `readSavedData`, refreshes on its `savedDataRevision` and on `storage`
@@ -165,7 +167,12 @@ which `debugExportCandidate` passes to the debug export's `editedWhileDebugging`
 turns the session host's value trace on (`setDebugTracing`), which every session operation then records into; the
 Variables tab (`DebugVariables.vue`,
 `DebugTraceRows.vue`) projects it with `player/debug-variables.ts`: `playerDebugVariables` groups live variables, and
-`playerDebugTraceRows` builds the visible derivation rows iteratively from the rows the player opened.
+`playerDebugTraceRows` builds the visible derivation rows iteratively from the rows the player opened. `PlayerApp`
+provides Explain values (`explainValues.ts`) to the transcript: a message offers it while Debug runs if
+`playerRuntimeTranscriptEventSequence` reads a runtime event sequence from its entry ID, and choosing it stores the
+selection in `usePlayerDebug` with the trace and epoch it belongs to, selects the Variables tab, and opens the panel
+through `PlayerToolsShell`'s exposed `showTool`. `playerDebugMessageOrigin` gives the message's output record or why
+there is none, from the trace status's `firstEventSequence`.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
 [`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's

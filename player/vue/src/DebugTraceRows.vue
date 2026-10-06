@@ -37,10 +37,13 @@ const rows = computed(() => {
     props.trace,
     props.roots,
     {
-      // Messages show their values; a value's own causes open on request.
-      expanded: (key, record, depth) =>
+      // Messages show their values, also through variables and parameters that pass a value on unchanged; a value's
+      // own causes open on request.
+      expanded: (key, record, depth, carried) =>
         choices.get(key) ??
-        (depth === 0 ? record.id === props.defaultOpen : record.kind === "interpolation"),
+        (depth === 0
+          ? record.id === props.defaultOpen
+          : record.kind === "interpolation" || carried),
       pages: (key) => pages.get(key) ?? 1,
     },
     props.live,

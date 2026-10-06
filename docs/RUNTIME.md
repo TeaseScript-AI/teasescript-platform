@@ -1315,7 +1315,9 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   whose plan or input snapshot is not the context's last result: its origin is `start` for a fresh snapshot, otherwise
   `attach`. A value read without a recorded origin gets an `unrecorded` record: `external` after Start (a host value),
   `beforeDebug` after attaching, `restored` after a restore, and `unavailable` once older records were dropped.
-  `status()` reports the epoch, its origin, its draws, and the generator state it began with, the seed after Start.
+  `status()` reports the epoch, its origin, its draws, the generator state it began with (the seed after Start), and
+  the sequence of its first event, so that a host can tell a message shown before the epoch from one whose record was
+  dropped.
 - **Queries.** `record(id)` gives a detached JSON-safe view; `outputRecord(eventSequence)`, `outputs(limit)`,
   `variableRecord(scopeId | "global", name)`, `storageRecord(key)`, and `stageImageRecord()` give record IDs.
 - **Not linked yet.** The condition of an `if`, `while`, or other branch is not a cause of the values set inside it;

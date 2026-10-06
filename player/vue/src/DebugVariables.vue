@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, reactive, ref, shallowRef, watch } from "vue";
 import { ChevronDown, ChevronUp } from "@lucide/vue";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
@@ -8,18 +8,23 @@ import { Input } from "@/components/ui/input";
 import {
   PLAYER_DEBUG_TRACE_PAGE,
   playerDebugLiveValue,
+  playerDebugMessageOrigin,
   playerDebugVariables,
 } from "../../debug-variables.js";
 import DebugTraceRows from "./DebugTraceRows.vue";
+import type { PlayerDebugExplained } from "./usePlayerDebug";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 // Debug's Variables view (DEBUGGER.md "Player Debug"): why values have their values, from the session's value trace.
-// Recent chat messages come first, newest first, each with the values it shows and their immediate causes; every live
-// variable is under the collapsed background section. Nothing here is computed while the tab is not shown.
+// A message chosen with Explain values comes first and stays until another is chosen; then recent chat messages, newest
+// first, each with the values it shows and their immediate causes; every live variable is under the collapsed
+// background section. Nothing here is computed while the tab is not shown.
 const props = defineProps<{
   player: PlayerSessionHost;
   /** Whether the tab is shown; while hidden it keeps its state and computes nothing. */
   active: boolean;
+  /** The message Explain values selected, or `null`. */
+  explained: PlayerDebugExplained | null;
 }>();
 
 const trace = computed(() => props.player.debugTrace.value);
@@ -41,6 +46,35 @@ const outputs = computed(() => {
 // The newest message stays open by default until the player opens or closes one.
 const chose = ref(false);
 const defaultOpen = computed(() => (chose.value ? null : (outputs.value[0] ?? null)));
+
+// The selected message, while its trace and epoch last; "Back to recent chat" dismisses it.
+const dismissed = ref(0);
+const selected = computed(() => {
+  const explained = props.explained;
+  const current = trace.value;
+  if (explained === null || current === null || explained.trace !== current) return null;
+  if (explained.request === dismissed.value) return null;
+  void session.value;
+  if (current.status().epoch !== explained.epoch) return null;
+  // Found by the entry's identity, for its text when the trace has no record of it.
+  const entry = session.value?.transcriptEntries.find((item) => item.id === explained.entryId);
+  return {
+    request: explained.request,
+    origin: playerDebugMessageOrigin(current, explained.sequence),
+    text: entry?.kind === "message" ? entry.text : null,
+  };
+});
+const selectedSection = ref<HTMLElement | null>(null);
+watch(
+  () => selected.value?.request,
+  async (request) => {
+    if (request === undefined) return;
+    await nextTick();
+    selectedSection.value?.scrollIntoView({ block: "nearest" });
+    selectedSection.value?.focus({ preventScroll: true });
+  },
+  { immediate: true, flush: "post" },
+);
 
 const status = computed(() => {
   void session.value;
@@ -82,6 +116,52 @@ const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ??
           status.failure
         }}</span>
       </div>
+
+      <section
+        v-if="selected"
+        ref="selectedSection"
+        tabindex="-1"
+        aria-labelledby="debug-variables-selected"
+        class="grid gap-1 rounded-md focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        data-debug-selected-message
+      >
+        <div class="flex min-w-0 flex-wrap items-center justify-between gap-x-2">
+          <h3 id="debug-variables-selected" class="font-semibold">Selected message</h3>
+          <button
+            type="button"
+            class="min-h-11 max-w-full rounded-md px-2 text-start text-sm font-medium wrap-anywhere hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            data-debug-selected-dismiss
+            @click="dismissed = selected.request"
+          >
+            Back to recent chat
+          </button>
+        </div>
+        <DebugTraceRows
+          v-if="selected.origin.kind === 'record'"
+          :key="selected.request"
+          :trace="trace"
+          :roots="[selected.origin.id]"
+          :revision="session"
+          :live="live"
+          :default-open="selected.origin.id"
+          label="The selected message and its values"
+        />
+        <div
+          v-else
+          class="flex min-w-0 flex-wrap items-baseline gap-2 py-2 ps-12"
+          data-debug-selected-unavailable
+        >
+          <span class="min-w-0 font-medium wrap-anywhere">Message</span>
+          <code v-if="selected.text !== null" class="min-w-0 break-all">{{ selected.text }}</code>
+          <span
+            class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere"
+            >Unavailable</span
+          >
+          <span class="min-w-0 text-muted-foreground wrap-anywhere">{{
+            selected.origin.reason
+          }}</span>
+        </div>
+      </section>
 
       <section aria-labelledby="debug-variables-chat" class="grid gap-1">
         <h3 id="debug-variables-chat" class="font-semibold">Recent chat</h3>
