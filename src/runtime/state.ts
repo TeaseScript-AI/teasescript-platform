@@ -201,6 +201,11 @@ export interface RuntimeScopeFrameSnapshot {
    */
   readonly entry: number | null;
   readonly bindings: RuntimeBindingSnapshot[];
+  /**
+   * Present on a block, loop, or function scope once a timer, media, or button block shares one of its variables: only
+   * such a scope may be retained when its code leaves it.
+   */
+  shared?: true;
 }
 
 export interface RuntimeSpeakerSnapshot {
@@ -746,6 +751,7 @@ function cloneScopeFrame(frame: RuntimeScopeFrameSnapshot): RuntimeScopeFrameSna
     file: frame.file,
     entry: frame.entry,
     bindings: frame.bindings.map(cloneBinding),
+    ...(frame.shared === true ? { shared: true } : {}),
   };
 }
 
@@ -3268,7 +3274,13 @@ function validateScopes(
   for (const frame of [...frames, ...retainedScopes]) {
     if (
       !isPlainRecord(frame) ||
-      !hasExactKeys(frame, ["id", "file", "entry", "bindings"]) ||
+      !hasExactKeys(
+        frame,
+        Object.hasOwn(frame, "shared")
+          ? ["id", "file", "entry", "bindings", "shared"]
+          : ["id", "file", "entry", "bindings"],
+      ) ||
+      (Object.hasOwn(frame, "shared") && (frame.shared !== true || frame.file !== null)) ||
       !nonNegativeSafeInteger(frame.id) ||
       !Array.isArray(frame.bindings) ||
       (frame.file === null

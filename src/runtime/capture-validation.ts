@@ -55,6 +55,7 @@ export function validateCaptureState(
       if (
         scope === undefined ||
         scope.frame.file !== null ||
+        scope.frame.shared !== true ||
         scope.depth >= below ||
         !Array.isArray(scope.frame.bindings) ||
         !scope.frame.bindings.some((binding) => isPlainRecord(binding) && binding.name === name)

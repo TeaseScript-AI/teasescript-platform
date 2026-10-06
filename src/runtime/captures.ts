@@ -40,8 +40,10 @@ export function resolveCaptures(
   return names.map((name) => {
     for (let index = snapshot.frames.length - 1; index >= minimum; index -= 1) {
       const frame = snapshot.frames[index]!;
-      if (frame.file === null && frame.bindings.some((binding) => binding.name === name))
+      if (frame.file === null && frame.bindings.some((binding) => binding.name === name)) {
+        frame.shared = true;
         return { name, scopeId: frame.id };
+      }
     }
     const shared =
       top?.kind === "function" ? top.captures.find((capture) => capture.name === name) : undefined;
@@ -76,7 +78,7 @@ export function leaveScopes(snapshot: RuntimeSnapshot, depth: number): void {
   let shared: Set<number> | undefined;
   for (let index = depth; index < snapshot.frames.length; index += 1) {
     const frame = snapshot.frames[index]!;
-    if (frame.file !== null || frame.bindings.length === 0) continue;
+    if (frame.shared !== true) continue;
     shared ??= resourceCaptureScopes(snapshot);
     if (shared.has(frame.id)) snapshot.retainedScopes.push(frame);
   }

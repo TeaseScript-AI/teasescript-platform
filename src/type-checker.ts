@@ -621,8 +621,8 @@ class TypeChecker {
     /** The file's names, or the project's alone. */
     readonly outer: Scope;
     readonly file: number;
-    /** The function whose code created the block, or `null` for the file's top level. */
-    readonly unit: FunctionDeclaration | null;
+    /** The function or file whose code created the block. */
+    readonly unit: EffectUnit | null;
   }[] = [];
 
   #function: FunctionContext | null = null;
@@ -642,14 +642,13 @@ class TypeChecker {
   #flow = new Flow();
 
   /** What functions, blocks, and loops may change, collected before checking: for the file, and for every loop. */
-  #effects: Pick<ProgramEffects, "shared" | "handlerAssigned" | "loops"> = {
-    shared: new Set(),
-    handlerAssigned: new Map(),
-    loops: new Map(),
-  };
+  #effects: Pick<ProgramEffects, "shared" | "loops"> = { shared: new Set(), loops: new Map() };
 
-  /** The function whose locals the checked code declares, or `null` for the file's top level. */
-  #unit: FunctionDeclaration | null = null;
+  /** The names that timer, media, and button blocks assign, by the function or file whose code creates them. */
+  #handlerAssigned: ReadonlyMap<EffectUnit, ReadonlySet<string>> = new Map();
+
+  /** The function or file whose locals the checked code declares. */
+  #unit: EffectUnit | null = null;
 
   /** The globals that a function or a timer or media block of any file assigns. */
   #sharedGlobals: ReadonlySet<string> = new Set();
@@ -872,7 +871,11 @@ class TypeChecker {
             statement,
             this.#declareFunction(statement, file, this.#project),
           );
-    this.#effects = { shared: new Set(), handlerAssigned: new Map(), loops };
+    this.#effects = { shared: new Set(), loops };
+    // A global function may be checked first from another file, so these effects belong to the whole project.
+    this.#handlerAssigned = new Map(
+      effects.flatMap((fileEffects) => [...fileEffects.handlerAssigned]),
+    );
     // Start values run one after another with nothing between them, so what one stores is known to the next.
     this.#flow = new Flow();
     for (const { file, declaration } of sessionDeclarations(programs)) {
@@ -887,12 +890,8 @@ class TypeChecker {
       : this.#flow;
     for (const [file, program] of programs.entries()) {
       this.#enterFile(file);
-      this.#effects = {
-        shared: effects[file]!.shared,
-        handlerAssigned: effects[file]!.handlerAssigned,
-        loops,
-      };
-      this.#unit = null;
+      this.#effects = { shared: effects[file]!.shared, loops };
+      this.#unit = program;
       this.#root = new Scope(this.#project);
       this.#outer = this.#root;
       this.#scriptVariables = new Set(
@@ -1562,7 +1561,7 @@ class TypeChecker {
    * and assigns, so that a suspension may change it (rule 5.5, V30 §14).
    */
   #sharedLocal(name: string): boolean {
-    return this.#effects.handlerAssigned.get(this.#unit)?.has(name) === true;
+    return this.#unit !== null && this.#handlerAssigned.get(this.#unit)?.has(name) === true;
   }
 
   /** Directly after a store, a variable holds the stored value's type (rule 5.2). */
@@ -5469,10 +5468,10 @@ interface ProgramEffects {
   /** Names that function bodies and timer or media blocks assign. */
   readonly shared: ReadonlySet<string>;
   /**
-   * Names that timer, media, or button blocks assign, by the function whose code creates them, or `null` for the file's
-   * top level. A local of that name may be one the blocks share with that code (V30 §14).
+   * Names that timer, media, or button blocks assign, by the function or file whose code creates them. A local of that
+   * name may be one the blocks share with that code (V30 §14).
    */
-  readonly handlerAssigned: ReadonlyMap<FunctionDeclaration | null, ReadonlySet<string>>;
+  readonly handlerAssigned: ReadonlyMap<EffectUnit, ReadonlySet<string>>;
   /** Names that the file's top level assigns, which another file's `call` may run (ADR 0022 §5). */
   readonly rootAssigned: ReadonlySet<string>;
   /** Whether the file calls a file, so another file's top level may run during the call. */
@@ -5490,11 +5489,14 @@ interface LoopNode {
   suspends: boolean;
 }
 
-/** Where a node stands: in a function or block, the function whose code it is part of, and in a block. */
+/** The code whose locals blocks may share: a function, or a file's top level. */
+type EffectUnit = FunctionDeclaration | Program;
+
+/** Where a node stands: in a function or block, the function or file whose code it is part of, and in a block. */
 interface EffectPlace {
   readonly loop: LoopNode | null;
   readonly inside: boolean;
-  readonly unit: FunctionDeclaration | null;
+  readonly unit: EffectUnit;
   readonly handler: boolean;
 }
 
@@ -5509,7 +5511,7 @@ type EffectWork =
 function programEffects(program: Program): ProgramEffects {
   const shared = new Set<string>();
   const rootAssigned = new Set<string>();
-  const handlerAssigned = new Map<FunctionDeclaration | null, Set<string>>();
+  const handlerAssigned = new Map<EffectUnit, Set<string>>();
   let callsFiles = false;
   let entersMain = false;
   const nodes: LoopNode[] = [];
@@ -5523,7 +5525,7 @@ function programEffects(program: Program): ProgramEffects {
     nodes.push(node);
     return node;
   };
-  const handlers = (node: Statement | Expression, unit: FunctionDeclaration | null): void => {
+  const handlers = (node: Statement | Expression, unit: EffectUnit): void => {
     for (const block of handlerBlocks(node))
       enter(block.statements, { loop: null, inside: true, unit, handler: true });
   };
@@ -5537,7 +5539,7 @@ function programEffects(program: Program): ProgramEffects {
       handlerAssigned.set(place.unit, names);
     }
   };
-  enter(program.statements, { loop: null, inside: false, unit: null, handler: false });
+  enter(program.statements, { loop: null, inside: false, unit: program, handler: false });
   while (work.length > 0) {
     const item = work.pop()!;
     const { loop, inside, unit, handler } = item;

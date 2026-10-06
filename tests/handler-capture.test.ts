@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../src/compiler.js";
+import { compileProject, compileSource } from "../src/compiler.js";
 import type { InstructionPlan } from "../src/plan/model.js";
 import {
   createCheckpoint,
@@ -425,6 +425,11 @@ test("checkpoints whose shared variables do not fit the plan and the scopes are 
       "Runtime retained scope is not shared by any block.",
     ],
     [
+      "a shared scope without its mark",
+      (s) => delete s.retainedScopes.find((scope: MutableSnapshot) => scope.id === scopeId).shared,
+      unresolved,
+    ],
+    [
       "a scope without the variable",
       (s) =>
         (s.retainedScopes.find((scope: MutableSnapshot) => scope.id === scopeId).bindings = []),
@@ -457,6 +462,27 @@ test("the compiler shares the variables visible where a block is created, and ch
         'check("abc")',
       ].join("\n"),
     ),
+    ["TSV043"],
+  );
+  // Also in a global function that another file calls first.
+  assert.deepEqual(
+    compileProject([
+      { path: "main.tease", source: 'check("abc")\nexit' },
+      {
+        path: "helpers.tease",
+        source: [
+          "global function check(value: string?) {",
+          "    timer async 1 s {",
+          "        value = null",
+          "    }",
+          "    if value != null {",
+          "        wait 2 s",
+          "        say value.length",
+          "    }",
+          "}",
+        ].join("\n"),
+      },
+    ]).diagnostics.map((diagnostic) => diagnostic.code),
     ["TSV043"],
   );
   // A block that only reads it does not.
