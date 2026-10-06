@@ -1,0 +1,11 @@
+--- a/scripts/toy.groovy
++++ b/scripts/toy.groovy
+@@ -361,7 +361,7 @@ return new Object() {
+ 
+ 	final requestables = [:];
+ 	final addRequestable = { String name, String label, func, cond = null ->
+-		requestables[name] = [lbl: label, act: func, cond: cond];
++		requestables[name] = [lbl: label, act: func, cond: cond, arg: null];
+ 	};
+ 	final removeRequestable = { String name ->
+ 		requestables.remove(name);

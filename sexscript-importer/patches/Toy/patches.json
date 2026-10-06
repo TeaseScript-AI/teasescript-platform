@@ -90,6 +90,34 @@
       "category": "b",
       "reason": "The lounge loop ran until the player closed the legacy player, so the converted session never reached exit (TSV053); the lounge menu gets an \"End session\" option that ends the script.",
       "diff": "end-session.diff"
+    },
+    {
+      "id": "imagery-loops",
+      "layer": "source",
+      "category": "b",
+      "reason": "Toy built its image catalogue at runtime by listing images/toy and reading each set's tags file (new File, listFiles, readLines), and chose images with closures (matchTags, findAll, every, intersect, Collections.shuffle), none of which converts, so IMAGEDATA stayed null and the first image stopped the script. Write the 31 tags files out as text (identical to ToyExpanded's) and build the same catalogue from them in loops; select images with Toy's own rule (every tag of the flat spec present, no '!tag' present, one random match), outfits and the recent-outfit check in loops in the same order, and pick a random matching tag for the comment instead of shuffling the intersection. A random element is taken through a small randomItem closure, whose parameter keeps the result type open for the TeaseScript compiler. selectImageSet returns null when no outfit fits, which dress() already handles, where the legacy random index of an empty list failed.",
+      "diff": "imagery-loops.diff"
+    },
+    {
+      "id": "menu-record-args",
+      "layer": "source",
+      "category": "b",
+      "reason": "The lounge menu passes opts[opt].arg to the chosen request, but the request records have no arg; Groovy read the missing key as null, while a TeaseScript record has fixed properties, so choosing any request stopped the script. Give the request records arg: null, the value Groovy read.",
+      "diff": "menu-record-args.diff"
+    },
+    {
+      "id": "native-sessions",
+      "layer": "source",
+      "category": "b",
+      "reason": "sessionPlay ran the four session plans of images/toy/domme.groovy by evaluating their require and number expression strings with Eval.me in a scope of closures, which does not convert, so the first summon stopped the script (owner decision 2026-10-05: native code instead of eval emulation). Each plan becomes a method of a new module toy/domme.groovy (the data file under images is no script the converter reads): its phases are plain calls in the same order, with the conditions as ifs and the numbers as arguments; sessionChoices lists the sessions whose condition holds with their probabilities for the same weighted pick, and runSession calls one by its theme. The runner in play.groovy keeps Toy's older rules: wildcards expand by tags after the named entries, a null interval entry stays a chance of no interval, 'repeat' draws a random activity each time and 'take' draws its activities without repetition before running them (as shuffling and taking did), each followed by a random interval when there are any, and punishMultiply/punishApply apply numeric results; the session reads the punishment once at its start. The DEBUG self-check of the expression strings is dropped.",
+      "diff": "native-sessions.diff"
+    },
+    {
+      "id": "compose-loop",
+      "layer": "source",
+      "category": "b",
+      "reason": "compose() picked one text per group with a collect/join/capitalize chain, which the converter does not lower, so every composed line came out null. Pick one text per group in a loop and join the parts, with the same random draws and result.",
+      "diff": "compose-loop.diff"
     }
   ]
 }
