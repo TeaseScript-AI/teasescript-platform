@@ -61,6 +61,7 @@ import { runCompileTask, compileChild, type CompileTask } from "../continuation.
 import {
   askOperands,
   expressionChildren as instructionEmissionChildren,
+  mediaHandlerBlocks,
   mediaOperands,
   showButtonOptions,
   tagQueryOperands,
@@ -192,6 +193,8 @@ export class InstructionCompiler {
     private readonly path: string = MAIN_FILE_PATH,
     /** The files each glob target may pick, from semantic validation. */
     private readonly picks: ReadonlyMap<FileTarget, readonly string[]> = new Map(),
+    /** The variables each timer, media, or button block shares with the code that created it. */
+    private readonly captures: ReadonlyMap<Block, readonly string[]> = new Map(),
   ) {
     this.#functionIdBase = functions.length;
     const functionByName = new Map<
@@ -949,6 +952,7 @@ export class InstructionCompiler {
       persist: timer.persist,
       handlerFunctionId:
         timer.handler === null ? null : this.#registerHandler(timer.handler, "timer", null),
+      captures: this.#capturesOf(timer.handler === null ? [] : [timer.handler]),
       destinationTemporary,
       span: copySpan(timer.span),
     });
@@ -981,6 +985,7 @@ export class InstructionCompiler {
       text: text.plan,
       persist: button.persist,
       handlerFunctionId: this.#registerHandler(button.handler, "button", null),
+      captures: this.#capturesOf([button.handler]),
       destinationTemporary,
       span: copySpan(span),
     });
@@ -1069,6 +1074,7 @@ export class InstructionCompiler {
       volume: media.volume === null ? null : plan(media.volume),
       cues: cuePlans,
       finishFunctionId,
+      captures: this.#capturesOf(mediaHandlerBlocks(media)),
       destinationTemporary,
       span: copySpan(media.span),
     });
@@ -1113,6 +1119,13 @@ export class InstructionCompiler {
    */
   #emitPacingBarrier(receiver: ExpressionPlan | null, span: SourceSpan): void {
     this.instructions.push({ kind: "pacingBarrier", receiver, span: copySpan(span) });
+  }
+
+  /** The variables that blocks of one resource share with the code that creates it, in the order of first use. */
+  #capturesOf(blocks: readonly Block[]): string[] {
+    const names = new Set<string>();
+    for (const block of blocks) for (const name of this.captures.get(block) ?? []) names.add(name);
+    return [...names];
   }
 
   /** Reserves the next function ID; the region is compiled after all user functions. */

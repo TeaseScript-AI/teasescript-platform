@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 60;
+export const INSTRUCTION_PLAN_VERSION = 61;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -411,6 +411,14 @@ export interface WaitInstruction extends InstructionBase {
 export type DelayDisplay = "hidden" | "visible" | "mystery";
 
 /**
+ * The names of the function, loop, and block variables that the blocks of a timer, media, or permanent button use
+ * from the code that creates it, directly or in blocks they create, in the order of first use. Creating the resource
+ * resolves each name where that code runs, and the blocks then share those variables with it (V30 §14). Empty without
+ * blocks.
+ */
+export type HandlerCaptures = readonly string[];
+
+/**
  * Starts one asynchronous timer. Operands are evaluated as duration, display, then label; the compiler
  * materializes them first when source order differs. A range is drawn after every operand is evaluated.
  */
@@ -424,6 +432,8 @@ export interface StartTimerInstruction extends InstructionBase {
   readonly persist: boolean;
   /** A compiled timer-handler region, or `null` when the timer has no expiry block. */
   readonly handlerFunctionId: number | null;
+  /** The locals the expiry block shares with the code that starts the timer (see {@link HandlerCaptures}). */
+  readonly captures: HandlerCaptures;
   /** Receives the handle when the timer is used as a value. */
   readonly destinationTemporary: number | null;
 }
@@ -468,6 +478,8 @@ export interface ShowPermanentButtonInstruction extends InstructionBase {
   readonly text: ExpressionPlan;
   readonly persist: boolean;
   readonly handlerFunctionId: number;
+  /** The locals the block shares with the code that shows the button (see {@link HandlerCaptures}). */
+  readonly captures: HandlerCaptures;
   readonly destinationTemporary: number | null;
 }
 
@@ -507,6 +519,8 @@ export interface PlayMediaInstruction extends InstructionBase {
   readonly volume: ExpressionPlan | null;
   readonly cues: readonly MediaCuePlan[];
   readonly finishFunctionId: number | null;
+  /** The locals all blocks of the media share with the code that plays it (see {@link HandlerCaptures}). */
+  readonly captures: HandlerCaptures;
   /** Receives the handle when async playback is used as a value. */
   readonly destinationTemporary: number | null;
 }

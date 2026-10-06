@@ -39,6 +39,8 @@ import DialogContent from "@/components/ui/dialog/DialogContent.vue";
 import DialogHeader from "@/components/ui/dialog/DialogHeader.vue";
 import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
+import SavedDataExport from "./SavedDataExport.vue";
+import type { StorageTransfer } from "../../storage-transfer.js";
 import {
   computed,
   nextTick,
@@ -59,8 +61,16 @@ const props = defineProps<{
   stageHeight: number;
   mediaAspect: number;
   fullscreen: boolean;
-  /** The script's saved data when the host persists it; clearing is possible only while no session runs. */
-  savedData?: { readonly canClear: boolean; readonly clear: () => Promise<boolean> } | null;
+  /**
+   * The script's saved data when the host persists it: exporting is always possible, clearing only while no session
+   * runs.
+   */
+  savedData?: {
+    readonly name: string;
+    readonly export: () => Promise<{ readonly transfer: StorageTransfer; readonly missingPhotos: number }>;
+    readonly canClear: boolean;
+    readonly clear: () => Promise<boolean>;
+  } | null;
 }>();
 // User-facing Player Settings: owned by PlayerApp and available in every build.
 const contrast = defineModel<"standard" | "high">("contrast", { required: true });
@@ -916,12 +926,16 @@ async function updateSidebarVisibility(open: boolean) {
                     >
                       <h3 class="font-medium">Saved script data</h3>
                       <p>What this script saved in this browser for its next runs.</p>
+                      <div class="flex flex-wrap gap-2">
+                        <SavedDataExport :name="savedData.name" :read="savedData.export" />
+                      </div>
                       <template v-if="clearSavedData === 'confirm' || clearSavedData === 'clearing'">
                         <p>Clear all saved data for this script? This cannot be undone.</p>
                         <div ref="clearConfirmation" class="flex gap-2">
                           <Button
                             variant="destructive"
                             size="sm"
+                            class="min-h-11"
                             :disabled="clearSavedData === 'clearing'"
                             data-clear-saved-data-confirm
                             @click="confirmClearSavedData"
@@ -931,6 +945,7 @@ async function updateSidebarVisibility(open: boolean) {
                           <Button
                             variant="outline"
                             size="sm"
+                            class="min-h-11"
                             :disabled="clearSavedData === 'clearing'"
                             @click="clearSavedData = 'idle'"
                           >
@@ -940,7 +955,7 @@ async function updateSidebarVisibility(open: boolean) {
                       </template>
                       <template v-else>
                         <Button
-                          class="justify-self-start"
+                          class="min-h-11 justify-self-start"
                           variant="outline"
                           size="sm"
                           :disabled="!savedData.canClear"

@@ -171,7 +171,7 @@ import {
   timerRecord,
 } from "./operations/timer-lifecycle.js";
 import { removePermanentButtons, shownPermanentButton } from "./permanent-buttons.js";
-import { contextRootId, findRoot } from "./activations.js";
+import { contextRootId, findRoot, findScope } from "./activations.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import {
   booleanFromText,
@@ -2724,7 +2724,8 @@ function scriptReference(
 }
 
 /**
- * The binding `name` refers to: in the scopes of the running function, or of the root; then for a function that is not
+ * The binding `name` refers to: in the scopes of the running function, or of the root; then for a timer, media, or
+ * button block, among the variables it shares with the code that created it (V30 §14); then for a function that is not
  * global, in the root scope of its file; then among the session's globals (ADR 0022 §3, §6).
  */
 export function findBinding(
@@ -2753,6 +2754,13 @@ function findBindingLocation(
     const frame = snapshot.frames[index]!;
     const binding = frameBinding(frame.bindings, name);
     if (binding !== undefined) return { frame, binding };
+  }
+  if (top?.kind === "function" && top.captures.length > 0) {
+    const capture = top.captures.find((candidate) => candidate.name === name);
+    if (capture !== undefined) {
+      const frame = findScope(snapshot, capture.scopeId)!;
+      return { frame, binding: frameBinding(frame.bindings, name)! };
+    }
   }
   // A function sees the root of the activation it runs for; a global function sees only globals (ADR 0022 §5, §6).
   if (top?.kind === "function" && plan.functions[top.functionId - 1]?.global !== true) {

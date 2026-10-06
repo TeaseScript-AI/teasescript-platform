@@ -988,6 +988,7 @@ function validateInstruction(
           "repeat",
           "persist",
           "handlerFunctionId",
+          "captures",
           "destinationTemporary",
           "span",
         ]) ||
@@ -1012,6 +1013,7 @@ function validateInstruction(
           errors,
         );
       }
+      validateHandlerCaptures(value.captures, value.handlerFunctionId !== null, path, errors);
       if (value.destinationTemporary !== null) {
         validateTemporaryId(
           value.destinationTemporary,
@@ -1074,6 +1076,7 @@ function validateInstruction(
           "text",
           "persist",
           "handlerFunctionId",
+          "captures",
           "destinationTemporary",
           "span",
         ]) ||
@@ -1085,6 +1088,7 @@ function validateInstruction(
       }
       validateExpression(value.text, `${path}.text`, errors, false, temporaryCount);
       validateFunctionId(value.handlerFunctionId, `${path}.handlerFunctionId`, functionIds, errors);
+      validateHandlerCaptures(value.captures, true, path, errors);
       if (value.destinationTemporary !== null) {
         validateTemporaryId(
           value.destinationTemporary,
@@ -1176,6 +1180,7 @@ function validatePlayMediaInstruction(
       "volume",
       "cues",
       "finishFunctionId",
+      "captures",
       "destinationTemporary",
       "span",
     ]) ||
@@ -1228,6 +1233,12 @@ function validatePlayMediaInstruction(
   if (value.finishFunctionId !== null) {
     validateFunctionId(value.finishFunctionId, `${path}.finishFunctionId`, functionIds, errors);
   }
+  validateHandlerCaptures(
+    value.captures,
+    value.finishFunctionId !== null || (Array.isArray(value.cues) && value.cues.length > 0),
+    path,
+    errors,
+  );
   if (value.destinationTemporary !== null) {
     validateTemporaryId(
       value.destinationTemporary,
@@ -1235,6 +1246,23 @@ function validatePlayMediaInstruction(
       temporaryCount,
       errors,
     );
+  }
+}
+
+/** The variables a resource's blocks share: distinct names, and none without a block. */
+function validateHandlerCaptures(
+  captures: unknown,
+  hasBlocks: boolean,
+  path: string,
+  errors: PlanValidationError[],
+): void {
+  if (
+    !Array.isArray(captures) ||
+    captures.some((name) => typeof name !== "string" || name.length === 0) ||
+    new Set(captures).size !== captures.length ||
+    (!hasBlocks && captures.length > 0)
+  ) {
+    errors.push(planError("TSC002", "Handler captures are invalid.", `${path}.captures`));
   }
 }
 

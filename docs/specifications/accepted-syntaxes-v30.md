@@ -1125,8 +1125,9 @@ let level: integer = saved   // valid: saved is an integer here
 - Only plain variables narrow; `door.locked` and `items[0]` do not.
 - A function call, `wait`, interaction, `say`, timer, media command, storage write, or timer or media property write
   may let a function or block run, so it cancels narrowing for every top-level variable that a function or block
-  assigns. A loop's start forgets what the loop body may change, and a function or block body does not inherit
-  narrowing from the code around it.
+  assigns, and for every local variable that a timer, media, or button block shares and assigns
+  ([§14](#variables-in-timer-media-and-button-blocks)). A loop's start forgets what the loop body may change, and a
+  function or block body does not inherit narrowing from the code around it.
 
 ### Implicit conversions
 
@@ -1273,6 +1274,43 @@ if secondCondition {
     let message = "Second"
 }
 ```
+
+### Variables in timer, media, and button blocks
+**Status:** Accepted (Owner decision on #627, 2026-10-05; [ADR 0024](../decisions/0024-shared-block-variables.md))
+
+A timer expiry block, media block, or permanent button block uses the variables around it like any nested block: the
+globals, the top-level variables of its file, and the parameters and local variables, including loop variables, of the
+code that creates it. It shares them with that code: one variable, not a copy, so an assignment in either is seen by the
+other at its next read.
+
+```text
+function challenge {
+    let stop = false
+    showPermanentButton "Stop" {
+        stop = true
+    }
+    while not stop {
+        wait 5 s
+    }
+}
+```
+
+- A block sees the variables visible where it is created, not one declared later. Its own `let` may not reuse the name
+  of a variable it sees.
+- Each function call, each loop iteration, and each run of a loop body has its own variables:
+  `for name in names { showPermanentButton name { say name } }` gives each button its own `name`, and two calls of
+  `function offer(n: integer) { showPermanentButton "Add" { n += 1 } }` count separately. A variable declared before a
+  loop is one variable for every button the loop shows.
+- A block inside a block shares the same variables. A block's own `let` is new each time the block runs.
+- A variable lives while a timer, media, or button or a queued or running block uses it, also after its function
+  returned or its file entry was left ([§29](#29-script-files-and-paths)). A block that already runs keeps its
+  variables when its resource stops or is removed.
+- Assigning a shared variable cancels nothing: a running `wait` or question completes first. A value read before it is
+  stored as it was, so in `x += askInteger "Add?"` a click that sets `x` meanwhile is overwritten. Use `exit` to end at
+  once.
+- Assignment still copies values ([§12](#12-variable-declarations)): after `let b = a`, a block that changes `a` does
+  not change `b`.
+- A function called from a block sees its own variables and those of its file, never those of the block.
 
 ## 15. Objects
 **Status:** Accepted
@@ -2408,9 +2446,9 @@ playAudio async repeat "music/beat.mp3" {
   same interruption and resumption rules as [timer expiry blocks](#expiry-blocks); cues due at the same point run in
   source order. Media keeps playing while a block runs unless the block controls it. `stop()` cancels queued blocks of
   that media that have not started.
-- A block sees top-level names and its own locals, not the locals of the code that started the media. In
+- The blocks share the variables of the code that started the media
+  ([§14](#variables-in-timer-media-and-button-blocks)), all blocks of one media the same ones, across its repeats. In
   `let NAME = playAudio async ... { ... }` every block also sees `NAME` as its own handle, including inside a function.
-  This narrow self-handle binding is not general closure capture, which is tracked by #449.
 
 ### Failures, cleanup, and restore
 
@@ -2630,6 +2668,8 @@ for item in items {
 
 `for` goes through the elements of a list or set, the keys of a dict ([§40](#40-dictionaries)), or the whole numbers of
 a range, as they were when the loop started: changing the source inside the loop does not change what the loop visits.
+Each iteration has its own loop variable, which a block created in it keeps
+([§14](#variables-in-timer-media-and-button-blocks)).
 
 With two variables, `for` goes through the entries of a dict, giving each key and its value:
 
@@ -2909,8 +2949,8 @@ of the wrong type are rejected.
 ### Expiry blocks
 
 The block runs when the timer expires. It does not need an `onFinish` wrapper and runs without pausing currently
-playing audio or video. It may use top-level names, its own locals, normal functions, and new timers, but not the
-local variables of the code that started the timer.
+playing audio or video. It may use top-level names, the variables of the code that started the timer, which it shares
+([§14](#variables-in-timer-media-and-button-blocks)), its own locals, normal functions, and new timers.
 
 A due block interrupts at the next deterministic runtime boundary, including while the main path waits on an
 interaction, `wait`, or blocking timer; it waits while a paced message still blocks the chat. The interrupted action
@@ -2948,8 +2988,8 @@ cue declarations; `at` is measured from the start of a round and `beforeEnd` bac
 natural passage, including repeat rounds; `finish` runs once after the final round and never after `stop()`; an
 assignment to `remaining` that jumps over a cue does not fire it; and cue blocks run one at a time like expiry blocks.
 The existing compact block stays the per-round expiry block, like `beforeEnd 0 s`. A timer block of
-`let NAME = timer async ...` will likewise see `NAME` as its own handle; until then expiry blocks see no local of the
-code that started the timer.
+`let NAME = timer async ...` will likewise see `NAME` as its own handle; until then `NAME` is not visible in its own
+block, because it is declared only once the timer has started.
 
 ### Time
 
@@ -3008,6 +3048,8 @@ Click and handler behavior:
   paced message still blocks the chat or another block runs. The interrupted action returns when the handler finishes.
 - From the click until its handler finishes, the button stays in place but is inactive and cannot be clicked. It
   becomes active again unless it was removed.
+- The handler shares the variables of the code that showed the button
+  ([§14](#variables-in-timer-media-and-button-blocks)).
 - A `goto` handler abandons the interrupted execution path.
 - Function handlers do not pause currently playing audio or video.
 
@@ -3083,8 +3125,10 @@ Rules:
 - Each entry into a file, by `goto` or `call` naming it, by `call` of a label, or by the fallback, starts with fresh
   top-level variables of that file. A `goto` to a label of the file continues with the variables of the entry it runs
   in.
-- A function sees the top-level variables of the entry that called it, and a timer or media block those of the entry
-  that started it, also after the session has left that entry.
+- A function sees the top-level variables of the entry that called it, and a timer, media, or button block those of the
+  entry that created it, also after the session has left that entry. A block also keeps the local variables it shares
+  ([§14](#variables-in-timer-media-and-button-blocks)), although a transfer discards the function, loop, and block
+  continuations that declared them.
 - `end`, also in a function or block, ends the running file and returns after its `call`. A file called from a block
   returns into that block.
 - A `goto label` in a block of an entry other than the running one continues that entry at the label, with its own

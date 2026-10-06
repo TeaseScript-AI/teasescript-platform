@@ -1,5 +1,6 @@
 import { interpolateCeilMs, interpolateRoundMs } from "./exact-interpolation.js";
 import type { SerializableRuntimeValue } from "./serializable-values.js";
+import { cloneCaptures, type RuntimeCaptureSnapshot } from "./captures.js";
 
 /**
  * Audio or video playback state. The enclosing background action owns an ADR 0016 action ID; the media ID is the
@@ -37,6 +38,8 @@ export interface RuntimeMediaSnapshot {
   readonly mediaId: number;
   /** The activation root its cue and finish blocks run in, kept after it settles; `null` without blocks. */
   readonly handlerRootScopeId: number | null;
+  /** The variables its blocks share with the code that played it; kept after it settles, owning nothing. */
+  readonly captures: readonly RuntimeCaptureSnapshot[];
   readonly media: "audio" | "video";
   readonly source: string;
   state: RuntimeMediaState;
@@ -109,6 +112,8 @@ export interface RuntimeMediaCueInvocationSnapshot {
   readonly handlerFunctionId: number;
   /** The activation root of its media's blocks. */
   readonly rootScopeId: number;
+  /** Its media's shared variables, which the queued block keeps even when the media goes. */
+  readonly captures: readonly RuntimeCaptureSnapshot[];
   readonly dueAtMs: number;
   count: number;
 }
@@ -885,6 +890,7 @@ function settledWarning(media: RuntimeMediaSnapshot, operation: string): MediaWa
 export function cloneMedia(media: RuntimeMediaSnapshot): RuntimeMediaSnapshot {
   return {
     ...media,
+    captures: cloneCaptures(media.captures),
     repeat: { ...media.repeat },
     cues: media.cues.map((cue) => ({ ...cue })),
     points: media.points.map((point) => ({ ...point })),

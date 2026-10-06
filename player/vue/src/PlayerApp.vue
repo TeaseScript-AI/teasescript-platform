@@ -106,6 +106,8 @@ const tools = computed(() => (debug.menu.value ? [debugTool, ...props.tools] : p
 const savedData = computed(() =>
   props.player.hasScriptStorage
     ? {
+        name: props.title,
+        export: props.player.exportScriptStorage,
         canClear: props.player.canClearScriptStorage.value,
         clear: props.player.clearScriptStorage,
       }

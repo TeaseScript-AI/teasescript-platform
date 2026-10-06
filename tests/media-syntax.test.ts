@@ -60,7 +60,7 @@ test("accepted media forms compile, each behind a pacing barrier", () => {
   ]);
 });
 
-test("a media block may use its own handle, also inside a function, but not other locals", () => {
+test("a media block may use its own handle and the locals around it, but not a local declared after it", () => {
   plan(
     [
       "function scene {",
@@ -75,18 +75,35 @@ test("a media block may use its own handle, also inside a function, but not othe
       "exit",
     ].join("\n"),
   );
-  const otherLocal = [
+  plan(
+    [
+      "function scene {",
+      "  let level = 0.2",
+      '  let music = playAudio async "music.mp3" {',
+      "    at 3 s {",
+      "      music.volume = level",
+      "    }",
+      "  }",
+      "}",
+      "scene()",
+      "exit",
+    ].join("\n"),
+  );
+  const laterLocal = [
     "function scene {",
-    "  let level = 0.2",
     '  let music = playAudio async "music.mp3" {',
     "    at 3 s {",
     "      music.volume = level",
     "    }",
     "  }",
+    "  let level = 0.2",
     "}",
     "scene()",
   ].join("\n");
-  assertRejected(otherLocal, "TSV002", lastSpan(otherLocal, "level"));
+  assertRejected(laterLocal, "TSV002", [
+    laterLocal.indexOf("level"),
+    laterLocal.indexOf("level") + 5,
+  ]);
   // Without a let declaration there is no self-handle.
   const withoutHandle =
     'function scene {\n  playAudio async "a.mp3" {\n    music.stop()\n  }\n}\nscene()';

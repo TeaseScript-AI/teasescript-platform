@@ -47,6 +47,7 @@ import {
   numberAnswerText,
 } from "./interaction-answers.js";
 import type { PlanImage, PlanTag, TypeCheckPlan } from "./plan/model.js";
+import type { VariableSite } from "./semantic.js";
 import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
 import {
   emptyImageFilterMessage,
@@ -59,7 +60,9 @@ import { CONVERSION_RESULTS, isTemporalConversionResult } from "./conversions.js
 import {
   builtinCallProblems,
   builtinShapeProblems,
+  COLLECTION_CHANGES,
   COLLECTION_METHODS,
+  rootName,
   collectionMethodProblems,
   expressionLabel,
   memberProblems,
@@ -179,6 +182,8 @@ export interface TypeCheckOptions {
     readonly path: string;
     readonly tags: readonly PlanTag[] | null;
   }[];
+  /** The declarations of the variables that a timer, media, or button block shares and assigns, from name checking. */
+  readonly sharedWrites?: ReadonlySet<VariableSite>;
 }
 
 export interface TypeCheckResult {
@@ -500,6 +505,18 @@ class Scope {
   public declare(name: string, entry: Entry): void {
     this.#entries.set(name, entry);
   }
+
+  /**
+   * The names visible here down to `boundary`, not those of `boundary` and the scopes around it, in a new scope under
+   * `boundary`: the same variables, so their types stay one.
+   */
+  public visibleAbove(boundary: Scope): Scope {
+    const copy = new Scope(boundary);
+    for (let scope: Scope | null = this; scope !== null && scope !== boundary; scope = scope.parent)
+      for (const [name, entry] of scope.#entries)
+        if (!copy.#entries.has(name)) copy.#entries.set(name, entry);
+    return copy;
+  }
 }
 
 /** A function's parameter types and result type, both computed once, when first needed. */
@@ -600,11 +617,14 @@ class TypeChecker {
   /** The names each function's parameters and body mention, found when first needed. */
   readonly #namesUsed = new Map<FunctionType, ReadonlySet<string>>();
 
-  /** Timer and media blocks to check after their file's functions, with the scope and file they belong to. */
+  /** Timer, media, and button blocks to check after their file's functions, with the scope and file they belong to. */
   readonly #handlers: {
     readonly block: Block;
     readonly selfHandle: string | null;
+    /** The locals the block shares with the code that created it, under {@link outer} (V30 §14). */
     readonly scope: Scope;
+    /** The file's names, or the project's alone. */
+    readonly outer: Scope;
     readonly file: number;
   }[] = [];
 
@@ -626,6 +646,9 @@ class TypeChecker {
 
   /** What functions, blocks, and loops may change, collected before checking: for the file, and for every loop. */
   #effects: Pick<ProgramEffects, "shared" | "loops"> = { shared: new Set(), loops: new Map() };
+
+  /** The declarations of the variables that a block shares and assigns (see {@link VariableSite}). */
+  readonly #sharedWrites: ReadonlySet<VariableSite>;
 
   /** The globals that a function or a timer or media block of any file assigns. */
   #sharedGlobals: ReadonlySet<string> = new Set();
@@ -779,6 +802,7 @@ class TypeChecker {
     this.#decided = decided;
     this.#copies = copies;
     this.#capturesTaggedPhotos = options.capturesTaggedPhotos ?? false;
+    this.#sharedWrites = options.sharedWrites ?? new Set();
     this.#scriptCatalog =
       options.scriptCatalog?.map((file) => ({
         path: file.path,
@@ -910,7 +934,7 @@ class TypeChecker {
             variable: { name: handler.selfHandle, type: { kind: "media" }, shared: false },
           });
         this.#function = null;
-        this.#outer = handler.scope;
+        this.#outer = handler.outer;
         // A block does not inherit narrowed facts from the code around it (rule 5.5).
         this.#flow = new Flow();
         runCompileTask(this.#statementsTask(handler.block.statements, scope));
@@ -1302,7 +1326,7 @@ class TypeChecker {
         const variable: Variable = {
           name: statement.variable.name,
           type: this.#ownType(statement, loopType),
-          shared: false,
+          shared: this.#sharedLocal(statement),
           declaration: statement,
         };
         this.#declared.set(statement, variable);
@@ -1411,7 +1435,7 @@ class TypeChecker {
     const key: Variable = {
       name: statement.variable.name,
       type: this.#ownType(statement, copyType(STRING_TYPE)),
-      shared: false,
+      shared: this.#sharedLocal(statement),
       declaration: statement,
     };
     const element = dictValueType(iterable);
@@ -1420,7 +1444,7 @@ class TypeChecker {
     const value: Variable = {
       name: valueName.name,
       type: this.#ownType(valueName, valueType),
-      shared: false,
+      shared: this.#sharedLocal(valueName),
       declaration: valueName,
     };
     this.#declared.set(statement, key);
@@ -1516,13 +1540,23 @@ class TypeChecker {
       shared:
         statement.kind === "globalStatement"
           ? this.#sharedGlobals.has(name)
-          : scope === this.#root && this.#effects.shared.has(name),
+          : scope === this.#root
+            ? this.#effects.shared.has(name)
+            : this.#sharedLocal(statement),
       declaration: statement.typeAnnotation === null ? statement : undefined,
       annotated: statement.typeAnnotation !== null,
     };
     if (statement.typeAnnotation === null) this.#declared.set(statement, variable);
     scope.declare(name, { kind: "variable", variable });
     this.#assigned(variable, value);
+  }
+
+  /**
+   * Whether a timer, media, or button block shares and assigns the variable of this declaration, so that a suspension
+   * may change it (rule 5.5, V30 §14).
+   */
+  #sharedLocal(site: VariableSite): boolean {
+    return this.#sharedWrites.has(site);
   }
 
   /** Directly after a store, a variable holds the stored value's type (rule 5.2). */
@@ -2425,10 +2459,10 @@ class TypeChecker {
     this.#outer = fn.scope;
     const scope = new Scope(fn.scope);
     // The body works on its own copies, so checking an argument never changes what the body assumes.
-    const accepted: Variable[] = parameters.map((parameter) => ({
+    const accepted: Variable[] = parameters.map((parameter, index) => ({
       ...parameter,
       type: copyType(parameter.type),
-      shared: false,
+      shared: this.#sharedLocal(declaration.parameters[index]!),
     }));
     fn.accepted = accepted;
     for (const parameter of accepted) {
@@ -2512,6 +2546,9 @@ class TypeChecker {
     const outerFlow = this.#flow;
     this.#flow = new Flow();
     const outerFile = this.#enterFile(fn.file);
+    const outerScope = this.#outer;
+    // A default runs in the function, so a block it creates shares the parameters before it.
+    this.#outer = fn.scope;
     for (const parameter of fn.declaration.parameters) {
       const name = parameter.name.name;
       let type: StaticType = UNKNOWN_TYPE;
@@ -2553,7 +2590,7 @@ class TypeChecker {
       const variable: Variable = {
         name,
         type,
-        shared: false,
+        shared: this.#sharedLocal(parameter),
         declaration,
         annotated: parameter.typeAnnotation !== null,
       };
@@ -2563,6 +2600,7 @@ class TypeChecker {
     }
     this.#reportMixedLiterals();
     this.#flow = outerFlow;
+    this.#outer = outerScope;
     this.#enterFile(outerFile);
     return parameters;
   }
@@ -4973,13 +5011,18 @@ class TypeChecker {
         yield* compileChild(this.#expressionTask(timer.label, scope)),
         "a timer label",
       );
-    if (timer.handler !== null)
-      this.#handlers.push({
-        block: timer.handler,
-        selfHandle: null,
-        scope: this.#outer,
-        file: this.#file,
-      });
+    if (timer.handler !== null) this.#pendHandler(timer.handler, null, scope);
+  }
+
+  /** A block runs later, with the variables visible where it is created. */
+  #pendHandler(block: Block, selfHandle: string | null, scope: Scope): void {
+    this.#handlers.push({
+      block,
+      selfHandle,
+      scope: scope.visibleAbove(this.#outer),
+      outer: this.#outer,
+      file: this.#file,
+    });
   }
 
   /** A button's text is shown text; its block runs later, when the player clicks it, like a timer expiry block. */
@@ -4989,12 +5032,7 @@ class TypeChecker {
       yield* compileChild(this.#expressionTask(button.text, scope)),
       "a button label",
     );
-    this.#handlers.push({
-      block: button.handler,
-      selfHandle: null,
-      scope: this.#outer,
-      file: this.#file,
-    });
+    this.#pendHandler(button.handler, null, scope);
   }
 
   *#mediaTask(media: MediaParts, scope: Scope, selfHandle: string | null): CompileTask<StaticType> {
@@ -5031,12 +5069,7 @@ class TypeChecker {
       } else yield* compileChild(this.#timeTask(operand, false, scope));
     }
     for (const block of mediaHandlerBlocks(media))
-      this.#handlers.push({
-        block,
-        selfHandle: media.async ? selfHandle : null,
-        scope: this.#outer,
-        file: this.#file,
-      });
+      this.#pendHandler(block, media.async ? selfHandle : null, scope);
     this.#suspend();
     return media.async ? { kind: "media" } : UNKNOWN_TYPE;
   }
@@ -5737,16 +5770,6 @@ function hasUndecidedElements(type: StaticType): boolean {
 /** The methods of a dict. */
 const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
 
-const COLLECTION_CHANGES: ReadonlySet<string> = new Set([
-  "add",
-  "addAll",
-  "remove",
-  "clear",
-  "removeAt",
-  "removeFirst",
-  "removeLast",
-]);
-
 /**
  * The members of a variable's own type that hold what it is known to hold, such as `integer[]` of `integer[] | string[]`
  * for a list of integers. Every list type holds the empty list, so an overlap decides only when no member holds it.
@@ -5762,14 +5785,6 @@ function ownMembers(variable: Variable, known: StaticType): StaticType[] {
       kept.add(member);
   }
   return all.filter((member) => kept.has(member));
-}
-
-/** The variable a place belongs to, such as `xs` for `xs[0].name`, or `null` for a place no variable holds. */
-function rootName(expression: Expression): string | null {
-  let node = unwrap(expression);
-  while (node.kind === "propertyAccessExpression" || node.kind === "indexExpression")
-    node = unwrap(node.object);
-  return node.kind === "identifier" ? node.name : null;
 }
 
 /**
