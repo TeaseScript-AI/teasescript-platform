@@ -577,6 +577,39 @@ test("a media block's own handle is its first variable", () => {
   );
 });
 
+test("speaker and handle properties are state that every name for them reads", () => {
+  const played = traced(
+    [
+      'global author = "Ada"',
+      "speaker guide {",
+      "    firstName: author",
+      "}",
+      "let alias = guide",
+      'let renamed = "Bea"',
+      "alias.firstName = renamed",
+      "let t = timer async 10 s",
+      "let changed = 2 s",
+      "t.remaining = changed",
+      "speaker guide",
+      'say "${guide.firstName} ${speaker.firstName} ${t.remaining}"',
+      "exit",
+    ].join("\n"),
+  );
+  assertComplete(played);
+  const [byName, contextual, remaining] = causes(played.trace, outputOf(played, "Bea Bea 2 s"));
+  for (const interpolation of [byName!, contextual!]) {
+    const steps = lineage(played.trace, interpolation.id);
+    assert.ok(
+      steps.some((step) => step.kind === "assignment" && step.target === "guide.firstName"),
+      "the alias's assignment explains the speaker's name",
+    );
+    assert.ok(steps.some((step) => step.target === "renamed"));
+  }
+  const timer = lineage(played.trace, remaining!.id);
+  assert.ok(timer.some((step) => step.kind === "assignment" && step.target === "timer.remaining"));
+  assert.ok(timer.some((step) => step.target === "changed"));
+});
+
 test("answers, loads, and saves explain values, and refused or repeated reports record nothing", () => {
   const played = traced(
     [
@@ -842,6 +875,96 @@ test("bounded history drops the oldest records and says so", () => {
   const bigVersion = record(trace, trace.variableRecord(played.snapshot.frames[0]!.id, "big"));
   assert.equal(bigVersion.previewTruncated, true);
   assert.equal(bigVersion.preview!.length, RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters);
+});
+
+test("oversized values, wide staged messages, and rollbacks stay within the bounds", () => {
+  const budget = 64 * 1024;
+  const longKey = compile(
+    [
+      'let key = "xxxxxxxx"',
+      "for i in 1..=18 {",
+      "    key += key",
+      "}",
+      "save 1 as key",
+      "exit",
+    ].join("\n"),
+  );
+  const oversized = new RuntimeDebugContext({ maxAccountedBytes: budget });
+  play(longKey, { trace: oversized });
+  assert.ok(oversized.status().accountedBytes <= budget);
+
+  // A host function inside the staged message reports the trace's size while the say is still staged.
+  const placeholders = 3000;
+  const compiled = compileSource(
+    [
+      `let s = "${"x".repeat(1024)}"`,
+      `say "${"${s}${probe()}".repeat(placeholders)}", instant`,
+      "exit",
+    ].join("\n"),
+    { builtins: ["probe"] },
+  );
+  assert.deepEqual(compiled.diagnostics, []);
+  const staged = new RuntimeDebugContext({ maxAccountedBytes: budget });
+  const sizes: number[] = [];
+  const probe = () => {
+    sizes.push(staged.status().accountedBytes);
+    return "";
+  };
+  const wide = run(
+    compiled.plan!,
+    createImmediatePacingRuntimeSnapshot(compiled.plan!, { seed: SEED }),
+    { builtins: { probe } },
+    { debugTrace: staged },
+  );
+  assert.equal(wide.snapshot.status, "halted");
+  assert.equal(sizes.length, placeholders);
+  assert.ok(Math.max(...sizes) <= budget, "staged records count toward the bounds");
+
+  // A wide say that fails after its placeholders rolls back what the bounds kept of it.
+  const failing = compile(
+    [
+      `let s = "${"x".repeat(1024)}"`,
+      "let pace = -1",
+      `say "${"${s}".repeat(placeholders)}", pace`,
+      "exit",
+    ].join("\n"),
+  );
+  const rolledBack = new RuntimeDebugContext({ maxAccountedBytes: budget });
+  assert.equal(play(failing, { trace: rolledBack }).snapshot.status, "failed");
+  assert.ok(rolledBack.status().accountedBytes <= budget);
+  assert.deepEqual(
+    records(rolledBack).filter((candidate) => candidate.kind === "interpolation"),
+    [],
+  );
+
+  const draw = compile("let r = random()\nexit");
+  const tiny = new RuntimeDebugContext({ maxAccountedBytes: 180 });
+  play(draw, { trace: tiny });
+  assert.ok(tiny.status().accountedBytes <= 180);
+});
+
+test("previews cut long keys and labels before writing them", () => {
+  const plan = compile(['let key = load "key"', "let table = dict{ [key]: 1 }", "exit"].join("\n"));
+  const longest = { length: 0 };
+  const replace = String.prototype.replace;
+  // Observe how much text escaping handles while the traced run writes its previews.
+  // EVIDENCE: invariant: the wrapper forwards every call unchanged to the original replace, so it has its type.
+  String.prototype.replace = function (this: string, ...args: Parameters<typeof replace>) {
+    longest.length = Math.max(longest.length, this.length);
+    return replace.apply(this, args);
+  } as typeof replace;
+  try {
+    const trace = new RuntimeDebugContext();
+    const played = play(plan, {
+      trace,
+      scriptStorage: [{ key: "key", value: "\n".repeat(100_000) }],
+    });
+    const table = record(trace, trace.variableRecord(played.snapshot.frames[0]!.id, "table"));
+    assert.equal(table.previewTruncated, true);
+  } finally {
+    String.prototype.replace = replace;
+  }
+  assert.ok(longest.length <= RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters);
 });
 
 test("a small byte budget evicts by size, and wide expressions keep at most the dependency limit", () => {

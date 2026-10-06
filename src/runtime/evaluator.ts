@@ -175,6 +175,7 @@ import { contextRootId, findRoot, findScope } from "./activations.js";
 import {
   bindingKey,
   emptyDependencies,
+  stateKey,
   type DebugDependencies,
   type RuntimeDebugRandomOperation,
   type TraceStore,
@@ -302,11 +303,13 @@ export class Evaluator {
       case "identifier": {
         if (expression.name === "speaker" && this.snapshot.contextualSpeaker !== null) {
           const speaker = this.speakerById(this.snapshot.contextualSpeaker, expression.span);
-          return {
+          const reference: SerializableRuntimeValue = {
             kind: "speakerReference",
             speakerId: speaker.id,
             identifier: speaker.identifier,
           };
+          if (this.trace !== null) this.#readState(reference);
+          return reference;
         }
         const location = findBindingLocation(this.snapshot, this.plan, expression.name);
         if (location === undefined) throw this.#unknownName(expression.name, expression.span);
@@ -339,6 +342,50 @@ export class Evaluator {
   /** The call frame whose temporaries execution sees now, or 0 outside every call. */
   public callFrameId(): number {
     return this.snapshot.callFrames.at(-1)?.id ?? 0;
+  }
+
+  /** The runtime state a speaker reference or handle names, or `null` for any other value. */
+  #stateKey(value: SerializableRuntimeValue): string | null {
+    if (isSpeakerReference(value)) return stateKey("speaker", value.speakerId);
+    if (isTimerHandle(value)) return stateKey("timer", value.timerId);
+    if (isMediaHandle(value)) return stateKey("media", value.mediaId);
+    if (isPermanentButton(value)) return stateKey("button", value.buttonId);
+    if (isCameraView(value)) return stateKey("camera");
+    return null;
+  }
+
+  /** A read of the state `value` names. A speaker was declared by the script; a handle's creation explains itself. */
+  #readState(value: SerializableRuntimeValue): void {
+    const key = this.#stateKey(value);
+    if (key === null) return;
+    this.trace!.readState(
+      key,
+      isSpeakerReference(value) ? value.identifier : null,
+      value,
+      isSpeakerReference(value),
+    );
+  }
+
+  /** A change of the state `value` names, with the causes collected so far. */
+  #writeState(
+    value: SerializableRuntimeValue,
+    property: string,
+    assigned: SerializableRuntimeValue,
+    span: SourceSpan,
+    kind: "assignment" | "mutation" = "assignment",
+  ): void {
+    const key = this.#stateKey(value);
+    if (key === null) return;
+    const owner = isSpeakerReference(value)
+      ? value.identifier
+      : isTimerHandle(value)
+        ? "timer"
+        : isMediaHandle(value)
+          ? "media"
+          : isCameraView(value)
+            ? "camera"
+            : "permanent button";
+    this.trace!.write(kind, key, `${owner}.${property}`, assigned, span);
   }
 
   /** A collection method changed the variable its receiver names; the call's value comes from that change. */
@@ -1012,6 +1059,7 @@ export class Evaluator {
           this.#traceVariableChange("assignment", receiverDescriptor, target.span);
         return;
       }
+      // A speaker, timer, media, or camera view keeps its properties as runtime state, which every name for it reads.
       if (isSpeakerReference(object)) {
         setSpeakerProperty(
           this.speakerById(object.speakerId, target.span),
@@ -1019,20 +1067,22 @@ export class Evaluator {
           value,
           target.span,
         );
-        if (this.trace !== null)
-          this.#traceVariableChange("assignment", receiverDescriptor, target.span);
+        if (this.trace !== null) this.#writeState(object, target.name, value, target.span);
         return;
       }
       if (isTimerHandle(object)) {
         this.#assignTimerProperty(object, target.name, value, target.span);
+        if (this.trace !== null) this.#writeState(object, target.name, value, target.span);
         return;
       }
       if (isMediaHandle(object)) {
         this.#assignMediaProperty(object, target.name, value, target.span);
+        if (this.trace !== null) this.#writeState(object, target.name, value, target.span);
         return;
       }
       if (isCameraView(object)) {
         this.#assignCameraProperty(target.name, value, target.span);
+        if (this.trace !== null) this.#writeState(object, target.name, value, target.span);
         return;
       }
       throw fault(
@@ -1370,6 +1420,7 @@ export class Evaluator {
       | SerializableCameraViewHandle,
     span: SourceSpan,
   ): string {
+    if (this.trace !== null) this.#readState(handle);
     if (isCameraView(handle)) {
       const view = this.#cameraView();
       return view.shown ? `<camera ${view.placement}>` : "<camera, hidden>";
@@ -1595,8 +1646,12 @@ export class Evaluator {
       if (MIN_MAX_BUILTINS.has(name))
         return this.#minMaxBuiltin(name, positional, named, expression.span);
       if (name === "script") return scriptReference(positional, named, expression.span);
-      if (name === "removePermanentButton")
-        return this.#removePermanentButton(positional, named, expression.span);
+      if (name === "removePermanentButton") {
+        const removed = this.#removePermanentButton(positional, named, expression.span);
+        if (this.trace !== null && isPermanentButton(positional[0]!))
+          this.#writeState(positional[0], "removed", null, expression.span, "mutation");
+        return removed;
+      }
       const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
       const builtin = Object.hasOwn(this.#builtins, name) ? this.#builtins[name] : undefined;
@@ -1671,10 +1726,40 @@ export class Evaluator {
       return copied;
     }
     if (expression.callee.kind === "property" && isTimerHandle(receiver)) {
-      return this.#callTimer(receiver, expression.callee.name, positional, named, expression.span);
+      const called = this.#callTimer(
+        receiver,
+        expression.callee.name,
+        positional,
+        named,
+        expression.span,
+      );
+      if (this.trace !== null)
+        this.#writeState(
+          receiver,
+          `${expression.callee.name}()`,
+          null,
+          expression.span,
+          "mutation",
+        );
+      return called;
     }
     if (expression.callee.kind === "property" && isMediaHandle(receiver)) {
-      return this.#callMedia(receiver, expression.callee.name, positional, named, expression.span);
+      const called = this.#callMedia(
+        receiver,
+        expression.callee.name,
+        positional,
+        named,
+        expression.span,
+      );
+      if (this.trace !== null)
+        this.#writeState(
+          receiver,
+          `${expression.callee.name}()`,
+          null,
+          expression.span,
+          "mutation",
+        );
+      return called;
     }
     if (expression.callee.kind === "property" && typeof receiver === "string") {
       const name = Object.keys(named)[0];
@@ -2271,6 +2356,8 @@ export class Evaluator {
       for (const image of this.snapshot.capturedImages) {
         if (matches(imageTags(image))) found.push(image.reference);
       }
+      // Tagged photos come from accepted captures.
+      this.trace?.readState(stateKey("photos"), null, null, false);
     }
     if (query.select === "list") return { kind: "list", items: found };
     if (found.length === 0)
@@ -2631,6 +2718,7 @@ export class Evaluator {
     span: SourceSpan,
   ): SerializableRuntimeValue {
     if (isObject(value)) return this.#getObjectProperty(value, name, span);
+    if (this.trace !== null) this.#readState(value);
     if (isSpeakerReference(value)) {
       return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
     }

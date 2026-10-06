@@ -104,10 +104,18 @@ function plainScalarText(value: SerializableRuntimeValue, span: SourceSpan): str
   throw fault("TSR021", "This value cannot be converted implicitly to visible text.", span);
 }
 
-/** A script reference as the call that makes it: `script("rooms/hall.tease", label: "start")`. */
-function scriptNotation(value: SerializableScriptReference): string {
-  const label = value.label === null ? "" : `, label: ${quotedText(value.label)}`;
-  return `script(${quotedText(value.path)}${label})`;
+/**
+ * A script reference as the call that makes it: `script("rooms/hall.tease", label: "start")`. A `limit` cuts its texts
+ * before they are quoted.
+ */
+function scriptNotation(value: SerializableScriptReference, limit = Infinity): string {
+  const label = value.label === null ? "" : `, label: ${quotedText(prefix(value.label, limit))}`;
+  return `script(${quotedText(prefix(value.path, limit))}${label})`;
+}
+
+/** At most the first `limit` characters of `text`. */
+function prefix(text: string, limit: number): string {
+  return text.length > limit ? text.slice(0, limit) : text;
 }
 
 /** Whether `visibleText` accepts the value. */
@@ -214,7 +222,7 @@ function writeNotation(
       next.index += 1;
       const name = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(property.name)
         ? property.name
-        : quotedText(property.name);
+        : quotedText(prefix(property.name, limit));
       work.push(
         next,
         { value: property.value },
@@ -229,7 +237,7 @@ function writeNotation(
       work.push(
         next,
         { value: entry.value },
-        { text: `${next.index > 1 ? ", " : ""}${quotedText(entry.key)}: ` },
+        { text: `${next.index > 1 ? ", " : ""}${quotedText(prefix(entry.key, limit))}: ` },
       );
       continue;
     }
@@ -237,7 +245,7 @@ function writeNotation(
     const before = output.length;
     if (typeof current === "string")
       // A long text is cut before it is quoted; the closing quote then marks no end.
-      output.push(quotedText(current.length > limit ? current.slice(0, limit) : current));
+      output.push(quotedText(prefix(current, limit)));
     else if (isList(current) || isSet(current))
       work.push({ text: "]" }, { items: current.items, index: 0 }, { text: "[" });
     else if (isObject(current)) {
@@ -259,6 +267,7 @@ function writeNotation(
     )
       output.push(handleNotation(current));
     else if (isTemporal(current)) output.push(temporalNotation(current));
+    else if (isScriptReference(current)) output.push(scriptNotation(current, limit));
     else output.push(plainScalarText(current, span));
     for (let index = before; index < output.length; index += 1) length += output[index]!.length;
   }

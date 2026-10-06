@@ -302,9 +302,7 @@ interface TraceRecord {
 }
 
 interface Stage {
-  readonly records: number;
   readonly nextId: number;
-  readonly bytes: number;
   readonly draws: number;
   readonly pendingOutput: TraceStore["pendingOutput"];
   readonly pendingStorage: TraceStore["pendingStorage"];
@@ -323,7 +321,8 @@ const INDEX_OVERHEAD_BYTES = 48;
  * reported in `status()`, and never reaches the script's execution.
  */
 export class TraceStore {
-  #records: TraceRecord[] = [];
+  /** Retained records from `#head` on; dropped slots before it are emptied so their data can be released. */
+  #records: (TraceRecord | undefined)[] = [];
   #head = 0;
   #nextId = 1;
   #bytes = 0;
@@ -567,21 +566,47 @@ export class TraceStore {
       this.writeTemporary(callFrameId, temporaryId, value);
       return;
     }
+    if (!this.alias(temporaryKey(callFrameId, temporaryId), deps.ids[0]!))
+      this.writeTemporary(callFrameId, temporaryId, value);
+  }
+
+  /** Makes `key` name retained record `id` too; `false` when that record is no longer retained. */
+  alias(key: string, id: number | null): boolean {
+    if (this.#failure !== null || id === null) return false;
     try {
-      const source = this.#find(deps.ids[0]!);
-      const key = temporaryKey(callFrameId, temporaryId);
-      if (source === undefined) {
-        this.writeTemporary(callFrameId, temporaryId, value);
-        return;
-      }
-      if (this.#versions.get(key) === source.id) return;
+      const source = this.#find(id);
+      if (source === undefined) return false;
+      if (this.#versions.get(key) === source.id) return true;
       // The alias is accounted to its record, so it is dropped with it and counts toward the bounds.
       (source.aliases ??= []).push(key);
       const bytes = 16 + key.length * 2;
       source.bytes += bytes;
       this.#bytes += bytes;
       this.#index(key, source.id);
-      if (this.#stage === null) this.#evict();
+      this.#evict();
+      return true;
+    } catch (error) {
+      this.#fail(error);
+      return false;
+    }
+  }
+
+  /**
+   * A read of runtime state outside variables, such as a speaker's or a timer's properties: its last recorded change,
+   * if any. With `unknown`, an unrecorded state reads as an unrecorded origin; otherwise it adds nothing, because the
+   * value naming the state already explains its creation.
+   */
+  readState(
+    key: string,
+    target: string | null,
+    value: SerializableRuntimeValue,
+    unknown: boolean,
+  ): void {
+    if (this.#failure !== null) return;
+    try {
+      const id = this.#versions.get(key);
+      if (id !== undefined) this.#add(this.acc, id);
+      else if (unknown) this.#add(this.acc, this.#unrecorded(key, target, value));
     } catch (error) {
       this.#fail(error);
     }
@@ -700,7 +725,7 @@ export class TraceStore {
           stateAfter,
         }),
       );
-      this.#lastRandom = this.#records[this.#records.length - 1]!;
+      this.#lastRandom = this.#find(id) ?? null;
       this.#add(this.acc, id);
     } catch (error) {
       this.#fail(error);
@@ -719,6 +744,7 @@ export class TraceStore {
       record.bytes += grown;
       this.#bytes += grown;
       this.#lastRandom = null;
+      this.#evict();
     } catch (error) {
       this.#fail(error);
     }
@@ -742,23 +768,24 @@ export class TraceStore {
       this.write(
         "load",
         null,
-        key,
+        clip(key),
         value,
         span,
-        Object.freeze({ kind: "load", key, found, defaultEvaluated }),
+        Object.freeze({ kind: "load", key: clip(key), found, defaultEvaluated }),
       ),
     );
   }
 
   /** A write to the session's storage view: the script's, or a debugging tool's edit, which has no causes. */
   storage(key: string, value: SerializableRuntimeValue, edited = false): void {
+    // A key longer than a preview is not indexed: a later load of it shows no recorded save.
     this.write(
       "storage",
-      storageKeyOf(key),
-      key,
+      key.length > RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters ? null : storageKeyOf(key),
+      clip(key),
       value,
       null,
-      Object.freeze({ kind: "storage", key, deleted: value === null, edited }),
+      Object.freeze({ kind: "storage", key: clip(key), deleted: value === null, edited }),
       edited ? emptyDependencies() : this.acc,
     );
   }
@@ -826,13 +853,14 @@ export class TraceStore {
     if (id !== null) this.#stageImageId = id;
   }
 
-  /** Starts staging: records until `commit` disappear with `rollback`, as the staged runtime state does. */
+  /**
+   * Starts staging: records until `commit` disappear with `rollback`, as the staged runtime state does. Staged records
+   * count toward the bounds like any others.
+   */
   stage(): Stage | null {
     if (this.#failure !== null) return null;
     const stage: Stage = {
-      records: this.#records.length,
       nextId: this.#nextId,
-      bytes: this.#bytes,
       draws: this.#draws,
       pendingOutput: this.pendingOutput,
       pendingStorage: this.pendingStorage,
@@ -860,19 +888,36 @@ export class TraceStore {
     if (stage === null || this.#stage !== stage) return;
     this.#stage = null;
     if (this.#failure !== null) return;
-    this.#records.length = stage.records;
-    this.#nextId = stage.nextId;
-    this.#bytes = stage.bytes;
-    this.#draws = stage.draws;
-    this.pendingOutput = stage.pendingOutput;
-    this.pendingStorage = stage.pendingStorage;
-    this.#stageImageId = stage.stageImageId;
-    this.#lastRandom = stage.lastRandom;
-    for (const [key, id] of stage.versions) {
-      if (id === undefined) this.#versions.delete(key);
-      else this.#versions.set(key, id);
+    try {
+      // Staged records still retained are the newest; older ones the bounds dropped meanwhile stay dropped.
+      while (this.#records.length > this.#head && this.#records.at(-1)!.id >= stage.nextId)
+        this.#bytes -= this.#records.pop()!.bytes;
+      this.#nextId = stage.nextId;
+      this.#draws = stage.draws;
+      this.pendingOutput = stage.pendingOutput;
+      this.pendingStorage = stage.pendingStorage;
+      this.#stageImageId =
+        stage.stageImageId !== null && this.#find(stage.stageImageId) !== undefined
+          ? stage.stageImageId
+          : null;
+      this.#lastRandom =
+        stage.lastRandom !== null && this.#find(stage.lastRandom.id) === stage.lastRandom
+          ? stage.lastRandom
+          : null;
+      for (const [key, id] of stage.versions) {
+        const indexed = this.#versions.has(key);
+        if (id !== undefined && this.#find(id) !== undefined) {
+          if (!indexed) this.#bytes += INDEX_OVERHEAD_BYTES + key.length * 2;
+          this.#versions.set(key, id);
+        } else if (indexed) {
+          this.#versions.delete(key);
+          this.#bytes -= INDEX_OVERHEAD_BYTES + key.length * 2;
+        }
+      }
+      for (const sequence of stage.outputs) this.#outputs.delete(sequence);
+    } catch (error) {
+      this.#fail(error);
     }
-    for (const sequence of stage.outputs) this.#outputs.delete(sequence);
   }
 
   #append(
@@ -907,17 +952,18 @@ export class TraceStore {
     this.#records.push(record);
     this.#bytes += record.bytes;
     if (key !== null) this.#index(key, record.id);
-    if (this.#stage === null) this.#evict();
+    this.#evict();
     return record.id;
   }
 
   /** Drops the oldest records, with the index entries that still name them, until the trace fits its bounds. */
   #evict(): void {
     while (
-      this.#records.length - this.#head > this.maxRecords ||
-      (this.#bytes > this.maxBytes && this.#records.length - this.#head > 1)
+      this.#records.length > this.#head &&
+      (this.#records.length - this.#head > this.maxRecords || this.#bytes > this.maxBytes)
     ) {
       const record = this.#records[this.#head]!;
+      this.#records[this.#head] = undefined;
       this.#head += 1;
       this.#truncated = true;
       this.#bytes -= record.bytes;
@@ -1046,6 +1092,17 @@ function argumentKey(callFrameId: number, parameter: string): string {
   return `a${callFrameId}:${parameter}`;
 }
 
+/**
+ * Runtime state that values are read from besides variables: a speaker's properties, a timer, media, or permanent
+ * button, the camera view, and the catalog of tagged photos.
+ */
+export function stateKey(
+  kind: "speaker" | "timer" | "media" | "button" | "camera" | "photos",
+  id = 0,
+): string {
+  return `x${kind}:${id}`;
+}
+
 export function loopKey(callFrameId: number, loopId: number): string {
   return `l${callFrameId}:${loopId}`;
 }
@@ -1063,6 +1120,13 @@ function addDependency(deps: DebugDependencies, id: number, limit: number): void
 function addAll(target: DebugDependencies, source: DebugDependencies, limit: number): void {
   for (const id of source.ids) addDependency(target, id, limit);
   target.omitted += source.omitted;
+}
+
+/** Text the trace keeps as a label, cut like a preview. */
+function clip(text: string): string {
+  return text.length > RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters
+    ? text.slice(0, RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters)
+    : text;
 }
 
 function copyDependencies(deps: DebugDependencies): DebugDependencies {

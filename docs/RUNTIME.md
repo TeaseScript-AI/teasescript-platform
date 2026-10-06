@@ -1251,13 +1251,16 @@ snapshot, events, random state, and checkpoint with or without it, and without i
   each `say` message, by its event sequence; and Stage image changes.
 - **Identity.** A dependency names the record of the version actually read. Variables are keyed by scope ID and name,
   globals apart, so recursion, same-named variables, prepared references, and variables that blocks share keep their
-  real target; temporaries by call frame and temporary ID; arguments by call frame and parameter; storage by key. A
-  compiled copy of one value shares that value's record.
-- **Staging.** Records made while a `say` or a speaker declaration is staged commit or vanish with it. A message that
-  waits behind pacing keeps its text's causes until it is shown.
+  real target; temporaries by call frame and temporary ID; arguments by call frame and parameter; storage by key. The
+  properties of a speaker, timer, media, permanent button, or the camera view, and the tagged photos, are state keyed by
+  its identity, so every name for it reads the latest declaration, assignment, or method call. A compiled copy of one
+  value shares that value's record.
+- **Staging.** Records made while a `say` or a speaker declaration is staged commit or vanish with it, and count toward
+  the bounds meanwhile. A message that waits behind pacing keeps its text's causes until it is shown.
 - **Bounds.** At most 8,192 records or 8 MiB of accounted data (`RUNTIME_DEBUG_TRACE_LIMITS`), which drops the oldest
-  records with their index entries; a dependency on a dropped record reads as not retained. Previews stop at 1,024
-  characters while they are written, and a record keeps at most 32 dependencies and counts the others as omitted.
+  records with their index entries, a record larger than the budget at once; a dependency on a dropped record reads as
+  not retained. Previews and labels stop at 1,024 characters while they are written, a longer storage key is not
+  indexed, and a record keeps at most 32 dependencies and counts the others as omitted.
   These are debugger tuning values, not language limits.
 - **Epochs.** `reset("start")` and `reset("restore")` begin a new epoch and drop every record. So does an operation
   whose plan or input snapshot is not the context's last result: its origin is `start` for a fresh snapshot, otherwise

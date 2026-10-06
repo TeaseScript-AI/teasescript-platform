@@ -56,8 +56,10 @@ import {
 } from "./operations/transfers.js";
 import { activeFunctionFrame, contextRootId, interruptRunning } from "./activations.js";
 import {
+  bindingKey,
   closeDebugTrace,
   loopKey,
+  stateKey,
   openDebugTrace,
   type DebugDependencies,
   type RuntimeDebugContext,
@@ -423,11 +425,17 @@ function executePlannedInstruction(
           }
           speaker.properties.push({ name: property.name, value: propertyValue });
         }
-        stagedEvaluator.trace?.writeBinding("declaration", GLOBAL_SCOPE_ID, instruction.name, {
-          kind: "speakerReference",
-          speakerId: speaker.id,
-          identifier: instruction.name,
-        });
+        // The speaker's properties are its state; its global names that state.
+        const trace = stagedEvaluator.trace;
+        if (trace !== null)
+          trace.alias(
+            bindingKey(GLOBAL_SCOPE_ID, instruction.name),
+            trace.write("declaration", stateKey("speaker", speaker.id), instruction.name, {
+              kind: "speakerReference",
+              speakerId: speaker.id,
+              identifier: instruction.name,
+            }),
+          );
         advance(stagedSnapshot);
       });
       return;
@@ -959,6 +967,7 @@ function executePlannedInstruction(
     case "showCamera":
       // Shows the default camera's view, or moves it when it is shown already; the Player brings the camera, if any.
       snapshot.cameraView = { placement: instruction.placement, shown: true };
+      evaluator.trace?.write("assignment", stateKey("camera"), "camera", { kind: "cameraView" });
       if (instruction.destinationTemporary !== null) {
         setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, {
           kind: "cameraView",
@@ -971,6 +980,7 @@ function executePlannedInstruction(
       return;
     case "hideCamera":
       if (snapshot.cameraView !== null) snapshot.cameraView.shown = false;
+      evaluator.trace?.write("assignment", stateKey("camera"), "camera", { kind: "cameraView" });
       advance(snapshot);
       return;
     case "showPermanentButton":

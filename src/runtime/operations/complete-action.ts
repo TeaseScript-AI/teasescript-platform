@@ -33,6 +33,7 @@ import { settleBackgroundPacingGate } from "./pacing-gate.js";
 import {
   closeDebugTrace,
   openDebugTrace,
+  stateKey,
   type RuntimeDebugContext,
   type TraceStore,
 } from "../debug-trace.js";
@@ -335,7 +336,7 @@ function completeCapture(
   }
   assertEventSequenceCapacity(current, resolved.unavailableReason === null ? 1 : 2);
   setTemporary(current.temporaries, action.destinationTemporary, reference);
-  trace?.writeTemporary(
+  const input = trace?.writeTemporary(
     action.ownerCallFrameId ?? 0,
     action.destinationTemporary,
     reference,
@@ -351,6 +352,8 @@ function completeCapture(
   // A photo taken with tags joins the image catalog, keyed by its reference, so tag queries find it too.
   if (reference !== null && action.tags !== null) {
     current.capturedImages.push({ reference, tags: action.tags.map((tag) => ({ ...tag })) });
+    trace?.replace(input ?? null);
+    trace?.write("mutation", stateKey("photos"), "tagged photos", reference);
   }
   const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   const events: InterpreterEvent[] = [];
