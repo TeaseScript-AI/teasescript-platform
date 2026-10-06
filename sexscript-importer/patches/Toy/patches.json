@@ -97,6 +97,13 @@
       "category": "b",
       "reason": "Toy built its image catalogue at runtime by listing images/toy and reading each set's tags file (new File, listFiles, readLines), and chose images with closures (matchTags, findAll, every, intersect, Collections.shuffle), none of which converts, so IMAGEDATA stayed null and the first image stopped the script. Write the 31 tags files out as text (identical to ToyExpanded's) and build the same catalogue from them in loops; select images with Toy's own rule (every tag of the flat spec present, no '!tag' present, one random match), outfits and the recent-outfit check in loops in the same order, and pick a random matching tag for the comment instead of shuffling the intersection. A random element is taken through a small randomItem closure, whose parameter keeps the result type open for the TeaseScript compiler. selectImageSet returns null when no outfit fits, which dress() already handles, where the legacy random index of an empty list failed.",
       "diff": "imagery-loops.diff"
+    },
+    {
+      "id": "menu-record-args",
+      "layer": "source",
+      "category": "b",
+      "reason": "The lounge menu passes opts[opt].arg to the chosen request, but the request records have no arg; Groovy read the missing key as null, while a TeaseScript record has fixed properties, so choosing any request stopped the script. Give the request records arg: null, the value Groovy read.",
+      "diff": "menu-record-args.diff"
     }
   ]
 }
