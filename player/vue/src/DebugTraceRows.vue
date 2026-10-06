@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
 import { ArrowUp, ChevronDown, ChevronRight } from "@lucide/vue";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { RuntimeDebugContext } from "../../../src/index.js";
 import {
@@ -11,7 +10,9 @@ import {
 } from "../../debug-variables.js";
 
 // Rows of Debug's derivation trees (DEBUGGER.md "Player Debug"): each root with its immediate causes, and further levels
-// as the player opens them, one row at a time. A record shown again in the same tree is a link to its first row.
+// as the player opens them, one row at a time. A record shown again in the same tree is a link to its first row. Every
+// text in a row wraps within the width its indentation leaves, so tags and text actions are plain elements that wrap,
+// not single-line Badges or Buttons.
 const props = defineProps<{
   trace: RuntimeDebugContext;
   roots: readonly number[];
@@ -115,7 +116,7 @@ const indent = (depth: number) => ({ paddingInlineStart: `${Math.min(depth, 6) *
             <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
               <!-- Every part wraps anywhere: names, statements and notes may be one long word. -->
               <span class="min-w-0 font-medium wrap-anywhere">{{ row.text.title }}</span>
-              <Badge v-if="row.text.unknown" variant="outline" data-trace-unknown>Unknown origin</Badge>
+              <span v-if="row.text.unknown" class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere" data-trace-unknown>Unknown origin</span>
               <span v-if="row.text.note" class="min-w-0 text-muted-foreground wrap-anywhere">{{
                 row.text.note
               }}</span>
@@ -133,18 +134,17 @@ const indent = (depth: number) => ({ paddingInlineStart: `${Math.min(depth, 6) *
                 data-trace-value
                 >{{ row.text.value }}{{ row.text.truncated ? "…" : "" }}</code
               >
-              <Button
+              <button
                 v-if="row.text.value.length > LONG_VALUE"
-                variant="ghost"
-                size="sm"
-                class="min-h-11 justify-self-start"
+                type="button"
+                class="justify-self-start min-h-11 max-w-full rounded-md px-2 text-start text-sm font-medium wrap-anywhere hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 :aria-expanded="fullValues.has(row.key)"
                 @click="
                   fullValues.has(row.key) ? fullValues.delete(row.key) : fullValues.add(row.key)
                 "
               >
                 {{ fullValues.has(row.key) ? "Show less" : "Show all" }}
-              </Button>
+              </button>
             </template>
             <span
               v-if="row.text.shownAs !== null"
@@ -171,7 +171,7 @@ const indent = (depth: number) => ({ paddingInlineStart: `${Math.min(depth, 6) *
         class="flex min-h-11 items-center gap-2 ps-12"
         data-trace-expired
       >
-        <Badge variant="outline">Expired</Badge>
+        <span class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere">Expired</span>
         <span class="min-w-0 text-muted-foreground wrap-anywhere">Older history was dropped</span>
       </div>
       <p
@@ -180,16 +180,11 @@ const indent = (depth: number) => ({ paddingInlineStart: `${Math.min(depth, 6) *
       >
         {{ row.count }} more {{ row.count === 1 ? "cause was" : "causes were" }} not kept
       </p>
-      <Button
-        v-else
-        variant="ghost"
-        size="sm"
-        class="ms-12 min-h-11"
-        data-trace-more
-        @click="showMore(row)"
-      >
-        Show {{ Math.min(row.remaining, 20) }} more
-      </Button>
+      <div v-else class="flex min-w-0 ps-12">
+        <button type="button" class="min-h-11 max-w-full rounded-md px-2 text-start text-sm font-medium wrap-anywhere hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" data-trace-more @click="showMore(row)">
+          Show {{ Math.min(row.remaining, 20) }} more
+        </button>
+      </div>
     </li>
   </ul>
 </template>

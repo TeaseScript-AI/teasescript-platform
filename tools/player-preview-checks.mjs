@@ -2210,7 +2210,12 @@ async function debugVariablesChecks(page) {
     'let pick = choose a: "Apple", b: "Pear"',
     'say "You picked ${pick}", instant',
     'let done = showButton "Done"',
-    `say "Done with \${spanks} and \${variable_${"verylong".repeat(24)}}", instant`,
+    // After Debug turns on again: a chain eight values deep from an unrecorded value, with a wide sum on the way.
+    ...Array.from({ length: 25 }, (_, index) => `let x${index} = ${index}`),
+    `let wide = ${Array.from({ length: 25 }, (_, index) => `x${index}`).join(" + ")}`,
+    "let e1 = low + wide",
+    ...Array.from({ length: 7 }, (_, index) => `let e${index + 2} = e${index + 1} + 1`),
+    `say "Done with \${e8} and \${variable_${"verylong".repeat(24)}}", instant`,
     'let after = askText "Anything else?"',
     "exit",
   ].join("\n");
@@ -2321,9 +2326,31 @@ async function debugVariablesChecks(page) {
 
   // Everything fits the Small dock and the narrowest drawer: long names, unknown origins, and links to rows above.
   await page.locator("[data-foreground-controls] button").filter({ hasText: "Done" }).click();
-  // The question that follows is the newest message; values from before Debug was turned on say so.
+  // The question that follows is the newest message; values from before Debug was turned on say so, also at the
+  // deepest indentation, next to the page of a wide cause list.
   await rows.filter({ hasText: "Done with" }).locator("[data-trace-toggle]").click();
-  await panel.locator("[data-trace-unknown]").first().waitFor();
+  for (let guard = 0; guard < 40; guard += 1) {
+    const closed = panel.locator('[data-trace-toggle][aria-expanded="false"]');
+    if ((await closed.count()) === 0) break;
+    await closed.first().click();
+  }
+  const depthOf = (locator) =>
+    locator.evaluate((element) => Number(element.closest("li").dataset.traceDepth));
+  await panel.locator("[data-trace-more]").first().waitFor();
+  const deepest = [
+    await depthOf(panel.locator("[data-trace-more]").first()),
+    Math.max(
+      ...(await panel
+        .locator("[data-trace-unknown]")
+        .evaluateAll((elements) =>
+          elements.map((element) => Number(element.closest("li").dataset.traceDepth)),
+        )),
+    ),
+  ];
+  check(
+    deepest[0] >= 9 && deepest[1] >= 8,
+    `The deepest rows lack the page control or the unknown origin: ${deepest}`,
+  );
   await panel.locator("[data-debug-background-toggle]").click();
   await panel.getByLabel("Filter variables by name").fill("");
   const fits = async (where) => {

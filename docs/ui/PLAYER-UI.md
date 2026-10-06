@@ -413,8 +413,9 @@ the Standard Player's platform Debugger tool ([DEBUGGER.md](../DEBUGGER.md#playe
 tools menu while Player Settings' Debug menu is on, and turning that menu off removes it from every panel state. Its
 time controls stand above its tabs (shadcn-vue Tabs): Now, Variables, Log, and Storage, with its saved-value editor in
 a Dialog, when the host persists script storage; Now, Variables, and Storage wrap long paths, keys, names, and values
-so they fit the Small dock and the narrow drawer. Variables rows open with full-height (44 px) toggles that name what
-they open; a long value shows three lines until **Show all**.
+so they fit the Small dock and the narrow drawer, also at the deepest indentation, where tags and text actions wrap
+instead of keeping one line. Variables rows open with full-height (44 px) toggles that name what they open; a long value
+shows three lines until **Show all**.
 
 ## Session start and user activation
 

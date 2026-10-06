@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, shallowRef, watch } from "vue";
 import { ChevronDown, ChevronUp } from "@lucide/vue";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
 import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
@@ -75,10 +73,11 @@ const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ??
     <template v-else>
       <div class="flex min-w-0 flex-wrap items-center gap-2" data-debug-trace-status>
         <span class="text-muted-foreground">{{ origins[status.origin] }}</span>
-        <Badge v-if="status.truncated" variant="outline" data-debug-trace-truncated>
+        <!-- Tags and actions are plain elements that wrap in the narrowest panel. -->
+        <span v-if="status.truncated" class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere" data-debug-trace-truncated>
           Earlier history unavailable
-        </Badge>
-        <Badge v-if="!status.recording" variant="destructive">Recording stopped</Badge>
+        </span>
+        <span v-if="!status.recording" class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere text-destructive">Recording stopped</span>
         <span v-if="!status.recording" class="min-w-0 text-muted-foreground wrap-anywhere">{{
           status.failure
         }}</span>
@@ -97,16 +96,15 @@ const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ??
           label="Recent chat messages and their values"
           @chose="chose = true"
         />
-        <Button
+        <button
           v-if="outputs.length === PLAYER_DEBUG_TRACE_PAGE * outputPages"
-          variant="ghost"
-          size="sm"
-          class="min-h-11 justify-self-start"
+          type="button"
+          class="min-h-11 max-w-full justify-self-start rounded-md px-2 text-start text-sm font-medium wrap-anywhere hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           data-debug-more-messages
           @click="outputPages++"
         >
           Show {{ PLAYER_DEBUG_TRACE_PAGE }} older messages
-        </Button>
+        </button>
       </section>
 
       <Collapsible v-model:open="background" v-slot="{ open }" class="grid gap-2">
@@ -158,15 +156,17 @@ const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ??
                   <code class="min-w-0 break-all"
                     >{{ variable.value }}{{ variable.truncated ? "…" : "" }}</code
                   >
-                  <Badge variant="outline">No recorded origin</Badge>
+                  <span
+                    class="inline-block max-w-full rounded-md border px-1.5 py-0.5 text-xs font-medium wrap-anywhere"
+                    >No recorded origin</span
+                  >
                 </div>
               </li>
             </ul>
-            <Button
+            <button
               v-if="group.variables.length > shown(group.key)"
-              variant="ghost"
-              size="sm"
-              class="min-h-11 justify-self-start"
+              type="button"
+              class="min-h-11 max-w-full justify-self-start rounded-md px-2 text-start text-sm font-medium wrap-anywhere hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               @click="groupPages.set(group.key, (groupPages.get(group.key) ?? 1) + 1)"
             >
               Show
@@ -174,7 +174,7 @@ const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ??
                 Math.min(group.variables.length - shown(group.key), PLAYER_DEBUG_TRACE_PAGE)
               }}
               more
-            </Button>
+            </button>
           </section>
         </CollapsibleContent>
       </Collapsible>
