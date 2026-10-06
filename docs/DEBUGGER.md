@@ -88,8 +88,8 @@ copies saved values, answers, and session text, so it requires all three.
 `version: 2`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
 (unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name);
 `editedWhileDebugging`, the Debug storage editor's mark (`firstEditSceneTimeMs` and `editCount`, or `null`), which also
-covers edits before the replay anchor and which `inspect` prints; the selection and omissions; the canonical checkpoint and its role, `current` or `lastGood`; the replay data; photos; and
-readable sections. Replay data is the anchor snapshot from an earlier boundary, or the last good checkpoint itself, and
+covers edits before the replay anchor and which `inspect` prints; the selection and omissions; the canonical checkpoint
+and its role, `current` or `lastGood`; the replay data; photos; and readable sections. Replay data is the anchor snapshot from an earlier boundary, or the last good checkpoint itself, and
 every elementary engine call the Player made since, in order: `run` with its options, `observeTime`, `completeAction`
 with the media store's recorded answers, `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and
 `applyExternalStorageEdit` with the edit, each with its plain arguments, outcome, emitted event range, resulting
@@ -106,8 +106,8 @@ cannot copy, or a media store that throws during a call, marks it incomplete.
 The Player assembles an export when its dialog opens ([Player UI](ui/PLAYER-UI.md#session-end-and-failure)), from the
 session, the record, and the photos frozen then (`player/debug-export-assembly.ts`), so play may continue meanwhile.
 The technical report carries the build and its revisions, the package's storage scope and a SHA-256 of its compiled plan
-where the browser can hash, the incident as the session's actual state shows it, and the sequence and kind of the last
-256 events. Saved values add the session's
+where the browser can hash, the incident as the session's actual state shows it, the storage editor's mark, and the
+sequence and kind of the last 256 events. Saved values add the session's
 storage view; answers add the recorded interaction completions; session text adds the last 50 transcript messages and
 the events with their content: messages, the player's own transcript text, and button labels always, but the details of
 requests, settlements, warnings, failures, and storage edits, which can hold saved values, answers, or storage keys,

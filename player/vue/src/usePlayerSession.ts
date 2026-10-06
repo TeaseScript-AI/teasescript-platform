@@ -1013,6 +1013,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
               },
         recording: recorder.recording(),
         hostError: hostError.value,
+        editedWhileDebugging: debugEdits.value,
         player,
       };
       const storage =

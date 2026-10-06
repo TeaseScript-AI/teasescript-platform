@@ -55,9 +55,18 @@ interface StorageHost {
     value: SerializableRuntimeValue;
     expected: SerializableRuntimeValue | undefined;
   }): Promise<
-    { kind: "saved"; live: boolean } | { kind: "changed" } | { kind: "failed"; message: string }
+    | { kind: "saved"; live: boolean }
+    | { kind: "busy" }
+    | { kind: "overtaken" }
+    | { kind: "changed" }
+    | { kind: "failed"; message: string }
   >;
   readonly debugEdits: Readonly<Ref<{ firstEditSceneTimeMs: number; editCount: number } | null>>;
+  debugExportCandidate(
+    player: Record<string, never>,
+  ): Promise<{
+    readonly editedWhileDebugging: { firstEditSceneTimeMs: number; editCount: number } | null;
+  }>;
 }
 let usePlayerSession: (options: {
   scriptStorage: ScriptStorageProvider;
@@ -667,6 +676,11 @@ test("a Debug edit is stored first, and the running session's next load returns 
   assert.deepEqual([...storage.entries], [["k", 2]]);
   assert.deepEqual(host.session.value?.snapshot.scriptStorage, [{ key: "k", value: 2 }]);
   assert.deepEqual(host.debugEdits.value, { firstEditSceneTimeMs: 0, editCount: 1 });
+  // A debug export of this session carries the mark.
+  assert.deepEqual((await host.debugExportCandidate({})).editedWhileDebugging, {
+    firstEditSceneTimeMs: 0,
+    editCount: 1,
+  });
   host.update(activatePlayerRuntimeButton(host.session.value!)!.session);
   assert.deepEqual(said(host.session.value), ["1 2"]);
 });
