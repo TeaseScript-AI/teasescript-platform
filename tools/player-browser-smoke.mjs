@@ -3943,13 +3943,17 @@ async function formFieldsScenario(cdp, origin) {
   // Sooner than the form takes the text from the composer.
   await delay(100);
   await pressPermanentButton("Check");
+  // The block's form has a typed field of the same name, submitted while it is edited.
   await waitFor(cdp, `!!${field("ready")} && ${buttonShown("[data-form-actions] button", "OK")}`);
+  await physicalClick(cdp, '[data-form-field="name"]');
+  await waitFor(cdp, `${composer}.value === "Inner" && document.activeElement === ${composer}`);
+  await cdp.call("Input.insertText", { text: "Zed" });
   await pressButton("[data-form-actions] button", "OK");
   await waitFor(
     cdp,
-    `!!${field("name")} && ${composer}.value === "Bea"`,
+    `!${field("ready")} && !!${field("name")} && ${composer}.value === "Bea" && document.activeElement === ${composer}`,
     8_000,
-    "The text being typed was lost after a block asked a form",
+    "The text being typed was lost, or not focused, after a block asked a form",
   );
   await evaluate(cdp, `${composer}.select()`);
   await cdp.call("Input.insertText", { text: "Cy" });

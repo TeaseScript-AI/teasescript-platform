@@ -8,7 +8,7 @@ showPermanentButton "Pause" {
     showButton "Resume"
 }
 showPermanentButton "Check" {
-    let check = askForm "Check", fields: { ready: false }, submit: "OK"
+    let check = askForm "Check", fields: { ready: false, name: { value: "Inner", text: "Name" } }, submit: "OK"
 }
 let details = askForm as mistress "Your details", fields: {
     impact: { value: 5, min: 1, max: 10, text: "Impact", hint: "1 to 10", description: "How hard, from 1 to 10" },
