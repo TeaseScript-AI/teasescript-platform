@@ -37,6 +37,11 @@ export interface StorageBundleScript {
   readonly scope: string;
   /** The script's title when the exporting Player knew it. */
   readonly name: string | null;
+  /**
+   * The references in its values that were its own stored photos, whose bytes are in the bundle's images. Another
+   * reference in its values, even one naming another script's photo, is ordinary text and stays unchanged.
+   */
+  readonly photos: readonly string[];
   readonly entries: readonly RuntimeScriptStorageEntrySnapshot[];
 }
 
@@ -51,7 +56,7 @@ export class StorageTransferError extends Error {
 }
 
 const FORMAT = "teasescript-script-storage";
-// 2: several scripts, each with its scope, name, and values. 1: one script's scope, entries, and images.
+// 2: several scripts, each with its scope, name, own photos, and values. 1: one script's scope, entries, and images.
 const VERSION = 2;
 const TEXT_PREFIX = "TSST1.gzip.";
 
@@ -92,7 +97,17 @@ export async function collectSavedScript(
       }
     }
   }
-  return { script: { scope: provider.scope, name, entries }, photos, missingPhotos, size };
+  return {
+    script: {
+      scope: provider.scope,
+      name,
+      photos: photos.map((photo) => photo.reference),
+      entries,
+    },
+    photos,
+    missingPhotos,
+    size,
+  };
 }
 
 /**
@@ -188,18 +203,29 @@ export function parseStorageTransfer(json: string): StorageBundle {
   if (document["version"] === 1) {
     if (!hasExactly(document, ["format", "version", "scope", "entries", "images"]))
       throw new StorageTransferError(
-        "This saved data has fields other than format, version, scope, entries, and images.",
+        "This saved data must have exactly format, version, scope, entries, and images.",
       );
+    // Its one script owns each photo it carries that its values reference; any other is refused below.
+    const script = parseScript(
+      { scope: document["scope"], name: null, photos: [], entries: document["entries"] },
+      new Set(),
+    );
+    const used = new Set(
+      script.entries.flatMap((entry) => [...capturedMediaReferences(entry.value)]),
+    );
+    const images = document["images"];
+    const carried = Array.isArray(images)
+      ? images.flatMap((image) =>
+          isRecord(image) && typeof image["reference"] === "string" ? [image["reference"]] : [],
+        )
+      : [];
     scripts = [
-      parseScript(
-        { scope: document["scope"], name: null, entries: document["entries"] },
-        new Set(),
-      ),
+      { ...script, photos: [...new Set(carried)].filter((reference) => used.has(reference)) },
     ];
   } else if (document["version"] === VERSION) {
     if (!hasExactly(document, ["format", "version", "scripts", "images"]))
       throw new StorageTransferError(
-        "This saved data has fields other than format, version, scripts, and images.",
+        "This saved data must have exactly format, version, scripts, and images.",
       );
     const listed = document["scripts"];
     if (!Array.isArray(listed) || listed.length === 0)
@@ -212,25 +238,28 @@ export function parseStorageTransfer(json: string): StorageBundle {
     );
   const images = document["images"];
   if (!Array.isArray(images)) throw new StorageTransferError("The saved photos are not a list.");
-  const referenced = new Set<string>();
-  for (const script of scripts)
-    for (const entry of script.entries)
-      for (const reference of capturedMediaReferences(entry.value)) referenced.add(reference);
+  const owned = new Set(scripts.flatMap((script) => script.photos));
   const decoded: StorageTransferImage[] = [];
   const seen = new Set<string>();
   for (let index = 0; index < images.length; index += 1) {
-    decoded.push(parseImage(images[index], `Saved photo ${index + 1}`, referenced, seen));
+    decoded.push(parseImage(images[index], `Saved photo ${index + 1}`, owned, seen));
   }
+  for (const script of scripts)
+    for (const reference of script.photos)
+      if (!seen.has(reference))
+        throw new StorageTransferError(
+          `A photo of ${script.name ?? script.scope} is missing from this saved data.`,
+        );
   return { scripts, images: decoded };
 }
 
 /** One script of a bundle; any invalid value refuses the whole bundle. */
 function parseScript(script: unknown, scopes: Set<string>): StorageBundleScript {
-  if (!isRecord(script) || !hasExactly(script, ["scope", "name", "entries"]))
+  if (!isRecord(script) || !hasExactly(script, ["scope", "name", "photos", "entries"]))
     throw new StorageTransferError(
-      "A script in this saved data must have exactly scope, name, and entries.",
+      "A script in this saved data must have exactly scope, name, photos, and entries.",
     );
-  const { scope, name, entries } = script;
+  const { scope, name, photos, entries } = script;
   if (typeof scope !== "string")
     throw new StorageTransferError("A script in this saved data has no scope.");
   if (name !== null && typeof name !== "string")
@@ -242,7 +271,20 @@ function parseScript(script: unknown, scopes: Set<string>): StorageBundleScript 
     throw new StorageTransferError(`A saved value of ${name ?? scope} is invalid: ${failure}`);
   // EVIDENCE: validation: validateScriptStorageEntries accepted entries as storable script-storage entries.
   const valid = entries as readonly RuntimeScriptStorageEntrySnapshot[];
-  return { scope, name, entries: valid };
+  const label = name ?? scope;
+  if (!Array.isArray(photos))
+    throw new StorageTransferError(`The photos of ${label} are not a list.`);
+  const referenced = new Set<string>();
+  for (const entry of valid)
+    for (const reference of capturedMediaReferences(entry.value)) referenced.add(reference);
+  const own = new Set<string>();
+  for (const reference of photos) {
+    if (typeof reference !== "string" || !referenced.has(reference))
+      throw new StorageTransferError(`A photo of ${label} is not used by its saved values.`);
+    if (own.has(reference)) throw new StorageTransferError(`A photo of ${label} is listed twice.`);
+    own.add(reference);
+  }
+  return { scope, name, photos: [...own], entries: valid };
 }
 
 /** A photo of an import, checked like a chosen image: its type read from its bytes, and decoded by the browser. */
@@ -329,7 +371,7 @@ export function remapCapturedMediaReferences(
 function parseImage(
   image: unknown,
   label: string,
-  referenced: ReadonlySet<string>,
+  owned: ReadonlySet<string>,
   seen: Set<string>,
 ): StorageTransferImage {
   if (!isRecord(image) || !hasExactly(image, ["reference", "byteLength", "data"]))
@@ -339,8 +381,8 @@ function parseImage(
     throw new StorageTransferError(`${label} has no valid photo reference.`);
   if (seen.has(reference)) throw new StorageTransferError(`${label} is listed twice.`);
   seen.add(reference);
-  if (!referenced.has(reference))
-    throw new StorageTransferError(`${label} is not used by any saved value.`);
+  if (!owned.has(reference))
+    throw new StorageTransferError(`${label} is not a photo of any script.`);
   if (typeof byteLength !== "number" || !Number.isSafeInteger(byteLength) || byteLength < 1)
     throw new StorageTransferError(`${label} has no valid byteLength.`);
   const bytes = typeof data === "string" ? decodeBase64url(data) : null;
@@ -357,7 +399,7 @@ function parseImage(
 function* pieces(bundle: StorageBundle): Generator<string> {
   yield `{"format":${JSON.stringify(FORMAT)},"version":${VERSION},\n"scripts":[`;
   for (const [index, script] of bundle.scripts.entries()) {
-    yield `${index === 0 ? "\n" : ",\n"}{"scope":${JSON.stringify(script.scope)},"name":${JSON.stringify(script.name)},"entries":[`;
+    yield `${index === 0 ? "\n" : ",\n"}{"scope":${JSON.stringify(script.scope)},"name":${JSON.stringify(script.name)},"photos":${JSON.stringify(script.photos)},"entries":[`;
     for (const [entryIndex, entry] of script.entries.entries())
       yield `${entryIndex === 0 ? "\n" : ",\n"}${serializeValidatedRuntimeJson({ key: entry.key, value: entry.value })}`;
     yield "\n]}";

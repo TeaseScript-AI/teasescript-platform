@@ -12,7 +12,14 @@ import {
 } from "../player/runtime-adapter.js";
 import type { SavedDataHost } from "../player/saved-data.js";
 import { createLocalScriptStorage, type ScriptStorageProvider } from "../player/script-storage.js";
-import type { StorageBundle, StorageBundleScript } from "../player/storage-transfer.js";
+import {
+  bundleSavedScripts,
+  readStorageTransferFile,
+  storageTransferFile,
+  type SavedScript,
+  type StorageBundle,
+  type StorageBundleScript,
+} from "../player/storage-transfer.js";
 import type { RuntimeScriptStorageEntrySnapshot, SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
 
@@ -27,16 +34,12 @@ interface ImportScript {
 interface ImportReview {
   readonly scripts: readonly ImportScript[];
 }
-interface SavedScriptSummary {
-  readonly script: StorageBundleScript;
-  readonly photos: readonly { readonly reference: string }[];
-}
 interface ImportHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   readonly sessionInProgress: Readonly<Ref<boolean>>;
   readonly canImportSavedData: Readonly<Ref<boolean>>;
-  savedScripts(): Promise<readonly SavedScriptSummary[]>;
+  savedScripts(): Promise<readonly SavedScript[]>;
   reviewSavedDataImport(bundle: StorageBundle): Promise<ImportReview>;
   importSavedData(review: ImportReview, chosen: ReadonlySet<string>): Promise<void>;
   loadScriptStorage(): Promise<void>;
@@ -171,6 +174,7 @@ function script(scope: string, name: string | null = null): StorageBundleScript 
   return {
     scope,
     name,
+    photos: [exported],
     entries: [
       { key: "photo", value: exported },
       { key: "album", value: { kind: "list", items: [exported, exported, "plain"] } },
@@ -290,6 +294,47 @@ test("a bundle imports each script into its own scope while a different script r
     assert.deepEqual(await repository.listReferences(scope), [photo]);
     assert.equal(saved.has("old"), false, "the import replaces, not merges");
   }
+});
+
+test("text that names another script's photo stays text when only that script is imported", async (context) => {
+  const provider = new MemoryProvider(SHOWN);
+  const { host, repository, other } = createHost(context, provider);
+  // OTHER saved a photo; NEW holds the same reference as text, with no photo of its own.
+  const data = new Blob([PNG], { type: "image/png" });
+  await repository.add({
+    namespace: OTHER,
+    reference: exported,
+    kind: "image",
+    mimeType: "image/png",
+    size: data.size,
+    data,
+  });
+  await other(OTHER).replace([{ key: "photo", value: exported }]);
+  await other(NEW).replace([{ key: "note", value: exported }]);
+  const listed = await host.savedScripts();
+  assert.deepEqual(
+    listed.map((saved) => [saved.script.scope, saved.photos.length, saved.missingPhotos]),
+    [
+      [NEW, 0, 1],
+      [OTHER, 1, 0],
+    ],
+  );
+  const file = await storageTransferFile(await bundleSavedScripts(listed), false);
+  const read = await readStorageTransferFile(new Uint8Array(await file.arrayBuffer()));
+  await other(NEW).replace([{ key: "note", value: "changed" }]);
+
+  const review = await host.reviewSavedDataImport(read);
+  assert.deepEqual(
+    review.scripts.map((item) => [item.scope, item.photos]),
+    [
+      [NEW, 0],
+      [OTHER, 1],
+    ],
+  );
+  await host.importSavedData(review, new Set([NEW]));
+  assert.deepEqual([...(await values(other(NEW)))], [["note", exported]]);
+  assert.deepEqual(await repository.listReferences(NEW), []);
+  assert.deepEqual(await repository.listReferences(OTHER), [exported]);
 });
 
 test("a bundle that includes the shown script ends its session, and the next Start loads its data", async (context) => {

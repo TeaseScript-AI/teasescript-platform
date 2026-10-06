@@ -10,7 +10,6 @@ import {
 } from "../../captured-media.js";
 import {
   browserCapturedMediaLocks,
-  capturedMediaReferences,
   capturedMediaStorage,
 } from "../../captured-media-persistence.js";
 import {
@@ -493,10 +492,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     }
   }
 
-  /**
-   * Checks exported saved data for an import into this script and compares it with what is saved now; nothing changes
-   * yet. Rejects with a `StorageTransferError` naming the problem, such as data of another script or a damaged photo.
-   */
   /** The saved data of every script this browser keeps, for an export; scripts without values are left out. */
   async function savedScripts(): Promise<readonly SavedScript[]> {
     const scopes = new Set(options.savedData?.scopes() ?? []);
@@ -543,14 +538,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           "This browser's saved data cannot be read, so nothing can be imported.",
         );
       }
-      const references = new Set<string>();
-      for (const entry of script.entries)
-        for (const reference of capturedMediaReferences(entry.value)) references.add(reference);
       scripts.push({
         scope: script.scope,
         name: script.name ?? options.savedData?.name(script.scope) ?? null,
         values: script.entries.length,
-        photos: images.filter((image) => references.has(image.reference)).length,
+        photos: script.photos.length,
         currentValues: current.length,
         shown: own,
       });
@@ -579,7 +571,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         try {
           if (script.scope === scriptStorage?.scope) {
             // Without durable captured media, imported photos would not outlive this page.
-            if (capturedMediaPersistence === undefined && usesImages(script, review.images))
+            if (capturedMediaPersistence === undefined && usesImages(script))
               throw new CapturedMediaNotStoredError("This Player cannot keep saved photos.");
             await replaceScript(scriptStorage, capturedMedia, script, review.images);
           } else {
@@ -888,21 +880,22 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
 
 export type PlayerSessionHost = ReturnType<typeof usePlayerSession>;
 
-/** Replaces one script's saved data with its imported values: its photos are added under new references first. */
+/**
+ * Replaces one script's saved data with its imported values: its own photos are added under new references first. Any
+ * other reference in its values, such as another script's photo, stays the text it was.
+ */
 async function replaceScript(
   storage: ScriptStorageProvider,
   media: CapturedMediaStore,
   script: StorageBundleScript,
   images: readonly CheckedTransferImage[],
 ): Promise<void> {
-  const used = new Set<string>();
-  for (const entry of script.entries)
-    for (const reference of capturedMediaReferences(entry.value)) used.add(reference);
+  const own = new Set(script.photos);
   const references = new Map<string, string>();
   const added: string[] = [];
   try {
     for (const image of images) {
-      if (!used.has(image.reference)) continue;
+      if (!own.has(image.reference)) continue;
       const stored = media.add("image", image.data, { width: image.width, height: image.height });
       references.set(image.reference, stored.reference);
       added.push(stored.reference);
@@ -921,11 +914,8 @@ async function replaceScript(
   }
 }
 
-function usesImages(script: StorageBundleScript, images: readonly CheckedTransferImage[]): boolean {
-  const available = new Set(images.map((image) => image.reference));
-  return script.entries.some((entry) =>
-    [...capturedMediaReferences(entry.value)].some((reference) => available.has(reference)),
-  );
+function usesImages(script: StorageBundleScript): boolean {
+  return script.photos.length > 0;
 }
 
 /** A checked import and how each script in it changes the saved data, shown before the player confirms it. */

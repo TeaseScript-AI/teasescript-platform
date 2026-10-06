@@ -68,7 +68,9 @@ const entries: RuntimeScriptStorageEntrySnapshot[] = [
 ];
 
 const transfer: StorageBundle = {
-  scripts: [{ scope: "development-package:Example", name: "Example", entries }],
+  scripts: [
+    { scope: "development-package:Example", name: "Example", photos: [photo, second], entries },
+  ],
   images: [
     { reference: photo, bytes: pngBytes },
     // Large enough to span several encoding slices, with every byte value.
@@ -128,7 +130,9 @@ test("the plain document keeps stored values readable, one saved value per line"
   assert.deepEqual(document, {
     format: "teasescript-script-storage",
     version: 2,
-    scripts: [{ scope: "development-package:Example", name: "Example", entries }],
+    scripts: [
+      { scope: "development-package:Example", name: "Example", photos: [photo, second], entries },
+    ],
     images: [],
   });
 });
@@ -142,6 +146,7 @@ test("values edited by hand and a replaced photo are accepted, without any signa
       {
         scope: "development-package:Example",
         name: null,
+        photos: [photo],
         entries: [
           { key: "player.score", value: 99 },
           { key: "album", value: { kind: "list", items: [photo] } },
@@ -221,8 +226,8 @@ test("a document that is not valid saved data is refused with a message naming t
     [{ ...base, format: "teasescript-checkpoint" }, /not exported saved data/],
     [{ ...base, version: 3 }, /format version/],
     [{ ...base, version: "1" }, /format version/],
-    [{ ...base, extra: true }, /fields other than/],
-    [{ format: base["format"], version: 1, scope: "s", entries: [] }, /fields other than/],
+    [{ ...base, extra: true }, /must have exactly format, version, scope/],
+    [{ format: base["format"], version: 1, scope: "s", entries: [] }, /must have exactly/],
     [{ ...base, scope: 7 }, /has no scope/],
     [{ ...base, entries: {} }, /A saved value of development-package:Example is invalid/],
     [
@@ -258,7 +263,7 @@ test("a document that is not valid saved data is refused with a message naming t
     [{ ...image({}), images: [...image({}).images, ...image({}).images] }, /listed twice/],
     [
       { ...image({}), entries: [{ key: "album", value: "no photo" }] },
-      /not used by any saved value/,
+      /Saved photo 1 is not a photo of any script/,
     ],
     [image({ byteLength: 0 }), /no valid byteLength/],
     [image({ byteLength: 1.5 }), /no valid byteLength/],
@@ -321,6 +326,8 @@ test("an export reads the saved values fresh with each stored photo once, never 
   assert.deepEqual(collected.script, {
     scope: "script",
     name: "Script",
+    // Only the references that resolved to this script's stored photos are its photos.
+    photos: [saved],
     entries: await provider.load(),
   });
   assert.deepEqual(
@@ -423,7 +430,7 @@ test("a deeply nested value a script saved moves as a file and as text", async (
   );
   assert.equal(session.snapshot.status, "halted");
   const deep: StorageBundle = {
-    scripts: [{ scope: "script", name: null, entries: session.snapshot.scriptStorage }],
+    scripts: [{ scope: "script", name: null, photos: [], entries: session.snapshot.scriptStorage }],
     images: [],
   };
   // Compared as JSON text written without recursion, since a recursive comparison cannot reach the bottom.
@@ -447,11 +454,13 @@ test("several scripts move in one bundle, a shared photo once, and an older sing
       {
         scope: "development-package:first",
         name: "First",
+        photos: [photo],
         entries: [{ key: "photo", value: photo }],
       },
       {
         scope: "development-package:second",
         name: null,
+        photos: [photo],
         entries: [
           { key: "album", value: { kind: "list", items: [photo] } },
           { key: "score", value: 3 },
@@ -514,23 +523,74 @@ test("several scripts move in one bundle, a shared photo once, and an older sing
     ],
   };
   assert.deepEqual(await readStorageTransferFile(gzipSync(JSON.stringify(older))), {
-    scripts: [{ scope: "development-package:first", name: null, entries: older.entries }],
+    scripts: [
+      { scope: "development-package:first", name: null, photos: [photo], entries: older.entries },
+    ],
     images: [shared],
   });
   // Any invalid script refuses the whole bundle.
-  const document = (scripts: unknown) =>
-    JSON.stringify({ format: "teasescript-script-storage", version: 2, scripts, images: [] });
-  const good = { scope: "a", name: "A", entries: [{ key: "k", value: 1 }] };
-  for (const [scripts, message] of [
-    [[], /contains no scripts/],
-    [{}, /contains no scripts/],
-    [[good, { ...good }], /a is listed twice/],
-    [[good, { scope: "b", name: 7, entries: [] }], /name of b is not text/],
-    [[good, { scope: "b", entries: [] }], /exactly scope, name, and entries/],
+  const image = {
+    reference: photo,
+    byteLength: pngBytes.length,
+    data: Buffer.from(pngBytes).toString("base64url"),
+  };
+  const document = (scripts: unknown, images: unknown[] = []) =>
+    JSON.stringify({ format: "teasescript-script-storage", version: 2, scripts, images });
+  const good = { scope: "a", name: "A", photos: [], entries: [{ key: "k", value: 1 }] };
+  const holding = (photos: unknown) => ({
+    scope: "b",
+    name: "Bee",
+    photos,
+    entries: [{ key: "k", value: photo }],
+  });
+  for (const [scripts, images, message] of [
+    [[], [], /contains no scripts/],
+    [{}, [], /contains no scripts/],
+    [[good, { ...good }], [], /a is listed twice/],
+    [[good, { scope: "b", name: 7, photos: [], entries: [] }], [], /name of b is not text/],
     [
-      [good, { scope: "b", name: "Bee", entries: [{ key: "k", value: null }] }],
+      [good, { scope: "b", name: null, entries: [] }],
+      [],
+      /exactly scope, name, photos, and entries/,
+    ],
+    [
+      [good, { scope: "b", name: "Bee", photos: [], entries: [{ key: "k", value: null }] }],
+      [],
       /A saved value of Bee is invalid/,
     ],
+    [[good, holding({})], [image], /photos of Bee are not a list/],
+    [[good, holding([photo, photo])], [image], /A photo of Bee is listed twice/],
+    [[good, holding([7])], [image], /A photo of Bee is not used by its saved values/],
+    [[{ ...good, photos: [photo] }], [image], /A photo of A is not used by its saved values/],
+    [[good, holding([photo])], [], /A photo of Bee is missing from this saved data/],
+    // A photo no script owns, though a value holds its reference as text.
+    [[good, holding([])], [image], /Saved photo 1 is not a photo of any script/],
   ] as const)
-    await rejects(() => parseStorageTransfer(document(scripts)), message);
+    await rejects(() => parseStorageTransfer(document(scripts, [...images])), message);
+});
+
+test("a reference a script holds without having the photo stays its text beside a script that has it", async () => {
+  const blob = new Blob([pngBytes], { type: "image/png" });
+  const owner = {
+    script: { scope: "a", name: "A", photos: [photo], entries: [{ key: "photo", value: photo }] },
+    photos: [{ reference: photo, data: blob }],
+    missingPhotos: 0,
+    size: 1,
+  };
+  const holder = {
+    script: { scope: "b", name: "B", photos: [], entries: [{ key: "note", value: photo }] },
+    photos: [],
+    missingPhotos: 1,
+    size: 1,
+  };
+  const bundle = await bundleSavedScripts([owner, holder]);
+  const read = await readStorageTransferFile(await bytesOf(await storageTransferFile(bundle)));
+  assert.deepEqual(
+    read.scripts.map((script) => [script.scope, script.photos]),
+    [
+      ["a", [photo]],
+      ["b", []],
+    ],
+  );
+  assert.deepEqual(read.images, [{ reference: photo, bytes: pngBytes }]);
 });
