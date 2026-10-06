@@ -7,6 +7,7 @@ import { useResizeObserver } from "@vueuse/core";
 import { ArrowDown } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../model.js";
+import { playerRuntimeTranscriptEventSequence } from "../../runtime-adapter.js";
 import TranscriptMessage from "./TranscriptMessage.vue";
 import { recordSpeakerAvatarMessage, speakerAvatarPalette } from "./speakerAvatar";
 import { backdropBehind, resolveColour } from "./messageContrast";
@@ -130,6 +131,23 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
     };
   }),
 );
+// TanStack compensates a remeasured row above the view except while the reader scrolls up. A message whose text changed
+// while it was out of view is remeasured as it comes back into view, so it is compensated then too; otherwise the text
+// being read would move by the change. Every other measurement keeps TanStack's own rule.
+virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+  const offset = (instance.scrollOffset ?? 0) + instance.scrollAdjustments;
+  const measured = instance.itemSizeCache.get(item.key);
+  if (measured === undefined) return item.start < offset;
+  if (item.start + measured > offset) return false;
+  return instance.scrollDirection !== "backward" || changedInPlace(props.entries[item.index]);
+};
+function changedInPlace(entry: PlayerTranscriptEntryPresentation | undefined): boolean {
+  return (
+    entry?.kind === "message" &&
+    entry.contentSequence !== undefined &&
+    entry.contentSequence !== playerRuntimeTranscriptEventSequence(entry.id)
+  );
+}
 watch(endInset, (inset, previous) => {
   const instance = virtualizer.value;
   const previousDistance =
@@ -225,6 +243,38 @@ watch(
       ),
     );
   },
+);
+// A message changed in place can replace the element inside it that had focus, such as a link. Focus then moves to the
+// message itself, without scrolling, and the message is a tab stop only until focus leaves it.
+let focusedEntry: string | null = null;
+watch(
+  () => props.revision,
+  () => {
+    const active = document.activeElement;
+    const entry =
+      active instanceof HTMLElement && scrollElement.value?.contains(active)
+        ? active.closest<HTMLElement>(".transcript-entry")
+        : null;
+    focusedEntry = entry?.dataset.messageId ?? null;
+  },
+  { flush: "pre" },
+);
+watch(
+  () => props.revision,
+  () => {
+    const id = focusedEntry;
+    focusedEntry = null;
+    if (id === null || (document.activeElement !== null && document.activeElement !== document.body))
+      return;
+    const entry = scrollElement.value?.querySelector<HTMLElement>(
+      `.transcript-entry[data-message-id="${CSS.escape(id)}"]`,
+    );
+    if (entry === null || entry === undefined) return;
+    entry.tabIndex = -1;
+    entry.addEventListener("blur", () => entry.removeAttribute("tabindex"), { once: true });
+    entry.focus({ preventScroll: true });
+  },
+  { flush: "post" },
 );
 function interruptFollow() {
   following.value = false;

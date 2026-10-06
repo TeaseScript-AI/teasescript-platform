@@ -9,6 +9,7 @@ import {
   PLAYER_DEBUG_TRACE_PAGE,
   playerDebugLiveValue,
   playerDebugMessageOrigin,
+  playerDebugRecentChat,
   playerDebugVariables,
 } from "../../debug-variables.js";
 import { playerRuntimeTranscriptMessage } from "../../runtime-adapter.js";
@@ -41,8 +42,10 @@ const live = computed(() =>
 
 const outputPages = ref(1);
 const outputs = computed(() => {
-  void session.value;
-  return trace.value?.outputs(PLAYER_DEBUG_TRACE_PAGE * outputPages.value) ?? [];
+  const shown = session.value;
+  return trace.value === null || shown === null
+    ? []
+    : playerDebugRecentChat(trace.value, shown, PLAYER_DEBUG_TRACE_PAGE * outputPages.value);
 });
 // The newest message stays open by default until the player opens or closes one.
 const chose = ref(false);

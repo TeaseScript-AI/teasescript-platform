@@ -1,4 +1,5 @@
 import {
+  RUNTIME_DEBUG_TRACE_LIMITS,
   runtimeDebugPreview,
   type RuntimeDebugContext,
   type RuntimeDebugRecord,
@@ -7,6 +8,8 @@ import {
   type SerializableRuntimeValue,
 } from "../src/index.js";
 import { instructionSourcePath, type InstructionPlan } from "../src/plan/model.js";
+import { quotedText } from "../src/runtime/value-text.js";
+import { playerRuntimeTranscriptMessage, type PlayerRuntimeSession } from "./runtime-adapter.js";
 
 /**
  * Player Debug's Variables view (DEBUGGER.md "Player Debug"): live variables grouped by where they live, and the trace's
@@ -57,7 +60,7 @@ export function playerDebugVariables(
       group = { label, variables: [] };
       groups.set(key, group);
     }
-    const preview = runtimeDebugPreview(value);
+    const preview = livePreview(snapshot, value);
     group.variables.push(
       Object.freeze({
         name,
@@ -115,6 +118,45 @@ export function playerDebugVariables(
       Object.freeze({ key, label: group.label, variables: Object.freeze(group.variables) }),
     ),
   );
+}
+
+/** A value as the trace previews it; a message handle also shows the text its message has now. */
+function livePreview(
+  snapshot: RuntimeSnapshot,
+  value: SerializableRuntimeValue,
+): { readonly text: string; readonly truncated: boolean } {
+  const preview = runtimeDebugPreview(value);
+  if (typeof value !== "object" || value === null || value.kind !== "messageHandle") return preview;
+  const text = snapshot.liveMessages.find(
+    (message) => message.messageId === value.messageId,
+  )?.sourceText;
+  if (text === undefined) return preview;
+  const limit = RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters;
+  return {
+    text: `<message ${value.messageId} ${quotedText(text.slice(0, limit))}>`,
+    truncated: text.length > limit,
+  };
+}
+
+/**
+ * The Variables view's recent chat: the newest `limit` messages the trace recorded, newest first, each as the record of
+ * the content it shows now, so that a changed message is explained by its latest change while the trace keeps that.
+ */
+export function playerDebugRecentChat(
+  trace: RuntimeDebugContext,
+  session: PlayerRuntimeSession,
+  limit: number,
+): readonly number[] {
+  return trace.outputs(limit).map((id) => {
+    const detail = trace.record(id)?.detail;
+    const message =
+      detail?.kind === "output"
+        ? playerRuntimeTranscriptMessage(session, `runtime-event-${detail.eventSequence}`)
+        : null;
+    const latest =
+      message?.contentSequence === undefined ? null : trace.outputRecord(message.contentSequence);
+    return latest ?? id;
+  });
 }
 
 /** A row of the derivation tree: a record, a dropped record, a record shown above, or a summary of hidden causes. */

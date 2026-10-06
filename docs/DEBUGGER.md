@@ -64,8 +64,10 @@ tabs **Now** (first), **Variables**, **Log**, and **Storage**, which appears whe
   then on. **Explain values**, a button beside each script message in the chat while Debug runs, opens the tab on that
   message as **Selected message**, which stays above the recent chat until another is chosen or **Back to recent chat**;
   the message is found by its event, never by its text, and one shown before the current recording began, or whose
-  record was dropped, says so. **Recent chat** lists recorded messages, newest first, 20 at a time; the newest is open
-  until the player opens or closes one. An open message shows each value it displays (a placeholder that shows one value
+  record was dropped, says so. A message whose text changed in place is explained by its latest change, the `.text`
+  write with its causes, also when it changes while selected. **Recent chat** lists recorded messages, newest first, 20
+  at a time, each once, by the text it shows now; the newest is open until the player opens or closes one. A variable
+  that holds a message handle shows the message's current text beside its identity. An open message shows each value it displays (a placeholder that shows one value
   gives way to it, and a variable, argument, or parameter that only passes the message on opens too), and each row
   opens to its own causes, one level at a time, by click, keyboard, or tap. A row names what happened, with
   its value then, its statement, and, for an earlier version of a variable, its value now; a record that appears again
@@ -128,7 +130,9 @@ with it.
   step restores a state or a state is being adopted, input to an inspected state, Return, and another step are refused.
 - In the chat, Back is each earlier answer's **Back to here**; while a state is inspected, the later messages show grey
   and a bar offers Forward, Resume, and Return to session ([Player
-  UI](ui/PLAYER-UI.md#composer-and-foreground-interactions)).
+  UI](ui/PLAYER-UI.md#composer-and-foreground-interactions)). Each state's transcript folds only the events that led to
+  it, so a message that changes later shows the text it had then, and the grey messages are only those created later,
+  with their text in the state Forward restores.
 - Every restored state marks the session **Rewound while debugging**, with the scene time of the state the latest
   rewind restored and how many rewinds led to it, which an adopted state keeps. The debug recorder and the value trace
   begin anew at every restored state, so a replay never mixes branches.
@@ -144,7 +148,7 @@ The technical report, always included, locates the failure without runtime value
 copies saved values, answers, and session text, so it requires all three.
 
 `player/debug-export.ts` owns the format: a versioned JSON document (`format: "teasescript-debug-export"`,
-`version: 2`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
+`version: 3`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
 (unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name);
 `editedWhileDebugging`, the Debug storage editor's mark (`firstEditSceneTimeMs` and `editCount`, or `null`), which also
 covers edits before the replay anchor, and `rewoundWhileDebugging`, the [rewind](#rewind)'s mark (`restoredSceneTimeMs`
@@ -172,8 +176,8 @@ Stage image's status (such as an unresolved path or a failed load), each playing
 each notice's kind and level, such as blocked audio. These describe this browser; a replay of the engine calls does not
 reproduce them. Saved values add the session's storage view; answers add the recorded interaction completions; session
 text adds the last 50 transcript messages, the Stage image's authored path, media sources, notice messages, and the
-Debug log while the Debug menu is on, and the events with their content: messages, the player's own transcript text, and
-button labels always, but the details of requests, settlements, warnings, failures, and storage edits, which can hold
+Debug log while the Debug menu is on, and the events with their content: messages and their changes, the player's own
+transcript text, and button labels always, but the details of requests, settlements, warnings, failures, and storage edits, which can hold
 saved values, answers, or storage keys, only when saved values and answers are chosen too; replay data adds the
 checkpoint of the state a complete record reaches (of the actual state when the record is incomplete), or of its anchor
 as the last good state when that state cannot be checkpointed; photos add the chosen originals and their uses (a
