@@ -17,6 +17,10 @@ branches. Exact UI and source mapping remain presentation/tooling work.
 - **Active debug** runs a disposable fork of a selected session/checkpoint. It may Run, Step, Pause, change variables,
   control deterministic RNG outcomes, exercise branches, and use manual checkpoint/restore. Debug mutations never merge
   back into the canonical session.
+- **Storage edits** of a local Player session are the exception: an edit through `applyExternalStorageEdit`
+  ([`RUNTIME.md`](RUNTIME.md#script-storage)) turns the active session into a diagnostic fork in place, without a
+  separate fork object. The Player marks the session edited while debugging, in its own session data rather than the
+  checkpoint, keeps the mark with its debug export and restore, and never treats it as normal play.
 
 ## Player Debug
 
@@ -62,14 +66,14 @@ The technical report, always included, locates the failure without runtime value
 copies saved values, answers, and session text, so it requires all three.
 
 `player/debug-export.ts` owns the format: a versioned JSON document (`format: "teasescript-debug-export"`,
-`version: 1`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
+`version: 2`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
 (unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name); the
 selection and omissions; the canonical checkpoint and its role, `current` or `lastGood`; the replay data; photos; and
 readable sections. Replay data is the anchor snapshot from an earlier boundary, or the last good checkpoint itself, and
 every elementary engine call the Player made since, in order: `run` with its options, `observeTime`, `completeAction`
-with the media store's recorded answers, `reportMediaLoad`, `pressPermanentButton`, and `recordContinueCapture`, each
-with its plain arguments, outcome, emitted event range, resulting status, or thrown error name. It adds no plan,
-snapshot, or checkpoint revision.
+with the media store's recorded answers, `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and
+`applyExternalStorageEdit` with the edit, each with its plain arguments, outcome, emitted event range, resulting
+status, or thrown error name. It adds no plan, snapshot, or checkpoint revision.
 
 After `npm run build:typescript`, `node tools/debug-export.mjs inspect <file>` summarizes an export without runtime
 values (`--values` prints the recorded arguments and readable sections), and `replay <file>` runs the calls again from

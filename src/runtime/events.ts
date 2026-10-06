@@ -89,6 +89,19 @@ export interface RuntimeFailureEvent {
   readonly span: SourceSpan;
 }
 
+/**
+ * A debugging tool changed one key of the session's script-storage view (`applyExternalStorageEdit`); host-authored,
+ * so it has no source location. The edited value is in the recorded input, not here.
+ */
+export interface ScriptStorageEditedEvent {
+  readonly kind: "scriptStorageEdited";
+  readonly sequence: number;
+  readonly key: string;
+  readonly operation: "set" | "delete";
+  readonly currentSessionTimeMs: number;
+  readonly observedSessionTimeMs: number;
+}
+
 export type InterpreterEvent =
   | SayEvent
   | ExitEvent
@@ -97,4 +110,5 @@ export type InterpreterEvent =
   | PlayerTranscriptEvent
   | PermanentButtonPressedEvent
   | DeveloperWarningEvent
-  | RuntimeFailureEvent;
+  | RuntimeFailureEvent
+  | ScriptStorageEditedEvent;

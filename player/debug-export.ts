@@ -8,6 +8,7 @@ import {
   observeTime,
   pressPermanentButton,
   recordContinueCapture,
+  applyExternalStorageEdit,
   reportMediaLoad,
   restoreCheckpoint,
   run,
@@ -105,7 +106,7 @@ export type DebugOperationKind = (typeof OPERATION_KINDS)[number];
 /**
  * One engine call the Player made, with the plain arguments it passed after the plan and snapshot: `run` takes its run
  * options; `observeTime` the time and media reports; `completeAction` the request; `reportMediaLoad` the media and
- * report; `pressPermanentButton` the button; `recordContinueCapture` the capture.
+ * report; `pressPermanentButton` the button; `recordContinueCapture` the capture; `applyExternalStorageEdit` the edit.
  */
 export interface DebugOperation {
   readonly seq: number;
@@ -159,7 +160,8 @@ export class DebugExportError extends Error {
 }
 
 export const DEBUG_EXPORT_FORMAT = "teasescript-debug-export";
-export const DEBUG_EXPORT_VERSION = 1;
+// 2: adds the `applyExternalStorageEdit` call.
+export const DEBUG_EXPORT_VERSION = 2;
 /** The most JSON a reader decompresses or parses; a diagnostic-tool limit, not a TeaseScript one. */
 export const DEBUG_EXPORT_MAX_JSON_BYTES = 64 * 1024 * 1024;
 
@@ -170,6 +172,7 @@ const OPERATION_KINDS = [
   "reportMediaLoad",
   "pressPermanentButton",
   "recordContinueCapture",
+  "applyExternalStorageEdit",
 ] as const;
 const ARITY: Readonly<Record<DebugOperationKind, number>> = {
   run: 1,
@@ -178,6 +181,7 @@ const ARITY: Readonly<Record<DebugOperationKind, number>> = {
   reportMediaLoad: 2,
   pressPermanentButton: 1,
   recordContinueCapture: 1,
+  applyExternalStorageEdit: 1,
 };
 const STATUSES = ["ready", "running", "waiting", "halted", "failed"] as const;
 const SELECTION_FIELDS = [
@@ -751,6 +755,8 @@ function dispatch(
       return withOutcome(pressPermanentButton(plan, snapshot, first));
     case "recordContinueCapture":
       return withOutcome(recordContinueCapture(plan, snapshot, first));
+    case "applyExternalStorageEdit":
+      return withOutcome(applyExternalStorageEdit(plan, snapshot, first));
   }
 }
 
