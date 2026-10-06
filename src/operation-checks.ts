@@ -7,11 +7,11 @@ import {
   isTemporalConversionResult,
   numberFromText,
   MIN_MAX_BUILTINS,
-  ROUNDING_BUILTINS,
   TEMPORAL_CONVERSIONS,
   temporalTextProblem,
   type ConversionResult,
 } from "./conversions.js";
+import { NUMERIC_FUNCTIONS } from "./numeric-functions.js";
 import type { SourceSpan } from "./source.js";
 import { staticNumber, staticVisibleText } from "./static-evaluation.js";
 import {
@@ -274,9 +274,9 @@ export function builtinShapeProblems(name: string, call: CallExpression): Operat
 
 /**
  * Compile-time problems with a call of a conversion (`toString`, `toNumber`, `toInteger`, `toBoolean`, and the date and
- * time conversions) or rounding built-in (`round`, `floor`, `ceil`): its arguments, a value of a known type it cannot
- * convert, constant text that cannot convert (V30 §13, §35), and a `default:` of another type than the result. Other
- * callees give no problems.
+ * time conversions), a numeric function (`round`, `floor`, `ceil`, `abs`, `sqrt`, `pow`), `min`, or `max`: its
+ * arguments, a value of a known type it cannot take, constant text that cannot convert (V30 §13, §35), and a `default:`
+ * of another type than the result. Other callees give no problems.
  */
 export function builtinCallProblems(
   name: string,
@@ -284,21 +284,19 @@ export function builtinCallProblems(
   typeOf: (expression: Expression) => StaticType,
 ): OperationProblem[] {
   if (MIN_MAX_BUILTINS.has(name)) return minMaxProblems(name, call, typeOf);
-  const result = isConversionName(name) ? CONVERSION_RESULTS.get(name)! : undefined;
-  if (result === undefined && !ROUNDING_BUILTINS.has(name)) return [];
+  if (NUMERIC_FUNCTIONS.has(name)) return numericFunctionProblems(name, call, typeOf);
+  if (!isConversionName(name)) return [];
+  const result = CONVERSION_RESULTS.get(name)!;
   const problems: OperationProblem[] = [];
   let fallback: Expression | undefined;
   const positional: Expression[] = [];
   for (const argument of call.arguments) {
     if (argument.kind === "positionalArgument") positional.push(argument.value);
-    else if (result !== undefined && argument.name.name === "default") fallback = argument.value;
+    else if (argument.name.name === "default") fallback = argument.value;
     else
       problems.push({
         kind: "unknownNamedArgument",
-        message:
-          result === undefined
-            ? `${name}(...) takes no named arguments; remove '${argument.name.name}:'.`
-            : `${name}(...) has no parameter '${argument.name.name}'; its only named argument is default:.`,
+        message: `${name}(...) has no parameter '${argument.name.name}'; its only named argument is default:.`,
         span: argument.name.span,
       });
   }
@@ -314,22 +312,53 @@ export function builtinCallProblems(
   if (parts) problems.push(...dateTimePartProblems(positional[0]!, positional[1]!, typeOf));
   else {
     const value = positional[0]!;
-    const type = typeOf(value);
-    const message =
-      result === undefined
-        ? isAssignable(NUMBER_TYPE, type)
-          ? undefined
-          : `${name}(...) needs a number, not ${describeValue(forUse(type))}.${isScalar(forUse(type), "string") ? " Convert text with toNumber(...) first." : ""}`
-        : conversionProblem(name, result, value, type);
+    const message = conversionProblem(name, result, value, typeOf(value));
     if (message !== undefined) problems.push({ kind: "invalidOperand", message, span: value.span });
   }
-  if (result !== undefined && fallback !== undefined) {
+  if (fallback !== undefined) {
     const fallbackType = typeOf(fallback);
     if (!isAssignable({ kind: "scalar", name: result }, fallbackType))
       problems.push({
         kind: "invalidOperand",
         message: `${name}(...) needs ${describeConversionResult(result)} as its default:, not ${describeValue(fallbackType)}.`,
         span: fallback.span,
+      });
+  }
+  return problems;
+}
+
+/** Problems with a numeric function: its named arguments, its number of arguments, and arguments that are not numbers. */
+function numericFunctionProblems(
+  name: string,
+  call: CallExpression,
+  typeOf: (expression: Expression) => StaticType,
+): OperationProblem[] {
+  const { parameters } = NUMERIC_FUNCTIONS.get(name)!;
+  const problems: OperationProblem[] = [];
+  const positional: Expression[] = [];
+  for (const argument of call.arguments) {
+    if (argument.kind === "positionalArgument") positional.push(argument.value);
+    else
+      problems.push({
+        kind: "unknownNamedArgument",
+        message: `${name}(...) takes no named arguments; remove '${argument.name.name}:'.`,
+        span: argument.name.span,
+      });
+  }
+  if (positional.length !== parameters.length)
+    problems.push({
+      kind: "argumentCount",
+      message: `${name}(...) takes ${parameters.length} argument${parameters.length === 1 ? "" : "s"} (${parameters.join(", ")}), received ${positional.length}.`,
+      span: call.span,
+    });
+  if (problems.length > 0) return problems;
+  for (const value of positional) {
+    const type = typeOf(value);
+    if (!isAssignable(NUMBER_TYPE, type))
+      problems.push({
+        kind: "invalidOperand",
+        message: `${name}(...) needs a number, not ${describeValue(forUse(type))}.${isScalar(forUse(type), "string") ? " Convert text with toNumber(...) first." : ""}`,
+        span: value.span,
       });
   }
   return problems;

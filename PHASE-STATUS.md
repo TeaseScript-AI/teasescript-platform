@@ -15,15 +15,15 @@ accept syntax, architecture, or implementation details.
 
 - **Source pipeline:** lexer, parser, immutable AST, source spans, diagnostics, semantic validation, type checking,
   and compilation for the implemented TeaseScript subset.
-- **Language foundation:** values including elapsed durations and date, time, datetime, and timestamp values,
-  variables, assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated
-  single-line and block strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion,
-  control flow, deterministic random, rounding, and `min`/`max` built-ins, text operations and list `join`, `+` on two
-  texts or two lists, the `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `addAll`, `sort`/`shuffle` and
-  set operations, top-level
-  user-defined functions, labels and `goto`, and explicit endings with a required `exit` (ADR 0022). Projects of several
-  `.tease` files compile into one plan, with globals, global functions, and speakers shared by all files, `goto`,
-  `call`, and `end` between files with a `fallback`, glob targets, and computed targets from `script(...)` references.
+- **Language foundation:** values including elapsed durations and date, time, datetime, and timestamp values, variables,
+  assignments including `+=`/`-=`, speakers, output, collections, expressions, interpolated single-line and block
+  strings, constrained authored `say` message markup, protected `escapeMarkup` literal insertion, control flow,
+  deterministic random, rounding, `min`/`max`, and `abs`/`sqrt`/`pow` built-ins, text operations and list `join`, `+` on
+  two texts or two lists, the `toString`/`toNumber`/`toInteger`/`toBoolean` conversions, list `addAll`, `sort`/`shuffle`
+  and set operations, top-level user-defined functions, labels and `goto`, and explicit endings with a required `exit`
+  (ADR 0022). Projects of several `.tease` files compile into one plan, with globals, global functions, and speakers
+  shared by all files, `goto`, `call`, and `end` between files with a `fallback`, glob targets, and computed targets
+  from `script(...)` references.
 - **Deterministic runtime:** versioned JSON-safe instruction plans, runtime snapshots, checkpoints, explicit loop and
   call state, deterministic RNG state, typed sequenced events, instruction budgets, and defensive restore validation.
 - **Script storage:** `save`/`load`/`delete`, optional lazy defaults, a validated checkpointed session view, and

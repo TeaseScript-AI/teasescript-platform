@@ -1242,6 +1242,32 @@ let pause = max(1 minute, remaining)
 let boundedLevel = max(1, min(level, 10))
 ```
 
+### Numeric functions
+**Status:** Accepted (Owner decision, 2026-10-07)
+
+`abs(value)` returns the distance of a number from 0, `sqrt(value)` its square root, and `pow(base, exponent)` the base
+raised to the exponent. TeaseScript has no `**` operator.
+
+```text
+abs(-2.5)      // 2.5
+sqrt(2)        // 1.4142135623730951
+pow(2, 10)     // 1024
+pow(10, -2)    // 0.01
+pow(8, 1 / 3)  // 2
+pow(0, 0)      // 1
+```
+
+- `abs` of an `integer` is an `integer`, and of a `number` a `number`. `sqrt` returns a `number`, also when the result
+  is whole. `pow` returns an `integer` when its base is an `integer` and its exponent a whole number of at least 0 that
+  the compiler can see, as in `pow(side, 2)`, and a `number` otherwise. `round`, `floor`, or `ceil` makes another result
+  whole.
+- A call without a finite result fails: `sqrt` of a negative number, `pow` of 0 to a negative exponent, `pow` of a
+  negative base to an exponent that is not whole, and a `pow` result too large to represent. It is a compile error when
+  the compiler can see the arguments, and runtime error `TSR036` otherwise. A result too small to represent is 0.
+- Every argument is a number. Other values, `null`, another number of arguments, and named arguments are compile errors
+  when the types show them, and runtime errors otherwise.
+- `sqrt` and `pow` give the same result on every device and browser.
+
 ## 14. Scope
 **Status:** Accepted
 
@@ -4543,6 +4569,9 @@ floor
 ceil
 min
 max
+abs
+sqrt
+pow
 toString
 toNumber
 toInteger

@@ -28,6 +28,7 @@ import { normalizeTagName } from "../tags.js";
 import { globMatches, isPathGlob } from "../project-paths.js";
 import { escapeMarkup } from "../message-markup.js";
 import { expressionPlanChildren } from "../plan/expression-children.js";
+import { NUMERIC_FUNCTIONS } from "../numeric-functions.js";
 import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
@@ -191,9 +192,7 @@ import {
   isConversionResult,
   isTemporalConversionResult,
   numberFromText,
-  rounded,
   MIN_MAX_BUILTINS,
-  ROUNDING_BUILTINS,
   temporalTextProblem,
   withoutNegativeZero,
   type ConversionName,
@@ -1663,8 +1662,8 @@ export class Evaluator {
       const name = expression.callee.name;
       if (isConversionName(name))
         return this.#conversionBuiltin(name, positional, named, expression.span);
-      if (ROUNDING_BUILTINS.has(name))
-        return this.#roundingBuiltin(name, positional, named, expression.span);
+      if (NUMERIC_FUNCTIONS.has(name))
+        return this.#numericFunction(name, positional, named, expression.span);
       if (MIN_MAX_BUILTINS.has(name))
         return this.#minMaxBuiltin(name, positional, named, expression.span);
       if (name === "script") return scriptReference(positional, named, expression.span);
@@ -2622,22 +2621,33 @@ export class Evaluator {
     return cloneSerializableValue(best);
   }
 
-  #roundingBuiltin(
+  /** A numeric function of numbers (V30 §13); a call without a finite result fails. */
+  #numericFunction(
     name: string,
     positional: readonly SerializableRuntimeValue[],
     named: Readonly<Record<string, SerializableRuntimeValue>>,
     span: SourceSpan,
   ): number {
-    if (positional.length !== 1 || Object.keys(named).length !== 0)
-      throw fault("TSR028", `${name}(...) takes one number, such as ${name}(2.5).`, span);
-    const value = positional[0];
-    if (typeof value !== "number")
+    const { parameters, example, apply } = NUMERIC_FUNCTIONS.get(name)!;
+    if (positional.length !== parameters.length || Object.keys(named).length !== 0)
       throw fault(
-        "TSR059",
-        `${name}(...) needs a number, not ${describeRuntimeValue(value!)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : ""}`,
+        "TSR028",
+        `${name}(...) takes ${parameters.length === 1 ? "one number" : `${parameters.length} numbers (${parameters.join(", ")})`}, such as ${example}.`,
         span,
       );
-    return rounded(name, value);
+    const numbers: number[] = [];
+    for (const value of positional) {
+      if (typeof value !== "number")
+        throw fault(
+          "TSR059",
+          `${name}(...) needs a number, not ${describeRuntimeValue(value)}.${typeof value === "string" ? " Convert text with toNumber(...) first." : ""}`,
+          span,
+        );
+      numbers.push(value);
+    }
+    const result = apply(numbers);
+    if (typeof result !== "number") throw fault("TSR036", result.noResult, span);
+    return result;
   }
 
   #escapeMarkupBuiltin(call: RuntimeCapabilityCall): string {

@@ -84,6 +84,7 @@ import {
   type OperationProblem,
 } from "./operation-checks.js";
 import { CORE_RUNTIME_BUILTINS, PLATFORM_STANDARD_LIBRARY_PRELUDE } from "./protected-names.js";
+import { NUMERIC_FUNCTIONS, type NumericArgument } from "./numeric-functions.js";
 import {
   compareDurationParts,
   divideDurationParts,
@@ -4571,12 +4572,60 @@ class TypeChecker {
     );
   }
 
+  /**
+   * Checks the arguments of a numeric function and gives its result type (V30 §13). A call whose arguments the compiler
+   * can see and that has no finite result is a compile error.
+   */
+  #numericFunctionType(
+    name: string,
+    expression: CallExpression,
+    values: readonly StaticType[],
+  ): StaticType {
+    const numeric = NUMERIC_FUNCTIONS.get(name)!;
+    const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
+    const fitting = problems.every((problem) => problem.kind === "invalidOperand");
+    // An argument that may be one of several types, or null, names the test or the check first (ADR 0021 rule 3.5,
+    // #504 Q1).
+    const several = fitting
+      ? expression.arguments.flatMap((item, index) =>
+          members(values[index]!).length > 1 ? [{ item, type: values[index]! }] : [],
+        )
+      : [];
+    const spans = new Set(several.map(({ item }) => item.value.span.start.offset));
+    this.#reportProblems(problems.filter((problem) => !spans.has(problem.span.start.offset)));
+    for (const { item, type } of several)
+      this.#reportUnless(type, isNumeric, item.value, `${name}(...) takes a number`);
+    const inputs = numeric.parameters.map((_, index): NumericArgument => {
+      const item = fitting ? expression.arguments[index] : undefined;
+      if (item === undefined) return { type: "unknown", known: undefined };
+      const parts = members(nonNullTypeForUse(values[index]!));
+      const known = this.#known(item.value);
+      return {
+        type:
+          parts.length === 0 || !parts.every(isNumeric)
+            ? "unknown"
+            : parts.every((part) => isScalar(part, "integer"))
+              ? "integer"
+              : "number",
+        known: typeof known === "number" ? known : undefined,
+      };
+    });
+    if (problems.length === 0 && inputs.every((input) => input.known !== undefined)) {
+      const result = numeric.apply(inputs.map((input) => input.known!));
+      if (typeof result !== "number")
+        this.#report(typeCode.invalidOperand, result.noResult, expression.span);
+    }
+    const result = numeric.result(inputs);
+    return result === "integer" ? INTEGER_TYPE : result === "number" ? NUMBER_TYPE : UNKNOWN_TYPE;
+  }
+
   /** Argument and result types of the implemented built-ins; injected host functions return unknown values. */
   #builtinType(
     name: string,
     expression: CallExpression,
     values: readonly StaticType[],
   ): StaticType {
+    if (NUMERIC_FUNCTIONS.has(name)) return this.#numericFunctionType(name, expression, values);
     const argument = expression.arguments[0];
     const value = values[0];
     // A built-in that takes fixed positional arguments checks their values only when their number is right.
@@ -4613,22 +4662,6 @@ class TypeChecker {
             "removePermanentButton(...) takes the identifier that showPermanentButton gives",
           );
         return NULL_TYPE;
-      case "round":
-      case "floor":
-      case "ceil":
-        {
-          const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
-          // A union or a possibly null number names the test or the check first (ADR 0021 rule 3.5, #504 Q1).
-          if (
-            problems.every((problem) => problem.kind === "invalidOperand") &&
-            argument !== undefined &&
-            value !== undefined &&
-            members(value).length > 1
-          )
-            this.#reportUnless(value, isNumeric, argument.value, `${name}(...) takes a number`);
-          else this.#reportProblems(problems);
-        }
-        return INTEGER_TYPE;
       case "min":
       case "max": {
         const problems = builtinCallProblems(name, expression, (item) => this.#typeOf(item));
