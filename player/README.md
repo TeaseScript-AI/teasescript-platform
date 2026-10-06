@@ -35,6 +35,9 @@ This is a local inspection route, not the production cross-origin Player/host pr
   images chosen for `askImage(...)` as session media and durable while saved script storage references them;
   `image-file.ts` checks a chosen file before it is stored. These shapes are implementation details rather
   than an accepted author-facing API.
+- `transfer-encoding.ts` holds the base64url and gzip encoding of the files players move by hand: saved-data transfers
+  (`storage-transfer.ts`) and debug exports (`debug-export.ts`, read offline by `tools/debug-export.mjs`; see
+  [`DEBUGGER.md`](../docs/DEBUGGER.md#debug-export)).
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
 presentation state in the Player; Tailwind CSS 4 is integrated through Vite as a foundation layer,

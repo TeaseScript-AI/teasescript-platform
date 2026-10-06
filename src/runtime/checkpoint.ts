@@ -50,17 +50,23 @@ export function createCheckpoint(
 }
 
 export function serializeCheckpoint(checkpoint: RuntimeCheckpoint): string {
-  const restored = restoreCheckpoint(checkpoint);
-  // Native JSON writes the validated data as the iterative writer does, unless a host hook could apply or the data
-  // is deeper than the host stack allows.
+  return serializeValidatedRuntimeJson(restoreCheckpoint(checkpoint));
+}
+
+/**
+ * JSON of plain runtime data that checkpoint validation produced, such as a checkpoint or one of its snapshots, without
+ * validating it again. Native JSON writes it as the iterative writer does, unless a host hook could apply or the data is
+ * deeper than the host stack allows.
+ */
+export function serializeValidatedRuntimeJson(value: unknown): string {
   if (!inheritsToJson()) {
     try {
-      return JSON.stringify(restored);
+      return JSON.stringify(value);
     } catch (error) {
       if (!isStackExhaustion(error)) throw error;
     }
   }
-  return serializeJsonIterative(restored);
+  return serializeJsonIterative(value);
 }
 
 /**

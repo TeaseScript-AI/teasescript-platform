@@ -51,6 +51,34 @@ auto-skip and ends a jump at its next yield. The time controls stand above the t
   - A collapsed **Timers** list shows every timer, hidden ones included: blocking or async, display, running, paused, or
     suspended behind a block, remaining time, and the statement that started it.
 
+## Debug export
+
+A debug export (`<script>-debug.teasedebug.json.gz`, or `.teasedebug.json` where the browser cannot compress) lets a
+developer find why a Player session failed. Owner decision: noise, such as whole histories, unrelated media, browser
+storage, credentials, or host objects, is never included; useful but personal content (saved values, submitted
+answers, session text, photos, and Player/browser details) is a separate choice for each export, off by default and
+previewed before download; a selected photo carries its original bytes and links to the call or action that used it.
+The technical report, always included, locates the failure without runtime values. Replay data discloses state that
+copies saved values, answers, and session text, so it requires all three.
+
+`player/debug-export.ts` owns the format: a versioned JSON document (`format: "teasescript-debug-export"`,
+`version: 1`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
+(unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name); the
+selection and omissions; the canonical checkpoint and its role, `current` or `lastGood`; the replay data; photos; and
+readable sections. Replay data is the anchor snapshot from an earlier boundary, or the last good checkpoint itself, and
+every elementary engine call the Player made since, in order: `run` with its options, `observeTime`, `completeAction`
+with the media store's recorded answers, `reportMediaLoad`, `pressPermanentButton`, and `recordContinueCapture`, each
+with its plain arguments, outcome, emitted event range, resulting status, or thrown error name. It adds no plan,
+snapshot, or checkpoint revision.
+
+After `npm run build:typescript`, `node tools/debug-export.mjs inspect <file>` summarizes an export without runtime
+values (`--values` prints the recorded arguments and readable sections), and `replay <file>` runs the calls again from
+the anchor in a worker and compares each result and the final state. It reports a reproduced engine failure (exit 0),
+the first divergence with its source location and calls (1), an incomplete export (2), an unsupported version, for
+which a checkout of the recorded build is needed (3), an invalid export (4), or a timeout (`--timeout`, default 60 s;
+5). Exact replay covers the engine path; browser and device failures are diagnosed from their recorded reports, which
+replay substitutes for the devices.
+
 Debugger history may snapshot selected boundaries; this does not imply that production execution persists every internal
 instruction. Simulation is debugger tooling when execution uses disposable or test state, not an editor semantic.
 
