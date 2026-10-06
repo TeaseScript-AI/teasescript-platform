@@ -159,6 +159,15 @@ test("askForm reports what the compiler can see is wrong", () => {
       "cannot start as a whole number (integer) or null",
     ],
     ['askForm fields: { on: false }, hint: ["a"]', "A list cannot be an input hint."],
+    // At the time limit the answers are submitted as they stand, so each written field starts with one.
+    [
+      'askForm fields: { n: { type: "integer" } }, timeout: 1, onTimeout: "submit"',
+      `askForm field 'n': onTimeout: "submit" needs a value in every field; give it value:.`,
+    ],
+    [
+      'askForm fields: dict { n: { type: "integer" } }, timeout: 1, onTimeout: "submit"',
+      `askForm field 'n': onTimeout: "submit" needs a value in every field; give it value:.`,
+    ],
   ];
   for (const [form, message] of cases) {
     const diagnostics = compileSource(`let answers = ${form}\nexit`).diagnostics;
@@ -655,6 +664,17 @@ test("a form with a time limit settles by itself, with its answers as they stand
       interactionKind: "form",
       update: { kind: "edit", fieldId: "level" },
     }).snapshot;
+    current = updateInteraction(plan, current, {
+      actionId: current.foregroundAction!.actionId,
+      actionKind: "interaction",
+      interactionKind: "form",
+      update: { kind: "draft", fieldId: "level", text: "9" },
+    }).snapshot;
+    assert.equal(
+      current.foregroundAction?.kind === "interaction" &&
+        current.foregroundAction.form?.editor?.text,
+      "9",
+    );
     current = deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, current))).snapshot;
     const early = run(plan, observeTime(plan, current, 29_999).snapshot);
     assert.equal(early.snapshot.foregroundAction?.kind, "interaction");

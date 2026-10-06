@@ -3046,8 +3046,19 @@ class TypeChecker {
   #checkFormStarts(expression: InteractionExpression): void {
     const fields = expression.formArguments.find((argument) => argument.name.name === "fields");
     const literal = fields === undefined ? undefined : unwrap(fields.value);
-    if (literal?.kind !== "objectLiteral") return;
-    for (const property of literal.properties) {
+    const written =
+      literal?.kind === "objectLiteral"
+        ? literal.properties.map((property) => ({
+            name: property.name.name,
+            value: property.value,
+          }))
+        : literal?.kind === "dictLiteral"
+          ? literal.entries.map((entry) => ({
+              name: staticText(entry.key) ?? "?",
+              value: entry.value,
+            }))
+          : [];
+    for (const property of written) {
       const descriptor = unwrap(property.value);
       if (descriptor.kind === "nullLiteral" || descriptor.kind === "objectLiteral") {
         const start =
@@ -3065,7 +3076,7 @@ class TypeChecker {
         if (!finite && !toggle && (start === undefined || unwrap(start).kind === "nullLiteral"))
           this.#report(
             typeCode.invalidOperand,
-            `askForm field '${property.name.name}': onTimeout: "submit" needs a value in every field; give it value:.`,
+            `askForm field '${property.name}': onTimeout: "submit" needs a value in every field; give it value:.`,
             property.value.span,
           );
       }
