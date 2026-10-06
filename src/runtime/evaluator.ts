@@ -31,6 +31,7 @@ import { expressionPlanChildren } from "../plan/expression-children.js";
 import { CORE_RUNTIME_BUILTINS } from "../protected-names.js";
 import type { SourceSpan as RichSourceSpan } from "../source.js";
 import { RuntimeFault } from "./errors.js";
+import type { InstructionTraceCollector } from "./instruction-trace.js";
 import type { DeveloperWarningEvent, InterpreterEvent, OutputSpeaker } from "./events.js";
 import { copySpan, takeSequence } from "./operations/support.js";
 import {
@@ -225,6 +226,8 @@ export class RuntimeExecutionContext {
     private readonly plan: InstructionPlan,
     /** The debug trace of the operation, or `null` when it is not traced. */
     public readonly trace: TraceStore | null = null,
+    /** The instruction trace the call returns, or `null` when it returns none. */
+    public readonly instructionTrace: InstructionTraceCollector | null = null,
   ) {}
 
   public evaluator(): Evaluator {
