@@ -239,7 +239,7 @@ them at the top.
 ```sh
 # from sexscript-importer/, after npm run build:typescript in the repository root:
 node tools/explore.ts [--budget-seconds 60] [--max-states 20000] [--seed 1] [--workers 1|2] <unit-dir>... --out <dir>
-node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N)
+node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --error)
 ```
 
 `explore` plays each package headlessly in the real runtime (`src/explorer.ts`), without the Player, through every
@@ -278,7 +278,9 @@ The report `<out>/<unit>.json` has these parts:
 - the end states: `completed` (exit), `failed`, `stuck`, and `open` when the budget ran out.
 
 `summary.md` has one table row per unit. `--replay` plays the input list of a crash or trap again with the run's seed,
-prints the transcript, and for a crash exits 0 only when the same failure returns.
+prints the transcript, and for a crash exits 0 only when the same failure returns. A runtime operation that throws,
+such as a runtime that rejects a snapshot it produced (`TSR101`), is no crash of the package: the report counts these
+under `search.engineErrors` with the input list of the first, which `--error` replays.
 
 A trap is a loop the player cannot leave by the inputs tried. Explored states are grouped by loop key. A group
 escapes when one of its states ended (completed or failed), or when none of its states was fully expanded, so its
