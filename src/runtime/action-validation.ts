@@ -41,6 +41,7 @@ import type { RuntimeChatPacingGateSettlementSnapshot } from "./actions/model.js
 import { CAPTURE_UNAVAILABLE_REASONS, requiredActionCompletionEvents } from "./actions/model.js";
 import { buttonTimeoutMilliseconds, imageRequestValue } from "./actions/interaction.js";
 import {
+  formAnswerMismatch,
   formRequestValue,
   isFormUi,
   validFormResult,
@@ -1493,7 +1494,9 @@ function preparedInteractionUiMatchesAction(
     // EVIDENCE: validation: validateCapturedSerializableValue accepted the captured request above.
     const captured = request as SerializableRuntimeValue;
     return (
-      actual.shape === prepared.shape.kind && serializableEquals(captured, formRequestValue(actual))
+      actual.shape === prepared.shape.kind &&
+      serializableEquals(captured, formRequestValue(actual)) &&
+      formAnswerMismatch(actual.fields, prepared.shape) === null
     );
   }
   if (prepared.kind === "image") {

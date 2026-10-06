@@ -149,7 +149,7 @@ and `rewindCount`, or `null`), both of which `inspect` prints; the selection and
 and its role, `current` or `lastGood`; the replay data; photos; and readable sections. Replay data is the anchor snapshot from an earlier boundary, or the last good checkpoint itself, and
 every elementary engine call the Player made since, in order: `run` with its options, `observeTime`, `completeAction`
 with the media store's recorded answers, `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and
-`applyExternalStorageEdit` with the edit, each with its plain arguments, outcome, emitted event range, resulting
+`applyExternalStorageEdit` with the edit, and `updateInteraction` with the form edit, each with its plain arguments, outcome, emitted event range, resulting
 status, or thrown error name. It adds no plan, snapshot, or checkpoint revision.
 
 In every build, the Player's `player/debug-recorder.ts` records each session from its Start or Continue: the anchor

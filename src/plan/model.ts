@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 62;
+export const INSTRUCTION_PLAN_VERSION = 63;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -753,8 +753,15 @@ export type PreparedFormShape =
         readonly name: string;
         readonly numericKind: FormNumericKind;
       }[];
+      /** The answer type the compiler gave each named field, which the form checks when it opens. */
+      readonly answers: readonly { readonly name: string; readonly type: TypePlan }[];
     }
-  | { readonly kind: "dict"; readonly numericKind: FormNumericKind | null }
+  | {
+      readonly kind: "dict";
+      readonly numericKind: FormNumericKind | null;
+      /** The answer type the compiler gave every field, which the form checks when it opens; `null` for any. */
+      readonly answer: TypePlan | null;
+    }
   | { readonly kind: "booleanList" };
 export type FormNumericKind = "integer" | "number";
 

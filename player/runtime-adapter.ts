@@ -46,8 +46,16 @@ import {
   type SerializableRuntimeValue,
   type TemporalContext,
   type TimeObservationOutcome,
+  updateInteraction,
+  type InteractionUpdateOutcome,
 } from "../src/index.js";
-import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
+import type {
+  RuntimeChatPacingGateActionSnapshot,
+  RuntimeFormValue,
+} from "../src/runtime/actions/model.js";
+import { currentTemporalContext } from "../src/runtime/state.js";
+import { presentDate, presentDateTime, presentTime } from "../src/temporal.js";
+import { numberAnswerText } from "../src/interaction-answers.js";
 import { instructionSourcePath } from "../src/plan/model.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import { runValidatedState } from "../src/runtime/engine.js";
@@ -61,6 +69,9 @@ import type { RuntimeTimerSnapshot } from "../src/runtime/timers.js";
 import type { DebugRecorder } from "./debug-recorder.js";
 import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
 import type {
+  PlayerFormEditorPresentation,
+  PlayerFormFieldPresentation,
+  PlayerFormPresentation,
   PlayerForegroundPresentation,
   PlayerPermanentButtonPresentation,
   PlayerTimerPresentation,
@@ -141,7 +152,9 @@ export interface PlayerRuntimeRestorePoint {
   readonly events: readonly InterpreterEvent[];
 }
 
-export interface PlayerRuntimeControlResult<T = ActionCompletionOutcome | TimeObservationOutcome> {
+export interface PlayerRuntimeControlResult<
+  T = ActionCompletionOutcome | TimeObservationOutcome | InteractionUpdateOutcome,
+> {
   readonly session: PlayerRuntimeSession;
   readonly outcome: T;
 }
@@ -315,9 +328,13 @@ export function playerRuntimeForeground(
   if (action === null) return null;
   const accessibleName = interactionAccessibleName(action.ui.accessibleName);
   switch (action.ui.kind) {
-    // The Player presents forms in a later slice of #512.
+    // The fields change with each edit; `playerRuntimeForm` presents them.
     case "form":
-      return null;
+      return Object.freeze({
+        kind: "form",
+        accessibleName,
+        hint: action.ui.hint ?? "Type your response…",
+      });
     case "button":
       return Object.freeze({
         kind: "show-button",
@@ -812,12 +829,23 @@ function actionRequest(
 export function submitPlayerRuntimeComposer(
   session: PlayerRuntimeSession,
   submittedText: string,
-): PlayerRuntimeControlResult<ActionCompletionOutcome> | null {
+): PlayerRuntimeControlResult<ActionCompletionOutcome | InteractionUpdateOutcome> | null {
   const action = activeInteraction(session.snapshot);
   if (action?.ui.kind === "button") {
     return submittedText !== "" && submittedText === action.ui.buttonLabel
       ? completePlayerAction(session, action, { kind: "activate" })
       : null;
+  }
+  // While a form field is edited, the composer's text is its answer. Otherwise the composer takes the exact text of
+  // one visible button: a field's label steps it, the submit label submits.
+  if (action?.ui.kind === "form") {
+    if (action.form?.editor != null) return commitPlayerRuntimeFormField(session, submittedText);
+    const fields = action.ui.fields.filter((field) => field.text === submittedText);
+    const submits = action.ui.submit.text === submittedText ? 1 : 0;
+    if (submittedText === "" || fields.length + submits !== 1) return null;
+    return submits === 1
+      ? submitPlayerRuntimeForm(session)
+      : stepPlayerRuntimeFormField(session, fields[0]!.id);
   }
   if (
     action === null ||
@@ -866,6 +894,289 @@ export function answerPlayerRuntimeImage(
       operation.events,
       operation.outcome.kind === "completed",
     ),
+    outcome: operation.outcome,
+  });
+}
+
+/** One presentation per form state: an edit replaces the state, and nothing else re-renders the form. */
+const formPresentations = new WeakMap<object, PlayerFormPresentation>();
+
+/** The controls of the pending form as its answers stand, or `null` without a pending form. */
+export function playerRuntimeForm(session: PlayerRuntimeSession): PlayerFormPresentation | null {
+  const action = activeInteraction(session.snapshot);
+  if (action?.ui.kind !== "form" || action.form === undefined) return null;
+  const cached = formPresentations.get(action.form);
+  if (cached !== undefined) return cached;
+  const { ui, form } = action;
+  const presentation = currentTemporalContext(session.snapshot).presentation;
+  const fields = ui.fields.map((field, index): PlayerFormFieldPresentation => {
+    const value = form.values[index] ?? null;
+    const editing = form.editor?.fieldId === field.id;
+    if (field.kind !== "boolean" && field.kind !== "cycle")
+      return Object.freeze({
+        id: field.id,
+        label: field.text,
+        kind: "value",
+        pressed: false,
+        state: value === null ? null : formValueText(value, presentation),
+        optional: field.optional,
+        editing,
+        ...(field.background === undefined ? {} : { authoredFill: field.background }),
+      });
+    const option =
+      field.kind === "cycle"
+        ? typeof value === "number"
+          ? field.options[value]
+          : undefined
+        : field.options?.find((candidate) => candidate.value === value);
+    const authoredFill = option?.background ?? field.background;
+    return Object.freeze({
+      id: field.id,
+      label: field.text,
+      kind: field.kind === "boolean" ? "toggle" : "cycle",
+      pressed: value === true,
+      state: option?.text ?? null,
+      optional: false,
+      editing: false,
+      ...(authoredFill === undefined ? {} : { authoredFill }),
+    });
+  });
+  const total = ui.fields.length;
+  const status = ui.fields.every((field) => field.kind === "boolean")
+    ? `${form.values.filter((value) => value === true).length} of ${total} selected`
+    : `${form.values.filter((value) => value !== null).length} of ${total} set`;
+  const edited = ui.fields.find((field) => field.id === form.editor?.fieldId);
+  const result = Object.freeze({
+    actionId: action.actionId,
+    fields: Object.freeze(fields),
+    submit: Object.freeze({
+      label: ui.submit.text,
+      ...(ui.submit.background === undefined ? {} : { authoredFill: ui.submit.background }),
+    }),
+    status,
+    editor:
+      edited === undefined ||
+      form.editor === null ||
+      edited.kind === "boolean" ||
+      edited.kind === "cycle"
+        ? null
+        : Object.freeze({
+            fieldId: edited.id,
+            label: edited.text,
+            // A date or time control shows its hint beside it, so it has none by default.
+            hint:
+              edited.hint ??
+              (edited.kind === "date" || edited.kind === "time" || edited.kind === "datetime"
+                ? ""
+                : `${edited.text}…`),
+            optional: edited.optional,
+            text: form.editor.text,
+            inputMode:
+              edited.kind === "integer" ? "numeric" : edited.kind === "number" ? "decimal" : "text",
+            // A native date control has no year 0000, so such a value is edited as ISO text.
+            inputType:
+              edited.kind === "date" || edited.kind === "time" || edited.kind === "datetime"
+                ? form.editor.text.startsWith("0000")
+                  ? "text"
+                  : edited.kind === "datetime"
+                    ? "datetime-local"
+                    : edited.kind
+                : "text",
+          } satisfies PlayerFormEditorPresentation),
+  });
+  formPresentations.set(action.form, result);
+  return result;
+}
+
+/** A typed field's value as its button shows it: a number as typed, a date or time as `say` shows it. */
+function formValueText(
+  value: NonNullable<RuntimeFormValue>,
+  presentation: TemporalContext["presentation"],
+): string {
+  if (typeof value === "number") return numberAnswerText(value);
+  if (typeof value === "string") return value;
+  if (typeof value === "boolean") return value ? "true" : "false";
+  return value.kind === "date"
+    ? presentDate(presentation, value)
+    : value.kind === "time"
+      ? presentTime(presentation, value)
+      : presentDateTime(presentation, value);
+}
+
+type FormControlResult = PlayerRuntimeControlResult<
+  InteractionUpdateOutcome | ActionCompletionOutcome
+>;
+
+/**
+ * Brings the form's draft up to the composer's text before another edit, so the edit commits what the player typed.
+ * Returns the refusal when the draft is not taken, or the session to continue with.
+ */
+function withComposerDraft(
+  session: PlayerRuntimeSession,
+  draft: string | undefined,
+): { readonly session: PlayerRuntimeSession } | FormControlResult {
+  const action = activeInteraction(session.snapshot);
+  const editor = action?.form?.editor ?? null;
+  if (action === null || editor === null || draft === undefined || draft === editor.text)
+    return { session };
+  const result = updatePlayerRuntimeForm(session, action, {
+    kind: "draft",
+    fieldId: editor.fieldId,
+    text: draft,
+  });
+  return result.outcome.kind === "updated" || result.outcome.kind === "unchanged"
+    ? { session: result.session }
+    : result;
+}
+
+/** Runs `next` on the session after the composer's draft is taken, or returns the draft's refusal. */
+function afterDraft(
+  session: PlayerRuntimeSession,
+  draft: string | undefined,
+  next: (session: PlayerRuntimeSession) => FormControlResult | null,
+): FormControlResult | null {
+  const drafted = withComposerDraft(session, draft);
+  return "outcome" in drafted ? drafted : next(drafted.session);
+}
+
+/**
+ * Advances a form field one step: a toggle switches, a cycle shows its next option, wrapping around, and a typed field
+ * opens in the composer. Each edit names what it selects, so a repeated report changes nothing more. `draft` is the
+ * composer's text, which the field being edited takes first.
+ */
+export function stepPlayerRuntimeFormField(
+  session: PlayerRuntimeSession,
+  fieldId: string,
+  draft?: string,
+): FormControlResult | null {
+  return afterDraft(session, draft, (current) => {
+    const action = activeInteraction(current.snapshot);
+    if (action?.ui.kind !== "form" || action.form === undefined) return null;
+    const index = action.ui.fields.findIndex((field) => field.id === fieldId);
+    const field = action.ui.fields[index];
+    const value = action.form.values[index];
+    if (field === undefined) return null;
+    if (field.kind !== "boolean" && field.kind !== "cycle")
+      return updatePlayerRuntimeForm(current, action, { kind: "edit", fieldId });
+    let optionIndex: number;
+    if (field.kind === "cycle" && typeof value === "number")
+      optionIndex = (value + 1) % field.options.length;
+    else if (field.kind === "boolean" && typeof value === "boolean")
+      optionIndex =
+        field.options === null
+          ? value
+            ? 0
+            : 1
+          : field.options.findIndex((option) => option.value === !value);
+    else return null;
+    return updatePlayerRuntimeForm(current, action, { kind: "select", fieldId, optionIndex });
+  });
+}
+
+/** Commits the composer's text as the edited field's value; blank text unsets an optional field. */
+export function commitPlayerRuntimeFormField(
+  session: PlayerRuntimeSession,
+  draft: string,
+): FormControlResult | null {
+  return afterDraft(session, draft, (current) => {
+    const action = activeInteraction(current.snapshot);
+    const editor = action?.form?.editor ?? null;
+    if (action === null || editor === null) return null;
+    return updatePlayerRuntimeForm(current, action, { kind: "commit", fieldId: editor.fieldId });
+  });
+}
+
+/** Back or Escape: closes the composer's field and drops its text, keeping the field's value. */
+export function dismissPlayerRuntimeFormField(
+  session: PlayerRuntimeSession,
+): FormControlResult | null {
+  const action = activeInteraction(session.snapshot);
+  const editor = action?.form?.editor ?? null;
+  if (action === null || editor === null) return null;
+  return updatePlayerRuntimeForm(session, action, { kind: "dismiss", fieldId: editor.fieldId });
+}
+
+/** Clear: leaves the edited optional field without a value. */
+export function clearPlayerRuntimeFormField(
+  session: PlayerRuntimeSession,
+): FormControlResult | null {
+  const action = activeInteraction(session.snapshot);
+  const editor = action?.form?.editor ?? null;
+  if (action === null || editor === null) return null;
+  return updatePlayerRuntimeForm(session, action, { kind: "clear", fieldId: editor.fieldId });
+}
+
+/** The forms that can still be answered: the presented one and one that a running block suspended. */
+export function playerRuntimeFormActionIds(snapshot: RuntimeSnapshot): readonly number[] {
+  return [
+    snapshot.foregroundAction,
+    ...snapshot.callFrames.map((frame) =>
+      frame.kind === "function" ? (frame.timerInterruption?.suspendedAction ?? null) : null,
+    ),
+  ].flatMap((action) =>
+    action?.kind === "interaction" && action.ui.kind === "form" ? [action.actionId] : [],
+  );
+}
+
+/**
+ * Keeps the form's draft equal to the composer's text, so a checkpoint or debug export holds what was typed. The text
+ * belongs to one action's field: while another form or field is presented, such as one a block opened, nothing changes.
+ */
+export function draftPlayerRuntimeForm(
+  session: PlayerRuntimeSession,
+  target: { readonly actionId: number; readonly fieldId: string },
+  draft: string,
+): FormControlResult | null {
+  const action = activeInteraction(session.snapshot);
+  const editor = action?.form?.editor ?? null;
+  if (
+    action === null ||
+    editor === null ||
+    action.actionId !== target.actionId ||
+    editor.fieldId !== target.fieldId ||
+    draft === editor.text
+  )
+    return null;
+  return updatePlayerRuntimeForm(session, action, {
+    kind: "draft",
+    fieldId: editor.fieldId,
+    text: draft,
+  });
+}
+
+/** Submits the pending form with its answers, after the composer's draft, then continues the session. */
+export function submitPlayerRuntimeForm(
+  session: PlayerRuntimeSession,
+  draft?: string,
+): FormControlResult | null {
+  return afterDraft(session, draft, (current) => {
+    const action = activeInteraction(current.snapshot);
+    if (action?.ui.kind !== "form") return null;
+    return completePlayerAction(current, action, { kind: "submit" });
+  });
+}
+
+function updatePlayerRuntimeForm(
+  session: PlayerRuntimeSession,
+  action: RuntimeInteractionActionSnapshot,
+  update: Record<string, unknown>,
+): PlayerRuntimeControlResult<InteractionUpdateOutcome> {
+  const request = {
+    actionId: action.actionId,
+    actionKind: "interaction",
+    interactionKind: "form",
+    update,
+  };
+  const operation = recorded(
+    session.recorder,
+    "updateInteraction",
+    session.snapshot,
+    [request],
+    () =>
+      updateInteraction(session.plan, session.snapshot, request, traceOptions(session.debugTrace)),
+  );
+  return Object.freeze({
+    session: applyOperation(session, operation.snapshot, operation.events, false),
     outcome: operation.outcome,
   });
 }
@@ -1327,14 +1638,15 @@ function appendRuntimeEvents(
   // EVIDENCE: emptySession creates an unfrozen adapter-owned transcript accumulator for every session.
   const transcriptEntries = session.transcriptEntries as PlayerTranscriptEntryPresentation[];
   for (const event of events) retainedEvents.push(event);
-  const responseKinds = new Map<number, "choice" | "button">();
+  const responseKinds = new Map<number, "choice" | "button" | "form">();
   for (const event of events) {
     if (
       event.kind === "actionCompleted" &&
       event.settlement.actionKind === "interaction" &&
       event.settlement.transcriptEventSequence !== null &&
       (event.settlement.interactionKind === "choice" ||
-        event.settlement.interactionKind === "button")
+        event.settlement.interactionKind === "button" ||
+        event.settlement.interactionKind === "form")
     ) {
       responseKinds.set(event.settlement.transcriptEventSequence, event.settlement.interactionKind);
     }

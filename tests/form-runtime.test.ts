@@ -68,6 +68,7 @@ const OBJECT: PreparedFormShape = {
     { name: "impact", numericKind: "integer" },
     { name: "weight", numericKind: "number" },
   ],
+  answers: [],
 };
 
 const SETTINGS = `{
@@ -391,7 +392,7 @@ test("every interim edit, including a draft, survives a checkpoint and resumes a
 test("a dict form keeps its keys and order, and a boolean list counts what is selected", () => {
   const dictPlan = formPlan(
     `{ fields: dict { "12": { value: 5, min: 1, max: 10, text: "Rope" }, "3": { value: 2, text: "Cuffs" } } }`,
-    { kind: "dict", numericKind: "integer" },
+    { kind: "dict", numericKind: "integer", answer: null },
   );
   const dictForm = submit(dictPlan, started(dictPlan));
   assert.equal(dictForm.outcome.kind, "completed");
@@ -492,7 +493,7 @@ test("a form that cannot be built fails when it opens, with a message that names
     ],
     [
       `{ name: { value: "Ada", label: "Name" } }`,
-      "askForm field 'name': unknown property 'label'. A field has type, value, text, options, optional, min, max, hint, and background.",
+      "askForm field 'name': unknown property 'label'. A field has type, value, text, options, optional, min, max, hint, background, and description.",
     ],
     [
       `{ when: { type: "date", value: "2026-10-05" } }`,
@@ -523,7 +524,7 @@ test("a form that cannot be built fails when it opens, with a message that names
   // The longest text start opens, and the form can be saved.
   const longest = formPlan(`{ fields: { name: "x".repeat(65536) } }`, OBJECT);
   roundTrip(longest, started(longest));
-  const empty = formPlan(`{ fields: dict {} }`, { kind: "dict", numericKind: null });
+  const empty = formPlan(`{ fields: dict {} }`, { kind: "dict", numericKind: null, answer: null });
   assert.equal(
     run(empty, createFreshRuntimeSnapshot(empty)).snapshot.failure?.message,
     "A form needs at least one field.",

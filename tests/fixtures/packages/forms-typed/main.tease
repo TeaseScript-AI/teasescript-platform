@@ -1,0 +1,22 @@
+---
+title: "Your details"
+---
+speaker mistress {
+    displayName: "Mistress"
+}
+showPermanentButton "Pause" {
+    showButton "Resume"
+}
+showPermanentButton "Check" {
+    let check = askForm "Check", fields: { ready: false, name: { value: "Inner", text: "Name" } }, submit: "OK"
+}
+let details = askForm as mistress "Your details", fields: {
+    impact: { value: 5, min: 1, max: 10, text: "Impact", hint: "1 to 10", description: "How hard, from 1 to 10" },
+    weight: { type: "number", optional: true, text: "Weight" },
+    name: { value: "Ada", text: "Name" },
+    day: { type: "date", text: "Day" },
+    enabled: false
+}, submit: "Continue"
+say as mistress "Impact ${details.impact}, weight ${details.weight}, ${details.name}, ${details.day}, ${details.enabled}."
+showButton "Done"
+exit

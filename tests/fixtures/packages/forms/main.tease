@@ -1,0 +1,25 @@
+---
+title: "Your settings"
+---
+speaker mistress {
+    displayName: "Mistress"
+    color: "#b05090"
+}
+let toys = askForm as mistress "Which toys do you own?", fields: {
+    rope: { value: true, text: "Rope", description: "Cotton or jute" },
+    cuffs: false, collar: false, gag: false, blindfold: false, paddle: false, crop: false, flogger: false,
+    clamps: false, vibrator: false, plug: false, chastity: false, candle: false, ice: false, feather: false,
+    mirror: false, timer: false, chain: false, leash: false, hood: false, mask: false, rope2: false,
+    tape: false, spreader: false, hook: false, belt: false, brush: false, clips: false, ruler: false,
+    spoon: false, cane: false, whip: false, tawse: false, strap: false, pinwheel: false, oil: false,
+    gloves: false, corset: false, heels: false, stockings: false, bell: false, lock: false, key: false
+}, outro: "Choose everything you have nearby."
+say as mistress "Now the details."
+let settings = askForm as mistress "Adjust your settings", fields: {
+    enabled: { value: false, text: "Access", options: [{ value: false, text: "Off", background: "firebrick" }, { value: true, text: "On", background: "seagreen" }] },
+    intensity: { text: "Intensity", options: [{ text: "Low", background: "seagreen" }, { text: "Medium", background: "orange" }, { text: "High", background: "red" }] },
+    pace: ["Slow", "Steady", "Fast"]
+}, submit: { text: "Continue", background: "seagreen" }
+say as mistress "Rope: ${toys.rope}. Access: ${settings.enabled}. Intensity: ${settings.intensity}, pace ${settings.pace}."
+showButton "Done"
+exit

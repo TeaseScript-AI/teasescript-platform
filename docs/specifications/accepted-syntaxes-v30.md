@@ -1940,8 +1940,9 @@ button is chosen.
 
 ### Forms
 
-**Status:** Accepted (Owner decisions on #512, 2026-10-06). The engine's form interaction is implemented
-([RUNTIME.md](../RUNTIME.md#forms)); the `askForm` source form and `askBooleans` are not yet.
+**Status:** Accepted (Owner decisions on #512, 2026-10-06). `askForm` is implemented for an object of fields of every
+kind, with descriptions and `outro:` ([RUNTIME.md](../RUNTIME.md#forms)); a dict of fields, `cancel:`, `askBooleans`,
+and `timeout:` are not yet, and the compiler reports them.
 
 `askForm` asks for several values at once. Its buttons stay in place while the player changes them, and nothing is
 returned until the player submits:
@@ -1975,6 +1976,10 @@ A descriptor has `value:` (the start), `text:` (the label, by default the field'
 `optional:`, `min:`, `max:`, `hint:`, `background:`, and `description:`. `type:` is `"boolean"`, `"cycle"`, `"integer"`,
 `"number"`, `"text"`, `"date"`, `"time"`, or `"datetime"`. It is needed when no start shows the kind, as in
 `{ type: "date" }`; an unknown type is an error that suggests a likely one, such as `unknown type 'intger' (use 'integer')`.
+The compiler types each answer from what the form can see: a descriptor written where the form is asked is read as
+written, and a descriptor built earlier by the properties its type shows. When the form opens, every field must answer
+within the type the compiler gave it; otherwise the form fails, and the error says to write `type:` where the field's
+starting object is created.
 
 ```text
 let access = askForm("Access?", fields: { enabled: { value: false, options: [{ value: false, text: "Off", background: "firebrick" }, { value: true, text: "On", background: "seagreen" }] } })
@@ -2031,7 +2036,9 @@ for id in selected { save selected[id] as "toys.${id}" }
 When the compiler can prove that every field of a dict has one kind, from the dict's type and, for descriptors, a
 written `type:` or `value:`, the result is a dict of that answer type, such as an `integer dict`; it is an
 `integer? dict` when a field may be `optional:`. Otherwise, as for an `object dict` of descriptors of different kinds
-with explicit `type:`, the result is a `(boolean | number | string | date | time | datetime | null) dict`; read an answer into a local and narrow it with `is`
+with explicit `type:`, the result is a
+`(boolean | number | string | date | time | datetime | duration | timestamp | null) dict`, since a cycle may return
+any choice value but `null`; read an answer into a local and narrow it with `is`
 ([§13](#13-explicit-types)). A dict of fields must not be empty, and each of its descriptors is checked when the form
 opens; an invalid one is an error that names its key.
 

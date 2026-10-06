@@ -148,8 +148,10 @@ async function main() {
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
+      await formsScenario(cdp, origin);
+      await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, missing, late and overlapping media, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, missing, late and overlapping media, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -3775,6 +3777,203 @@ async function permanentButtonsScenario(cdp, origin) {
   await waitFor(cdp, `document.body.innerText.includes("Stopped at 1. Only Pause stays now.")`);
   await clickButton("Yes, Mistress");
   await waitFor(cdp, `${rail} === ""`, 8_000, "exit did not remove the persistent button");
+}
+
+/**
+ * `askForm` on a phone: 43 toggles wrap and scroll inside the form, so its submit button stays on screen above the
+ * composer; a toggle is a pressed button with a polite status count, a cycle steps through authored colours, and
+ * submitting adds one summary line.
+ */
+async function formsScenario(cdp, origin) {
+  await setViewport(cdp, 390, 700);
+  await navigate(cdp, `${origin}/player/?package=forms`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const fields = `[...document.querySelectorAll('[data-form-fields] button')]`;
+  const status = `document.querySelector('[data-form-controls] [role=status]')?.textContent.trim()`;
+  await waitFor(cdp, `${fields}.length === 43`, 15_000, "The 43 toggles did not appear");
+  assertEqual(await value(cdp, status), "1 of 43 selected", "The status does not count the start");
+  // Every control keeps its touch height; following the latest content shows the submit button above the composer
+  // while the fields scroll.
+  assertEqual(
+    await value(cdp, `${fields}.every((button) => button.getBoundingClientRect().height >= 44)`),
+    true,
+    "A toggle is shorter than a touch target",
+  );
+  const submit = `[...document.querySelectorAll('[data-form-actions] button')].find((button) => button.textContent.trim() === "OK")`;
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const rect = ${submit}.getBoundingClientRect(); const composer = document.querySelector('[data-composer-input]').getBoundingClientRect(); return rect.top >= 0 && rect.bottom <= composer.top; })()`,
+    ),
+    true,
+    "The submit button is not visible above the composer",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const viewport = document.querySelector('[data-form-fields] [data-reka-scroll-area-viewport]'); return viewport.scrollHeight > viewport.clientHeight; })()`,
+    ),
+    true,
+    "The fields do not scroll inside the form",
+  );
+  // The last toggle scrolls into reach and turns on.
+  await evaluate(cdp, `${fields}.at(-1).scrollIntoView({ block: "center" })`);
+  await evaluate(cdp, `${fields}.at(-1).setAttribute("data-smoke-last", "")`);
+  await physicalClick(cdp, "[data-smoke-last]");
+  await waitFor(cdp, `${status} === "2 of 43 selected"`, 8_000, "The toggle did not turn on");
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-smoke-last]').getAttribute('aria-pressed')`),
+    "true",
+    "The toggle is not pressed",
+  );
+  await evaluate(cdp, `${submit}.click()`);
+  await waitFor(cdp, `document.body.innerText.includes("2 of 43 selected")`);
+  await waitFor(cdp, `${fields}.length === 3`, 15_000, "The second form did not appear");
+  const intensity = `${fields}.find((button) => button.textContent.includes("Intensity"))`;
+  const fill = `getComputedStyle(${intensity}).backgroundImage`;
+  const low = await value(cdp, fill);
+  await evaluate(cdp, `${intensity}.click()`);
+  await waitFor(
+    cdp,
+    `${intensity}.textContent.includes("Medium")`,
+    8_000,
+    "The cycle did not step",
+  );
+  assertEqual((await value(cdp, fill)) !== low, true, "The cycle did not take its option's colour");
+  await evaluate(
+    cdp,
+    `[...document.querySelectorAll('[data-form-actions] button')].find((button) => button.textContent.trim() === "Continue").click()`,
+  );
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes("Rope: true. Access: false. Intensity: Medium, pace Slow.")`,
+    15_000,
+    "The answers did not reach the script",
+  );
+}
+
+/**
+ * Typed `askForm` fields in the composer: a field opens with its value selected, so typing replaces it; a refused
+ * answer stays with the composer notice; Enter commits and returns focus to the field; a date field uses the date
+ * control; and submitting takes the text still being typed.
+ */
+async function formFieldsScenario(cdp, origin) {
+  await setViewport(cdp, 1100, 800);
+  await navigate(cdp, `${origin}/player/?package=forms-typed`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const field = (id) => `document.querySelector('[data-form-field="${id}"]')`;
+  const composer = `document.querySelector('[data-composer-input]')`;
+  const pressEnter = async () => {
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+      });
+  };
+  await waitFor(cdp, `!!${field("impact")}`, 15_000, "The typed form did not appear");
+  await physicalClick(cdp, '[data-form-field="impact"]');
+  await waitFor(
+    cdp,
+    `document.activeElement === ${composer} && ${composer}.value === "5" && ${composer}.selectionEnd === 1`,
+    8_000,
+    "The field did not open in the composer with its value selected",
+  );
+  await cdp.call("Input.insertText", { text: "11" });
+  await pressEnter();
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes("That is wrong. Impact must be from 1 to 10.")`,
+    8_000,
+    "An answer outside the bounds was not refused",
+  );
+  assertEqual(await value(cdp, `${composer}.value`), "11", "The refused text was not kept");
+  await evaluate(cdp, `${composer}.select()`);
+  await cdp.call("Input.insertText", { text: "7" });
+  await pressEnter();
+  await waitFor(
+    cdp,
+    `${field("impact")}.textContent.trim() === "Impact: 7" && document.activeElement === ${field("impact")}`,
+    8_000,
+    "Enter did not commit the answer and return focus to the field",
+  );
+  await physicalClick(cdp, '[data-form-field="day"]');
+  await waitFor(
+    cdp,
+    `document.activeElement?.type === "date"`,
+    8_000,
+    "The date field did not use the date control",
+  );
+  await evaluate(
+    cdp,
+    `const input = document.activeElement; input.value = "2026-10-05"; input.dispatchEvent(new Event("input", { bubbles: true }))`,
+  );
+  await pressEnter();
+  await waitFor(
+    cdp,
+    `!${field("day")}.textContent.includes("Set…")`,
+    8_000,
+    "The date was not committed",
+  );
+  await physicalClick(cdp, '[data-form-field="weight"]');
+  await waitFor(cdp, `document.activeElement === ${composer}`);
+  await cdp.call("Input.insertText", { text: "2.5" });
+  const pressButton = (scope, text) =>
+    evaluate(
+      cdp,
+      `[...document.querySelectorAll(${JSON.stringify(scope)})].find((button) => button.textContent.trim() === ${JSON.stringify(text)}).click()`,
+    );
+  const buttonShown = (scope, text) =>
+    `[...document.querySelectorAll(${JSON.stringify(scope)})].some((button) => button.textContent.trim() === ${JSON.stringify(text)})`;
+  const pressPermanentButton = async (text) => {
+    const id = await value(
+      cdp,
+      `[...document.querySelectorAll('[data-permanent-button]')].find((button) => button.textContent.trim() === ${JSON.stringify(text)})?.dataset.permanentButton`,
+    );
+    await physicalClick(cdp, `[data-permanent-button="${id}"]`);
+  };
+  // Opening another field commits this one; the text typed for that one survives a block that interrupts the form,
+  // also one that asks a form of its own.
+  await physicalClick(cdp, '[data-form-field="name"]');
+  await waitFor(cdp, `${composer}.value === "Ada" && document.activeElement === ${composer}`);
+  await cdp.call("Input.insertText", { text: "Bea" });
+  // Sooner than the form takes the text from the composer.
+  await delay(100);
+  await pressPermanentButton("Check");
+  // The block's form has a typed field of the same name, submitted while it is edited.
+  await waitFor(cdp, `!!${field("ready")} && ${buttonShown("[data-form-actions] button", "OK")}`);
+  await physicalClick(cdp, '[data-form-field="name"]');
+  await waitFor(cdp, `${composer}.value === "Inner" && document.activeElement === ${composer}`);
+  await cdp.call("Input.insertText", { text: "Zed" });
+  await pressButton("[data-form-actions] button", "OK");
+  await waitFor(
+    cdp,
+    `!${field("ready")} && !!${field("name")} && ${composer}.value === "Bea" && document.activeElement === ${composer}`,
+    8_000,
+    "The text being typed was lost, or not focused, after a block asked a form",
+  );
+  await evaluate(cdp, `${composer}.select()`);
+  await cdp.call("Input.insertText", { text: "Cy" });
+  await delay(100);
+  await pressPermanentButton("Pause");
+  await waitFor(cdp, buttonShown("button", "Resume"));
+  await pressButton("button", "Resume");
+  await waitFor(
+    cdp,
+    `!!${field("name")} && ${composer}.value === "Cy"`,
+    8_000,
+    "The text being typed was lost after the interruption",
+  );
+  await pressButton("[data-form-actions] button", "Continue");
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes("Impact 7, weight 2.5, Cy,")`,
+    15_000,
+    "Submitting did not take the text being typed",
+  );
 }
 
 async function click(cdp, selector) {

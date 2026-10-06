@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import ForegroundControls from "./ForegroundControls.vue";
+import FormControls from "./FormControls.vue";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { useEventListener } from "@vueuse/core";
 import {
@@ -7,10 +8,17 @@ import {
   activatePlayerRuntimeButton,
   answerPlayerRuntimeImage,
   playerRuntimeForeground,
+  playerRuntimeForm,
   playerRuntimePacingGate,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
+  clearPlayerRuntimeFormField,
+  dismissPlayerRuntimeFormField,
+  draftPlayerRuntimeForm,
+  playerRuntimeFormActionIds,
+  stepPlayerRuntimeFormField,
   submitPlayerRuntimeComposer,
+  submitPlayerRuntimeForm,
   type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
 } from "../../runtime-adapter.js";
@@ -18,7 +26,11 @@ import Composer from "./Composer.vue";
 import ConversationSurface from "./ConversationSurface.vue";
 import Transcript from "./Transcript.vue";
 import { usePlayerConditions } from "./usePlayerConditions";
-import type { PlayerTranscriptEntryPresentation, PlayerSpeakerPresentation } from "../../model.js";
+import type {
+  PlayerFormPresentation,
+  PlayerTranscriptEntryPresentation,
+  PlayerSpeakerPresentation,
+} from "../../model.js";
 import { imagePickerAccept, type ImageFileFilters } from "../../image-file.js";
 import type { CapturedMediaAdmission } from "../../../src/index.js";
 
@@ -81,6 +93,63 @@ const foreground = computed(() => {
     id === undefined ? null : { plan: session.plan, reset: props.reset, actionId: id, value };
   return value;
 });
+// A form's answers change with each edit, unlike the rest of its presentation.
+const form = computed(() => (props.session ? playerRuntimeForm(props.session) : null));
+/**
+ * The composer's latest text for each field being edited, by action and field, for this session, so a form shows it
+ * again when it resumes after a block interrupted it, also before the text reached the form, and also when that block
+ * opened a form of its own.
+ */
+let typed: {
+  readonly plan: PlayerRuntimeSession["plan"];
+  readonly reset: number;
+  readonly texts: Map<string, string>;
+} | null = null;
+function typedTexts(): Map<string, string> | null {
+  if (!props.session) return null;
+  if (typed?.plan !== props.session.plan || typed.reset !== props.reset)
+    typed = { plan: props.session.plan, reset: props.reset, texts: new Map() };
+  return typed.texts;
+}
+const typedKey = (actionId: number, fieldId: string) => `${actionId}:${fieldId}`;
+function parseTypedKey(key: string): { readonly actionId: number; readonly fieldId: string } {
+  const colon = key.indexOf(":");
+  return { actionId: Number(key.slice(0, colon)), fieldId: key.slice(colon + 1) };
+}
+/**
+ * The form field whose text the composer holds, or `null`. Only loading a field's editor sets it, and anything that
+ * replaces the composer's text otherwise clears it first, so the text never becomes another action's or field's.
+ */
+let composerOwner: { readonly actionId: number; readonly fieldId: string } | null = null;
+/** Loads a form's edited field into the composer, with the text typed for it, else the form's; `false` without one. */
+function loadFormEditor(current: PlayerFormPresentation | null): boolean {
+  if (!current?.editor) {
+    composerOwner = null;
+    return false;
+  }
+  composerOwner = { actionId: current.actionId, fieldId: current.editor.fieldId };
+  draft.value =
+    typedTexts()?.get(typedKey(current.actionId, current.editor.fieldId)) ?? current.editor.text;
+  return true;
+}
+/** Whether the composer holds the text of the presented form's edited field. */
+function ownsPresentedEditor(): boolean {
+  return (
+    composerOwner !== null &&
+    form.value?.actionId === composerOwner.actionId &&
+    form.value.editor?.fieldId === composerOwner.fieldId
+  );
+}
+// Only the forms that can still be answered keep their text, so a script that asks again and again keeps no more.
+watch(
+  () => form.value?.actionId,
+  () => {
+    const texts = typedTexts();
+    if (!texts || !props.session) return;
+    const pending = new Set(playerRuntimeFormActionIds(props.session.snapshot));
+    for (const key of texts.keys()) if (!pending.has(parseTypedKey(key).actionId)) texts.delete(key);
+  },
+);
 const pacing = computed(() => {
   const gate = props.session ? playerRuntimePacingGate(props.session) : null;
   return gate?.skippable ? gate : null;
@@ -130,7 +199,7 @@ function presents(request: ImageRequestIdentity): boolean {
 const readingImage = ref(false);
 const root = ref<HTMLElement | null>(null);
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
-const composer = ref<{ focusInput(): void } | null>(null);
+const composer = ref<{ focusInput(): void; selectInput(): void } | null>(null);
 const draft = ref("");
 const feedback = ref("");
 const submitting = ref(false);
@@ -152,6 +221,64 @@ function showFeedback(message: string) {
 }
 
 watch(draft, clearFeedback);
+
+// The composer edits one form field at a time: it opens with the field's text selected, so typing replaces it and
+// Enter keeps it; after the field closes, focus returns to the field's button.
+const formEditor = computed(() => form.value?.editor ?? null);
+watch(
+  () => (form.value?.editor ? typedKey(form.value.actionId, form.value.editor.fieldId) : null),
+  async (key, previousKey) => {
+    const closed = previousKey === null ? null : parseTypedKey(previousKey);
+    // A field of the presented form that closed, or that another of its fields replaced, drops its typed text; a
+    // suspended form keeps it for its return, also while a block's form is presented.
+    const closedHere = closed !== null && closed.actionId === form.value?.actionId;
+    if (closedHere) typedTexts()?.delete(previousKey!);
+    // A field that opens, also in a form that resumes, shows its text selected in the composer.
+    if (key !== null) {
+      loadFormEditor(form.value);
+      composer.value?.selectInput();
+      return;
+    }
+    if (!closedHere) return;
+    // The controls stay disabled until the edit that closed the field is published.
+    if (submitting.value)
+      await new Promise<void>((resolve) => {
+        const stop = watch(submitting, (busy) => {
+          if (busy) return;
+          stop();
+          resolve();
+        });
+      });
+    await nextTick();
+    root.value
+      ?.querySelector<HTMLElement>(`[data-form-field="${CSS.escape(closed.fieldId)}"]`)
+      ?.focus({ preventScroll: true });
+  },
+);
+// The form holds the text being typed, shortly after typing pauses, so a checkpoint or debug export keeps it. Only the
+// composer's own field takes it, while it is presented.
+let draftTimer: ReturnType<typeof setTimeout> | undefined;
+watch(draft, (text) => {
+  clearTimeout(draftTimer);
+  if (!ownsPresentedEditor() || !props.session) return;
+  const target = composerOwner!;
+  const { plan } = props.session;
+  const reset = props.reset;
+  typedTexts()?.set(typedKey(target.actionId, target.fieldId), text);
+  if (text === formEditor.value?.text) return;
+  draftTimer = setTimeout(() => {
+    // A replaced session, such as one Debug's rewind restored, takes no text typed for another.
+    if (props.session?.plan !== plan || props.reset !== reset || submitting.value) return;
+    // The text reaches only its own action's field; while another is presented it stays typed for the return.
+    const result = draftPlayerRuntimeForm(props.session, target, text);
+    if (result?.outcome.kind === "updated") emit("update:session", result.session);
+  }, 400);
+});
+onUnmounted(() => clearTimeout(draftTimer));
+/** The composer's text, which the edited form field takes before any other edit of its form. */
+function formDraft(): string | undefined {
+  return ownsPresentedEditor() ? draft.value : undefined;
+}
 onUnmounted(clearFeedback);
 useEventListener(
   document,
@@ -174,6 +301,8 @@ const { hoverAvailable } = usePlayerConditions();
 watch(
   [actionId, () => props.reset],
   async () => {
+    // Text typed for another action, or for a replaced session, reaches the form only when it shows that field again.
+    clearTimeout(draftTimer);
     const active = document.activeElement;
     const ownedFocus = !!active && !!root.value?.contains(active);
     // Default composer focus when nothing else owns it; touch-only devices would raise a keyboard.
@@ -188,8 +317,10 @@ watch(
     const keyboardNavigation = document.documentElement.dataset.playerKeyboardFocus === "true";
     // A default answer starts in the composer; the player submits it unchanged or edits it first.
     const presentedInput = foreground.value;
-    draft.value =
-      presentedInput !== null && "prefill" in presentedInput ? (presentedInput.prefill ?? "") : "";
+    // A form field being edited, also one that resumes after an interruption, keeps the text typed for it.
+    if (!loadFormEditor(form.value))
+      draft.value =
+        presentedInput !== null && "prefill" in presentedInput ? (presentedInput.prefill ?? "") : "";
     clearFeedback();
     await nextTick();
     // Completion releases the disabled guard after publishing the session.
@@ -247,13 +378,23 @@ async function complete(
       showFeedback(
         foreground.value?.kind === "show-button"
           ? "Type the exact button text or activate it above."
-          : imageTextFeedback.value,
+          : foreground.value?.kind === "form"
+            ? "Type the exact text of one button, or use the buttons above."
+            : imageTextFeedback.value,
       );
       if (refocusInput) focusInput();
       return;
     }
     emit("update:session", result.session);
-    if (result.outcome.kind === "completed") {
+    clearTimeout(draftTimer);
+    // A form edit, also an unchanged one, succeeds without completing the form; the composer then shows the text of
+    // the field it edits, if any.
+    // The composer gives up its field before its text changes, so the change is never typed text of another one.
+    if (result.outcome.kind === "updated" || result.outcome.kind === "unchanged") {
+      if (!loadFormEditor(playerRuntimeForm(result.session))) draft.value = "";
+      clearFeedback();
+    } else if (result.outcome.kind === "completed") {
+      composerOwner = null;
       draft.value = "";
       clearFeedback();
     } else {
@@ -397,7 +538,22 @@ function submit(source: "input" | "button") {
           :bottom-inset="bottomInset"
         >
           <template #foreground>
+            <FormControls
+              v-if="form && foreground?.kind === 'form'"
+              :key="actionId ?? 0"
+              :form="form"
+              :accessible-name="foreground.accessibleName"
+              :disabled="submitting"
+              @step="
+                (fieldId) =>
+                  complete((session) => stepPlayerRuntimeFormField(session, fieldId, formDraft()), false)
+              "
+              @submit="complete((session) => submitPlayerRuntimeForm(session, formDraft()))"
+              @dismiss="complete(dismissPlayerRuntimeFormField, false)"
+              @clear="complete(clearPlayerRuntimeFormField, false)"
+            />
             <ForegroundControls
+              v-else
               :key="actionId ?? 0"
               :foreground="foreground"
               :disabled="submitting"
@@ -431,19 +587,29 @@ function submit(source: "input" | "button") {
           :pacing="!foreground && !!pacing"
           :submitting="submitting || readingImage"
           :placeholder="
-            imageRequest
-              ? imageRequest.hint || 'Add an image…'
-              : foreground && 'hint' in foreground
-                ? foreground.hint
-                : 'Type your response…'
+            formEditor
+              ? formEditor.hint
+              : imageRequest
+                ? imageRequest.hint || 'Add an image…'
+                : foreground && 'hint' in foreground
+                  ? foreground.hint
+                  : 'Type your response…'
           "
           :attach="attach"
-          :accessible-name="foreground?.accessibleName ?? 'Response'"
+          :accessible-name="formEditor?.label ?? foreground?.accessibleName ?? 'Response'"
           :input-mode="
-            foreground?.kind !== 'ask-number' ? 'text' : foreground.integer ? 'numeric' : 'decimal'
+            formEditor
+              ? formEditor.inputMode
+              : foreground?.kind !== 'ask-number'
+                ? 'text'
+                : foreground.integer
+                  ? 'numeric'
+                  : 'decimal'
           "
           :input-type="
-            foreground && 'isoText' in foreground && foreground.isoText
+            formEditor
+              ? formEditor.inputType
+              : foreground && 'isoText' in foreground && foreground.isoText
               ? 'text'
               : foreground?.kind === 'ask-date'
                 ? 'date'
@@ -456,6 +622,7 @@ function submit(source: "input" | "button") {
           :feedback="feedback"
           @submit="submit"
           @skip="skipPacing(true)"
+          @escape="formEditor && complete(dismissPlayerRuntimeFormField, false)"
           @files="submitImage"
         />
       </template>

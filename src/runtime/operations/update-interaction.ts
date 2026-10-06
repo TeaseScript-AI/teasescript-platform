@@ -3,6 +3,7 @@ import type { InstructionPlan } from "../../plan/model.js";
 import { interruptFrame } from "../activations.js";
 import { applyFormUpdate, formStatesEqual } from "../actions/form.js";
 import type { RuntimeSnapshot } from "../state.js";
+import { closeDebugTrace, openDebugTrace, type RuntimeDebugContext } from "../debug-trace.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import {
   captureExecutableData,
@@ -42,15 +43,21 @@ export function updateInteraction(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   request: unknown,
+  options: { readonly debugTrace?: RuntimeDebugContext } = {},
 ): PendingActionOperationResult<InteractionUpdateOutcome> {
-  const current = captureExecutableData(plan, snapshot).snapshot;
+  const captured = captureExecutableData(plan, snapshot);
+  // An edit changes no script value; the trace only follows the session through it.
+  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
   const external = captureExternalData(request);
-  if (!external.ok || !isPlainRecord(external.value))
-    return pendingResult(current, [], {
-      kind: "invalidPayload",
-      message: "An interaction update must be bounded JSON-safe object data.",
-    });
-  return updateCapturedInteraction(current, external.value);
+  const updated =
+    !external.ok || !isPlainRecord(external.value)
+      ? pendingResult(captured.snapshot, [], {
+          kind: "invalidPayload" as const,
+          message: "An interaction update must be bounded JSON-safe object data.",
+        })
+      : updateCapturedInteraction(captured.snapshot, external.value);
+  closeDebugTrace(trace, updated);
+  return updated;
 }
 
 function updateCapturedInteraction(

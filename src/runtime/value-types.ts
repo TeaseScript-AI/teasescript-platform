@@ -203,7 +203,7 @@ const NAMED_DESCRIPTIONS: Readonly<Record<string, string>> = {
 };
 
 /** A plain-language description of the values of `type`, in the compiler's wording. */
-function describeType(type: TypePlan): string {
+export function describeType(type: TypePlan): string {
   // A union's members are described one after another; nested unions only add members.
   const descriptions: string[] = [];
   const pending: TypePlan[] = [type];

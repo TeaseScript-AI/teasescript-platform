@@ -27,6 +27,8 @@ import {
   restorePlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
+  stepPlayerRuntimeFormField,
+  submitPlayerRuntimeForm,
 } from "../player/runtime-adapter.js";
 import {
   createCheckpoint,
@@ -43,7 +45,7 @@ async function replay(recorder: DebugRecorder): Promise<DebugReplayResult> {
   assert.ok(recording);
   const exported: DebugExport = {
     format: "teasescript-debug-export",
-    version: 2,
+    version: 3,
     build: { commit: null, dirty: null, mode: null, appVersion: null, ...debugBuildRevisions() },
     package: { id: null, version: null, contentHash: null },
     incident: {
@@ -90,6 +92,7 @@ function playEverySeam(recorder: DebugRecorder | undefined): PlayerRuntimeSessio
       '    save "pressed" as "button"',
       "}",
       'let name = askText "Name"',
+      'let flags = askForm fields: { a: false, b: ["x", "y"] }',
       'let picture = askImage("Picture", allowCamera: false)',
       "let photo = takePhoto()",
       "let draw = random()",
@@ -120,6 +123,9 @@ function playEverySeam(recorder: DebugRecorder | undefined): PlayerRuntimeSessio
   // A refused and then an accepted answer.
   assert.equal(answerPlayerRuntimeImage(session, reference, store), null, "no image request yet");
   session = submitPlayerRuntimeComposer(session, "Ada")!.session;
+  session = stepPlayerRuntimeFormField(session, "a")!.session;
+  session = stepPlayerRuntimeFormField(session, "b")!.session;
+  session = submitPlayerRuntimeForm(session)!.session;
   const refused = answerPlayerRuntimeImage(session, reference.replace(":1", ":2"), store)!;
   assert.equal(refused.outcome.kind, "invalidPayload");
   session = answerPlayerRuntimeImage(refused.session, reference, store)!.session;
@@ -150,6 +156,7 @@ test("the recorder records every Player engine seam so that a replay reproduces 
     "pressPermanentButton",
     "reportMediaLoad",
     "run",
+    "updateInteraction",
   ]);
   assert.equal(await replay(recorder).then((result) => result.kind), "reproduced");
 

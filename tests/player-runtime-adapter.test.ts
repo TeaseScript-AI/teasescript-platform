@@ -39,7 +39,13 @@ import {
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
+  stepPlayerRuntimeFormField,
   submitPlayerRuntimeComposer,
+  submitPlayerRuntimeForm,
+  playerRuntimeForm,
+  clearPlayerRuntimeFormField,
+  dismissPlayerRuntimeFormField,
+  draftPlayerRuntimeForm,
 } from "../player/runtime-adapter.js";
 
 test("a Player session starts at main.tease of a project, or of a single source", () => {
@@ -943,4 +949,157 @@ test("a session records the account's zone and presentation, falling back to the
       .format(Date.UTC(2026, 9, 4, 18, 30))
       .replace(/[\u00a0\u202f]/gu, " "),
   );
+});
+
+test("a form presents its fields as their answers stand, takes edits, and survives a restore", () => {
+  const session = createPlayerRuntimeSession(
+    [
+      "let answers = askForm fields: {",
+      '  rope: { value: true, text: "Rope" }, cuffs: false,',
+      '  pace: { text: "Pace", options: [{ text: "Slow", background: "seagreen" }, { text: "Fast" }] }',
+      '}, submit: { text: "Continue", background: "red" }',
+      'say "${answers.cuffs} ${answers.pace}", instant',
+      'showButton "Done"',
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(playerRuntimeForeground(session), {
+    kind: "form",
+    accessibleName: "Answer",
+    hint: "Type your response…",
+  });
+  const form = playerRuntimeForm(session)!;
+  assert.deepEqual(
+    form.fields.map((field) => [field.id, field.label, field.kind, field.pressed, field.state]),
+    [
+      ["rope", "Rope", "toggle", true, null],
+      ["cuffs", "cuffs", "toggle", false, null],
+      ["pace", "Pace", "cycle", false, "Slow"],
+    ],
+  );
+  assert.equal(form.fields[2]!.authoredFill, normalizeColor("seagreen"));
+  assert.deepEqual(form.submit, { label: "Continue", authoredFill: normalizeColor("red") });
+  assert.equal(form.status, "3 of 3 set");
+  // The same answers keep the same presentation, so frequent observations do not re-render the form.
+  assert.equal(playerRuntimeForm(session), form);
+
+  const stepped = stepPlayerRuntimeFormField(session, "cuffs")!;
+  assert.equal(stepped.outcome.kind, "updated");
+  // A cycle steps through its options by exact composer text too, and wraps around.
+  const cycled = submitPlayerRuntimeComposer(stepped.session, "Pace")!;
+  assert.equal(cycled.outcome.kind, "updated");
+  const presented = playerRuntimeForm(cycled.session)!;
+  assert.deepEqual(
+    presented.fields.map((field) => [field.pressed, field.state]),
+    [
+      [true, null],
+      [true, null],
+      [false, "Fast"],
+    ],
+  );
+  assert.equal(presented.fields[2]!.authoredFill, undefined);
+  // Ambiguous or unknown text is not an edit, and edits add nothing to the transcript.
+  assert.equal(submitPlayerRuntimeComposer(cycled.session, "Slow"), null);
+  assert.deepEqual(cycled.session.transcriptEntries, session.transcriptEntries);
+
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(cycled.session));
+  assert.deepEqual(playerRuntimeForm(restored), presented);
+  const done = submitPlayerRuntimeForm(restored)!;
+  assert.equal(done.outcome.kind, "completed");
+  assert.deepEqual(
+    done.session.transcriptEntries.map((entry) => [
+      entry.text,
+      entry.kind === "message" ? (entry.responseKind ?? null) : null,
+    ]),
+    [
+      ["3 of 3 fields set", "form"],
+      ["true Fast", null],
+    ],
+  );
+  assert.equal(playerRuntimeForm(done.session), null);
+});
+
+test("a typed form field opens in the composer, keeps its draft through a restore, and takes the composer's text", () => {
+  const session = createPlayerRuntimeSession(
+    [
+      "let details = askForm fields: {",
+      '  impact: { value: 5, min: 1, max: 10, text: "Impact" }, weight: { type: "number", optional: true },',
+      '  day: { type: "date", hint: "Pick a day" }',
+      "}",
+      'say "${details.impact} ${details.weight} ${details.day}", instant',
+      'showButton "Done"',
+      "exit",
+    ].join("\n"),
+  );
+  const form = playerRuntimeForm(session)!;
+  assert.deepEqual(
+    form.fields.map((field) => [field.id, field.kind, field.state, field.optional]),
+    [
+      ["impact", "value", "5", false],
+      ["weight", "value", null, true],
+      ["day", "value", null, false],
+    ],
+  );
+  assert.equal(form.editor, null);
+  const opened = stepPlayerRuntimeFormField(session, "impact")!;
+  assert.deepEqual(playerRuntimeForm(opened.session)!.editor, {
+    fieldId: "impact",
+    label: "Impact",
+    hint: "Impact…",
+    optional: false,
+    text: "5",
+    inputMode: "numeric",
+    inputType: "text",
+  });
+  // The composer's text reaches the form before a checkpoint, and a restore shows it again.
+  const target = { actionId: playerRuntimeForm(opened.session)!.actionId, fieldId: "impact" };
+  // A draft for another action or field changes nothing.
+  assert.equal(
+    draftPlayerRuntimeForm(opened.session, { ...target, actionId: target.actionId + 1 }, "1"),
+    null,
+  );
+  assert.equal(draftPlayerRuntimeForm(opened.session, { ...target, fieldId: "day" }, "1"), null);
+  const drafted = draftPlayerRuntimeForm(opened.session, target, "1")!;
+  assert.equal(drafted.outcome.kind, "updated");
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(drafted.session));
+  assert.equal(playerRuntimeForm(restored)!.editor?.text, "1");
+  // Enter in the composer commits its text; a refused one stays, with the engine's message.
+  const refused = submitPlayerRuntimeComposer(restored, "12")!;
+  assert.deepEqual(refused.outcome, {
+    kind: "invalidPayload",
+    message: "That is wrong. Impact must be from 1 to 10.",
+  });
+  assert.equal(playerRuntimeForm(refused.session)!.editor?.text, "12");
+  const committed = submitPlayerRuntimeComposer(refused.session, "7")!;
+  assert.equal(committed.outcome.kind, "updated");
+  assert.equal(playerRuntimeForm(committed.session)!.fields[0]!.state, "7");
+  // A date field uses the date control and its own hint; Back drops the text.
+  const day = stepPlayerRuntimeFormField(committed.session, "day")!;
+  assert.deepEqual(
+    [
+      playerRuntimeForm(day.session)!.editor?.inputType,
+      playerRuntimeForm(day.session)!.editor?.hint,
+    ],
+    ["date", "Pick a day"],
+  );
+  const back = dismissPlayerRuntimeFormField(day.session)!;
+  assert.equal(playerRuntimeForm(back.session)!.editor, null);
+  // Opening another field commits the text typed for this one; Clear leaves an optional field without a value.
+  const weight = stepPlayerRuntimeFormField(back.session, "weight")!;
+  const switched = stepPlayerRuntimeFormField(weight.session, "day", "2.5")!;
+  assert.equal(playerRuntimeForm(switched.session)!.fields[1]!.state, "2.5");
+  const reopened = stepPlayerRuntimeFormField(
+    dismissPlayerRuntimeFormField(switched.session)!.session,
+    "weight",
+  )!;
+  const cleared = clearPlayerRuntimeFormField(reopened.session)!;
+  assert.equal(playerRuntimeForm(cleared.session)!.fields[1]!.state, null);
+  // Submitting takes the composer's text for the edited field first.
+  const day2 = stepPlayerRuntimeFormField(cleared.session, "day")!;
+  const done = submitPlayerRuntimeForm(day2.session, "2026-10-05")!;
+  assert.equal(done.outcome.kind, "completed");
+  assert.deepEqual(done.session.transcriptEntries.map((entry) => entry.text).slice(-2), [
+    "2 of 3 fields set",
+    "7 null 2026-10-05",
+  ]);
 });

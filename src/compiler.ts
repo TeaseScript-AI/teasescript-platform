@@ -1,4 +1,4 @@
-import type { Block, FileTarget, Program } from "./ast.js";
+import type { Block, FileTarget, InteractionExpression, Program } from "./ast.js";
 import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-validation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { compileStableProject, type InstructionPlan } from "./compiler/compile-program.js";
@@ -9,7 +9,7 @@ import type { Tag } from "./tags.js";
 import { validateCapturedInstructionPlan } from "./plan/validation.js";
 import { markValidatedImmutableInstructionPlan } from "./plan/validated-immutable.js";
 import { planLocationToSourceSpan } from "./plan/source-location.js";
-import type { PlanImage, TypeCheckPlan } from "./plan/model.js";
+import type { PlanImage, PreparedFormShape, TypeCheckPlan } from "./plan/model.js";
 import { imageCatalog, type ProjectImageFile } from "./image-catalog.js";
 import { capturesTaggedPhotos } from "./capture-call.js";
 import { compareProjectPaths, MAIN_FILE_PATH, packagePathProblem } from "./project-paths.js";
@@ -122,7 +122,7 @@ function compileProjectFiles(
   });
   if (inventory.diagnostics.length === 0 && !hasErrors(catalog.diagnostics) && checked !== null) {
     if (checked.reachesExit) {
-      plan = lowerProject(files, checked.typeChecks, catalog.images);
+      plan = lowerProject(files, checked.typeChecks, catalog.images, checked.formShapes);
     } else {
       const main = files[0]!.result;
       const noExit = createDiagnostic(
@@ -261,6 +261,7 @@ function checkProject(
   options: ProjectCheckOptions,
 ): {
   readonly typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
+  readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
   readonly reachesExit: boolean;
 } | null {
   let current = 0;
@@ -321,7 +322,11 @@ function checkProject(
     );
     return files.some((file) => hasErrors(file.result.diagnostics))
       ? null
-      : { typeChecks: types.runtimeChecks, reachesExit: types.reachesExit };
+      : {
+          typeChecks: types.runtimeChecks,
+          formShapes: types.formShapes,
+          reachesExit: types.reachesExit,
+        };
   } catch (error) {
     if (!isNativeStackExhaustion(error)) throw error;
     const file = files[current]!;
@@ -357,6 +362,7 @@ function lowerProject(
   files: CompiledProjectFile[],
   typeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>,
   images: readonly PlanImage[],
+  formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>,
 ): InstructionPlan | null {
   let current = files[0]!;
   let failure: ReturnType<typeof compiledPlanValidationDiagnostic>;
@@ -374,6 +380,7 @@ function lowerProject(
         current = files[fileIndex]!;
       },
       images,
+      formShapes,
     );
     current = files[0]!;
     failure = compiledPlanValidationDiagnostic(compiled);
