@@ -29,4 +29,19 @@ if level == null {
   pick()
 }
 say "Level ${level}"
+// So do numbers that functions add to, since Groovy failed on a null sum.
+let points = 0
+function addPoints {
+  points = 0
+  points += 300
+}
+addPoints()
+say "Points ${points}"
+// A Date reads its milliseconds as a number, so a variable it sets starts at 0.
+let started = 0
+function mark {
+  started = getTimestamp().toMilliseconds()
+}
+mark()
+say "Took ${getTimestamp().toMilliseconds() - started}"
 exit

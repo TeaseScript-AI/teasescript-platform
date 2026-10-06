@@ -26,3 +26,6 @@ def answer = getString(stored, "")
 // A question that may be null elsewhere needs no test right after it was set to text.
 stored = "Ready now?"
 def ready = getBoolean(stored)
+// A character of a text is its one-character substring, also counted from the end.
+def code = getString("Square?", "B4")
+show("Row " + code[0] + ", column " + code[-1])

@@ -138,6 +138,12 @@ const OBJECT_METHOD_RESULT_TYPES = new Map<string, ValueType>([
   ["toString", STRING],
   ["toUpperCase", STRING],
   ["trim", STRING],
+  // A Date's milliseconds, and the pixel size of a Java image or icon.
+  ["getTime", NUMBER],
+  ["getWidth", NUMBER],
+  ["getHeight", NUMBER],
+  ["getIconWidth", NUMBER],
+  ["getIconHeight", NUMBER],
 ]);
 
 /** Java list classes, whose constructors make a list. */
@@ -271,6 +277,9 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   if (onlyOf(left, STRING | NULL) && left & STRING) return STRING;
   if (onlyOf(right, STRING | NULL) && right & STRING) return STRING;
   if (onlyOf(left, NUMBER) && onlyOf(right, NUMBER)) return NUMBER;
+  // Groovy failed on a null number operand, so where the sum has a value it is a number.
+  if (onlyOf(left, NUMBER | NULL) && left & NUMBER && onlyOf(right, NUMBER | NULL) && right & NUMBER)
+    return NUMBER;
   if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
   return UNKNOWN;
 }

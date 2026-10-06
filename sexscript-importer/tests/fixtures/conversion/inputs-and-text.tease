@@ -46,4 +46,7 @@ let answer = askText
 stored = "Ready now?"
 say stored
 let ready = (choose yes: "Yes", no: "No") == "yes"
+// A character of a text is its one-character substring, also counted from the end.
+let code = askText "Square?", default: "B4"
+say "Row ${code.substring(0, 1)}, column ${code.substring(code.length - 1)}"
 exit

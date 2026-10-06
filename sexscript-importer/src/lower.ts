@@ -8636,6 +8636,40 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       return key === null ? null : { kind: "index", target, index: key, dict: true };
     }
     const negativeIndex = negativeConstantIndex(indexNode);
+    // Groovy `text[i]` is the character at i, also counted from the end; TeaseScript text takes `substring`.
+    if (
+      targetNode !== null &&
+      onlyOf(inferType(targetNode, context.types), STRING | NULL) &&
+      (inferType(targetNode, context.types) & STRING) !== 0 &&
+      indexNode.kind !== "range"
+    ) {
+      const index = lowerExpression(indexNode, context);
+      if (index === null) return null;
+      const length: IrExpression = { kind: "property", target, name: "length" };
+      const start: IrExpression | null =
+        negativeIndex !== null
+          ? isRepeatableExpression(targetNode)
+            ? { kind: "binary", operator: "-", left: length, right: { kind: "literal", value: negativeIndex } }
+            : null
+          : isRepeatableExpression(indexNode)
+            ? index
+            : null;
+      if (start !== null) {
+        // The last character runs to the end; a literal position adds its 1 at once.
+        const end: IrExpression | null =
+          negativeIndex === 1
+            ? null
+            : start.kind === "literal" && typeof start.value === "number"
+              ? { kind: "literal", value: start.value + 1 }
+              : { kind: "binary", operator: "+", left: start, right: { kind: "literal", value: 1 } };
+        return {
+          kind: "methodCall",
+          target,
+          name: "substring",
+          arguments: end === null ? [start] : [start, end],
+        };
+      }
+    }
     if (
       negativeIndex !== null &&
       targetNode !== null &&
