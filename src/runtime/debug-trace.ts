@@ -53,6 +53,11 @@ export type RuntimeDebugRecordKind =
   | "interpolation"
   /** A `say` message, with the event sequence it was emitted with. */
   | "output"
+  /**
+   * A branch condition, `true` or `false`, that decided which way execution went; the writes on the side it took name
+   * it as their `control`.
+   */
+  | "decision"
   /** `showImage` or `hideImage` set the Stage image. */
   | "image"
   /** A value whose origin the trace did not record; see its detail for why. */
@@ -159,6 +164,11 @@ export interface RuntimeDebugRecord {
   readonly detail: RuntimeDebugRecordDetail | null;
   /** The variable whose version the record is, for `variableRecord`: a scope ID or `"global"`, and its name. */
   readonly variable: { readonly scope: number | "global"; readonly name: string } | null;
+  /**
+   * For a write, message, Stage image, or decision: the innermost branch decision of the same call on whose taken side
+   * it happened, or `null`. See `RUNTIME.md#debug-trace` for the branches.
+   */
+  readonly control: RuntimeDebugDependency | null;
 }
 
 /** How the current epoch began: from Start, from a restored checkpoint, or by attaching to a running session. */
@@ -304,13 +314,45 @@ interface TraceRecord {
   readonly dependencies: readonly number[];
   readonly omitted: number;
   readonly detail: RuntimeDebugRecordDetail | null;
+  readonly control: number | null;
   bytes: number;
   /** Further index keys that name this record, dropped with it. */
   aliases: string[] | null;
 }
 
+/** A branch decision while execution is on the side it took: `[start, end)` of call frame `frame`. */
+interface Decision {
+  readonly serial: number;
+  readonly frame: number;
+  readonly start: number;
+  readonly end: number;
+  readonly instruction: number;
+  readonly sceneTimeMs: number;
+  readonly value: boolean;
+  readonly deps: DebugDependencies;
+  /** The decision it was made inside of, in the same call. */
+  readonly parent: Decision | null;
+  /** Its record, once a write names it. */
+  id: number | null;
+}
+
+/** Record kinds that name the decision they happened under. */
+const CONTROLLED: ReadonlySet<RuntimeDebugRecordKind> = new Set([
+  "declaration",
+  "assignment",
+  "mutation",
+  "storage",
+  "return",
+  "output",
+  "image",
+]);
+
+/** Decisions kept at once; nesting beyond it, or decisions of calls that never returned to them, drop the oldest. */
+const MAX_DECISIONS = 256;
+
 interface Stage {
   readonly nextId: number;
+  readonly decisionSerial: number;
   readonly draws: number;
   readonly pendingOutput: TraceStore["pendingOutput"];
   readonly pendingStorage: TraceStore["pendingStorage"];
@@ -344,6 +386,7 @@ export class TraceStore {
     readonly value: SerializableRuntimeValue;
     readonly instruction: number;
     readonly deps: DebugDependencies;
+    readonly control: number | null;
   } | null = null;
   #lastRandom: TraceRecord | null = null;
   #stage: Stage | null = null;
@@ -359,9 +402,13 @@ export class TraceStore {
   #plan: InstructionPlan | null = null;
   #last: WeakRef<RuntimeSnapshot> | null = null;
 
-  /** Where records are attributed now. */
+  /** Where records are attributed now: an instruction, and the call frame that runs it when the engine runs it. */
   #instruction: number | null = null;
+  #frame: number | null = null;
   #sceneTimeMs = 0;
+  /** Decisions whose taken side execution may still be on, innermost last. */
+  #decisions: Decision[] = [];
+  #decisionSerial = 0;
   /** The collector of the value being evaluated now. */
   acc: DebugDependencies = emptyDependencies();
 
@@ -431,6 +478,7 @@ export class TraceStore {
     this.#rngAnchorState = null;
     this.#firstEventSequence = null;
     this.#plan = null;
+    this.#decisions = [];
     this.acc = emptyDependencies();
   }
 
@@ -442,13 +490,118 @@ export class TraceStore {
     this.#versions = new Map();
     this.#outputs = new Map();
     this.#stage = null;
+    this.#decisions = [];
   }
 
-  /** Attributes the following records to an instruction at a scene time, with a fresh collector. */
-  at(instruction: number | null, sceneTimeMs: number): void {
+  /**
+   * Attributes the following records to an instruction at a scene time, with a fresh collector. The engine also passes
+   * the call `frame` running the instruction: a decision of that call ends once execution is outside the side it took.
+   */
+  at(instruction: number | null, sceneTimeMs: number, frame: number | null = null): void {
     this.#instruction = instruction;
+    this.#frame = frame;
     this.#sceneTimeMs = sceneTimeMs;
     this.acc = emptyDependencies();
+    if (frame === null || instruction === null || this.#decisions.length === 0) return;
+    // Running calls have increasing IDs, the running one the highest, so a decision of a higher ID belongs to a call
+    // that returned. Compacted in place: this runs for every instruction.
+    const decisions = this.#decisions;
+    let kept = 0;
+    for (const decision of decisions)
+      if (
+        decision.frame < frame ||
+        (decision.frame === frame && decision.start <= instruction && instruction < decision.end)
+      )
+        decisions[kept++] = decision;
+    decisions.length = kept;
+  }
+
+  /**
+   * A `jumpIfFalse` at the current instruction decided `value`, with the condition's causes collected. Taken, it runs up
+   * to its `target`; not taken, it runs from `target` up to where the jump just before it skips to, when that jump ends
+   * the taken side of the same construct: an if with an else, a switch case, or an `or`. A nested construct's jump does
+   * not enclose the condition's `span`, so it never counts.
+   */
+  branch(value: boolean, target: number, span: PlanSourceLocation): void {
+    const index = this.#instruction;
+    if (this.#failure !== null || index === null || this.#frame === null || this.#plan === null)
+      return;
+    try {
+      if (value) {
+        this.#decide(value, index + 1, target);
+        return;
+      }
+      const skip = this.#plan.instructions[target - 1];
+      if (skip?.kind === "jump" && skip.target > target && encloses(skip.span, span))
+        this.#decide(value, target, skip.target);
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  /** A `while` condition at the current instruction was true: this round runs up to the loop's `end`. */
+  loopRound(end: number): void {
+    const index = this.#instruction;
+    if (this.#failure !== null || index === null || this.#frame === null) return;
+    try {
+      this.#decide(true, index + 1, end);
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  #decide(value: boolean, start: number, end: number): void {
+    if (start >= end) return;
+    this.#decisionSerial += 1;
+    this.#decisions.push({
+      serial: this.#decisionSerial,
+      frame: this.#frame!,
+      start,
+      end,
+      instruction: this.#instruction!,
+      sceneTimeMs: this.#sceneTimeMs,
+      value,
+      deps: copyDependencies(this.acc),
+      parent: this.#innermost(),
+      id: null,
+    });
+    if (this.#decisions.length > MAX_DECISIONS) this.#decisions.shift();
+  }
+
+  /** The innermost decision of the running call; `at` keeps only those whose taken side holds the instruction. */
+  #innermost(): Decision | null {
+    if (this.#frame === null) return null;
+    for (let index = this.#decisions.length - 1; index >= 0; index -= 1)
+      if (this.#decisions[index]!.frame === this.#frame) return this.#decisions[index]!;
+    return null;
+  }
+
+  /** The record of the innermost decision of the running call, recorded with the decisions around it on first use. */
+  #control(): number | null {
+    const innermost = this.#innermost();
+    if (innermost === null) return null;
+    const unrecorded: Decision[] = [];
+    let decision: Decision | null = innermost;
+    while (decision !== null && decision.id === null) {
+      unrecorded.push(decision);
+      decision = decision.parent;
+    }
+    for (let index = unrecorded.length - 1; index >= 0; index -= 1) {
+      const outer = unrecorded[index]!;
+      outer.id = this.#append(
+        "decision",
+        null,
+        null,
+        outer.value,
+        true,
+        outer.deps,
+        null,
+        null,
+        outer.parent?.id ?? null,
+        outer,
+      );
+    }
+    return innermost.id;
   }
 
   /** Collects into a fresh collector and returns the previous one, for `pop`. */
@@ -537,10 +690,11 @@ export class TraceStore {
     span: TraceSpan | null = null,
     detail: RuntimeDebugRecordDetail | null = null,
     deps: DebugDependencies = this.acc,
+    control?: number | null,
   ): number | null {
     if (this.#failure !== null) return null;
     try {
-      return this.#append(kind, key, target, value, true, deps, span, detail);
+      return this.#append(kind, key, target, value, true, deps, span, detail, control);
     } catch (error) {
       this.#fail(error);
       return null;
@@ -822,7 +976,12 @@ export class TraceStore {
   }
 
   /** A write to the session's storage view: the script's, or a debugging tool's edit, which has no causes. */
-  storage(key: string, value: SerializableRuntimeValue, edited = false): void {
+  storage(
+    key: string,
+    value: SerializableRuntimeValue,
+    edited = false,
+    control: number | null | undefined = undefined,
+  ): void {
     // A key longer than a preview is not indexed: a later load of it shows no recorded save.
     this.write(
       "storage",
@@ -832,19 +991,25 @@ export class TraceStore {
       null,
       Object.freeze({ kind: "storage", key: clip(key), deleted: value === null, edited }),
       edited ? emptyDependencies() : this.acc,
+      edited ? null : control,
     );
   }
 
-  /** A persistent write waits for the host; its causes wait with it. */
+  /** A persistent write waits for the host; its causes and the decision it happens under wait with it. */
   awaitStorage(actionId: number, key: string, value: SerializableRuntimeValue): void {
     if (this.#failure !== null || this.#instruction === null) return;
-    this.pendingStorage = {
-      actionId,
-      key,
-      value,
-      instruction: this.#instruction,
-      deps: copyDependencies(this.acc),
-    };
+    try {
+      this.pendingStorage = {
+        actionId,
+        key,
+        value,
+        instruction: this.#instruction,
+        deps: copyDependencies(this.acc),
+        control: this.#control(),
+      };
+    } catch (error) {
+      this.#fail(error);
+    }
   }
 
   storageSettled(actionId: number, stored: boolean): void {
@@ -854,7 +1019,7 @@ export class TraceStore {
     if (!stored) return;
     this.#instruction = pending.instruction;
     this.acc = pending.deps;
-    this.storage(pending.key, pending.value);
+    this.storage(pending.key, pending.value, false, pending.control);
   }
 
   /** A `say` emitted now with event `sequence`; its text's causes are `deps`. */
@@ -907,6 +1072,7 @@ export class TraceStore {
     if (this.#failure !== null) return null;
     const stage: Stage = {
       nextId: this.#nextId,
+      decisionSerial: this.#decisionSerial,
       draws: this.#draws,
       pendingOutput: this.pendingOutput,
       pendingStorage: this.pendingStorage,
@@ -939,6 +1105,13 @@ export class TraceStore {
       while (this.#records.length > this.#head && this.#records.at(-1)!.id >= stage.nextId)
         this.#bytes -= this.#records.pop()!.bytes;
       this.#nextId = stage.nextId;
+      // Staged decisions are undone with the state they steered; a decision recorded meanwhile is recorded anew.
+      this.#decisions = this.#decisions.filter(
+        (decision) => decision.serial <= stage.decisionSerial,
+      );
+      for (const decision of this.#decisions)
+        for (let item: Decision | null = decision; item !== null; item = item.parent)
+          if (item.id !== null && item.id >= stage.nextId) item.id = null;
       this.#draws = stage.draws;
       this.pendingOutput = stage.pendingOutput;
       this.pendingStorage = stage.pendingStorage;
@@ -975,6 +1148,10 @@ export class TraceStore {
     deps: DebugDependencies,
     span: TraceSpan | null,
     detail: RuntimeDebugRecordDetail | null,
+    // By default, the decision a kind that names one happened under.
+    control: number | null = CONTROLLED.has(kind) ? this.#control() : null,
+    // Where and when a decision recorded on first use was made.
+    decided: Decision | null = null,
   ): number {
     const preview = hasValue ? previewOf(value) : null;
     const record: TraceRecord = {
@@ -982,14 +1159,15 @@ export class TraceStore {
       kind,
       key,
       target,
-      instruction: this.#instruction,
+      instruction: decided?.instruction ?? this.#instruction,
       span: span === null || "sl" in span ? span : sourceSpanToPlanLocation(span),
-      sceneTimeMs: this.#sceneTimeMs,
+      sceneTimeMs: decided?.sceneTimeMs ?? this.#sceneTimeMs,
       preview: preview?.text ?? null,
       previewTruncated: preview?.truncated ?? false,
       dependencies: Object.freeze([...deps.ids]),
       omitted: deps.omitted,
       detail,
+      control,
       bytes: 0,
       aliases: null,
     };
@@ -1134,6 +1312,13 @@ export class TraceStore {
       omittedDependencies: record.omitted,
       detail: record.detail,
       variable: variableOf(record.key),
+      control:
+        record.control === null
+          ? null
+          : Object.freeze({
+              id: record.control,
+              retained: this.#find(record.control) !== undefined,
+            }),
     });
   }
 
@@ -1224,6 +1409,11 @@ function clip(text: string): string {
     : text;
 }
 
+/** Whether source span `outer` holds `inner`. */
+function encloses(outer: PlanSourceLocation, inner: PlanSourceLocation): boolean {
+  return outer.so <= inner.so && inner.eo <= outer.eo;
+}
+
 function copyDependencies(deps: DebugDependencies): DebugDependencies {
   return { ids: [...deps.ids], omitted: deps.omitted };
 }
@@ -1281,7 +1471,7 @@ function recordBytes(record: TraceRecord): number {
   return (
     RECORD_OVERHEAD_BYTES +
     2 * ((record.preview?.length ?? 0) + (record.target?.length ?? 0) + (record.key?.length ?? 0)) +
-    8 * record.dependencies.length
+    8 * (record.dependencies.length + (record.control === null ? 0 : 1))
   );
 }
 

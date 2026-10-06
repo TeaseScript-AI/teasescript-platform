@@ -811,6 +811,141 @@ test("Stage image changes record where they were set", () => {
   );
 });
 
+/** Each record that names a decision, with the decisions around it as `line:value`, innermost first. */
+function controlled(trace: RuntimeDebugContext): string[] {
+  return records(trace)
+    .filter((candidate) => candidate.control !== null && candidate.kind !== "decision")
+    .map((candidate) => {
+      const chain: string[] = [];
+      for (let decision = candidate.control; decision !== null;) {
+        const found = record(trace, decision.id);
+        assert.equal(found.kind, "decision");
+        chain.push(`${found.location?.line}:${found.preview}`);
+        decision = found.control;
+      }
+      return `${candidate.kind} ${candidate.target ?? ""} ${candidate.preview} <- ${chain.join(" <- ")}`;
+    });
+}
+
+test("a write names the innermost branch decision on whose taken side it ran", () => {
+  const played = traced(
+    [
+      "let a = 3",
+      "let x = 0",
+      "if a > 2 {",
+      "    x = 1",
+      "    if a > 5 {",
+      "        x = 2",
+      "    } else {",
+      "        x = 3",
+      "    }",
+      "}",
+      "x = 4",
+      "if a == 1 { x = 5 } else if a == 3 { x = 6 } else { x = 7 }",
+      "switch a {",
+      "    case 1 { x = 8 }",
+      "    case 2, 3 { x = 9 }",
+      "    default { x = 10 }",
+      "}",
+      "let n = 0",
+      "while n < 5 {",
+      "    n += 1",
+      "    if n == 2 { break }",
+      "}",
+      "function twice(v) {",
+      "    if v > 1 { return v * 2 }",
+      "    let z = 1",
+      "    return z",
+      "}",
+      "if a > 0 { x = twice(a) }",
+      "x = twice(0)",
+      'say "${x} ${n}"',
+      "exit",
+    ].join("\n"),
+  );
+  assertComplete(played);
+  // Writes after a construct, and a callee's writes, name no decision of the caller.
+  assert.deepEqual(controlled(played.trace), [
+    "assignment x 1 <- 3:true",
+    "assignment x 3 <- 5:false <- 3:true",
+    "assignment x 6 <- 12:true <- 12:false",
+    "assignment x 9 <- 15:true <- 14:false",
+    "assignment n 1 <- 19:true",
+    "assignment n 2 <- 19:true",
+    "return  6 <- 24:true",
+    "assignment x 6 <- 28:true",
+  ]);
+  // Each round of a loop is a decision of its own, and a decision's causes are its condition's.
+  const rounds = records(played.trace).filter(
+    (candidate) => candidate.kind === "decision" && candidate.location?.line === 19,
+  );
+  assert.equal(rounds.length, 2);
+  assert.deepEqual(
+    causes(played.trace, rounds[1]!).map((cause) => [cause.target, cause.preview]),
+    [["n", "1"]],
+  );
+  // A decision that governs no write is not recorded.
+  assert.equal(
+    records(played.trace).some(
+      (candidate) => candidate.kind === "decision" && candidate.location?.line === 21,
+    ),
+    false,
+  );
+});
+
+test("and, or, and load defaults decide too, and blocks keep their own decisions", () => {
+  const played = traced(
+    [
+      "let flag = true",
+      'let sure = flag and (askText "Really?") == "y"',
+      'let other = flag or (askText "Never?") == "y"',
+      "let off = false",
+      'let either = off or (askText "Other?") == "n"',
+      "let beats = 0",
+      "if flag {",
+      "    let t = timer(duration: 1, async: true, repeat: true) {",
+      "        beats += 1",
+      "    }",
+      "    wait 3",
+      "    t.stop()",
+      "}",
+      'say "${sure} ${other} ${either} ${beats}"',
+      "exit",
+    ].join("\n"),
+    {
+      answers: [
+        () => ({ kind: "submittedText", submittedText: "y" }),
+        () => ({ kind: "submittedText", submittedText: "n" }),
+      ],
+    },
+  );
+  assertComplete(played);
+  const lines = controlled(played.trace);
+  // The question of a right side that ran names the left side's decision; the timer block's writes name none.
+  assert.deepEqual(
+    lines.filter((line) => line.startsWith("output")),
+    ['output  "Really?" <- 2:true', 'output  "Other?" <- 5:false'],
+  );
+  assert.ok(lines.some((line) => line.startsWith("declaration t ") && line.endsWith(" <- 7:true")));
+  assert.deepEqual(
+    lines.filter((line) => line.includes(" beats ")),
+    [],
+  );
+  const said = played.events.find((event) => event.kind === "say" && event.text.startsWith("true"));
+  assert.ok(said?.kind === "say" && !said.text.endsWith(" 0"), "the timer block ran");
+});
+
+test("a rejected say inside a branch leaves no decision behind", () => {
+  const played = traced(
+    ["let pace = -1", "if pace < 0 {", '    say "${["a", "b"]}", pace', "}", "exit"].join("\n"),
+  );
+  assert.equal(played.snapshot.status, "failed");
+  assert.deepEqual(
+    records(played.trace).filter((candidate) => candidate.kind === "decision"),
+    [],
+  );
+});
+
 test("a rejected say leaves no output, draw, or link behind", () => {
   const played = traced(["let pace = -1", 'say "${["a", "b"]}", pace', "exit"].join("\n"));
   assert.equal(played.snapshot.status, "failed");

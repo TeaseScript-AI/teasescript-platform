@@ -1320,8 +1320,14 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   dropped.
 - **Queries.** `record(id)` gives a detached JSON-safe view; `outputRecord(eventSequence)`, `outputs(limit)`,
   `variableRecord(scopeId | "global", name)`, `storageRecord(key)`, and `stageImageRecord()` give record IDs.
-- **Not linked yet.** The condition of an `if`, `while`, or other branch is not a cause of the values set inside it;
-  each record's location shows its statement.
+- **Branch decisions.** A variable write, `return` value, storage write, message, or Stage image names in `control`
+  the innermost branch decision of the same call on whose taken side it happened: an `if`, `else if`, or `else`, a
+  `switch` case or `default`, a `while` round, the right side of an `and` or `or` that a pausing operand compiles to
+  instructions, or a `load` default. A `decision` record holds the condition's value and causes and names the decision
+  it was made inside of; it is recorded when a write first names it, so a decision that governs no write leaves no
+  record. Code of another call, such as a called function or a timer or button block, names its own decisions only. A
+  decision is kept while execution is on its taken side, at most 256 at once; one dropped beyond that leaves its later
+  writes without a `control`, never with another's.
 
 ## Checkpoint boundary
 

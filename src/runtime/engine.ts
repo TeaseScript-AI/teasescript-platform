@@ -254,7 +254,11 @@ function executeInstructionBoundary(
 
   snapshot.status = "running";
   const evaluator = context.evaluator();
-  context.trace?.at(instructionIndex, snapshot.currentSessionTimeMs);
+  context.trace?.at(
+    instructionIndex,
+    snapshot.currentSessionTimeMs,
+    currentCallFrameId(snapshot) ?? 0,
+  );
   try {
     executePlannedInstruction(plan, instruction, snapshot, evaluator, context.events);
     if (snapshot.interactionResultHandoff?.continuationInstruction === instructionIndex) {
@@ -544,6 +548,7 @@ function executePlannedInstruction(
       if (typeof condition !== "boolean") {
         throw fault("TSR026", "Expected a boolean value.", instruction.condition.span);
       }
+      evaluator.trace?.branch(condition, instruction.target, instruction.span);
       snapshot.nextInstruction = condition ? snapshot.nextInstruction + 1 : instruction.target;
       return;
     }
@@ -1788,6 +1793,7 @@ function executeLoopStart(
       snapshot.nextInstruction = instruction.target;
       return;
     }
+    evaluator.trace?.loopRound(instruction.target);
     pushIterationScope(snapshot, []);
     advance(snapshot);
     return;
