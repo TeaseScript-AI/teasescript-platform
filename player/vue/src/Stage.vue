@@ -10,7 +10,11 @@ const props = defineProps<{
    */
   camera?: MediaStreamTrack | null;
 }>();
-const emit = defineEmits<{ mediaAspect: [ratio: number]; mediaFailure: [src: string | null] }>();
+const emit = defineEmits<{
+  mediaAspect: [ratio: number];
+  mediaLoad: [src: string | null];
+  mediaFailure: [src: string | null];
+}>();
 const cameraMirrored = defineModel<boolean>("cameraMirrored", { default: true });
 // The camera view covers the Stage image without replacing it: the image stays loaded underneath, and the Stage follows
 // the camera's aspect while the view is shown. The image's own aspect is kept for when the view goes.
@@ -21,12 +25,16 @@ const imageElement = ref<HTMLImageElement | null>(null);
 // browser's broken-image look, until its source changes.
 const failedSource = ref<string | null>(null);
 watch(failedSource, (source) => emit("mediaFailure", source));
+// The source the image on the Stage has loaded and decoded, or `null` while it loads, failed, or the Stage is empty.
+const loadedSource = ref<string | null>(null);
+watch(loadedSource, (source) => emit("mediaLoad", source));
 // Only a new source needs measuring again; an equal source keeps its loaded image and aspect.
 watch(
   () => props.media?.src,
   () => {
     imageAspect = 0;
     failedSource.value = null;
+    loadedSource.value = null;
     if (!props.camera) emit("mediaAspect", 0);
   },
 );
@@ -38,12 +46,14 @@ watch(
 );
 function mediaLoaded(event: Event) {
   const image = event.currentTarget;
-  if (!(image instanceof HTMLImageElement) || !image.naturalHeight) return;
+  if (!(image instanceof HTMLImageElement) || image !== imageElement.value || !props.media) return;
+  if (!image.naturalHeight) return;
+  loadedSource.value = props.media.src;
   imageAspect = image.naturalWidth / image.naturalHeight;
   if (!props.camera) emit("mediaAspect", imageAspect);
 }
 // Only the image element on the Stage now counts, in its current state: a removed element, or one whose source was
-// replaced, may still finish loading its earlier source.
+// replaced, may still finish loading its earlier source. The same holds for a successful load.
 function mediaFailed(event: Event) {
   const image = event.currentTarget;
   if (!(image instanceof HTMLImageElement) || image !== imageElement.value || !props.media) return;

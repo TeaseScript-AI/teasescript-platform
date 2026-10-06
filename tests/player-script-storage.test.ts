@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createLocalScriptStorage } from "../player/script-storage.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 
 class MemoryStorage implements Storage {
@@ -391,4 +392,20 @@ test("replacing and clearing keep scopes with shared prefixes apart and ignore g
       assert.deepEqual(await createLocalScriptStorage(storage, scope).load(), [
         { key: "answer", value: index },
       ]);
+});
+
+test("a value nested deeper than native JSON recursion allows is saved, replaced, and loaded", async () => {
+  let value: SerializableRuntimeValue = 1;
+  for (let depth = 0; depth < 5_000; depth += 1) value = { kind: "list", items: [value] };
+  // Compared as JSON text written without recursion, since a recursive comparison cannot reach the bottom.
+  const json = (data: unknown) => serializeValidatedRuntimeJson(data);
+  const storage = new MemoryStorage();
+  const provider = createLocalScriptStorage(storage, "demo");
+  await provider.write("deep", value);
+  assert.equal(json(await provider.load()), json([{ key: "deep", value }]));
+  await provider.replace([{ key: "replaced", value }]);
+  assert.equal(
+    json(await createLocalScriptStorage(storage, "demo").load()),
+    json([{ key: "replaced", value }]),
+  );
 });

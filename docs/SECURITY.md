@@ -46,9 +46,16 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
 - Authored Standard-chat message markup crosses into the Player as validated typed blocks and spans. Angle-bracket HTML
   remains literal text, controlled style values cannot carry arbitrary CSS, and only canonical HTTP(S) targets become
   links. The Player renders this structure without a raw-HTML path and opens links with opener isolation.
+- A debug export ([`DEBUGGER.md`](DEBUGGER.md#debug-export)) is untrusted external data wherever it is read. The
+  offline tool bounds decompression (64 MiB by default) and parses it as plain data, validates every field, restores its
+  checkpoint and replay anchor only through checkpoint validation, passes recorded arguments only to the engine's public
+  operations, answers media-store questions only from recorded answers, and replays in a worker with a time limit; it
+  never evaluates, imports, or fetches anything the file names. Exports are neither encrypted nor signed.
 - Saved script data moves between browsers only by the player's own hand ([transfer](DATA-AND-API.md#saved-data-transfer)):
   an export stays in the browser until the player downloads or copies it, with no upload, URL, or clipboard read. It is
-  neither encrypted nor signed and can contain private photos, which the Player says when exporting.
+  neither encrypted nor signed and can contain private photos, which the Player says when exporting. An import is
+  external data: it is decoded and validated completely, photos included, before the player confirms, applies only to
+  the script whose storage scope it names, and gets media references only from the trusted media store.
 
 ## Accepted pending-action boundary
 

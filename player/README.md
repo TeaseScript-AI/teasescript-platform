@@ -35,6 +35,9 @@ This is a local inspection route, not the production cross-origin Player/host pr
   images chosen for `askImage(...)` as session media and durable while saved script storage references them;
   `image-file.ts` checks a chosen file before it is stored. These shapes are implementation details rather
   than an accepted author-facing API.
+- `transfer-encoding.ts` holds the base64url and gzip encoding of the files players move by hand: saved-data transfers
+  (`storage-transfer.ts`) and debug exports (`debug-export.ts`, read offline by `tools/debug-export.mjs`; see
+  [`DEBUGGER.md`](../docs/DEBUGGER.md#debug-export)).
 
 Browser-native CSS remains responsible for layout and responsive composition. Vue 3 owns rendering and local
 presentation state in the Player; Tailwind CSS 4 is integrated through Vite as a foundation layer,
@@ -130,11 +133,23 @@ playing audio seeks along, and browser video seeking waits for video playback. E
 closed; these lines are local UI state, never transcript entries, notices, or checkpoint data. The explanations of
 Auto-skip and the jumps open from their labels. While Debug runs, `playerRuntimeDebugCountdown` selects the foreground
 wait that the countdown line under the foreground controls shows, and the scene clock refreshes its display estimate
-for it. Automation finds the controls by role and name (the `Debug menu` switch in Player Settings, the Debug launcher,
+for it. The **Now** tab (`DebugNow.vue`) combines `playerRuntimeDebugNow` (next statement, waiting statement, calls,
+timers, and media with their start statements) with the Stage's load reports for its current image element
+(`stageImageObservation`, judged by `debugStageImageStatus`); it adds nothing to the session. Automation finds the
+controls by role and name (the `Debug menu` switch in Player Settings, the Debug launcher,
 the `Debug` and `Auto-skip` switches, the `Skip event`, `+10 s` and `+1 min` buttons) or by
 `[data-player-setting="debug-menu"]`, `[data-debug-active]` and `data-development-time-action` (`skip`, `advance-10s`,
-`advance-1min`), the countdown in `[data-debug-countdown]`, the log lines under `[data-debug-log]`, and the latest
-announcement in `[data-debug-announcement]`.
+`advance-1min`), the countdown in `[data-debug-countdown]`, the Now tab's `[data-debug-now]` with `-next`, `-waiting`,
+`-calls` (and `-calls-toggle`), `-image` (its badge's `data-status`), `-image-path`, `-media`, and `-timers` (and
+`-timers-toggle`), the tabs by `[data-debug-tab]`, the Storage tab's `[data-debug-storage]` with `-summary`, `-row`
+(`-key`), `-photos` and `-refresh`, each value's `[data-storage-preview]`, `[data-storage-expand]` and
+`[data-storage-more]`, a thumbnail's
+`[data-storage-photo]` with its `data-state` (`loading`, `ready`, `missing`), the log lines under `[data-debug-log]` in
+the Log tab, and the latest announcement in `[data-debug-announcement]`. The Storage tab (`DebugStorage.vue`) reads
+the saved values through the session host's `readSavedData`, refreshes on its `savedDataRevision` and on `storage`
+events for its `savedDataScope`, renders each value as the flat, paged outline of `storageOutline`
+(`player/storage-preview.ts`, `StorageValue.vue`), and loads a thumbnail through `savedPhoto` only once it is in view,
+keyed by its reference.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
 [`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's

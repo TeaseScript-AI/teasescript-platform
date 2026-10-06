@@ -9,6 +9,7 @@ import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import type { PlayerSpeakerPresentation } from "../../model.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import DebugPanel from "./DebugPanel.vue";
+import DebugStorage from "./DebugStorage.vue";
 import DebugStatus from "./DebugStatus.vue";
 import FloatingViewfinder, { type FloatingPlace } from "./FloatingViewfinder.vue";
 import ImageCapture from "./ImageCapture.vue";
@@ -108,6 +109,12 @@ const savedData = computed(() =>
     ? {
         name: props.title,
         export: props.player.exportScriptStorage,
+        import: {
+          available: props.player.canImportScriptStorage.value,
+          endsSession: props.player.sessionInProgress.value,
+          review: props.player.reviewScriptStorageImport,
+          commit: props.player.importScriptStorage,
+        },
         canClear: props.player.canClearScriptStorage.value,
         clear: props.player.clearScriptStorage,
       }
@@ -188,9 +195,12 @@ async function toggleFullscreen() {
         v-model:active="debug.active.value"
         :time="debug.time.value"
         :log="debug.log.value"
+        :player="player"
+        :stage-covered="stageCamera !== null"
+        :stage-overridden="media !== undefined"
       >
-        <template v-if="$slots['debug-storage']" #storage>
-          <slot name="debug-storage" />
+        <template v-if="player.hasScriptStorage" #storage>
+          <DebugStorage :player="player" />
         </template>
       </DebugPanel>
       <slot v-else name="tool" v-bind="scope" />
@@ -234,6 +244,7 @@ async function toggleFullscreen() {
             :media="stageMedia"
             :camera="stageCamera"
             @media-aspect="mediaAspect = $event"
+            @media-load="player.stageImageLoad"
             @media-failure="player.stageImageFailure"
           >
             <template v-if="capture && !captureInWindow" #camera>

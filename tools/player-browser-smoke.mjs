@@ -121,9 +121,12 @@ async function main() {
       await insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`);
       await packageScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
-      await savedDataExportScenario(cdp, origin, profile);
+      const exported = await savedDataExportScenario(cdp, origin, profile);
+      await savedDataImportScenario(debugPort, origin, exported);
       await developmentTimeScenario(cdp, origin);
       await debugCountdownScenario(cdp, origin);
+      await debugNowScenario(cdp, origin);
+      await debugStorageScenario(cdp, origin, profile);
       await missingMediaScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
@@ -131,7 +134,7 @@ async function main() {
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export from Settings, development time controls, Debug countdowns, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, development time controls, Debug countdowns, Now and Storage, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -1458,6 +1461,252 @@ async function debugCountdownScenario(cdp, origin) {
 }
 
 /**
+ * Debug's Now tab on the `debug-now` package, shaped like the Domme3 case: from a nested folder, a called file's
+ * function shows an image reference the package lacks, then an image the browser cannot decode, then `hideImage`, then
+ * a valid image, while two sounds overlap and a hidden timer runs. The tab names each state with the authored paths,
+ * the call chain and the timers, and fits a narrow drawer.
+ */
+/**
+ * Debug's Storage tab on the `debug-storage` package: it lists the script's saved values in key order with typed
+ * previews and the saved photo, once per photo with the keys that use it; a member list expands to the shared photo;
+ * a later save updates it; Debug off hides it; and it fits the narrow drawer.
+ */
+async function debugStorageScenario(cdp, origin, profile) {
+  await setViewport(cdp, 1440, 900);
+  const chosen = join(profile, "debug-storage.png");
+  await writeFile(chosen, solidPng(24, 16, [40, 90, 200]));
+  const rows = `[...document.querySelectorAll('[data-debug-storage-row]')].map((row) => [row.querySelector('[data-debug-storage-key]').textContent, row.querySelector('[data-storage-preview]').textContent.trim()])`;
+  await navigate(cdp, `${origin}/player/?dev&package=debug-storage`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    visible("[data-composer-attach]"),
+    8_000,
+    "The image request offered no paperclip",
+  );
+  await openPicker(cdp);
+  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Saved.'))`,
+    8_000,
+    "The script did not save",
+  );
+  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+  await physicalClick(cdp, '[data-debug-tab="storage"]');
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-debug-storage-summary]')?.textContent.replace(/\\s+/g, ' ').trim() === 'Saved data · 7 keys'`,
+    5_000,
+    "The Storage tab did not count the saved values",
+  );
+  // Text shaped like a photo reference stays visible as text, the chosen photo's reference included.
+  const listed = (await value(cdp, rows)).map(([key, preview]) =>
+    key === '"player.photo"' && /^"captured-media:[0-9a-f-]+:1"$/.test(preview)
+      ? [key, "<photo reference>"]
+      : [key, preview],
+  );
+  assertEqual(
+    JSON.stringify(listed),
+    JSON.stringify([
+      ['"album"', "2 items"],
+      ['"missing"', '"captured-media:00000000-0000-4000-8000-000000000000:1"'],
+      ['"note"', '"captured-media:note"'],
+      ['"player.flags"', "2 properties"],
+      ['"player.name"', '"Ada"'],
+      ['"player.photo"', "<photo reference>"],
+      ['"player.score"', "3"],
+    ]),
+    "The Storage tab did not list the saved values in key order",
+  );
+  // The saved photo once, used by two keys; each thumbnail loads from this browser's storage once it is in view.
+  const photoRow = `[...document.querySelectorAll('[data-debug-storage-row]')].find((row) => row.querySelector('[data-debug-storage-key]').textContent === '"player.photo"')`;
+  await evaluate(cdp, `${photoRow}.scrollIntoView()`);
+  await waitFor(
+    cdp,
+    `!!${photoRow}.querySelector('[data-storage-photo][data-state="ready"] img')`,
+    5_000,
+    "The saved photo's row showed no thumbnail",
+  );
+  await evaluate(cdp, `document.querySelector('[data-debug-storage-photos]').scrollIntoView()`);
+  await waitFor(
+    cdp,
+    `/Used by "album", "player.photo"/.test(document.querySelector('[data-debug-storage-photos]').textContent) &&
+      !!document.querySelector('[data-debug-storage-photos] [data-storage-photo][data-state="ready"] img')`,
+    5_000,
+    "The Storage tab did not show the shared saved photo",
+  );
+  // A well-formed reference the store does not have says so, and ordinary text gets no thumbnail.
+  await evaluate(cdp, `document.querySelectorAll('[data-debug-storage-row]')[1].scrollIntoView()`);
+  await waitFor(
+    cdp,
+    `(() => { const [missing, note] = [...document.querySelectorAll('[data-debug-storage-row]')].slice(1, 3);
+      return missing.querySelector('[data-storage-photo]')?.dataset.state === 'missing' &&
+        /No saved photo/.test(missing.textContent) && !note.querySelector('[data-storage-photo]'); })()`,
+    5_000,
+    "A reference without a saved photo or ordinary text was misshown",
+  );
+  await evaluate(cdp, `document.querySelector('[data-debug-storage-row]').scrollIntoView()`);
+  await physicalClick(cdp, "[data-debug-storage-row] [data-storage-expand]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-debug-storage-row]').querySelectorAll('[data-storage-photo]').length === 2`,
+    5_000,
+    "The album did not expand to its two photos",
+  );
+  // A later save shows at once; the photo row's new reference, out of view, is not read until it comes into view.
+  await setViewport(cdp, 1440, 480);
+  await evaluate(cdp, `document.querySelector('[data-debug-active]').scrollIntoView()`);
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(
+    cdp,
+    `${rows}.some(([key, preview]) => key === '"player.score"' && preview === '4') &&
+      /:2"$/.test(${photoRow}.querySelector('[data-storage-preview]').textContent)`,
+    5_000,
+    "A later save did not update the Storage tab",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const row = ${photoRow}; const panel = row.closest('[data-tool]').getBoundingClientRect();
+        return row.getBoundingClientRect().top > panel.bottom && row.querySelector('[data-storage-photo]').dataset.state; })()`,
+    ),
+    "loading",
+    "An off-screen new photo reference was read before it came into view",
+  );
+  await evaluate(cdp, `${photoRow}.scrollIntoView()`);
+  await waitFor(
+    cdp,
+    `${photoRow}.querySelector('[data-storage-photo]').dataset.state === 'missing'`,
+    5_000,
+    "The new photo reference was not read once in view",
+  );
+  await setViewport(cdp, 1440, 900);
+  await evaluate(cdp, `document.querySelector('[data-debug-active]').scrollIntoView()`);
+  await physicalClick(cdp, "[data-debug-active]");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-debug-storage]') && /Debug is off/.test(document.querySelector('[data-debug-panel]')?.textContent ?? '')`,
+    2_000,
+    "Debug off left the Storage overview",
+  );
+  await physicalClick(cdp, "[data-debug-active]");
+  await waitFor(cdp, `!!document.querySelector('[data-debug-storage]')`);
+
+  await setViewport(cdp, 390, 760);
+  await waitFor(
+    cdp,
+    `document.querySelector('#player-shell')?.dataset.playerHorizontal === 'constrained'`,
+  );
+  // Focus in the tools keeps them open as the drawer; otherwise open it.
+  if (
+    await value(cdp, `!!document.querySelector('[data-player-top-bar] [data-sidebar="trigger"]')`)
+  )
+    await physicalClick(cdp, '[data-player-top-bar] [data-sidebar="trigger"]');
+  await waitFor(
+    cdp,
+    `!!document.querySelector('.tools-drawer [data-debug-storage]')`,
+    5_000,
+    "The drawer did not show Storage",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const storage = document.querySelector('.tools-drawer [data-debug-storage]'); return storage.scrollWidth <= storage.clientWidth && storage.getBoundingClientRect().right <= innerWidth && [...storage.querySelectorAll('[data-debug-storage-row]')].every((row) => row.scrollWidth <= row.clientWidth); })()`,
+    ),
+    true,
+    "The Storage tab overflows the narrow drawer",
+  );
+}
+
+async function debugNowScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const text = (selector) =>
+    `document.querySelector(${JSON.stringify(selector)})?.textContent.replace(/\\s+/g, " ").trim() ?? null`;
+  const imageStatus = (status) =>
+    `document.querySelector('[data-debug-now-image] [data-status]')?.getAttribute('data-status') === ${JSON.stringify(status)}`;
+  const next = async (status, failure) => {
+    await physicalClick(cdp, "[data-foreground-controls] button");
+    await waitFor(cdp, imageStatus(status), 5_000, failure);
+  };
+  await navigate(cdp, `${origin}/player/?dev&package=debug-now`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+  await waitFor(cdp, imageStatus("unresolved"), 5_000, "The bad reference was not unresolved");
+  assertEqual(
+    await value(cdp, text("[data-debug-now-image-path]")),
+    "Domme/Domme43.jpg",
+    "Now did not name the authored image path",
+  );
+  assertEqual(
+    await value(cdp, text("[data-debug-now-waiting]")),
+    "Button · Domme3/spanking.tease:3",
+    "Now did not name the waiting statement with its nested path",
+  );
+  await physicalClick(cdp, "[data-debug-now-calls-toggle]");
+  await waitFor(cdp, `!!document.querySelector('[data-debug-now-calls]')`);
+  assertEqual(
+    JSON.stringify(
+      await value(
+        cdp,
+        `[...document.querySelectorAll('[data-debug-now-calls] li')].map((item) => item.textContent.replace(/\\s+/g, " ").trim())`,
+      ),
+    ),
+    JSON.stringify([
+      "punish() · Domme3/spanking.tease:8",
+      "call Domme3/spanking.tease · Domme3/maintenance.tease:2",
+    ]),
+    "Now did not list the call chain",
+  );
+  // Both sounds play at once; the hidden timer is listed.
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('[data-debug-now-media] li')].filter((item) => /Playing/.test(item.textContent)).length === 2`,
+    5_000,
+    "Now did not list both playing sounds",
+  );
+  await physicalClick(cdp, "[data-debug-now-timers-toggle]");
+  await waitFor(
+    cdp,
+    `/hidden · running/.test(document.querySelector('[data-debug-now-timers]')?.textContent ?? '')`,
+    2_000,
+    "Now did not list the hidden timer",
+  );
+  await next("failed", "The undecodable image was not a load failure");
+  await next("hidden", "hideImage did not hide the Stage image");
+  await next("displayed", "The valid image was not displayed");
+  assertEqual(
+    await value(cdp, text("[data-debug-now-image-path]")),
+    "Domme0/Domme44.svg",
+    "Now did not name the valid image",
+  );
+
+  // The narrow drawer shows the tab without horizontal overflow.
+  await setViewport(cdp, 390, 760);
+  await waitFor(
+    cdp,
+    `document.querySelector('#player-shell')?.dataset.playerHorizontal === 'constrained'`,
+  );
+  await physicalClick(cdp, '[data-player-top-bar] [data-sidebar="trigger"]');
+  await waitFor(
+    cdp,
+    `!!document.querySelector('.tools-drawer [data-debug-now]')`,
+    5_000,
+    "The drawer did not show Now",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const now = document.querySelector('.tools-drawer [data-debug-now]'); return now.scrollWidth <= now.clientWidth && now.getBoundingClientRect().right <= innerWidth; })()`,
+    ),
+    true,
+    "The Now tab overflows the narrow drawer",
+  );
+}
+
+/**
  * The importer's route (#615): a folder package opened by URL with the Debug tool, auto-skip on from the URL. After a
  * physical Start the 15 s wait ends at once; +10 s at the waiting button shows in its elapsed time. Without auto-skip,
  * Skip event ends the wait; the default build has no Debug tool.
@@ -2241,6 +2490,265 @@ async function savedDataExportScenario(cdp, origin, profile) {
   await closeDialog("[data-saved-data-export]");
   await closeDialog("[data-player-settings]");
   await setViewport(cdp, 1440, 900);
+  return { file: join(downloads, download.name), text: exportedText };
+}
+
+// Imports the export into a fresh browser profile, as on another device: a file chosen and reviewed, whose Cancel keeps
+// the running session; then a dropped file whose confirmation ends that session, after which Start shows the saved photo
+// again; pasted text into a reloaded Player; and text of this script refused by another script.
+async function savedDataImportScenario(debugPort, origin, exported) {
+  const browser = await connectCdp(
+    (await (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).json()).webSocketDebuggerUrl,
+  );
+  const { result: context } = await browser.call("Target.createBrowserContext");
+  let cdp;
+  try {
+    const { result: target } = await browser.call("Target.createTarget", {
+      url: "about:blank",
+      browserContextId: context.browserContextId,
+    });
+    cdp = await connectCdp(`ws://127.0.0.1:${debugPort}/devtools/page/${target.targetId}`);
+    await cdp.call("Page.enable");
+    await cdp.call("Runtime.enable");
+    await setViewport(cdp, 1440, 900);
+    const text = (value) => `document.body.innerText.includes(${JSON.stringify(value)})`;
+    const start = "[data-session-activation] button";
+    const openImport = async () => {
+      await physicalClick(cdp, "[data-settings-trigger]");
+      await waitFor(
+        cdp,
+        `document.querySelector('[data-import-saved-data]')?.disabled === false`,
+        8_000,
+      );
+      await physicalClick(cdp, "[data-import-saved-data]");
+      await waitFor(cdp, `!!document.querySelector('[data-saved-data-import]')`);
+    };
+    const escape = async (selector) => {
+      for (const type of ["keyDown", "keyUp"])
+        await cdp.call("Input.dispatchKeyEvent", {
+          type,
+          key: "Escape",
+          code: "Escape",
+          windowsVirtualKeyCode: 27,
+        });
+      await waitFor(cdp, `!document.querySelector(${JSON.stringify(selector)})`);
+    };
+    const summary = `document.querySelector('[data-import-summary]')?.textContent.replace(/\\s+/g, ' ').trim()`;
+
+    await navigate(cdp, `${origin}/player/?package=saved-photo`);
+    await waitFor(cdp, `!!document.querySelector('${start}')`);
+    assertEqual(
+      await value(
+        cdp,
+        `Object.keys(localStorage).filter((name) => name.includes('saved-photo')).length`,
+      ),
+      0,
+      "The import profile starts without saved data",
+    );
+    await physicalClick(cdp, start);
+    await waitFor(
+      cdp,
+      visible("[data-composer-attach]"),
+      8_000,
+      "The fresh profile's session did not ask for an image",
+    );
+    assertEqual(
+      await value(cdp, text("Your saved photo is back.")),
+      false,
+      "The fresh profile already had the photo",
+    );
+
+    // A chosen file is checked and reviewed; Cancel keeps the session.
+    await openImport();
+    await setInputFiles(cdp, "[data-import-file]", [exported.file]);
+    await waitFor(
+      cdp,
+      `!!document.querySelector('[data-import-confirm]')`,
+      8_000,
+      "The chosen file was not reviewed",
+    );
+    assertEqual(
+      await value(cdp, summary),
+      "Imports 2 saved values · 1 photo, replacing 0 saved values.",
+      "Import review summary",
+    );
+    assertEqual(
+      await value(cdp, `document.querySelector('[data-import-confirm]').textContent.trim()`),
+      "End session and replace data",
+      "Confirming must say it ends the session",
+    );
+    // Measured once the dialog's opening zoom has finished.
+    await waitFor(
+      cdp,
+      `document.getAnimations().every((animation) => animation.playState !== 'running')`,
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `[...document.querySelectorAll('[data-saved-data-import] button:not([data-slot="dialog-close"])')].filter((button) => button.offsetParent && button.getBoundingClientRect().height < 44).map((button) => button.textContent.trim() + ' ' + button.getBoundingClientRect().height).join('; ')`,
+      ),
+      "",
+      "The import review's controls are not touch-sized",
+    );
+    await physicalClick(cdp, "[data-saved-data-import] [data-import-confirm] + button");
+    await waitFor(cdp, `!!document.querySelector('[data-import-drop]')`);
+    await escape("[data-saved-data-import]");
+    await escape("[data-player-settings]");
+    assertEqual(
+      await value(cdp, visible("[data-composer-attach]")),
+      true,
+      "Cancel ended the session",
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `Object.keys(localStorage).filter((name) => name.includes('saved-photo')).length`,
+      ),
+      0,
+      "Cancel changed the saved data",
+    );
+
+    // A dropped file; confirming ends the session, and the next Start shows the imported photo.
+    await openImport();
+    const bytes = (await readFile(exported.file)).toString("base64");
+    const drop = (names) =>
+      evaluate(
+        cdp,
+        `const bytes = Uint8Array.from(atob(${JSON.stringify(bytes)}), (character) => character.charCodeAt(0));
+        const transfer = new DataTransfer();
+        for (const name of ${JSON.stringify(names)}) transfer.items.add(new File([bytes], name));
+        document.querySelector('[data-import-drop]').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));`,
+      );
+    // Refusing a drop of two files also discards a file still being read, which never becomes the review.
+    await evaluate(
+      cdp,
+      `const read = File.prototype.arrayBuffer;
+      window.__releaseHeld = null;
+      File.prototype.arrayBuffer = function () {
+        if (this.name !== 'held.teasestorage.json.gz') return read.call(this);
+        return new Promise((resolve) => (window.__releaseHeld = () => resolve(read.call(this))));
+      };`,
+    );
+    await drop(["held.teasestorage.json.gz"]);
+    await waitFor(cdp, `typeof window.__releaseHeld === 'function'`);
+    await drop(["first.teasestorage.json.gz", "second.teasestorage.json.gz"]);
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-import-problem]')?.textContent.includes('Drop one exported file.') === true`,
+    );
+    await evaluate(cdp, `window.__releaseHeld();`);
+    await delay(500);
+    assertEqual(
+      await value(
+        cdp,
+        `!document.querySelector('[data-import-confirm]') && document.querySelector('[data-import-problem]')?.textContent.includes('Drop one exported file.') === true`,
+      ),
+      true,
+      "A file read before a refused drop became the import review",
+    );
+    await drop(["saved.teasestorage.json.gz"]);
+    await waitFor(
+      cdp,
+      `!!document.querySelector('[data-import-confirm]')`,
+      8_000,
+      "The dropped file was not reviewed",
+    );
+    await physicalClick(cdp, "[data-import-confirm]");
+    await waitFor(
+      cdp,
+      text("Saved data imported. Start to use it."),
+      8_000,
+      "The import did not finish",
+    );
+    assertEqual(
+      await value(cdp, visible("[data-composer-attach]")),
+      false,
+      "The session did not end",
+    );
+    await escape("[data-saved-data-import]");
+    await escape("[data-player-settings]");
+    await waitFor(
+      cdp,
+      `!!document.querySelector('${start}')`,
+      8_000,
+      "Start was not offered after the import",
+    );
+    await physicalClick(cdp, start);
+    await waitFor(
+      cdp,
+      text("Your saved photo is back."),
+      8_000,
+      "The imported data did not load at Start",
+    );
+    await waitFor(
+      cdp,
+      `(() => { const image = document.querySelector('.stage-media'); return !!image && image.complete && image.naturalWidth === 24; })()`,
+      8_000,
+      "The imported photo is not on the Stage",
+    );
+
+    // Pasted text into a reloaded Player, before Start, replaces the data without a session to end.
+    await navigate(cdp, `${origin}/player/?package=saved-photo`);
+    await waitFor(cdp, `!!document.querySelector('${start}')`);
+    await openImport();
+    await physicalClick(cdp, '[data-import-tab="text"]');
+    await waitFor(cdp, `!!document.querySelector('[data-import-text]')`);
+    await evaluate(
+      cdp,
+      `const area = document.querySelector('[data-import-text]');
+      area.value = ${JSON.stringify(exported.text.replace(/(.{76})/g, "$1\n"))};
+      area.dispatchEvent(new Event('input', { bubbles: true }));`,
+    );
+    await physicalClick(cdp, "[data-import-review]");
+    await waitFor(
+      cdp,
+      `!!document.querySelector('[data-import-confirm]')`,
+      8_000,
+      "The pasted text was not reviewed",
+    );
+    assertEqual(
+      await value(cdp, `document.querySelector('[data-import-confirm]').textContent.trim()`),
+      "Replace saved data",
+      "Without a session, confirming only replaces the data",
+    );
+    await physicalClick(cdp, "[data-import-confirm]");
+    await waitFor(cdp, text("Saved data imported. Start to use it."));
+    await escape("[data-saved-data-import]");
+    await escape("[data-player-settings]");
+
+    // Another script refuses this script's data and keeps its own.
+    await navigate(cdp, `${origin}/player/?package=pictures`);
+    await waitFor(cdp, `!!document.querySelector('${start}')`);
+    await openImport();
+    await physicalClick(cdp, '[data-import-tab="text"]');
+    await evaluate(
+      cdp,
+      `const area = document.querySelector('[data-import-text]');
+      area.value = ${JSON.stringify(exported.text)};
+      area.dispatchEvent(new Event('input', { bubbles: true }));`,
+    );
+    await physicalClick(cdp, "[data-import-review]");
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-import-problem]')?.textContent.includes('belongs to another script') === true`,
+      8_000,
+      "Another script's data was not refused",
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `Object.keys(localStorage).some((name) => name.includes('development-package:pictures'))`,
+      ),
+      false,
+      "The refused import changed the other script's data",
+    );
+  } finally {
+    cdp?.close();
+    await browser.call("Target.disposeBrowserContext", {
+      browserContextId: context.browserContextId,
+    });
+    browser.close();
+  }
 }
 
 async function askImageCameraScenario(cdp, origin, profile) {

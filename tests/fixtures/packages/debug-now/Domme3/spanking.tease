@@ -1,0 +1,15 @@
+function punish {
+  showImage "Domme/Domme43.jpg"
+  let first = showButton "Next"
+}
+playAudio(file: "sounds/loop.wav", async: true, repeat: true)
+playAudio(file: "sounds/bell.wav", async: true, repeat: true)
+timer async hidden 600 s
+punish()
+showImage "Domme0/broken.svg"
+let second = showButton "Next"
+hideImage
+let third = showButton "Next"
+showImage "Domme0/Domme44.svg"
+let fourth = showButton "Next"
+end

@@ -172,6 +172,14 @@ the exact field sets, the storage-entry validation used for runtime storage, the
 `byteLength`, and the rule that every photo is used by a value detect damage. There is no signature: a value or photo
 edited by hand is accepted when it is valid, a replaced photo with its `byteLength` updated.
 
+An import accepts only data whose `scope` is the host's scope for the open script; there is no scope rewriting. Each
+photo is then checked like an image chosen for `askImage(...)`: its type is read from its bytes and the browser must
+decode it. After the player confirms, a session in progress ends, each photo becomes new media with a fresh reference,
+and every value that held an exported reference, as text, list or set item, object property name or value, or dict key
+or value, gets the new one. The values then replace the scope's saved data all at once, with key order kept; the photos
+are stored first, so a failure leaves the previous data. Earlier media records are never overwritten, and photos left
+unreferenced are reclaimed later.
+
 Ordinary Player use does not expose arbitrary manual checkpoint/restore points as a rewind mechanism. The runtime/Player
 creates and restores supported checkpoints according to the session lifecycle. Developer/debug tooling may expose
 manual checkpoint and restore operations because those runs are explicitly diagnostic rather than ordinary canonical

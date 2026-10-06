@@ -674,7 +674,8 @@ can `stop()` a later timer before it expires, and a timer it starts orders by it
 Time reaches waits and timers only through `observeTime`; a Player cannot complete them. Host input (an interaction
 answer or a pacing skip) happens at the observed time, so `completeAction` returns `executionPending` without changing
 anything while scene time is behind the observed time or a due expiry block can run. A storage write acknowledgement
-is the exception: it is accepted at the current scene time (see [Script storage](#script-storage)). The Player then runs the engine
+is the exception: it is accepted at the current scene time (see [Script storage](#script-storage)), as is a debugging tool's
+storage edit. The Player then runs the engine
 and retries with the same action ID; if a block ended or replaced that action, the retry reports it as no longer
 active. A failed session accepts no host input: such a request is `invalidPayload`, and Players schedule no further
 observation for it.
@@ -1008,7 +1009,25 @@ catch-up holds at the block's due time, the completion is accepted at that scene
 due time before catch-up continues. A pending write survives checkpoint and restore like other foreground actions.
 
 Restoring an older checkpoint carries its older storage view. A later read-modify-write can overwrite newer durable
-data; reconciliation belongs to #469 and is not implemented here.
+data; reconciliation belongs to #469 and is not implemented here. Later durable-store changes do not update a session's
+view by themselves. Replacing the durable store, as a saved-data import does
+([transfer](DATA-AND-API.md#saved-data-transfer)), never changes it: the Player ends a session in progress first, and
+the next fresh session loads the replaced values.
+
+A debugging tool changes the view only through `applyExternalStorageEdit(plan, snapshot, { key, value })`
+([DEBUGGER.md](DEBUGGER.md#player-debug)): a host input, not author syntax. The request is captured as external data
+and must be exactly `{ key, value }` with a string key, any string, and a value that `validateScriptStorageEntries`
+accepts, or `null` to remove the key; otherwise the outcome is `invalidEdit`. An ended or failed session refuses it
+(`invalidState`), and so does a pending `storageWrite` (`storageWritePending`): the host acknowledges that write with
+`completeAction` first, runs nothing, and then edits, so the edit follows the write and precedes any further script
+code. An accepted edit applies at the current instruction boundary, also while scene time is behind the observed time
+or a block is due; this is a deliberate debugging exception to observed-time input ordering, so a due block that has
+not run yet reads the edited value. It writes a copy of the value into the view, emits one `scriptStorageEdited`
+event (`key`, `operation` `set` or `delete`, and the current and observed scene times; the value stays in the recorded
+input), executes no instruction, and changes nothing else: values already loaded into variables, temporaries, or
+prepared results keep what they loaded. The edited view is ordinary checkpoint state, so restore reproduces it without
+applying the edit again; replaying the recorded input from an earlier anchor reaches the same state. It adds no plan,
+snapshot, or checkpoint revision.
 
 ## Camera capture
 
@@ -1215,6 +1234,13 @@ Runtime state must be serializable at every instruction boundary, but normal exe
 A checkpoint is currently a self-contained plan-and-snapshot bundle. Restore validates the checkpoint, instruction plan, snapshot, format versions, references, function/call progress, RNG state, and other structural invariants before execution resumes.
 
 Under ADR 0016, restore of a valid waiting checkpoint remains waiting and preserves the same action, `currentSessionTimeMs`, settlement, and event identities. Restore does not read time or silently complete a deadline. After the restored-session activation gate, the Player application submits an explicit observation; the atomic observation operation persists the nondecreasing effective coordinate before settling due actions.
+
+Without host builtins or a random source, as the Player runs it, execution reads no clock, randomness, or host state
+outside the snapshot and the arguments of each operation, except a media store's answer whether it holds a
+captured-media reference. Running the same operations with the same arguments
+and store answers from a restored snapshot therefore reaches the same state and events; a debug export's replay relies
+on this ([`DEBUGGER.md`](DEBUGGER.md#debug-export)). The Player records its operations beside the session, outside
+runtime state, and recording never changes them.
 
 ## Format evolution
 

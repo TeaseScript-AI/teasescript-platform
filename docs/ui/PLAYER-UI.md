@@ -288,6 +288,17 @@ unavailable it selects the text for copying with the browser. Nothing leaves the
 actions, and closing the dialog releases the prepared file and text. The dialog fits narrow screens, and its own
 controls are at least 44px tall.
 
+Its **Import…** control opens a dialog whose **File** tab reads one exported file, chosen with **Choose file…** or
+dropped on its drop area, and whose **Text** tab reads pasted text after **Review import**; a file dropped elsewhere on
+the dialog is ignored. Everything is checked before anything changes, and a problem, such as damaged data or data of
+another script, is shown with nothing changed. The review then asks "Replace all saved data for this script? This
+cannot be undone.", counts the incoming values and photos against the saved values, lists the keys the import removes,
+and suggests exporting first. While a session runs, waits for Continue, or is starting, the confirmation is **End
+session and replace data** and explains that unsaved progress is lost; Cancel leaves the session running. Confirming
+ends that session, replaces the saved data, and offers Start, which begins a new session with the imported data; it
+neither starts nor continues one by itself. A failed import keeps the saved data, and Start is still offered. Import is
+unavailable while saved data is cleared or this browser's storage cannot be read.
+
 ## Left tools area
 
 The Standard Player owns the tools menu, sidebar visibility, temporary/pinned panels, shared headers, panel order and
@@ -389,7 +400,9 @@ the stage-shape goal remain provisional visual inputs, not additional device mod
 
 `Visual Lab` and `Layout Debug` are development-preview tools, not Standard Player product tools. The Debug panel is
 the Standard Player's platform Debugger tool ([DEBUGGER.md](../DEBUGGER.md#player-debug)); it appears first in the
-tools menu while Player Settings' Debug menu is on, and turning that menu off removes it from every panel state.
+tools menu while Player Settings' Debug menu is on, and turning that menu off removes it from every panel state. Its
+time controls stand above its tabs (shadcn-vue Tabs): Now, Log, and Storage when the host persists script storage; Now
+and Storage wrap long paths, keys, and values so they fit the narrow drawer.
 
 ## Session start and user activation
 

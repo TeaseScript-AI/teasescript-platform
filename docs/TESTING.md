@@ -599,13 +599,21 @@ the request opened turns off after a photo or a file answered, and that a busy c
 paperclip stays. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
 waits: the downloaded gzip file and the text hold the same document with the saved photo's exact bytes and not the
 unsaved one, a refused copy selects the text, closing releases the file, and the narrow dialog fits with touch-sized
-controls. On the
+controls. In a fresh browser profile it imports that export: a chosen file is reviewed and Cancel keeps the running
+session; a dropped file's confirmation ends the session, and the next Start shows the imported photo; pasted text
+replaces the data before Start; and another package refuses the text. On the
 importer's route `/player/?dev&package=waiting&time=skip`, auto-skip ends that package's 15 s wait right after a
 physical Start, and +10 s at its button reaches the button's elapsed time; without `time=skip`, Skip event ends the
 wait, and the default build starts with the Debug menu off. In the default build, Settings' Debug menu shows the
 `debug-countdowns` package's countdown line with the Debug panel closed: for its wait, none for its blocking timer, then
 its pacing and its timed button after Skip event; the panel's Debug switch and the Debug menu hide and show it, an untimed
-button has none, and the transcript stays free of Debug text; `?dev` starts with the menu on. With auto-skip, the `missing-media` package, which refers to a
+button has none, and the transcript stays free of Debug text; `?dev` starts with the menu on. Its Now tab on the
+`debug-now` package, shaped like the Domme3 case, names a nested call chain and two overlapping sounds and the hidden
+timer, and the Stage image as unresolved, failed, hidden, and displayed in turn, and fits the narrow drawer. Its Storage
+tab on the `debug-storage` package lists the saved values in key order with typed previews, keeps reference-shaped text
+visible and says when it names no saved photo, shows the saved photo once with both keys that use it and expands a list
+to it, updates after a later save without reading a changed photo reference before it is in view, hides with Debug
+off, and fits the narrow drawer. With auto-skip, the `missing-media` package, which refers to a
 missing and an invalid image and sound, reaches its end at once, with one warning notice per path and a valid image
 restoring the Stage; in `late-image`, an invalid image that fails only after the script hid it and showed a valid one
 neither hides that image nor is reported.

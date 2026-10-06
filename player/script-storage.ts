@@ -3,6 +3,7 @@ import {
   type RuntimeScriptStorageEntrySnapshot,
   type SerializableRuntimeValue,
 } from "../src/index.js";
+import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 
 /**
  * Persistent script storage for TeaseScript `save`, `load`, and `delete` in one storage scope. The host chooses the
@@ -94,7 +95,7 @@ export function createLocalScriptStorage(
     try {
       for (const { key, value } of entries) {
         const name = itemName(generation, key);
-        store.setItem(name, JSON.stringify({ v: PAYLOAD_VERSION, value }));
+        store.setItem(name, payload(value));
         staged.push(name);
       }
       store.setItem(headName, JSON.stringify({ v: PAYLOAD_VERSION, generation }));
@@ -128,11 +129,16 @@ export function createLocalScriptStorage(
       const name = itemName(head(store), key);
       // A quota or denial error rejects, so the runtime keeps the previous value.
       if (value === null) store.removeItem(name);
-      else store.setItem(name, JSON.stringify({ v: PAYLOAD_VERSION, value }));
+      else store.setItem(name, payload(value));
     },
     replace: async (entries) => replace(entries),
     clear: async () => replace([]),
   };
+}
+
+/** The stored item of a value, written without recursion so that any value a script can save is stored. */
+function payload(value: SerializableRuntimeValue): string {
+  return serializeValidatedRuntimeJson({ v: PAYLOAD_VERSION, value });
 }
 
 function randomGeneration(): string {

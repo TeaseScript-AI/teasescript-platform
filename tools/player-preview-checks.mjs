@@ -2174,6 +2174,24 @@ async function markupLinkChecks(page) {
 // keyboard and touch; explanations stay collapsed until their label opens them, several at once; jumps go to the Debug
 // log and an invisible live region, never the transcript or notices; a badge shows auto-skip; and `time=skip` only
 // sets the initial state. This group replaces the development scenario with its own script.
+// Debug's Now tab names a development Stage fixture as such, and the session's image again once Runtime is selected.
+async function debugNowOverrideChecks(page) {
+  const base = page.url().split("?")[0];
+  await page.goto(`${base}?dev`);
+  const status = (value) => page.locator(`[data-debug-now-image] [data-status="${value}"]`);
+  await page.locator('[data-launcher] button[aria-label="Debug"]').click();
+  await page.locator('[data-tool="Debug"] [data-panel-pin]').click();
+  await status("displayed").waitFor({ timeout: 5_000 });
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  const fixture = page.getByLabel("Stage media fixture");
+  const fixtures = await fixture.locator("option").allInnerTexts();
+  await fixture.selectOption(fixtures.find((name) => name !== "Runtime"));
+  await status("overridden").waitFor({ timeout: 5_000 });
+  await fixture.selectOption("Runtime");
+  await status("displayed").waitFor({ timeout: 5_000 });
+  return "PASS Debug Now names a Stage fixture override and the session image after Runtime";
+}
+
 async function developmentTimeChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -2202,6 +2220,7 @@ async function developmentTimeChecks(page) {
   const badge = page.locator("[data-development-time-badge]");
   const announcement = page.locator('[role="status"]').filter({ hasText: "Debug log" });
   const logLines = page.locator("[data-debug-log] li");
+  const logTab = page.getByRole("tab", { name: "Log", exact: true });
   const autoSkip = page.getByRole("switch", { name: "Auto-skip", exact: true });
   const aboutAutoSkip = page.getByRole("button", { name: "About auto-skip", exact: true });
   const aboutJumps = page.getByRole("button", { name: "About time jumps", exact: true });
@@ -2298,8 +2317,15 @@ async function developmentTimeChecks(page) {
   check(!(await autoSkip.isChecked()), "Tapping the label switched auto-skip");
 
   // Skip ends the wait at once and logs the jump; a waiting button offers +10 s and +1 min, but nothing to skip.
+  // Now is the first tab; the log keeps its lines while another tab shows.
+  check(
+    (await page.getByRole("tab", { name: "Now", exact: true }).getAttribute("aria-selected")) ===
+      "true",
+    "The Debug panel must open on Now",
+  );
   await skip.click();
   await foreground("Done").waitFor({ timeout: 5_000 });
+  await logTab.click();
   // What really elapsed before Skip is not skipped.
   await logLines
     .first()
@@ -2354,6 +2380,7 @@ async function developmentTimeChecks(page) {
   );
   await launcher.click();
   check(await autoSkip.isChecked(), "time=skip must switch auto-skip on");
+  await logTab.click();
   await logLines
     .first()
     .filter({ hasText: /^⏩ 1[45] s skipped$/ })
@@ -2389,6 +2416,7 @@ const groups = [
   directDemoLatestChecks,
   markupLinkChecks,
   developmentTimeChecks,
+  debugNowOverrideChecks,
   timerChecks,
   transcriptNativeWheelChecks,
   contentContainmentChecks,

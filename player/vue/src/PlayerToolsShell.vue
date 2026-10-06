@@ -40,6 +40,8 @@ import DialogHeader from "@/components/ui/dialog/DialogHeader.vue";
 import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
 import SavedDataExport from "./SavedDataExport.vue";
+import SavedDataImport from "./SavedDataImport.vue";
+import type { ScriptStorageImportReview } from "./usePlayerSession";
 import type { StorageTransfer } from "../../storage-transfer.js";
 import {
   computed,
@@ -62,12 +64,18 @@ const props = defineProps<{
   mediaAspect: number;
   fullscreen: boolean;
   /**
-   * The script's saved data when the host persists it: exporting is always possible, clearing only while no session
-   * runs.
+   * The script's saved data when the host persists it: exporting is always possible, importing ends a session in
+   * progress after confirmation, and clearing is possible only while no session runs.
    */
   savedData?: {
     readonly name: string;
     readonly export: () => Promise<{ readonly transfer: StorageTransfer; readonly missingPhotos: number }>;
+    readonly import: {
+      readonly available: boolean;
+      readonly endsSession: boolean;
+      readonly review: (transfer: StorageTransfer) => Promise<ScriptStorageImportReview>;
+      readonly commit: (review: ScriptStorageImportReview) => Promise<void>;
+    };
     readonly canClear: boolean;
     readonly clear: () => Promise<boolean>;
   } | null;
@@ -928,6 +936,12 @@ async function updateSidebarVisibility(open: boolean) {
                       <p>What this script saved in this browser for its next runs.</p>
                       <div class="flex flex-wrap gap-2">
                         <SavedDataExport :name="savedData.name" :read="savedData.export" />
+                        <SavedDataImport
+                          :available="savedData.import.available"
+                          :ends-session="savedData.import.endsSession"
+                          :review="savedData.import.review"
+                          :commit="savedData.import.commit"
+                        />
                       </div>
                       <template v-if="clearSavedData === 'confirm' || clearSavedData === 'clearing'">
                         <p>Clear all saved data for this script? This cannot be undone.</p>

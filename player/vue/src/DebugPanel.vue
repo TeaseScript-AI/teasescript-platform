@@ -6,13 +6,24 @@ import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.v
 import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
 import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import Switch from "@/components/ui/switch/Switch.vue";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import DebugNow from "./DebugNow.vue";
 import type { DebugLog } from "./useDebugLog";
 import type { DevelopmentTime } from "./useDevelopmentTime";
+import type { PlayerSessionHost } from "./usePlayerSession";
 
-// The Debug panel (DEBUGGER.md "Player Debug"): its Debug switch, the time controls (#615) while Debug is on, a
-// reserved place for the saved-data tools, and the Debug log, newest line first. An explanation opens from its label,
-// by click, tap or keyboard; any number may be open.
-defineProps<{ time: DevelopmentTime | null; log: DebugLog }>();
+// The Debug panel (DEBUGGER.md "Player Debug"): its Debug switch and, while Debug is on, the time controls (#615) above
+// the tabs: Now, the Debug log, newest line first, and Storage when the host persists script storage. An explanation
+// opens from its label, by click, tap or keyboard; any number may be open.
+defineProps<{
+  time: DevelopmentTime | null;
+  log: DebugLog;
+  player: PlayerSessionHost;
+  /** Whether the camera view covers the Stage image. */
+  stageCovered: boolean;
+  /** Whether the development preview shows a Stage media fixture instead of the session's image. */
+  stageOverridden: boolean;
+}>();
 const active = defineModel<boolean>("active", { required: true });
 </script>
 
@@ -94,21 +105,42 @@ const active = defineModel<boolean>("active", { required: true });
         </Button>
       </div>
     </section>
-    <!-- Reserved for the saved-data overview and editor, which a host supplies. -->
-    <slot name="storage" />
-    <section aria-labelledby="debug-log" class="grid gap-2">
-      <h3 id="debug-log" class="font-semibold">Debug log</h3>
-      <div class="h-32 rounded-md border">
-        <ScrollArea
-          class="size-full"
-          :viewport-attrs="{ tabindex: 0, role: 'region', 'aria-labelledby': 'debug-log' }"
-        >
-          <ol class="grid gap-0.5 p-2 font-mono text-muted-foreground" data-debug-log>
-            <li v-for="line in log.lines.value" :key="line.id">{{ line.text }}</li>
-            <li v-if="!log.lines.value.length">No entries yet.</li>
-          </ol>
-        </ScrollArea>
-      </div>
-    </section>
+    <Tabs default-value="now">
+      <TabsList class="h-auto w-full">
+        <TabsTrigger value="now" class="min-h-11" data-debug-tab="now">Now</TabsTrigger>
+        <TabsTrigger value="log" class="min-h-11" data-debug-tab="log">Log</TabsTrigger>
+        <TabsTrigger v-if="$slots.storage" value="storage" class="min-h-11" data-debug-tab="storage">Storage</TabsTrigger>
+      </TabsList>
+      <TabsContent value="now">
+        <DebugNow
+          v-if="time"
+          :player="player"
+          :stage-covered="stageCovered"
+          :stage-overridden="stageOverridden"
+        />
+        <p v-else class="text-muted-foreground">Debug is off.</p>
+      </TabsContent>
+      <!-- Kept mounted, so new lines arrive while another tab shows. -->
+      <TabsContent value="log" force-mount class="data-[state=inactive]:hidden">
+        <section aria-labelledby="debug-log" class="grid gap-2">
+          <h3 id="debug-log" class="font-semibold">Debug log</h3>
+          <div class="h-64 rounded-md border">
+            <ScrollArea
+              class="size-full"
+              :viewport-attrs="{ tabindex: 0, role: 'region', 'aria-labelledby': 'debug-log' }"
+            >
+              <ol class="grid gap-0.5 p-2 font-mono text-muted-foreground" data-debug-log>
+                <li v-for="line in log.lines.value" :key="line.id">{{ line.text }}</li>
+                <li v-if="!log.lines.value.length">No entries yet.</li>
+              </ol>
+            </ScrollArea>
+          </div>
+        </section>
+      </TabsContent>
+      <TabsContent v-if="$slots.storage" value="storage">
+        <slot v-if="time" name="storage" />
+        <p v-else class="text-muted-foreground">Debug is off.</p>
+      </TabsContent>
+    </Tabs>
   </div>
 </template>

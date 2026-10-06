@@ -2753,8 +2753,9 @@ let visits = load "visits", default: 0             // compact form
 
 `load` evaluates its key first. When the key exists, it returns the stored value with its stored TeaseScript type
 without evaluating the default. When absent, it evaluates and returns the default, or returns `null` without one.
-`load` never writes: the default is not stored. Only `save` creates or changes a stored value. An explicit target
-type may determine the intended numeric type of a literal default, as in the `number` example above.
+`load` never writes: the default is not stored. Only `save` creates or changes a stored value, apart from the Player's
+Debug storage editor, a debugging tool whose edits the next `load` returns (see `RUNTIME.md`, Script storage). An
+explicit target type may determine the intended numeric type of a literal default, as in the `number` example above.
 
 The bounded form takes the key and an optional named `default:` inside `()`, where line breaks follow the rules of
 other arguments. Its `)` ends the `load`, also with a space before `(`, so the result combines directly with another
