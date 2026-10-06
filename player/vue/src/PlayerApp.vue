@@ -108,6 +108,12 @@ const savedData = computed(() =>
     ? {
         name: props.title,
         export: props.player.exportScriptStorage,
+        import: {
+          available: props.player.canImportScriptStorage.value,
+          endsSession: props.player.sessionInProgress.value,
+          review: props.player.reviewScriptStorageImport,
+          commit: props.player.importScriptStorage,
+        },
         canClear: props.player.canClearScriptStorage.value,
         clear: props.player.clearScriptStorage,
       }

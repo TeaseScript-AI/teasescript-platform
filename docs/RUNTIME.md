@@ -1008,7 +1008,9 @@ catch-up holds at the block's due time, the completion is accepted at that scene
 due time before catch-up continues. A pending write survives checkpoint and restore like other foreground actions.
 
 Restoring an older checkpoint carries its older storage view. A later read-modify-write can overwrite newer durable
-data; reconciliation belongs to #469 and is not implemented here.
+data; reconciliation belongs to #469 and is not implemented here. Replacing the durable store, as a saved-data import
+does ([transfer](DATA-AND-API.md#saved-data-transfer)), never changes a session's view: the Player ends a session in
+progress first, and the next fresh session loads the replaced values.
 
 ## Camera capture
 

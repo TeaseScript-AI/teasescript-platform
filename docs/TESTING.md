@@ -599,7 +599,9 @@ the request opened turns off after a photo or a file answered, and that a busy c
 paperclip stays. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
 waits: the downloaded gzip file and the text hold the same document with the saved photo's exact bytes and not the
 unsaved one, a refused copy selects the text, closing releases the file, and the narrow dialog fits with touch-sized
-controls. On the
+controls. In a fresh browser profile it imports that export: a chosen file is reviewed and Cancel keeps the running
+session; a dropped file's confirmation ends the session, and the next Start shows the imported photo; pasted text
+replaces the data before Start; and another package refuses the text. On the
 importer's route `/player/?dev&package=waiting&time=skip`, auto-skip ends that package's 15 s wait right after a
 physical Start, and +10 s at its button reaches the button's elapsed time; without `time=skip`, Skip event ends the
 wait, and the default build starts with the Debug menu off. In the default build, Settings' Debug menu shows the

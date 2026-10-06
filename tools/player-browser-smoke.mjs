@@ -121,7 +121,8 @@ async function main() {
       await insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`);
       await packageScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
-      await savedDataExportScenario(cdp, origin, profile);
+      const exported = await savedDataExportScenario(cdp, origin, profile);
+      await savedDataImportScenario(debugPort, origin, exported);
       await developmentTimeScenario(cdp, origin);
       await debugCountdownScenario(cdp, origin);
       await missingMediaScenario(cdp, origin);
@@ -131,7 +132,7 @@ async function main() {
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export from Settings, development time controls, Debug countdowns, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, development time controls, Debug countdowns, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -2241,6 +2242,265 @@ async function savedDataExportScenario(cdp, origin, profile) {
   await closeDialog("[data-saved-data-export]");
   await closeDialog("[data-player-settings]");
   await setViewport(cdp, 1440, 900);
+  return { file: join(downloads, download.name), text: exportedText };
+}
+
+// Imports the export into a fresh browser profile, as on another device: a file chosen and reviewed, whose Cancel keeps
+// the running session; then a dropped file whose confirmation ends that session, after which Start shows the saved photo
+// again; pasted text into a reloaded Player; and text of this script refused by another script.
+async function savedDataImportScenario(debugPort, origin, exported) {
+  const browser = await connectCdp(
+    (await (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).json()).webSocketDebuggerUrl,
+  );
+  const { result: context } = await browser.call("Target.createBrowserContext");
+  let cdp;
+  try {
+    const { result: target } = await browser.call("Target.createTarget", {
+      url: "about:blank",
+      browserContextId: context.browserContextId,
+    });
+    cdp = await connectCdp(`ws://127.0.0.1:${debugPort}/devtools/page/${target.targetId}`);
+    await cdp.call("Page.enable");
+    await cdp.call("Runtime.enable");
+    await setViewport(cdp, 1440, 900);
+    const text = (value) => `document.body.innerText.includes(${JSON.stringify(value)})`;
+    const start = "[data-session-activation] button";
+    const openImport = async () => {
+      await physicalClick(cdp, "[data-settings-trigger]");
+      await waitFor(
+        cdp,
+        `document.querySelector('[data-import-saved-data]')?.disabled === false`,
+        8_000,
+      );
+      await physicalClick(cdp, "[data-import-saved-data]");
+      await waitFor(cdp, `!!document.querySelector('[data-saved-data-import]')`);
+    };
+    const escape = async (selector) => {
+      for (const type of ["keyDown", "keyUp"])
+        await cdp.call("Input.dispatchKeyEvent", {
+          type,
+          key: "Escape",
+          code: "Escape",
+          windowsVirtualKeyCode: 27,
+        });
+      await waitFor(cdp, `!document.querySelector(${JSON.stringify(selector)})`);
+    };
+    const summary = `document.querySelector('[data-import-summary]')?.textContent.replace(/\\s+/g, ' ').trim()`;
+
+    await navigate(cdp, `${origin}/player/?package=saved-photo`);
+    await waitFor(cdp, `!!document.querySelector('${start}')`);
+    assertEqual(
+      await value(
+        cdp,
+        `Object.keys(localStorage).filter((name) => name.includes('saved-photo')).length`,
+      ),
+      0,
+      "The import profile starts without saved data",
+    );
+    await physicalClick(cdp, start);
+    await waitFor(
+      cdp,
+      visible("[data-composer-attach]"),
+      8_000,
+      "The fresh profile's session did not ask for an image",
+    );
+    assertEqual(
+      await value(cdp, text("Your saved photo is back.")),
+      false,
+      "The fresh profile already had the photo",
+    );
+
+    // A chosen file is checked and reviewed; Cancel keeps the session.
+    await openImport();
+    await setInputFiles(cdp, "[data-import-file]", [exported.file]);
+    await waitFor(
+      cdp,
+      `!!document.querySelector('[data-import-confirm]')`,
+      8_000,
+      "The chosen file was not reviewed",
+    );
+    assertEqual(
+      await value(cdp, summary),
+      "Imports 2 saved values · 1 photo, replacing 0 saved values.",
+      "Import review summary",
+    );
+    assertEqual(
+      await value(cdp, `document.querySelector('[data-import-confirm]').textContent.trim()`),
+      "End session and replace data",
+      "Confirming must say it ends the session",
+    );
+    // Measured once the dialog's opening zoom has finished.
+    await waitFor(
+      cdp,
+      `document.getAnimations().every((animation) => animation.playState !== 'running')`,
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `[...document.querySelectorAll('[data-saved-data-import] button:not([data-slot="dialog-close"])')].filter((button) => button.offsetParent && button.getBoundingClientRect().height < 44).map((button) => button.textContent.trim() + ' ' + button.getBoundingClientRect().height).join('; ')`,
+      ),
+      "",
+      "The import review's controls are not touch-sized",
+    );
+    await physicalClick(cdp, "[data-saved-data-import] [data-import-confirm] + button");
+    await waitFor(cdp, `!!document.querySelector('[data-import-drop]')`);
+    await escape("[data-saved-data-import]");
+    await escape("[data-player-settings]");
+    assertEqual(
+      await value(cdp, visible("[data-composer-attach]")),
+      true,
+      "Cancel ended the session",
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `Object.keys(localStorage).filter((name) => name.includes('saved-photo')).length`,
+      ),
+      0,
+      "Cancel changed the saved data",
+    );
+
+    // A dropped file; confirming ends the session, and the next Start shows the imported photo.
+    await openImport();
+    const bytes = (await readFile(exported.file)).toString("base64");
+    const drop = (names) =>
+      evaluate(
+        cdp,
+        `const bytes = Uint8Array.from(atob(${JSON.stringify(bytes)}), (character) => character.charCodeAt(0));
+        const transfer = new DataTransfer();
+        for (const name of ${JSON.stringify(names)}) transfer.items.add(new File([bytes], name));
+        document.querySelector('[data-import-drop]').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));`,
+      );
+    // Refusing a drop of two files also discards a file still being read, which never becomes the review.
+    await evaluate(
+      cdp,
+      `const read = File.prototype.arrayBuffer;
+      window.__releaseHeld = null;
+      File.prototype.arrayBuffer = function () {
+        if (this.name !== 'held.teasestorage.json.gz') return read.call(this);
+        return new Promise((resolve) => (window.__releaseHeld = () => resolve(read.call(this))));
+      };`,
+    );
+    await drop(["held.teasestorage.json.gz"]);
+    await waitFor(cdp, `typeof window.__releaseHeld === 'function'`);
+    await drop(["first.teasestorage.json.gz", "second.teasestorage.json.gz"]);
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-import-problem]')?.textContent.includes('Drop one exported file.') === true`,
+    );
+    await evaluate(cdp, `window.__releaseHeld();`);
+    await delay(500);
+    assertEqual(
+      await value(
+        cdp,
+        `!document.querySelector('[data-import-confirm]') && document.querySelector('[data-import-problem]')?.textContent.includes('Drop one exported file.') === true`,
+      ),
+      true,
+      "A file read before a refused drop became the import review",
+    );
+    await drop(["saved.teasestorage.json.gz"]);
+    await waitFor(
+      cdp,
+      `!!document.querySelector('[data-import-confirm]')`,
+      8_000,
+      "The dropped file was not reviewed",
+    );
+    await physicalClick(cdp, "[data-import-confirm]");
+    await waitFor(
+      cdp,
+      text("Saved data imported. Start to use it."),
+      8_000,
+      "The import did not finish",
+    );
+    assertEqual(
+      await value(cdp, visible("[data-composer-attach]")),
+      false,
+      "The session did not end",
+    );
+    await escape("[data-saved-data-import]");
+    await escape("[data-player-settings]");
+    await waitFor(
+      cdp,
+      `!!document.querySelector('${start}')`,
+      8_000,
+      "Start was not offered after the import",
+    );
+    await physicalClick(cdp, start);
+    await waitFor(
+      cdp,
+      text("Your saved photo is back."),
+      8_000,
+      "The imported data did not load at Start",
+    );
+    await waitFor(
+      cdp,
+      `(() => { const image = document.querySelector('.stage-media'); return !!image && image.complete && image.naturalWidth === 24; })()`,
+      8_000,
+      "The imported photo is not on the Stage",
+    );
+
+    // Pasted text into a reloaded Player, before Start, replaces the data without a session to end.
+    await navigate(cdp, `${origin}/player/?package=saved-photo`);
+    await waitFor(cdp, `!!document.querySelector('${start}')`);
+    await openImport();
+    await physicalClick(cdp, '[data-import-tab="text"]');
+    await waitFor(cdp, `!!document.querySelector('[data-import-text]')`);
+    await evaluate(
+      cdp,
+      `const area = document.querySelector('[data-import-text]');
+      area.value = ${JSON.stringify(exported.text.replace(/(.{76})/g, "$1\n"))};
+      area.dispatchEvent(new Event('input', { bubbles: true }));`,
+    );
+    await physicalClick(cdp, "[data-import-review]");
+    await waitFor(
+      cdp,
+      `!!document.querySelector('[data-import-confirm]')`,
+      8_000,
+      "The pasted text was not reviewed",
+    );
+    assertEqual(
+      await value(cdp, `document.querySelector('[data-import-confirm]').textContent.trim()`),
+      "Replace saved data",
+      "Without a session, confirming only replaces the data",
+    );
+    await physicalClick(cdp, "[data-import-confirm]");
+    await waitFor(cdp, text("Saved data imported. Start to use it."));
+    await escape("[data-saved-data-import]");
+    await escape("[data-player-settings]");
+
+    // Another script refuses this script's data and keeps its own.
+    await navigate(cdp, `${origin}/player/?package=pictures`);
+    await waitFor(cdp, `!!document.querySelector('${start}')`);
+    await openImport();
+    await physicalClick(cdp, '[data-import-tab="text"]');
+    await evaluate(
+      cdp,
+      `const area = document.querySelector('[data-import-text]');
+      area.value = ${JSON.stringify(exported.text)};
+      area.dispatchEvent(new Event('input', { bubbles: true }));`,
+    );
+    await physicalClick(cdp, "[data-import-review]");
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-import-problem]')?.textContent.includes('belongs to another script') === true`,
+      8_000,
+      "Another script's data was not refused",
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `Object.keys(localStorage).some((name) => name.includes('development-package:pictures'))`,
+      ),
+      false,
+      "The refused import changed the other script's data",
+    );
+  } finally {
+    cdp?.close();
+    await browser.call("Target.disposeBrowserContext", {
+      browserContextId: context.browserContextId,
+    });
+    browser.close();
+  }
 }
 
 async function askImageCameraScenario(cdp, origin, profile) {
