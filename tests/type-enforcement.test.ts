@@ -707,13 +707,16 @@ test("a variable that starts as null takes the type of its first non-null value 
     `let box = { t: null }\nfunction setT(t) {\n    box.t = t\n}\nfunction show {\n    let v = box.t\n    let o = 0\n    if v != null {\n        o = v\n    }\n    say "\${o}"\n}\nshow()\nsetT(${argument})\nshow()\nexit`;
   assert.deepEqual(sayTexts(unknownStore("5")), ["0", "5"]);
   assert.equal(runValidSource(unknownStore('"high"')).snapshot.failure?.code, "TSR058");
-  // Also when the unknown value replaces the whole object, or arrives through a function's result.
+  // Also when the unknown value replaces the whole object, or arrives through a function's result, alone or joined
+  // with a known value.
   for (const [store, read] of [
     ["box = t", "box.t"],
     ["box.t = t", "get()"],
+    ["box.t = t", "known(true)"],
+    ["box.t = t", "[box.t, 9][0]"],
   ] as const) {
     const source = (argument: string) =>
-      `let box = { t: null }\nfunction setT(t) {\n    ${store}\n}\nfunction get {\n    return box.t\n}\nfunction show {\n    let v = ${read}\n    let o: integer = 0\n    if v != null {\n        o = v\n    }\n    say o\n}\nshow()\nsetT(${argument})\nshow()\nexit`;
+      `let box = { t: null }\nfunction setT(t) {\n    ${store}\n}\nfunction get {\n    return box.t\n}\nfunction known(flag) {\n    if flag {\n        return box.t\n    }\n    return 9\n}\nfunction show {\n    let v = ${read}\n    let o: integer = 0\n    if v != null {\n        o = v\n    }\n    say o\n}\nshow()\nsetT(${argument})\nshow()\nexit`;
     const argument =
       store === "box = t" ? (value: string) => `{ t: ${value} }` : (value: string) => value;
     assert.deepEqual(sayTexts(source(argument("5"))), ["0", "5"], store);

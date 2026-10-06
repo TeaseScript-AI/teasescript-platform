@@ -1187,6 +1187,14 @@ function* joinTask(
   if (left.kind === "unknown" || right.kind === "unknown") return UNKNOWN_TYPE;
   const leftValue = decidedValue(left);
   const rightValue = decidedValue(right);
+  // A slot that a value the compiler cannot know reached may hold any value, so with a known value it joins as unknown.
+  const reachedUnknown = (type: StaticType): boolean =>
+    members(type).some((member) => member.kind === "open" && member.heldUnknown !== undefined);
+  if (
+    (reachedUnknown(left) && rightValue.kind !== "never") ||
+    (reachedUnknown(right) && leftValue.kind !== "never")
+  )
+    return UNKNOWN_TYPE;
   const nullable = holdsNull(left) || holdsNull(right);
   if (leftValue.kind === "never" && rightValue.kind === "never") {
     // No value decided either side yet. An undecided place stays undecided and keeps whether null came first.
