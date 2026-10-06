@@ -416,7 +416,10 @@ a Dialog, when the host persists script storage. The tabs wrap to a second row i
 44 px target; Now, Variables, and Storage wrap long paths, keys, names, and values
 so they fit the Small dock and the narrow drawer, also at the deepest indentation, where tags and text actions wrap
 instead of keeping one line. Variables rows open with full-height (44 px) toggles that name what they open; a long value
-shows three lines until **Show all**.
+shows three lines until **Show all**. While Debug runs, each script message, bubble or prose, has a 44 px **Explain
+values** icon button at its end, beside a bubble and below prose text, outside the message's own links; it opens the
+Debug panel, also in the narrow drawer, on the Variables tab and moves focus to the selected message there. Turning
+Debug off removes the buttons without re-creating the transcript's rows.
 
 ## Session start and user activation
 

@@ -27,6 +27,7 @@ import StageRightRail from "./StageRightRail.vue";
 import TimerRegion from "./TimerRegion.vue";
 import { speakerAvatarSource } from "./speakerAvatar";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
+import { explainValues } from "./explainValues";
 import { usePlayerDebug } from "./usePlayerDebug";
 import { debugStageImage } from "./debugStageImage";
 import { playerRuntimeDebugNow } from "../../runtime-adapter.js";
@@ -176,6 +177,14 @@ watch(
   },
 );
 const debugTool: PlayerTool = { name: "Debug", icon: Bug };
+const toolsShell = ref<InstanceType<typeof PlayerToolsShell> | null>(null);
+// Explain values on a chat message opens the Debug panel on its Variables tab.
+provide(explainValues, {
+  offers: debug.offers,
+  explain(entryId) {
+    if (debug.explain(entryId)) void toolsShell.value?.showTool(debugTool.name);
+  },
+});
 const tools = computed(() => (debug.menu.value ? [debugTool, ...props.tools] : props.tools));
 const savedData = computed(() =>
   props.player.hasSavedData
@@ -256,6 +265,7 @@ async function toggleFullscreen() {
 
 <template>
   <PlayerToolsShell
+    ref="toolsShell"
     :tools="tools"
     :stage-height="stageHeight"
     :media-aspect="mediaAspect"
@@ -270,6 +280,8 @@ async function toggleFullscreen() {
       <DebugPanel
         v-if="scope.tool === debugTool.name && debug.log.value"
         v-model:active="debug.active.value"
+        v-model:tab="debug.tab.value"
+        :explained="debug.explained.value"
         :time="debug.time.value"
         :log="debug.log.value"
         :player="player"

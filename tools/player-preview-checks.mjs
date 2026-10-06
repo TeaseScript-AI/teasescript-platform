@@ -2378,6 +2378,158 @@ async function debugVariablesChecks(page) {
   return "PASS Debug Now image origin, Variables two-level view, click, key and tap expansion, hidden-panel recording, long values, state across tabs, Debug off and on, fit in Small dock and narrow drawer";
 }
 
+// Explain values on a chat message (DEBUGGER.md "Player Debug") opens Debug's Variables tab on that message's own recorded
+// values, found by its event and not its text: through a function parameter, after the variable changed, for a message
+// with a link and a prose message, by click, keyboard and tap, from deep in a virtualized transcript, also in the narrow
+// drawer. Messages from before Debug was turned on say so, and Debug off removes the entry point without re-keying rows.
+async function explainValuesChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const source = [
+    "let n = 5",
+    "function tell(message) {",
+    "    say message, instant",
+    "}",
+    'tell("You get ${n}")',
+    "let m = 5",
+    'say "You get ${m}", instant',
+    'say "Read [the rules](https://example.com/rules) about ${n}", instant',
+    'say prose "A quiet aside about ${n}", instant',
+    "n = 9",
+    "for i in 1..=40 {",
+    '    say "Line ${i}", instant',
+    "}",
+    'let done = showButton "Done"',
+    'say "After ${n}", instant',
+    'let more = askText "More?"',
+    "exit",
+  ].join("\n");
+  await page.route("**/src/runtimeScenario.ts*", (route) => {
+    const url = route.request().url();
+    if (/[?&]original(?:[=&]|$)/.test(url)) return route.continue();
+    const original = `${url}${url.includes("?") ? "&" : "?"}original=`;
+    return route.fulfill({
+      contentType: "text/javascript",
+      body: `export * from ${JSON.stringify(original)};\nexport const openingScenario = ${JSON.stringify(source)};`,
+    });
+  });
+  const base = page.url().split("?")[0];
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${base}?dev`);
+  const panel = page.locator('[data-tool="Debug"]');
+  const selected = panel.locator("[data-debug-selected-message]");
+  const entry = (text) => page.locator(".transcript-entry").filter({ hasText: text });
+  const explain = (locator) => locator.locator("[data-explain-values]");
+  await page.locator("[data-foreground-controls] button").filter({ hasText: "Done" }).waitFor();
+  check(!(await panel.isVisible()), "The Debug panel was open before Explain values");
+
+  // The first messages are far above the latest; the transcript renders them once scrolled to.
+  await page.locator(".transcript-scroll").evaluate((element) => (element.scrollTop = 0));
+  const same = entry("You get 5");
+  await same.nth(1).waitFor();
+  check((await same.count()) === 2, "Both equal messages must be rendered");
+  await same.nth(0).evaluate((element) => (element.dataset.explainMark = "kept"));
+  const button = explain(same.nth(0));
+  check(
+    (await button.getAttribute("aria-label")) === "Explain values",
+    "The entry point must say what it does",
+  );
+  await button.click();
+  await selected.waitFor();
+  check(
+    (await page
+      .getByRole("tab", { name: "Variables", exact: true })
+      .getAttribute("aria-selected")) === "true",
+    "Explain values must show the Variables tab",
+  );
+  // Through the parameter and the argument to the variable, with its value now.
+  for (const text of ["parameter message of tell()", "argument message of tell()", "let n"])
+    await selected.locator("[data-trace-row]").filter({ hasText: text }).first().waitFor();
+  await selected.locator("[data-trace-now]").filter({ hasText: "9" }).waitFor();
+  check(
+    await selected.evaluate((element) => element.contains(document.activeElement)),
+    "Focus must move to the selected message",
+  );
+
+  // The equal message has its own cause, chosen by keyboard.
+  await explain(same.nth(1)).focus();
+  await page.keyboard.press("Enter");
+  await selected.locator("[data-trace-row]").filter({ hasText: "let m" }).first().waitFor();
+  check(
+    (await selected.locator("[data-trace-row]").filter({ hasText: "let n" }).count()) === 0,
+    "An equal message borrowed another message's causes",
+  );
+
+  // A message with a link keeps its link; the entry point sits beside it.
+  const linked = entry("Read the rules about 5");
+  check(
+    (await linked.getByRole("link", { name: "the rules" }).count()) === 1,
+    "The message link must stay a link",
+  );
+  const url = page.url();
+  await explain(linked).click();
+  await selected
+    .locator("[data-trace-row]")
+    .filter({ hasText: "Read the rules" })
+    .first()
+    .waitFor();
+  check(page.url() === url, "Explain values followed the message link");
+
+  // A prose message offers it too, by tap.
+  const prose = page.locator(".transcript-entry[data-prose]").filter({ hasText: "A quiet aside" });
+  const proseButton = explain(prose);
+  // A touch, unlike a click, does not scroll its target into view.
+  await proseButton.scrollIntoViewIfNeeded();
+  const box = await proseButton.boundingBox();
+  check(
+    box.width >= 44 && box.height >= 44,
+    `Explain values is too small to tap: ${JSON.stringify(box)}`,
+  );
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  const touch = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await cdp.detach();
+  await selected.locator("[data-trace-row]").filter({ hasText: "A quiet aside" }).first().waitFor();
+
+  // Debug off removes the entry point and keeps every row; on again, earlier messages say why they cannot be explained.
+  const debugSwitch = page.getByRole("switch", { name: "Debug", exact: true });
+  await debugSwitch.click();
+  await page.locator("[data-explain-values]").first().waitFor({ state: "detached" });
+  check(
+    (await same.nth(0).getAttribute("data-explain-mark")) === "kept",
+    "Debug off re-created a transcript row",
+  );
+  await debugSwitch.click();
+  await explain(same.nth(0)).click();
+  await selected.locator("[data-debug-selected-unavailable]").waitFor();
+  check(
+    (await selected.innerText()).includes("Shown before Debug was turned on"),
+    "An earlier message must say why it cannot be explained",
+  );
+  await selected.locator("[data-debug-selected-dismiss]").click();
+  await selected.waitFor({ state: "detached" });
+
+  // A later message is explained in the narrow drawer.
+  await page.locator("[data-foreground-controls] button").filter({ hasText: "Done" }).click();
+  await page.setViewportSize({ width: 320, height: 700 });
+  const after = entry("After 9");
+  await after.waitFor();
+  if (await page.getByRole("button", { name: "Hide sidebar", exact: true }).isVisible())
+    await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
+  await explain(after).click();
+  await selected.locator("[data-trace-row]").filter({ hasText: "After 9" }).first().waitFor();
+  const body = panel.locator("[data-tool-body]");
+  check(
+    await body.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    "The selected message widened the narrow drawer",
+  );
+  return "PASS Explain values by event through parameters, equal texts, link and prose messages, click, key and tap, virtualized history, Debug off and on, narrow drawer";
+}
+
 // With Storage, all four Debug tabs fit the Small dock and the narrow drawer: they wrap inside the tab list, each a full
 // touch target, without widening the panel.
 async function debugTabsFitChecks(page) {
@@ -2665,6 +2817,7 @@ const groups = [
   debugNowOverrideChecks,
   debugVariablesChecks,
   debugTabsFitChecks,
+  explainValuesChecks,
   timerChecks,
   transcriptNativeWheelChecks,
   contentContainmentChecks,

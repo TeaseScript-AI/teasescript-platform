@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, inject } from "vue";
+import { Variable } from "@lucide/vue";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Button } from "@/components/ui/button";
 import { Message, MessageAvatar, MessageContent, MessageHeader } from "@/components/ui/message";
 import type {
   PlayerSpeakerPresentation,
@@ -10,6 +12,7 @@ import type {
 import TranscriptMarkup from "./TranscriptMarkup.vue";
 import { nameOf, resolveAppearance } from "./transcriptPresentation";
 import { speakerAvatarColors, speakerAvatarSource } from "./speakerAvatar";
+import { explainValues } from "./explainValues";
 
 const props = defineProps<{
   entry: PlayerTranscriptEntryPresentation;
@@ -24,6 +27,11 @@ const speaker = props.entry.kind === "message" ? props.speakers[props.entry.spea
 const resolveAvatar = inject(speakerAvatarSource, () => null);
 const avatarImage = speaker?.avatarImage === undefined ? null : resolveAvatar(speaker.avatarImage);
 const name = !player && !props.continues ? nameOf(props.speakers, props.entry) : "";
+// While Debug runs, a script's message offers Explain values beside it, by click, tap or keyboard.
+const explain = inject(explainValues, null);
+const explainable = computed(
+  () => !player && props.entry.kind === "message" && explain?.offers(props.entry.id) === true,
+);
 const avatarColors = computed(() => speakerAvatarColors(props.avatarOrdinal ?? 0));
 const avatarStyle = computed(() => ({
   "--avatar-light-background": avatarColors.value.light.background,
@@ -58,6 +66,18 @@ const avatarStyle = computed(() => ({
       :authored-background="appearance.panel !== null"
     />
     <template v-else>{{ entry.text }}</template>
+    <div v-if="explainable" class="explain-row">
+      <Button
+        variant="ghost"
+        size="icon"
+        class="size-11"
+        aria-label="Explain values"
+        data-explain-values
+        @click="explain!.explain(entry.id)"
+      >
+        <Variable aria-hidden="true" />
+      </Button>
+    </div>
   </div>
   <Message v-else :align="player ? 'end' : 'start'">
     <MessageAvatar v-if="!player" class="self-start" :class="continues ? 'invisible' : ''">
@@ -69,7 +89,7 @@ const avatarStyle = computed(() => ({
         </AvatarFallback>
       </Avatar>
     </MessageAvatar>
-    <MessageContent>
+    <MessageContent :class="explainable ? 'flex-row items-end' : undefined">
       <Bubble
         class="max-w-[min(75%,65ch)]"
         :variant="player ? 'default' : 'secondary'"
@@ -108,6 +128,17 @@ const avatarStyle = computed(() => ({
           >
         </BubbleContent>
       </Bubble>
+      <Button
+        v-if="explainable"
+        variant="ghost"
+        size="icon"
+        class="size-11 shrink-0"
+        aria-label="Explain values"
+        data-explain-values
+        @click="explain!.explain(entry.id)"
+      >
+        <Variable aria-hidden="true" />
+      </Button>
     </MessageContent>
   </Message>
 </template>
@@ -176,6 +207,11 @@ const avatarStyle = computed(() => ({
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
+}
+.explain-row {
+  display: flex;
+  justify-content: flex-end;
+  white-space: normal;
 }
 .session-event {
   margin: 0;

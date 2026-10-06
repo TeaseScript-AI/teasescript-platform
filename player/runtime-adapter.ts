@@ -1271,6 +1271,16 @@ function emptySession(
   });
 }
 
+/** The prefix of a transcript entry ID the adapter derives from its runtime event. */
+const TRANSCRIPT_EVENT_ID = "runtime-event-";
+
+/** The runtime event sequence of a transcript entry this adapter appended, or `null` for any other entry ID. */
+export function playerRuntimeTranscriptEventSequence(entryId: string): number | null {
+  if (!entryId.startsWith(TRANSCRIPT_EVENT_ID)) return null;
+  const digits = entryId.slice(TRANSCRIPT_EVENT_ID.length);
+  return /^[1-9]\d*$/u.test(digits) && Number.isSafeInteger(Number(digits)) ? Number(digits) : null;
+}
+
 function appendRuntimeEvents(
   session: PlayerRuntimeSession,
   events: readonly InterpreterEvent[],
@@ -1302,7 +1312,7 @@ function appendRuntimeEvents(
       transcriptEntries.push(
         Object.freeze({
           kind: "message",
-          id: `runtime-event-${event.sequence}`,
+          id: `${TRANSCRIPT_EVENT_ID}${event.sequence}`,
           speakerId,
           text: event.text,
           content: event.content,
@@ -1313,7 +1323,7 @@ function appendRuntimeEvents(
       transcriptEntries.push(
         Object.freeze({
           kind: "message",
-          id: `runtime-event-${event.sequence}`,
+          id: `${TRANSCRIPT_EVENT_ID}${event.sequence}`,
           speakerId: "user",
           text: event.text,
           ...(responseKinds.has(event.sequence)
