@@ -130,8 +130,8 @@ node sexscript-importer/tools/serve-catalog.ts --catalog sexscript-importer/exte
 # from sexscript-importer/:
 node tools/play-check.ts [--base https://host:4443] [--runs N] [--steps N] [--only id,id] external/converted external/play-checks
 node tools/verify-package.ts --checks external/play-checks --verified external/verified --manual "<note>" external/converted <id>
-node tools/catalog.ts [--player https://host:port] --play-checks external/play-checks --verified external/verified \
-  [--approved docs/APPROVED.md] external/converted external/catalog/index.html
+node tools/catalog.ts [--player https://host:port] --play-checks external/play-checks [--explorer <dir>]... \
+  --verified external/verified [--approved docs/APPROVED.md] external/converted external/catalog/index.html
 ```
 
 `convert-corpus` takes one corpus folder per package, each with `scripts/`, `images/`, and `sounds/`. It runs
@@ -226,12 +226,17 @@ package's current `.tease` files.
 
 `catalog` writes one HTML page and reads each package as the Player does: the playground server's package scan, then
 `compileProject` with the package images. A summary table counts the packages that convert fully, compile, play to the
-end, stop during play, do not start, are not played yet, are blocked by unbuilt commands, are verified, or are
-owner-approved. Each table row shows the `---` header of `main.tease`, or of the first script that a generated
+end, stop during play, do not start, are not played in the Player, are blocked by unbuilt commands, are verified, or
+are owner-approved, and the explorer results. Each table row shows the `---` header of `main.tease`, or of the first script that a generated
 `main.tease` menu goes to: title (the Player link), author, keywords, and description. The status column takes, in
 this order, the owner-approved list (the first column of the Markdown table in `--approved`), the verified copy, the
 Player check of the current files, or else the compiler and the report's smoke run. A `partly converted` mark counts
-unconverted code; click a status for details. The source column links the legacy Groovy and converted `.tease` files,
+unconverted code, and a grey `older conversion` mark shows the latest Player check of files the importer has converted
+again since, which the summary counts apart; click a status for details. The explorer column shows the latest [`explore`](#branch-explorer)
+report of the current files from the `--explorer` folders (`<unit>.json` or `<unit>/<unit>.json`), for a verified
+copy else of the unit's newer conversion, marked so, else the latest report of other files, marked stale: line coverage and the numbers of crashes and traps, with the first crash's code
+and `file:line`, the first trap, and the search in its details. A report's compact `catalog` block (`coveragePercent`,
+`crashes`, `traps`, `firstCrash`, `firstTrap`, and `reach`, the lines per reach label) counts before its full fields. The source column links the legacy Groovy and converted `.tease` files,
 which `catalog` hard-links under `source/` next to the page; earlier versions that the unit's `unit.json` lists under
 `earlierVersions` appear in a collapsed section with links to their original Groovy. A Pin button keeps favourites in `localStorage` and lists
 them at the top.
