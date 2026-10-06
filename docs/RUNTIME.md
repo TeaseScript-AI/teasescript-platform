@@ -1249,8 +1249,9 @@ Reading `.text` returns the source. Assigning it takes text (`TSR050` otherwise)
 or, read, `TSR017`, and a handle without a record with `TSR053`, all before anything changes. The same text again
 changes nothing. Different text is parsed whole, emitted as a `messageUpdated` event (`messageId`, parsed `content`,
 visible `text`, and the write's `span`), and becomes the record. No pacing gate starts, ends, or moves. The debug trace
-keys a message's text by its ID and indexes each change as the output record of its event, without listing it as a
-message of its own.
+keys a message's text by its ID and indexes each change as the output record of its event; `recentMessages` lists the
+messages it has records of most recently, each once by its latest record. A reference prepared through `.text` keeps
+the text read then, as for a text variable.
 
 ## Globals, global functions, and speakers
 

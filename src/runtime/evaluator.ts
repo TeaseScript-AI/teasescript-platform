@@ -563,6 +563,18 @@ export class Evaluator {
                   frame.descriptor.path.push({ kind: "index", index });
                   frame.value = base.items[index]!;
                 }
+              } else if (isMessageHandle(base)) {
+                // A message's text is state of the message, outside the value that holds the handle, so the
+                // reference keeps the text read now, as it would keep a text variable's value.
+                const text = this.#getProperty(base, expression.name, expression.span);
+                frame.descriptor = {
+                  rootFrameId: null,
+                  rootName: null,
+                  path: [],
+                  capturedRoot: text,
+                  detached: true,
+                };
+                frame.value = text;
               } else {
                 frame.descriptor.path.push({ kind: "property", name: expression.name });
                 frame.value = this.#getProperty(base, expression.name, expression.span);
@@ -2353,7 +2365,13 @@ export class Evaluator {
       } satisfies MessageUpdatedEvent),
     );
     this.snapshot.liveMessages[index] = { messageId: handle.messageId, sourceText: value };
-    this.trace?.messageText(stateKey("message", handle.messageId), value, span, sequence);
+    this.trace?.messageText(
+      stateKey("message", handle.messageId),
+      handle.messageId,
+      value,
+      span,
+      sequence,
+    );
   }
 
   #mediaWarning(warning: MediaWarning | null, span: SourceSpan): void {

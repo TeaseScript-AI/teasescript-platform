@@ -120,6 +120,42 @@ test("each run of a result-bearing say shows its own message, and a handle shows
   ]);
 });
 
+test("a method on a message's text keeps the text read before its arguments run, also across a wait", () => {
+  // The method's receiver is prepared before the argument waits, so every boundary lies in between.
+  assertRuntimeResumeEquivalent(
+    source(
+      "function later {",
+      "    wait 1 ms",
+      '    return "B"',
+      "}",
+      "function rewrite(message) {",
+      '    return message.text.replace("A", later())',
+      "}",
+      `let line = ${say("A")}`,
+      "say rewrite(line), instant",
+      "exit",
+    ),
+    { scenarioName: "prepared message text", transformPlan: withMessageSays },
+  );
+  // An argument that changes the text does not change the receiver read before it, as for a text variable.
+  const plan = messageSayPlan(
+    source(
+      "function later(message) {",
+      '    setText(message, "X")',
+      '    return "B"',
+      "}",
+      "function rewrite(message) {",
+      '    return message.text.replace("A", later(message))',
+      "}",
+      `let line = ${say("A")}`,
+      "say rewrite(line), instant",
+      "exit",
+    ),
+  );
+  const result = run(plan, createFreshRuntimeSnapshot(plan));
+  assert.deepEqual(messageTexts(result.events), [["A", "X"], ["B"]]);
+});
+
 test("a text write starts, ends, and moves no pacing, also while the message's own pacing runs", () => {
   const plan = messageSayPlan(
     source(`let line = ${say("Waiting")}`, 'setText(line, "Ready")', 'say "Next", 1', "exit"),
