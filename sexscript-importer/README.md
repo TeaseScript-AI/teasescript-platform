@@ -230,8 +230,9 @@ package's current `.tease` files.
 `catalog` writes one HTML page and reads each package as the Player does: the playground server's package scan, then
 `compileProject` with the package images. Under the time it was written, in the reader's time zone, a few counts:
 the packages listed, that convert fully, compile, and play to the end, then the other counts that are not zero, each
-explained in its tooltip. A search box filters the rows on title, author, keywords, and description; a coverage range
-and a sort order (coverage, crashes, traps) use the explorer column. Each table row shows the `---` header of
+explained in its tooltip. A filter under each of the title, author, keywords, and description columns narrows the
+rows on that column, the filters combined; a coverage range and a sort order (coverage, crashes, traps) use the
+explorer column. Each table row shows the `---` header of
 `main.tease`, or of the first script that a generated `main.tease` menu goes to: title (the Player link), author,
 keywords, and description. A package with a verified copy has two Player links instead, `Play (verified copy)` and
 `Play (latest conversion)`, and source links to both. The status column takes, in

@@ -966,8 +966,8 @@ export async function writeSourceViews(
 
 /**
  * The page: when it was written, a few counts, then one table with a row per package, each with a Pin button; pinned
- * rows are copied into a table at the top. A search box, a coverage range, and a sort order narrow and order the
- * table. A few lines of inline CSS; on a narrow screen the rows stack. Its script shows the time in the reader's time
+ * rows are copied into a table at the top. A filter under each of the title, author, keywords, and description
+ * columns, a coverage range, and a sort order narrow and order the table. A few lines of inline CSS; on a narrow screen the rows stack. Its script shows the time in the reader's time
  * zone, filters and sorts the rows, and keeps the pins: on the server that serves the page (`pins.json` of
  * `serve-catalog.ts`), with `localStorage` as the fallback where the page is served without it.
  */
@@ -1051,7 +1051,10 @@ export function renderCatalogPage(
     .join("");
   const updated = new Date(options.updatedAt);
   const utc = `${updated.toISOString().slice(0, 10)} ${updated.toISOString().slice(11, 16)} UTC`;
-  const head = `<thead><tr><th>Pin</th><th>Title</th><th>Author</th><th>Keywords</th><th>Description</th><th title="Click a status for details. A grey &quot;older conversion&quot; mark is a Player check of files converted again since.">Status</th><th title="The headless explorer: share of script lines reached, crashes (runtime failures), and traps (loops the player cannot leave). Click for details.">Explorer</th><th>Source</th></tr></thead>`;
+  const labels = `<tr><th>Pin</th><th>Title</th><th>Author</th><th>Keywords</th><th>Description</th><th title="Click a status for details. A grey &quot;older conversion&quot; mark is a Player check of files converted again since.">Status</th><th title="The headless explorer: share of script lines reached, crashes (runtime failures), and traps (loops the player cannot leave). Click for details.">Explorer</th><th>Source</th></tr>`;
+  const filter = (name: string) =>
+    `<td><input type="search" data-filter="${name}" placeholder="Filter ${name}" aria-label="Filter ${name}"></td>`;
+  const filters = `<tr class="filters"><td></td>${["title", "author", "keywords", "description"].map(filter).join("")}<td></td><td></td><td></td></tr>`;
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -1078,7 +1081,8 @@ dl.summary div { cursor: help; }
 dl.summary dt { color: #666; font-size: 0.9em; }
 dl.summary dd { margin: 0; font-size: 1.3em; font-weight: 600; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.2rem; margin: 0 0 0.6rem; }
-.toolbar input[type="search"] { width: 22rem; max-width: 100%; }
+tr.filters td { padding-top: 0; border-bottom: 2px solid #ccc; }
+tr.filters input { width: 100%; box-sizing: border-box; font-size: 0.9em; }
 .toolbar input[type="number"] { width: 4.5rem; }
 .status { font-size: 0.8em; padding: 0 0.4em; border-radius: 0.3em; display: inline-block; max-width: 13rem; background: #eee; color: #333; }
 .status.plays { background: #ddf4dd; color: #1d5e1d; }
@@ -1095,7 +1099,8 @@ details.earlier ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
 td.status-cell details p, td.explorer details p, td.source details p { margin: 0.2rem 0; font-size: 0.85em; color: #555; }
 button[data-pin] { font-size: 0.8em; }
 @media (max-width: 60rem) {
-  table.packages thead { display: none; }
+  table.packages thead tr:not(.filters), tr.filters td:empty { display: none; }
+  tr.filters td { border: 0; padding: 0.1rem 0; }
   table.packages, table.packages tbody, table.packages tr, table.packages td { display: block; }
   table.packages tr { border-bottom: 1px solid #ddd; padding: 0.5rem 0; }
   table.packages tr[hidden] { display: none; }
@@ -1114,12 +1119,11 @@ button[data-pin] { font-size: 0.8em; }
 <h2>Pinned</h2>
 <p id="pinned-none" class="meta">Nothing pinned yet. Use a Pin button to keep a tease here.</p>
 <table class="packages" hidden>
-${head}
+<thead>${labels}</thead>
 <tbody id="pinned"></tbody>
 </table>
 <h2>All packages</h2>
 <div class="toolbar">
-<input type="search" id="search" placeholder="Search title, author, keywords, description" aria-label="Search title, author, keywords, and description">
 <span>Coverage <input type="number" id="coverage-min" min="0" max="100" placeholder="from" aria-label="Coverage from, in percent"> to <input type="number" id="coverage-max" min="0" max="100" placeholder="to" aria-label="Coverage up to, in percent"> %</span>
 <label>Sort <select id="sort">
 <option value="title">Title</option>
@@ -1131,7 +1135,7 @@ ${head}
 <span id="shown" class="meta"></span>
 </div>
 <table class="packages">
-${head}
+<thead>${labels}${filters}</thead>
 <tbody id="all">
 ${entries.map((entry, index) => renderRow(entry, index, options.playerOrigin)).join("\n")}
 </tbody>
@@ -1145,23 +1149,30 @@ for (const time of document.querySelectorAll("time[data-local]")) {
     pad(date.getHours()) + ":" + pad(date.getMinutes());
 }
 
-// Search, coverage range, and sort order of the table of all packages; rows without a value sort last.
+// Column filters, coverage range, and sort order of the table of all packages; every word of every filter must
+// appear in its column; rows without a value sort last.
 const all = document.getElementById("all");
 const rows = [...all.children];
-const search = document.getElementById("search");
+const filters = [...document.querySelectorAll("input[data-filter]")];
 const coverageMin = document.getElementById("coverage-min");
 const coverageMax = document.getElementById("coverage-max");
 const sort = document.getElementById("sort");
 const number = (text) => (text === undefined || text === "" ? null : Number(text));
 function apply() {
-  const words = search.value.toLowerCase().split(/\\s+/).filter((word) => word !== "");
+  const wanted = filters.flatMap((input) =>
+    input.value
+      .toLowerCase()
+      .split(/\\s+/)
+      .filter((word) => word !== "")
+      .map((word) => [input.dataset.filter, word]),
+  );
   const low = number(coverageMin.value);
   const high = number(coverageMax.value);
   let shown = 0;
   for (const row of rows) {
     const coverage = number(row.dataset.coverage);
     row.hidden = !(
-      words.every((word) => row.dataset.search.includes(word)) &&
+      wanted.every(([name, word]) => row.dataset[name].includes(word)) &&
       (low === null || (coverage !== null && coverage >= low)) &&
       (high === null || (coverage !== null && coverage <= high))
     );
@@ -1185,7 +1196,7 @@ function apply() {
   document.getElementById("shown").textContent =
     shown === rows.length ? "" : shown + " of " + rows.length + " shown";
 }
-for (const control of [search, coverageMin, coverageMax]) control.addEventListener("input", apply);
+for (const control of [...filters, coverageMin, coverageMax]) control.addEventListener("input", apply);
 sort.addEventListener("change", apply);
 
 // Favourites: package ids kept by the server that serves the page, so that they outlive regenerations of the page,
@@ -1275,20 +1286,18 @@ function renderRow(entry: CatalogEntry, index: number, playerOrigin: string): st
     ["explorer", renderExplorer(entry)],
     ["source", renderSource(entry)],
   ];
-  // What the search box matches, and the explorer's numbers for the coverage range and the sort order.
-  const search = [
-    entry.title,
-    entry.author ?? "",
-    entry.keywords.join(", "),
-    entry.description ?? "",
-  ]
-    .join("\n")
-    .toLowerCase();
+  // What the column filters match, and the explorer's numbers for the coverage range and the sort order.
+  const filtered: Array<[name: string, text: string]> = [
+    ["title", entry.title],
+    ["author", entry.author ?? ""],
+    ["keywords", entry.keywords.join(", ")],
+    ["description", entry.description ?? ""],
+  ];
   const report = entry.explored?.report ?? null;
   const data = [
     `data-id="${id}"`,
     `data-order="${index}"`,
-    `data-search="${escapeHtml(search)}"`,
+    ...filtered.map(([name, text]) => `data-${name}="${escapeHtml(text.toLowerCase())}"`),
     ...(report === null || report.coverage === null
       ? []
       : [`data-coverage="${report.coverage.percent}"`]),

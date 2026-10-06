@@ -215,10 +215,15 @@ test(
           '<p class="updated">Updated <time datetime="2026-10-07T12:32:00.000Z" data-local>2026-10-07 12:32 UTC</time></p>',
         ),
       );
-      // The search box and the explorer's coverage range and sort order read the row's data.
+      // One filter per column, under the labels of the table of all packages only.
+      assert.deepEqual(
+        [...page.matchAll(/<input type="search" data-filter="([a-z]+)"/gu)].map(([, name]) => name),
+        ["title", "author", "keywords", "description"],
+      );
+      // The column filters and the explorer's coverage range and sort order read the row's data.
       assert.match(
         page,
-        /<tr data-id="Night Walk" data-order="4" data-search="night &lt;walk&gt; &amp; talk\nann\nwalk, night\na short walk\." data-coverage="50" data-crashes="1" data-traps="1">/u,
+        /<tr data-id="Night Walk" data-order="4" data-title="night &lt;walk&gt; &amp; talk" data-author="ann" data-keywords="walk, night" data-description="a short walk\." data-coverage="50" data-crashes="1" data-traps="1">/u,
       );
       assert.ok(
         page.includes(
