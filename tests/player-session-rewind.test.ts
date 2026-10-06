@@ -31,8 +31,17 @@ interface RewindHost {
   prepare(create: (recording: { readonly recorder: DebugRecorder }) => PlayerRuntimeSession): void;
   activate(): void;
   update(session: PlayerRuntimeSession): void;
+  prepareInput(): true | Promise<boolean>;
+  editSavedData(edit: {
+    key: string;
+    value: SerializableRuntimeValue;
+    expected: SerializableRuntimeValue | undefined;
+  }): Promise<{ readonly kind: string }>;
   observe(): PlayerRuntimeSession | null;
-  debugRecording(): { readonly anchorSnapshot: RuntimeSnapshot } | null;
+  debugRecording(): {
+    readonly anchorSnapshot: RuntimeSnapshot;
+    readonly endSnapshot: RuntimeSnapshot;
+  } | null;
   debugExportCandidate(
     player: Record<string, never>,
   ): Promise<{
@@ -90,11 +99,13 @@ function memoryStorage() {
   const calls: string[] = [];
   let failReplace = false;
   let replaceHeld: Promise<void> | null = null;
+  let writeHeld: Promise<void> | null = null;
   const provider: ScriptStorageProvider = {
     scope: "test",
     load: async () => [...entries].map(([key, value]) => ({ key, value })),
     write: async (key, value) => {
       calls.push(`write ${key}`);
+      await writeHeld;
       if (value === null) entries.delete(key);
       else entries.set(key, value);
     },
@@ -113,6 +124,12 @@ function memoryStorage() {
     saved: () => Object.fromEntries(entries),
     failReplaces() {
       failReplace = true;
+    },
+    /** Holds every write until `release` is called. */
+    holdWrites() {
+      let release!: () => void;
+      writeHeld = new Promise((resolve) => (release = resolve));
+      return () => release();
     },
     /** Holds every replacement until `release` is called. */
     holdReplaces() {
@@ -163,7 +180,7 @@ function createHost(context: TestContext, provider: ScriptStorageProvider) {
     debug.stop();
     scope.stop();
   });
-  return { host, rewind, debug, spill: spill.state };
+  return { host, rewind, debug, scope, spill: spill.state };
 }
 
 // Lets storage writes report, which the host does in a later task.
@@ -194,13 +211,16 @@ async function start(context: TestContext, host: RewindHost) {
   await settle(context);
 }
 
-function choose(context: TestContext, host: RewindHost, label: string) {
-  const session = host.session.value!;
-  const foreground = playerRuntimeForeground(session);
-  assert.ok(foreground?.kind === "choose", label);
-  const option = foreground.options.find((candidate) => candidate.label === label)!;
-  host.update(selectPlayerRuntimeChoice(session, option.id)!.session);
-  return settle(context);
+// Chooses as the Player's interaction does: the session is readied for input first, and only then is input evaluated.
+async function choose(context: TestContext, host: RewindHost, label: string) {
+  if (await host.prepareInput()) {
+    const session = host.session.value!;
+    const foreground = playerRuntimeForeground(session);
+    assert.ok(foreground?.kind === "choose", label);
+    const option = foreground.options.find((candidate) => candidate.label === label)!;
+    host.update(selectPlayerRuntimeChoice(session, option.id)!.session);
+  }
+  await settle(context);
 }
 
 function said(host: RewindHost): string[] {
@@ -352,16 +372,79 @@ test("turning Debug off while an adoption is under way reinstates the session on
       assert.equal(await rewind.back(0), true);
       const release = storage.holdReplaces();
       if (fails) storage.failReplaces();
-      const session = host.session.value!;
-      const foreground = playerRuntimeForeground(session);
-      assert.ok(foreground?.kind === "choose");
-      host.update(selectPlayerRuntimeChoice(session, foreground.options[1]!.id)!.session);
+      const chosen = choose(subtest, host, "Two");
       debug.stop();
       release();
-      await settle(subtest);
+      await chosen;
       assert.equal(host.rewind.inspecting.value, false);
       if (fails) assert.equal(host.session.value, tip);
       else assert.deepEqual(said(host), ["Two", "first Two"]);
     });
   }
+});
+
+test("input to an inspected state is evaluated only once it is adopted, so a failed adoption changes nothing", async (context) => {
+  const storage = memoryStorage();
+  const { host, rewind } = createHost(context, storage.provider);
+  await start(context, host);
+  await choose(context, host, "One");
+  assert.equal(await rewind.back(0), true);
+  const inspected = host.session.value!;
+  const events = inspected.events.length;
+  storage.failReplaces();
+  await choose(context, host, "Two");
+  assert.equal(host.session.value, inspected);
+  assert.deepEqual(said(host), []);
+  assert.equal(inspected.events.length, events);
+  assert.equal(host.debugRecording()?.endSnapshot, inspected.snapshot);
+});
+
+test("a second input while the state is being adopted is refused, and the first applies once", async (context) => {
+  const storage = memoryStorage();
+  const { host, rewind } = createHost(context, storage.provider);
+  await start(context, host);
+  await choose(context, host, "One");
+  assert.equal(await rewind.back(0), true);
+  const release = storage.holdReplaces();
+  const first = choose(context, host, "Two");
+  assert.equal(await host.prepareInput(), false);
+  release();
+  await first;
+  assert.deepEqual(said(host), ["Two", "first Two"]);
+  const sequences = host.session.value!.events.map((event) => event.sequence);
+  assert.equal(new Set(sequences).size, sequences.length);
+  assert.deepEqual(storage.saved(), { k: 1, pick: "Two" });
+});
+
+test("Back waits for a Storage editor change until the session took it", async (context) => {
+  const storage = memoryStorage();
+  const { host, rewind } = createHost(context, storage.provider);
+  await start(context, host);
+  await choose(context, host, "One");
+  const release = storage.holdWrites();
+  const edit = host.editSavedData({ key: "pick", value: "Edited", expected: "One" });
+  await settle(context);
+  assert.equal(host.rewind.canRewind.value, false);
+  assert.equal(await rewind.back(0), false);
+  release();
+  assert.deepEqual(await edit, { kind: "saved", live: true });
+  await settle(context);
+  assert.equal(host.rewind.canRewind.value, true);
+});
+
+test("an unmounted Player whose adoption fails publishes nothing", async (context) => {
+  const storage = memoryStorage();
+  const { host, rewind, debug, scope } = createHost(context, storage.provider);
+  await start(context, host);
+  await choose(context, host, "One");
+  assert.equal(await rewind.back(0), true);
+  const release = storage.holdReplaces();
+  storage.failReplaces();
+  const chosen = choose(context, host, "Two");
+  const generation = host.generation.value;
+  scope.stop();
+  debug.stop();
+  release();
+  await chosen;
+  assert.equal(host.generation.value, generation);
 });

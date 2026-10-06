@@ -565,6 +565,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     const owner = generation.value;
     const result = editChain.then(() => applySavedDataEdit(edit, owner));
     editChain = result.catch(() => undefined);
+    // Debug's rewind waits until the edit is stored and the session took it.
+    editsInFlight.value++;
+    void editChain.then(() => editsInFlight.value--);
     return result;
   }
   async function applySavedDataEdit(
@@ -831,10 +834,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session.value = next;
     clock.rebase();
   }
-  // Publishes the result of a completed runtime action. Input to an inspected state adopts it first.
+  // Publishes the result of a completed runtime action. Input to an inspected state is evaluated only once
+  // `prepareInput` adopted it, so a result for the inspected state itself is never published.
   function update(next: PlayerRuntimeSession) {
     if (!inspecting.value) session.value = next;
-    else if (next !== session.value) void adoptRewound(next);
+  }
+  /**
+   * Readies the session for input before the input is evaluated: an inspected state Debug's rewind restored is adopted
+   * first. `true` when input may go ahead at once, else whether it may once the state is adopted; a state that could
+   * not be adopted, or one being adopted for other input, takes none, and stays as it was.
+   */
+  function prepareInput(): true | Promise<boolean> {
+    return inspecting.value ? adoptRewound() : true;
   }
 
   /**
@@ -846,6 +857,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     create: PlayerSessionStart,
     state: { readonly paused: boolean; readonly marks: DebugHistoryMarks },
   ) {
+    // An unmounted Player publishes nothing.
+    if (disposed) return;
     const next = create({ recorder });
     start(next, state.paused);
     debugEdits.value = state.marks.editedWhileDebugging;
@@ -853,6 +866,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   const adopting = ref(false);
   let adoption: Promise<boolean> | null = null;
+  const editsInFlight = ref(0);
   /** Whether Debug's rewind may restore a state now: nothing waits for the host or the player. */
   const canRewind = computed(
     () =>
@@ -862,25 +876,22 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       !clearing.value &&
       !openingCamera.value &&
       !adopting.value &&
+      editsInFlight.value === 0 &&
       pendingPlayerRuntimeStorageWrite(session.value.snapshot) === null,
   );
   let rewindAdopted: (() => void) | null = null;
   /**
-   * Adopts the inspected state as the session, then publishes `next`, the input's result, if any: the saved data are
-   * replaced by the state's own, as one validated replacement that also keeps the photos they use, and the state runs
-   * from then on, saving as any session. When the saved data cannot be replaced, the state stays inspected and nothing
-   * changes. Resolves to whether it was adopted.
+   * Adopts the inspected state as the session: the saved data are replaced by the state's own, as one validated
+   * replacement that also keeps the photos they use, and the state runs from then on, saving as any session. When the
+   * saved data cannot be replaced, the state stays inspected and nothing changes. Resolves to whether it was adopted.
    */
-  function adoptRewound(next: PlayerRuntimeSession | null): Promise<boolean> {
+  function adoptRewound(): Promise<boolean> {
     if (!inspecting.value || adopting.value || session.value === null)
       return Promise.resolve(false);
-    adoption = adoptShown(session.value, next).finally(() => (adoption = null));
+    adoption = adoptShown(session.value).finally(() => (adoption = null));
     return adoption;
   }
-  async function adoptShown(
-    shown: PlayerRuntimeSession,
-    next: PlayerRuntimeSession | null,
-  ): Promise<boolean> {
+  async function adoptShown(shown: PlayerRuntimeSession): Promise<boolean> {
     const owner = generation.value;
     adopting.value = true;
     try {
@@ -899,7 +910,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     rewindAdopted?.();
     inspecting.value = false;
     clock.rebase();
-    if (next !== null) session.value = next;
     return true;
   }
   /**
@@ -916,7 +926,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     session.value === null ? [] : playerRuntimePermanentButtons(session.value.snapshot),
   );
   /** Clicks a permanent button at the observed time, like other input; a click it does not accept changes nothing. */
-  function pressPermanentButton(buttonId: number) {
+  async function pressPermanentButton(buttonId: number) {
+    if (!(await prepareInput())) return;
     const current = clock.observe();
     if (current === null) return;
     const result = pressPlayerRuntimePermanentButton(current, buttonId);
@@ -1222,6 +1233,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     publishJump,
     start,
     update,
+    prepareInput,
     /** Debug's rewind (DEBUGGER.md "Rewind"): how the session host shows the states it restores. */
     rewind: {
       /** Whether a restored state is shown for inspection, which runs only once input adopts it. */
@@ -1235,7 +1247,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       openSpill: options.debugHistorySpill ?? (() => openDebugHistorySpill()),
       publish: publishRewound,
       /** Adopts the inspected state without new input, so it runs on; resolves to whether it was adopted. */
-      resume: () => adoptRewound(null),
+      resume: () => adoptRewound(),
       /** The adoption under way, which resolves to whether the state was adopted, or `null`. */
       adoption: () => adoption,
       /** Calls `listener` whenever an inspected state is adopted as the session, before it runs on. */

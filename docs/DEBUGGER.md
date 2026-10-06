@@ -114,14 +114,14 @@ still uses is deleted only once that Player is done with it.
   storage view, Stage, and media, its transcript, and its marks. The restored state is **inspected**: nothing runs on
   its own, its clock stands, media keep their position without playing, load reports, camera requests, and auto-skip
   wait, and the browser's saved data stay as they are, without the Storage editor. The first Back parks the session it
-  left; every Back keeps the state it left for **Forward**, which restores it exactly. Back waits while a save, Start,
-  Continue, import, clear, or camera opening waits for the host or the player.
+  left; every Back keeps the state it left for **Forward**, which restores it exactly. Back waits while a save, a
+  Storage editor change, Start, Continue, import, clear, or camera opening waits for the host or the player.
 - **Return** reinstates the parked session as it was, and so does turning Debug off while a state is inspected; time
   spent inspecting is no scene time.
 - New input to the inspected state (an answer, a button, a permanent button, or a time skip), or **Resume**, **adopts**
-  it as the session: the browser's saved data are first replaced by the state's storage view, as one replacement
-  through the provider and its captured-media layer, and then the input applies and the session runs and saves as any
-  session. The parked session, the states kept for Forward, and the points after the adopted state are gone; earlier
+  it as the session before the input is evaluated: the browser's saved data are first replaced by the state's storage
+  view, as one replacement through the provider and its captured-media layer, and then the input applies and the
+  session runs and saves as any session. Other input while the state is being adopted is refused. The parked session, the states kept for Forward, and the points after the adopted state are gone; earlier
   points stay for a later Back. When the saved data cannot be replaced, for example on quota, the state stays
   inspected, the Player says so, and nothing changes.
 - Every restored state marks the session **Rewound while debugging**, with the scene time of the state the latest
