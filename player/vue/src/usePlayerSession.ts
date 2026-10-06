@@ -628,6 +628,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     diagnostics: computed(() => diagnostics.value),
     /** Presented runtime timers; hidden timers have no entry. */
     timers: clock.timers,
+    /** The display estimate of scene time, for presentation only; see `refreshSceneTimeWhile`. */
+    sceneTimeMs: clock.displayTimeMs,
+    /** Keeps `sceneTimeMs` refreshing while `demand` holds, until the calling scope ends. */
+    refreshSceneTimeWhile: clock.refreshWhile,
     /** The permanent buttons the script shows, in creation order; a busy one is inactive until its block ends. */
     permanentButtons,
     pressPermanentButton,

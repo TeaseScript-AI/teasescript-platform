@@ -58,8 +58,8 @@ specification may lead the implementation. The Player presents supported transcr
 pacing behavior from canonical runtime state. Its development preview opens one runtime choice scenario and adds Visual
 Lab, Layout Debug, the Stage media picker, Theme Lab, and timer/background-button presentation fixtures. The default
 build plays the repository demo without that preview; the development server or explicit `?dev` URL opt-in loads it.
-Only `?dev` adds the Debug tool with development time controls, which is not a Standard Player tool; `player/README.md`
-describes it.
+Player Settings' Debug menu adds the Debug panel ([Player Settings](#player-settings)); `player/README.md` describes
+its controls.
 Runtime timers, permanent buttons, the Stage image, and audio are wired; browser video playback and production host
 integration remain separate work. Values marked for retesting remain provisional tuning baselines.
 
@@ -264,11 +264,14 @@ available in every build to every user. It currently offers:
 - **Menu Sidebar labels:** icons only, icons with a temporary label preview, or icons with labels;
 - **Contrast:** Standard or High, an accessibility preference that strengthens theme contrast and authored-colour
   treatment and is kept when switching light/dark;
-- **Title bar on short screens · A/B test:** variant A or B above.
+- **Title bar on short screens · A/B test:** variant A or B above;
+- **Testing · Debug menu:** adds the Debug panel to the tools menu ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)).
 
-These are presentation preferences, not canonical runtime state. The Player keeps them in this browser's local storage
+Apart from the Debug menu, these are presentation preferences, not canonical runtime state. The Player keeps them in this browser's local storage
 across reloads, treats stored text as external input that falls back to the default when unknown, and works without
-storage when the host frame denies it. Account settings may later take over or synchronize them.
+storage when the host frame denies it. Account settings may later take over or synchronize them. The Debug menu is not
+stored: every load starts with it off, so a tester who opens another script never debugs it by accident; the
+development preview's `?dev` starts it on.
 
 When the host persists script storage, Player Settings also contains a **Saved script data** section. Its **Clear saved
 script data** control removes, after a confirmation, only the values the current script saved for later runs; Player
@@ -375,8 +378,9 @@ dock composition determine whether the tools framework uses a dock or drawer. Ex
 individual panels are capped by available allocation while retaining their chosen width preset. Conversation bounds and
 the stage-shape goal remain provisional visual inputs, not additional device modes.
 
-`Visual Lab` and `Layout Debug` are development-preview tools, not Standard Player product tools. A real
-platform Debugger remains future work described in [DEBUGGER.md](../DEBUGGER.md).
+`Visual Lab` and `Layout Debug` are development-preview tools, not Standard Player product tools. The Debug panel is
+the Standard Player's platform Debugger tool ([DEBUGGER.md](../DEBUGGER.md#player-debug)); it appears first in the
+tools menu while Player Settings' Debug menu is on, and turning that menu off removes it from every panel state.
 
 ## Session start and user activation
 
@@ -604,6 +608,11 @@ normal viewport; a larger bottom safe-area inset takes precedence where needed.
 Invalid submissions show a short red notice anchored to the composer input without changing its height or moving choices.
 In a tight layout the floating notice may temporarily cover a choice. It clears when typing resumes, the interaction
 changes, after a brief delay, or when the player taps outside it.
+
+While Debug runs ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)), one small muted status line below the foreground
+controls counts down the current foreground wait, also while the Debug panel is closed: **Debug · Continues in 4 s**,
+**Debug · Press within 4 s**, or **Debug · Pacing: 4 s remaining**. It is not a timer: it has no card, ring, or
+right-rail entry, takes no input, is not announced each second, and never enters the transcript.
 
 ### Wide presentation
 

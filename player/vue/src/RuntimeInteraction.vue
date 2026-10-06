@@ -45,6 +45,8 @@ const props = defineProps<{
   observeTime?: () => PlayerRuntimeSession | null;
   /** Answers `askImage` with a chosen file; without it an image request offers no file input. */
   images?: PlayerImageInput;
+  /** The Debug countdown line, shown under the foreground controls while Debug runs (DEBUGGER.md "Player Debug"). */
+  debugCountdown?: string | null;
 }>();
 const emit = defineEmits<{
   "update:session": [session: PlayerRuntimeSession];
@@ -401,6 +403,14 @@ function submit(source: "input" | "button") {
                   )
               "
             />
+            <!-- Status text only: it is not announced each second and takes no input. -->
+            <p
+              v-if="debugCountdown"
+              class="flex justify-center pt-2 text-xs text-muted-foreground"
+              data-debug-countdown
+            >
+              {{ debugCountdown }}
+            </p>
           </template>
         </Transcript>
       </template>

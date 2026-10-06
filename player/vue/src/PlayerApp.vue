@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, provide, ref, watch } from "vue";
 import { useEventListener, useResizeObserver } from "@vueuse/core";
+import { Bug } from "@lucide/vue";
 import SidebarTrigger from "@/components/ui/sidebar/SidebarTrigger.vue";
 import Tooltip from "@/components/ui/tooltip/Tooltip.vue";
 import TooltipContent from "@/components/ui/tooltip/TooltipContent.vue";
 import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import type { PlayerSpeakerPresentation } from "../../model.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
+import DebugPanel from "./DebugPanel.vue";
+import DebugStatus from "./DebugStatus.vue";
 import FloatingViewfinder, { type FloatingPlace } from "./FloatingViewfinder.vue";
 import ImageCapture from "./ImageCapture.vue";
 import PlayerComposition from "./PlayerComposition.vue";
@@ -23,6 +26,7 @@ import StageRightRail from "./StageRightRail.vue";
 import TimerRegion from "./TimerRegion.vue";
 import { speakerAvatarSource } from "./speakerAvatar";
 import { enhancedTranscriptContrast } from "./transcriptContrast";
+import { usePlayerDebug } from "./usePlayerDebug";
 import { usePlayerKeyboardFocus } from "./usePlayerKeyboardFocus";
 import { usePlayerNotifications } from "./usePlayerNotifications";
 import { usePlayerPreference } from "./usePlayerPreference";
@@ -39,8 +43,10 @@ const props = withDefaults(
     tools?: readonly PlayerTool[];
     /** Why the script cannot start; shown instead of Start. */
     failure?: ScriptFailure | null;
+    /** How Debug starts: the Debug menu, and auto-skip once Debug runs. Both are off unless the host asks (`?dev`). */
+    debug?: { readonly menu: boolean; readonly autoSkip: boolean };
   }>(),
-  { title: "", tools: () => [], failure: null },
+  { title: "", tools: () => [], failure: null, debug: () => ({ menu: false, autoSkip: false }) },
 );
 // The camera view's window keeps the place the user gave it, and the view its mirroring, while the Player is mounted.
 const floatingPlace = ref<FloatingPlace | null>(null);
@@ -93,6 +99,10 @@ function toggleThemeMode() {
 }
 
 const session = computed(() => props.player.session.value);
+// The Debug menu adds the Debug panel first in the tools menu.
+const debug = usePlayerDebug(props.player, props.debug);
+const debugTool: PlayerTool = { name: "Debug", icon: Bug };
+const tools = computed(() => (debug.menu.value ? [debugTool, ...props.tools] : props.tools));
 const savedData = computed(() =>
   props.player.hasScriptStorage
     ? {
@@ -168,9 +178,20 @@ async function toggleFullscreen() {
     :saved-data="savedData"
     v-model:contrast="contrast"
     v-model:titlebar-option="titlebarOption"
+    v-model:debug-menu="debug.menu.value"
   >
     <template #tool="scope">
-      <slot name="tool" v-bind="scope" />
+      <DebugPanel
+        v-if="scope.tool === debugTool.name && debug.log.value"
+        v-model:active="debug.active.value"
+        :time="debug.time.value"
+        :log="debug.log.value"
+      >
+        <template v-if="$slots['debug-storage']" #storage>
+          <slot name="debug-storage" />
+        </template>
+      </DebugPanel>
+      <slot v-else name="tool" v-bind="scope" />
     </template>
     <template #default="{ sidebarVisible }">
       <PlayerComposition>
@@ -247,6 +268,7 @@ async function toggleFullscreen() {
             :seen-sequence="notifications.seenSequence.value"
             :theme-mode="themeIntent.mode"
           />
+          <DebugStatus v-if="debug.log.value" :time="debug.time.value" :log="debug.log.value" />
           <slot name="overlay" />
         </template>
         <template #right-rail>
@@ -280,6 +302,7 @@ async function toggleFullscreen() {
           :revision="transcript.revision"
           :observe-time="player.observe"
           :images="player.images"
+          :debug-countdown="debug.countdownText.value"
           @update:session="player.update"
         />
       </PlayerComposition>

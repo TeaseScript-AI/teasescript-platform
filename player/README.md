@@ -115,21 +115,26 @@ resolves the scenario's Stage images to the development illustrations and its ch
 surfaces, not Standard Player product tools or runtime/package/host APIs. Fixture timer/control values remain local;
 the opening scenario still uses the shared canonical runtime adapter.
 
-With the explicit `?dev` opt-in, also on the development server, the preview adds the **Debug** tool for testing long
-scripts; its time controls (#615) are always active there. **Skip event** advances scene time to the next wait, timer
+Player Settings' **Debug menu** adds the **Debug** panel for testing long scripts in every build
+([`docs/DEBUGGER.md`](../docs/DEBUGGER.md#player-debug)); it starts off on every load, and on with the explicit `?dev`
+opt-in. The panel's **Debug** switch starts on and pauses its time controls (#615) and countdowns. **Skip event** advances scene time to the next wait, timer
 expiry, pacing pause, button timeout, or audio cue or end (silent rounds of a repeating timer without an expiry block
 and passes of looping audio without cues are no stops), and **+10 s** and **+1 min** apply only while the script waits
 for player input. The **Auto-skip** switch skips event after event while no input is pending and no media is loading, so
 a player's think time and the background timers running meanwhile stay real time; a badge over the Stage shows it while
-it is on. `?dev&time=skip` starts with auto-skip on, plain `?dev` with it off. Jumps are ordinary observations (see
+it is on. `?dev&time=skip` starts with auto-skip on, plain `?dev` with it off; Debug turned on again later starts with
+it off. Jumps are ordinary observations (see
 [`docs/RUNTIME.md`](../docs/RUNTIME.md#timers-and-scene-time)), made in short tasks so the Player stays responsive;
 playing audio seeks along, and browser video seeking waits for video playback. Each jump adds a line to the panel's
 **Debug log** ("⏩ 30 s skipped", newest first), which an invisible live region also announces while the panel is
 closed; these lines are local UI state, never transcript entries, notices, or checkpoint data. The explanations of
-Auto-skip and the jumps open from their labels. Automation finds the controls by role and name (the Debug launcher, the
-`Auto-skip` switch, the `Skip event`, `+10 s` and `+1 min` buttons) or by `data-development-time-action`
-(`skip`, `advance-10s`, `advance-1min`), the log lines under `[data-debug-log]`, and the latest announcement in
-`[data-debug-announcement]`.
+Auto-skip and the jumps open from their labels. While Debug runs, `playerRuntimeDebugCountdown` selects the foreground
+wait that the countdown line under the foreground controls shows, and the scene clock refreshes its display estimate
+for it. Automation finds the controls by role and name (the `Debug menu` switch in Player Settings, the Debug launcher,
+the `Debug` and `Auto-skip` switches, the `Skip event`, `+10 s` and `+1 min` buttons) or by
+`[data-player-setting="debug-menu"]`, `[data-debug-active]` and `data-development-time-action` (`skip`, `advance-10s`,
+`advance-1min`), the countdown in `[data-debug-countdown]`, the log lines under `[data-debug-log]`, and the latest
+announcement in `[data-debug-announcement]`.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
 [`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's
