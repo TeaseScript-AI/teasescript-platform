@@ -273,31 +273,39 @@ storage when the host frame denies it. Account settings may later take over or s
 stored: every load starts with it off, so a tester who opens another script never debugs it by accident; the
 development preview's `?dev` starts it on.
 
-When the host persists script storage, Player Settings also contains a **Saved script data** section. Its **Clear saved
-script data** control removes, after a confirmation, only the values the current script saved for later runs; Player
-Settings, checkpoints, account data, and other scripts are unaffected, and the next new session starts without them. It
-is available before Start and after the session has ended, but not while a session runs or waits for Continue, because
-a running session keeps its own view of the saved values, and not when this browser's storage could not be read.
+Player Settings also contains a **Saved data** section, on every Player page whatever script it shows. Saved data
+belongs to the player, like an account's: **Export…** and **Import…** take the saved data of every script this browser
+has played at once, or of the scripts the player keeps ticked ([format](../DATA-AND-API.md#saved-data-transfer)). It is
+not a session checkpoint.
 
-Its **Export…** control opens a dialog that takes the script's saved data, with its saved photos, to another browser or
-device ([format](../DATA-AND-API.md#saved-data-transfer)); it is not a session checkpoint, also works during a session,
-and includes saves already stored. The dialog counts the values and photos, warns that the export can contain private
-photos, and offers two tabs: **File** prepares one file and then downloads it from the player's own press of **Download
-file**; **Text** shows the data in a read-only field with **Copy** and **Select text**, and when copying is refused or
-unavailable it selects the text for copying with the browser. Nothing leaves the browser except through these player
-actions, and closing the dialog releases the prepared file and text. The dialog fits narrow screens, and its own
-controls are at least 44px tall.
+**Export…** reads every script's saved data freshly, also during a session, so saves already stored count. It lists each
+script that has saved values, by its title when a Player has shown it, otherwise by its storage scope, with its values,
+photos, and size; all are ticked, with **Select all** and **Select none**, and a long list scrolls. It warns that the
+export can contain private photos and offers two tabs for the ticked scripts: **File** prepares one file and then
+downloads it from the player's own press of **Download file**; **Text** shows the data in a read-only field with
+**Copy** and **Select text**, and when copying is refused or unavailable it selects the text for copying with the
+browser. Every change of the ticks prepares them again. Nothing leaves the browser except through these player actions,
+and closing the dialog releases the prepared file and text.
 
-Its **Import…** control opens a dialog whose **File** tab reads one exported file, chosen with **Choose file…** or
-dropped on its drop area, and whose **Text** tab reads pasted text after **Review import**; a file dropped elsewhere on
-the dialog is ignored. Everything is checked before anything changes, and a problem, such as damaged data or data of
-another script, is shown with nothing changed. The review then asks "Replace all saved data for this script? This
-cannot be undone.", counts the incoming values and photos against the saved values, lists the keys the import removes,
-and suggests exporting first. While a session runs, waits for Continue, or is starting, the confirmation is **End
-session and replace data** and explains that unsaved progress is lost; Cancel leaves the session running. Confirming
-ends that session, replaces the saved data, and offers Start, which begins a new session with the imported data; it
-neither starts nor continues one by itself. A failed import keeps the saved data, and Start is still offered. Import is
-unavailable while saved data is cleared or this browser's storage cannot be read.
+**Import…** reads one exported file, chosen with **Choose file…** or dropped on its drop area in the **File** tab, or
+pasted text after **Review import** in the **Text** tab; a file dropped elsewhere on the dialog is ignored. Everything,
+every script's values and every photo, is checked before anything changes, and a problem, such as damaged data, is shown
+with nothing changed. The review asks "Replace the saved data of the ticked scripts? This cannot be undone.", lists the
+file's scripts, all ticked, each marked **New** or **Replaces saved data** with its counts and the shown script marked
+**This script**, and suggests exporting first; unticked scripts keep their saved data. Each script's data goes into its
+own saved data and never another's. When the shown script is ticked while its session runs, waits for Continue, or is
+starting, the confirmation is **End session and replace data** and explains that unsaved progress is lost; Cancel
+leaves the session running. Confirming replaces each ticked script's saved data at once; it ends that session first and
+then offers Start, which begins a new session with the imported data, and leaves a session of another script running.
+A script that cannot be imported keeps its saved data, and the dialog names it. Import is unavailable while saved data
+is imported or cleared.
+
+When the host persists the shown script's storage, the section also offers **Clear saved script data**, which removes,
+after a confirmation, only the values this script saved for later runs; Player Settings, checkpoints, account data, and
+other scripts are unaffected, and the next new session starts without them. It is available before Start and after the
+session has ended, but not while a session runs or waits for Continue, because a running session keeps its own view of
+the saved values, and not when this browser's storage could not be read. The dialogs fit narrow screens, and their own
+controls and rows are at least 44px tall.
 
 ## Left tools area
 

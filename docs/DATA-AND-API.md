@@ -148,37 +148,48 @@ can be added there.
 
 ### Saved-data transfer
 
-A player moves one script's saved data, with its saved photos, by hand and offline to another browser or device through
-Player Settings ([Player UI](ui/PLAYER-UI.md#player-settings)); `player/storage-transfer.ts` owns the format. It is not
-a session checkpoint and carries no session position, timers, transcript, or RNG state. The document is UTF-8 JSON
-with exactly these fields:
+A player moves the saved data of every script this browser has played, or of the scripts they tick, with its saved
+photos, by hand and offline to another browser or device through Player Settings
+([Player UI](ui/PLAYER-UI.md#player-settings)); `player/storage-transfer.ts` owns the format and `player/saved-data.ts`
+lists and opens the scopes. It is not a session checkpoint and carries no session position, timers, transcript, or RNG
+state. The document is UTF-8 JSON with exactly these fields:
 
 ```json
-{ "format": "teasescript-script-storage", "version": 1, "scope": "<host storage scope>",
-  "entries": [{ "key": "player.photo", "value": "captured-media:<uuid>:1" }],
+{ "format": "teasescript-script-storage", "version": 2,
+  "scripts": [{ "scope": "<host storage scope>", "name": "<title or null>", "photos": ["captured-media:<uuid>:1"],
+                "entries": [{ "key": "player.photo", "value": "captured-media:<uuid>:1" }] }],
   "images": [{ "reference": "captured-media:<uuid>:1", "byteLength": 68, "data": "<unpadded base64url>" }] }
 ```
 
-`entries` are the stored values in their `SerializableRuntimeValue` representation, one per line. `images` holds the
-original bytes of each saved photo a value references, once per reference; references that resolve to no stored photo
-stay ordinary text and are only counted. An export reads the provider freshly, so saves stored during a running session
-count and its unsaved photos do not. A file (`<script>-saved-data.teasestorage.json.gz`) is the document compressed
-with gzip; text is `TSST1.gzip.` plus the gzip bytes in unpadded base64url. Where the browser cannot compress (native
-`CompressionStream`), both are the plain JSON (`.teasestorage.json`).
+Each script's `entries` are its stored values in their `SerializableRuntimeValue` representation, one per line; its
+`name` is the title of its `main.tease` header when a Player showed it, remembered in browser storage, or `null`; its
+`photos` are the references in its values that resolved to its own stored photos. `images` holds the original bytes of
+each such photo, once per reference, also when scripts share it. Any other reference, including one naming another
+script's photo, stays ordinary text and is only counted. An export reads each scope
+freshly, the shown script's after the saves its session issued, so saves stored during a running session count and its
+unsaved photos do not. A file (`<script>-saved-data.teasestorage.json.gz` for one script, otherwise
+`teasescript-saved-data.teasestorage.json.gz`) is the document compressed with gzip; text is `TSST1.gzip.` plus the gzip
+bytes in unpadded base64url. Where the browser cannot compress (native `CompressionStream`), both are the plain JSON
+(`.teasestorage.json`). A version 1 document, of one script's `scope`, `entries`, and `images`, reads as a bundle of one whose photos are
+the images its values reference.
 
 Reading treats the data as external input: the contents, not a file's name or type, select gzip or plain JSON; text
 may also be the plain JSON and may be wrapped across lines. Gzip's checksum, strict base64url, UTF-8 and JSON decoding,
-the exact field sets, the storage-entry validation used for runtime storage, the reference shape, a photo's
-`byteLength`, and the rule that every photo is used by a value detect damage. There is no signature: a value or photo
-edited by hand is accepted when it is valid, a replaced photo with its `byteLength` updated.
+the exact field sets, a scope listed once, the storage-entry validation used for runtime storage for every script, the
+reference shape, a photo's `byteLength`, and the rules that each script's photos are used by its values and present in
+`images` and that each image is a photo of a script detect damage; any of them
+refuses the whole document. There is no signature: a value or photo edited by hand is accepted when it is valid, a
+replaced photo with its `byteLength` updated.
 
-An import accepts only data whose `scope` is the host's scope for the open script; there is no scope rewriting. Each
-photo is then checked like an image chosen for `askImage(...)`: its type is read from its bytes and the browser must
-decode it. After the player confirms, a session in progress ends, each photo becomes new media with a fresh reference,
-and every value that held an exported reference, as text, list or set item, object property name or value, or dict key
-or value, gets the new one. The values then replace the scope's saved data all at once, with key order kept; the photos
-are stored first, so a failure leaves the previous data. Earlier media records are never overwritten, and photos left
-unreferenced are reclaimed later.
+An import writes each ticked script into its own scope and no other. Each photo is first checked like an image chosen
+for `askImage(...)`: its type is read from its bytes and the browser must decode it. After the player confirms, a
+session of the shown script ends when that script is ticked. For each script, each of its `photos` becomes new media of its
+scope with a fresh reference, and every value that held that exported reference, as text, list or set item, object
+property name or value, or dict key or value, gets the new one. The values then replace the scope's saved data all at
+once, with key order kept; the photos are stored first, under the scope's live lock as a Player of it holds, so a
+failure leaves that scope's previous data. Scripts replace one after another, and a failure of one
+leaves the others to continue, so the import reports which scripts kept their previous data. Earlier media records are never overwritten, and photos left unreferenced are reclaimed
+later.
 
 Ordinary Player use does not expose arbitrary manual checkpoint/restore points as a rewind mechanism. The runtime/Player
 creates and restores supported checkpoints according to the session lifecycle. Developer/debug tooling may expose

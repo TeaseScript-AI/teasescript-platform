@@ -105,18 +105,21 @@ const debug = usePlayerDebug(props.player, props.debug);
 const debugTool: PlayerTool = { name: "Debug", icon: Bug };
 const tools = computed(() => (debug.menu.value ? [debugTool, ...props.tools] : props.tools));
 const savedData = computed(() =>
-  props.player.hasScriptStorage
+  props.player.hasSavedData
     ? {
-        name: props.title,
-        export: props.player.exportScriptStorage,
+        export: props.player.savedScripts,
         import: {
-          available: props.player.canImportScriptStorage.value,
-          endsSession: props.player.sessionInProgress.value,
-          review: props.player.reviewScriptStorageImport,
-          commit: props.player.importScriptStorage,
+          available: props.player.canImportSavedData.value,
+          sessionInProgress: props.player.sessionInProgress.value,
+          review: props.player.reviewSavedDataImport,
+          commit: props.player.importSavedData,
         },
-        canClear: props.player.canClearScriptStorage.value,
-        clear: props.player.clearScriptStorage,
+        clear: props.player.hasScriptStorage
+          ? {
+              available: props.player.canClearScriptStorage.value,
+              run: props.player.clearScriptStorage,
+            }
+          : null,
       }
     : null,
 );

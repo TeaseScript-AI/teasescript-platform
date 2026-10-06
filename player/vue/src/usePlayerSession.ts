@@ -35,14 +35,17 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
 import { DebugRecorder } from "../../debug-recorder.js";
+import type { SavedDataHost } from "../../saved-data.js";
 import type { ScriptStorageProvider } from "../../script-storage.js";
 import {
   checkStorageTransferImages,
-  collectStorageTransfer,
+  collectSavedScript,
   remapCapturedMediaReferences,
   StorageTransferError,
   type CheckedTransferImage,
-  type StorageTransfer,
+  type SavedScript,
+  type StorageBundle,
+  type StorageBundleScript,
 } from "../../storage-transfer.js";
 import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../../session-camera.js";
 import {
@@ -89,6 +92,11 @@ export interface PlayerSessionOptions {
    * persistent script storage passes it, also without a repository, so that no saved reference outlives its media.
    */
   capturedMedia?: { readonly repository: CapturedMediaRepository | null };
+  /**
+   * The saved data of every script this browser keeps, which export and import of saved data read and write as the
+   * player's own; without it they cover only the script this Player shows.
+   */
+  savedData?: SavedDataHost;
   /** Decodes a chosen image file before it is stored; the browser's decoder by default. */
   decodeImage?: ImageDecoder;
   /**
@@ -484,83 +492,114 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     }
   }
 
-  /**
-   * Checks exported saved data for an import into this script and compares it with what is saved now; nothing changes
-   * yet. Rejects with a `StorageTransferError` naming the problem, such as data of another script or a damaged photo.
-   */
-  async function reviewScriptStorageImport(
-    transfer: StorageTransfer,
-  ): Promise<ScriptStorageImportReview> {
-    if (!scriptStorage || storedEntries.value === null)
-      throw new StorageTransferError(
-        "This browser's saved data cannot be read, so nothing can be imported.",
-      );
-    if (transfer.scope !== scriptStorage.scope)
-      throw new StorageTransferError(
-        "This saved data belongs to another script. Open that script and import it there.",
-      );
-    // Without durable captured media, imported photos would not outlive this page.
-    if (transfer.images.length > 0 && capturedMediaPersistence === undefined)
-      throw new StorageTransferError(
-        "This Player cannot keep saved photos, so it cannot import them.",
-      );
-    const images = await checkStorageTransferImages(transfer, decodeImage);
-    const incoming = new Set(transfer.entries.map((entry) => entry.key));
-    let current: readonly RuntimeScriptStorageEntrySnapshot[];
-    try {
-      current = await scriptStorage.load();
-    } catch {
-      throw new StorageTransferError(
-        "This browser's saved data cannot be read, so nothing can be imported.",
-      );
+  /** The saved data of every script this browser keeps, for an export; scripts without values are left out. */
+  async function savedScripts(): Promise<readonly SavedScript[]> {
+    const scopes = new Set(options.savedData?.scopes() ?? []);
+    if (scriptStorage) scopes.add(scriptStorage.scope);
+    const saved: SavedScript[] = [];
+    for (const scope of [...scopes].sort()) {
+      const name = options.savedData?.name(scope) ?? null;
+      let script: SavedScript;
+      // This Player's script is read through its own storage, after the saves its session issued.
+      if (scope === scriptStorage?.scope)
+        script = await collectSavedScript(scriptStorage, capturedMedia, name);
+      else if (options.savedData) {
+        const media = options.savedData.media(scope);
+        try {
+          script = await collectSavedScript(options.savedData.provider(scope), media, name);
+        } finally {
+          media.close();
+        }
+      } else continue;
+      if (script.script.entries.length > 0) saved.push(script);
     }
-    return {
-      transfer,
-      images,
-      currentCount: current.length,
-      removedKeys: current.map((entry) => entry.key).filter((key) => !incoming.has(key)),
-    };
+    return saved;
   }
   /**
-   * Replaces this script's saved data with a reviewed import, ending a running, waiting, or starting session first; the
-   * next Start uses the imported data. Imported photos get new references, stored before any value. When it rejects,
-   * the saved data is unchanged; a session it ended stays ended, and Start is offered either way.
+   * Checks exported saved data for an import, all of it, photos included, and compares each script with what this
+   * browser keeps now; nothing changes yet. Rejects with a `StorageTransferError` naming the problem.
    */
-  async function importScriptStorage(review: ScriptStorageImportReview): Promise<void> {
-    if (!scriptStorage || importing.value || clearing.value)
-      throw new StorageTransferError("Saved data cannot be replaced right now.");
-    importing.value = true;
-    const added: string[] = [];
-    try {
-      if (sessionInProgress.value) endSession();
-      const references = new Map<string, string>();
-      for (const image of review.images) {
-        const stored = capturedMedia.add("image", image.data, {
-          width: image.width,
-          height: image.height,
-        });
-        references.set(image.reference, stored.reference);
-        added.push(stored.reference);
+  async function reviewSavedDataImport(bundle: StorageBundle): Promise<SavedDataImportReview> {
+    const images = await checkStorageTransferImages(bundle.images, decodeImage);
+    const scripts: SavedDataImportScript[] = [];
+    for (const script of bundle.scripts) {
+      const own = script.scope === scriptStorage?.scope;
+      if (!own && !options.savedData)
+        throw new StorageTransferError(
+          "This Player can import only the saved data of the script it shows.",
+        );
+      let current: readonly RuntimeScriptStorageEntrySnapshot[];
+      try {
+        current = own
+          ? await scriptStorage!.load()
+          : await options.savedData!.provider(script.scope).load();
+      } catch {
+        throw new StorageTransferError(
+          "This browser's saved data cannot be read, so nothing can be imported.",
+        );
       }
-      const entries = review.transfer.entries.map((entry) => ({
-        key: entry.key,
-        value: remapCapturedMediaReferences(entry.value, references),
-      }));
-      // Issued saves of an ended session finish first: storage runs its operations in issue order.
-      await scriptStorage.replace(entries);
-    } catch (error) {
-      // Media that was stored before the failure is reclaimed later, as no saved value references it.
-      for (const reference of added) capturedMedia.discard(reference);
-      throw new StorageTransferError(
-        error instanceof CapturedMediaNotStoredError
-          ? "The photos could not be stored in this browser. The saved data is unchanged."
-          : "The import could not be saved in this browser, for example because its storage is full. The saved data is unchanged.",
-      );
-    } finally {
-      await loadScriptStorage();
-      importing.value = false;
-      if (lastStart !== null && !sessionInProgress.value) prepare(lastStart);
+      scripts.push({
+        scope: script.scope,
+        name: script.name ?? options.savedData?.name(script.scope) ?? null,
+        values: script.entries.length,
+        photos: script.photos.length,
+        currentValues: current.length,
+        shown: own,
+      });
     }
+    return { bundle, images, scripts };
+  }
+  /**
+   * Imports the chosen scripts of a reviewed bundle, each replacing its own scope's saved data at once, photos stored
+   * first under new references. When this Player's script is among them, a session in progress ends first and Start is
+   * offered with the imported data. A script that fails keeps its saved data; the rejection names it, and the scripts
+   * imported before it stay imported. Unchosen scripts are untouched.
+   */
+  async function importSavedData(
+    review: SavedDataImportReview,
+    chosen: ReadonlySet<string>,
+  ): Promise<void> {
+    if (importing.value || clearing.value)
+      throw new StorageTransferError("Saved data cannot be replaced right now.");
+    const ownChosen = scriptStorage !== undefined && chosen.has(scriptStorage.scope);
+    importing.value = true;
+    const failed: string[] = [];
+    try {
+      if (ownChosen && sessionInProgress.value) endSession();
+      for (const script of review.bundle.scripts) {
+        if (!chosen.has(script.scope)) continue;
+        try {
+          if (script.scope === scriptStorage?.scope) {
+            // Without durable captured media, imported photos would not outlive this page.
+            if (capturedMediaPersistence === undefined && usesImages(script))
+              throw new CapturedMediaNotStoredError("This Player cannot keep saved photos.");
+            await replaceScript(scriptStorage, capturedMedia, script, review.images);
+          } else {
+            const { storage, media } = options.savedData!.persistence(script.scope);
+            try {
+              await replaceScript(storage, media, script, review.images);
+            } finally {
+              await storage.close();
+              media.close();
+            }
+          }
+        } catch (error) {
+          failed.push(
+            `${script.name ?? script.scope} (${error instanceof CapturedMediaNotStoredError ? "its photos could not be stored" : "it could not be saved, for example because storage is full"})`,
+          );
+        }
+      }
+    } finally {
+      if (ownChosen) {
+        await loadScriptStorage();
+        importing.value = false;
+        if (lastStart !== null && !sessionInProgress.value) prepare(lastStart);
+      } else importing.value = false;
+    }
+    if (failed.length > 0)
+      throw new StorageTransferError(
+        `Not imported, and their saved data is unchanged: ${failed.join("; ")}. Any other chosen script was imported.`,
+      );
   }
   /** Whether a session runs, waits for Continue, or is starting; its own view of the saved values is in use. */
   const sessionInProgress = computed(
@@ -747,22 +786,21 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       void mediaRevision.value;
       return capturedMedia.resolve(reference);
     },
-    exportScriptStorage: () =>
-      scriptStorage
-        ? collectStorageTransfer(scriptStorage, capturedMedia)
-        : Promise.reject(new Error("This script keeps no saved data.")),
-    /** Whether saved data can be imported now: the host persists it, it can be read, and no import or clear runs. */
-    canImportScriptStorage: computed(
-      () =>
-        scriptStorage !== undefined &&
-        storedEntries.value !== null &&
-        !clearing.value &&
-        !importing.value,
-    ),
-    /** Whether an import must end the session first. */
+    /** Whether the Player offers saved data: of every script this browser keeps, or at least of the shown one. */
+    hasSavedData: options.savedData !== undefined || scriptStorage !== undefined,
+    savedScripts,
+    /** Remembers the shown script's title for listing its saved data among other scripts'. */
+    rememberScriptName(name: string) {
+      if (scriptStorage) options.savedData?.rememberName(scriptStorage.scope, name);
+    },
+    /** Whether saved data can be imported now: no import or clear runs. */
+    canImportSavedData: computed(() => !clearing.value && !importing.value),
+    /** Whether an import that includes this script must end its session first. */
     sessionInProgress,
-    reviewScriptStorageImport,
-    importScriptStorage,
+    /** The storage scope of the script this Player shows, or `null`. */
+    scriptScope: scriptStorage?.scope ?? null,
+    reviewSavedDataImport,
+    importSavedData,
     /** The current or last session's recorded engine calls for a debug export, or `null` before any Start. */
     debugRecording: () => recorder.recording(),
     loadScriptStorage,
@@ -842,12 +880,58 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
 
 export type PlayerSessionHost = ReturnType<typeof usePlayerSession>;
 
-/** A checked import and how it changes the saved data, shown before the player confirms it. */
-export interface ScriptStorageImportReview {
-  readonly transfer: StorageTransfer;
+/**
+ * Replaces one script's saved data with its imported values: its own photos are added under new references first. Any
+ * other reference in its values, such as another script's photo, stays the text it was.
+ */
+async function replaceScript(
+  storage: ScriptStorageProvider,
+  media: CapturedMediaStore,
+  script: StorageBundleScript,
+  images: readonly CheckedTransferImage[],
+): Promise<void> {
+  const own = new Set(script.photos);
+  const references = new Map<string, string>();
+  const added: string[] = [];
+  try {
+    for (const image of images) {
+      if (!own.has(image.reference)) continue;
+      const stored = media.add("image", image.data, { width: image.width, height: image.height });
+      references.set(image.reference, stored.reference);
+      added.push(stored.reference);
+    }
+    // Issued saves of an ended session finish first: storage runs its operations in issue order.
+    await storage.replace(
+      script.entries.map((entry) => ({
+        key: entry.key,
+        value: remapCapturedMediaReferences(entry.value, references),
+      })),
+    );
+  } catch (error) {
+    // Media stored before the failure is reclaimed later, as no saved value references it.
+    for (const reference of added) media.discard(reference);
+    throw error;
+  }
+}
+
+function usesImages(script: StorageBundleScript): boolean {
+  return script.photos.length > 0;
+}
+
+/** A checked import and how each script in it changes the saved data, shown before the player confirms it. */
+export interface SavedDataImportReview {
+  readonly bundle: StorageBundle;
   readonly images: readonly CheckedTransferImage[];
-  /** How many values are saved now. */
-  readonly currentCount: number;
-  /** Saved keys that the import removes. */
-  readonly removedKeys: readonly string[];
+  readonly scripts: readonly SavedDataImportScript[];
+}
+
+export interface SavedDataImportScript {
+  readonly scope: string;
+  readonly name: string | null;
+  readonly values: number;
+  readonly photos: number;
+  /** How many values are saved now; with none, the import adds the script. */
+  readonly currentValues: number;
+  /** Whether it is the script this Player shows, whose session an import ends. */
+  readonly shown: boolean;
 }

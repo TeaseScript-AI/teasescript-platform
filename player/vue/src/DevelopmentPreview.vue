@@ -6,6 +6,7 @@ import type { CapturedMediaRepository } from "../../captured-media.js";
 import type { PlayerTimerKind } from "../../model.js";
 import { playerNoticeKeys, playerNotices, type PlayerNotice } from "../../notices.js";
 import { createPlayerRuntimeSession, playerTemporalContext } from "../../runtime-adapter.js";
+import { browserSavedData } from "../../saved-data.js";
 import { createLocalScriptStorage } from "../../script-storage.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import BackgroundControlsFixture from "./BackgroundControlsFixture.vue";
@@ -75,6 +76,7 @@ const player = usePlayerSession(
         scriptStorage: createLocalScriptStorage(browserStorage(), packageHost.storageScope),
         // As in the default build: an image the script saves a reference to stays in this browser for later runs.
         capturedMedia: { repository: props.capturedMediaRepository ?? null },
+        savedData: browserSavedData(browserStorage(), props.capturedMediaRepository ?? null),
       }
     : {
         // The camera scenarios speak as the repository demo's Mistress and use its images and sounds.
@@ -86,6 +88,7 @@ const player = usePlayerSession(
         ...(cameraScenario && {
           scriptStorage: createLocalScriptStorage(browserStorage(), "development-camera"),
           capturedMedia: { repository: props.capturedMediaRepository ?? null },
+          savedData: browserSavedData(browserStorage(), props.capturedMediaRepository ?? null),
         }),
       },
 );

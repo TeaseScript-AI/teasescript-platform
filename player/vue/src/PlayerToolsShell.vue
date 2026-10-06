@@ -41,8 +41,8 @@ import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 import DialogDescription from "@/components/ui/dialog/DialogDescription.vue";
 import SavedDataExport from "./SavedDataExport.vue";
 import SavedDataImport from "./SavedDataImport.vue";
-import type { ScriptStorageImportReview } from "./usePlayerSession";
-import type { StorageTransfer } from "../../storage-transfer.js";
+import type { SavedDataImportReview } from "./usePlayerSession";
+import type { SavedScript, StorageBundle } from "../../storage-transfer.js";
 import {
   computed,
   nextTick,
@@ -68,16 +68,15 @@ const props = defineProps<{
    * progress after confirmation, and clearing is possible only while no session runs.
    */
   savedData?: {
-    readonly name: string;
-    readonly export: () => Promise<{ readonly transfer: StorageTransfer; readonly missingPhotos: number }>;
+    readonly export: () => Promise<readonly SavedScript[]>;
     readonly import: {
       readonly available: boolean;
-      readonly endsSession: boolean;
-      readonly review: (transfer: StorageTransfer) => Promise<ScriptStorageImportReview>;
-      readonly commit: (review: ScriptStorageImportReview) => Promise<void>;
+      readonly sessionInProgress: boolean;
+      readonly review: (bundle: StorageBundle) => Promise<SavedDataImportReview>;
+      readonly commit: (review: SavedDataImportReview, chosen: ReadonlySet<string>) => Promise<void>;
     };
-    readonly canClear: boolean;
-    readonly clear: () => Promise<boolean>;
+    /** Clearing the shown script's saved data, when the host keeps it; possible only while no session runs. */
+    readonly clear: { readonly available: boolean; readonly run: () => Promise<boolean> } | null;
   } | null;
 }>();
 // User-facing Player Settings: owned by PlayerApp and available in every build.
@@ -224,7 +223,7 @@ async function askToClearSavedData() {
 }
 async function confirmClearSavedData() {
   clearSavedData.value = "clearing";
-  clearSavedData.value = (await props.savedData?.clear()) ? "cleared" : "failed";
+  clearSavedData.value = (await props.savedData?.clear?.run()) ? "cleared" : "failed";
 }
 watch(
   [sidebarVisible, narrow],
@@ -879,7 +878,7 @@ async function updateSidebarVisibility(open: boolean) {
                     <DialogHeader>
                       <DialogTitle>Player Settings</DialogTitle>
                       <DialogDescription>
-                        Preferences for the Player interface{{ savedData ? " and this script's saved data" : "" }}.
+                        Preferences for the Player interface{{ savedData ? " and the saved data of the scripts you play" : "" }}.
                       </DialogDescription>
                     </DialogHeader>
                     <label class="flex flex-col gap-2 text-sm">
@@ -932,55 +931,62 @@ async function updateSidebarVisibility(open: boolean) {
                       class="grid gap-2 border-t pt-4 text-sm"
                       data-player-setting="saved-data"
                     >
-                      <h3 class="font-medium">Saved script data</h3>
-                      <p>What this script saved in this browser for its next runs.</p>
+                      <h3 class="font-medium">Saved data</h3>
+                      <p>
+                        What the scripts you play saved in this browser. Export and import take every script at once,
+                        or the ones you tick.
+                      </p>
                       <div class="flex flex-wrap gap-2">
-                        <SavedDataExport :name="savedData.name" :read="savedData.export" />
+                        <SavedDataExport :read="savedData.export" />
                         <SavedDataImport
                           :available="savedData.import.available"
-                          :ends-session="savedData.import.endsSession"
+                          :session-in-progress="savedData.import.sessionInProgress"
                           :review="savedData.import.review"
                           :commit="savedData.import.commit"
                         />
                       </div>
-                      <template v-if="clearSavedData === 'confirm' || clearSavedData === 'clearing'">
-                        <p>Clear all saved data for this script? This cannot be undone.</p>
-                        <div ref="clearConfirmation" class="flex gap-2">
+                      <template v-if="savedData.clear">
+                        <template v-if="clearSavedData === 'confirm' || clearSavedData === 'clearing'">
+                          <p>Clear all saved data for this script? This cannot be undone.</p>
+                          <div ref="clearConfirmation" class="flex gap-2">
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              class="min-h-11"
+                              :disabled="clearSavedData === 'clearing'"
+                              data-clear-saved-data-confirm
+                              @click="confirmClearSavedData"
+                            >
+                              {{ clearSavedData === "clearing" ? "Clearing…" : "Clear" }}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              class="min-h-11"
+                              :disabled="clearSavedData === 'clearing'"
+                              @click="clearSavedData = 'idle'"
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </template>
+                        <template v-else>
                           <Button
-                            variant="destructive"
-                            size="sm"
-                            class="min-h-11"
-                            :disabled="clearSavedData === 'clearing'"
-                            data-clear-saved-data-confirm
-                            @click="confirmClearSavedData"
-                          >
-                            {{ clearSavedData === "clearing" ? "Clearing…" : "Clear" }}
-                          </Button>
-                          <Button
+                            class="min-h-11 justify-self-start"
                             variant="outline"
                             size="sm"
-                            class="min-h-11"
-                            :disabled="clearSavedData === 'clearing'"
-                            @click="clearSavedData = 'idle'"
+                            :disabled="!savedData.clear.available"
+                            data-clear-saved-data
+                            @click="askToClearSavedData"
                           >
-                            Cancel
+                            Clear saved script data
                           </Button>
-                        </div>
-                      </template>
-                      <template v-else>
-                        <Button
-                          class="min-h-11 justify-self-start"
-                          variant="outline"
-                          size="sm"
-                          :disabled="!savedData.canClear"
-                          data-clear-saved-data
-                          @click="askToClearSavedData"
-                        >
-                          Clear saved script data
-                        </Button>
-                        <p v-if="!savedData.canClear">Available before the session starts or after it ends.</p>
-                        <p v-if="clearSavedData === 'cleared'" role="status">Saved script data cleared.</p>
-                        <p v-if="clearSavedData === 'failed'" role="status">Could not clear saved script data.</p>
+                          <p v-if="!savedData.clear.available">
+                            Clears only this script's data, before the session starts or after it ends.
+                          </p>
+                          <p v-if="clearSavedData === 'cleared'" role="status">Saved script data cleared.</p>
+                          <p v-if="clearSavedData === 'failed'" role="status">Could not clear saved script data.</p>
+                        </template>
                       </template>
                     </section>
                   </DialogContent>
