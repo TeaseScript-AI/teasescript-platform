@@ -7,6 +7,7 @@ import {
   chooseDebugPhoto,
   debugPhotoUses,
   NO_PERSONAL_CONTENT,
+  type DebugCategory,
   type DebugExportCandidate,
   type DebugExportChoices,
 } from "../player/debug-export-assembly.js";
@@ -227,40 +228,47 @@ test("a state that cannot be checkpointed is exported as the last good state, wh
   assert.equal(replayDebugExport(parseDebugExport(await fileText(exported))).kind, "reproduced");
 });
 
-test("session text leaves out a value saved without being said and an answer's value, unless their own categories are chosen", async () => {
+test("session text shows what the player saw; values that were never said need their own categories", async () => {
+  const hidden = "private-value-never-said";
   const recorder = new DebugRecorder();
   let session = createPlayerRuntimeSession(
-    'save load("private", default: "") as "copy"\nlet pick = choose [{ text: "Pick", value: 7 }]\nexit',
-    { recorder, persistentScriptStorage: true, scriptStorage: [{ key: "private", value: SECRET }] },
+    [
+      'let secret = load("private", default: "")',
+      'let pick = choose [{ text: "Pick", value: secret }]',
+      'let typed = askText("Name", default: secret)',
+      'save "kept" as secret',
+      'say "Done"',
+      "exit",
+    ].join("\n"),
+    { recorder, persistentScriptStorage: true, scriptStorage: [{ key: "private", value: hidden }] },
   );
+  const choices = playerRuntimeForeground(session);
+  if (choices?.kind !== "choose") throw new Error("Expected choices");
+  session = selectPlayerRuntimeChoice(session, choices.options[0]!.id)!.session;
+  session = submitPlayerRuntimeComposer(session, "Typed by the player")!.session;
   session = completePlayerRuntimeStorageWrite(
     session,
     pendingPlayerRuntimeStorageWrite(session.snapshot)!.actionId,
     true,
   ).session;
-  const choices = playerRuntimeForeground(session);
-  if (choices?.kind !== "choose") throw new Error("Expected choices");
-  session = selectPlayerRuntimeChoice(session, choices.options[0]!.id)!.session;
   assert.equal(session.snapshot.status, "halted");
   const frozen = candidate(session, recorder);
-  const sessionText = chooseDebugCategory(NO_PERSONAL_CONTENT, frozen, "sessionText", true);
-  // The saved value as text, and the answer's value as the result of its completion.
-  const result = async (chosen: DebugExportChoices) => {
-    const { exported } = await assembleDebugExport(frozen, chosen);
-    const text = JSON.stringify(exported.sections["eventsTail"]);
-    const answer = /"actionKind":"interaction".*?"result":("[^"]*"|\d+)/u.exec(text)?.[1];
-    return { saved: text.includes(SECRET), answer };
+  const exported = async (categories: readonly DebugCategory[]) => {
+    let chosen = NO_PERSONAL_CONTENT;
+    for (const category of categories) chosen = chooseDebugCategory(chosen, frozen, category, true);
+    const result = (await assembleDebugExport(frozen, chosen)).exported;
+    return { file: await fileText(result), events: JSON.stringify(result.sections["eventsTail"]) };
   };
-  assert.deepEqual(await result(sessionText), { saved: false, answer: '"[left out: not chosen]"' });
-  const withAll = await result(
-    chooseDebugCategory(
-      chooseDebugCategory(sessionText, frozen, "savedValues", true),
-      frozen,
-      "answers",
-      true,
-    ),
-  );
-  assert.deepEqual(withAll, { saved: true, answer: "7" });
+  // The choice's value, the default, and the storage key all hold the value; none of them was said.
+  const textOnly = await exported(["sessionText"]);
+  assert.ok(!textOnly.file.includes(hidden), "the whole file");
+  assert.ok(textOnly.events.includes("Typed by the player") && textOnly.events.includes("Done"));
+  for (const categories of [
+    ["sessionText", "savedValues"],
+    ["sessionText", "answers"],
+  ] as const)
+    assert.ok(!(await exported(categories)).events.includes(hidden), categories.join(", "));
+  assert.ok((await exported(["sessionText", "savedValues", "answers"])).events.includes(hidden));
 });
 
 test("credentials and rooted paths are removed from every readable section, and replay data with one is left out", async () => {
@@ -279,6 +287,44 @@ test("credentials and rooted paths are removed from every readable section, and 
     assert.ok(!text.includes(removed), removed);
   assert.equal(exported.replay, null);
   assert.match(JSON.stringify(exported.sections["player"]), /ReviewBrowser +\[removed\]/u);
+});
+
+test("replay data is judged by its actual text: escaped whitespace hides nothing, and a URL is no file path", async () => {
+  const exportOf = async (saved: string) => {
+    const recorder = new DebugRecorder();
+    const session = createPlayerRuntimeSession('let name = askText "Name"\nexit', {
+      recorder,
+      scriptStorage: [{ key: "value", value: saved }],
+    });
+    const frozen = candidate(session, recorder);
+    return (await assembleDebugExport(frozen, all(frozen))).exported;
+  };
+  for (const saved of [
+    "prefix\nghp_abcdefghijklmnopqrstuvwx",
+    "prefix\tghp_abcdefghijklmnopqrstuvwx",
+    "prefix\n/srv/private/notes.txt",
+    "\t/srv/private/notes.txt",
+    "file:///home/player/notes.txt",
+    "https://example.com/?key=ghp_abcdefghijklmnopqrstuvwx",
+  ]) {
+    const exported = await exportOf(saved);
+    assert.equal(exported.checkpoint, null, JSON.stringify(saved));
+    const text = await fileText(exported);
+    for (const part of ["ghp_abcdefghijklmnopqrstuvwx", "/srv/private", "/home/player"])
+      assert.ok(!text.includes(part), `${JSON.stringify(saved)} keeps ${part}`);
+  }
+  for (const saved of [
+    "https://example.com/render?file=/album/photo.jpg",
+    "See https://example.com/a/b/c.png (the cover)",
+    "images/room.png",
+  ]) {
+    const exported = await exportOf(saved);
+    assert.notEqual(exported.checkpoint, null, saved);
+    assert.equal(replayDebugExport(parseDebugExport(await fileText(exported))).kind, "reproduced");
+    assert.ok(
+      JSON.stringify(exported.sections["storage"]).includes(JSON.stringify(saved).slice(1, -1)),
+    );
+  }
 });
 
 test("a recording that stopped early still reports the actual failure, and its incomplete replay says why", async () => {

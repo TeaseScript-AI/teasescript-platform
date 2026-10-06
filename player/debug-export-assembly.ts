@@ -158,7 +158,7 @@ export async function assembleDebugExport(
   const sections: Record<string, unknown> = {};
   const events = session?.events.slice(-EVENT_TAIL) ?? [];
   sections["eventsTail"] = choices.sessionText
-    ? removeSecrets(events.map((event) => withoutUnchosenValues(event, choices)))
+    ? removeSecrets(events.map((event) => sessionTextEvent(event, choices)))
     : events.map((event) => ({ sequence: event.sequence, kind: event.kind }));
   if (choices.sessionText && session !== null) {
     const transcript = session.transcriptEntries
@@ -204,10 +204,7 @@ export async function assembleDebugExport(
       recording,
       omissions,
     ));
-    if (
-      checkpoint !== null &&
-      containsSecret(serializeValidatedRuntimeJson({ checkpoint, replay }))
-    ) {
+    if (checkpoint !== null && containsSecretText({ checkpoint, replay })) {
       checkpoint = null;
       checkpointRole = null;
       replay = null;
@@ -336,24 +333,52 @@ function replayData(
 const LEFT_OUT = "[left out: not chosen]";
 
 /**
- * An event as session text: chat text stays, but a value a script saves without saying it is a saved value, and the
- * value an answer gave is an answer, so each stays only when its own category is chosen.
+ * An event as session text. What the player saw stays: messages, their own transcript text, and button labels. Any other
+ * event can hold a saved value, an answer, or a storage key (a request's options and default, a settlement's result, a
+ * warning about a key), so it keeps its structure only, unless saved values and answers are chosen too.
  */
-function withoutUnchosenValues(event: InterpreterEvent, choices: DebugExportChoices) {
-  if (
-    !choices.savedValues &&
-    event.kind === "actionRequested" &&
-    event.action.kind === "storageWrite"
-  )
-    return { ...event, action: { ...event.action, value: LEFT_OUT } };
-  if (
-    !choices.answers &&
-    event.kind === "actionCompleted" &&
-    event.settlement.actionKind === "interaction"
-  )
-    return { ...event, settlement: { ...event.settlement, result: LEFT_OUT } };
-  return event;
+function sessionTextEvent(event: InterpreterEvent, choices: DebugExportChoices) {
+  if (choices.savedValues && choices.answers) return event;
+  const { kind, sequence } = event;
+  switch (event.kind) {
+    case "say":
+    case "playerTranscript":
+    case "permanentButtonPressed":
+    case "exit":
+      return event;
+    case "actionRequested":
+      return {
+        kind,
+        sequence,
+        span: event.span,
+        action: { kind: event.action.kind, actionId: event.action.actionId },
+        leftOut: LEFT_OUT,
+      };
+    case "actionCompleted":
+      return {
+        kind,
+        sequence,
+        span: event.span,
+        settlement: Object.fromEntries(
+          Object.entries(event.settlement).filter(([field]) => SETTLEMENT_STRUCTURE.has(field)),
+        ),
+        leftOut: LEFT_OUT,
+      };
+    case "developerWarning":
+    case "runtimeFailure":
+      return { kind, sequence, code: event.code, span: event.span, message: LEFT_OUT };
+    case "scriptStorageEdited":
+      return { kind, sequence, operation: event.operation, key: LEFT_OUT };
+  }
 }
+
+/** The fields of a settlement that say how an action ended without what it carried. */
+const SETTLEMENT_STRUCTURE: ReadonlySet<string> = new Set([
+  "actionKind",
+  "actionId",
+  "settlementKind",
+  "outcome",
+]);
 
 /** The answers the Player submitted, from the recorded completions of interactions. */
 function recordedAnswers(recording: DebugRecording | null): unknown[] {
@@ -408,23 +433,21 @@ export function debugPhotoUses(
 }
 
 // Text that looks like a credential or an absolute file path. Detection cannot prove text free of secrets; the dialog
-// says so, and the player reviews the preview.
-const SECRET_PATTERNS = [
+// says so, and the player reviews the preview. Credentials are found anywhere, also in a URL.
+const CREDENTIAL_PATTERNS = [
   /\b(?:sk|pk|rk)[-_](?:live|test|proj)?[-_]?[A-Za-z0-9]{16,}/gu,
   /\b(?:ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{16,}/gu,
   /\bxox[abprs]-[A-Za-z0-9-]{10,}/gu,
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/gu,
   /\bBearer\s+[A-Za-z0-9._~+/-]{16,}/gu,
-  // A rooted path of at least two parts, such as /srv/notes.txt or C:\notes; not a URL, whose slashes follow a colon.
-  /(?:^|[\s"'(=])(?:\/[^\s"'()/]+\/[^\s"')]+|[A-Za-z]:\\\\?[^\s"')]+)/gu,
 ];
-
-function containsSecret(text: string): boolean {
-  return SECRET_PATTERNS.some((pattern) => {
-    pattern.lastIndex = 0;
-    return pattern.test(text);
-  });
-}
+// A path outside a URL: a rooted one of at least two parts, such as /srv/notes.txt or C:\notes, or a file URL.
+const PATH_PATTERNS = [
+  /(?:^|[\s"'(=])(?:\/[^\s"'()/]+\/[^\s"')]+|[A-Za-z]:\\\\?[^\s"')]+)/gu,
+  /\b[Ff][Ii][Ll][Ee]:\/\/[^\s"')]+/gu,
+];
+// A URL other than a file URL, whose path is part of an address, not of this computer.
+const URL_PATTERN = /\b(?![Ff][Ii][Ll][Ee]:)[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'<>]*/gu;
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -448,9 +471,34 @@ function removeSecrets(value: unknown): JsonValue {
   return copy;
 }
 
+/** Whether any text in plain data, a property name included, is something {@link scrub} removes. */
+function containsSecretText(value: unknown): boolean {
+  const pending: unknown[] = [JSON.parse(serializeValidatedRuntimeJson(value))];
+  for (let current = pending.pop(); current !== undefined; current = pending.pop()) {
+    if (typeof current === "string") {
+      if (scrub(current) !== current) return true;
+    } else if (Array.isArray(current)) pending.push(...current);
+    else if (current !== null && typeof current === "object")
+      for (const [key, item] of Object.entries(current)) pending.push(key, item);
+  }
+  return false;
+}
+
 function scrub(text: string): string {
+  let result = "";
+  let last = 0;
+  for (const url of text.matchAll(URL_PATTERN)) {
+    result += removePaths(text.slice(last, url.index)) + url[0];
+    last = url.index + url[0].length;
+  }
+  result += removePaths(text.slice(last));
+  for (const pattern of CREDENTIAL_PATTERNS) result = result.replace(pattern, " [removed]");
+  return result;
+}
+
+function removePaths(text: string): string {
   let result = text;
-  for (const pattern of SECRET_PATTERNS) result = result.replace(pattern, " [removed]");
+  for (const pattern of PATH_PATTERNS) result = result.replace(pattern, " [removed]");
   return result;
 }
 

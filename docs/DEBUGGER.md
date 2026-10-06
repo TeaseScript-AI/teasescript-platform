@@ -97,12 +97,13 @@ The technical report carries the build and its revisions, the package's storage 
 where the browser can hash, the incident as the session's actual state shows it, and the sequence and kind of the last
 256 events. Saved values add the session's
 storage view; answers add the recorded interaction completions; session text adds the last 50 transcript messages and
-the events with their content, except a value saved without being said or an answer's value unless its own category
-is chosen; replay data adds the checkpoint of the state a complete record reaches (of the actual state when the record
+the events with their content: messages, the player's own transcript text, and button labels always, but the details of
+requests, settlements, warnings, failures, and storage edits, which can hold saved values, answers, or storage keys,
+only when saved values and answers are chosen too; replay data adds the checkpoint of the state a complete record reaches (of the actual state when the record
 is incomplete), or of its anchor as the last good state when that state cannot be checkpointed; photos add the chosen originals and their uses (a recorded image
 answer or capture, or a saved value); Player and browser details add the presentation settings, screen geometry,
-pointer, language, and user agent. Text that looks like a credential or a rooted file path is replaced in every readable
-section, and replay data containing it is left out entirely, since changing it would change the replay; such
+pointer, language, and user agent. Text that looks like a credential, or a rooted file path or file URL outside another URL, is replaced in
+every readable section, and replay data containing it is left out entirely, since changing it would change the replay; such
 detection cannot prove text safe, so the export is never called anonymous.
 
 After `npm run build:typescript`, `node tools/debug-export.mjs inspect <file>` summarizes an export without runtime

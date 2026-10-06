@@ -26,7 +26,11 @@ const props = defineProps<{
   photoUrl: (reference: string) => string | null;
 }>();
 
-const categories: readonly { readonly key: DebugCategory; readonly label: string; readonly help: string }[] = [
+const categories: readonly {
+  readonly key: DebugCategory;
+  readonly label: string;
+  readonly help: string;
+}[] = [
   {
     key: "savedValues",
     label: "Saved script values",
@@ -40,7 +44,7 @@ const categories: readonly { readonly key: DebugCategory; readonly label: string
   {
     key: "sessionText",
     label: "Session text and debug details",
-    help: "Recent chat messages and events with their text; they can repeat answers and saved values.",
+    help: "Recent chat messages and the kinds of recent events; with saved values and answers too, every event detail.",
   },
   {
     key: "replay",
@@ -72,9 +76,16 @@ function size(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
 }
 function uses(photo: (typeof photos.value)[number]): string {
-  const relations = { capture: "photo taken", imageAnswer: "image answer", savedValue: "saved value" } as const;
+  const relations = {
+    capture: "photo taken",
+    imageAnswer: "image answer",
+    savedValue: "saved value",
+  } as const;
   return photo.usedBy
-    .map((use) => `${relations[use.relation]}${use.operation === null ? "" : ` (step ${use.operation})`}`)
+    .map(
+      (use) =>
+        `${relations[use.relation]}${use.operation === null ? "" : ` (step ${use.operation})`}`,
+    )
     .join(", ");
 }
 </script>
@@ -85,8 +96,8 @@ function uses(photo: (typeof photos.value)[number]): string {
       <DialogHeader>
         <DialogTitle>Download debug export</DialogTitle>
         <DialogDescription>
-          A file that helps a developer find what went wrong. Attachments to a public issue can be read by anyone, so
-          choose what to include.
+          A file that helps a developer find what went wrong. Attachments to a public issue can be
+          read by anyone, so choose what to include.
         </DialogDescription>
       </DialogHeader>
 
@@ -94,7 +105,9 @@ function uses(photo: (typeof photos.value)[number]): string {
         <div class="flex min-h-11 items-center justify-between gap-4">
           <div>
             <p class="font-medium">Technical report</p>
-            <p class="text-muted-foreground">Versions, the error and where it happened, and the kinds of recent events.</p>
+            <p class="text-muted-foreground">
+              Versions, the error and where it happened, and the kinds of recent events.
+            </p>
           </div>
           <Badge variant="secondary">Included</Badge>
         </div>
@@ -107,20 +120,28 @@ function uses(photo: (typeof photos.value)[number]): string {
           <span>
             <span class="block font-medium">{{ category.label }}</span>
             <span class="block text-muted-foreground">{{ category.help }}</span>
-            <span v-if="category.key === 'replay' && replayBlocked" class="block text-muted-foreground">
-              Turn on saved values, answers, and session text first: the engine state holds copies of them.
+            <span
+              v-if="category.key === 'replay' && replayBlocked"
+              class="block text-muted-foreground"
+            >
+              Turn on saved values, answers, and session text first: the engine state holds copies
+              of them.
             </span>
           </span>
           <Switch
             :model-value="choices[category.key]"
-            :disabled="exporter.candidate.value === null || (category.key === 'replay' && replayBlocked)"
+            :disabled="
+              exporter.candidate.value === null || (category.key === 'replay' && replayBlocked)
+            "
             @update:model-value="(on: boolean) => exporter.choose(category.key, on)"
           />
         </label>
 
         <fieldset v-if="choices.photos" class="grid gap-2" data-debug-export-photos>
           <legend class="font-medium">Photos to include</legend>
-          <p v-if="photos.length === 0" class="text-muted-foreground">This session used no photos.</p>
+          <p v-if="photos.length === 0" class="text-muted-foreground">
+            This session used no photos.
+          </p>
           <label
             v-for="photo in photos"
             :key="photo.reference"
@@ -139,15 +160,17 @@ function uses(photo: (typeof photos.value)[number]): string {
             />
             <span class="min-w-0">
               <span class="block">{{ uses(photo) }}</span>
-              <span class="block text-muted-foreground">{{ photo.mimeType }} · {{ size(photo.byteLength) }}</span>
+              <span class="block text-muted-foreground"
+                >{{ photo.mimeType }} · {{ size(photo.byteLength) }}</span
+              >
             </span>
           </label>
         </fieldset>
 
         <Alert>
           <AlertDescription>
-            The file is not encrypted. Credentials and file paths found in the chosen text are removed, but that cannot
-            catch everything: check the preview before sharing.
+            The file is not encrypted. Credentials and file paths found in the chosen text are
+            removed, but that cannot catch everything: check the preview before sharing.
           </AlertDescription>
         </Alert>
 
@@ -173,7 +196,11 @@ function uses(photo: (typeof photos.value)[number]): string {
           </Alert>
           <Collapsible>
             <CollapsibleTrigger as-child>
-              <Button variant="outline" class="min-h-11 w-full justify-between" data-debug-export-preview-toggle>
+              <Button
+                variant="outline"
+                class="min-h-11 w-full justify-between"
+                data-debug-export-preview-toggle
+              >
                 What the file contains
                 <ChevronDown />
               </Button>
@@ -184,12 +211,19 @@ function uses(photo: (typeof photos.value)[number]): string {
                   <li v-for="part in prepared.parts" :key="part.name">
                     <span class="font-medium">{{ part.name }}:</span> {{ part.detail }}
                   </li>
-                  <li v-for="omission in prepared.omissions" :key="omission" class="text-muted-foreground">
+                  <li
+                    v-for="omission in prepared.omissions"
+                    :key="omission"
+                    class="text-muted-foreground"
+                  >
                     {{ omission }}
                   </li>
                 </ul>
                 <ScrollArea class="h-48 rounded-md border">
-                  <pre class="p-2 text-xs break-all whitespace-pre-wrap" data-debug-export-preview>{{ prepared.preview }}</pre>
+                  <pre
+                    class="p-2 text-xs break-all whitespace-pre-wrap"
+                    data-debug-export-preview
+                    >{{ prepared.preview }}</pre>
                 </ScrollArea>
               </div>
             </CollapsibleContent>
@@ -197,7 +231,9 @@ function uses(photo: (typeof photos.value)[number]): string {
         </template>
 
         <div class="flex flex-wrap justify-end gap-2">
-          <Button variant="outline" class="min-h-11" @click="exporter.open.value = false">Cancel</Button>
+          <Button variant="outline" class="min-h-11" @click="exporter.open.value = false"
+            >Cancel</Button
+          >
           <Button v-if="prepared && !prepared.problem" as-child class="min-h-11">
             <a :href="prepared.url" :download="exporter.fileName.value" data-debug-export-download>
               <Download />
