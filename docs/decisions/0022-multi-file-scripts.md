@@ -116,7 +116,8 @@ goto script("rooms/${room}.tease", label: "start")
 4. Asynchronous media continues across `goto`, `call`, and `end`. `exit` stops it.
 5. A non-persistent timer or permanent button belongs to the file entry that started it and goes when that entry is
    left: by a `goto` from it, by its `end`, or when a block's `goto` abandons it. A `call` does not leave the caller.
-   Persistent ones stay; `exit` removes all (V30 §27, §28).
+   Persistent ones stay; `exit` removes all (V30 §27, §28). A block that stays keeps the local variables it shares
+   (ADR 0024), although the continuations that declared them are discarded.
 6. Each entry into a file has its own top-level variables. V30 §29 states how functions, blocks, `end`, and a block's
    `goto` relate to entries.
 

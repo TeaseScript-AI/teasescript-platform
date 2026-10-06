@@ -1,4 +1,5 @@
 import type { InstructionPlan } from "../plan/model.js";
+import { sameCaptures } from "./capture-validation.js";
 import { rootFitsFunction, serializedRootFiles } from "./activation-validation.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import {
@@ -23,6 +24,7 @@ const MEDIA_KEYS = [
   "cues",
   "finishFunctionId",
   "handlerRootScopeId",
+  "captures",
   "segment",
   "committedProgressMs",
   "positionMs",
@@ -475,11 +477,13 @@ export function validateMediaState(
           "mediaId",
           "handlerFunctionId",
           "rootScopeId",
+          "captures",
           "dueAtMs",
           "count",
         ]) ||
         !positiveSafeInteger(invocation.count) ||
         invocation.rootScopeId !== media?.handlerRootScopeId ||
+        !sameCaptures(invocation.captures, media?.captures) ||
         !rootFitsFunction(plan, roots, invocation.rootScopeId, invocation.handlerFunctionId) ||
         media?.state === "stopped" ||
         !validOwner(media, invocation.handlerFunctionId, invocation.count)
@@ -502,7 +506,8 @@ export function validateMediaState(
         : undefined;
       if (
         !validOwner(media, frame.functionId, 1) ||
-        frame.rootScopeId !== media?.handlerRootScopeId
+        frame.rootScopeId !== media?.handlerRootScopeId ||
+        !sameCaptures(frame.captures, media?.captures)
       ) {
         errors.push("Runtime media cue-block frame does not belong to its media.");
       }

@@ -1,4 +1,5 @@
 import { exactDurationMilliseconds } from "./temporal-operations.js";
+import { leaveScopes, resolveCaptures } from "./captures.js";
 import { resolveMessagePresentation } from "./message-presentation.js";
 import type { MessagePresentation } from "../message-presentation.js";
 import type { TemporalContext } from "../temporal.js";
@@ -383,7 +384,7 @@ function executePlannedInstruction(
       if (currentFrame(snapshot).file !== null) {
         throw fault("TSR033", "Cannot leave the root lexical scope.", instruction.span);
       }
-      snapshot.frames.pop();
+      leaveScopes(snapshot, snapshot.frames.length - 1);
       advance(snapshot);
       return;
     case "declareBinding": {
@@ -1263,6 +1264,8 @@ function enterFunction(
     id: snapshot.nextCallFrameId,
     // A function sees the top-level names of the activation that calls it, which is always its own file's.
     rootScopeId: contextRootId(snapshot),
+    // A function sees its own locals and those of its file, never those of its caller (V30 §14).
+    captures: [],
     functionId: definition.id,
     functionName: definition.name,
     callSiteSpan: copySpan(instruction.span),
@@ -1421,7 +1424,7 @@ function returnFromFunction(
     return;
   }
   const returned = cloneCapturedSerializableValue(value);
-  snapshot.frames.splice(frame.scopeBaseDepth);
+  leaveScopes(snapshot, frame.scopeBaseDepth);
   snapshot.loopFrames.splice(frame.loopBaseDepth);
   snapshot.callFrames.pop();
   snapshot.temporaries.splice(
@@ -1642,7 +1645,7 @@ function executeLoopControl(
   if (snapshot.frames.length <= frame.scopeDepth) {
     throw fault("TSR042", "Active loop iteration scope is missing.", instruction.span);
   }
-  snapshot.frames.splice(frame.scopeDepth);
+  leaveScopes(snapshot, frame.scopeDepth);
   if (instruction.action === "break") snapshot.loopFrames.pop();
   snapshot.nextInstruction = instruction.target;
 }
@@ -2431,6 +2434,7 @@ function startTimer(
     instruction.span,
   );
   const timerId = snapshot.nextTimerId;
+  const captures = resolveCaptures(snapshot, instruction.captures, instruction.span);
   const sequence = takeSequence(snapshot);
   const action: RuntimeTimerActionSnapshot = {
     kind: "timer",
@@ -2447,6 +2451,7 @@ function startTimer(
       persist: instruction.persist,
       handlerFunctionId: instruction.handlerFunctionId,
       rootScopeId: contextRootId(snapshot),
+      captures,
       range:
         range === null ? null : { start: range.start, end: range.end, inclusive: range.inclusive },
       repeatDurationMs: instruction.repeat && range === null ? roundDurationMs : null,
@@ -2707,6 +2712,7 @@ function startMedia(
     5 + requiredFutureActionCompletionEvents(snapshot),
     instruction.span,
   );
+  const captures = resolveCaptures(snapshot, instruction.captures, instruction.span);
   if (instruction.media === "video") stopStageVideo(plan, snapshot, events, instruction.span);
   const mediaId = snapshot.nextMediaId;
   const mediaSequence = takeSequence(snapshot);
@@ -2722,6 +2728,7 @@ function startMedia(
         instruction.cues.length > 0 || instruction.finishFunctionId !== null
           ? contextRootId(snapshot)
           : null,
+      captures,
       media: instruction.media,
       source: file ?? "",
       state: "running",
@@ -2857,6 +2864,7 @@ function showPermanentButton(
     2 + requiredFutureActionCompletionEvents(snapshot),
     instruction.span,
   );
+  const captures = resolveCaptures(snapshot, instruction.captures, instruction.span);
   const sequence = takeSequence(snapshot);
   const buttonId = snapshot.nextPermanentButtonId;
   const action: RuntimePermanentButtonActionSnapshot = {
@@ -2871,6 +2879,7 @@ function showPermanentButton(
       persist: instruction.persist,
       handlerFunctionId: instruction.handlerFunctionId,
       rootScopeId: contextRootId(snapshot),
+      captures,
     },
   };
   snapshot.nextActionId += 1;

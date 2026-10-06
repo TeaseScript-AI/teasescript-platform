@@ -1,4 +1,5 @@
 import { type InstructionPlan, type PlanSourceLocation, mainSourceSpan } from "../../plan/model.js";
+import { cloneCaptures, sweepRetainedScopes } from "../captures.js";
 import { interruptFrame } from "../activations.js";
 import type { SourceSpan } from "../../source.js";
 import type {
@@ -183,6 +184,7 @@ function settleMediaAction(
   const completionEventSequence = takeSequence(snapshot, 1);
   snapshot.backgroundActions.splice(snapshot.backgroundActions.indexOf(action), 1);
   snapshot.settledMedia.push(action.media);
+  sweepRetainedScopes(snapshot, false);
   const settlement: RuntimeMediaSettlementSnapshot = Object.freeze({
     actionId: action.actionId,
     actionKind: "media",
@@ -317,6 +319,7 @@ function queueMediaCue(
     mediaId,
     handlerFunctionId,
     rootScopeId: media.handlerRootScopeId!,
+    captures: cloneCaptures(media.captures),
     dueAtMs,
     count: 1,
   });

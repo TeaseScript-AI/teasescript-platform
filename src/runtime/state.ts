@@ -68,6 +68,8 @@ import {
   type SerializableRuntimeSet,
   type SerializableRuntimeValue,
 } from "./serializable-values.js";
+import { cloneCaptures, type RuntimeCaptureSnapshot } from "./captures.js";
+import { validateCaptureState } from "./capture-validation.js";
 import {
   contextHoldsInstruction,
   rootFitsFunction,
@@ -109,7 +111,7 @@ import {
 } from "./script-storage.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 51;
+export const RUNTIME_SNAPSHOT_VERSION = 52;
 export const DEFAULT_MAX_CALL_DEPTH = 256;
 export const MAX_SUPPORTED_CALL_DEPTH = 4096;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -301,6 +303,8 @@ export interface RuntimeCallFrameSnapshot {
   readonly id: number;
   /** The activation root whose top-level names the function or block sees. */
   readonly rootScopeId: number;
+  /** For a timer, media, or button block, the variables it shares with the code that created it; otherwise empty. */
+  readonly captures: readonly RuntimeCaptureSnapshot[];
   readonly functionId: number;
   readonly functionName: string;
   /** A user call site, or the timer statement for an expiry block. */
@@ -698,7 +702,10 @@ export function cloneCapturedRuntimeSnapshot(snapshot: RuntimeSnapshot): Runtime
         : clonePreparedSayOutput(snapshot.preparedSayOutput),
     settledTimers: snapshot.settledTimers.map(cloneTimer),
     nextTimerId: snapshot.nextTimerId,
-    pendingTimerHandlers: snapshot.pendingTimerHandlers.map((invocation) => ({ ...invocation })),
+    pendingTimerHandlers: snapshot.pendingTimerHandlers.map((invocation) => ({
+      ...invocation,
+      captures: cloneCaptures(invocation.captures),
+    })),
     stageImage: snapshot.stageImage,
     capturedImages: snapshot.capturedImages.map(cloneCapturedImage),
     scriptStorage: cloneScriptStorage(snapshot.scriptStorage),
@@ -747,6 +754,7 @@ function cloneFunctionFrame(frame: RuntimeCallFrameSnapshot): RuntimeCallFrameSn
     kind: "function",
     id: frame.id,
     rootScopeId: frame.rootScopeId,
+    captures: cloneCaptures(frame.captures),
     functionId: frame.functionId,
     functionName: frame.functionName,
     callSiteSpan: copySpan(frame.callSiteSpan),
@@ -1242,6 +1250,7 @@ function validateCapturedRuntimeSnapshotDetails(
   validateMediaState(value, plan, handleIds.media, errors);
   validateCameraView(value, handleIds.camera, errors);
   validatePermanentButtonState(value, plan, handleIds.permanentButton, errors);
+  validateCaptureState(value, analysis, errors);
   if (value.stageImage !== null && typeof value.stageImage !== "string") {
     errors.push("Runtime stageImage must be a string or null.");
   }
@@ -3237,7 +3246,10 @@ function validateStartupPhase(
   }
 }
 
-/** Scope frames on the stack, then the roots retained for blocks of activations the session has left. */
+/**
+ * Scope frames on the stack, then the retained scopes: roots of activations the session has left and scopes whose
+ * variables blocks share, which capture validation checks.
+ */
 function validateScopes(
   frames: unknown,
   retainedScopes: unknown,
@@ -3253,7 +3265,7 @@ function validateScopes(
     return;
   }
   const frameIds = new Set<number>();
-  for (const [index, frame] of [...frames, ...retainedScopes].entries()) {
+  for (const frame of [...frames, ...retainedScopes]) {
     if (
       !isPlainRecord(frame) ||
       !hasExactKeys(frame, ["id", "file", "entry", "bindings"]) ||
@@ -3263,8 +3275,7 @@ function validateScopes(
         ? frame.entry !== null
         : !nonNegativeSafeInteger(frame.file) ||
           !nonNegativeSafeInteger(frame.entry) ||
-          (analysis !== undefined && !isFileEntry(analysis, frame.file, frame.entry))) ||
-      (index >= frames.length && frame.file === null)
+          (analysis !== undefined && !isFileEntry(analysis, frame.file, frame.entry)))
     ) {
       errors.push("Runtime scope frame is malformed.");
       continue;

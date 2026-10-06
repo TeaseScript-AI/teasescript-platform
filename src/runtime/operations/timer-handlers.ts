@@ -1,4 +1,5 @@
 import type { InstructionPlan } from "../../plan/model.js";
+import { cloneCaptures, leaveScopes, sweepRetainedScopes } from "../captures.js";
 import type { InterpreterEvent } from "../events.js";
 import type { RuntimeCallFrameSnapshot, RuntimeSnapshot } from "../state.js";
 import { processDueWork } from "./observe-time.js";
@@ -36,6 +37,7 @@ export function startTimerHandler(plan: InstructionPlan, snapshot: RuntimeSnapsh
     kind: "function",
     id: snapshot.nextCallFrameId,
     rootScopeId: invocation.rootScopeId,
+    captures: cloneCaptures(invocation.captures),
     functionId: definition.id,
     functionName: definition.name,
     callSiteSpan: copySpan(definition.declarationSpan),
@@ -89,9 +91,10 @@ export function returnFromTimerHandler(
   frame: RuntimeCallFrameSnapshot,
   events: InterpreterEvent[],
 ): void {
-  snapshot.frames.splice(frame.scopeBaseDepth);
+  leaveScopes(snapshot, frame.scopeBaseDepth);
   snapshot.loopFrames.splice(frame.loopBaseDepth);
   snapshot.callFrames.pop();
+  sweepRetainedScopes(snapshot, false);
   // Copied one by one: a wide caller state must not depend on the host's argument-spread limit.
   snapshot.temporaries.length = 0;
   for (const temporary of frame.callerTemporaries) snapshot.temporaries.push({ ...temporary });

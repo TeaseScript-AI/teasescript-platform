@@ -206,6 +206,8 @@ export interface FileSemanticResult {
   reachableEntries(flow: StatementFlow): readonly FileEntry[];
   /** The files each glob target may pick, in project order. */
   readonly picks: ReadonlyMap<FileTarget, readonly string[]>;
+  /** The variables each timer, media, or button block shares with the code that created it (V30 §14). */
+  readonly captures: ReadonlyMap<Block, readonly string[]>;
   /** Checks the uses of top-level variables after labels, given the labels of this file that are entered afresh. */
   checkInitialization(freshLabels: ReadonlySet<string>, flow: StatementFlow): readonly Diagnostic[];
 }
@@ -265,6 +267,7 @@ export function validateProjectSemantics(
     Object.freeze({
       diagnostics: Object.freeze([...diagnostics]),
       picks: validators[index]?.picks ?? new Map<FileTarget, readonly string[]>(),
+      captures: validators[index]?.captures ?? new Map<Block, readonly string[]>(),
       reachableEntries: (flow: StatementFlow) =>
         validators[index]?.reachableEntries(flow, reachable(flow)) ?? [],
       checkInitialization: (freshLabels: ReadonlySet<string>, flow: StatementFlow) =>
@@ -405,13 +408,27 @@ class ProjectNames {
 class SemanticScope {
   readonly bindings = new Map<string, Binding>();
 
-  public constructor(readonly parent: SemanticScope | null = null) {}
+  /**
+   * For the scope of the locals a timer, media, or button block shares with the code that created it: the names the
+   * block uses from it, in the order of first use.
+   */
+  readonly captured: Set<string> | null;
+
+  public constructor(
+    readonly parent: SemanticScope | null = null,
+    captures = false,
+  ) {
+    this.captured = captures ? new Set() : null;
+  }
 
   public resolve(name: string): Binding | undefined {
     let scope: SemanticScope | null = this;
     while (scope !== null) {
       const binding = scope.bindings.get(name);
-      if (binding !== undefined) return binding;
+      if (binding !== undefined) {
+        if (binding.kind === "variable") scope.captured?.add(name);
+        return binding;
+      }
       scope = scope.parent;
     }
     return undefined;
@@ -429,6 +446,13 @@ interface PendingHandler {
   readonly block: Block;
   readonly owner: "timer" | "media" | "button";
   readonly selfHandle: string | null;
+  /**
+   * The locals of the code that created the block, as they are visible where it does: the block shares these variables
+   * with that code (V30 §14). Its parent holds the file's names, or the project's alone.
+   */
+  readonly scope: SemanticScope;
+  /** The block whose code created this one, or `null` when a function or a file's top level did. */
+  readonly parent: PendingHandler | null;
   /** The global function the block is in, directly or through other blocks. */
   readonly globalFunction: FunctionDeclaration | null;
   /** Where the block runs, for the initialization check: in `origin`, when `created` runs. */
@@ -618,14 +642,17 @@ class SemanticValidator {
     for (let index = 0; index < this.#pendingHandlers.length; index += 1) {
       const handler = this.#pendingHandlers[index]!;
       this.#context = { kind: "handler", origin: handler.origin, created: handler.created };
-      this.#validateHandler(this.#pendingHandlers[index]!);
+      this.#handler = handler;
+      this.#validateHandler(handler);
     }
+    this.#handler = null;
+    this.#collectCaptures();
     for (const overflow of findVisibleOverflows(program))
       this.#report(semanticCode.visibleOverflow, OVERFLOW_MESSAGES[overflow.cause], overflow.span);
   }
 
   /**
-   * A handler block sees top-level names and its own locals, like a function body without parameters. A media block's
+   * A handler block sees top-level names, the locals of the code that created it, and its own locals. A media block's
    * self-handle is a local of the handler scope, so it shadows any outer name of the same spelling.
    */
   #validateHandler(handler: PendingHandler): void {
@@ -634,7 +661,7 @@ class SemanticValidator {
     this.#handlerOwner = handler.owner;
     this.#globalFunction = handler.globalFunction;
     try {
-      const scope = new SemanticScope(this.#outerScope());
+      const scope = new SemanticScope(handler.scope);
       if (handler.selfHandle !== null) {
         scope.bindings.set(handler.selfHandle, { kind: "variable", handle: "media" });
       }
@@ -649,6 +676,64 @@ class SemanticValidator {
   /** The scope a function body or handler block starts under: the file's names, or the project's alone. */
   #outerScope(): SemanticScope {
     return this.#globalFunction === null ? this.#root : this.project.scope;
+  }
+
+  /** The block whose statements are being validated, or `null` outside blocks. */
+  #handler: PendingHandler | null = null;
+
+  /**
+   * The locals by which a block created here shares variables with this code: those visible now, so not one declared
+   * later in the same scope, under the file's or the project's names.
+   */
+  #captureScope(scope: SemanticScope): SemanticScope {
+    const outer = this.#outerScope();
+    const captures = new SemanticScope(outer, true);
+    for (let current: SemanticScope | null = scope; current !== null && current !== outer;) {
+      for (const [name, binding] of current.bindings)
+        if (!captures.bindings.has(name)) captures.bindings.set(name, binding);
+      current = current.parent;
+    }
+    return captures;
+  }
+
+  #pendHandler(
+    block: Block,
+    owner: PendingHandler["owner"],
+    selfHandle: string | null,
+    scope: SemanticScope,
+  ): void {
+    this.#pendingHandlers.push({
+      block,
+      owner,
+      selfHandle,
+      scope: scope.captured === null ? this.#captureScope(scope) : scope,
+      parent: this.#handler,
+      globalFunction: this.#globalFunction,
+      origin: this.#context,
+      created: this.#statement!,
+    });
+  }
+
+  /** The variables each block shares with the code that created it, by its block, for the lowering. */
+  readonly captures = new Map<Block, readonly string[]>();
+
+  /**
+   * A block that creates another one also shares the variables the inner block uses from outside the outer one. Inner
+   * blocks come after the block that created them, so walking backwards completes each block before its creator.
+   */
+  #collectCaptures(): void {
+    for (let index = this.#pendingHandlers.length - 1; index >= 0; index -= 1) {
+      const handler = this.#pendingHandlers[index]!;
+      const captured = handler.scope.captured!;
+      const parent = handler.parent;
+      if (parent !== null)
+        for (const name of captured) {
+          const binding = parent.scope.bindings.get(name);
+          if (binding !== undefined && binding === handler.scope.bindings.get(name))
+            parent.scope.captured!.add(name);
+        }
+      this.captures.set(handler.block, [...captured]);
+    }
   }
 
   #handlerDepth = 0;
@@ -763,15 +848,7 @@ class SemanticValidator {
         );
       }
     }
-    if (timer.handler !== null)
-      this.#pendingHandlers.push({
-        block: timer.handler,
-        owner: "timer",
-        selfHandle: null,
-        globalFunction: this.#globalFunction,
-        origin: this.#context,
-        created: this.#statement!,
-      });
+    if (timer.handler !== null) this.#pendHandler(timer.handler, "timer", null, scope);
   }
 
   /** The button text is checked like any shown text; the click action runs later, like a timer expiry block. */
@@ -780,14 +857,7 @@ class SemanticValidator {
     scope: SemanticScope,
   ): CompileTask<void> {
     yield* compileChild(this.#validateExpressionTask(button.text, scope, null));
-    this.#pendingHandlers.push({
-      block: button.handler,
-      owner: "button",
-      selfHandle: null,
-      globalFunction: this.#globalFunction,
-      origin: this.#context,
-      created: this.#statement!,
-    });
+    this.#pendHandler(button.handler, "button", null, scope);
   }
 
   /** Static checks of a play command; runtime validates the values that are not literals. */
@@ -913,16 +983,10 @@ class SemanticValidator {
         this.#validateMediaPosition(cue.offset, cue.kind);
       }
     }
-    for (const block of mediaHandlerBlocks(media)) {
-      this.#pendingHandlers.push({
-        block,
-        owner: "media",
-        selfHandle: media.async ? selfHandle : null,
-        globalFunction: this.#globalFunction,
-        origin: this.#context,
-        created: this.#statement!,
-      });
-    }
+    // The blocks of one media share its variables.
+    const captures = this.#captureScope(scope);
+    for (const block of mediaHandlerBlocks(media))
+      this.#pendHandler(block, "media", media.async ? selfHandle : null, captures);
   }
 
   /**

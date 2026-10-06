@@ -262,7 +262,12 @@ test("unsupported and invalid timer forms, members, and handler scope fail with 
     ["let t = timer async 5\nsay t.nope", "TSV034", "nope"],
     ["let t = timer async 5\nt.elapsed = 1 s", "TSV034", "elapsed"],
     ["let t = timer async 5\nt.restart()", "TSV034", "restart"],
-    ['function f {\n  let local = 1\n  timer async 1 { say "${local}" }\n}', "TSV002", "local"],
+    // A block shares the locals of the code that creates it, not those of another function (V30 §14).
+    [
+      'function g {\n  let other = 1\n}\nfunction f {\n  timer async 1 { say "${other}" }\n}',
+      "TSV002",
+      "other",
+    ],
     ["timer async 1 { return 5 }", "TSV033", "5"],
     [
       "timer(duration: 1, async: true, repeat: true)\ntimer(duration: 0, async: true, repeat: true)",

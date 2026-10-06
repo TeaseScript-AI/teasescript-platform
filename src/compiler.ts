@@ -1,4 +1,4 @@
-import type { FileTarget, Program } from "./ast.js";
+import type { Block, FileTarget, Program } from "./ast.js";
 import { findNonFiniteNumericLiteralDiagnosticsInStableProgram } from "./ast-validation.js";
 import { createDiagnostic, DiagnosticSeverity, type Diagnostic } from "./diagnostics.js";
 import { compileStableProject, type InstructionPlan } from "./compiler/compile-program.js";
@@ -160,6 +160,8 @@ interface CompiledProjectFile {
   readonly parsed: ReturnType<typeof parse> | null;
   /** The files each glob target may pick, once the names are checked. */
   picks?: ReadonlyMap<FileTarget, readonly string[]>;
+  /** The variables each timer, media, or button block shares with the code that created it. */
+  captures?: ReadonlyMap<Block, readonly string[]>;
 }
 
 /** Valid, unique package paths in plan order, and a `TSC009` diagnostic for every other path or a missing main. */
@@ -275,6 +277,7 @@ function checkProject(
     names.forEach((result, index) => {
       addSemanticDiagnostics(files[index]!, result.diagnostics);
       files[index]!.picks = result.picks;
+      files[index]!.captures = result.captures;
     });
     if (files.some((file) => file.parsed === null || hasErrors(file.result.diagnostics)))
       return null;
@@ -363,6 +366,7 @@ function lowerProject(
         path: file.result.path,
         program: file.result.program,
         ...(file.picks === undefined ? {} : { picks: file.picks }),
+        ...(file.captures === undefined ? {} : { captures: file.captures }),
         tags: scriptTags(file.result),
       })),
       typeChecks,

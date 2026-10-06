@@ -47,6 +47,8 @@ export interface SnapshotValidationAnalysis {
   readonly computedFallback: boolean;
   /** Where an activation of each file may start: its entry and its labels. */
   readonly fileEntries: readonly ReadonlySet<number>[];
+  /** The variables each timer, media, or button block shares, as the instruction that creates its resource names them. */
+  readonly handlerCaptures: ReadonlyMap<number, readonly string[]>;
 }
 
 /**
@@ -105,8 +107,17 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
   const loops = new Map<number, PlannedLoop>();
   const fallbackDestinations: PlanTransferDestination[] = [];
   let computedFallback = false;
+  const handlerCaptures = new Map<number, readonly string[]>();
   for (let index = 0; index < plan.instructions.length; index += 1) {
     const instruction = plan.instructions[index];
+    if (instruction?.kind === "startTimer" || instruction?.kind === "showPermanentButton") {
+      if (instruction.handlerFunctionId !== null)
+        handlerCaptures.set(instruction.handlerFunctionId, instruction.captures);
+    } else if (instruction?.kind === "playMedia") {
+      for (const cue of instruction.cues) handlerCaptures.set(cue.functionId, instruction.captures);
+      if (instruction.finishFunctionId !== null)
+        handlerCaptures.set(instruction.finishFunctionId, instruction.captures);
+    }
     if (instruction?.kind === "bindDefaultParameter") {
       defaultBindingPositions.set(`${instruction.functionId}:${instruction.parameterIndex}`, index);
     } else if (instruction?.kind === "loopStart") {
@@ -156,6 +167,7 @@ function createSnapshotValidationAnalysis(plan: InstructionPlan): SnapshotValida
     fileEntries: plan.files.map(
       (file) => new Set([file.entryInstruction, ...file.labels.map((label) => label.instruction)]),
     ),
+    handlerCaptures,
   };
 }
 

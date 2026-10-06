@@ -8,6 +8,7 @@ import type {
 import type { ActionCompletedEvent, InterpreterEvent } from "./events.js";
 import { assertEventSequenceCapacity, copySpan, takeSequence } from "./operations/support.js";
 import type { RuntimeSnapshot } from "./state.js";
+import { sweepRetainedScopes, type RuntimeCaptureSnapshot } from "./captures.js";
 
 /**
  * Permanent buttons (V30 §28). A shown button is a background action until it is removed; a click queues its block in
@@ -21,6 +22,8 @@ export interface RuntimePermanentButtonSnapshot {
   readonly handlerFunctionId: number;
   /** The root of the activation that showed the button: a transfer that leaves it removes a non-persistent button. */
   readonly rootScopeId: number;
+  /** The variables its block shares with the code that showed it. */
+  readonly captures: readonly RuntimeCaptureSnapshot[];
 }
 
 /** A click whose block has not started yet. It shares the interrupt queue with timer expiry and media cue blocks. */
@@ -29,6 +32,8 @@ export interface RuntimePermanentButtonInvocationSnapshot {
   readonly handlerFunctionId: number;
   /** The activation root of its button's block. */
   readonly rootScopeId: number;
+  /** Its button's shared variables. */
+  readonly captures: readonly RuntimeCaptureSnapshot[];
   /** The scene time of the click. */
   readonly dueAtMs: number;
   /** Always 1: a button cannot be clicked again before its block has run. */
@@ -101,6 +106,7 @@ export function removePermanentButtons(
       } satisfies ActionCompletedEvent),
     );
   }
+  sweepRetainedScopes(snapshot, false);
 }
 
 /** A shown permanent button as a Player presents it: in creation order, inactive while `busy`. */
