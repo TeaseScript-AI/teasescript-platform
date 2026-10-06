@@ -22,9 +22,10 @@ import { isRecord } from "./ast.ts";
  * - Traps are described at {@link findTraps}.
  */
 
+/** A runtime operation result read field by field; plans and snapshots inside it are passed back unchanged. */
 type Data = Readonly<Record<string, unknown>>;
 
-const ENGINE_FUNCTIONS = [
+const ENGINE_OPERATIONS = [
   "compileProject",
   "createFreshRuntimeSnapshot",
   "run",
@@ -33,24 +34,44 @@ const ENGINE_FUNCTIONS = [
   "observeTime",
   "reportMediaLoad",
   "pressPermanentButton",
-  "mediaPlaybackProjection",
-  "permanentButtonProjection",
 ] as const;
+const ENGINE_PROJECTIONS = ["mediaPlaybackProjection", "permanentButtonProjection"] as const;
 
-export type Engine = Record<(typeof ENGINE_FUNCTIONS)[number], (...args: unknown[]) => unknown>;
+/** The runtime operations the explorer drives, as `runtime-check.ts` reads them: each result must be an object. */
+export interface Engine {
+  call: (name: (typeof ENGINE_OPERATIONS)[number], ...args: unknown[]) => Data;
+  /** The records of a projection of a snapshot, such as the playback of its media. */
+  project: (name: (typeof ENGINE_PROJECTIONS)[number], snapshot: Data) => Data[];
+}
 
 const repositoryIndexUrl = new URL("../../dist/src/index.js", import.meta.url);
 
 /** Loads the runtime operations from the repository build (`npm run build:typescript`). */
 export async function loadEngine(): Promise<Engine> {
   const module: unknown = await import(repositoryIndexUrl.href);
-  const engine: Partial<Engine> = {};
-  for (const name of ENGINE_FUNCTIONS) {
+  const exported = (name: string) => {
     const value = isRecord(module) ? module[name] : undefined;
     if (typeof value !== "function") throw new Error(`Repository build does not export ${name}().`);
-    engine[name] = value as (...args: unknown[]) => unknown;
-  }
-  return engine as Engine;
+    return value;
+  };
+  const functions = new Map(
+    [...ENGINE_OPERATIONS, ...ENGINE_PROJECTIONS].map((name) => [name, exported(name)]),
+  );
+  return {
+    call: (name, ...args) => {
+      const operation = functions.get(name);
+      if (operation === undefined) throw new Error(`Unknown runtime operation ${name}.`);
+      const value: unknown = operation(...args);
+      if (!isRecord(value)) throw new Error(`${name}() returned an unexpected result shape.`);
+      return value;
+    },
+    project: (name, snapshot) => {
+      const projection = functions.get(name);
+      if (projection === undefined) throw new Error(`Unknown runtime projection ${name}.`);
+      const value: unknown = projection(snapshot);
+      return Array.isArray(value) ? value.filter(isRecord) : [];
+    },
+  };
 }
 
 /** One input of a path from the start; `label` fields only explain the input to a reader. */
@@ -62,6 +83,13 @@ export type ExplorerInput =
   | { readonly kind: "image" }
   | { readonly kind: "wait"; readonly untilMs: number }
   | { readonly kind: "press"; readonly buttonId: number; readonly label: string };
+
+/** The answers the explorer gives to an interaction, as `completeAction` takes them. */
+type InteractionPayload =
+  | { readonly kind: "selectedOption"; readonly optionIndex: number }
+  | { readonly kind: "activate" }
+  | { readonly kind: "submittedText"; readonly submittedText: string }
+  | { readonly kind: "image"; readonly reference: string };
 
 /** The wall clock at session time 0: 2026-10-02 12:00 UTC, as in `runtime-check.ts`. */
 const EPOCH_MS = Date.UTC(2026, 9, 2, 12, 0, 0);
@@ -145,16 +173,14 @@ export class Session {
 
   /** The fresh session, run until the player is first asked. */
   start(): Step {
-    const fresh = record(
-      this.#engine.createFreshRuntimeSnapshot(this.#plan, {
-        seed: this.#seed,
-        baseDelayMs: 0,
-        delayPerWordMs: 0,
-        delayPerCharacterMs: 0,
-        scriptStorage: [],
-        wallClockMs: EPOCH_MS,
-      }),
-    );
+    const fresh = this.#engine.call("createFreshRuntimeSnapshot", this.#plan, {
+      seed: this.#seed,
+      baseDelayMs: 0,
+      delayPerWordMs: 0,
+      delayPerCharacterMs: 0,
+      scriptStorage: [],
+      wallClockMs: EPOCH_MS,
+    });
     return this.#settle(fresh);
   }
 
@@ -176,7 +202,11 @@ export class Session {
       options.push(...interactionOptions(ui, literals));
       // A button whose result the script keeps is timed: the player may also think first, as long as nothing else
       // happens meanwhile.
-      if (ui.kind === "button" && action.expectedResult === "duration" && action.destinationTemporary !== null) {
+      if (
+        ui.kind === "button" &&
+        action.expectedResult === "duration" &&
+        action.destinationTemporary !== null
+      ) {
         const now = Number(snapshot.observedSessionTimeMs);
         for (const afterMs of thinkTimes(literals)) {
           if (until === null || now + afterMs < until)
@@ -184,7 +214,7 @@ export class Session {
         }
       }
     }
-    for (const button of list(this.#engine.permanentButtonProjection(snapshot))) {
+    for (const button of this.#engine.project("permanentButtonProjection", snapshot)) {
       if (button.busy !== true && typeof button.buttonId === "number")
         options.push({ kind: "press", buttonId: button.buttonId, label: String(button.text) });
     }
@@ -199,31 +229,34 @@ export class Session {
       return { text: typeof action.kind === "string" ? `(${action.kind})` : "", instruction: null };
     }
     const ui = record(action.ui);
-    const instruction = typeof action.owningInstruction === "number" ? action.owningInstruction : null;
+    const instruction =
+      typeof action.owningInstruction === "number" ? action.owningInstruction : null;
     if (ui.kind === "button") return { text: `[${String(ui.buttonLabel)}]`, instruction };
     if (ui.kind === "choice") {
       const labels = list(ui.options).map((option) => `[${String(option.text)}]`);
       return { text: short(labels.join(" ")), instruction };
     }
-    return { text: `(ask ${String(ui.kind)}${ui.integer === true ? " integer" : ""})`, instruction };
+    return {
+      text: `(ask ${String(ui.kind)}${ui.integer === true ? " integer" : ""})`,
+      instruction,
+    };
   }
 
   #input(snapshot: Data, input: ExplorerInput): Data | null {
     const plan = this.#plan;
     const action = record(snapshot.foregroundAction);
-    const completion = (payload: object, from = snapshot) =>
-      record(
-        this.#engine.completeAction(
-          plan,
-          from,
-          {
-            actionId: action.actionId,
-            actionKind: "interaction",
-            interactionKind: action.interactionKind,
-            payload,
-          },
-          { capturedMedia: { holds: (reference: string) => reference === EXPLORER_IMAGE } },
-        ),
+    const completion = (payload: InteractionPayload, from = snapshot) =>
+      this.#engine.call(
+        "completeAction",
+        plan,
+        from,
+        {
+          actionId: action.actionId,
+          actionKind: "interaction",
+          interactionKind: action.interactionKind,
+          payload,
+        },
+        { capturedMedia: { holds: (reference: string) => reference === EXPLORER_IMAGE } },
       );
     let result: Data;
     let accepted: string;
@@ -236,10 +269,15 @@ export class Session {
         let from = snapshot;
         if (input.afterMs !== undefined) {
           const until = Number(snapshot.observedSessionTimeMs) + input.afterMs;
-          const observed = record(
-            this.#engine.observeTime(plan, snapshot, until, this.#mediaReports(snapshot, until)),
+          const observed = this.#engine.call(
+            "observeTime",
+            plan,
+            snapshot,
+            until,
+            this.#mediaReports(snapshot, until),
           );
-          if (record(observed.outcome).kind !== "observed" || !isRecord(observed.snapshot)) return null;
+          if (record(observed.outcome).kind !== "observed" || !isRecord(observed.snapshot))
+            return null;
           from = observed.snapshot;
         }
         result = completion({ kind: "activate" }, from);
@@ -255,17 +293,23 @@ export class Session {
         accepted = "completed";
         break;
       case "press":
-        result = record(this.#engine.pressPermanentButton(plan, snapshot, input.buttonId));
+        result = this.#engine.call("pressPermanentButton", plan, snapshot, input.buttonId);
         accepted = "pressed";
         break;
       case "wait":
-        result = record(
-          this.#engine.observeTime(plan, snapshot, input.untilMs, this.#mediaReports(snapshot, input.untilMs)),
+        result = this.#engine.call(
+          "observeTime",
+          plan,
+          snapshot,
+          input.untilMs,
+          this.#mediaReports(snapshot, input.untilMs),
         );
         accepted = "observed";
         break;
     }
-    return record(result.outcome).kind === accepted && isRecord(result.snapshot) ? result.snapshot : null;
+    return record(result.outcome).kind === accepted && isRecord(result.snapshot)
+      ? result.snapshot
+      : null;
   }
 
   /** Runs until the player is asked: answers camera requests, loads media, and lets time pass while nothing else can happen. */
@@ -282,26 +326,25 @@ export class Session {
       if (snapshot.status !== "waiting" || operations >= MAX_AUTO_OPERATIONS) break;
       const action = record(snapshot.foregroundAction);
       if (action.kind === "capture") {
-        const result = record(
-          this.#engine.completeAction(this.#plan, snapshot, {
-            actionId: action.actionId,
-            actionKind: "capture",
-            payload: { kind: "unavailable", reason: "unconfigured" },
-          }),
-        );
+        const result = this.#engine.call("completeAction", this.#plan, snapshot, {
+          actionId: action.actionId,
+          actionKind: "capture",
+          payload: { kind: "unavailable", reason: "unconfigured" },
+        });
         if (record(result.outcome).kind !== "completed" || !isRecord(result.snapshot)) break;
         snapshot = result.snapshot;
         continue;
       }
-      const unloaded = list(this.#engine.mediaPlaybackProjection(snapshot)).find(
-        (media) => media.loaded !== true,
-      );
+      const unloaded = this.#engine
+        .project("mediaPlaybackProjection", snapshot)
+        .find((media) => media.loaded !== true);
       if (unloaded !== undefined) {
-        const result = record(
-          this.#engine.reportMediaLoad(this.#plan, snapshot, unloaded.mediaId, {
-            kind: "loaded",
-            durationMs: MEDIA_PASS_MS,
-          }),
+        const result = this.#engine.call(
+          "reportMediaLoad",
+          this.#plan,
+          snapshot,
+          unloaded.mediaId,
+          { kind: "loaded", durationMs: MEDIA_PASS_MS },
         );
         if (record(result.outcome).kind !== "accepted" || !isRecord(result.snapshot)) break;
         snapshot = result.snapshot;
@@ -324,7 +367,7 @@ export class Session {
   #execute(start: Data, texts: string[]): { snapshot: Data; newInstructions: number } {
     let snapshot = start;
     let newInstructions = 0;
-    for (let steps = 0; ; ) {
+    for (let steps = 0; ;) {
       // What `run` would find runnable; a waiting session runs only to start a queued block.
       const runnable =
         snapshot.status === "ready" ||
@@ -333,16 +376,21 @@ export class Session {
       if (!runnable) return { snapshot, newInstructions };
       if (this.#known >= TRACE_PATIENCE) {
         this.untracedRuns += 1;
-        const result = record(
-          this.#engine.run(this.#plan, snapshot, {}, { instructionBudget: INSTRUCTION_BUDGET - steps }),
+        const result = this.#engine.call(
+          "run",
+          this.#plan,
+          snapshot,
+          {},
+          { instructionBudget: INSTRUCTION_BUDGET - steps },
         );
         collectTexts(result.events, texts);
         return { snapshot: record(result.snapshot), newInstructions };
       }
       const before = typeof snapshot.nextInstruction === "number" ? snapshot.nextInstruction : -1;
       const interrupts = interruptFrames(snapshot);
-      const result = record(this.#engine.executeInstruction(this.#plan, snapshot, {}));
-      const executed = typeof result.instructionsExecuted === "number" ? result.instructionsExecuted : 0;
+      const result = this.#engine.call("executeInstruction", this.#plan, snapshot, {});
+      const executed =
+        typeof result.instructionsExecuted === "number" ? result.instructionsExecuted : 0;
       // Nothing was runnable; `run` would not have executed this boundary, nor settled due work after it.
       if (executed === 0 || !isRecord(result.snapshot)) return { snapshot, newInstructions };
       const after = result.snapshot;
@@ -375,11 +423,15 @@ export class Session {
     const found: Literals = { numbers: [], strings: [] };
     for (let distance = 0; distance <= LITERAL_WINDOW; distance += 1) {
       for (const position of positions) {
-        for (const index of distance === 0 ? [position] : [position - distance, position + distance]) {
+        for (const index of distance === 0
+          ? [position]
+          : [position - distance, position + distance]) {
           const literals = this.#literals[index];
           if (literals === undefined) continue;
-          for (const value of literals.numbers) if (!found.numbers.includes(value)) found.numbers.push(value);
-          for (const value of literals.strings) if (!found.strings.includes(value)) found.strings.push(value);
+          for (const value of literals.numbers)
+            if (!found.numbers.includes(value)) found.numbers.push(value);
+          for (const value of literals.strings)
+            if (!found.strings.includes(value)) found.strings.push(value);
         }
       }
     }
@@ -399,7 +451,8 @@ export class Session {
 
   /** The earliest time at which something happens without the player, or null when nothing will. */
   #nextDeadline(snapshot: Data): number | null {
-    const now = typeof snapshot.observedSessionTimeMs === "number" ? snapshot.observedSessionTimeMs : 0;
+    const now =
+      typeof snapshot.observedSessionTimeMs === "number" ? snapshot.observedSessionTimeMs : 0;
     const deadlines: number[] = [];
     const add = (value: unknown) => {
       if (typeof value === "number") deadlines.push(value);
@@ -418,10 +471,12 @@ export class Session {
     }
     // Media plays on through every observation, and the runtime catches up on its cues and passes; a stop at the end
     // of a pass is needed only where the story waits for that media, or where nothing else will happen.
-    const running = list(this.#engine.mediaPlaybackProjection(snapshot)).filter(
-      (media) => media.state === "running" && media.loaded === true,
+    const running = this.#engine
+      .project("mediaPlaybackProjection", snapshot)
+      .filter((media) => media.state === "running" && media.loaded === true);
+    const awaited = running.filter(
+      (media) => action.kind === "mediaPlayback" && media.mediaId === action.mediaId,
     );
-    const awaited = running.filter((media) => action.kind === "mediaPlayback" && media.mediaId === action.mediaId);
     for (const media of awaited.length > 0 || deadlines.length > 0 ? awaited : running) {
       const progress = typeof media.reportedProgressMs === "number" ? media.reportedProgressMs : 0;
       add(now + Math.max(1, MEDIA_PASS_MS - (progress % MEDIA_PASS_MS)));
@@ -431,14 +486,18 @@ export class Session {
 
   /** Progress of every running media until `until`, which plays on in real time. */
   #mediaReports(snapshot: Data, until: number): object[] {
-    const now = typeof snapshot.observedSessionTimeMs === "number" ? snapshot.observedSessionTimeMs : 0;
-    return list(this.#engine.mediaPlaybackProjection(snapshot))
+    const now =
+      typeof snapshot.observedSessionTimeMs === "number" ? snapshot.observedSessionTimeMs : 0;
+    return this.#engine
+      .project("mediaPlaybackProjection", snapshot)
       .filter((media) => media.state === "running" && media.loaded === true)
       .map((media) => ({
         mediaId: media.mediaId,
         segment: media.segment,
         progressMs:
-          (typeof media.reportedProgressMs === "number" ? media.reportedProgressMs : 0) + until - now,
+          (typeof media.reportedProgressMs === "number" ? media.reportedProgressMs : 0) +
+          until -
+          now,
       }));
   }
 }
@@ -486,7 +545,8 @@ function comparedLiterals(instruction: Data): Literals {
     const literal = record(value);
     if (literal.kind !== "literal") return;
     if (typeof literal.value === "number") found.numbers.push(literal.value);
-    if (typeof literal.value === "string" && literal.value.trim() !== "") found.strings.push(literal.value);
+    if (typeof literal.value === "string" && literal.value.trim() !== "")
+      found.strings.push(literal.value);
   };
   const walk = (value: unknown): void => {
     if (Array.isArray(value)) value.forEach(walk);
@@ -507,7 +567,9 @@ function comparedLiterals(instruction: Data): Literals {
 /** Think times before a timed button: just past each compared constant, read as seconds, or {@link THINK_MS}. */
 function thinkTimes(literals: Literals): number[] {
   const seconds = literals.numbers.filter((value) => value >= 1 && value <= 3600);
-  return seconds.length === 0 ? [THINK_MS] : [...new Set(seconds.map((value) => (Math.floor(value) + 1) * 1000))];
+  return seconds.length === 0
+    ? [THINK_MS]
+    : [...new Set(seconds.map((value) => (Math.floor(value) + 1) * 1000))];
 }
 
 /**
@@ -598,7 +660,8 @@ export function stateKeys(snapshot: Data): { state: string; loop: string } {
   const ids = new Map<string, Set<number>>();
   const collect = (value: unknown, holder: unknown, key: string): void => {
     if (Array.isArray(value)) for (const item of value) collect(item, value, "");
-    else if (isRecord(value)) for (const [name, item] of Object.entries(value)) collect(item, value, name);
+    else if (isRecord(value))
+      for (const [name, item] of Object.entries(value)) collect(item, value, name);
     else if (typeof value === "number") {
       const family = idFamily(holder, key);
       if (family !== undefined) {
@@ -611,7 +674,10 @@ export function stateKeys(snapshot: Data): { state: string; loop: string } {
   collect(snapshot, null, "");
   const ranks = new Map<string, Map<number, number>>();
   for (const [family, values] of ids)
-    ranks.set(family, new Map([...values].sort((a, b) => a - b).map((value, rank) => [value, rank])));
+    ranks.set(
+      family,
+      new Map([...values].sort((a, b) => a - b).map((value, rank) => [value, rank])),
+    );
   const key = (loop: boolean) =>
     createHash("sha1")
       .update(
@@ -691,7 +757,13 @@ export interface UnvisitedBranch {
   kind: "if" | "loop";
   path: string;
   line: number;
-  condition: { line: number; column: number; endLine: number; endColumn: number; text: string } | null;
+  condition: {
+    line: number;
+    column: number;
+    endLine: number;
+    endColumn: number;
+    text: string;
+  } | null;
   /** The missed way: `true`/`false` for a condition, `enter`/`exit` for a loop. */
   missed: "true" | "false" | "enter" | "exit";
   /** The first instruction and line of the missed way. */
@@ -755,7 +827,7 @@ class Frontier {
   push(node: number, tier: number, repeats: number): void {
     const items = this.#items;
     items.push({ node, rank: [tier, repeats, -node] });
-    for (let index = items.length - 1; index > 0; ) {
+    for (let index = items.length - 1; index > 0;) {
       const parent = (index - 1) >> 1;
       if (!before(items[index]!.rank, items[parent]!.rank)) break;
       [items[index], items[parent]] = [items[parent]!, items[index]!];
@@ -769,7 +841,7 @@ class Frontier {
     const last = items.pop();
     if (top === undefined || last === undefined || items.length === 0) return top?.node;
     items[0] = last;
-    for (let index = 0; ; ) {
+    for (let index = 0; ;) {
       const left = index * 2 + 1;
       const right = left + 1;
       let best = index;
@@ -900,11 +972,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       stuck: count("stuck"),
       open: count("open") + count("partial"),
     },
-    coverage: {
-      ...coverage,
-      instructions: session.visited.length,
-      visitedInstructions,
-    },
+    coverage: { ...coverage, instructions: session.visited.length, visitedInstructions },
     crashes: [...crashes.values()],
     traps: findTraps(nodes, plan),
   };
@@ -912,7 +980,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
 
 function pathTo(nodes: readonly Node[], node: Node): ExplorerInput[] {
   const inputs: ExplorerInput[] = [];
-  for (let current: Node | undefined = node; current?.input; ) {
+  for (let current: Node | undefined = node; current?.input;) {
     inputs.push(current.input);
     current = current.parent === null ? undefined : nodes[current.parent];
   }
@@ -1069,7 +1137,13 @@ function lineCoverage(plan: Data, session: Session, sources: ReadonlyMap<string,
 }
 
 /** Instructions that only open or close a block, which a way's first line should skip. */
-const STRUCTURAL = new Set(["enterScope", "leaveScope", "clearTemporary", "clearTemporaries", "jump"]);
+const STRUCTURAL = new Set([
+  "enterScope",
+  "leaveScope",
+  "clearTemporary",
+  "clearTemporaries",
+  "jump",
+]);
 
 /** The first instruction at or after `index` that is not structural, within a few steps. */
 function firstStatement(instructions: readonly Data[], index: number): number {
@@ -1137,7 +1211,9 @@ export function findTraps(nodes: readonly Node[], plan: Data): TrapReport[] {
   const bottom = components
     .map((component, index) => ({ component, index }))
     .filter(({ component, index }) =>
-      component.every((loop) => [...successors.get(loop)!].every((next) => componentOf.get(next) === index)),
+      component.every((loop) =>
+        [...successors.get(loop)!].every((next) => componentOf.get(next) === index),
+      ),
     );
   // Feeders: trapped groups outside the bottom components, each counted for the first one a backward search from the
   // bottom components reaches it from.
@@ -1164,8 +1240,7 @@ export function findTraps(nodes: readonly Node[], plan: Data): TrapReport[] {
   const instructions = list(plan.instructions);
   return bottom.map(({ component, index }) => {
     const members = component.flatMap((loop) => groups.get(loop)!);
-    const cyclic =
-      component.length > 1 || successors.get(component[0]!)!.has(component[0]!);
+    const cyclic = component.length > 1 || successors.get(component[0]!)!.has(component[0]!);
     const entry = members.reduce((best, node) => (node.depth < best.depth ? node : best));
     const locations = new Set<string>();
     for (const node of members) {
@@ -1179,14 +1254,19 @@ export function findTraps(nodes: readonly Node[], plan: Data): TrapReport[] {
       feederStates: feeders.get(index) ?? 0,
       locations: [...locations].slice(0, 10),
       sampleTexts: [...new Set(members.flatMap((node) => node.texts))].slice(0, 8),
-      samplePrompts: [...new Set(members.map((node) => node.prompt.text).filter((text) => text !== ""))].slice(0, 8),
+      samplePrompts: [
+        ...new Set(members.map((node) => node.prompt.text).filter((text) => text !== "")),
+      ].slice(0, 8),
       inputs: pathTo(nodes, entry),
     };
   });
 }
 
 /** Tarjan's strongly connected components, iteratively. */
-function stronglyConnected(vertices: readonly string[], next: (vertex: string) => string[]): string[][] {
+function stronglyConnected(
+  vertices: readonly string[],
+  next: (vertex: string) => string[],
+): string[][] {
   const inside = new Set(vertices);
   const index = new Map<string, number>();
   const low = new Map<string, number>();
@@ -1203,7 +1283,11 @@ function stronglyConnected(vertices: readonly string[], next: (vertex: string) =
       counter += 1;
       stack.push(vertex);
       onStack.add(vertex);
-      work.push({ vertex, edges: next(vertex).filter((target) => inside.has(target)), position: 0 });
+      work.push({
+        vertex,
+        edges: next(vertex).filter((target) => inside.has(target)),
+        position: 0,
+      });
     };
     open(root);
     while (work.length > 0) {
@@ -1221,7 +1305,7 @@ function stronglyConnected(vertices: readonly string[], next: (vertex: string) =
         low.set(parent.vertex, Math.min(low.get(parent.vertex)!, low.get(frame.vertex)!));
       if (low.get(frame.vertex) === index.get(frame.vertex)) {
         const component: string[] = [];
-        for (let vertex: string | undefined; vertex !== frame.vertex; ) {
+        for (let vertex: string | undefined; vertex !== frame.vertex;) {
           vertex = stack.pop()!;
           onStack.delete(vertex);
           component.push(vertex);
@@ -1274,7 +1358,10 @@ export function replay(
       error = String(thrown);
       break;
     }
-    if (next === null) throw new Error(`The runtime rejected input ${JSON.stringify(input)} at step ${steps.length}.`);
+    if (next === null)
+      throw new Error(
+        `The runtime rejected input ${JSON.stringify(input)} at step ${steps.length}.`,
+      );
     step = next;
     steps.push(describe(input, step));
   }
