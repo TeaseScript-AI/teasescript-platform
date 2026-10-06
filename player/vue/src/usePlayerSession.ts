@@ -395,6 +395,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   let disposed = false;
   tryOnScopeDispose(() => {
     disposed = true;
+    // A Debug storage edit waiting for a script write gives up; the retired session never runs on.
+    handOffWrite(null);
     activationToken++;
     loads.clear();
     device.reset();
@@ -460,19 +462,30 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         setTimeout(() => report(stored), 0);
       }
       function report(stored: boolean) {
-        writesInFlight.delete(flight);
         // A write that settles after unmount must not continue the session.
-        if (disposed) return handOffWrite(null);
+        if (disposed) return void writesInFlight.delete(flight);
         const latest = session.value;
         // The report must belong to the session that requested it.
-        if (generation.value !== sessionGeneration || latest === null) return handOffWrite(null);
-        if (pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write!.actionId)
-          return handOffWrite(null);
+        if (
+          generation.value !== sessionGeneration ||
+          latest === null ||
+          pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write!.actionId
+        ) {
+          writesInFlight.delete(flight);
+          return void handOffWrite(null);
+        }
         if (!stored) notices.publish(playerNotices.storageWriteFailed());
         else savedDataRevision.value++;
-        // A Debug storage edit waiting for this write settles it itself, before the script continues.
-        if (handOffWrite({ actionId: write!.actionId, stored, generation: sessionGeneration }))
-          return;
+        // A Debug storage edit waiting for this write settles it itself, before the script continues. The write stays
+        // in flight until then, so a publication meanwhile does not issue it again.
+        const settled = {
+          actionId: write!.actionId,
+          stored,
+          generation: sessionGeneration,
+          flight,
+        };
+        if (handOffWrite(settled)) return;
+        writesInFlight.delete(flight);
         session.value = completePlayerRuntimeStorageWrite(latest, write!.actionId, stored).session;
       }
     },
@@ -494,6 +507,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     readonly actionId: number;
     readonly stored: boolean;
     readonly generation: number;
+    /** Its entry in `writesInFlight`, removed once the write is acknowledged. */
+    readonly flight: string;
   };
   let writeWaiter: ((write: SettledWrite | null) => void) | null = null;
   /** Gives a settled write to a waiting edit; `null` when that write no longer belongs to the session. */
@@ -505,6 +520,13 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     return write !== null;
   }
   let editChain: Promise<unknown> = Promise.resolve();
+  /** Puts a stored edit into the values the next Start loads, as the provider now holds them. */
+  function seedNextStart(key: string, value: SerializableRuntimeValue) {
+    const entries = storedEntries.value;
+    if (entries === null) return;
+    const others = entries.filter((entry) => entry.key !== key);
+    storedEntries.value = value === null ? others : [...others, { key, value }];
+  }
   // Which session Debug changed the saved values of, for its debug export: when and how often.
   const debugEdits = shallowRef<{
     readonly firstEditSceneTimeMs: number;
@@ -527,20 +549,28 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     readonly value: SerializableRuntimeValue;
     readonly expected: SerializableRuntimeValue | undefined;
   }): Promise<SavedDataEditResult> {
-    const result = editChain.then(() => applySavedDataEdit(edit));
+    // The edit belongs to the session at hand when it was made; a later session, or an unmounted Player, never takes it.
+    const owner = generation.value;
+    const result = editChain.then(() => applySavedDataEdit(edit, owner));
     editChain = result.catch(() => undefined);
     return result;
   }
-  async function applySavedDataEdit({
-    key,
-    value,
-    expected,
-  }: {
-    readonly key: string;
-    readonly value: SerializableRuntimeValue;
-    readonly expected: SerializableRuntimeValue | undefined;
-  }): Promise<SavedDataEditResult> {
+  async function applySavedDataEdit(
+    {
+      key,
+      value,
+      expected,
+    }: {
+      readonly key: string;
+      readonly value: SerializableRuntimeValue;
+      readonly expected: SerializableRuntimeValue | undefined;
+    },
+    owner: number,
+  ): Promise<SavedDataEditResult> {
     const failed = (message: string) => ({ kind: "failed", message }) as const;
+    const retired = () => disposed || generation.value !== owner;
+    const overtaken = () => failed("The session changed meanwhile; open the editor again.");
+    if (retired()) return overtaken();
     if (!scriptStorage || storedEntries.value === null)
       return failed("This browser's saved data cannot be read.");
     if (
@@ -560,18 +590,23 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     } catch {
       return failed("This browser's saved data cannot be read.");
     }
+    if (retired()) return overtaken();
     const now = current.find((entry) => entry.key === key)?.value;
     if (!sameSavedValue(now, expected)) return { kind: "changed" };
 
-    const sessionGeneration = generation.value;
     const waitForWrite = () =>
       new Promise<SettledWrite | null>((resolve) => {
         writeWaiter = resolve;
       });
     let settled: SettledWrite | null = null;
     for (;;) {
-      if (liveSession() && pendingPlayerRuntimeStorageWrite(session.value!.snapshot))
+      if (liveSession() && pendingPlayerRuntimeStorageWrite(session.value!.snapshot)) {
         settled = await waitForWrite();
+        if (retired()) {
+          if (settled !== null) writesInFlight.delete(settled.flight);
+          return overtaken();
+        }
+      }
       try {
         await scriptStorage.write(key, value);
       } catch {
@@ -579,15 +614,18 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         return failed("The change could not be saved in this browser. Nothing changed.");
       }
       savedDataRevision.value++;
-      if (!liveSession() || generation.value !== sessionGeneration) {
+      // The next Start loads the stored values as they are now.
+      seedNextStart(key, value);
+      if (disposed) return { kind: "saved", live: false };
+      if (!liveSession() || generation.value !== owner) {
         if (settled !== null) settle(settled, true);
-        void loadScriptStorage();
         return { kind: "saved", live: false };
       }
       // Acknowledge the waiting write without running on, then edit, then run, in one step.
       let latest = session.value!;
       let settledWithoutRun = false;
       if (settled !== null) {
+        writesInFlight.delete(settled.flight);
         if (pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId === settled.actionId) {
           latest = completePlayerRuntimeStorageWrite(latest, settled.actionId, settled.stored, {
             continueRun: false,
@@ -615,12 +653,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           editCount: count + 1,
         };
       }
-      void loadScriptStorage();
       return { kind: "saved", live: edited.outcome.kind === "applied" };
     }
 
     /** Settles a write that waited for this edit as it would have been without it, running on. */
     function settle(write: SettledWrite, run: boolean) {
+      writesInFlight.delete(write.flight);
       const latest = session.value;
       if (
         latest === null ||
@@ -805,6 +843,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     notices.dismiss(playerNoticeKeys.storageWriteFailed);
     reportedMedia = new Set();
     debugEdits.value = null;
+    // A Debug storage edit waiting for the previous session's write is for that session only.
+    handOffWrite(null);
     device.reset();
     loads.clear();
     pendingLoadCount.value = 0;

@@ -431,6 +431,11 @@ test("an export is validated as untrusted data, and another version is unsupport
     /editCount/,
   );
   invalid(
+    changed(["editedWhileDebugging"], { firstEditSceneTimeMs: -1, editCount: 1 }),
+    "invalid",
+    /firstEditSceneTimeMs/,
+  );
+  invalid(
     changed(["checkpoint", "snapshot", "nextInstruction"], -5),
     "invalid",
     /\$\.checkpoint is not a valid checkpoint/,
@@ -538,6 +543,18 @@ test("the offline tool inspects without values, replays in a worker, and refuses
     );
     assert.doesNotMatch(inspected.stdout, /submittedText/, "recorded arguments only with --values");
     assert.match(cli("inspect", failed, "--values").stdout, /"submittedText":"0"/);
+    const marked = await write(
+      "marked.teasedebug.json.gz",
+      failedRecording("0").export({
+        editedWhileDebugging: { firstEditSceneTimeMs: 123.5, editCount: 2 },
+      }),
+    );
+    const markedInspected = cli("inspect", marked);
+    assert.equal(markedInspected.status, 0, markedInspected.stderr);
+    assert.match(
+      markedInspected.stdout,
+      /edited while debugging: yes, 2 saved-value edit\(s\) from scene time 123\.5 ms/,
+    );
 
     const reproduced = cli("replay", failed);
     assert.equal(reproduced.status, 0, reproduced.stderr + reproduced.stdout);
@@ -746,10 +763,11 @@ test("a Debug storage edit replays from its recorded request, refused ones inclu
     ],
   );
   // The mark says the session was edited, also for edits before the anchor, which the calls cannot show.
+  // Scene time may have a fraction of a millisecond, as the Player's clock observes it.
   const marked = await roundTrip(
-    recording.export({ editedWhileDebugging: { firstEditSceneTimeMs: 0, editCount: 1 } }),
+    recording.export({ editedWhileDebugging: { firstEditSceneTimeMs: 123.5, editCount: 1 } }),
   );
-  assert.deepEqual(marked.editedWhileDebugging, { firstEditSceneTimeMs: 0, editCount: 1 });
+  assert.deepEqual(marked.editedWhileDebugging, { firstEditSceneTimeMs: 123.5, editCount: 1 });
   const result = replayDebugExport(marked);
   assert.equal(result.kind, "reproduced");
   // Without the edit the session would not fail: the edit is part of what reproduces it.

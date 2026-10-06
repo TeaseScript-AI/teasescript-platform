@@ -1559,8 +1559,8 @@ async function debugStorageEditScenario(cdp, origin) {
   );
   await closed();
 
-  // The editor fits a narrow screen.
-  await setViewport(cdp, 390, 760);
+  // The editor fits a narrow, short screen: within the viewport, scrolling to reach Save.
+  await setViewport(cdp, 390, 480);
   await waitFor(
     cdp,
     `document.querySelector('#player-shell')?.dataset.playerHorizontal === 'constrained'`,
@@ -1586,11 +1586,25 @@ async function debugStorageEditScenario(cdp, origin) {
   assertEqual(
     await value(
       cdp,
-      `(() => { const box = document.querySelector('[data-storage-editor]').getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth; })()`,
+      `(() => { const box = document.querySelector('[data-storage-editor]').getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight; })()`,
     ),
     true,
-    "The editor overflows a narrow screen",
+    "The editor overflows a narrow, short screen",
   );
+  await choose("advanced");
+  await evaluate(
+    cdp,
+    `document.querySelector('[data-storage-editor-save]').scrollIntoView({ block: "nearest" })`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const save = document.querySelector('[data-storage-editor-save]').getBoundingClientRect(); return save.top >= 0 && save.bottom <= innerHeight; })()`,
+    ),
+    true,
+    "Save is out of reach on a short screen",
+  );
+  await choose("text");
   await setField("[data-storage-editor-key]", "after");
   await setField("[data-storage-editor-value]", "later");
   await save(

@@ -51,7 +51,6 @@ function typeOf(value: SerializableRuntimeValue): ValueType {
   if (typeof value === "boolean") return "boolean";
   return "advanced";
 }
-// Each change of type starts from the current value in that type's form, so nothing typed is lost unseen.
 function textFor(value: SerializableRuntimeValue, as: ValueType): string {
   if (as === "advanced") return serializeValidatedRuntimeJson(value);
   return typeof value === "string" || typeof value === "number" ? String(value) : "";
@@ -65,11 +64,47 @@ watch(
     key.value = edit.kind === "add" ? "" : edit.key;
     const value = edit.kind === "add" ? "" : edit.value;
     type.value = typeOf(value);
+    shownType = type.value;
     text.value = textFor(value, type.value);
     flag.value = value === true;
   },
   { immediate: true },
 );
+
+// A change of type carries the draft over in the new type's form, so nothing typed is lost unseen: text and numbers
+// keep their text, the stored JSON form becomes or gives up a plain value where it is one, and Yes/no takes "true".
+let shownType: ValueType = type.value;
+function convertDraft() {
+  const from = shownType;
+  const to = type.value;
+  shownType = to;
+  if (to === "boolean") {
+    flag.value = text.value.trim() === "true";
+    return;
+  }
+  if (from === "boolean") {
+    text.value = to === "advanced" ? JSON.stringify(flag.value) : String(flag.value);
+    return;
+  }
+  if (to === "advanced" && from !== "advanced") {
+    const number = Number(text.value.trim());
+    text.value = JSON.stringify(
+      from !== "text" && NUMBER.test(text.value.trim()) && Number.isFinite(number)
+        ? number
+        : text.value,
+    );
+    return;
+  }
+  if (from === "advanced" && to !== "advanced") {
+    let plain: unknown;
+    try {
+      plain = JSON.parse(text.value);
+    } catch {
+      return;
+    }
+    if (typeof plain === "string" || typeof plain === "number") text.value = String(plain);
+  }
+}
 
 const NUMBER = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/u;
 /** The value as typed, or why it is not one. */
@@ -152,7 +187,8 @@ async function submit() {
 
 <template>
   <Dialog :open="edit !== null" @update:open="(open) => !open && !saving && emit('close')">
-    <DialogContent data-storage-editor>
+    <!-- Within the viewport, scrolling, so the fields and Save stay reachable on a short screen. -->
+    <DialogContent class="max-h-[calc(100dvh-2rem)] overflow-y-auto" data-storage-editor>
       <DialogHeader>
         <DialogTitle class="break-all">{{ title }}</DialogTitle>
         <DialogDescription>
@@ -178,7 +214,7 @@ async function submit() {
               v-model="type"
               class="min-h-11 rounded-md border bg-background p-2"
               data-storage-editor-type
-              @change="text = edit?.kind === 'edit' ? textFor(edit.value, type) : ''"
+              @change="convertDraft"
             >
               <option v-for="(label, name) in typeLabels" :key="name" :value="name">{{ label }}</option>
             </select>

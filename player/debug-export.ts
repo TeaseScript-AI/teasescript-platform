@@ -419,10 +419,9 @@ function parseEditedWhileDebugging(value: unknown): DebugEditedWhileDebugging | 
   const edited = record(value, "$.editedWhileDebugging");
   exactly(edited, "$.editedWhileDebugging", ["firstEditSceneTimeMs", "editCount"]);
   return {
-    firstEditSceneTimeMs: count(
+    firstEditSceneTimeMs: sceneTime(
       edited["firstEditSceneTimeMs"],
       "$.editedWhileDebugging.firstEditSceneTimeMs",
-      true,
     ),
     editCount: count(edited["editCount"], "$.editedWhileDebugging.editCount"),
   };
@@ -891,6 +890,13 @@ function strings(value: unknown, path: string): string[] {
 
 function boolean(value: unknown, path: string): boolean {
   if (typeof value !== "boolean") fail(path, "must be true or false");
+  return value;
+}
+
+/** A scene time in milliseconds: finite and not negative, fractions included, as the Player's clock observes it. */
+function sceneTime(value: unknown, path: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+    fail(path, "must be a finite, non-negative number of milliseconds");
   return value;
 }
 
