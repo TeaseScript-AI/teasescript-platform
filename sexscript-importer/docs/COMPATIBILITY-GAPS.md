@@ -55,7 +55,7 @@ implemented):
 | ternary / Elvis | `if` statements with one assignment or statement per branch |
 | implicit last-expression return | explicit `return`, also in the last statements of `if`/`else` branches |
 | `list[getRandom(list.size())]`, `list[-1]` | `list.random`, `list.last` / `list[list.length - n]` |
-| `collect`, `findAll`, `find`, `any`, `every`, `sum`, `times`, `eachWithIndex` with closures | ordinary `for` / `repeat` loops |
+| `collect`, `findAll`, `find`, `any`, `every`, `sum`, `times`, `eachWithIndex` with closures; `collect()` without one | ordinary `for` / `repeat` loops |
 | closures stored in data or passed as callbacks | string action IDs (the forwarded function's name) plus one generated dispatcher function |
 | `return new Object() { fields; methods }.main()` | globals, functions, and the entry method's statements as the script flow |
 | runtime-loaded `metaClass` mixin modules (`Eval.me` over a script directory) | the injected methods as functions and direct calls to each module's load and setup function |
@@ -190,7 +190,7 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   grows with them, or literal positions in order) the conversion appends, or writes in place; elsewhere, such as a
   list filled from its end or from position 1, it first pads the list up to the position: with null where the code
   compares the list's elements with null, otherwise with the elements' empty value (0, "", or false), which Groovy
-  truth treats like null (`SX_LIST_PADDING`). A list of elements of unknown type still appends at the end, which
+  truth treats like null (`SX_LIST_PADDING`; accepted 2026-10-06, following the zero-start decision). A list of elements of unknown type still appends at the end, which
   differs beyond it (`SX_LIST_GROWTH`, DisciplineClinic's `assignmentArrayList`). A computed position counts as a
   number where its operands are numbers or of unknown type, since Groovy failed on a list position of another type.
 - What a function cannot convert does not block the script when nothing references the function: no call, action ID, or
@@ -478,8 +478,10 @@ date and time (#532), `switch` (#529, #557), the `showButton` timeout and elapse
 rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526),
 `load "key", default:` (#545), permanent buttons (#612), `for key, value in dict` (#639), and image tags with
 `findImages` (#572): a legacy count of an images folder becomes a query for one generated tag of the folder's full
-path, which an XMP sidecar gives each image (`SX_IMAGE_TAGS`, owner decision 2026-10-05); only a count filtered by file
-name stays counted at conversion time (`SX_IMAGE_COUNT_WORKAROUND`). Timer, permanent-button, and media blocks share
+path, which an XMP sidecar gives each image (`SX_IMAGE_TAGS`, owner decision 2026-10-05), and a listing of the folder
+the package paths of its images, also where a name test keeps file names (`listing.findAll { f ->
+f.name.endsWith(".jpg") }.name`); only a count filtered by file name stays counted at conversion time
+(`SX_IMAGE_COUNT_WORKAROUND`). Timer, permanent-button, and media blocks share
 the local variables around them since #645; the importer needed no change for it, since it never moved a local to a
 global only for a handler, and its generated globals (device and switch buttons, background sounds) are shared across
 files on purpose.
@@ -584,7 +586,7 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 
 ## Current state and remaining gaps
 
-Measured on the selected large corpus on 2026-10-06, at importer `dc2cb65b` with `main` `0ab0fac9` merged in.
+Measured on the selected large corpus on 2026-10-06, at importer `e32615c6` with `main` `0ab0fac9` merged in.
 - **The selection** follows the owner decisions of 2026-10-05. It takes corpus2's merged units with one revision per
   title.
   - The largest revision, checked by hand, is the package. Earlier revisions are listed in the catalog as earlier
@@ -600,13 +602,13 @@ Measured on the selected large corpus on 2026-10-06, at importer `dc2cb65b` with
 | Compile and play to the end from `main.tease` in the smoke run | 129 |
 | Smoke run from `main.tease`: halted, blocked at a file that does not compile, step limit, failed, no run | 129, 54, 23, 3, 1 |
 
-Of the 575 scripts, 426 are lowered without a root error and 411 compile; 1,467 root errors remain.
+Of the 575 scripts, 426 are lowered without a root error and 411 compile; 1,445 root errors remain.
 
 **Smoke runs:**
 - **The step limit is inconclusive** (23 units). Most of these are loops that wait for a typed text or a time.
 - **The 3 failed runs:**
-  - SpankingParty (`TSR025`): a list read past its end, where Groovy read null. The script draws six implements
-    from the player's toys, and with fewer toys the draws give null, which later draws pick again.
+  - SpankingParty (`TSR058`): the script draws six implements from the player's toys, and with fewer toys the
+    draws give null, which a list of implements cannot hold (and which Groovy's later draws read past the end).
   - ashleyYHBS (`TSR058`): a missing setting stored in an `int`.
   - tabata (`TSR036`): a division by zero.
 - **Isolated runs** of scripts that no entry run reaches fail mostly on settings that an introduction saves:
@@ -650,6 +652,15 @@ may be null, no property of null, null indexed, combined, or compared.
 - spinthebottle: mostly null-related (15 of 24).
 - Banjo_SpankedHeroRPG (45): a union variable without type tests, and text subtraction.
 - worstpicture (8): numbers added to a text list.
+
+**Script-specific, deferred** (left as they are until an owner or coordinator decision):
+- SpankingParty: null implements when the player owns fewer than six toys (see the failed runs).
+- Locker: a developer tool whose menu always returns to itself, with every action a call of its unconverted Locker
+  helper class.
+- courtroom: variables that hold text and numbers in different places, nullable online texts that are indexed, and
+  nullable records.
+- SissyPlaytimeExposure: online profiles that arrive as maps of unknown shape, possibly null, with fields the record
+  does not declare.
 
 ## Open importer work
 
