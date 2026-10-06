@@ -76,6 +76,7 @@ import {
   type RuntimeDebugContext,
   type TraceStore,
 } from "./debug-trace.js";
+import { InstructionTraceCollector } from "./instruction-trace.js";
 import { detachPreparedReferencesForMutation, GLOBAL_SCOPE_ID } from "./prepared-references.js";
 export type {
   ActionCompletionOutcome,
@@ -198,13 +199,24 @@ export interface RuntimeRunOptions {
   readonly instructionBudget?: number;
   /** An opt-in debug trace that observes the operation (`docs/RUNTIME.md#debug-trace`). */
   readonly debugTrace?: RuntimeDebugContext;
+  /** `true` returns what the call executed as `instructionTrace` (`docs/RUNTIME.md#instruction-trace`). */
+  readonly instructionTrace?: boolean;
+}
+
+function instructionTraceFor(
+  plan: InstructionPlan,
+  options: Pick<RuntimeRunOptions, "instructionTrace">,
+): InstructionTraceCollector | null {
+  return options.instructionTrace === true
+    ? new InstructionTraceCollector(plan.instructions.length)
+    : null;
 }
 
 export function executeInstruction(
   plan: InstructionPlan,
   inputSnapshot: RuntimeSnapshot,
   capabilities: RuntimeCapabilities = {},
-  options: Pick<RuntimeRunOptions, "debugTrace"> = {},
+  options: Pick<RuntimeRunOptions, "debugTrace" | "instructionTrace"> = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, inputSnapshot);
   const trace = openDebugTrace(options.debugTrace, captured.plan, inputSnapshot);
@@ -213,13 +225,19 @@ export function executeInstruction(
     capabilities,
     captured.plan,
     trace,
+    instructionTraceFor(captured.plan, options),
   );
   const instructionsExecuted = executeCapturedInstruction(
     captured.plan,
     captured.snapshot,
     context,
   );
-  const executed = result(captured.snapshot, context.events, instructionsExecuted);
+  const executed = result(
+    captured.snapshot,
+    context.events,
+    instructionsExecuted,
+    context.instructionTrace,
+  );
   closeDebugTrace(trace, executed);
   return executed;
 }
@@ -270,8 +288,11 @@ function executeInstructionBoundary(
     snapshot.currentSessionTimeMs,
     currentCallFrameId(snapshot) ?? 0,
   );
+  const instructionTrace = context.instructionTrace;
+  instructionTrace?.visit(instructionIndex);
   try {
     executePlannedInstruction(plan, instruction, snapshot, evaluator, context.events);
+    instructionTrace?.settle(instructionIndex, instruction, snapshot.nextInstruction);
     if (snapshot.interactionResultHandoff?.continuationInstruction === instructionIndex) {
       snapshot.interactionResultHandoff = null;
     }
@@ -329,7 +350,13 @@ function stepCapturedToEvent(
   trace: TraceStore | null,
 ): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  const context = new RuntimeExecutionContext(snapshot, capabilities, plan, trace);
+  const context = new RuntimeExecutionContext(
+    snapshot,
+    capabilities,
+    plan,
+    trace,
+    instructionTraceFor(plan, options),
+  );
   let instructionsExecuted = 0;
   while (executionRunnable(snapshot) && context.events.length === 0) {
     if (instructionsExecuted >= budget) {
@@ -338,7 +365,7 @@ function stepCapturedToEvent(
     }
     instructionsExecuted += executeCapturedInstruction(plan, snapshot, context);
   }
-  return result(snapshot, context.events, instructionsExecuted);
+  return result(snapshot, context.events, instructionsExecuted, context.instructionTrace);
 }
 
 export function run(
@@ -375,7 +402,13 @@ function runCaptured(
   trace: TraceStore | null,
 ): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  const context = new RuntimeExecutionContext(snapshot, capabilities, plan, trace);
+  const context = new RuntimeExecutionContext(
+    snapshot,
+    capabilities,
+    plan,
+    trace,
+    instructionTraceFor(plan, options),
+  );
   let instructionsExecuted = 0;
   while (executionRunnable(snapshot)) {
     if (instructionsExecuted >= budget) {
@@ -384,7 +417,7 @@ function runCaptured(
     }
     instructionsExecuted += executeCapturedInstruction(plan, snapshot, context);
   }
-  return result(snapshot, context.events, instructionsExecuted);
+  return result(snapshot, context.events, instructionsExecuted, context.instructionTrace);
 }
 
 function executePlannedInstruction(

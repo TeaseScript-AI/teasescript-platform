@@ -150,6 +150,7 @@ export {
   type RuntimeOperationResult,
   type RuntimeRunOptions,
 } from "./runtime/engine.js";
+export type { RuntimeInstructionTrace } from "./runtime/instruction-trace.js";
 export {
   completeAction,
   type ActionCompletionOptions,

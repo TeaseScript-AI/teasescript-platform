@@ -1353,6 +1353,31 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   such as an early case of a long chain of unmatched cases, leaves its later writes, and the decisions it enclosed,
   without a link to it, never with another's.
 
+## Instruction trace
+
+A development and testing aid, such as a coverage explorer: `run`, `stepToEvent`, `executeInstruction`,
+`runValidatedState`, and `stepValidatedStateToEvent` take the option `instructionTrace: true`, and their result then
+also holds `instructionTrace` (`RuntimeInstructionTrace`), what that call executed. Both lists are in ascending order
+and hold each entry once, so the plan bounds their size.
+
+- `instructions`: the plan index of every instruction the call executed, including one that failed. Starting a timer,
+  media, or permanent-button block executes none; the block's own instructions follow.
+- `branches`: `[instruction, next]`, the successor taken by an instruction that chooses it at run time:
+  - `jumpIfFalse`, the condition of an `if`, `else if`, or `switch` case, the right side of an `and` or `or` that a
+    pausing operand compiles to instructions, or a `load` default: `instruction + 1` when the condition was true,
+    otherwise its `target`;
+  - `loopStart`, which runs before each round of a `repeat`, `for`, or `while`: `instruction + 1` for a round, its
+    `target` when the loop ends;
+  - `transfer`, a `goto` or `call` naming a file or a `call label`, and `end`: where execution continued, such as the
+    file a glob or computed target picked, the fallback, or the instruction after the `call` that `end` returns to.
+
+The other operations execute no instruction: they settle actions, set where execution continues, or queue blocks, which
+the next run or step executes and traces. The trace is not part of snapshots, events, or checkpoints and changes no
+format: a call returns the same snapshot, events, and random state with or without it, and without it the result has
+no `instructionTrace`. For a source location, `plan.instructions[index].span` holds the zero-based line `sl` and column
+`sc` and the offsets `so` and `eo` in its file: `plan.files[instruction.file]` for a `declareGlobal` or
+`declareSpeaker`, otherwise the file whose `startInstruction <= index < endInstruction`.
+
 ## Checkpoint boundary
 
 Runtime state must be serializable at every instruction boundary, but normal execution does not need to stringify or persist after every instruction. A production runner may execute many instructions in memory until an event, wait, input, timer, explicit save point, page lifecycle boundary, or configured checkpoint interval.
