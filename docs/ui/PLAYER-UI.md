@@ -438,7 +438,8 @@ When a script error stops the session, a card above the composer says "The sessi
 the error code and its file and line, and offers **Download debug export**; an exception of the Player itself says "The
 Player ran into an error." with the error's name instead. An error notice with the same action supplements the card
 until a new session starts. An ordinary end shows only "Session ended.", and media warnings are notices, never failures.
-The transcript and Stage stay for inspection, and nothing opens by itself.
+The transcript and Stage stay for inspection, with the transcript's end scrolling clear of the card, and nothing opens
+by itself.
 
 The card, its notice, and Player Settings open one **Download debug export** dialog for a developer
 ([`DEBUGGER.md`](../DEBUGGER.md#debug-export)). The technical report is always included; each personal category is a

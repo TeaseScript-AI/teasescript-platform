@@ -3019,6 +3019,20 @@ async function debugExportScenario(cdp, origin, profile) {
   });
   await waitFor(cdp, `!document.querySelector('[data-debug-export]')`);
   await setViewport(cdp, 390, 844);
+  // At the transcript's end, its last message is clear of the failure card above the composer.
+  await waitFor(
+    cdp,
+    `(() => {
+      const scroller = document.querySelector('.transcript-scroll');
+      scroller.scrollTop = scroller.scrollHeight;
+      const entries = document.querySelectorAll('.transcript-entry');
+      const last = entries[entries.length - 1].getBoundingClientRect();
+      const card = document.querySelector('[data-runtime-failure]').getBoundingClientRect();
+      return last.bottom <= card.top && document.getAnimations().every((animation) => animation.playState !== 'running');
+    })()`,
+    8_000,
+    "The failure card covers the transcript's last message",
+  );
   await physicalClick(cdp, "[data-runtime-failure-export]");
   await waitFor(cdp, ready);
   await waitFor(
@@ -3037,18 +3051,72 @@ async function debugExportScenario(cdp, origin, profile) {
     })()`,
   );
   assertEqual(fit, "fits", "The debug export dialog on a narrow screen");
-  await cdp.call("Input.dispatchKeyEvent", {
-    type: "keyDown",
-    key: "Escape",
-    code: "Escape",
-    windowsVirtualKeyCode: 27,
-  });
-  await cdp.call("Input.dispatchKeyEvent", {
-    type: "keyUp",
-    key: "Escape",
-    code: "Escape",
-    windowsVirtualKeyCode: 27,
-  });
+  const escape = async () => {
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+      });
+  };
+  await escape();
+  await waitFor(cdp, `!document.querySelector('[data-debug-export]')`);
+
+  // From Settings in the narrow tools drawer, the dialog is above Settings and takes input; closing it returns there.
+  await physicalClick(cdp, "[data-player-top-bar] [data-sidebar=trigger]");
+  const settled = `document.getAnimations().every((animation) => animation.playState !== 'running' || animation.effect?.getComputedTiming().iterations === Infinity)`;
+  await waitFor(
+    cdp,
+    `(() => {
+      const rect = document.querySelector('[data-settings-trigger]')?.getBoundingClientRect();
+      return !!rect && rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth && ${settled};
+    })()`,
+  );
+  await physicalClick(cdp, "[data-settings-trigger]");
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-player-setting="debug-export"]') && ${settled}`,
+  );
+  await evaluate(
+    cdp,
+    `document.querySelector('[data-player-setting="debug-export"]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
+  );
+  await physicalClick(cdp, '[data-player-setting="debug-export"]');
+  await waitFor(
+    cdp,
+    `${ready} && ${settled}`,
+    8_000,
+    "The debug export did not open from Settings",
+  );
+  const row = '[data-debug-export-category="player"]';
+  assertEqual(
+    await value(
+      cdp,
+      `(() => {
+        const rect = document.querySelector('${row}').getBoundingClientRect();
+        return !!document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-debug-export]');
+      })()`,
+    ),
+    true,
+    "The debug export opened from Settings is above Settings",
+  );
+  await physicalClick(cdp, `${row} [role=switch]`);
+  await waitFor(
+    cdp,
+    `document.querySelector('${row} [role=switch]')?.getAttribute('aria-checked') === 'true'`,
+    8_000,
+    "A choice in the debug export opened from Settings did not take input",
+  );
+  await escape();
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-debug-export]') && document.activeElement?.matches('[data-player-setting="debug-export"]')`,
+    8_000,
+    "Closing the debug export did not return to Settings",
+  );
+  await escape();
+  await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
   await setViewport(cdp, 1440, 900);
 }
 

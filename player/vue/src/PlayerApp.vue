@@ -124,7 +124,11 @@ const debugExport = useDebugExport(
     language: navigator.language,
   }),
 );
+// Each opening mounts the dialog anew: a dialog stacks by when it was mounted, so it then stays above one mounted since
+// the page loaded, such as Settings in the narrow tools drawer, which it opens from.
+const debugExportOpening = ref(0);
 function openDebugExport() {
+  if (!debugExport.open.value) debugExportOpening.value += 1;
   debugExport.open.value = true;
 }
 // An exception in the Player's own interface is a Player error: it is reported and can be exported, and still logged.
@@ -321,13 +325,11 @@ async function toggleFullscreen() {
           </FloatingViewfinder>
           <ScriptProblems v-if="failure" :failure="failure" />
           <SessionActivation v-else :activation="player.activation.value" @activate="player.activate" />
-          <RuntimeFailure
-            v-if="!failure && player.activation.value === null"
-            :snapshot="session?.snapshot ?? null"
-            :host-error="player.hostError.value"
-            @export="openDebugExport"
+          <DebugExportDialog
+            :key="debugExportOpening"
+            :exporter="debugExport"
+            :photo-url="player.resolveAsset"
           />
-          <DebugExportDialog :exporter="debugExport" :photo-url="player.resolveAsset" />
           <PlayerToasts
             :notifications="notifications.notifications.value"
             :seen-sequence="notifications.seenSequence.value"
@@ -369,7 +371,16 @@ async function toggleFullscreen() {
           :images="player.images"
           :debug-countdown="debug.countdownText.value"
           @update:session="player.update"
-        />
+        >
+          <template #end>
+            <RuntimeFailure
+              v-if="!failure && player.activation.value === null"
+              :snapshot="session?.snapshot ?? null"
+              :host-error="player.hostError.value"
+              @export="openDebugExport"
+            />
+          </template>
+        </RuntimeInteraction>
       </PlayerComposition>
     </template>
   </PlayerToolsShell>

@@ -5,7 +5,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import type { RuntimeSnapshot } from "../../../src/index.js";
 
-// How a session ended, in the composer area (PLAYER-UI "Session end and failure"): after an error it says so, names the
+// How a session ended, above the composer (PLAYER-UI "Session end and failure"): after an error it says so, names the
 // error and where it happened, and offers a debug export; an ordinary end is only noted. The transcript and Stage stay.
 const props = defineProps<{
   snapshot: RuntimeSnapshot | null;
@@ -51,16 +51,11 @@ const ended = computed(() => props.snapshot?.status === "halted" && props.hostEr
 </template>
 
 <style scoped>
-/* Above the composer, like Start; only the card itself takes input, so the transcript stays usable. */
+/* In the conversation overlay above the composer, which is measured, so the transcript scrolls clear of it. */
 .runtime-end {
-  position: absolute;
-  z-index: 30;
-  inset-inline: 0;
-  bottom: var(--player-edge-space);
   display: grid;
   justify-items: center;
-  padding-inline: var(--player-edge-space);
-  pointer-events: none;
+  padding-bottom: 8px;
 }
 .runtime-end > * {
   max-width: 36rem;

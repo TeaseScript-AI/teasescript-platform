@@ -140,9 +140,16 @@ export async function assembleDebugExport(
   const { session, recording } = candidate;
   const parts: DebugExportPart[] = [];
   const omissions: string[] = [];
-  const snapshot = recording?.endSnapshot ?? session?.snapshot ?? null;
+  // The session's actual state describes what happened; a recording that stopped early ends at an earlier state.
+  const snapshot = session?.snapshot ?? recording?.endSnapshot ?? null;
+  // The state replay data checkpoints: where a complete recording's calls lead, which a failed session reached before
+  // any later observation of time. An incomplete recording does not replay, so the actual state is the most useful.
+  const replaySnapshot = recording?.complete === true ? recording.endSnapshot : snapshot;
   const plan = recording?.plan ?? session?.plan ?? null;
-  const incident = describeIncident(snapshot, candidate.hostError);
+  const incident = describeIncident(
+    snapshot,
+    candidate.hostError === null ? null : scrub(candidate.hostError),
+  );
   parts.push({
     name: "Technical report",
     detail: `Build, versions, ${incident.code ?? incident.hostError ?? "no error"}${incident.path === null ? "" : ` at ${incident.path}:${incident.line}`}, and the kinds of the last events`,
@@ -151,7 +158,7 @@ export async function assembleDebugExport(
   const sections: Record<string, unknown> = {};
   const events = session?.events.slice(-EVENT_TAIL) ?? [];
   sections["eventsTail"] = choices.sessionText
-    ? removeSecrets(events)
+    ? removeSecrets(events.map((event) => withoutUnchosenValues(event, choices)))
     : events.map((event) => ({ sequence: event.sequence, kind: event.kind }));
   if (choices.sessionText && session !== null) {
     const transcript = session.transcriptEntries
@@ -180,7 +187,7 @@ export async function assembleDebugExport(
     if (recording === null) omissions.push("No answers were recorded for this session.");
   }
   if (choices.player) {
-    sections["player"] = { ...candidate.player };
+    sections["player"] = removeSecrets(candidate.player);
     parts.push({
       name: "Player and browser details",
       detail: Object.keys(candidate.player).join(", "),
@@ -190,8 +197,13 @@ export async function assembleDebugExport(
   let checkpoint: RuntimeCheckpoint | null = null;
   let checkpointRole: DebugExport["checkpointRole"] = null;
   let replay: DebugReplay | null = null;
-  if (choices.replay && plan !== null && snapshot !== null) {
-    ({ checkpoint, checkpointRole, replay } = replayData(plan, snapshot, recording, omissions));
+  if (choices.replay && plan !== null && replaySnapshot !== null) {
+    ({ checkpoint, checkpointRole, replay } = replayData(
+      plan,
+      replaySnapshot,
+      recording,
+      omissions,
+    ));
     if (
       checkpoint !== null &&
       containsSecret(serializeValidatedRuntimeJson({ checkpoint, replay }))
@@ -320,6 +332,29 @@ function replayData(
   }
 }
 
+/** Stands in for a value whose category the player did not choose. */
+const LEFT_OUT = "[left out: not chosen]";
+
+/**
+ * An event as session text: chat text stays, but a value a script saves without saying it is a saved value, and the
+ * value an answer gave is an answer, so each stays only when its own category is chosen.
+ */
+function withoutUnchosenValues(event: InterpreterEvent, choices: DebugExportChoices) {
+  if (
+    !choices.savedValues &&
+    event.kind === "actionRequested" &&
+    event.action.kind === "storageWrite"
+  )
+    return { ...event, action: { ...event.action, value: LEFT_OUT } };
+  if (
+    !choices.answers &&
+    event.kind === "actionCompleted" &&
+    event.settlement.actionKind === "interaction"
+  )
+    return { ...event, settlement: { ...event.settlement, result: LEFT_OUT } };
+  return event;
+}
+
 /** The answers the Player submitted, from the recorded completions of interactions. */
 function recordedAnswers(recording: DebugRecording | null): unknown[] {
   if (recording === null) return [];
@@ -380,7 +415,8 @@ const SECRET_PATTERNS = [
   /\bxox[abprs]-[A-Za-z0-9-]{10,}/gu,
   /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/gu,
   /\bBearer\s+[A-Za-z0-9._~+/-]{16,}/gu,
-  /(?:^|[\s"'(=])(?:\/(?:home|Users|root|var|etc|private|tmp|mnt|opt)\/[^\s"')]+|[A-Za-z]:\\\\?[^\s"')]+)/gu,
+  // A rooted path of at least two parts, such as /srv/notes.txt or C:\notes; not a URL, whose slashes follow a colon.
+  /(?:^|[\s"'(=])(?:\/[^\s"'()/]+\/[^\s"')]+|[A-Za-z]:\\\\?[^\s"')]+)/gu,
 ];
 
 function containsSecret(text: string): boolean {

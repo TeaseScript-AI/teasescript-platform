@@ -14,7 +14,12 @@ import { debugExportFile, parseDebugExport, replayDebugExport } from "../player/
 import { DebugRecorder } from "../player/debug-recorder.js";
 import {
   answerPlayerRuntimeImage,
+  applyPlayerRuntimeStorageEdit,
+  completePlayerRuntimeStorageWrite,
   createPlayerRuntimeSession,
+  pendingPlayerRuntimeStorageWrite,
+  playerRuntimeForeground,
+  selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
@@ -220,4 +225,82 @@ test("a state that cannot be checkpointed is exported as the last good state, wh
   assert.equal(exported.checkpointRole, "lastGood");
   assert.equal(exported.incident.kind, "hostError");
   assert.equal(replayDebugExport(parseDebugExport(await fileText(exported))).kind, "reproduced");
+});
+
+test("session text leaves out a value saved without being said and an answer's value, unless their own categories are chosen", async () => {
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(
+    'save load("private", default: "") as "copy"\nlet pick = choose [{ text: "Pick", value: 7 }]\nexit',
+    { recorder, persistentScriptStorage: true, scriptStorage: [{ key: "private", value: SECRET }] },
+  );
+  session = completePlayerRuntimeStorageWrite(
+    session,
+    pendingPlayerRuntimeStorageWrite(session.snapshot)!.actionId,
+    true,
+  ).session;
+  const choices = playerRuntimeForeground(session);
+  if (choices?.kind !== "choose") throw new Error("Expected choices");
+  session = selectPlayerRuntimeChoice(session, choices.options[0]!.id)!.session;
+  assert.equal(session.snapshot.status, "halted");
+  const frozen = candidate(session, recorder);
+  const sessionText = chooseDebugCategory(NO_PERSONAL_CONTENT, frozen, "sessionText", true);
+  // The saved value as text, and the answer's value as the result of its completion.
+  const result = async (chosen: DebugExportChoices) => {
+    const { exported } = await assembleDebugExport(frozen, chosen);
+    const text = JSON.stringify(exported.sections["eventsTail"]);
+    const answer = /"actionKind":"interaction".*?"result":("[^"]*"|\d+)/u.exec(text)?.[1];
+    return { saved: text.includes(SECRET), answer };
+  };
+  assert.deepEqual(await result(sessionText), { saved: false, answer: '"[left out: not chosen]"' });
+  const withAll = await result(
+    chooseDebugCategory(
+      chooseDebugCategory(sessionText, frozen, "savedValues", true),
+      frozen,
+      "answers",
+      true,
+    ),
+  );
+  assert.deepEqual(withAll, { saved: true, answer: "7" });
+});
+
+test("credentials and rooted paths are removed from every readable section, and replay data with one is left out", async () => {
+  const recorder = new DebugRecorder();
+  const session = createPlayerRuntimeSession('let name = askText "Name"\nexit', {
+    recorder,
+    scriptStorage: [{ key: "notes", value: "/srv/private/notes.txt" }],
+  });
+  const frozen: DebugExportCandidate = {
+    ...candidate(session, recorder),
+    player: { userAgent: "ReviewBrowser ghp_abcdefghijklmnopqrstuvwx /data/private/agent" },
+  };
+  const { exported } = await assembleDebugExport(frozen, all(frozen));
+  const text = await fileText(exported);
+  for (const removed of ["ghp_abcdefghijklmnopqrstuvwx", "/data/private", "/srv/private"])
+    assert.ok(!text.includes(removed), removed);
+  assert.equal(exported.replay, null);
+  assert.match(JSON.stringify(exported.sections["player"]), /ReviewBrowser +\[removed\]/u);
+});
+
+test("a recording that stopped early still reports the actual failure, and its incomplete replay says why", async () => {
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(
+    'let name = askText "Name"\nlet zero = 0\nlet result = 1 / zero\nexit',
+    { recorder },
+  );
+  // A value the engine refuses, which leaves the recording incomplete.
+  session = applyPlayerRuntimeStorageEdit(session, { key: "k", value: Number.NaN }).session;
+  session = submitPlayerRuntimeComposer(session, "Ada")!.session;
+  assert.equal(session.snapshot.status, "failed");
+  const frozen = candidate(session, recorder);
+  const byDefault = await assembleDebugExport(frozen, NO_PERSONAL_CONTENT);
+  assert.equal(byDefault.exported.incident.kind, "runtimeFailure");
+  assert.equal(byDefault.exported.incident.code, session.snapshot.failure?.code);
+  const { exported } = await assembleDebugExport(frozen, all(frozen));
+  assert.equal(exported.checkpoint?.snapshot.status, "failed");
+  assert.equal(exported.replay?.complete, false);
+  const replayed = replayDebugExport(parseDebugExport(await fileText(exported)));
+  assert.deepEqual(replayed, {
+    kind: "incomplete",
+    reason: "A call's arguments could not be copied exactly.",
+  });
 });

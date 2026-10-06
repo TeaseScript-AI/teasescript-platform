@@ -94,13 +94,15 @@ cannot copy, or a media store that throws during a call, marks it incomplete.
 The Player assembles an export when its dialog opens ([Player UI](ui/PLAYER-UI.md#session-end-and-failure)), from the
 session, the record, and the photos frozen then (`player/debug-export-assembly.ts`), so play may continue meanwhile.
 The technical report carries the build and its revisions, the package's storage scope and a SHA-256 of its compiled plan
-where the browser can hash, the incident, and the sequence and kind of the last 256 events. Saved values add the session's
+where the browser can hash, the incident as the session's actual state shows it, and the sequence and kind of the last
+256 events. Saved values add the session's
 storage view; answers add the recorded interaction completions; session text adds the last 50 transcript messages and
-the events with their content; replay data adds the checkpoint of the state the record reaches, or of its anchor as the
-last good state when that state cannot be checkpointed; photos add the chosen originals and their uses (a recorded image
+the events with their content, except a value saved without being said or an answer's value unless its own category
+is chosen; replay data adds the checkpoint of the state a complete record reaches (of the actual state when the record
+is incomplete), or of its anchor as the last good state when that state cannot be checkpointed; photos add the chosen originals and their uses (a recorded image
 answer or capture, or a saved value); Player and browser details add the presentation settings, screen geometry,
-pointer, language, and user agent. Text that looks like a credential or an absolute file path is replaced in readable
-sections, and replay data containing it is left out entirely, since changing it would change the replay; such
+pointer, language, and user agent. Text that looks like a credential or a rooted file path is replaced in every readable
+section, and replay data containing it is left out entirely, since changing it would change the replay; such
 detection cannot prove text safe, so the export is never called anonymous.
 
 After `npm run build:typescript`, `node tools/debug-export.mjs inspect <file>` summarizes an export without runtime

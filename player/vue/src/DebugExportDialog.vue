@@ -35,7 +35,7 @@ const categories: readonly { readonly key: DebugCategory; readonly label: string
   {
     key: "answers",
     label: "Submitted answers",
-    help: "Exactly what was typed or chosen, with the question it answered.",
+    help: "Exactly what was typed or chosen, and which request it answered.",
   },
   {
     key: "sessionText",
@@ -160,7 +160,9 @@ function uses(photo: (typeof photos.value)[number]): string {
             {{ size(prepared.size) }} ·
             {{
               prepared.replay === "complete"
-                ? "A developer can replay the error exactly."
+                ? exporter.candidate.value?.hostError
+                  ? "A developer can replay the recorded engine calls; the Player's own error is described, not replayed."
+                  : "A developer can replay the error exactly."
                 : prepared.replay === "incomplete"
                   ? "Replay data is incomplete."
                   : "Without replay data, a developer can read the report but not replay it."

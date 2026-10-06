@@ -52,8 +52,9 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
   operations, answers media-store questions only from recorded answers, and replays in a worker with a time limit; it
   never evaluates, imports, or fetches anything the file names. Exports are neither encrypted nor signed. The Player
   writes one only on the player's request and downloads it only from the player's press, with no upload; personal
-  content is off until chosen for that export, and cookies, tokens, storage outside the session, DOM, and host objects
-  are never collected.
+  content is off until chosen for that export. Cookies, browser credentials, storage outside the session, DOM, and host
+  objects are never read; text the player entered can still contain a secret, which the export removes or leaves out
+  as far as it recognizes it.
 - Saved script data moves between browsers only by the player's own hand ([transfer](DATA-AND-API.md#saved-data-transfer)):
   an export stays in the browser until the player downloads or copies it, with no upload, URL, or clipboard read. It is
   neither encrypted nor signed and can contain private photos, which the Player says when exporting. An import is

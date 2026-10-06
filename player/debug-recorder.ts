@@ -4,6 +4,7 @@ import type {
   InterpreterEvent,
   RuntimeSnapshot,
 } from "../src/index.js";
+import { captureExternalData } from "../src/external-data-capture.js";
 import {
   debugExportJson,
   type DebugAdmissionQuery,
@@ -144,8 +145,9 @@ export class DebugRecorder {
   ): { readonly args: unknown[]; readonly bytes: number } | null {
     if (this.#frozen || this.#plan === null) return null;
     try {
-      // JSON would turn a value such as NaN into null and replay a different call, so such a call is not recorded.
-      if (!copiesExactly(args)) {
+      // JSON would turn a value such as NaN into null and replay a different call, and a cycle has no JSON form, so
+      // such a call is not recorded; the engine's own validation then still refuses or admits it.
+      if (!captureExternalData(args).ok) {
         this.#problem ??= "A call's arguments could not be copied exactly.";
         this.#frozen = true;
         return null;
@@ -204,33 +206,4 @@ export class DebugRecorder {
     this.#end = after;
     if (thrown !== null || after.status === "failed") this.#frozen = true;
   }
-}
-
-/** Whether JSON copies `value` exactly: only finite numbers, strings, booleans, null, arrays, and plain objects. */
-function copiesExactly(value: unknown): boolean {
-  const pending: unknown[] = [value];
-  while (pending.length > 0) {
-    const current = pending.pop();
-    if (current === null || typeof current === "string" || typeof current === "boolean") continue;
-    if (typeof current === "number") {
-      if (!Number.isFinite(current)) return false;
-      continue;
-    }
-    if (typeof current !== "object") return false;
-    const prototype: unknown = Object.getPrototypeOf(current);
-    if (Array.isArray(current)) {
-      if (prototype !== Array.prototype) return false;
-      for (let index = 0; index < current.length; index += 1) {
-        if (!Object.hasOwn(current, index)) return false;
-        pending.push(current[index]);
-      }
-    } else {
-      if (prototype !== Object.prototype && prototype !== null) return false;
-      for (const item of Object.values(current)) {
-        if (item === undefined) return false;
-        pending.push(item);
-      }
-    }
-  }
-  return true;
 }

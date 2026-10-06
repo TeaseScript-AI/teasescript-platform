@@ -415,6 +415,8 @@ function submit(source: "input" | "button") {
         </Transcript>
       </template>
       <template #interaction>
+        <!-- Above the composer, so the transcript's inset makes room for it. -->
+        <slot name="end" />
         <Composer
           ref="composer"
           v-model="draft"

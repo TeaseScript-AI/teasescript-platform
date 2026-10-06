@@ -839,11 +839,28 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     async debugExportCandidate(
       player: DebugExportCandidate["player"],
     ): Promise<DebugExportCandidate> {
+      // Everything is taken before the first photo is read, so play continuing meanwhile cannot mix in later state.
       const current = session.value;
-      const recording = recorder.recording();
-      const storage = recording?.endSnapshot.scriptStorage ?? current?.snapshot.scriptStorage ?? [];
+      const frozen = {
+        build: playerBuildIdentity,
+        package: options.debugPackage ?? { id: null, version: null },
+        session:
+          current === null
+            ? null
+            : {
+                plan: current.plan,
+                snapshot: current.snapshot,
+                events: [...current.events],
+                transcriptEntries: [...current.transcriptEntries],
+              },
+        recording: recorder.recording(),
+        hostError: hostError.value,
+        player,
+      };
+      const storage =
+        current?.snapshot.scriptStorage ?? frozen.recording?.endSnapshot.scriptStorage ?? [];
       const photos: DebugPhotoCandidate[] = [];
-      for (const [reference, usedBy] of debugPhotoUses(recording, storage)) {
+      for (const [reference, usedBy] of debugPhotoUses(frozen.recording, storage)) {
         const record = await capturedMedia.read(reference);
         if (record === null || record.kind !== "image") continue;
         photos.push({
@@ -856,23 +873,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
           read: async () => new Uint8Array(await record.data.arrayBuffer()),
         });
       }
-      return {
-        build: playerBuildIdentity,
-        package: options.debugPackage ?? { id: null, version: null },
-        session:
-          current === null
-            ? null
-            : {
-                plan: current.plan,
-                snapshot: current.snapshot,
-                events: [...current.events],
-                transcriptEntries: [...current.transcriptEntries],
-              },
-        recording,
-        hostError: hostError.value,
-        photos,
-        player,
-      };
+      return { ...frozen, photos };
     },
     loadScriptStorage,
     scriptStorageOptions,
