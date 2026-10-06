@@ -395,8 +395,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   let disposed = false;
   tryOnScopeDispose(() => {
     disposed = true;
-    // A Debug storage edit waiting for a script write gives up; the retired session never runs on.
-    releaseWriteWaiter();
     activationToken++;
     loads.clear();
     device.reset();
@@ -462,30 +460,15 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         setTimeout(() => report(stored), 0);
       }
       function report(stored: boolean) {
+        writesInFlight.delete(flight);
         // A write that settles after unmount must not continue the session.
-        if (disposed) return void writesInFlight.delete(flight);
+        if (disposed) return;
         const latest = session.value;
-        // The report must belong to the session that requested it; an edit waiting for this write gives up.
-        if (
-          generation.value !== sessionGeneration ||
-          latest === null ||
-          pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write!.actionId
-        ) {
-          writesInFlight.delete(flight);
-          return releaseWriteWaiter({ generation: sessionGeneration, actionId: write!.actionId });
-        }
+        // The report must belong to the session that requested it.
+        if (generation.value !== sessionGeneration || latest === null) return;
+        if (pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write!.actionId) return;
         if (!stored) notices.publish(playerNotices.storageWriteFailed());
         else savedDataRevision.value++;
-        // A Debug storage edit waiting for this write settles it itself, before the script continues. The write stays
-        // in flight until then, so a publication meanwhile does not issue it again.
-        const settled = {
-          actionId: write!.actionId,
-          stored,
-          generation: sessionGeneration,
-          flight,
-        };
-        if (handOffWrite(settled)) return;
-        writesInFlight.delete(flight);
         session.value = completePlayerRuntimeStorageWrite(latest, write!.actionId, stored).session;
       }
     },
@@ -499,40 +482,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const openingCamera = ref(false);
   // While an import replaces the saved data, no Start, Continue, or clear begins.
   const importing = ref(false);
-  // Debug storage edits (DEBUGGER.md "Player Debug"), one at a time. An edit is persisted first and reaches the running
-  // session only once that succeeded, through the engine's storage-edit input. While the script's own write waits for
-  // the host, the edit waits for that write's result: the write is then settled without running on, the edit follows,
-  // and only then does the script continue, so its next `load` returns the edit.
-  type SettledWrite = {
-    readonly actionId: number;
-    readonly stored: boolean;
-    readonly generation: number;
-    /** Its entry in `writesInFlight`, removed once the write is acknowledged. */
-    readonly flight: string;
-  };
-  // The edit waiting for one script write: only that write, of that session, settles or releases it.
-  let writeWaiter: {
-    readonly generation: number;
-    readonly actionId: number;
-    readonly resolve: (write: SettledWrite | null) => void;
-  } | null = null;
-  /** Gives a settled write to the edit waiting for exactly that write; whether one took it. */
-  function handOffWrite(write: SettledWrite): boolean {
-    const waiter = writeWaiter;
-    if (waiter?.generation !== write.generation || waiter.actionId !== write.actionId) return false;
-    writeWaiter = null;
-    waiter.resolve(write);
-    return true;
-  }
-  /** Releases the waiting edit, or only the one waiting for the given write, without a settled write. */
-  function releaseWriteWaiter(only?: { readonly generation: number; readonly actionId: number }) {
-    const waiter = writeWaiter;
-    if (waiter === null) return;
-    if (only && (waiter.generation !== only.generation || waiter.actionId !== only.actionId))
-      return;
-    writeWaiter = null;
-    waiter.resolve(null);
-  }
+  // Debug storage edits (DEBUGGER.md "Player Debug"), one at a time. An edit is stored first and reaches the running
+  // session only once that succeeded, through the engine's storage-edit input; its next `load` then returns it. While
+  // the script's own write waits for the host, an edit is not taken: it would have to come between that write and the
+  // script. A write the script issues while an edit is being stored settles as usual first.
   let editChain: Promise<unknown> = Promise.resolve();
   /** Puts a stored edit into the values the next Start loads, as the provider now holds them. */
   function seedNextStart(key: string, value: SerializableRuntimeValue) {
@@ -552,10 +505,24 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     (session.value.snapshot.status === "running" || session.value.snapshot.status === "waiting") &&
     activation.value === null &&
     !openingCamera.value;
+  /** Whether the running session's own write waits for the host, so it takes no edit until that settled. */
+  const scriptSaving = () =>
+    liveSession() && pendingPlayerRuntimeStorageWrite(session.value!.snapshot) !== null;
+  // Edits that wait for the session's write to settle, each released when it settled or the session went.
+  const writeSettledWaiters = new Set<() => void>();
+  watch(session, () => {
+    if (scriptSaving()) return;
+    for (const resolve of writeSettledWaiters) resolve();
+    writeSettledWaiters.clear();
+  });
+  tryOnScopeDispose(() => {
+    for (const resolve of writeSettledWaiters) resolve();
+    writeSettledWaiters.clear();
+  });
 
   /**
    * Changes one saved value for Debug: `value: null` deletes the key. `expected` is the value the editor started from,
-   * `undefined` for a new key; a saved value that changed meanwhile is reported, not overwritten. The edit is persisted
+   * `undefined` for a new key; a saved value that changed meanwhile is reported, not overwritten. The edit is stored
    * first; a running session's next `load` then returns it, and values it already loaded keep what they loaded.
    */
   function editSavedData(edit: {
@@ -583,8 +550,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   ): Promise<SavedDataEditResult> {
     const failed = (message: string) => ({ kind: "failed", message }) as const;
     const retired = () => disposed || generation.value !== owner;
-    const overtaken = () => failed("The session changed meanwhile; open the editor again.");
-    if (retired()) return overtaken();
+    const sessionChanged = () => failed("The session changed meanwhile; open the editor again.");
+    if (retired()) return sessionChanged();
     if (!scriptStorage || storedEntries.value === null)
       return failed("This browser's saved data cannot be read.");
     if (
@@ -594,6 +561,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       activation.value?.kind === "continue"
     )
       return failed("Saved data cannot be changed right now.");
+    if (scriptSaving()) return { kind: "busy" };
     if (value !== null) {
       const problem = validateScriptStorageEntries([{ key, value }], "value");
       if (problem !== null) return failed(problem);
@@ -604,89 +572,49 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     } catch {
       return failed("This browser's saved data cannot be read.");
     }
-    if (retired()) return overtaken();
+    if (retired()) return sessionChanged();
     const now = current.find((entry) => entry.key === key)?.value;
     if (!sameSavedValue(now, expected)) return { kind: "changed" };
-
-    const waitForWrite = (actionId: number) =>
-      new Promise<SettledWrite | null>((resolve) => {
-        writeWaiter = { generation: owner, actionId, resolve };
-      });
-    let settled: SettledWrite | null = null;
+    if (scriptSaving()) return { kind: "busy" };
+    try {
+      await scriptStorage.write(key, value);
+    } catch {
+      return failed("The change could not be saved in this browser. Nothing changed.");
+    }
+    savedDataRevision.value++;
+    // The next Start loads the stored values as they are now.
+    seedNextStart(key, value);
+    // A script write issued meanwhile settles first; storage then says whose value stands, and the session follows it.
+    let stored: SerializableRuntimeValue | undefined;
     for (;;) {
-      const pending = liveSession() && pendingPlayerRuntimeStorageWrite(session.value!.snapshot);
-      if (pending) {
-        settled = await waitForWrite(pending.actionId);
-        if (retired()) {
-          if (settled !== null) writesInFlight.delete(settled.flight);
-          return overtaken();
-        }
-      }
+      while (!retired() && scriptSaving())
+        await new Promise<void>((resolve) => writeSettledWaiters.add(resolve));
+      if (retired()) return { kind: "saved", live: false };
       try {
-        await scriptStorage.write(key, value);
+        stored = (await scriptStorage.load()).find((entry) => entry.key === key)?.value;
       } catch {
-        if (settled !== null) settle(settled, true);
-        return failed("The change could not be saved in this browser. Nothing changed.");
+        return failed(
+          "The change was saved, but the session could not be updated; the next Start loads it.",
+        );
       }
-      savedDataRevision.value++;
-      // The next Start loads the stored values as they are now.
-      seedNextStart(key, value);
-      if (disposed) return { kind: "saved", live: false };
-      if (!liveSession() || generation.value !== owner) {
-        if (settled !== null) settle(settled, true);
-        return { kind: "saved", live: false };
-      }
-      // Acknowledge the waiting write without running on, then edit, then run, in one step.
-      let latest = session.value!;
-      let settledWithoutRun = false;
-      if (settled !== null) {
-        writesInFlight.delete(settled.flight);
-        if (pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId === settled.actionId) {
-          latest = completePlayerRuntimeStorageWrite(latest, settled.actionId, settled.stored, {
-            continueRun: false,
-          }).session;
-          settledWithoutRun = true;
-        }
-        settled = null;
-      }
-      const edited = applyPlayerRuntimeStorageEdit(
-        latest,
-        { key, value },
-        { continueRun: settledWithoutRun },
-      );
-      // A write the script issued while this edit was being stored settles first; the edit is stored again after it.
-      if (edited.outcome.kind === "storageWritePending") {
-        session.value = latest;
-        continue;
-      }
-      session.value = edited.session;
-      if (edited.outcome.kind === "applied") {
-        const count = debugEdits.value?.editCount ?? 0;
-        debugEdits.value = {
-          firstEditSceneTimeMs:
-            debugEdits.value?.firstEditSceneTimeMs ?? latest.snapshot.observedSessionTimeMs,
-          editCount: count + 1,
-        };
-      }
-      return { kind: "saved", live: edited.outcome.kind === "applied" };
+      if (retired()) return { kind: "saved", live: false };
+      if (!scriptSaving()) break;
     }
-
-    /** Settles a write that waited for this edit as it would have been without it, running on. */
-    function settle(write: SettledWrite, run: boolean) {
-      writesInFlight.delete(write.flight);
-      // An unmounted Player never runs a session on.
-      if (disposed) return;
-      const latest = session.value;
-      if (
-        latest === null ||
-        generation.value !== write.generation ||
-        pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write.actionId
-      )
-        return;
-      session.value = completePlayerRuntimeStorageWrite(latest, write.actionId, write.stored, {
-        continueRun: run,
-      }).session;
+    if (!sameSavedValue(stored, value === null ? undefined : value)) {
+      seedNextStart(key, stored ?? null);
+      return { kind: "overtaken" };
     }
+    if (!liveSession()) return { kind: "saved", live: false };
+    const latest = session.value!;
+    const edited = applyPlayerRuntimeStorageEdit(latest, { key, value });
+    if (edited.outcome.kind !== "applied") return { kind: "saved", live: false };
+    session.value = edited.session;
+    debugEdits.value = {
+      firstEditSceneTimeMs:
+        debugEdits.value?.firstEditSceneTimeMs ?? latest.snapshot.observedSessionTimeMs,
+      editCount: (debugEdits.value?.editCount ?? 0) + 1,
+    };
+    return { kind: "saved", live: true };
   }
   const canClearScriptStorage = computed(
     () =>
@@ -860,8 +788,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     notices.dismiss(playerNoticeKeys.storageWriteFailed);
     reportedMedia = new Set();
     debugEdits.value = null;
-    // A Debug storage edit waiting for the previous session's write is for that session only.
-    releaseWriteWaiter();
     device.reset();
     loads.clear();
     pendingLoadCount.value = 0;
@@ -1029,6 +955,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         !openingCamera.value &&
         activation.value?.kind !== "continue",
       live: liveSession(),
+      /** The running session's own write waits for the host; Debug edits wait until it settled. */
+      scriptSaving: scriptSaving(),
     })),
     /** Whether Debug changed this session's saved values: from which scene time and how often; for its debug export. */
     debugEdits: computed(() => debugEdits.value),
@@ -1238,6 +1166,10 @@ export interface SavedDataImportScript {
 /** What a Debug storage edit did: saved (and taken by the running session when `live`), not saved, or overtaken. */
 export type SavedDataEditResult =
   | { readonly kind: "saved"; readonly live: boolean }
+  /** The running session's own write waits for the host; nothing was written. */
+  | { readonly kind: "busy" }
+  /** The script saved the same key after the edit was stored; its value stands, stored and in the session. */
+  | { readonly kind: "overtaken" }
   /** The saved value changed since the editor read it; nothing was written. */
   | { readonly kind: "changed" }
   | { readonly kind: "failed"; readonly message: string };

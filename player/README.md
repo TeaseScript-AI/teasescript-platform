@@ -153,9 +153,9 @@ the saved values through the session host's `readSavedData`, refreshes on its `s
 events for its `savedDataScope`, renders each value as the flat, paged outline of `storageOutline`
 (`player/storage-preview.ts`, `StorageValue.vue`), and loads a thumbnail through `savedPhoto` only once it is in view,
 keyed by its reference. `StorageEditDialog.vue` edits through the host's `editSavedData`, which stores the edit through
-the provider first, then applies it with the recorded `applyPlayerRuntimeStorageEdit`; a script write waiting for the
-host is settled with `completePlayerRuntimeStorageWrite(..., { continueRun: false })` before it, and the edit runs the
-session on. `debugEdits` holds the Edited-while-debugging mark for the debug export's `editedWhileDebugging`.
+the provider first, then applies it with the recorded `applyPlayerRuntimeStorageEdit`. It refuses an edit (`busy`)
+while a script write waits for the host; a script write issued meanwhile settles first, and the session then follows
+the value the provider kept (`overtaken` when that is the script's). `debugEdits` holds the Edited-while-debugging mark for the debug export's `editedWhileDebugging`.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
 [`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's

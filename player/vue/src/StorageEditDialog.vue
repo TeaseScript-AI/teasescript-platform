@@ -141,6 +141,7 @@ function parsed(): { value: SerializableRuntimeValue } | { problem: string } {
 }
 
 const live = computed(() => props.player.savedDataEditing.value.live);
+const scriptSaving = computed(() => props.player.savedDataEditing.value.scriptSaving);
 const title = computed(() =>
   props.edit?.kind === "add"
     ? "Add a saved value"
@@ -176,6 +177,9 @@ async function submit() {
   }
   if (result.kind === "saved")
     emit("saved", { key: key.value, live: result.live, deleted: value === null });
+  else if (result.kind === "busy") problem.value = "The script is saving… try again in a moment.";
+  else if (result.kind === "overtaken")
+    problem.value = "The script saved this value meanwhile; its value stands.";
   else if (result.kind === "changed")
     problem.value =
       edit.kind === "add"
@@ -242,6 +246,9 @@ async function submit() {
           </label>
           <p class="text-muted-foreground">The script checks the type when it loads the value.</p>
         </template>
+        <p v-if="scriptSaving" class="text-muted-foreground" role="status" data-storage-editor-busy>
+          The script is saving… try again in a moment.
+        </p>
         <Alert v-if="problem" variant="destructive" data-storage-editor-problem>
           <AlertDescription>{{ problem }}</AlertDescription>
         </Alert>
@@ -253,7 +260,7 @@ async function submit() {
             type="submit"
             :variant="edit?.kind === 'delete' ? 'destructive' : 'default'"
             class="min-h-11"
-            :disabled="saving"
+            :disabled="saving || scriptSaving"
             data-storage-editor-save
           >
             {{ saving ? "Saving…" : edit?.kind === "delete" ? "Delete" : "Save" }}
