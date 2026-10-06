@@ -76,6 +76,20 @@
       "category": "e",
       "reason": "perm(String i) passed it, which is not defined there, to can() instead of its parameter i; nothing calls perm, so pass i.",
       "diff": "perm-parameter.diff"
+    },
+    {
+      "id": "debug-prompt",
+      "layer": "source",
+      "category": "b",
+      "reason": "The lounge menu's question showed the whole DOMME map in debug mode and \"Yes, toy?\" otherwise; a map is no question text, so the menu asks \"Yes, toy?\" in both modes.",
+      "diff": "debug-prompt.diff"
+    },
+    {
+      "id": "end-session",
+      "layer": "source",
+      "category": "b",
+      "reason": "The lounge loop ran until the player closed the legacy player, so the converted session never reached exit (TSV053); the lounge menu gets an \"End session\" option that ends the script.",
+      "diff": "end-session.diff"
     }
   ]
 }
