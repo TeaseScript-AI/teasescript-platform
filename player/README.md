@@ -141,8 +141,12 @@ the `Debug` and `Auto-skip` switches, the `Skip event`, `+10 s` and `+1 min` but
 `[data-player-setting="debug-menu"]`, `[data-debug-active]` and `data-development-time-action` (`skip`, `advance-10s`,
 `advance-1min`), the countdown in `[data-debug-countdown]`, the Now tab's `[data-debug-now]` with `-next`, `-waiting`,
 `-calls` (and `-calls-toggle`), `-image` (its badge's `data-status`), `-image-path`, `-media`, and `-timers` (and
-`-timers-toggle`), the log lines under `[data-debug-log]` in the Log tab, and the latest announcement in
-`[data-debug-announcement]`.
+`-timers-toggle`), the tabs by `[data-debug-tab]`, the Storage tab's `[data-debug-storage]` with `-summary`, `-row`
+(`-key`), `-photos` and `-refresh`, each value's `[data-storage-preview]` and `[data-storage-expand]`, a thumbnail's
+`[data-storage-photo]` with its `data-state` (`loading`, `ready`, `missing`), the log lines under `[data-debug-log]` in
+the Log tab, and the latest announcement in `[data-debug-announcement]`. The Storage tab (`DebugStorage.vue`) reads
+the saved values through the session host's `readSavedData`, refreshes on its `savedDataRevision`, previews them with
+`player/storage-preview.ts`, and loads a thumbnail through `savedPhoto` only once it is in view.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
 [`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's

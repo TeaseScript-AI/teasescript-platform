@@ -9,6 +9,7 @@ import TooltipTrigger from "@/components/ui/tooltip/TooltipTrigger.vue";
 import type { PlayerSpeakerPresentation } from "../../model.js";
 import type { PlayerThemeIntent } from "../../theme/palette.js";
 import DebugPanel from "./DebugPanel.vue";
+import DebugStorage from "./DebugStorage.vue";
 import DebugStatus from "./DebugStatus.vue";
 import FloatingViewfinder, { type FloatingPlace } from "./FloatingViewfinder.vue";
 import ImageCapture from "./ImageCapture.vue";
@@ -198,8 +199,8 @@ async function toggleFullscreen() {
         :stage-covered="stageCamera !== null"
         :stage-overridden="media !== undefined"
       >
-        <template v-if="$slots['debug-storage']" #storage>
-          <slot name="debug-storage" />
+        <template v-if="player.hasScriptStorage" #storage>
+          <DebugStorage :player="player" />
         </template>
       </DebugPanel>
       <slot v-else name="tool" v-bind="scope" />

@@ -1,0 +1,12 @@
+save 3 as "player.score"
+save "Ada" as "player.name"
+save { level: 2, tags: ["a", "b"] } as "player.flags"
+let photo: string = askImage(hint: "Add an image to save")
+save photo as "player.photo"
+save [photo, photo] as "album"
+say "Saved.", instant
+let more = showButton "More"
+save 4 as "player.score"
+say "Saved again.", instant
+let done = showButton "Done"
+exit

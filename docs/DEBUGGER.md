@@ -29,7 +29,7 @@ tools menu; the switch is not stored, so every load starts with it off (the deve
 Its own **Debug** switch, on whenever the menu is turned on, pauses the Debug features without leaving the panel. The
 Debug log lives while the menu is on; the other features run only while both are on, and turning either off stops
 auto-skip and ends a jump at its next yield. The time controls stand above the tabs **Now** (first), **Log**, and
-**Storage**, which appears when a host supplies the saved-data overview and editor.
+**Storage**, which appears when the host persists script storage.
 
 - **Time controls** (Skip event, +10 s, +1 min, Auto-skip) advance the canonical session's own scene time through
   ordinary observations ([`RUNTIME.md`](RUNTIME.md#timers-and-scene-time)). They are read-only inspection with
@@ -54,6 +54,12 @@ auto-skip and ends a jump at its next yield. The time controls stand above the t
     playhead, and the statement that started it.
   - A collapsed **Timers** list shows every timer, hidden ones included: blocking or async, display, running, paused, or
     suspended behind a block, remaining time, and the statement that started it.
+- **Storage** lists what the script saved in this browser, read-only: every key in UTF-16 order, its value's type and a
+  short preview, and a list, set, object, or dict's members once expanded. A saved photo shows as a thumbnail, read from
+  this browser's storage only once it is in view or missing as Unavailable; each saved photo also appears once with the
+  keys whose values use it. The tab reads the saved values freshly when it opens, after this Player saved, cleared, or
+  imported them, after another tab of this browser changed them, and on Refresh. The running session keeps the copy it
+  loaded at Start.
 
 ## Debug export
 

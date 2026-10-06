@@ -381,6 +381,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The stored values that seed the next session, or `null` when storage is session-local: no provider, or one that
   // could not load, such as a browser that denies storage. A session-local run plays normally and keeps nothing.
   const storedEntries = shallowRef<readonly RuntimeScriptStorageEntrySnapshot[] | null>(null);
+  // Counts changes this Player made to the saved values: a stored save, a clear, an import, or a fresh read.
+  const savedDataRevision = ref(0);
   /**
    * Reads the stored values freshly for the next Start; call it before each `prepare`. Reading ahead keeps Start
    * synchronous within the player's activation.
@@ -389,6 +391,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     if (!scriptStorage) return;
     try {
       storedEntries.value = await scriptStorage.load();
+      savedDataRevision.value++;
       notices.dismiss(playerNoticeKeys.storageUnavailable);
     } catch {
       storedEntries.value = null;
@@ -431,6 +434,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         if (generation.value !== sessionGeneration || latest === null) return;
         if (pendingPlayerRuntimeStorageWrite(latest.snapshot)?.actionId !== write!.actionId) return;
         if (!stored) notices.publish(playerNotices.storageWriteFailed());
+        else savedDataRevision.value++;
         session.value = completePlayerRuntimeStorageWrite(latest, write!.actionId, stored).session;
       }
     },
@@ -463,6 +467,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     try {
       await scriptStorage.clear();
       storedEntries.value = [];
+      savedDataRevision.value++;
       return true;
     } catch {
       return false;
@@ -711,6 +716,20 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
      * The saved values as stored now, with the saved photos they reference, for an export; also during a session, whose
      * saves count once they are stored. Rejects when storage cannot be read.
      */
+    /**
+     * The saved values as stored now, read freshly through the provider in issue order, for Debug's Storage tab; rejects
+     * when storage cannot be read. `savedDataRevision` changes when this Player changed them.
+     */
+    readSavedData: () =>
+      scriptStorage
+        ? scriptStorage.load()
+        : Promise.reject(new Error("This script keeps no saved data.")),
+    savedDataRevision: computed(() => savedDataRevision.value),
+    /** A saved photo, loaded on first use: its URL once ready, or whether it still loads or is missing. */
+    savedPhoto(reference: string) {
+      void mediaRevision.value;
+      return capturedMedia.resolve(reference);
+    },
     exportScriptStorage: () =>
       scriptStorage
         ? collectStorageTransfer(scriptStorage, capturedMedia)
