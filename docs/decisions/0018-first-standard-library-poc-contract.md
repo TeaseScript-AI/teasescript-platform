@@ -395,7 +395,7 @@ The engine uses one discriminated foreground interaction family rather than inde
 Conceptually each active interaction contains enough JSON-safe data for:
 
 ```text
-kind: button | text | number | temporal | image | choice
+kind: button | text | number | temporal | image | choice | form
 stable action identity
 owning and continuation instruction positions
 scene time when it appeared, and a button's timeout when set
@@ -427,7 +427,16 @@ choose control:
 
 showButton:
     actionId
+
+form submission:
+    actionId
 ```
+
+A form ([V30 §20](../specifications/accepted-syntaxes-v30.md#forms); Owner decisions on #512, 2026-10-06) is the one
+interaction whose state changes before it completes: its answers and the one draft being edited are part of the pending
+action, and the host changes them only through validated, absolute, non-settling edits that name a field by its ID. An
+edit publishes no event or transcript and does not resume the script; submission settles the form once with all its
+answers ([`RUNTIME.md`](../RUNTIME.md#forms)).
 
 Exact cross-origin property names remain a host-protocol decision. The semantic payload above is fixed.
 

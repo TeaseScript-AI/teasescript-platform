@@ -2,7 +2,7 @@ import type { StoredDuration } from "../duration.js";
 import type { DateFields, DateTimeFields, TimeFields } from "../temporal.js";
 
 export const INSTRUCTION_PLAN_FORMAT = "teasescript-instruction-plan";
-export const INSTRUCTION_PLAN_VERSION = 61;
+export const INSTRUCTION_PLAN_VERSION = 62;
 
 /** Compact serialized instruction-plan representation of a source range. */
 export interface PlanSourceLocation {
@@ -525,13 +525,14 @@ export interface PlayMediaInstruction extends InstructionBase {
   readonly destinationTemporary: number | null;
 }
 
-export type InteractionKind = "button" | "text" | "number" | "choice" | "temporal" | "image";
+export type InteractionKind =
+  "button" | "text" | "number" | "choice" | "temporal" | "image" | "form";
 /**
  * `choice` is the value of the selected choice option; a button used as a value yields a `duration`; `temporal` is the
- * date, time, or date and time the UI asks for.
+ * date, time, or date and time the UI asks for; `form` is the object, dict, or boolean list of a form's answers.
  */
 export type InteractionResultDomain =
-  "none" | "string" | "number" | "choice" | "duration" | "temporal";
+  "none" | "string" | "number" | "choice" | "duration" | "temporal" | "form";
 /** What `askDate`, `askTime`, and `askDateTime` ask for (V30 §20). */
 export type InteractionTemporalKind = "date" | "time" | "datetime";
 export type InteractionAccessibleName =
@@ -599,7 +600,70 @@ export type InteractionUiPayload =
       readonly question: string | null;
       readonly hint: string | null;
       readonly accessibleName: InteractionAccessibleName;
-    } & ImageRequest);
+    } & ImageRequest)
+  | FormUi;
+
+/**
+ * What a form returns: an object with one property per field (`askForm` with an object of fields), a dict with one
+ * entry per field (`askForm` with a dict of fields), or a list of booleans (`askBooleans`).
+ */
+export type FormShape = "object" | "dict" | "booleanList";
+/** A field with a finite set of states: a toggle (`boolean`) or a `cycle` through options. */
+export type FormChoiceFieldKind = "boolean" | "cycle";
+/** A field whose value is typed in the composer. */
+export type FormScalarFieldKind = "integer" | "number" | "text" | InteractionTemporalKind;
+export type FormFieldKind = FormChoiceFieldKind | FormScalarFieldKind;
+
+interface FormFieldBase {
+  /** The property name or dict key that identifies the field; `askBooleans` numbers its fields `0`, `1`, ... */
+  readonly id: string;
+  /** The label on the field's button. */
+  readonly text: string;
+  readonly background?: string;
+}
+
+/**
+ * A toggle. Without custom `options` its button shows the label with a check mark; with them, it shows the option of its
+ * state: exactly one option is `false` and one `true`, in authored order.
+ */
+export interface FormBooleanField extends FormFieldBase {
+  readonly kind: "boolean";
+  readonly options: readonly InteractionChoiceOption[] | null;
+}
+
+/** A button that advances through its options and wraps around; the field's value is the selected option's value. */
+export interface FormCycleField extends FormFieldBase {
+  readonly kind: "cycle";
+  readonly options: readonly InteractionChoiceOption[];
+}
+
+/**
+ * A field the composer edits. A required field must have a value before the form is submitted; an `optional` field
+ * without one returns `null`. `min` and `max` bound an `integer` or `number` field inclusively, and `hint` is the
+ * composer's help while the field is edited.
+ */
+export interface FormScalarField extends FormFieldBase {
+  readonly kind: FormScalarFieldKind;
+  readonly optional: boolean;
+  readonly min: number | null;
+  readonly max: number | null;
+  readonly hint: string | null;
+}
+
+export type FormField = FormBooleanField | FormCycleField | FormScalarField;
+
+/**
+ * The definition of a form, materialized once when it opens: its fields in order, with unique IDs, the form's `hint`,
+ * and the submit button. The answers the player has given so far live in the action's form state.
+ */
+export interface FormUi {
+  readonly kind: "form";
+  readonly shape: FormShape;
+  readonly fields: readonly FormField[];
+  readonly hint: string | null;
+  readonly submit: { readonly text: string; readonly background?: string };
+  readonly accessibleName: InteractionAccessibleName;
+}
 
 /**
  * How the player may answer `askImage` (V30 §20): from the camera, from a file, or both, and which file extensions and
@@ -663,7 +727,36 @@ export type PreparedInteractionUiPayload =
        */
       readonly requestTemporary: number;
       readonly accessibleName: InteractionAccessibleName;
+    }
+  | {
+      readonly kind: "form";
+      /**
+       * An object holding the written arguments of the form by name: `fields`, an object or dict, and optionally `hint`
+       * and `submit`; for `askBooleans`, `texts` and `defaults` instead of `fields`. When the form opens, it holds the
+       * form's canonical definition instead.
+       */
+      readonly requestTemporary: number;
+      readonly shape: PreparedFormShape;
+      readonly accessibleName: InteractionAccessibleName;
     };
+
+/**
+ * The result shape of a prepared form, with what only the compiler knows: whether a number written as a field's start
+ * (or as its descriptor's `value:`, `min:`, or `max:`) is an `integer` or a `number`, which decides the field's kind
+ * when the field has no `type:`. A runtime number does not record it. An object form lists it by field name; a dict
+ * form has one for all its fields, or `null` when its fields must say `type:` for numbers.
+ */
+export type PreparedFormShape =
+  | {
+      readonly kind: "object";
+      readonly numericKinds: readonly {
+        readonly name: string;
+        readonly numericKind: FormNumericKind;
+      }[];
+    }
+  | { readonly kind: "dict"; readonly numericKind: FormNumericKind | null }
+  | { readonly kind: "booleanList" };
+export type FormNumericKind = "integer" | "number";
 
 /** Static compiler/Standard-Library foreground interaction. */
 export interface StaticInteractionInstruction extends InstructionBase {

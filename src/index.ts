@@ -155,6 +155,10 @@ export {
   type ActionCompletionOptions,
 } from "./runtime/operations/complete-action.js";
 export type { CapturedMediaAdmission } from "./runtime/actions/capture.js";
+export {
+  updateInteraction,
+  type InteractionUpdateOutcome,
+} from "./runtime/operations/update-interaction.js";
 export { observeTime, type MediaProgressReport } from "./runtime/operations/observe-time.js";
 export {
   RUNTIME_DEBUG_TRACE_LIMITS,

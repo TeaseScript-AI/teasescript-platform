@@ -438,7 +438,8 @@ function completeInteraction(
       receivedInteractionKind === "number" ||
       receivedInteractionKind === "choice" ||
       receivedInteractionKind === "temporal" ||
-      receivedInteractionKind === "image"
+      receivedInteractionKind === "image" ||
+      receivedInteractionKind === "form"
         ? `interaction:${receivedInteractionKind}`
         : "<invalid>";
     return pendingResult(current, [], {
