@@ -15,6 +15,7 @@ import { leaveScopes, sweepRetainedScopes } from "../captures.js";
 import { RuntimeFault } from "../errors.js";
 import type { Evaluator } from "../evaluator.js";
 import { nextXorShift32 } from "../random.js";
+import type { TraceStore } from "../debug-trace.js";
 import { cloneTransferDestination } from "../state.js";
 import { isScriptReference } from "../value-predicates.js";
 import { describeValue } from "../value-types.js";
@@ -99,7 +100,7 @@ export function executeTransfer(
           evaluator,
           instruction.span,
         )
-      : drawDestination(snapshot, instruction.destination);
+      : drawDestination(plan, snapshot, instruction.destination, evaluator.trace);
   const root = freshRoot(snapshot, destination);
   if (instruction.mode === "goto") {
     const left = activationRootsFrom(snapshot, innermostFileCallIndex(snapshot));
@@ -129,9 +130,11 @@ export function executeTransfer(
  * or without one continues at the fallback destination.
  */
 export function executeEnd(
+  plan: InstructionPlan,
   instruction: EndInstruction,
   snapshot: RuntimeSnapshot,
   events: InterpreterEvent[],
+  trace: TraceStore | null,
 ): void {
   const index = innermostFileCallIndex(snapshot);
   if (index < 0 && snapshot.fallback === null) {
@@ -145,7 +148,7 @@ export function executeEnd(
   removeNonPersistentWork(snapshot, activationRootsFrom(snapshot, index), instruction.span, events);
   if (index < 0) {
     // A glob fallback draws its file each time it is used.
-    const fallback = drawDestination(snapshot, snapshot.fallback!);
+    const fallback = drawDestination(plan, snapshot, snapshot.fallback!, trace);
     replaceCurrentRoot(snapshot, freshRoot(snapshot, fallback));
     snapshot.nextInstruction = fallback.target;
   } else {
@@ -221,11 +224,20 @@ function resolveComputed(
 
 /** A glob target picks one of its files with one draw from the session random generator, each time it runs. */
 function drawDestination(
+  plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   destination: PlanTransferDestination,
+  trace: TraceStore | null,
 ): PlanDestination {
   if (!("pick" in destination)) return destination;
-  return destination.pick[Math.floor(nextXorShift32(snapshot.rng) * destination.pick.length)]!;
+  const before = snapshot.rng.state;
+  const picked =
+    destination.pick[Math.floor(nextXorShift32(snapshot.rng) * destination.pick.length)]!;
+  if (trace !== null) {
+    trace.random("glob", null, destination.pick.length, null, before, snapshot.rng.state);
+    trace.randomResult(plan.files[picked.file]!.path);
+  }
+  return picked;
 }
 
 /** The index of the file call whose activation has this root, -1 for the base activation, or none when left. */

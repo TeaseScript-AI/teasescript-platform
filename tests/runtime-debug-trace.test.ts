@@ -1,0 +1,843 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  compileProject,
+  compileSource,
+  completeAction,
+  createCheckpoint,
+  deserializeCheckpoint,
+  observeTime,
+  pressPermanentButton,
+  RUNTIME_DEBUG_TRACE_LIMITS,
+  run,
+  RuntimeDebugContext,
+  serializeCheckpoint,
+  type InstructionPlan,
+  type InterpreterEvent,
+  type ProjectSourceFile,
+  type RuntimeDebugRecord,
+  type RuntimeScriptStorageEntrySnapshot,
+  type RuntimeSnapshot,
+} from "../src/index.js";
+import {
+  advancePlayerRuntimeTime,
+  createPlayerRuntimeRestorePoint,
+  createPlayerRuntimeSession,
+  nextPlayerRuntimeEventMs,
+  observePlayerRuntimeTime,
+  playerRuntimeMedia,
+  reportPlayerRuntimeMediaLoad,
+  restorePlayerRuntimeSession,
+  submitPlayerRuntimeComposer,
+} from "../player/runtime-adapter.js";
+import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
+
+/*
+ * The opt-in debug trace (docs/RUNTIME.md#debug-trace) explains values with what execution actually computed. Every
+ * scenario runs from source through the public operations; each traced run is checked against the same run without a
+ * trace, and a trace from Start must give every value it explains a recorded origin and see every random draw.
+ */
+
+const SEED = 0x2468_ace1;
+
+type Answer = (
+  action: Extract<RuntimeSnapshot["foregroundAction"], { kind: "interaction" }>,
+) => Record<string, unknown> | "refuse";
+
+interface PlayOptions {
+  readonly trace?: RuntimeDebugContext;
+  /** Answers for the interactions in order: a payload, or `"refuse"` to send an invalid one first. */
+  readonly answers?: readonly Answer[];
+  readonly scriptStorage?: readonly RuntimeScriptStorageEntrySnapshot[];
+  /** Whether storage is persistent, and then whether the host stores each write. */
+  readonly persistentStores?: readonly boolean[];
+  /** Permanent buttons to press once the session first waits at or after each scene time. */
+  readonly presses?: readonly { readonly atMs: number; readonly buttonId: number }[];
+  /** Leave every interaction unanswered, so that buttons time out. */
+  readonly unanswered?: boolean;
+  readonly from?: RuntimeSnapshot;
+}
+
+interface Played {
+  readonly snapshot: RuntimeSnapshot;
+  readonly events: readonly InterpreterEvent[];
+  /** The checkpoint after every operation, which a trace must leave unchanged. */
+  readonly checkpoints: readonly string[];
+}
+
+function compile(source: string | readonly ProjectSourceFile[]): InstructionPlan {
+  const compiled =
+    typeof source === "string" ? compileSource(source) : compileProject(source, { images: [] });
+  assert.deepEqual(compiled.diagnostics, []);
+  return compiled.plan!;
+}
+
+/** A simulated host: runs, answers interactions, stores writes, presses buttons, and otherwise lets time pass. */
+function play(plan: InstructionPlan, options: PlayOptions = {}): Played {
+  const debug = options.trace === undefined ? {} : { debugTrace: options.trace };
+  const answers = [...(options.answers ?? [])];
+  const stores = [...(options.persistentStores ?? [])];
+  const presses = [...(options.presses ?? [])];
+  const events: InterpreterEvent[] = [];
+  const checkpoints: string[] = [];
+  let snapshot =
+    options.from ??
+    createImmediatePacingRuntimeSnapshot(plan, {
+      seed: SEED,
+      persistentScriptStorage: options.persistentStores !== undefined,
+      ...(options.scriptStorage === undefined ? {} : { scriptStorage: options.scriptStorage }),
+    });
+  const apply = (result: { snapshot: RuntimeSnapshot; events: readonly InterpreterEvent[] }) => {
+    snapshot = result.snapshot;
+    events.push(...result.events);
+    checkpoints.push(serializeCheckpoint(createCheckpoint(plan, snapshot)));
+  };
+  apply(run(plan, snapshot, {}, debug));
+  for (let guard = 0; snapshot.status === "waiting"; guard += 1) {
+    assert.ok(guard < 500, "the scenario must end");
+    const action = snapshot.foregroundAction;
+    if (presses[0] !== undefined && snapshot.currentSessionTimeMs >= presses[0].atMs) {
+      apply(pressPermanentButton(plan, snapshot, presses.shift()!.buttonId, debug));
+    } else if (action?.kind === "interaction" && options.unanswered !== true) {
+      const answer = answers.shift();
+      assert.ok(answer !== undefined, "an answer for every interaction");
+      const request = (payload: Record<string, unknown>) => ({
+        actionId: action.actionId,
+        actionKind: "interaction",
+        interactionKind: action.interactionKind,
+        payload,
+      });
+      const payload = answer(action);
+      if (payload === "refuse") {
+        const refused = completeAction(plan, snapshot, request({ kind: "bogus" }), debug);
+        assert.equal(refused.outcome.kind, "invalidPayload");
+        apply(refused);
+        continue;
+      }
+      const completed = completeAction(plan, snapshot, request(payload), debug);
+      assert.equal(completed.outcome.kind, "completed");
+      apply(completed);
+      // A repeated report of the same answer changes nothing.
+      const repeated = completeAction(plan, snapshot, request(payload), debug);
+      assert.equal(repeated.outcome.kind, "alreadySettled");
+      apply(repeated);
+    } else if (action?.kind === "storageWrite") {
+      const stored = stores.shift() ?? true;
+      apply(
+        completeAction(
+          plan,
+          snapshot,
+          {
+            actionId: action.actionId,
+            actionKind: "storageWrite",
+            payload: { kind: stored ? "stored" : "failed" },
+          },
+          debug,
+        ),
+      );
+    } else {
+      const next = nextPlayerRuntimeEventMs(snapshot);
+      assert.notEqual(next, null, "a waiting scenario without input must have a next event");
+      apply(observeTime(plan, snapshot, next, [], debug));
+    }
+    apply(run(plan, snapshot, {}, debug));
+  }
+  return { snapshot, events, checkpoints };
+}
+
+/** Plays traced and untraced; the trace must not change any state, event, or checkpoint. */
+function traced(
+  source: string | readonly ProjectSourceFile[],
+  options: Omit<PlayOptions, "trace"> = {},
+): Played & { readonly trace: RuntimeDebugContext; readonly plan: InstructionPlan } {
+  const plan = compile(source);
+  const trace = new RuntimeDebugContext();
+  const withTrace = play(plan, { ...options, trace });
+  const withoutTrace = play(plan, options);
+  assert.deepEqual(withTrace.checkpoints, withoutTrace.checkpoints);
+  assert.deepEqual(withTrace.events, withoutTrace.events);
+  assert.deepEqual(withTrace.snapshot, withoutTrace.snapshot);
+  assert.equal(trace.status().recording, true, trace.status().failure ?? "");
+  return { ...withTrace, trace, plan };
+}
+
+function records(trace: RuntimeDebugContext): RuntimeDebugRecord[] {
+  const { firstRecord, lastRecord } = trace.status();
+  const all: RuntimeDebugRecord[] = [];
+  if (firstRecord === null || lastRecord === null) return all;
+  for (let id = firstRecord; id <= lastRecord; id += 1) all.push(trace.record(id)!);
+  return all;
+}
+
+function record(trace: RuntimeDebugContext, id: number | null): RuntimeDebugRecord {
+  assert.notEqual(id, null);
+  const found = trace.record(id!);
+  assert.ok(found !== null, `record ${id} is retained`);
+  return found;
+}
+
+function causes(trace: RuntimeDebugContext, of: RuntimeDebugRecord): RuntimeDebugRecord[] {
+  return of.dependencies.map((dependency) => record(trace, dependency.id));
+}
+
+/** Every record reachable from `id`, breadth first. */
+function lineage(trace: RuntimeDebugContext, id: number | null): RuntimeDebugRecord[] {
+  const seen = new Set<number>();
+  const found: RuntimeDebugRecord[] = [];
+  const queue = [id!];
+  while (queue.length > 0) {
+    const next = queue.shift()!;
+    if (seen.has(next)) continue;
+    seen.add(next);
+    const current = record(trace, next);
+    found.push(current);
+    queue.push(...current.dependencies.map((dependency) => dependency.id));
+  }
+  return found;
+}
+
+function outputOf(
+  played: Played & { trace: RuntimeDebugContext },
+  text: string,
+): RuntimeDebugRecord {
+  const event = played.events.find(
+    (candidate) => candidate.kind === "say" && candidate.text === text,
+  );
+  assert.ok(event !== undefined, `said ${JSON.stringify(text)}`);
+  return record(played.trace, played.trace.outputRecord(event.sequence));
+}
+
+/**
+ * A trace from Start records an origin for every value it explains, and sees every draw: the generator states of its
+ * random records follow each other from the seed to the final state.
+ */
+function assertComplete(played: Played & { trace: RuntimeDebugContext }): void {
+  const all = records(played.trace);
+  assert.equal(played.trace.status().origin, "start");
+  assert.equal(played.trace.status().truncated, false);
+  assert.deepEqual(
+    all.filter((candidate) => candidate.kind === "unrecorded"),
+    [],
+    "every explained value has a recorded origin",
+  );
+  let state = played.trace.status().rngAnchorState;
+  assert.equal(state, SEED);
+  for (const draw of all) {
+    if (draw.detail?.kind !== "random") continue;
+    assert.equal(draw.detail.stateBefore, state, `draw ${draw.id} follows the previous one`);
+    state = draw.detail.stateAfter;
+  }
+  assert.equal(state, played.snapshot.rng.state, "every draw is recorded");
+}
+
+test("a message explains its interpolated value through a call, its parameters, and a random draw", () => {
+  const played = traced(
+    [
+      "let low = 10",
+      "let factor = 2",
+      "function spanksFor(base, times = factor) {",
+      "    return base * times",
+      "}",
+      "let drawn = randomInteger(low..=30)",
+      "let spanks = spanksFor(drawn)",
+      'say "You get ${spanks} spanks"',
+      "exit",
+    ].join("\n"),
+  );
+  assertComplete(played);
+  const said = played.events.find((event) => event.kind === "say")!;
+  assert.equal(said.kind, "say");
+  const spanks = Number(/You get (\d+) spanks/u.exec(said.text)![1]);
+
+  const output = outputOf(played, said.text);
+  assert.deepEqual(output.detail, { kind: "output", eventSequence: said.sequence });
+  const [interpolation] = causes(played.trace, output);
+  assert.equal(interpolation!.kind, "interpolation");
+  assert.equal(interpolation!.preview, `"${spanks}"`);
+  assert.equal(interpolation!.location?.line, 8);
+
+  const [declaration] = causes(played.trace, interpolation!);
+  assert.deepEqual(
+    [declaration!.kind, declaration!.target, declaration!.preview, declaration!.location?.line],
+    ["declaration", "spanks", String(spanks), 7],
+  );
+  const [returned] = causes(played.trace, declaration!);
+  assert.equal(returned!.kind, "return");
+  assert.deepEqual(returned!.detail, {
+    kind: "call",
+    functionName: "spanksFor",
+    parameter: null,
+    defaulted: false,
+  });
+  const parameters = causes(played.trace, returned!);
+  assert.deepEqual(
+    parameters.map((parameter) => [parameter.target, parameter.detail]),
+    [
+      ["base", { kind: "call", functionName: "spanksFor", parameter: "base", defaulted: false }],
+      ["times", { kind: "call", functionName: "spanksFor", parameter: "times", defaulted: true }],
+    ],
+  );
+  assert.deepEqual(
+    causes(played.trace, parameters[1]!).map((cause) => [cause.target, cause.preview]),
+    [["factor", "2"]],
+  );
+  const [argument] = causes(played.trace, parameters[0]!);
+  assert.equal(argument!.kind, "argument");
+  const [drawn] = causes(played.trace, argument!);
+  assert.deepEqual([drawn!.target, Number(drawn!.preview) * 2], ["drawn", spanks]);
+  const drawCauses = causes(played.trace, drawn!);
+  assert.deepEqual(
+    drawCauses.map((cause) => [cause.kind, cause.target]),
+    [
+      ["declaration", "low"],
+      ["random", null],
+    ],
+  );
+  assert.deepEqual(drawCauses[1]!.detail, {
+    kind: "random",
+    operation: "randomInteger",
+    choices: 21,
+    range: { start: 10, end: 30, inclusive: true },
+    firstDraw: 1,
+    draws: 1,
+    stateBefore: SEED,
+    stateAfter: played.snapshot.rng.state,
+  });
+  assert.equal(drawCauses[1]!.preview, drawn!.preview);
+});
+
+test("recursion and same-named variables keep each call's and each block's own variables apart", () => {
+  const played = traced(
+    [
+      "function sum(n) {",
+      "    if n == 0 {",
+      "        return 0",
+      "    }",
+      "    let rest = sum(n - 1)",
+      "    return n + rest",
+      "}",
+      "function title {",
+      '    let n = "three"',
+      "    return n",
+      "}",
+      "let total = sum(3)",
+      "let name = title()",
+      "for pass in 1..=2 {",
+      "    let step = pass * 10",
+      '    say "${total} ${name} ${step}"',
+      "}",
+      "exit",
+    ].join("\n"),
+  );
+  assertComplete(played);
+  const [total, name] = causes(played.trace, outputOf(played, "6 three 10")).map(
+    (interpolation) => causes(played.trace, interpolation)[0]!,
+  );
+  assert.deepEqual([total!.target, total!.preview], ["total", "6"]);
+  // Another function's `n` is not any call of sum's parameter.
+  assert.deepEqual(
+    lineage(played.trace, name!.id).map((step) => [step.kind, step.target, step.preview]),
+    [
+      ["declaration", "name", '"three"'],
+      ["return", null, '"three"'],
+      ["declaration", "n", '"three"'],
+    ],
+  );
+  // Each round's `step` is its own variable, from its own round's loop value.
+  const steps = ["6 three 10", "6 three 20"].map(
+    (text) => causes(played.trace, causes(played.trace, outputOf(played, text))[2]!)[0]!,
+  );
+  assert.deepEqual(
+    steps.map((step) => causes(played.trace, step).map((cause) => [cause.kind, cause.preview])),
+    [[["loopValue", "1"]], [["loopValue", "2"]]],
+  );
+  // Each call's `n` comes from its own argument: 3, 2, 1, 0 down the recursion.
+  const parameters = lineage(played.trace, total!.id).filter(
+    (candidate) => candidate.kind === "parameter",
+  );
+  // sum(0) returns a literal 0, which depends on no parameter.
+  assert.deepEqual(parameters.map((parameter) => parameter.preview).sort(), ["1", "2", "3"]);
+  for (const parameter of parameters) {
+    const [argument] = causes(played.trace, parameter);
+    assert.equal(argument!.kind, "argument");
+    assert.equal(argument!.preview, parameter.preview);
+  }
+});
+
+test("a global assigned in another file explains a message in main.tease", () => {
+  const played = traced([
+    {
+      path: "main.tease",
+      source: ["global score = 1", 'call "rooms/bonus.tease"', 'say "Score ${score}"', "exit"].join(
+        "\n",
+      ),
+    },
+    { path: "rooms/bonus.tease", source: ["let bonus = 4", "score += bonus", "end"].join("\n") },
+  ]);
+  assertComplete(played);
+  const [interpolation] = causes(played.trace, outputOf(played, "Score 5"));
+  const [assignment] = causes(played.trace, interpolation!);
+  assert.deepEqual(
+    [assignment!.kind, assignment!.target, assignment!.location?.path, assignment!.location?.line],
+    ["assignment", "score", "rooms/bonus.tease", 2],
+  );
+  assert.deepEqual(
+    causes(played.trace, assignment!).map((cause) => [cause.target, cause.location?.path]),
+    [
+      ["score", "main.tease"],
+      ["bonus", "rooms/bonus.tease"],
+    ],
+  );
+  assert.equal(played.trace.variableRecord("global", "score"), assignment!.id);
+});
+
+test("compound, property, index, and collection changes give the whole variable a new version", () => {
+  const played = traced(
+    [
+      'let pet = { name: "Bo", tricks: ["sit"] }',
+      'let extra = "roll"',
+      "pet.tricks.add(extra)",
+      'pet.tricks[0] = "beg"',
+      "let count = 1",
+      "count += pet.tricks.length",
+      'say "${pet.tricks.first} ${count}"',
+      "exit",
+    ].join("\n"),
+  );
+  assertComplete(played);
+  const [first, count] = causes(played.trace, outputOf(played, "beg 3")).map(
+    (interpolation) => causes(played.trace, interpolation)[0]!,
+  );
+  assert.deepEqual([first!.kind, first!.target, first!.location?.line], ["assignment", "pet", 4]);
+  assert.equal(first!.preview, '{ name: "Bo", tricks: ["beg", "roll"] }');
+  const mutation = causes(played.trace, first!).find((cause) => cause.kind === "mutation")!;
+  assert.deepEqual([mutation.target, mutation.location?.line], ["pet", 3]);
+  assert.deepEqual(
+    causes(played.trace, mutation).map((cause) => [cause.kind, cause.target]),
+    [
+      ["declaration", "pet"],
+      ["declaration", "extra"],
+    ],
+  );
+  // `count += ...` reads the earlier count and the list's length at that time.
+  assert.deepEqual(
+    causes(played.trace, count!).map((cause) => [cause.target, cause.location?.line]),
+    [
+      ["count", 5],
+      ["pet", 4],
+    ],
+  );
+});
+
+test("interpolation selection and shuffle record the draws that chose the text", () => {
+  const played = traced(
+    [
+      'let deck = ["ace", "king", "queen", "jack"]',
+      "deck.shuffle()",
+      'let tools = ["paddle", "cane"]',
+      'say "${deck.first} with the ${tools}"',
+      "exit",
+    ].join("\n"),
+  );
+  assertComplete(played);
+  const said = played.events.find((event) => event.kind === "say")!;
+  assert.equal(said.kind, "say");
+  const [card, tool] = causes(played.trace, outputOf(played, said.text));
+  const shuffled = causes(played.trace, card!)[0]!;
+  assert.deepEqual([shuffled.kind, shuffled.target], ["mutation", "deck"]);
+  const shuffle = causes(played.trace, shuffled).find((cause) => cause.kind === "random")!;
+  assert.deepEqual(
+    shuffle.detail?.kind === "random" && [shuffle.detail.operation, shuffle.detail.draws],
+    ["shuffle", 3],
+  );
+  const selection = causes(played.trace, tool!).find((cause) => cause.kind === "random")!;
+  assert.deepEqual(
+    selection.detail?.kind === "random" && [selection.detail.operation, selection.detail.choices],
+    ["interpolation", 2],
+  );
+  assert.equal(selection.preview, tool!.preview);
+  assert.ok(said.text.endsWith(`with the ${JSON.parse(tool!.preview!)}`));
+});
+
+test("a repeating timer's random rounds and a block's shared variable stay traceable", () => {
+  const played = traced(
+    [
+      "function count {",
+      "    let beats = 0",
+      "    let t = timer(duration: 1..=3, async: true, repeat: true) {",
+      "        beats += 1",
+      "    }",
+      "    wait 10",
+      "    t.stop()",
+      '    say "beats ${beats}"',
+      "}",
+      "count()",
+      "exit",
+    ].join("\n"),
+  );
+  assertComplete(played);
+  const said = played.events.find((event) => event.kind === "say")!;
+  assert.equal(said.kind, "say");
+  const [interpolation] = causes(played.trace, outputOf(played, said.text));
+  const latest = causes(played.trace, interpolation!)[0]!;
+  // The block's assignment reaches the function's own `beats`, version after version, back to its `let`.
+  assert.deepEqual([latest.kind, latest.target, latest.location?.line], ["assignment", "beats", 4]);
+  const versions = lineage(played.trace, latest.id).filter((step) => step.target === "beats");
+  assert.equal(versions.at(-1)!.kind, "declaration");
+  assert.equal(versions.length, Number(said.text.split(" ")[1]) + 1);
+  const rounds = records(played.trace).filter(
+    (candidate) =>
+      candidate.detail?.kind === "random" && candidate.detail.operation === "timerRepeat",
+  );
+  assert.ok(rounds.length >= 2, "repeat rounds draw their durations");
+  for (const round of rounds) assert.equal(round.location?.line, 3);
+});
+
+test("permanent button blocks assign the variables they share with their function", () => {
+  const played = traced(
+    [
+      "function challenge {",
+      "    let stop = false",
+      "    let rounds = 0",
+      '    showPermanentButton "Stop" {',
+      "        stop = true",
+      "    }",
+      "    while not stop {",
+      "        rounds += 1",
+      "        wait 5 s",
+      "    }",
+      '    say "stopped after ${rounds} rounds, ${stop}"',
+      "}",
+      "challenge()",
+      "exit",
+    ].join("\n"),
+    { presses: [{ atMs: 5_000, buttonId: 1 }] },
+  );
+  assertComplete(played);
+  const said = played.events.find((event) => event.kind === "say")!;
+  assert.equal(said.kind, "say");
+  const stop = causes(played.trace, causes(played.trace, outputOf(played, said.text))[1]!)[0]!;
+  assert.deepEqual(
+    [stop.kind, stop.target, stop.preview, stop.location?.line],
+    ["assignment", "stop", "true", 5],
+  );
+});
+
+test("a button that times out while a timer block runs records its timeout as the answer", () => {
+  const played = traced(
+    'timer async 1 { wait 5 }\nlet elapsed = showButton "Go", timeout: 3\nsay "After ${elapsed}."\nexit',
+    { unanswered: true },
+  );
+  assertComplete(played);
+  const said = played.events.find((event) => event.kind === "say")!;
+  assert.equal(said.kind, "say");
+  const input = lineage(played.trace, outputOf(played, said.text).id).find(
+    (step) => step.kind === "input",
+  )!;
+  assert.deepEqual(input.detail?.kind === "input" && input.detail.outcome, "timedOut");
+  assert.equal(input.preview, "3 s");
+});
+
+test("a media block's own handle is its first variable", () => {
+  const trace = new RuntimeDebugContext();
+  const debug = { debugTrace: trace };
+  let session = createPlayerRuntimeSession(
+    [
+      'let music = playAudio async "loop.mp3" {',
+      "    at 1 s {",
+      '        say "cue at ${music.position}"',
+      "    }",
+      "}",
+      "wait 3",
+      "exit",
+    ].join("\n"),
+    debug,
+  );
+  const media = playerRuntimeMedia(session.snapshot).media[0]!;
+  session = reportPlayerRuntimeMediaLoad(
+    session,
+    media.mediaId,
+    { kind: "loaded", durationMs: 10_000 },
+    debug,
+  ).session;
+  session = advancePlayerRuntimeTime(session, 60_000, debug);
+  assert.equal(session.snapshot.status, "halted");
+  const said = session.events.find((event) => event.kind === "say")!;
+  const steps = lineage(trace, trace.outputRecord(said.sequence));
+  assert.deepEqual(
+    steps.filter((step) => step.target === "music").map((step) => [step.kind, step.preview]),
+    [["declaration", "<media>"]],
+  );
+  assert.equal(trace.status().epoch, 1);
+  assert.deepEqual(
+    records(trace).filter((candidate) => candidate.kind === "unrecorded"),
+    [],
+  );
+});
+
+test("answers, loads, and saves explain values, and refused or repeated reports record nothing", () => {
+  const played = traced(
+    [
+      'let name = askText "Name?"',
+      'let visits = load "visits", default: 0',
+      'save visits + 1 as "visits"',
+      'save name as "lost"',
+      'let again = load "visits"',
+      'let kept = load "lost", default: "none"',
+      'say "${name} ${again} ${kept}"',
+      "exit",
+    ].join("\n"),
+    {
+      answers: [() => "refuse", () => ({ kind: "submittedText", submittedText: "Bo" })],
+      scriptStorage: [{ key: "visits", value: 4 }],
+      persistentStores: [true, false],
+    },
+  );
+  assertComplete(played);
+  const all = records(played.trace);
+  const inputs = all.filter((candidate) => candidate.kind === "input");
+  const asked = played.events.find(
+    (event) => event.kind === "actionRequested" && event.action.kind === "interaction",
+  );
+  assert.equal(asked?.kind, "actionRequested");
+  assert.deepEqual(
+    inputs.map((input) => [input.preview, input.detail]),
+    [
+      [
+        '"Bo"',
+        {
+          kind: "input",
+          actionId: asked.action.actionId,
+          actionKind: "interaction",
+          interactionKind: "text",
+          outcome: "completed",
+        },
+      ],
+    ],
+  );
+  const [name, again, kept] = causes(played.trace, outputOf(played, "Bo 5 none")).map(
+    (interpolation) => causes(played.trace, interpolation)[0]!,
+  );
+  assert.deepEqual(
+    causes(played.trace, name!).map((cause) => cause.kind),
+    ["input"],
+  );
+  // The second load reads the stored save, which the first load's host value explains.
+  const load = causes(played.trace, again!)[0]!;
+  assert.deepEqual(load.detail, {
+    kind: "load",
+    key: "visits",
+    found: true,
+    defaultEvaluated: false,
+  });
+  const [save] = causes(played.trace, load);
+  assert.deepEqual([save!.kind, save!.preview, save!.location?.line], ["storage", "5", 3]);
+  const earlier = lineage(played.trace, save!.id).find((step) => step.kind === "load")!;
+  assert.deepEqual(earlier.detail, {
+    kind: "load",
+    key: "visits",
+    found: true,
+    defaultEvaluated: false,
+  });
+  assert.deepEqual(
+    earlier.dependencies,
+    [],
+    "a value stored before the session has no recorded cause",
+  );
+  // The host failed to store `lost`, so no save explains it and its default ran.
+  assert.deepEqual(causes(played.trace, kept!)[0]!.detail, {
+    kind: "load",
+    key: "lost",
+    found: false,
+    defaultEvaluated: true,
+  });
+  assert.equal(played.trace.storageRecord("lost"), null);
+});
+
+test("Stage image changes record where they were set", () => {
+  const played = traced(
+    ['let room = "rooms/hall"', 'showImage "${room}.jpg"', "hideImage", "exit"].join("\n"),
+  );
+  assertComplete(played);
+  const hidden = record(played.trace, played.trace.stageImageRecord());
+  assert.deepEqual([hidden.kind, hidden.preview, hidden.location?.line], ["image", "null", 3]);
+  const shown = records(played.trace).find((candidate) => candidate.kind === "image")!;
+  assert.equal(shown.preview, '"rooms/hall.jpg"');
+  assert.deepEqual(
+    lineage(played.trace, shown.id).map((step) => step.target ?? step.kind),
+    ["Stage image", "interpolation", "room"],
+  );
+});
+
+test("a rejected say leaves no output, draw, or link behind", () => {
+  const played = traced(["let pace = -1", 'say "${["a", "b"]}", pace', "exit"].join("\n"));
+  assert.equal(played.snapshot.status, "failed");
+  const all = records(played.trace);
+  assert.deepEqual(
+    all.filter((candidate) => ["output", "random", "interpolation"].includes(candidate.kind)),
+    [],
+  );
+  assert.equal(played.snapshot.rng.state, SEED, "the failed say drew nothing either");
+});
+
+test("a message held behind pacing keeps its causes until it is shown", () => {
+  const trace = new RuntimeDebugContext();
+  const debug = { debugTrace: trace };
+  let session = createPlayerRuntimeSession(
+    ['let first = "One"', 'say "${first}"', 'let second = "Two"', 'say "${second}"', "exit"].join(
+      "\n",
+    ),
+    debug,
+  );
+  session = advancePlayerRuntimeTime(session, 60_000, debug);
+  assert.equal(session.snapshot.status, "halted");
+  const outputs = trace.outputs().map((id) => record(trace, id));
+  assert.deepEqual(
+    outputs.map((output) => lineage(trace, output.id).map((step) => step.target ?? step.kind)),
+    [
+      ["output", "interpolation", "second"],
+      ["output", "interpolation", "first"],
+    ],
+  );
+  assert.equal(trace.status().epoch, 1, "one session is one epoch");
+});
+
+test("restore and attaching mid-run start a new epoch that names unrecorded history honestly", () => {
+  const source = [
+    'let base = "fixed"',
+    'let pick = ["a", "b", "c"].random',
+    'let answer = askText "Ready?"',
+    'say "${base} ${pick} ${answer}"',
+    "exit",
+  ].join("\n");
+  const trace = new RuntimeDebugContext();
+  const waiting = createPlayerRuntimeSession(source, { debugTrace: trace });
+  assert.equal(trace.status().epoch, 1);
+  const restorePoint = createPlayerRuntimeRestorePoint(waiting);
+
+  const restored = restorePlayerRuntimeSession(restorePoint, { debugTrace: trace });
+  assert.deepEqual(
+    [trace.status().epoch, trace.status().origin, trace.status().records],
+    [2, "restore", 0],
+  );
+  const answered = submitPlayerRuntimeComposer(restored, "Yes", { debugTrace: trace })!;
+  const said = answered.session.events.findLast((event) => event.kind === "say")!;
+  const restoredCauses = lineage(trace, trace.outputRecord(said.sequence)).filter(
+    (step) => step.kind === "unrecorded",
+  );
+  assert.deepEqual(restoredCauses.map((step) => [step.target, step.detail]).sort(), [
+    ["base", { kind: "unrecorded", reason: "restored" }],
+    ["pick", { kind: "unrecorded", reason: "restored" }],
+  ]);
+
+  // A context first used on a running session attaches to it.
+  const attached = new RuntimeDebugContext();
+  const late = submitPlayerRuntimeComposer(restorePlayerRuntimeSession(restorePoint), "Yes", {
+    debugTrace: attached,
+  })!;
+  assert.equal(attached.status().origin, "attach");
+  const lateSaid = late.session.events.findLast((event) => event.kind === "say")!;
+  assert.ok(
+    lineage(attached, attached.outputRecord(lateSaid.sequence)).some(
+      (step) => step.detail?.kind === "unrecorded" && step.detail.reason === "beforeDebug",
+    ),
+  );
+
+  // An operation on a snapshot that is not the last traced result cannot continue earlier links.
+  const epoch = attached.status().epoch;
+  observePlayerRuntimeTime(restored, 0, [], { debugTrace: attached });
+  assert.equal(attached.status().epoch, epoch + 1);
+});
+
+test("bounded history drops the oldest records and says so", () => {
+  const plan = compile(
+    [
+      "let total = 0",
+      "let big = []",
+      "for i in 1..=3000 {",
+      "    total += i",
+      '    big.add("item ${i} of a long list that makes the preview long")',
+      "}",
+      'say "${total}"',
+      "exit",
+    ].join("\n"),
+  );
+  const trace = new RuntimeDebugContext();
+  const played = play(plan, { trace });
+  const status = trace.status();
+  assert.equal(status.recording, true);
+  assert.ok(status.truncated);
+  assert.ok(status.records <= RUNTIME_DEBUG_TRACE_LIMITS.maxRecords);
+  assert.ok(status.accountedBytes <= RUNTIME_DEBUG_TRACE_LIMITS.maxAccountedBytes);
+  const said = played.events.find((event) => event.kind === "say")!;
+  const [interpolation] = causes(trace, record(trace, trace.outputRecord(said.sequence)));
+  const latest = causes(trace, interpolation!)[0]!;
+  assert.equal(latest.target, "total");
+  // Somewhere back the history is gone, and says so instead of inventing a cause.
+  let step: RuntimeDebugRecord | null = latest;
+  let expired = false;
+  for (let guard = 0; step !== null && guard < 10_000; guard += 1) {
+    const earlier: { id: number; retained: boolean } | undefined = step.dependencies.find(
+      (dependency) => !dependency.retained || record(trace, dependency.id).target === "total",
+    );
+    if (earlier === undefined) break;
+    if (!earlier.retained) {
+      expired = true;
+      break;
+    }
+    step = record(trace, earlier.id);
+  }
+  assert.ok(expired, "an expired dependency marks dropped history");
+  // Previews stop at the limit while they are captured.
+  const bigVersion = record(trace, trace.variableRecord(played.snapshot.frames[0]!.id, "big"));
+  assert.equal(bigVersion.previewTruncated, true);
+  assert.equal(bigVersion.preview!.length, RUNTIME_DEBUG_TRACE_LIMITS.maxPreviewCharacters);
+});
+
+test("a small byte budget evicts by size, and wide expressions keep at most the dependency limit", () => {
+  const names = Array.from({ length: 50 }, (_, index) => `v${index}`);
+  const plan = compile(
+    [
+      ...names.map((name, index) => `let ${name} = ${index}`),
+      `let sum = ${names.join(" + ")}`,
+      'say "${sum}"',
+      "exit",
+    ].join("\n"),
+  );
+  const wide = new RuntimeDebugContext();
+  const played = play(plan, { trace: wide });
+  const sum = record(wide, wide.variableRecord(played.snapshot.frames[0]!.id, "sum"));
+  assert.equal(sum.dependencies.length, RUNTIME_DEBUG_TRACE_LIMITS.maxDependencies);
+  assert.equal(sum.omittedDependencies, 50 - RUNTIME_DEBUG_TRACE_LIMITS.maxDependencies);
+
+  const small = new RuntimeDebugContext({ maxAccountedBytes: 4096 });
+  play(plan, { trace: small });
+  assert.ok(small.status().truncated);
+  assert.ok(small.status().accountedBytes <= 4096);
+  assert.ok(small.status().records < 53);
+});
+
+test("a deserialized checkpoint traced from its restore matches the untraced continuation", () => {
+  const plan = compile(
+    [
+      "let n = randomInteger(1..=6)",
+      'let a = askText "Go?"',
+      "let rolls = [n, randomInteger(1..=6)]",
+      'say "${rolls} ${a}"',
+      "exit",
+    ].join("\n"),
+  );
+  const answers: Answer[] = [() => ({ kind: "submittedText", submittedText: "now" })];
+  const waiting = run(plan, createImmediatePacingRuntimeSnapshot(plan, { seed: SEED })).snapshot;
+  const restored = () =>
+    deserializeCheckpoint(serializeCheckpoint(createCheckpoint(plan, waiting))).snapshot;
+  const trace = new RuntimeDebugContext();
+  trace.reset("restore");
+  const withTrace = play(plan, { from: restored(), trace, answers });
+  const withoutTrace = play(plan, { from: restored(), answers });
+  assert.deepEqual(withTrace.checkpoints, withoutTrace.checkpoints);
+  assert.deepEqual(withTrace.events, withoutTrace.events);
+  assert.equal(trace.status().origin, "restore");
+  assert.equal(trace.status().rngAnchorState, waiting.rng.state);
+});

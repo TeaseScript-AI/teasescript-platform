@@ -157,6 +157,20 @@ export {
 export type { CapturedMediaAdmission } from "./runtime/actions/capture.js";
 export { observeTime, type MediaProgressReport } from "./runtime/operations/observe-time.js";
 export {
+  RUNTIME_DEBUG_TRACE_LIMITS,
+  RuntimeDebugContext,
+  type RuntimeDebugDependency,
+  type RuntimeDebugLocation,
+  type RuntimeDebugRandomOperation,
+  type RuntimeDebugRecord,
+  type RuntimeDebugRecordDetail,
+  type RuntimeDebugRecordKind,
+  type RuntimeDebugTraceOptions,
+  type RuntimeDebugTraceOrigin,
+  type RuntimeDebugTraceStatus,
+  type RuntimeDebugUnrecordedReason,
+} from "./runtime/debug-trace.js";
+export {
   recordContinueCapture,
   type ContinueCaptureOutcome,
 } from "./runtime/operations/continue-capture.js";

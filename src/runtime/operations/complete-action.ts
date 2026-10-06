@@ -31,8 +31,15 @@ import type { ActionCompletionOutcome, PendingActionOperationResult } from "./mo
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import { settleBackgroundPacingGate } from "./pacing-gate.js";
 import {
+  closeDebugTrace,
+  openDebugTrace,
+  type RuntimeDebugContext,
+  type TraceStore,
+} from "../debug-trace.js";
+import {
   assertEventSequenceCapacity,
   captureExecutableData,
+  type CapturedExecutableData,
   cloneSettlement,
   copySpan,
   isPlainRecord,
@@ -48,6 +55,8 @@ export interface ActionCompletionOptions {
    * and no image request completes.
    */
   readonly capturedMedia?: CapturedMediaAdmission;
+  /** An opt-in debug trace that observes the operation (`docs/RUNTIME.md#debug-trace`). */
+  readonly debugTrace?: RuntimeDebugContext;
 }
 
 export function completeAction(
@@ -57,6 +66,18 @@ export function completeAction(
   options: ActionCompletionOptions = {},
 ): PendingActionOperationResult<ActionCompletionOutcome> {
   const captured = captureExecutableData(plan, snapshot);
+  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
+  const completed = completeCapturedAction(captured, request, options, trace);
+  closeDebugTrace(trace, completed);
+  return completed;
+}
+
+function completeCapturedAction(
+  captured: CapturedExecutableData,
+  request: unknown,
+  options: ActionCompletionOptions,
+  trace: TraceStore | null,
+): PendingActionOperationResult<ActionCompletionOutcome> {
   const current = captured.snapshot;
   const external = captureExternalData(request);
   if (!external.ok || !isPlainRecord(external.value)) {
@@ -131,7 +152,7 @@ export function completeAction(
   }
   // A storage write settles at the current scene time: catch-up may hold behind it for a queued block.
   if (active.kind === "storageWrite") {
-    return completeStorageWrite(captured.plan, current, active, value);
+    return completeStorageWrite(captured.plan, current, active, value, trace);
   }
   // Host input happens at the observed time: scene time must have caught up, and a due expiry block runs first.
   if (
@@ -140,11 +161,12 @@ export function completeAction(
   ) {
     return pendingResult(current, [], { kind: "executionPending", actionId });
   }
+  trace?.at(active.owningInstruction, current.currentSessionTimeMs);
   if (active.kind === "interaction") {
-    return completeInteraction(captured.plan, current, active, value, options.capturedMedia);
+    return completeInteraction(captured.plan, current, active, value, options.capturedMedia, trace);
   }
   if (active.kind === "capture") {
-    return completeCapture(captured.plan, current, active, value, options.capturedMedia);
+    return completeCapture(captured.plan, current, active, value, options.capturedMedia, trace);
   }
   return completePacingGate(captured.plan, current, active, value);
 }
@@ -225,6 +247,7 @@ function completeStorageWrite(
   current: RuntimeSnapshot,
   action: RuntimeStorageWriteActionSnapshot,
   request: Record<string, unknown>,
+  trace: TraceStore | null,
 ): PendingActionOperationResult<ActionCompletionOutcome> {
   const payload = request.payload;
   if (
@@ -241,6 +264,8 @@ function completeStorageWrite(
   assertEventSequenceCapacity(current, outcome === "failed" ? 2 : 1);
   const span = copySpan(plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan));
   const events: InterpreterEvent[] = [];
+  trace?.at(action.owningInstruction, current.currentSessionTimeMs);
+  trace?.storageSettled(action.actionId, outcome === "stored");
   if (outcome === "stored") {
     writeScriptStorage(current, action.key, action.value);
   } else {
@@ -291,6 +316,7 @@ function completeCapture(
   action: RuntimeCaptureActionSnapshot,
   request: Record<string, unknown>,
   admission: CapturedMediaAdmission | undefined,
+  trace: TraceStore | null,
 ): PendingActionOperationResult<ActionCompletionOutcome> {
   const resolved = resolveCaptureCompletion(request.payload, admission);
   if (!resolved.ok) {
@@ -309,6 +335,19 @@ function completeCapture(
   }
   assertEventSequenceCapacity(current, resolved.unavailableReason === null ? 1 : 2);
   setTemporary(current.temporaries, action.destinationTemporary, reference);
+  trace?.writeTemporary(
+    action.ownerCallFrameId ?? 0,
+    action.destinationTemporary,
+    reference,
+    "input",
+    Object.freeze({
+      kind: "input",
+      actionId: action.actionId,
+      actionKind: "capture",
+      interactionKind: null,
+      outcome: "completed",
+    }),
+  );
   // A photo taken with tags joins the image catalog, keyed by its reference, so tag queries find it too.
   if (reference !== null && action.tags !== null) {
     current.capturedImages.push({ reference, tags: action.tags.map((tag) => ({ ...tag })) });
@@ -377,6 +416,7 @@ function completeInteraction(
   action: RuntimeInteractionActionSnapshot,
   request: Record<string, unknown>,
   capturedMedia: CapturedMediaAdmission | undefined,
+  trace: TraceStore | null,
 ): PendingActionOperationResult<ActionCompletionOutcome> {
   if (request.interactionKind !== action.interactionKind) {
     const receivedInteractionKind = request.interactionKind;
@@ -419,13 +459,18 @@ function completeInteraction(
           ),
         })
       : resolved.result;
-  const settlement = commitInteractionSettlement(current, action, {
-    settlementKind: "completed",
-    transcriptEventSequence: transcriptSequence,
-    completionEventSequence: completionSequence,
-    result,
-    transcriptText: resolved.transcriptText,
-  });
+  const settlement = commitInteractionSettlement(
+    current,
+    action,
+    {
+      settlementKind: "completed",
+      transcriptEventSequence: transcriptSequence,
+      completionEventSequence: completionSequence,
+      result,
+      transcriptText: resolved.transcriptText,
+    },
+    trace,
+  );
   const span = plan.instructions[action.owningInstruction]?.span ?? mainSourceSpan(plan);
   const events: InterpreterEvent[] = [
     Object.freeze({
@@ -455,19 +500,25 @@ export function timeOutButton(
   current: RuntimeSnapshot,
   action: RuntimeInteractionActionSnapshot,
   events: InterpreterEvent[],
+  trace: TraceStore | null = null,
 ): void {
   if (action.timeoutMs === null) throw new Error("Only a button with a timeout can time out.");
   const completionSequence = takeSequence(current, 2);
-  const settlement = commitInteractionSettlement(current, action, {
-    settlementKind: "timedOut",
-    transcriptEventSequence: null,
-    completionEventSequence: completionSequence,
-    result:
-      action.expectedResult === "duration"
-        ? Object.freeze({ kind: "duration" as const, milliseconds: action.timeoutMs })
-        : null,
-    transcriptText: null,
-  });
+  const settlement = commitInteractionSettlement(
+    current,
+    action,
+    {
+      settlementKind: "timedOut",
+      transcriptEventSequence: null,
+      completionEventSequence: completionSequence,
+      result:
+        action.expectedResult === "duration"
+          ? Object.freeze({ kind: "duration" as const, milliseconds: action.timeoutMs })
+          : null,
+      transcriptText: null,
+    },
+    trace,
+  );
   events.push(
     Object.freeze({
       kind: "actionCompleted",
@@ -493,10 +544,25 @@ function commitInteractionSettlement(
     | "result"
     | "transcriptText"
   >,
+  trace: TraceStore | null,
 ): RuntimeInteractionActionSettlementSnapshot {
   const result = outcome.result;
   if (action.destinationTemporary !== null) {
     setTemporary(current.temporaries, action.destinationTemporary, result);
+    // Only an accepted answer or a timeout reaches here; refused and repeated reports record nothing.
+    trace?.writeTemporary(
+      action.ownerCallFrameId ?? 0,
+      action.destinationTemporary,
+      result,
+      "input",
+      Object.freeze({
+        kind: "input",
+        actionId: action.actionId,
+        actionKind: "interaction",
+        interactionKind: action.interactionKind,
+        outcome: outcome.settlementKind,
+      }),
+    );
   }
   const settlement: RuntimeInteractionActionSettlementSnapshot = Object.freeze({
     actionId: action.actionId,

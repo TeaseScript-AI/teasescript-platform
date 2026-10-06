@@ -14,6 +14,8 @@ import {
 import { RuntimeFault } from "./errors.js";
 import { copySpan } from "./operations/support.js";
 import type {
+  SerializableRuntimeDictEntry,
+  SerializableRuntimeProperty,
   SerializableMediaHandle,
   SerializablePermanentButtonHandle,
   SerializableCameraViewHandle,
@@ -153,52 +155,97 @@ export function valueNotation(
       | SerializableCameraViewHandle,
   ) => string,
 ): string {
+  return writeNotation(value, span, handleNotation, Infinity).text;
+}
+
+/**
+ * At most `limit` characters of `valueNotation`, written only as far as the limit, so that a large value is never
+ * materialized whole. `truncated` tells whether notation was cut off.
+ */
+export function valueNotationPrefix(
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+  handleNotation: Parameters<typeof valueNotation>[2],
+  limit: number,
+): { readonly text: string; readonly truncated: boolean } {
+  return writeNotation(value, span, handleNotation, limit);
+}
+
+/** Work of `writeNotation`: text, a value, or the next of a collection's members, written one at a time. */
+type NotationWork =
+  | { readonly text: string }
+  | { readonly value: SerializableRuntimeValue }
+  | { readonly items: readonly SerializableRuntimeValue[]; index: number }
+  | { readonly properties: readonly SerializableRuntimeProperty[]; index: number }
+  | { readonly entries: readonly SerializableRuntimeDictEntry[]; index: number };
+
+function writeNotation(
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+  handleNotation: Parameters<typeof valueNotation>[2],
+  limit: number,
+): { readonly text: string; readonly truncated: boolean } {
   const output: string[] = [];
-  const work: Array<{ readonly text: string } | { readonly value: SerializableRuntimeValue }> = [
-    { value },
-  ];
+  let length = 0;
+  // Members are taken one at a time, so a limit stops a large collection after the members it writes.
+  const work: NotationWork[] = [{ value }];
   while (work.length > 0) {
+    if (length >= limit) {
+      const text = output.join("");
+      return { text: text.slice(0, limit), truncated: true };
+    }
     const next = work.pop()!;
     if ("text" in next) {
       output.push(next.text);
+      length += next.text.length;
+      continue;
+    }
+    if ("items" in next) {
+      if (next.index === next.items.length) continue;
+      const item = next.items[next.index]!;
+      next.index += 1;
+      work.push(next, { value: item });
+      if (next.index > 1) work.push({ text: ", " });
+      continue;
+    }
+    if ("properties" in next) {
+      if (next.index === next.properties.length) continue;
+      const property = next.properties[next.index]!;
+      next.index += 1;
+      const name = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(property.name)
+        ? property.name
+        : quotedText(property.name);
+      work.push(
+        next,
+        { value: property.value },
+        { text: `${next.index > 1 ? ", " : ""}${name}: ` },
+      );
+      continue;
+    }
+    if ("entries" in next) {
+      if (next.index === next.entries.length) continue;
+      const entry = next.entries[next.index]!;
+      next.index += 1;
+      work.push(
+        next,
+        { value: entry.value },
+        { text: `${next.index > 1 ? ", " : ""}${quotedText(entry.key)}: ` },
+      );
       continue;
     }
     const current = next.value;
-    if (typeof current === "string") output.push(quotedText(current));
-    else if (isList(current) || isSet(current)) {
-      work.push({ text: "]" });
-      for (let index = current.items.length - 1; index >= 0; index -= 1) {
-        work.push({ value: current.items[index]! });
-        if (index > 0) work.push({ text: ", " });
-      }
-      work.push({ text: "[" });
-    } else if (isObject(current)) {
-      if (current.properties.length === 0) {
-        output.push("{}");
-        continue;
-      }
-      work.push({ text: " }" });
-      for (let index = current.properties.length - 1; index >= 0; index -= 1) {
-        const property = current.properties[index]!;
-        work.push({ value: property.value });
-        const name = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(property.name)
-          ? property.name
-          : quotedText(property.name);
-        work.push({ text: `${index > 0 ? ", " : ""}${name}: ` });
-      }
-      work.push({ text: "{ " });
+    const before = output.length;
+    if (typeof current === "string")
+      // A long text is cut before it is quoted; the closing quote then marks no end.
+      output.push(quotedText(current.length > limit ? current.slice(0, limit) : current));
+    else if (isList(current) || isSet(current))
+      work.push({ text: "]" }, { items: current.items, index: 0 }, { text: "[" });
+    else if (isObject(current)) {
+      if (current.properties.length === 0) output.push("{}");
+      else work.push({ text: " }" }, { properties: current.properties, index: 0 }, { text: "{ " });
     } else if (isDict(current)) {
-      if (current.entries.length === 0) {
-        output.push("dict{}");
-        continue;
-      }
-      work.push({ text: " }" });
-      for (let index = current.entries.length - 1; index >= 0; index -= 1) {
-        const entry = current.entries[index]!;
-        work.push({ value: entry.value });
-        work.push({ text: `${index > 0 ? ", " : ""}${quotedText(entry.key)}: ` });
-      }
-      work.push({ text: "dict{ " });
+      if (current.entries.length === 0) output.push("dict{}");
+      else work.push({ text: " }" }, { entries: current.entries, index: 0 }, { text: "dict{ " });
     } else if (isRange(current))
       output.push(
         `${plainScalarText(current.start, span)}${current.inclusive ? "..=" : ".."}${plainScalarText(current.end, span)}`,
@@ -213,8 +260,12 @@ export function valueNotation(
       output.push(handleNotation(current));
     else if (isTemporal(current)) output.push(temporalNotation(current));
     else output.push(plainScalarText(current, span));
+    for (let index = before; index < output.length; index += 1) length += output[index]!.length;
   }
-  return output.join("");
+  const text = output.join("");
+  return length > limit
+    ? { text: text.slice(0, limit), truncated: true }
+    : { text, truncated: false };
 }
 
 /** A double-quoted string literal with the TeaseScript escapes, including `\${`. */
