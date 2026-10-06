@@ -1731,8 +1731,9 @@ other options in this section, such as `message:` and `invalidMessage:`, are not
 
 The question is said in the chat by the asking speaker, as by `say`, right before the field opens; `hint:` is help
 text shown in the field only
-([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). The hint shows only
-while the field is empty, so with a default it is usually not visible:
+([ADR 0018](../decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). In a text or number
+field the hint shows only while the field is empty, so a default usually hides it; a date or time control shows the
+hint beside it, also with a default:
 
 ```text
 let name = askText "What is your name?", default: "Slave", hint: "Type your name"

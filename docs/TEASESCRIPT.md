@@ -116,7 +116,7 @@ expression, and `as speaker` comes before the parentheses
 
 For `askText`, `askNumber`, `askInteger`, and the date and time asks, the optional text is the question: the asking
 speaker says it in the chat, as by `say`, once, right before the field opens. `hint:` is help text shown in the field
-only, while it is empty, so with a default it is usually not visible
+only; in a text or number field it shows only while the field is empty, so a default usually hides it
 ([questions and hints](decisions/0018-first-standard-library-poc-contract.md#ask-questions-and-hints)). An
 optional `default:` answer prefills the field; the player still submits it, and a cleared field does not fall back to
 it. See [default answers](specifications/accepted-syntaxes-v30.md#default-answers).

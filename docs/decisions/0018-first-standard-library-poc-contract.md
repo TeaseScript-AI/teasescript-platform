@@ -247,8 +247,9 @@ let day = askDate hint: "Pick a day"
 - `askImage(...)` follows the same rule (Owner decision, 2026-10-05): its message, positional or `message:`, is the
   question, which the Player also keeps on the camera viewfinder, and `hint:` is the composer's help text.
 - `hint:` keeps the field-text rules above: without it the field uses its localized default, and an explicit empty
-  hint shows none while the control keeps its accessible name. The hint shows only while the field is empty, so with a
-  default it is usually not visible; examples write `default:` first. Neither the question nor the hint becomes the
+  hint shows none while the control keeps its accessible name. In a text or number field the hint shows only while the
+  field is empty, so a default usually hides it; a date or time control shows it beside the control, also with a
+  default. Examples write `default:` first. Neither the question nor the hint becomes the
   accessible name.
 
 ### `choose`
