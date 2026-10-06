@@ -6,6 +6,7 @@ import { createSourceSpan, type SourceSpan } from "../../source.js";
 import { planLocationToSourceSpan } from "../../plan/source-location.js";
 import { RuntimeFault } from "../errors.js";
 import type { InterpreterEvent } from "../events.js";
+import type { InstructionTraceCollector } from "../instruction-trace.js";
 import {
   cloneCapturedSerializableValue,
   cloneSerializableValue,
@@ -185,8 +186,14 @@ export function result(
   snapshot: RuntimeSnapshot,
   events: readonly InterpreterEvent[],
   instructionsExecuted: number,
+  instructionTrace: InstructionTraceCollector | null = null,
 ): RuntimeOperationResult {
-  return Object.freeze({ snapshot, events: Object.freeze([...events]), instructionsExecuted });
+  const executed = { snapshot, events: Object.freeze([...events]), instructionsExecuted };
+  return Object.freeze(
+    instructionTrace === null
+      ? executed
+      : { ...executed, instructionTrace: instructionTrace.result() },
+  );
 }
 
 export function pendingResult<T>(
