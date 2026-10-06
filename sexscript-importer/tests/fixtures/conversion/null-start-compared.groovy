@@ -8,3 +8,7 @@ if (answers != null) show(answers[0])
 def implement = "hand"
 implement = loadFirstTrue("toys.paddle", "toys.crop")
 show("You get the ${implement}")
+// One list of keys, passed as a Java array, is the list of keys itself.
+def paddles = ["toys.paddle", "toys.hairbrush"]
+def spanker = loadFirstTrue(paddles.toArray(new String[0]))
+show("Spanker ${spanker}")

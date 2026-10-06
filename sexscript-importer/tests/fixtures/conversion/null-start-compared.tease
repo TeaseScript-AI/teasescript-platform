@@ -1,3 +1,6 @@
+// MIGRATION INCOMPLETE: 1 error diagnostic.
+// Review diagnostics before treating this file as behaviorally equivalent.
+
 speaker system {
   title: "System"
 }
@@ -80,4 +83,10 @@ if answers != null {
 let implement: string? = "hand"
 implement = sexscriptLegacyLoadFirstTrue(["toys.paddle", "toys.crop"])
 say "You get the ${implement}"
+// One list of keys, passed as a Java array, is the list of keys itself.
+let paddles = ["toys.paddle", "toys.hairbrush"]
+// TODO SX_UNSUPPORTED_LIST_METHOD line 13: Groovy list method toArray() is not safely mapped yet.
+// | def spanker = loadFirstTrue(paddles.toArray(new String[0]))
+let spanker = ""
+say "Spanker ${spanker}"
 exit

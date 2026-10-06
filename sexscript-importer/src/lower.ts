@@ -8639,6 +8639,7 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     // Groovy `text[i]` is the character at i, also counted from the end; TeaseScript text takes `substring`.
     if (
       targetNode !== null &&
+      !context.writeTargets.has(node) &&
       onlyOf(inferType(targetNode, context.types), STRING | NULL) &&
       (inferType(targetNode, context.types) & STRING) !== 0 &&
       indexNode.kind !== "range"
@@ -12813,7 +12814,14 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
   if (call.name === "loadFirstTrue") {
     const keys = lowerArguments(call.arguments, context);
     if (keys === null) return null;
-    return useHelper(context, "loadFirstTrue", [{ kind: "list", items: keys }]);
+    // One list or array argument, `loadFirstTrue(keys.toArray(new String[0]))`, is the list of keys itself.
+    const only = call.arguments.length === 1 ? call.arguments[0]! : null;
+    const listed =
+      only !== null &&
+      (constantString(only.method) === "toArray" ||
+        (onlyOf(inferType(only, context.types), LIST | NULL) &&
+          (inferType(only, context.types) & LIST) !== 0));
+    return useHelper(context, "loadFirstTrue", [listed ? keys[0]! : { kind: "list", items: keys }]);
   }
 
   // getSelectedValue lowers its own arguments: its option list must stay a literal list.
