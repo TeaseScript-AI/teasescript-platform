@@ -193,4 +193,10 @@ while k < 3 {
   k += 1
 }
 say "Slots ${slots.length} ${seats.length}"
+// collect() without a closure collects each element as it is.
+let positions = []
+for item in 0..=2 {
+  positions.add(item)
+}
+say "Positions ${positions.length}"
 exit

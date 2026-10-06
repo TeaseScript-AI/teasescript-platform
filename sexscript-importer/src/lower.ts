@@ -2906,6 +2906,8 @@ function isCollectionLoop(node: AstNode, context: LowerContext): boolean {
   if (!["collect", "findAll", "find", "any", "every", "sum"].includes(call.name)) return false;
   if (receiver.kind !== "range" && !isKnownListExpression(receiver, context)) return false;
   if (call.name === "sum" && call.arguments.length === 0) return true;
+  // `collect()` without a closure collects each element as it is.
+  if (call.name === "collect" && call.arguments.length === 0) return true;
   const argument = closureArgument(call.arguments);
   return (
     argument !== null &&
@@ -3826,6 +3828,8 @@ function lowerDeclaration(
     );
     return [];
   }
+  const imageNames = imageNameFilter("declare", name, right, span, context);
+  if (imageNames !== null) return imageNames;
   // A non-closure declaration that shares a closure's name is a nested local in Groovy; naming renames it.
   const collectionLoop = lowerCollectionAssignment(
     true,
@@ -5047,6 +5051,16 @@ function lowerAssignment(
     ];
   }
   const variableTarget = variableName(targetNode);
+  if ((operator === "=" || operator === "+=") && variableTarget !== null) {
+    const imageNames = imageNameFilter(
+      operator === "=" ? "assign" : "append",
+      variableTarget,
+      right,
+      span,
+      context,
+    );
+    if (imageNames !== null) return imageNames;
+  }
   if (operator === "=" && variableTarget !== null) {
     const collectionLoop = lowerCollectionAssignment(
       false,
@@ -6063,9 +6077,14 @@ function lowerCollectionAssignment(
   }
   if (!["collect", "findAll", "find", "any", "every", "sum"].includes(call.name)) return null;
   if (receiver.kind !== "range" && !isKnownListExpression(receiver, context)) return null;
+  // `collect()` without a closure collects each element as it is, as `collect { item -> item }`.
+  const identity = call.name === "collect" && call.arguments.length === 0;
   const argument =
-    call.arguments.length === 0 && call.name === "sum" ? null : closureArgument(call.arguments);
-  if (argument === null && !(call.name === "sum" && call.arguments.length === 0)) return null;
+    call.arguments.length === 0 && (call.name === "sum" || identity)
+      ? null
+      : closureArgument(call.arguments);
+  if (argument === null && !(call.name === "sum" && call.arguments.length === 0) && !identity)
+    return null;
   if (argument !== null && argument.parameters.length !== 1) return null;
   const variable = argument?.parameters[0] ?? "item";
   const result = argument === null ? null : closureResult(argument.closure);
@@ -6169,9 +6188,13 @@ function lowerCollectionAssignment(
   };
   switch (call.name) {
     case "collect": {
+      initial = { kind: "list", items: [] };
+      if (identity) {
+        body = [add(item)];
+        break;
+      }
       const value = computed(result!.value);
       if (value === null) return failed();
-      initial = { kind: "list", items: [] };
       body = [...prefix, ...value.statements, add(value.value)];
       break;
     }
@@ -6294,6 +6317,112 @@ function closureResult(closure: AstNode): { statements: AstNode[]; value: AstNod
 }
 
 /** Single closure argument with its loop variable name (`it` when the closure declares none). */
+/**
+ * The names of an images folder's files that pass a name test, `listing.findAll { f -> f.name.endsWith(".jpg") }.name`
+ * over the listing of an images folder (imageFolderListing): a loop over the package paths of its images that keeps
+ * the file name of each one that passes. Null for other shapes.
+ */
+function imageNameFilter(
+  mode: "declare" | "assign" | "append",
+  target: string,
+  right: AstNode,
+  span: SourceSpan | null,
+  context: LowerContext,
+): IrStatement[] | null {
+  if (right.kind !== "property" || constantString(right.property) !== "name") return null;
+  const filter = asNode(right.object);
+  const call = filter === null ? null : callParts(filter);
+  const listing = filter === null ? null : asNode(filter.object);
+  if (call?.name !== "findAll" || call.inherited || listing === null) return null;
+  if (!holdsImageListing(listing, context)) return null;
+  const closure = closureArgument(call.arguments);
+  const result = closure === null ? null : closureResult(closure.closure);
+  if (
+    closure === null ||
+    closure.parameters.length !== 1 ||
+    result === null ||
+    result.statements.length > 0
+  )
+    return null;
+  const test = callParts(result.value);
+  const subject = asNode(result.value.object);
+  const suffix = test?.arguments.length === 1 ? constantValue(test.arguments[0]) : undefined;
+  if (
+    test === null ||
+    test.inherited ||
+    !["endsWith", "startsWith", "contains"].includes(test.name) ||
+    typeof suffix !== "string" ||
+    subject?.kind !== "property" ||
+    constantString(subject.property) !== "name" ||
+    variableName(asNode(subject.object)) !== closure.parameters[0]
+  )
+    return null;
+  const images = lowerExpression(listing, context);
+  if (images === null) return null;
+  const image: IrExpression = { kind: "variable", name: freshName("image", context) };
+  const fileName: IrExpression = { kind: "variable", name: freshName("fileName", context) };
+  const list: IrExpression = { kind: "variable", name: target };
+  const empty: IrExpression = { kind: "list", items: [] };
+  const start: IrStatement[] =
+    mode === "append"
+      ? []
+      : mode === "declare"
+        ? [{ kind: "let", name: target, value: empty, span }]
+        : [{ kind: "assign", target: list, operator: "=", value: empty, span }];
+  return [
+    ...start,
+    {
+      kind: "for",
+      variable: (image as { name: string }).name,
+      collection: images,
+      body: [
+        {
+          kind: "let",
+          name: (fileName as { name: string }).name,
+          value: {
+            kind: "methodCall",
+            target: image,
+            name: "substring",
+            arguments: [
+              {
+                kind: "binary",
+                operator: "+",
+                left: {
+                  kind: "methodCall",
+                  target: image,
+                  name: "lastIndexOf",
+                  arguments: [{ kind: "literal", value: "/" }],
+                },
+                right: { kind: "literal", value: 1 },
+              },
+            ],
+          },
+          span,
+        },
+        {
+          kind: "if",
+          condition: {
+            kind: "methodCall",
+            target: fileName,
+            name: test.name,
+            arguments: [{ kind: "literal", value: suffix }],
+          },
+          then: [
+            {
+              kind: "expression",
+              expression: { kind: "methodCall", target: list, name: "add", arguments: [fileName] },
+              span,
+            },
+          ],
+          else: [],
+          span,
+        },
+      ],
+      span,
+    },
+  ];
+}
+
 function closureArgument(args: AstNode[]): { closure: AstNode; parameters: string[] } | null {
   const closure = args.length === 1 && args[0]!.kind === "closure" ? args[0]! : null;
   if (closure === null || asNode(closure.body)?.kind !== "block") return null;

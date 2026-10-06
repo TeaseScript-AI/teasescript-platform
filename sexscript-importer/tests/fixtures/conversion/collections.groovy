@@ -55,3 +55,6 @@ if (seats[0] == null) show("Seat 0 is free")
 // A write that reads the same position first needs no padding: the position exists already.
 for (int k = 0; k < 3; k++) slots[k] = slots[k] + 1
 show("Slots ${slots.size()} ${seats.size()}")
+// collect() without a closure collects each element as it is.
+def positions = (0..2).collect()
+show("Positions ${positions.size()}")

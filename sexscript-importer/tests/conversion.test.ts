@@ -223,6 +223,10 @@ test(
           'save("picked", pick("Pack 2"))',
           'save("missing", pick("Pack 3"))',
           'save("count", new File(getDataFolder() + "images/Mistress/Pack 1").listFiles().length)',
+          'def listed = new File("images/Mistress/Pack 1").listFiles()',
+          'def names = listed.findAll { f -> f.name.endsWith(".jpg") }.name',
+          'names += listed.findAll { f -> f.name.endsWith(".png") }.name',
+          'save("names", names.join(","))',
           "",
         ].join("\n"),
       );
@@ -250,6 +254,7 @@ test(
         picked: "Mistress/Pack 2/c.JPG",
         missing: "none",
         count: 2,
+        names: "a.jpg,b.png",
       });
     } finally {
       rmSync(directory, { recursive: true, force: true });
