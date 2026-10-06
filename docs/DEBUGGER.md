@@ -29,9 +29,9 @@ The Standard Player's Debug panel is the first Debugger slice. Player Settings' 
 tools menu; the switch is not stored, so every load starts with it off (the development preview's `?dev` starts it on).
 Its own **Debug** switch, on whenever the menu is turned on, pauses the Debug features without leaving the panel. The
 Debug log lives while the menu is on; the other features run only while both are on, and turning either off stops
-auto-skip and ends a jump at its next yield. The time controls stand above the tabs **Now** (first), **Log**, and
-**Storage**, which appears when the host persists script storage. **Download debug export…** in the panel opens the
-[debug export](#debug-export) dialog from any tab, also with Debug off.
+auto-skip, ends a jump at its next yield, and drops the value trace with its history. The time controls stand above the
+tabs **Now** (first), **Variables**, **Log**, and **Storage**, which appears when the host persists script storage.
+**Download debug export…** in the panel opens the [debug export](#debug-export) dialog from any tab, also with Debug off.
 
 - **Time controls** (Skip event, +10 s, +1 min, Auto-skip) advance the canonical session's own scene time through
   ordinary observations ([`RUNTIME.md`](RUNTIME.md#timers-and-scene-time)). They are read-only inspection with
@@ -51,11 +51,23 @@ auto-skip and ends a jump at its next yield. The time controls stand above the t
   - The **Stage image** shows its authored path and state: Hidden, Unresolved path (the host has no file for it), Loading,
     Displayed, Load failed (the browser cannot load or decode it), or Covered by camera or video; in the development
     preview, Replaced by a preview fixture. Only the Stage's reports for the image element and source it shows now
-    count. A captured or chosen image has no path. Which statement set the image is not recorded yet and says so.
+    count. A captured or chosen image has no path. **Set by** names the statement that set the image, or says that
+    earlier history is unavailable.
   - **Audio and video** list every active instance with its authored path, Loading, Playing, or Paused, its reported
     playhead, and the statement that started it.
   - A collapsed **Timers** list shows every timer, hidden ones included: blocking or async, display, running, paused, or
     suspended behind a block, remaining time, and the statement that started it.
+- **Variables** explains values from the session's [value trace](RUNTIME.md#debug-trace), which runs while Debug is
+  on, also with the panel closed; Start and Continue begin its history, and Debug turned on mid-session records from
+  then on. **Recent chat** lists recorded messages, newest first, 20 at a time; the newest is open until the player opens
+  or closes one. An open message shows each value it displays (a placeholder that shows one value gives way to it), and
+  each row opens to its own causes, one level at a time, by click, keyboard, or tap. A row names what happened, with
+  its value then, its statement, and, for an earlier version of a variable, its value now; a record that appears again
+  in the same tree links to its first row. Unknown origins say why (supplied by the host, Not recorded before Debug,
+  Restored value, or no longer retained), a dropped cause reads **Expired**, and causes beyond the trace's limit are
+  counted. The collapsed **Background / all live variables** section filters by name and groups live variables by
+  globals, file, function or block call, and variables kept for blocks, 20 at a time, each opening to its origin. Branch
+  conditions are not causes yet.
 - **Storage** lists what the script saved in this browser: every key in UTF-16 order, its value's type and a
   short preview, and, once expanded, a list, set, object, or dict's members, 20 at a time, as one flat outline. Text
   stays text: when it has the exact shape of a photo reference, a thumbnail beside it shows the photo this browser

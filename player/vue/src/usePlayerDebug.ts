@@ -11,9 +11,10 @@ import type { PlayerSessionHost } from "./usePlayerSession";
  * not stored, so every load starts with it off unless the host starts it on (`?dev`). The panel's own **Debug** switch,
  * on whenever the menu is turned on, pauses the features without leaving the panel.
  *
- * The Debug log lives while the menu is on. Time controls and countdowns live only while both switches are on: turning
- * either off stops auto-skip and ends a jump at its next yield; turning it on again starts with auto-skip off. A
- * countdown shows while the session runs or waits, never before Start or Continue.
+ * The Debug log lives while the menu is on. Time controls, countdowns, and the value trace live only while both switches
+ * are on: turning either off stops auto-skip, ends a jump at its next yield, and drops the trace with its history;
+ * turning it on again starts with auto-skip off and a new trace. A countdown shows while the session runs or waits,
+ * never before Start or Continue.
  */
 export function usePlayerDebug(
   player: PlayerSessionHost,
@@ -55,12 +56,14 @@ export function usePlayerDebug(
           useDevelopmentTime(player, { autoSkip }, (text) => log.value?.add(text)),
         ) ?? null;
       if (enabled) autoSkip = false;
+      player.setDebugTracing(enabled);
     },
     { immediate: true, flush: "sync" },
   );
   tryOnScopeDispose(() => {
     timeScope?.stop();
     logScope?.stop();
+    player.setDebugTracing(false);
   });
 
   const countdown = computed(() => {

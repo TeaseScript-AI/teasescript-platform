@@ -1,0 +1,176 @@
+<script setup lang="ts">
+import { computed, reactive, ref } from "vue";
+import { ChevronDown, ChevronUp } from "@lucide/vue";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
+import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
+import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
+import { Input } from "@/components/ui/input";
+import {
+  PLAYER_DEBUG_TRACE_PAGE,
+  playerDebugLiveValue,
+  playerDebugVariables,
+} from "../../debug-variables.js";
+import DebugTraceRows from "./DebugTraceRows.vue";
+import type { PlayerSessionHost } from "./usePlayerSession";
+
+// Debug's Variables view (DEBUGGER.md "Player Debug"): why values have their values, from the session's value trace.
+// Recent chat messages come first, newest first, each with the values it shows and their immediate causes; every live
+// variable is under the collapsed background section. Nothing here is computed while the tab is not shown.
+const props = defineProps<{ player: PlayerSessionHost }>();
+
+const trace = computed(() => props.player.debugTrace.value);
+const session = computed(() => props.player.session.value);
+const live = computed(() =>
+  session.value === null ? null : playerDebugLiveValue(session.value.snapshot),
+);
+
+const outputPages = ref(1);
+const outputs = computed(() => {
+  void session.value;
+  return trace.value?.outputs(PLAYER_DEBUG_TRACE_PAGE * outputPages.value) ?? [];
+});
+// The newest message stays open by default until the player opens or closes one.
+const chose = ref(false);
+const defaultOpen = computed(() => (chose.value ? null : (outputs.value[0] ?? null)));
+
+const status = computed(() => {
+  void session.value;
+  return trace.value?.status() ?? null;
+});
+const origins = {
+  start: "Recording since Start",
+  restore: "Recording since Continue",
+  attach: "Recording since Debug was turned on",
+} as const;
+
+const background = ref(false);
+const filter = ref("");
+const groupPages = reactive(new Map<string, number>());
+const groups = computed(() => {
+  if (!background.value || session.value === null) return [];
+  return playerDebugVariables(
+    session.value.plan,
+    session.value.snapshot,
+    trace.value,
+    filter.value,
+  );
+});
+const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ?? 1);
+</script>
+
+<template>
+  <div class="grid gap-3" data-debug-variables>
+    <p v-if="!trace || !status" class="text-muted-foreground">Debug is off.</p>
+    <template v-else>
+      <div class="flex min-w-0 flex-wrap items-center gap-2" data-debug-trace-status>
+        <span class="text-muted-foreground">{{ origins[status.origin] }}</span>
+        <Badge v-if="status.truncated" variant="outline" data-debug-trace-truncated>
+          Earlier history unavailable
+        </Badge>
+        <Badge v-if="!status.recording" variant="destructive"
+          >Recording stopped: {{ status.failure }}</Badge
+        >
+      </div>
+
+      <section aria-labelledby="debug-variables-chat" class="grid gap-1">
+        <h3 id="debug-variables-chat" class="font-semibold">Recent chat</h3>
+        <p v-if="!outputs.length" class="text-muted-foreground">No messages recorded yet.</p>
+        <DebugTraceRows
+          v-else
+          :trace="trace"
+          :roots="outputs"
+          :revision="session"
+          :live="live"
+          :default-open="defaultOpen"
+          label="Recent chat messages and their values"
+          @chose="chose = true"
+        />
+        <Button
+          v-if="outputs.length === PLAYER_DEBUG_TRACE_PAGE * outputPages"
+          variant="ghost"
+          size="sm"
+          class="min-h-11 justify-self-start"
+          data-debug-more-messages
+          @click="outputPages++"
+        >
+          Show {{ PLAYER_DEBUG_TRACE_PAGE }} older messages
+        </Button>
+      </section>
+
+      <Collapsible v-model:open="background" v-slot="{ open }" class="grid gap-2">
+        <CollapsibleTrigger as-child>
+          <Button
+            variant="ghost"
+            size="sm"
+            class="min-h-11 justify-self-start"
+            data-debug-background-toggle
+          >
+            Background / all live variables
+            <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent class="grid gap-3">
+          <Input
+            v-model="filter"
+            class="min-h-11"
+            type="search"
+            placeholder="Filter by name"
+            aria-label="Filter variables by name"
+            data-debug-variable-filter
+          />
+          <p v-if="!groups.length" class="text-muted-foreground">
+            {{ filter ? "No variable has that name." : "No variables yet." }}
+          </p>
+          <section
+            v-for="group in groups"
+            :key="group.key"
+            class="grid gap-1"
+            :aria-label="group.label"
+            data-debug-variable-group
+          >
+            <h4 class="break-all font-semibold">{{ group.label }}</h4>
+            <ul class="grid gap-1">
+              <li
+                v-for="variable in group.variables.slice(0, shown(group.key))"
+                :key="`${variable.scope}:${variable.name}`"
+                class="min-w-0"
+                data-debug-variable
+              >
+                <DebugTraceRows
+                  v-if="variable.record !== null"
+                  :trace="trace"
+                  :roots="[variable.record]"
+                  :revision="session"
+                  :live="live"
+                  :label="`Origin of ${variable.name}`"
+                />
+                <div v-else class="flex min-w-0 flex-wrap items-baseline gap-2 py-2 ps-12">
+                  <span class="font-medium">{{ variable.name }}</span>
+                  <code class="min-w-0 break-all"
+                    >{{ variable.value }}{{ variable.truncated ? "…" : "" }}</code
+                  >
+                  <Badge variant="outline">No recorded origin</Badge>
+                </div>
+              </li>
+            </ul>
+            <Button
+              v-if="group.variables.length > shown(group.key)"
+              variant="ghost"
+              size="sm"
+              class="min-h-11 justify-self-start"
+              @click="groupPages.set(group.key, (groupPages.get(group.key) ?? 1) + 1)"
+            >
+              Show
+              {{
+                Math.min(group.variables.length - shown(group.key), PLAYER_DEBUG_TRACE_PAGE)
+              }}
+              more
+            </Button>
+          </section>
+        </CollapsibleContent>
+      </Collapsible>
+    </template>
+  </div>
+</template>

@@ -147,7 +147,12 @@ the `Debug` and `Auto-skip` switches, the `Skip event`, `+10 s` and `+1 min` but
 `[data-storage-more]`, the editor's `-add`, `-edit` and `-delete` buttons, its `[data-storage-editor]` dialog with
 `-key`, `-type`, `-value`, `-flag`, `-problem` and `-save`, the result in `[data-debug-storage-saved]`, the
 `[data-debug-storage-edited]` mark, a thumbnail's
-`[data-storage-photo]` with its `data-state` (`loading`, `ready`, `missing`), the log lines under `[data-debug-log]` in
+`[data-storage-photo]` with its `data-state` (`loading`, `ready`, `missing`), the Variables tab's `[data-debug-variables]`
+with `[data-debug-trace-status]`, each derivation list `[data-debug-trace]` with rows `[data-trace-row]` (their
+`data-trace-kind` and enclosing `data-trace-depth`), toggles `[data-trace-toggle]`, `[data-trace-value]`,
+`[data-trace-more]`, `[data-trace-expired]` and `[data-trace-reference]`, `[data-debug-background-toggle]`,
+`[data-debug-variable-filter]`, `[data-debug-variable-group]` and `[data-debug-variable]`, the log lines under
+`[data-debug-log]` in
 the Log tab, and the latest announcement in `[data-debug-announcement]`. The Storage tab (`DebugStorage.vue`) reads
 the saved values through the session host's `readSavedData`, refreshes on its `savedDataRevision` and on `storage`
 events for its `savedDataScope`, renders each value as the flat, paged outline of `storageOutline`
@@ -156,7 +161,11 @@ keyed by its reference. `StorageEditDialog.vue` edits through the host's `editSa
 the provider first, then applies it with the recorded `applyPlayerRuntimeStorageEdit`. It refuses an edit (`busy`)
 while a script write waits for the host; a script write issued meanwhile settles first, and the session then follows
 the value the provider kept (`overtaken` when that is the script's). `debugEdits` holds the Edited-while-debugging mark,
-which `debugExportCandidate` passes to the debug export's `editedWhileDebugging`.
+which `debugExportCandidate` passes to the debug export's `editedWhileDebugging`. While Debug runs, `usePlayerDebug`
+turns the session host's value trace on (`setDebugTracing`), which every session operation then records into; the
+Variables tab (`DebugVariables.vue`,
+`DebugTraceRows.vue`) projects it with `player/debug-variables.ts`: `playerDebugVariables` groups live variables, and
+`playerDebugTraceRows` builds the visible derivation rows iteratively from the rows the player opened.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
 [`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's

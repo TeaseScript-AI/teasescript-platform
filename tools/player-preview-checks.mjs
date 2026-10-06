@@ -2192,6 +2192,121 @@ async function debugNowOverrideChecks(page) {
   return "PASS Debug Now names a Stage fixture override and the session image after Runtime";
 }
 
+// Debug's Variables tab (DEBUGGER.md "Player Debug"): the newest message opens to the values it shows and their
+// immediate causes, further levels open by click, keyboard and tap, the trace keeps recording while the panel is hidden,
+// long values wrap and clamp inside the panel, and turning Debug off and on drops the old history honestly.
+async function debugVariablesChecks(page) {
+  const check = (value, message) => {
+    if (!value) throw new Error(message);
+  };
+  const longTool = `a very long tool name ${"that keeps going ".repeat(12)}to test wrapping`;
+  const source = [
+    'showImage "images/coast.svg"',
+    "let low = 10",
+    "let spanks = randomInteger(low..=30)",
+    `let tools = ["paddle", "cane", ${JSON.stringify(longTool)}]`,
+    'say "You get ${spanks} spanks", instant',
+    'let pick = choose a: "Apple", b: "Pear"',
+    'say "You picked ${pick}", instant',
+    'let done = showButton "Done"',
+    "exit",
+  ].join("\n");
+  await page.route("**/src/runtimeScenario.ts*", (route) => {
+    // Plain string handling: the run-code sandbox that executes this check has no URL global.
+    const url = route.request().url();
+    if (/[?&]original(?:[=&]|$)/.test(url)) return route.continue();
+    const original = `${url}${url.includes("?") ? "&" : "?"}original=`;
+    return route.fulfill({
+      contentType: "text/javascript",
+      body: `export * from ${JSON.stringify(original)};\nexport const openingScenario = ${JSON.stringify(source)};`,
+    });
+  });
+  const base = page.url().split("?")[0];
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${base}?dev`);
+  const panel = page.locator('[data-tool="Debug"]');
+  await page.locator('[data-launcher] button[aria-label="Debug"]').click();
+  await panel.locator("[data-panel-pin]").click();
+  // Now names the statement that set the Stage image.
+  await panel
+    .locator("[data-debug-now-image-origin]")
+    .filter({ hasText: "main.tease:1" })
+    .waitFor();
+  const variablesTab = page.getByRole("tab", { name: "Variables", exact: true });
+  await variablesTab.click();
+  const rows = panel.locator("[data-trace-row]");
+  const depth = (value) => panel.locator(`[data-trace-depth="${value}"]`);
+  await rows.first().waitFor({ timeout: 5_000 });
+  check(
+    (await panel.locator("[data-debug-trace-status]").innerText()).includes(
+      "Recording since Start",
+    ),
+    "A Debug session from Start must say so",
+  );
+  // Two levels by default: the newest message and the value it shows; that value's causes stay closed.
+  const spanks = panel.locator('[data-trace-depth="1"]').filter({ hasText: "let spanks" });
+  await spanks.waitFor();
+  check((await depth(2).count()) === 0, "Causes beyond the message's values opened by default");
+  const toggle = spanks.locator("[data-trace-toggle]");
+  check(
+    (await toggle.getAttribute("aria-label")) === "Show causes of let spanks",
+    "A cause toggle must name what it opens",
+  );
+  await toggle.click();
+  await depth(2).filter({ hasText: "randomInteger(10..=30)" }).waitFor();
+  check((await toggle.getAttribute("aria-expanded")) === "true", "Opened causes must say so");
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await depth(2).first().waitFor({ state: "detached" });
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+  const box = await toggle.boundingBox();
+  check(
+    box.width >= 44 && box.height >= 44,
+    `A cause toggle is smaller than a touch target: ${JSON.stringify(box)}`,
+  );
+  const touch = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touch] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await cdp.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await cdp.detach();
+  await depth(2).first().waitFor();
+
+  // The trace keeps recording while the panel is hidden: the answer given meanwhile explains the next message.
+  await page.getByRole("button", { name: "Hide sidebar", exact: true }).click();
+  await panel.waitFor({ state: "hidden" });
+  await page.locator("[data-foreground-controls] button").filter({ hasText: "Pear" }).click();
+  await page.locator(".transcript-entry").filter({ hasText: "You picked b" }).waitFor();
+  await page.getByRole("button", { name: "Show sidebar", exact: true }).click();
+  await variablesTab.click();
+  await rows.filter({ hasText: '"You picked b"' }).waitFor();
+  await panel.getByRole("button", { name: "Show causes of let pick", exact: true }).click();
+  await depth(2).filter({ hasText: "Answer" }).waitFor();
+
+  // Long values wrap inside the panel and show in full on request.
+  await panel.locator("[data-debug-background-toggle]").click();
+  await panel.getByLabel("Filter variables by name").fill("tools");
+  const tools = panel.locator("[data-debug-variable]").filter({ hasText: "let tools" });
+  await tools.waitFor();
+  await tools.getByRole("button", { name: "Show all", exact: true }).click();
+  await tools.getByText(longTool, { exact: false }).waitFor();
+  const body = panel.locator("[data-tool-body]");
+  check(
+    await body.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    "A long value widened the Debug panel",
+  );
+
+  // Debug off drops the trace; on again records from now, and earlier values say so.
+  const debugSwitch = page.getByRole("switch", { name: "Debug", exact: true });
+  await debugSwitch.click();
+  await panel.getByText("Debug is off.").first().waitFor();
+  await debugSwitch.click();
+  await variablesTab.click();
+  await panel.getByText("Recording since Debug was turned on").waitFor();
+  check((await rows.count()) === 0, "A new trace showed messages from before it began");
+  return "PASS Debug Now image origin, Variables two-level view, click, key and tap expansion, hidden-panel recording, long values, Debug off and on";
+}
+
 async function developmentTimeChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -2417,6 +2532,7 @@ const groups = [
   markupLinkChecks,
   developmentTimeChecks,
   debugNowOverrideChecks,
+  debugVariablesChecks,
   timerChecks,
   transcriptNativeWheelChecks,
   contentContainmentChecks,
