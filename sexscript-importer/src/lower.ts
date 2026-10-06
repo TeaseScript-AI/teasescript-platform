@@ -4672,7 +4672,38 @@ function withDirectClosureCalls(statements: IrStatement[], context: LowerContext
     ),
   );
   const replacedActions = new Set<string>();
-  const rewritten = statements.map((statement): IrStatement => {
+  // A closure called where it is written, `x = { ... }()`, names its function's action itself.
+  const directLiteral = (value: IrExpression): IrExpression => {
+    const mapped = mapChildren(value, directLiteral);
+    const action = mapped.kind === "call" ? mapped.positional[0] : undefined;
+    const args = mapped.kind === "call" ? mapped.positional[1] : undefined;
+    if (
+      mapped.kind !== "call" ||
+      mapped.name !== ACTION_DISPATCHER ||
+      action?.kind !== "literal" ||
+      action.action !== true ||
+      typeof action.value !== "string" ||
+      args?.kind !== "list"
+    )
+      return mapped;
+    const target = functions.get(action.value);
+    if (
+      target === undefined ||
+      args.items.length > target.parameters.length ||
+      args.items.length <
+        target.parameters.filter((parameter) => parameter.defaultValue === null).length
+    )
+      return mapped;
+    replacedActions.add(action.value);
+    return { kind: "call", name: action.value, positional: args.items, named: {}, local: true };
+  };
+  const literalCalls = (items: IrStatement[]): IrStatement[] =>
+    items.map((item) =>
+      item.kind === "function"
+        ? { ...item, body: literalCalls(item.body) }
+        : mapOwnExpressions(withNestedStatements(item, literalCalls), directLiteral),
+    );
+  const rewritten = literalCalls(statements).map((statement): IrStatement => {
     if (statement.kind !== "function") return statement;
     const declarations = new Map<string, number>();
     const actions = new Map<string, string>();

@@ -18,4 +18,10 @@ function countdown(n) {
   sexscriptLegacyCall(twice, [1])
 }
 countdown(2)
+function scriptCallback2 {
+  return { low: 1, high: 3 }
+}
+// A closure called where it is written calls its function directly.
+let limits = scriptCallback2()
+say "Up to ${limits.high}"
 exit
