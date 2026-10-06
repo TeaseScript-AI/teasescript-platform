@@ -46,6 +46,7 @@ export function useDebugRewind(player: PlayerSessionHost) {
   }
   // Every published session is followed, so a point keeps exactly the events that led to it.
   watch(player.generation, () => publishing || end(), { flush: "sync" });
+  watch(rewind.retirements, end, { flush: "sync" });
   watch(player.session, follow, { flush: "sync" });
   follow(player.session.value);
   rewind.onAdopted(() => {
@@ -103,6 +104,7 @@ export function useDebugRewind(player: PlayerSessionHost) {
   }
 
   /** Restores the point at `index`; the state left stays for Forward. Resolves to whether it was restored. */
+  // Once a step read its state, the session must still be one that may be left, or the step changes nothing.
   const back = (index: number) =>
     step((current) =>
       current.back(index, () => {
@@ -111,7 +113,7 @@ export function useDebugRewind(player: PlayerSessionHost) {
       }),
     );
   /** Restores the state the last Back left. */
-  const forward = () => step((current) => current.forward());
+  const forward = () => step((current) => current.forward(() => rewind.ready.value));
 
   /** Reinstates the session the first Back left, as it was then; the restored states go. */
   function returnToSession() {

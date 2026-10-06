@@ -105,17 +105,18 @@ rebuild its transcript; the plan is shared, and photos stay in the Player's capt
 photo it admitted while it is mounted. The history keeps every point: the newest, up to 32 Mi characters of state JSON,
 in memory and the older ones in an IndexedDB database of its own (`teasescript-debug-history-<UUID>`). Without
 IndexedDB, or once it fails, the history takes no more points than fit that budget and keeps those it has. Turning
-either Debug switch off, a new Start, Continue, or import, and unmounting the Player delete the history and its
-database. A page that ended without deleting its database, for example after a crash or by navigating away, leaves it
-to the next Player, which deletes it at startup where the browser lists its databases; one that another open Player
-still uses is deleted only once that Player is done with it.
+either Debug switch off, a new Start or Continue, importing or clearing this script's saved data, and unmounting the
+Player delete the history and its database; an import also ends an inspected state. A page that ended without deleting
+its database, for example after a crash or by navigating away, leaves it to the next Player, which deletes it at startup
+where the browser lists its databases; one that another open Player still uses is deleted only once that Player is done
+with it.
 
-- **Back** restores a point that leads to the state shown as a new generation of the session: its state with its
-  storage view, Stage, and media, its transcript, and its marks. The restored state is **inspected**: nothing runs on
-  its own, its clock stands, media keep their position without playing, load reports, camera requests, and auto-skip
-  wait, and the browser's saved data stay as they are, without the Storage editor. The first Back parks the session it
-  left; every Back keeps the state it left for **Forward**, which restores it exactly. Back waits while a save, a
-  Storage editor change, Start, Continue, import, clear, or camera opening waits for the host or the player.
+- **Back** restores a point that leads to the state shown as a new generation of the session: its state with its storage
+  view, Stage, and media, its transcript, and its marks. The restored state is **inspected**: nothing runs on its own,
+  its clock stands, media keep their position without playing, load reports, camera requests, and auto-skip wait, and
+  the browser's saved data stay as they are, without the Storage editor or clearing them. The first Back parks the
+  session it left; every Back keeps the state it left for **Forward**, which restores it exactly. Back waits while a
+  save, a Storage editor change, Start, Continue, import, clear, or camera opening waits for the host or the player.
 - **Return** reinstates the parked session as it was, and so does turning Debug off while a state is inspected; time
   spent inspecting is no scene time.
 - New input to the inspected state (an answer, a button, a permanent button, or a time skip), or **Resume**, **adopts**

@@ -283,9 +283,9 @@ export class DebugHistory {
   }
 
   /**
-   * Restores the point at `index`, which must lead to the state shown; the state left stays for Forward. The first Back
-   * parks the session being played, which `current` gives once the snapshot is read, for Return; it gives `null` when
-   * the session cannot be left now, and nothing changes.
+   * Restores the point at `index`, which must lead to the state shown; the state left stays for Forward. `current` gives
+   * the session shown once the snapshot is read, which the first Back parks for Return; it gives `null` when the session
+   * cannot be left now, and nothing changes.
    */
   async back(
     index: number,
@@ -299,8 +299,9 @@ export class DebugHistory {
     const snapshotJson = await this.#store.get(point.id);
     if (this.#inspection !== inspection || this.#points[index] !== point)
       throw new Error("The history changed meanwhile.");
-    const left = inspection === null ? current() : inspection.parked;
-    if (left === null) throw new Error("The session cannot go back now.");
+    const shown = current();
+    if (shown === null) throw new Error("The session cannot go back now.");
+    const left = inspection === null ? shown : inspection.parked;
     if (inspection === null) {
       const id = this.#nextId++;
       this.#store.add(id, playerRuntimeSnapshotJson(left.session), true);
@@ -319,8 +320,8 @@ export class DebugHistory {
     return { position: point, snapshotJson, marks: this.#restoredMarks(point) };
   }
 
-  /** Restores the state the last Back left. */
-  async forward(): Promise<DebugHistoryRestore> {
+  /** Restores the state the last Back left, once it is read, if `ready` still holds then; otherwise nothing changes. */
+  async forward(ready: () => boolean = () => true): Promise<DebugHistoryRestore> {
     const inspection = this.#inspection;
     const next = inspection?.forward.at(-1);
     if (inspection === null || next === undefined)
@@ -328,6 +329,7 @@ export class DebugHistory {
     const snapshotJson = await this.#store.get(next.position.id);
     if (this.#inspection !== inspection || inspection.forward.at(-1) !== next)
       throw new Error("The history changed meanwhile.");
+    if (!ready()) throw new Error("The session cannot go forward now.");
     inspection.forward.pop();
     inspection.shown = next.position;
     inspection.points = next.points;

@@ -141,9 +141,8 @@ test("Return reinstates the session Back first left, with its points", async () 
   const second = choose(first, "One");
   history.follow(second, unmarked);
   await history.back(1, () => ({ session: second, marks: unmarked }));
-  await history.back(0, () => {
-    throw new Error("A later Back parks nothing new.");
-  });
+  // A later Back checks the session shown, but parks nothing new.
+  await history.back(0, () => ({ session: first, marks: unmarked }));
   const parked = history.returnToSession();
   assert.equal(parked.session, second);
   assert.equal(history.inspection, null);

@@ -206,6 +206,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   };
   const resolveTemporalContext = options.temporalContext ?? (() => playerTemporalContext());
   const session = shallowRef<PlayerRuntimeSession | null>(null);
+  // Counts the times this script's saved data were replaced outside Debug's rewind, which ends its history.
+  const rewindRetirements = ref(0);
   // While Debug's rewind shows a restored state (DEBUGGER.md "Rewind"), nothing runs on its own: the clock stands, media
   // hold their position, and load reports and capture requests wait, until new input adopts the state as the session.
   const inspecting = ref(false);
@@ -663,6 +665,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       !clearing.value &&
       !importing.value &&
       !openingCamera.value &&
+      !inspecting.value &&
       activation.value?.kind !== "continue" &&
       (session.value === null ||
         session.value.snapshot.status === "halted" ||
@@ -676,6 +679,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       await scriptStorage.clear();
       storedEntries.value = [];
       savedDataRevision.value++;
+      // Debug's rewind could restore the saved data cleared now, so its history ends.
+      rewindRetirements.value++;
       return true;
     } catch {
       return false;
@@ -757,7 +762,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     importing.value = true;
     const failed: string[] = [];
     try {
-      if (ownChosen && sessionInProgress.value) endSession();
+      // Debug's rewind could restore this script's earlier saved data over the import, so its history ends too, and so
+      // does an inspected state, also one that ended.
+      if (ownChosen) {
+        if (sessionInProgress.value || inspecting.value) endSession();
+        rewindRetirements.value++;
+      }
       for (const script of review.bundle.scripts) {
         if (!chosen.has(script.scope)) continue;
         try {
@@ -1260,6 +1270,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       inspecting: computed(() => inspecting.value),
       /** Whether a restored state is being adopted: its saved data are being replaced. */
       adopting: computed(() => rewindWork.value === "adopt"),
+      /** Changes whenever this script's saved data were cleared or imported, which ends the rewind history. */
+      retirements: computed(() => rewindRetirements.value),
       /** Whether a rewind step or an adoption runs now. */
       working: computed(() => rewindWork.value !== null),
       /** Whether the session may be left for a restored state, apart from rewind work under way. */

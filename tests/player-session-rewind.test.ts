@@ -19,6 +19,10 @@ import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
 // Debug's rewind through the Player's real session host (DEBUGGER.md "Rewind"): Back shows an earlier state for
 // inspection without running it or touching saved data; new input adopts it as the session, with its saved data.
 
+/** What reviewing an import gives, which the import then takes; these tests do not read it. */
+interface ImportReview {
+  readonly scripts: readonly object[];
+}
 interface RewindHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly generation: Readonly<Ref<number>>;
@@ -39,6 +43,19 @@ interface RewindHost {
   update(session: PlayerRuntimeSession): void;
   prepareInput(): true | Promise<boolean>;
   setDebugTracing(on: boolean): void;
+  reviewSavedDataImport(bundle: {
+    readonly scripts: readonly {
+      readonly scope: string;
+      readonly name: string | null;
+      readonly photos: readonly string[];
+      readonly entries: readonly {
+        readonly key: string;
+        readonly value: SerializableRuntimeValue;
+      }[];
+    }[];
+    readonly images: readonly never[];
+  }): Promise<ImportReview>;
+  importSavedData(review: ImportReview, chosen: ReadonlySet<string>): Promise<void>;
   readonly debugTrace: Readonly<Ref<{ status(): { readonly epoch: number } } | null>>;
   editSavedData(edit: {
     key: string;
@@ -564,4 +581,50 @@ test("input is refused while a step reads a spilled state, so the saved data sta
     host.session.value!.snapshot.scriptStorage.map((entry) => [entry.key, entry.value]),
   );
   assert.deepEqual(view, storage.saved());
+});
+
+test("importing the shown script ends its rewind history and an inspected state, also one that ended", async (context) => {
+  const storage = memoryStorage();
+  const { host, rewind } = createHost(context, storage.provider);
+  await start(context, host);
+  for (const label of ["One", "Red", "A"]) await choose(context, host, label);
+  assert.equal(host.session.value?.snapshot.status, "halted");
+  assert.equal(await rewind.back(0), true);
+  assert.equal(await rewind.forward(), true);
+  assert.equal(host.rewind.inspecting.value, true);
+  const review = await host.reviewSavedDataImport({
+    scripts: [{ scope: "test", name: null, photos: [], entries: [{ key: "imported", value: 9 }] }],
+    images: [],
+  });
+  await host.importSavedData(review, new Set(["test"]));
+  assert.equal(host.rewind.inspecting.value, false);
+  assert.deepEqual(rewind.state.value.points, []);
+  assert.equal(await rewind.resume(), false);
+  assert.equal(rewind.returnToSession(), false);
+  assert.deepEqual(storage.saved(), { imported: 9 });
+});
+
+test("a step whose state was read after Start or Continue began changes nothing", async (context) => {
+  for (const step of ["back", "forward"] as const) {
+    await context.test(step, async (subtest) => {
+      const storage = memoryStorage();
+      const { host, rewind, holdGets } = createHost(subtest, storage.provider, { memoryBudget: 1 });
+      await start(subtest, host);
+      await choose(subtest, host, "One");
+      await choose(subtest, host, "Red");
+      assert.equal(await rewind.back(1), true);
+      if (step === "forward") assert.equal(await rewind.back(0), true);
+      const shown = host.session.value;
+      const before = rewind.state.value.inspection;
+      const release = holdGets();
+      const pending = step === "back" ? rewind.back(0) : rewind.forward();
+      host.prepare((recording) =>
+        createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
+      );
+      release();
+      assert.equal(await pending, false);
+      assert.equal(host.session.value, shown);
+      assert.deepEqual(rewind.state.value.inspection, before);
+    });
+  }
 });
