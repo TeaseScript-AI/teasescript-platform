@@ -76,7 +76,7 @@ implemented):
 | a map used as a lookup table: `[(KEY): v]`, `map[key]`, `containsKey`, `keySet`, `values`, `size`, `put`, `remove`, `clear`, `each { k, v -> }` | a `dict` (#536): `dict{ [KEY]: v }`, `map[key]`, `contains`, `keys`, `values`, `length`, `map[key] = v`, a guarded `remove`, `clear`, `for k, v in map` (#639) |
 | a map with fixed names that gains fields later, and its `clear()` | an object literal that declares every used field (null when added later); `clear()` reassigns it with null fields, so a map that `clear()` empties starts every field as null and sets its values right after, since a property keeps the type of its first value (ADR 0021 rule 1.4) |
 | `list.remove(index)`, `list.remove(value)` | `list.removeAt(index)`, also as a value; `list.remove(value)` with structural equality (#517) |
-| Groovy string methods (`size()`, `trim()`, `toUpperCase()`, `replace()`, `split()`, ...) | text operations (`text.length`, `trim()`, `uppercase()`, ...; #518) |
+| Groovy string methods (`size()`, `trim()`, `toUpperCase()`, `replace()`, `split()`, ...); `text[i]`, `text[a..b]`, `text - part`, `text * n` | text operations (`text.length`, `trim()`, `uppercase()`, ...; #518); `substring`, also for ranges and positions counted from the end; a helper that drops the part's first occurrence; `repeat` |
 | `list.join(separator)`, `"${list}"` | `list.join(separator)`; `"[${list.join(", ")}]"` (#518) |
 | `def x` / `int x` without initializer | `let x: string? = null`, and `0` or `false` for primitives; a list, also one declared `= null`, starts empty (`let lines: string[] = []`), and a number `0`, unless code in its script or modules compares it with null or reads it with `?.`, where null and an empty list or 0 differ (owner decisions); Groovy truth treats them alike. A note marks a number a text can show before its first value, which Groovy showed as `null` (`SX_NULL_START_NUMBER`) |
 | `def x = 0` that later holds a fraction | `let x = 0`, which widens to `number` by itself (#504 option B, #526) |
@@ -186,9 +186,13 @@ The importer converts these with an inline `NOTE` or reports them when it cannot
   type's empty value (`let lineArray: string[] = []`), which differs only where the empty text was read
   (`SX_PLACEHOLDER_TYPE`, 5 DisciplineClinic sites). A write by position into a list that starts empty, or at a
   literal position past the end of the literal list it starts as (`label[2] = exit` after `label = ["<", ">"]`), grew
-  the Groovy list, padding with null; the conversion appends when the position is the length and notes the difference
-  beyond it (`SX_LIST_GROWTH`, DisciplineClinic's `assignmentArrayList`). A computed position counts as a number where
-  its operands are numbers or of unknown type, since Groovy failed on a list position of another type.
+  the Groovy list, padding it with null up to the position. Where the writes are proven to count up (a counter that
+  grows with them, or literal positions in order) the conversion appends, or writes in place; elsewhere, such as a
+  list filled from its end or from position 1, it first pads the list up to the position: with null where the code
+  compares the list's elements with null, otherwise with the elements' empty value (0, "", or false), which Groovy
+  truth treats like null (`SX_LIST_PADDING`). A list of elements of unknown type still appends at the end, which
+  differs beyond it (`SX_LIST_GROWTH`, DisciplineClinic's `assignmentArrayList`). A computed position counts as a
+  number where its operands are numbers or of unknown type, since Groovy failed on a list position of another type.
 - What a function cannot convert does not block the script when nothing references the function: no call, action ID, or
   use as a value in the generated program, which counts module loaders, setups, and the action dispatcher, and no
   reference in the legacy code either, so a caller the conversion left unconverted still counts. Groovy never ran such a
@@ -580,32 +584,29 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
 
 ## Current state and remaining gaps
 
-Measured on the selected large corpus on 2026-10-06, at importer `24e930b2` with the unit patches of `03469a07` and
-`main` `0ab0fac9` merged in.
+Measured on the selected large corpus on 2026-10-06, at importer `dc2cb65b` with `main` `0ab0fac9` merged in.
 - **The selection** follows the owner decisions of 2026-10-05. It takes corpus2's merged units with one revision per
   title.
   - The largest revision, checked by hand, is the package. Earlier revisions are listed in the catalog as earlier
     versions and are not converted.
   - Two units whose revisions carry two titles are split into two units each: Toy and ToyExpanded, and jewell and
     JewellMistressMiley. Lines v2 counts as a revision of Lines.
-- **Script-specific fixes** are unit patches (49 units), not converter rules.
+- **Script-specific fixes** are unit patches (50 units), not converter rules.
 
 | Result | Units of 210 |
 | --- | ---: |
 | Converted without a failed step | 210 |
 | Compile as one project | 155 |
-| Compile and play to the end from `main.tease` in the smoke run | 128 |
-| Smoke run from `main.tease`: halted, blocked at a file that does not compile, step limit, failed, no run | 128, 54, 21, 6, 1 |
+| Compile and play to the end from `main.tease` in the smoke run | 129 |
+| Smoke run from `main.tease`: halted, blocked at a file that does not compile, step limit, failed, no run | 129, 54, 23, 3, 1 |
 
-Of the 575 scripts, 426 are lowered without a root error and 411 compile; 1,469 root errors remain.
+Of the 575 scripts, 426 are lowered without a root error and 411 compile; 1,467 root errors remain.
 
 **Smoke runs:**
-- **The step limit is inconclusive** (21 units). Most of these are loops that wait for a typed text or a time.
-- **The 6 failed runs:**
-  - Escape, OwlSays, and SpankingParty (`TSR025`): a list read or written past its end. Groovy read null there, and
-    padded the list with null when it wrote beyond its end (`SX_LIST_GROWTH`).
-  - ShockYourself (`TSR058`): settings lists filled with missing values, which the script replaces with defaults
-    only after loading.
+- **The step limit is inconclusive** (23 units). Most of these are loops that wait for a typed text or a time.
+- **The 3 failed runs:**
+  - SpankingParty (`TSR025`): a list read past its end, where Groovy read null. The script draws six implements
+    from the player's toys, and with fewer toys the draws give null, which later draws pick again.
   - ashleyYHBS (`TSR058`): a missing setting stored in an `int`.
   - tabata (`TSR036`): a division by zero.
 - **Isolated runs** of scripts that no entry run reaches fail mostly on settings that an introduction saves:
@@ -633,7 +634,8 @@ The TODO sites of the leading root codes, classified by their original Groovy li
 
 ### Compile errors
 
-Null-related errors are the largest compile error class left: 840 errors in 39 of the 55 units. "Null-related" means
+Null-related errors are the largest compile error class left: 874 errors in 39 of the 55 units, 34 more than before
+the null padding of lists whose elements the code compares with null (SlideLadderDare and OwlGames). "Null-related" means
 may be null, no property of null, null indexed, combined, or compared.
 
 | Class | Errors | Units | Route |
