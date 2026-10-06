@@ -279,6 +279,15 @@ Settings, checkpoints, account data, and other scripts are unaffected, and the n
 is available before Start and after the session has ended, but not while a session runs or waits for Continue, because
 a running session keeps its own view of the saved values, and not when this browser's storage could not be read.
 
+Its **Export…** control opens a dialog that takes the script's saved data, with its saved photos, to another browser or
+device ([format](../DATA-AND-API.md#saved-data-transfer)); it is not a session checkpoint, also works during a session,
+and includes saves already stored. The dialog counts the values and photos, warns that the export can contain private
+photos, and offers two tabs: **File** prepares one file and then downloads it from the player's own press of **Download
+file**; **Text** shows the data in a read-only field with **Copy** and **Select text**, and when copying is refused or
+unavailable it selects the text for copying with the browser. Nothing leaves the browser except through these player
+actions, and closing the dialog releases the prepared file and text. The dialog fits narrow screens, and its own
+controls are at least 44px tall.
+
 ## Left tools area
 
 The Standard Player owns the tools menu, sidebar visibility, temporary/pinned panels, shared headers, panel order and

@@ -146,6 +146,32 @@ reference before persisting them. Clearing or replacing a scope affects only tha
 running session's own view. Storage quotas are not enforced yet; all writes pass through the provider, so quota policy
 can be added there.
 
+### Saved-data transfer
+
+A player moves one script's saved data, with its saved photos, by hand and offline to another browser or device through
+Player Settings ([Player UI](ui/PLAYER-UI.md#player-settings)); `player/storage-transfer.ts` owns the format. It is not
+a session checkpoint and carries no session position, timers, transcript, or RNG state. The document is UTF-8 JSON
+with exactly these fields:
+
+```json
+{ "format": "teasescript-script-storage", "version": 1, "scope": "<host storage scope>",
+  "entries": [{ "key": "player.photo", "value": "captured-media:<uuid>:1" }],
+  "images": [{ "reference": "captured-media:<uuid>:1", "byteLength": 68, "data": "<unpadded base64url>" }] }
+```
+
+`entries` are the stored values in their `SerializableRuntimeValue` representation, one per line. `images` holds the
+original bytes of each saved photo a value references, once per reference; references that resolve to no stored photo
+stay ordinary text and are only counted. An export reads the provider freshly, so saves stored during a running session
+count and its unsaved photos do not. A file (`<script>-saved-data.teasestorage.json.gz`) is the document compressed
+with gzip; text is `TSST1.gzip.` plus the gzip bytes in unpadded base64url. Where the browser cannot compress (native
+`CompressionStream`), both are the plain JSON (`.teasestorage.json`).
+
+Reading treats the data as external input: the contents, not a file's name or type, select gzip or plain JSON; text
+may also be the plain JSON and may be wrapped across lines. Gzip's checksum, strict base64url, UTF-8 and JSON decoding,
+the exact field sets, the storage-entry validation used for runtime storage, the reference shape, a photo's
+`byteLength`, and the rule that every photo is used by a value detect damage. There is no signature: a value or photo
+edited by hand is accepted when it is valid, a replaced photo with its `byteLength` updated.
+
 Ordinary Player use does not expose arbitrary manual checkpoint/restore points as a rewind mechanism. The runtime/Player
 creates and restores supported checkpoints according to the session lifecycle. Developer/debug tooling may expose
 manual checkpoint and restore operations because those runs are explicitly diagnostic rather than ordinary canonical

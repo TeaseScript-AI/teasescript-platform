@@ -1,9 +1,9 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { crc32, deflateSync } from "node:zlib";
+import { crc32, deflateSync, gunzipSync } from "node:zlib";
 import { createPlaygroundServer } from "../dist/playground/server.js";
 import { findChromium } from "./find-chromium.mjs";
 
@@ -121,6 +121,7 @@ async function main() {
       await insecureOriginScenario(cdp, `http://${LAN_HOST}:${address.port}`);
       await packageScenario(cdp, origin);
       await askImageScenario(cdp, origin, profile);
+      await savedDataExportScenario(cdp, origin, profile);
       await developmentTimeScenario(cdp, origin);
       await debugCountdownScenario(cdp, origin);
       await missingMediaScenario(cdp, origin);
@@ -130,7 +131,7 @@ async function main() {
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, development time controls, Debug countdowns, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export from Settings, development time controls, Debug countdowns, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -1563,7 +1564,8 @@ async function cameraScenario(cdp, origin) {
           const database = request.result;
           const store = database.objectStoreNames[0];
           const keys = database.transaction(store).objectStore(store).getAllKeys();
-          keys.onsuccess = () => { database.close(); resolve(keys.result.map(([, reference]) => reference)); };
+          // Only this scenario's scope: other scenarios may keep saved photos of their own.
+          keys.onsuccess = () => { database.close(); resolve(keys.result.filter(([namespace]) => namespace === 'development-camera').map(([, reference]) => reference)); };
         };
       })`,
     );
@@ -2024,6 +2026,223 @@ async function askImageScenario(cdp, origin, profile) {
  * request with the camera's own, unmirrored picture. A camera the request opened turns off after the answer, also one
  * given as a file. A camera that fails offers "Try again" while the paperclip stays.
  */
+// Exports a package's saved data from Player Settings in the default build, without Debug: one downloaded file with the
+// saved photo's exact bytes, the same data as text with copying and its manual fallback, no unsaved photo, released
+// resources once the dialog closes, and a dialog that fits a narrow screen with touch-sized controls.
+async function savedDataExportScenario(cdp, origin, profile) {
+  const chosen = join(profile, "saved.png");
+  const photoBytes = solidPng(24, 16, [30, 160, 90]);
+  await writeFile(chosen, photoBytes);
+  const downloads = join(profile, "downloads");
+  await mkdir(downloads, { recursive: true });
+  await cdp.call("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
+  const text = (value) => `document.body.textContent.includes(${JSON.stringify(value)})`;
+  await setViewport(cdp, 1440, 900);
+  await navigate(cdp, `${origin}/player/?package=saved-photo`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  assertEqual(
+    await value(cdp, `location.search.includes('dev')`),
+    false,
+    "The export runs without Debug",
+  );
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    visible("[data-composer-attach]"),
+    8_000,
+    "The image request offered no paperclip",
+  );
+  await openPicker(cdp);
+  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await waitFor(cdp, text("Saved."), 8_000, "The script did not save its photo");
+  // The second image request gets another photo, which is never saved; the session then waits for text.
+  const unsaved = join(profile, "unsaved.png");
+  await writeFile(unsaved, solidPng(24, 16, [200, 30, 30]));
+  await waitFor(cdp, visible("[data-composer-attach]"));
+  await openPicker(cdp);
+  await setInputFiles(cdp, "[data-composer-file]", [unsaved]);
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[placeholder="Anything else?"]')`,
+    8_000,
+    "The session does not wait after the unsaved photo",
+  );
+
+  const openExport = async () => {
+    // A narrow Player keeps Settings in its tools drawer, which may be closed or still sliding in after a resize.
+    if (!(await value(cdp, visible("[data-settings-trigger]"))))
+      await physicalClick(cdp, "[data-player-top-bar] [data-sidebar=trigger]");
+    await waitFor(
+      cdp,
+      `(() => {
+        const rect = document.querySelector('[data-settings-trigger]')?.getBoundingClientRect();
+        return !!rect && rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth &&
+          document.getAnimations().every((animation) => animation.playState !== 'running' || animation.effect?.getComputedTiming().iterations === Infinity);
+      })()`,
+    );
+    await physicalClick(cdp, "[data-settings-trigger]");
+    await waitFor(cdp, `!!document.querySelector('[data-export-saved-data]')`);
+    await physicalClick(cdp, "[data-export-saved-data]");
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-export-summary]')?.textContent.replace(/\\s+/g, ' ').trim() === '2 saved values · 1 photo'`,
+      8_000,
+      "The export did not count the saved values and only the saved photo",
+    );
+  };
+  const closeDialog = async (selector) => {
+    await cdp.call("Input.dispatchKeyEvent", {
+      type: "keyDown",
+      key: "Escape",
+      code: "Escape",
+      windowsVirtualKeyCode: 27,
+    });
+    await cdp.call("Input.dispatchKeyEvent", {
+      type: "keyUp",
+      key: "Escape",
+      code: "Escape",
+      windowsVirtualKeyCode: 27,
+    });
+    await waitFor(cdp, `!document.querySelector(${JSON.stringify(selector)})`);
+  };
+  await openExport();
+  // Exporting works while the session waits, when clearing does not.
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-clear-saved-data]')?.disabled`),
+    true,
+    "Clearing was offered during the session",
+  );
+  const download = await value(
+    cdp,
+    `(() => { const link = document.querySelector('[data-export-download]'); return { href: link.href, name: link.download }; })()`,
+  );
+  assertEqual(
+    download.name,
+    "development-package-saved-photo-saved-data.teasestorage.json.gz",
+    "Export file name",
+  );
+  await physicalClick(cdp, "[data-export-download]");
+  let downloaded = null;
+  const deadline = Date.now() + 8_000;
+  while (downloaded === null && Date.now() < deadline) {
+    const names = await readdir(downloads);
+    if (names.includes(download.name)) downloaded = await readFile(join(downloads, download.name));
+    else await delay(50);
+  }
+  if (downloaded === null) throw new Error("The export file was not downloaded");
+  const document = JSON.parse(gunzipSync(downloaded).toString("utf8"));
+  assertEqual(document.format, "teasescript-script-storage", "Downloaded export format");
+  assertEqual(document.scope, "development-package:saved-photo", "Downloaded export scope");
+  assertEqual(
+    JSON.stringify(document.entries.map((entry) => entry.key).sort()),
+    JSON.stringify(["photo", "score"]),
+    "Downloaded export values",
+  );
+  assertEqual(document.images.length, 1, "Downloaded export photos");
+  assertEqual(
+    Buffer.from(document.images[0].data, "base64url").equals(photoBytes) &&
+      document.images[0].byteLength === photoBytes.length &&
+      document.entries.find((entry) => entry.key === "photo").value ===
+        document.images[0].reference,
+    true,
+    "The downloaded photo is not the saved photo's exact bytes",
+  );
+
+  await physicalClick(cdp, '[data-export-tab="text"]');
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-export-text]')?.value.startsWith('TSST1.gzip.') === true`,
+  );
+  const exportedText = await value(cdp, `document.querySelector('[data-export-text]').value`);
+  assertEqual(
+    gunzipSync(Buffer.from(exportedText.slice("TSST1.gzip.".length), "base64url")).toString("utf8"),
+    gunzipSync(downloaded).toString("utf8"),
+    "The text holds the same export as the file",
+  );
+  // Refused clipboard access leaves the text selected for copying by hand.
+  await evaluate(
+    cdp,
+    `Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.reject(new DOMException('denied', 'NotAllowedError')) } });`,
+  );
+  await physicalClick(cdp, "[data-export-copy]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-export-copy-status]')?.textContent.includes('copy it with the browser')`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const area = document.querySelector('[data-export-text]'); return document.activeElement === area && area.selectionStart === 0 && area.selectionEnd === area.value.length; })()`,
+    ),
+    true,
+    "The refused copy did not select the text",
+  );
+  await evaluate(
+    cdp,
+    `window.__copied = null; Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value) => { window.__copied = value; } } });`,
+  );
+  await physicalClick(cdp, "[data-export-copy]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-export-copy-status]')?.textContent.trim() === 'Copied.'`,
+  );
+  assertEqual(
+    await value(cdp, `window.__copied === document.querySelector('[data-export-text]').value`),
+    true,
+    "Copy wrote the text",
+  );
+
+  // Closing releases the prepared file.
+  await closeDialog("[data-saved-data-export]");
+  assertEqual(
+    await evaluate(
+      cdp,
+      `return fetch(${JSON.stringify(download.href)}).then(() => 'readable', () => 'released');`,
+    ),
+    "released",
+    "The export file stayed available after the dialog closed",
+  );
+  await closeDialog("[data-player-settings]");
+
+  // On a narrow screen the dialog fits, and its controls are large enough to touch.
+  await setViewport(cdp, 390, 844);
+  await openExport();
+  // Let the dialog finish its opening animation.
+  await delay(400);
+  const fit = await value(
+    cdp,
+    `(() => {
+      const dialog = document.querySelector('[data-saved-data-export]').getBoundingClientRect();
+      const controls = [...document.querySelectorAll('[data-saved-data-export] [data-export-download], [data-saved-data-export] [data-export-tab]')];
+      const problems = [];
+      if (dialog.left < 0 || dialog.right > innerWidth || dialog.top < 0 || dialog.bottom > innerHeight)
+        problems.push('dialog ' + JSON.stringify(dialog) + ' in ' + innerWidth + 'x' + innerHeight);
+      if (controls.length !== 3) problems.push(controls.length + ' controls');
+      for (const control of controls)
+        if (control.getBoundingClientRect().height < 44) problems.push(control.textContent.trim() + ' ' + control.getBoundingClientRect().height + 'px');
+      return problems.join('; ') || 'fits';
+    })()`,
+  );
+  assertEqual(
+    fit,
+    "fits",
+    "The export dialog does not fit a narrow screen with touch-sized controls",
+  );
+  await physicalClick(cdp, '[data-export-tab="text"]');
+  await waitFor(cdp, `!!document.querySelector('[data-export-copy]')`);
+  assertEqual(
+    await value(
+      cdp,
+      `[...document.querySelectorAll('[data-export-copy], [data-export-copy] + button')].map((button) => button.getBoundingClientRect().height >= 44).join()`,
+    ),
+    "true,true",
+    "Copy and Select text are not touch-sized",
+  );
+  await closeDialog("[data-saved-data-export]");
+  await closeDialog("[data-player-settings]");
+  await setViewport(cdp, 1440, 900);
+}
+
 async function askImageCameraScenario(cdp, origin, profile) {
   const file = join(profile, "camera-alternative.png");
   await writeFile(file, solidPng(32, 24, [10, 120, 200]));

@@ -34,6 +34,7 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../../runtime-adapter.js";
 import type { ScriptStorageProvider } from "../../script-storage.js";
+import { collectStorageTransfer } from "../../storage-transfer.js";
 import { CaptureService, SessionCamera, type PlayerDiagnostic } from "../../session-camera.js";
 import {
   PlayerNotices,
@@ -582,6 +583,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     hasScriptStorage: scriptStorage !== undefined,
     canClearScriptStorage,
     clearScriptStorage,
+    /**
+     * The saved values as stored now, with the saved photos they reference, for an export; also during a session, whose
+     * saves count once they are stored. Rejects when storage cannot be read.
+     */
+    exportScriptStorage: () =>
+      scriptStorage
+        ? collectStorageTransfer(scriptStorage, capturedMedia)
+        : Promise.reject(new Error("This script keeps no saved data.")),
     loadScriptStorage,
     scriptStorageOptions,
     resolveAsset,

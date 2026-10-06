@@ -83,6 +83,11 @@ export function isCapturedMediaReference(value: string): boolean {
   return value.startsWith(REFERENCE_PREFIX);
 }
 
+/** Whether a string has the exact shape of a reference a store hands out, so it can name stored media. */
+export function isWellFormedCapturedMediaReference(value: string): boolean {
+  return REFERENCE_PATTERN.test(value);
+}
+
 /**
  * Captured media of one Player and its durable backing. A capture starts as session media, held in memory for the
  * live Player and same-page restore. It becomes durable only when a saved script value references it, through
@@ -184,6 +189,16 @@ export class CapturedMediaStore {
   /** The record, reading it from storage when needed. */
   async read(reference: string): Promise<CapturedMediaRecord | null> {
     return this.#records.get(reference) ?? this.#load(reference);
+  }
+
+  /**
+   * The record when it is stored durably, reading it from storage when needed; `null` for session media that no save
+   * stored, and for a reference this store cannot resolve.
+   */
+  async readDurable(reference: string): Promise<CapturedMediaRecord | null> {
+    if (this.#durable.has(reference)) return this.#records.get(reference) ?? null;
+    if (this.#records.has(reference)) return null;
+    return this.#load(reference);
   }
 
   /** A browser URL for display or playback; starts reading an unknown stored reference. */
