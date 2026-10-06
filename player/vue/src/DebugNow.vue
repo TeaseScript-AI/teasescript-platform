@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import { useElementVisibility } from "@vueuse/core";
 import { ChevronDown, ChevronUp } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,6 @@ import { debugStageImageStatus, type DebugStageImageStatus } from "../../present
 import {
   playerRuntimeDebugNow,
   playerRuntimeMedia,
-  playerRuntimeMediaOrigin,
   type PlayerDebugSourceLocation,
   type PlayerDebugWaitKind,
 } from "../../runtime-adapter.js";
@@ -20,14 +20,22 @@ import type { PlayerSessionHost } from "./usePlayerSession";
 // Debug's Now view (DEBUGGER.md "Player Debug"): where the script is, what the Stage and media show, and every timer,
 // derived from canonical state and the Stage's own load reports while it is mounted. Paths are the authored ones, never
 // URLs; a captured or chosen image has no path.
-const props = defineProps<{ player: PlayerSessionHost; stageCovered: boolean }>();
+const props = defineProps<{
+  player: PlayerSessionHost;
+  /** Whether the camera view covers the Stage image. */
+  stageCovered: boolean;
+  /** Whether the development preview shows a Stage media fixture instead of the session's image. */
+  stageOverridden: boolean;
+}>();
+const root = ref<HTMLElement | null>(null);
 
 const now = computed(() => {
   const session = props.player.session.value;
   return session && playerRuntimeDebugNow(session, props.player.sceneTimeMs.value);
 });
-// Remaining timer times tick like the timer rail.
-props.player.refreshSceneTimeWhile(() => (now.value?.timers.length ?? 0) > 0);
+// Remaining timer times tick like the timer rail, while the tab is on screen.
+const onScreen = useElementVisibility(root);
+props.player.refreshSceneTimeWhile(() => onScreen.value && (now.value?.timers.length ?? 0) > 0);
 
 const at = (location: PlayerDebugSourceLocation) => `${location.path}:${location.line}`;
 const waitLabels: Record<PlayerDebugWaitKind, string> = {
@@ -52,6 +60,7 @@ const callLabels = {
 const imageLabels: Record<DebugStageImageStatus, string> = {
   hidden: "Hidden",
   unresolved: "Unresolved path",
+  overridden: "Replaced by a preview fixture",
   covered: "Covered by camera or video",
   failed: "Load failed",
   displayed: "Displayed",
@@ -68,6 +77,7 @@ const stage = computed(() => {
   const status = debugStageImageStatus({
     image,
     source: image === null ? null : props.player.resolveAsset(image),
+    overridden: props.stageOverridden,
     covered: props.stageCovered || stageVideo.value !== null,
     loaded: observed.loaded,
     failed: observed.failed,
@@ -78,23 +88,21 @@ const stage = computed(() => {
     problem: status === "unresolved" || status === "failed",
   };
 });
-const media = computed(() => {
-  const session = props.player.session.value;
-  if (session === null) return [];
-  return playerRuntimeMedia(session.snapshot).media.map((projection) => ({
-    id: projection.mediaId,
-    kind: projection.media === "audio" ? "Audio" : "Video",
-    source: projection.source,
-    status: !projection.loaded ? "Loading" : projection.state === "running" ? "Playing" : "Paused",
-    playhead: `${(projection.playheadMs / 1000).toFixed(1)} s`,
-    startedAt: playerRuntimeMediaOrigin(session, projection.mediaId)?.location ?? null,
-  }));
-});
+const media = computed(() =>
+  (now.value?.media ?? []).map((item) => ({
+    id: item.mediaId,
+    kind: item.media === "audio" ? "Audio" : "Video",
+    source: item.source,
+    status: !item.loaded ? "Loading" : item.state === "running" ? "Playing" : "Paused",
+    playhead: `${(item.playheadMs / 1000).toFixed(1)} s`,
+    startedAt: item.startedAt,
+  })),
+);
 const seconds = (milliseconds: number) => `${Math.ceil(milliseconds / 1000)} s`;
 </script>
 
 <template>
-  <div class="grid gap-3" data-debug-now>
+  <div ref="root" class="grid gap-3" data-debug-now>
     <p v-if="!now" class="text-muted-foreground">No session yet.</p>
     <template v-else>
       <dl class="grid gap-1">
@@ -147,7 +155,7 @@ const seconds = (milliseconds: number) => `${Math.ceil(milliseconds / 1000)} s`;
           <li v-for="item in media" :key="item.id" class="min-w-0 break-words">
             {{ item.kind }} <span class="break-all font-mono">{{ item.source }}</span>
             <Badge variant="outline" class="ms-1">{{ item.status }} · {{ item.playhead }}</Badge>
-            <span v-if="item.startedAt" class="block text-muted-foreground">
+            <span class="block text-muted-foreground">
               from <span class="font-mono">{{ at(item.startedAt) }}</span>
             </span>
           </li>
@@ -170,7 +178,8 @@ const seconds = (milliseconds: number) => `${Math.ceil(milliseconds / 1000)} s`;
         <CollapsibleContent>
           <ul class="grid gap-1 ps-2" data-debug-now-timers>
             <li v-for="timer in now.timers" :key="timer.actionId" class="min-w-0 break-words">
-              {{ timer.label ?? (timer.blocking ? "Blocking timer" : "Timer") }} · {{ timer.display }} ·
+              {{ timer.blocking ? "Blocking timer" : "Async timer" }}<template v-if="timer.label">
+                “{{ timer.label }}”</template> · {{ timer.display }} ·
               {{ timer.state }}{{ timer.repeat ? " · repeats" : "" }} · {{ seconds(timer.remainingMs) }} left
               <span class="block text-muted-foreground">
                 from <span class="font-mono">{{ at(timer.startedAt) }}</span>

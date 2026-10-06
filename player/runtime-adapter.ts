@@ -478,6 +478,18 @@ export interface PlayerDebugTimer {
   readonly startedAt: PlayerDebugSourceLocation;
 }
 
+/** One active audio or video instance, with the statement that started it. */
+export interface PlayerDebugMedia {
+  readonly mediaId: number;
+  readonly media: "audio" | "video";
+  readonly source: string;
+  /** `false` until the Player reported its load. */
+  readonly loaded: boolean;
+  readonly state: "running" | "paused";
+  readonly playheadMs: number;
+  readonly startedAt: PlayerDebugSourceLocation;
+}
+
 /** Player Debug's view of where the session is, derived on demand from canonical state; see `playerRuntimeDebugNow`. */
 export interface PlayerRuntimeDebugNow {
   /** Where execution continues, or `null` once the session ended or failed. */
@@ -489,6 +501,7 @@ export interface PlayerRuntimeDebugNow {
   } | null;
   readonly calls: readonly PlayerDebugCall[];
   readonly timers: readonly PlayerDebugTimer[];
+  readonly media: readonly PlayerDebugMedia[];
 }
 
 function debugLocation(
@@ -527,7 +540,7 @@ function debugWaitKind(
 
 /**
  * Where the session is, for Player Debug's Now view at display scene time `nowMs`: the next statement, the statement
- * whose foreground action it waits for, the active calls, and every timer, hidden ones included. Paths are package
+ * whose foreground action it waits for, the active calls, every timer, hidden ones included, and the active media. Paths are package
  * paths, relative to the folder of the entry script. Read-only and derived on demand; it adds nothing to the session.
  */
 export function playerRuntimeDebugNow(
@@ -605,6 +618,21 @@ export function playerRuntimeDebugNow(
     });
   }
 
+  const mediaOwners = new Map<number, number>();
+  for (const action of snapshot.backgroundActions)
+    if (action.kind === "media") mediaOwners.set(action.media.mediaId, action.owningInstruction);
+  const media = mediaPlaybackProjection(snapshot).map((projection) =>
+    Object.freeze({
+      mediaId: projection.mediaId,
+      media: projection.media,
+      source: projection.source,
+      loaded: projection.loaded,
+      state: projection.state,
+      playheadMs: projection.playheadMs,
+      startedAt: debugLocation(plan, mediaOwners.get(projection.mediaId)!),
+    }),
+  );
+
   return Object.freeze({
     next: active ? debugLocation(plan, snapshot.nextInstruction) : null,
     waitingAt:
@@ -620,6 +648,7 @@ export function playerRuntimeDebugNow(
         ? timers.sort((left, right) => left.actionId - right.actionId).map((t) => Object.freeze(t))
         : [],
     ),
+    media: Object.freeze(active ? media : []),
   });
 }
 

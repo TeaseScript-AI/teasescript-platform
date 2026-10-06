@@ -40,23 +40,25 @@ export function debugCountdownText(
 
 /** The state of the Stage image in Player Debug's Now view. */
 export type DebugStageImageStatus =
-  "hidden" | "unresolved" | "covered" | "failed" | "displayed" | "loading";
+  "hidden" | "unresolved" | "overridden" | "covered" | "failed" | "displayed" | "loading";
 
 /**
  * The Stage image's state from the session's image, its resolved source, and what the Stage reports about the source
- * it shows: hidden without an image, unresolved when the host has no file for it, covered while the camera view or a
- * video occupies the Stage, then failed, displayed, or still loading. The Stage's reports count only for the source the
- * image resolves to now.
+ * it shows: hidden without an image, unresolved when the host has no file for it, overridden while the development
+ * preview shows a fixture instead, covered while the camera view or a video occupies the Stage, then failed, displayed,
+ * or still loading. The Stage's reports count only for the source the image resolves to now.
  */
 export function debugStageImageStatus(stage: {
   readonly image: string | null;
   readonly source: string | null;
+  readonly overridden: boolean;
   readonly covered: boolean;
   readonly loaded: string | null;
   readonly failed: string | null;
 }): DebugStageImageStatus {
   if (stage.image === null) return "hidden";
   if (stage.source === null) return "unresolved";
+  if (stage.overridden) return "overridden";
   if (stage.covered) return "covered";
   if (stage.failed === stage.source) return "failed";
   if (stage.loaded === stage.source) return "displayed";

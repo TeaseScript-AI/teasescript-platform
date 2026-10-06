@@ -2174,6 +2174,24 @@ async function markupLinkChecks(page) {
 // keyboard and touch; explanations stay collapsed until their label opens them, several at once; jumps go to the Debug
 // log and an invisible live region, never the transcript or notices; a badge shows auto-skip; and `time=skip` only
 // sets the initial state. This group replaces the development scenario with its own script.
+// Debug's Now tab names a development Stage fixture as such, and the session's image again once Runtime is selected.
+async function debugNowOverrideChecks(page) {
+  const base = page.url().split("?")[0];
+  await page.goto(`${base}?dev`);
+  const status = (value) => page.locator(`[data-debug-now-image] [data-status="${value}"]`);
+  await page.locator('[data-launcher] button[aria-label="Debug"]').click();
+  await page.locator('[data-tool="Debug"] [data-panel-pin]').click();
+  await status("displayed").waitFor({ timeout: 5_000 });
+  await page.locator("[data-launcher] button").filter({ hasText: "Visual Lab" }).click();
+  const fixture = page.getByLabel("Stage media fixture");
+  const fixtures = await fixture.locator("option").allInnerTexts();
+  await fixture.selectOption(fixtures.find((name) => name !== "Runtime"));
+  await status("overridden").waitFor({ timeout: 5_000 });
+  await fixture.selectOption("Runtime");
+  await status("displayed").waitFor({ timeout: 5_000 });
+  return "PASS Debug Now names a Stage fixture override and the session image after Runtime";
+}
+
 async function developmentTimeChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
@@ -2398,6 +2416,7 @@ const groups = [
   directDemoLatestChecks,
   markupLinkChecks,
   developmentTimeChecks,
+  debugNowOverrideChecks,
   timerChecks,
   transcriptNativeWheelChecks,
   contentContainmentChecks,

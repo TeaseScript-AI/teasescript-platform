@@ -21,6 +21,8 @@ defineProps<{
   player: PlayerSessionHost;
   /** Whether the camera view covers the Stage image. */
   stageCovered: boolean;
+  /** Whether the development preview shows a Stage media fixture instead of the session's image. */
+  stageOverridden: boolean;
 }>();
 const active = defineModel<boolean>("active", { required: true });
 </script>
@@ -104,13 +106,18 @@ const active = defineModel<boolean>("active", { required: true });
       </div>
     </section>
     <Tabs default-value="now">
-      <TabsList class="w-full">
-        <TabsTrigger value="now">Now</TabsTrigger>
-        <TabsTrigger value="log">Log</TabsTrigger>
-        <TabsTrigger v-if="$slots.storage" value="storage">Storage</TabsTrigger>
+      <TabsList class="h-auto w-full">
+        <TabsTrigger value="now" class="min-h-11">Now</TabsTrigger>
+        <TabsTrigger value="log" class="min-h-11">Log</TabsTrigger>
+        <TabsTrigger v-if="$slots.storage" value="storage" class="min-h-11">Storage</TabsTrigger>
       </TabsList>
       <TabsContent value="now">
-        <DebugNow v-if="time" :player="player" :stage-covered="stageCovered" />
+        <DebugNow
+          v-if="time"
+          :player="player"
+          :stage-covered="stageCovered"
+          :stage-overridden="stageOverridden"
+        />
         <p v-else class="text-muted-foreground">Debug is off.</p>
       </TabsContent>
       <!-- Kept mounted, so new lines arrive while another tab shows. -->

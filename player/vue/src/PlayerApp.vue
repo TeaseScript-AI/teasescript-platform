@@ -196,6 +196,7 @@ async function toggleFullscreen() {
         :log="debug.log.value"
         :player="player"
         :stage-covered="stageCamera !== null"
+        :stage-overridden="media !== undefined"
       >
         <template v-if="$slots['debug-storage']" #storage>
           <slot name="debug-storage" />

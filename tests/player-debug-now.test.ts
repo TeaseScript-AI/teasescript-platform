@@ -7,6 +7,7 @@ import {
   createPlayerRuntimeSession,
   observePlayerRuntimeTime,
   playerRuntimeDebugNow,
+  reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
 
@@ -94,7 +95,7 @@ test("Now names the next statement, the wait's statement, and the calls across n
   session = press(observe(session, 5_000));
   assert.equal(session.snapshot.status, "halted");
   now = playerRuntimeDebugNow(session, 6_000);
-  assert.deepEqual(now, { next: null, waitingAt: null, calls: [], timers: [] });
+  assert.deepEqual(now, { next: null, waitingAt: null, calls: [], timers: [], media: [] });
 });
 
 test("Now lists blocking, suspended and paused timers and the block that interrupted the script", () => {
@@ -135,7 +136,14 @@ test("Now lists blocking, suspended and paused timers and the block that interru
 });
 
 test("the Stage image state follows the resolved source and what the Stage reports for it", () => {
-  const stage = { image: "a.png", source: "/a.png", covered: false, loaded: null, failed: null };
+  const stage = {
+    image: "a.png",
+    source: "/a.png",
+    overridden: false,
+    covered: false,
+    loaded: null,
+    failed: null,
+  };
   assert.equal(debugStageImageStatus({ ...stage, image: null, source: null }), "hidden");
   assert.equal(debugStageImageStatus({ ...stage, source: null }), "unresolved");
   assert.equal(debugStageImageStatus(stage), "loading");
@@ -144,4 +152,42 @@ test("the Stage image state follows the resolved source and what the Stage repor
   // A report about another source, such as the image this one replaced, does not count.
   assert.equal(debugStageImageStatus({ ...stage, loaded: "/old.png" }), "loading");
   assert.equal(debugStageImageStatus({ ...stage, loaded: "/a.png", covered: true }), "covered");
+  // A development Stage fixture shows instead: its own load says nothing about the session's image.
+  assert.equal(debugStageImageStatus({ ...stage, overridden: true }), "overridden");
+});
+
+test("Now lists each active sound with the statement that started it", () => {
+  let session = createPlayerRuntimeSession({
+    files: [
+      {
+        path: "main.tease",
+        source: 'call "rooms/hall.tease"\nlet done = showButton "Done"\nexit\n',
+      },
+      {
+        path: "rooms/hall.tease",
+        source:
+          'playAudio(file: "sounds/a.wav", async: true, repeat: true)\nplayAudio(file: "sounds/b.wav", async: true)\nend\n',
+      },
+    ],
+  });
+  const sounds = () =>
+    playerRuntimeDebugNow(session, 0).media.map(({ source, loaded, startedAt }) => ({
+      source,
+      loaded,
+      startedAt,
+    }));
+  // An async play waits for its load before the next statement runs.
+  assert.deepEqual(sounds(), [
+    { source: "sounds/a.wav", loaded: false, startedAt: location("rooms/hall.tease", 1) },
+  ]);
+  const loaded = reportPlayerRuntimeMediaLoad(session, session.snapshot.nextMediaId - 1, {
+    kind: "loaded",
+    durationMs: 10_000,
+  });
+  assert.equal(loaded.outcome.kind, "accepted");
+  session = loaded.session;
+  assert.deepEqual(sounds(), [
+    { source: "sounds/a.wav", loaded: true, startedAt: location("rooms/hall.tease", 1) },
+    { source: "sounds/b.wav", loaded: false, startedAt: location("rooms/hall.tease", 2) },
+  ]);
 });

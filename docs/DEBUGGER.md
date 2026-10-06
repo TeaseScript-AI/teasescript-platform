@@ -43,9 +43,9 @@ auto-skip and ends a jump at its next yield. The time controls stand above the t
     called files, and timer, media cue, or permanent-button blocks, innermost first, each with its call site or the
     position it interrupted.
   - The **Stage image** shows its authored path and state: Hidden, Unresolved path (the host has no file for it), Loading,
-    Displayed, Load failed (the browser cannot load or decode it), or Covered by camera or video. Only the Stage's
-    reports for the image element and source it shows now count. A captured or chosen image has no path. Which
-    statement set the image is not recorded yet and says so.
+    Displayed, Load failed (the browser cannot load or decode it), or Covered by camera or video; in the development
+    preview, Replaced by a preview fixture. Only the Stage's reports for the image element and source it shows now
+    count. A captured or chosen image has no path. Which statement set the image is not recorded yet and says so.
   - **Audio and video** list every active instance with its authored path, Loading, Playing, or Paused, its reported
     playhead, and the statement that started it.
   - A collapsed **Timers** list shows every timer, hidden ones included: blocking or async, display, running, paused, or
