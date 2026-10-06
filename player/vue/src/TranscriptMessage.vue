@@ -90,7 +90,12 @@ const avatarStyle = computed(() => ({
         </AvatarFallback>
       </Avatar>
     </MessageAvatar>
-    <MessageContent :class="explainable || backable ? 'flex-row items-end' : undefined">
+    <!-- The player's answer stays at the end of the row, with Back to here before it. -->
+    <MessageContent
+      :class="
+        backable ? 'flex-row items-end justify-end' : explainable ? 'flex-row items-end' : undefined
+      "
+    >
       <Button
         v-if="backable"
         variant="ghost"
