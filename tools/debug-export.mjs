@@ -10,8 +10,13 @@ import { isMainThread, parentPort, Worker, workerData } from "node:worker_thread
 import { gunzipSync } from "node:zlib";
 
 const exports = await import(new URL("../dist/player/debug-export.js", import.meta.url).href);
-const { DEBUG_EXPORT_MAX_JSON_BYTES, DebugExportError, parseDebugExport, replayDebugExport } =
-  exports;
+const {
+  DEBUG_EXPORT_MAX_JSON_BYTES,
+  DebugExportError,
+  debugExportJson,
+  parseDebugExport,
+  replayDebugExport,
+} = exports;
 
 const EXIT = {
   reproduced: 0,
@@ -213,10 +218,10 @@ function describe(exported, values) {
     if (replay !== null)
       for (const operation of replay.operations)
         lines.push(
-          `call ${operation.seq} ${operation.kind} ${JSON.stringify(operation.args)} -> ${operation.outcome ?? `threw ${operation.thrown}`}`,
+          `call ${operation.seq} ${operation.kind} ${debugExportJson(operation.args)} -> ${operation.outcome ?? `threw ${operation.thrown}`}`,
         );
     for (const [name, section] of Object.entries(sections))
-      lines.push(`${name}: ${JSON.stringify(section, null, 2)}`);
+      lines.push(`${name}: ${debugExportJson(section)}`);
   }
   return lines.join("\n");
 }

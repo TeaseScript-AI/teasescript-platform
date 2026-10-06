@@ -11,6 +11,7 @@ import {
   debugBuildRevisions,
   debugExportFile,
   debugExportFileName,
+  debugExportJson,
   DebugExportError,
   parseDebugExport,
   replayDebugExport,
@@ -111,7 +112,8 @@ class Recording {
     this.operations.push({
       seq: this.operations.length + 1,
       kind,
-      args: structuredClone(args),
+      // A copy without recursion, as the recorder makes it.
+      args: JSON.parse(debugExportJson(args)),
       admissionQueries,
       outcome,
       events: { first: events[0]?.sequence ?? null, count: events.length },
@@ -290,7 +292,7 @@ test("a replay reports the first call whose result differs, and a final state th
   );
   assert.ok(
     refused.kind === "diverged" &&
-      /outcome completed, recorded invalidPayload/.test(refused.reason),
+      /outcome completed, recorded outcome invalidPayload/.test(refused.reason),
   );
 
   // Every call matches, but the exported state is not where they lead.
@@ -450,7 +452,7 @@ test("an export is validated as untrusted data, and another version is unsupport
   invalid(
     changed(["selection"], { ...noneSelected }),
     "invalid",
-    /replay is present although replay data was not selected/,
+    /present although replay data was not selected/,
   );
   invalid(
     changed(["checkpointRole"], null),
@@ -568,10 +570,140 @@ test("the offline tool inspects without values, replays in a worker, and refuses
     assert.equal(bombResult.status, 4);
     assert.match(bombResult.stdout, /expands beyond 1048576 bytes/);
 
+    // Deeply nested untrusted values are refused or printed, never a crash of the tool.
+    const deepVersion = join(scratch, "deep-version.teasedebug.json");
+    writeFileSync(
+      deepVersion,
+      `{"format":"teasescript-debug-export","version":${"[".repeat(30_000)}0${"]".repeat(30_000)}}`,
+    );
+    const deepVersionResult = cli("inspect", deepVersion);
+    assert.equal(deepVersionResult.status, 3, deepVersionResult.stderr);
+    let nested: Json = 1;
+    for (let level = 0; level < 30_000; level += 1) nested = [nested];
+    const deepSections = await write("deep-sections.teasedebug.json.gz", {
+      ...halted,
+      selection: noneSelected,
+      checkpoint: null,
+      checkpointRole: null,
+      replay: null,
+      sections: { storage: nested },
+    });
+    const deepSectionsResult = cli("inspect", deepSections, "--values");
+    assert.equal(deepSectionsResult.status, 0, deepSectionsResult.stderr);
+    assert.match(deepSectionsResult.stdout, /storage: \[\[\[/);
+
     // A replay that does not finish in time is stopped.
     assert.equal(cli("replay", failed, "--timeout", "0.001").status, 5);
     assert.equal(cli("replay").status, 64);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("a recorded call that threw is compared like any other, and a failed anchor reproduces nothing", async () => {
+  const compiled = compileProject([{ path: "main.tease", source: 'say "hello"\nexit' }]);
+  assert.ok(compiled.plan);
+  const plan = compiled.plan;
+  // An event counter at its limit makes the next run throw without changing the state.
+  const anchor = {
+    ...createFreshRuntimeSnapshot(plan),
+    nextEventSequence: Number.MAX_SAFE_INTEGER,
+  };
+  assert.throws(() => run(plan, anchor));
+  const thrown: DebugOperation = {
+    seq: 1,
+    kind: "run",
+    args: [{}],
+    admissionQueries: [],
+    outcome: null,
+    events: { first: null, count: 0 },
+    status: "ready",
+    thrown: "RuntimeDataError",
+  };
+  const exported = (operation: DebugOperation): DebugExport => ({
+    ...failedRecording().export(),
+    incident: {
+      kind: "hostError",
+      code: null,
+      path: null,
+      line: null,
+      column: null,
+      hostError: "RuntimeDataError",
+    },
+    checkpoint: createCheckpoint(plan, anchor),
+    replay: { anchorSnapshot: anchor, operations: [operation], complete: true, reason: null },
+  });
+  assert.deepEqual(replayDebugExport(await roundTrip(exported(thrown))), {
+    kind: "reproduced",
+    failure: null,
+    operations: 1,
+  });
+  for (const [change, reason] of [
+    [{ status: "failed" }, /left the session ready, recorded failed/],
+    [{ thrown: "TypeError" }, /threw RuntimeDataError, recorded threw TypeError/],
+    [{ thrown: null, outcome: "ran" }, /threw RuntimeDataError, recorded outcome ran/],
+  ] as const) {
+    const result = replayDebugExport(await roundTrip(exported({ ...thrown, ...change })));
+    assert.ok(result.kind === "diverged" && reason.test(result.reason), JSON.stringify(change));
+  }
+  // A thrown call emits nothing, so a recording that says otherwise is invalid.
+  await assert.rejects(
+    roundTrip(exported({ ...thrown, events: { first: 999, count: 17 } })),
+    /must be empty for a call that threw/,
+  );
+
+  // A session that had already failed at the anchor: neither no calls nor calls that change nothing reproduce it.
+  const failed = new Recording(
+    compileProject([{ path: "main.tease", source: "let zero = 0\nlet result = 1 / zero\nexit" }])
+      .plan!,
+  );
+  assert.equal(failed.snapshot.status, "failed");
+  const afterFailure = failed.export({
+    replay: { anchorSnapshot: failed.snapshot, operations: [], complete: true, reason: null },
+  });
+  assert.equal(replayDebugExport(await roundTrip(afterFailure)).kind, "incomplete");
+  const noOp = new Recording(failed.plan);
+  const observed = observeTime(noOp.plan, noOp.snapshot, 10, []);
+  const afterNoOp = noOp.export({
+    replay: {
+      anchorSnapshot: noOp.snapshot,
+      operations: [
+        {
+          seq: 1,
+          kind: "observeTime",
+          args: [10, []],
+          admissionQueries: [],
+          outcome: observed.outcome.kind,
+          events: { first: observed.events[0]?.sequence ?? null, count: observed.events.length },
+          status: observed.snapshot.status,
+          thrown: null,
+        },
+      ],
+      complete: true,
+      reason: null,
+    },
+    checkpoint: createCheckpoint(noOp.plan, observed.snapshot),
+  });
+  assert.equal(replayDebugExport(await roundTrip(afterNoOp)).kind, "incomplete");
+});
+
+test("deeply nested values a script can save are written, read, and replayed without recursion", async () => {
+  const depth = 5_000;
+  const compiled = compileProject([
+    {
+      path: "main.tease",
+      source: `let nested = ${"[".repeat(depth)}1${"]".repeat(depth)}\nsave nested as "deep"\nlet answer = askText "Answer"\nexit`,
+    },
+  ]);
+  assert.deepEqual(compiled.diagnostics, []);
+  const recording = new Recording(compiled.plan!);
+  // An answer request carrying a nested extra field, which the engine accepts as JSON-safe data.
+  let extra: Json = 0;
+  for (let level = 0; level < depth; level += 1) extra = [extra];
+  recording.answer({ kind: "submittedText", submittedText: "done", extra });
+  const exported = recording.export({ sections: { storage: recording.snapshot.scriptStorage } });
+  for (const gzip of [true, false]) {
+    const read = await roundTrip(exported, gzip);
+    assert.equal(replayDebugExport(read).kind, "reproduced");
   }
 });

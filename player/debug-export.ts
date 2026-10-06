@@ -244,7 +244,7 @@ function* pieces(exported: DebugExport): Generator<string> {
           );
     yield `\n"replay":{"complete":${replay.complete},"reason":${JSON.stringify(replay.reason)},"anchorSnapshot":${anchor},"operations":[`;
     for (const [index, operation] of replay.operations.entries())
-      yield `${index === 0 ? "\n" : ",\n"}${JSON.stringify(operation)}`;
+      yield `${index === 0 ? "\n" : ",\n"}${serializeValidatedRuntimeJson(operation)}`;
     yield "]},";
   }
   yield `\n"photos":[`;
@@ -258,11 +258,29 @@ function* pieces(exported: DebugExport): Generator<string> {
       yield '"}';
     }
   }
-  yield `],\n"sections":${JSON.stringify(sections)}}\n`;
+  yield `],\n"sections":${serializeValidatedRuntimeJson(sections)}}\n`;
+}
+
+/** JSON text of plain data from an export, such as recorded arguments, written without recursion. */
+export function debugExportJson(value: unknown): string {
+  return serializeValidatedRuntimeJson(value);
 }
 
 /** Reads a debug export's JSON as untrusted data: every field, the checkpoint and anchor through checkpoint validation. */
 export function parseDebugExport(json: string): DebugExport {
+  try {
+    return parseDocument(json);
+  } catch (error) {
+    if (error instanceof DebugExportError) throw error;
+    // Untrusted data must be refused, never crash the reader, whatever the validation it met.
+    throw new DebugExportError(
+      "invalid",
+      `The export could not be validated (${error instanceof Error ? error.name : "error"}).`,
+    );
+  }
+}
+
+function parseDocument(json: string): DebugExport {
   let document: unknown;
   try {
     document = JSON.parse(json);
@@ -275,7 +293,7 @@ export function parseDebugExport(json: string): DebugExport {
   if (root["version"] !== DEBUG_EXPORT_VERSION)
     throw new DebugExportError(
       "unsupported",
-      `The export has version ${JSON.stringify(root["version"])}; this tool reads version ${DEBUG_EXPORT_VERSION}. Use a checkout of the build it names.`,
+      `The export has ${typeof root["version"] === "number" ? `version ${root["version"]}` : "no version number"}; this tool reads version ${DEBUG_EXPORT_VERSION}. Use a checkout of the build it names.`,
     );
   exactly(root, "$", [
     "format",
@@ -302,6 +320,9 @@ export function parseDebugExport(json: string): DebugExport {
     root["checkpoint"] === null ? null : restore(root["checkpoint"], "$.checkpoint", build);
   if ((checkpoint === null) !== (checkpointRole === null))
     fail("$.checkpointRole", "must be null exactly when there is no checkpoint");
+  // The checkpoint holds the same state as replay data, so it needs the same consent.
+  if (checkpoint !== null && !selection.replay)
+    fail("$.checkpoint", "is present although replay data was not selected");
   const replay = parseReplay(root["replay"], checkpoint, checkpointRole, build);
   if (replay !== null && !selection.replay)
     fail("$.replay", "is present although replay data was not selected");
@@ -478,6 +499,8 @@ function parseOperation(value: unknown, path: string, index: number): DebugOpera
   const thrown = nullableString(operation["thrown"], `${path}.thrown`);
   if ((outcome === null) === (thrown === null))
     fail(path, "must have either an outcome or a thrown error");
+  if (thrown !== null && eventCount > 0)
+    fail(`${path}.events`, "must be empty for a call that threw");
   return {
     seq,
     kind,
@@ -626,6 +649,7 @@ export function replayDebugExport(exported: DebugExport): DebugReplayResult {
     return { kind: "incomplete", reason: replay.reason ?? "The recorded calls are incomplete." };
   const plan = checkpoint.plan;
   let snapshot = replay.anchorSnapshot ?? checkpoint.snapshot;
+  const failedAtAnchor = snapshot.status === "failed";
   for (const operation of replay.operations) {
     const queries = [...operation.admissionQueries];
     let unexpected: string | null = null;
@@ -639,57 +663,39 @@ export function replayDebugExport(exported: DebugExport): DebugReplayResult {
         return query.result;
       },
     };
-    let result: { snapshot: RuntimeSnapshot; events: readonly InterpreterEvent[]; outcome: string };
+    // A call that throws changes nothing and emits nothing; every recorded field is compared either way.
+    let actual: {
+      readonly snapshot: RuntimeSnapshot;
+      readonly events: readonly InterpreterEvent[];
+      readonly outcome: string | null;
+      readonly thrown: string | null;
+    };
     try {
-      result = dispatch(plan, snapshot, operation, capturedMedia);
+      actual = { ...dispatch(plan, snapshot, operation, capturedMedia), thrown: null };
     } catch (error) {
-      const name = error instanceof Error ? error.name : "Error";
-      if (operation.thrown === name) continue;
-      return diverged(
-        plan,
+      actual = {
         snapshot,
-        operation,
-        `threw ${name}, recorded ${describeRecorded(operation)}`,
-      );
+        events: [],
+        outcome: null,
+        thrown: error instanceof Error ? error.name : "Error",
+      };
     }
-    if (operation.thrown !== null)
-      return diverged(
-        plan,
-        snapshot,
-        operation,
-        `returned ${result.outcome}, recorded threw ${operation.thrown}`,
-      );
-    if (unexpected !== null) return diverged(plan, result.snapshot, operation, unexpected);
-    if (queries.length > 0)
-      return diverged(
-        plan,
-        result.snapshot,
-        operation,
-        `${queries.length} recorded media question(s) were not asked`,
-      );
-    if (result.outcome !== operation.outcome)
-      return diverged(
-        plan,
-        result.snapshot,
-        operation,
-        `outcome ${result.outcome}, recorded ${operation.outcome}`,
-      );
-    const first = result.events[0]?.sequence ?? null;
-    if (result.events.length !== operation.events.count || first !== operation.events.first)
-      return diverged(
-        plan,
-        result.snapshot,
-        operation,
-        `emitted ${result.events.length} event(s) from ${first}, recorded ${operation.events.count} from ${operation.events.first}`,
-      );
-    if (result.snapshot.status !== operation.status)
-      return diverged(
-        plan,
-        result.snapshot,
-        operation,
-        `left the session ${result.snapshot.status}, recorded ${operation.status}`,
-      );
-    snapshot = result.snapshot;
+    const first = actual.events[0]?.sequence ?? null;
+    // An unrecorded store question explains everything after it, so it is reported first.
+    const difference =
+      unexpected !== null
+        ? unexpected
+        : actual.thrown !== operation.thrown || actual.outcome !== operation.outcome
+          ? `${describe(actual)}, recorded ${describe(operation)}`
+          : queries.length > 0
+            ? `${queries.length} recorded media question(s) were not asked`
+            : actual.events.length !== operation.events.count || first !== operation.events.first
+              ? `emitted ${actual.events.length} event(s) from ${first}, recorded ${operation.events.count} from ${operation.events.first}`
+              : actual.snapshot.status !== operation.status
+                ? `left the session ${actual.snapshot.status}, recorded ${operation.status}`
+                : null;
+    if (difference !== null) return diverged(plan, actual.snapshot, operation, difference);
+    snapshot = actual.snapshot;
   }
   if (exported.checkpointRole === "current") {
     const replayed = serializeValidatedRuntimeJson(createCheckpoint(plan, snapshot).snapshot);
@@ -701,11 +707,26 @@ export function replayDebugExport(exported: DebugExport): DebugReplayResult {
         location: location(plan, snapshot),
       };
   }
+  // Only a recorded call that reaches the failure reproduces it; a failed anchor is evidence to read, not to replay.
+  if (failedAtAnchor)
+    return {
+      kind: "incomplete",
+      reason:
+        "The session had already failed at the replay anchor, so no recorded call reaches the failure.",
+    };
   return {
     kind: "reproduced",
     failure: snapshot.failure === null ? null : location(plan, snapshot),
     operations: replay.operations.length,
   };
+}
+
+/** A call's result as the replay report names it. */
+function describe(result: {
+  readonly outcome: string | null;
+  readonly thrown: string | null;
+}): string {
+  return result.thrown === null ? `outcome ${result.outcome}` : `threw ${result.thrown}`;
 }
 
 function dispatch(
@@ -739,10 +760,6 @@ function withOutcome(result: {
   outcome: { kind: string };
 }) {
   return { snapshot: result.snapshot, events: result.events, outcome: result.outcome.kind };
-}
-
-function describeRecorded(operation: DebugOperation): string {
-  return operation.thrown === null ? `outcome ${operation.outcome}` : `threw ${operation.thrown}`;
 }
 
 function diverged(
