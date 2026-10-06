@@ -45,3 +45,11 @@ def joinDecks = { first, second, offset ->
 def labels = ["< Previous", "Next >"]
 labels[2] = "Exit"
 show("Decks ${joinDecks([1, 2], [3, 4], 2).size()} ${labels.size()}")
+// A list filled from its end, or past its end, gets padding up to the position, as Groovy padded it with null: 0 where
+// nothing compares its elements with null, and null where something does.
+def slots = []
+for (int k = 2; k >= 0; k--) slots[k] = k * 10
+def seats = []
+seats[1] = "Ann"
+if (seats[0] == null) show("Seat 0 is free")
+show("Slots ${slots.size()} ${seats.size()}")

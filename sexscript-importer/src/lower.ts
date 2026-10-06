@@ -228,6 +228,8 @@ interface LowerContext {
   assignedValues: ReadonlyMap<string, readonly AstNode[]>;
   /** The values each binding is updated to by `+=`, `-=`, `*=`, and `/=` (compoundValues). */
   compoundValues: ReadonlyMap<string, readonly AstNode[]>;
+  /** Lists whose elements the code compares with null (nullElementLists), by binding. */
+  nullElementLists: ReadonlySet<string>;
   /** How the maps are used, by binding: dicts (#536), object fields, value and key types. */
   mapUses: MapUses;
   /** Binding keys of variables that closures declare (bindingKeys). */
@@ -1198,6 +1200,7 @@ export function lowerParsedFile(
     parameterBindings: new Set(),
     assignedValues: new Map(),
     compoundValues: new Map(),
+    nullElementLists: new Set(),
     mapUses: mapUsesOf([]),
     bindings: new Map(),
     integerVariables: new Set(),
@@ -1287,6 +1290,8 @@ export function lowerParsedFile(
     context.parameterBindings = parameterBindings(body, file.sourceName);
     context.assignedValues = assignedValues(body, context.bindings);
     context.compoundValues = compoundValues(body, context.bindings);
+    context.nullElementLists = nullElementLists(body, context.bindings);
+    markSequentialWrites(body, context);
     context.constantInitializers = declarationInitializers(body, context.types);
     context.integerVariables = integerVariables(body, context.bindings);
     context.integerArrays = integerArrays(body, context.bindings);
@@ -2009,6 +2014,7 @@ function lowerHelperMethod(
     ),
     assignedValues: assignedValues(body, new Map()),
     compoundValues: compoundValues(body, new Map()),
+    nullElementLists: new Set(),
     mapUses: baseContext.mapUses,
     bindings: new Map(),
     integerVariables: new Set(),
@@ -5150,7 +5156,7 @@ function lowerAssignment(
     ];
   }
   const grown =
-    operator === "=" ? growingListWrite(targetNode, target, value, span, context) : null;
+    operator === "=" ? growingListWrite(targetNode, right, target, value, span, context) : null;
   if (grown !== null) return grown;
   if (operator === "*=" || operator === "/=") {
     if (variableTarget === null) {
@@ -11647,6 +11653,192 @@ function closureContains(closure: AstNode, node: AstNode): boolean {
   return found;
 }
 
+/** Positions of list writes that count up with the writes (markSequentialWrites), as the `list[i]` target nodes. */
+const sequentialWrites = new WeakSet<AstNode>();
+/** Writes at a literal position that a straight-line block shows to be the list's length, or inside it. */
+const literalAppends = new WeakSet<AstNode>();
+const literalSets = new WeakSet<AstNode>();
+
+/**
+ * Marks the list writes whose position grows by one with each write, so a list that starts empty grows by appending:
+ * a counter that starts at 0, only ever counts up by one, and counts up in the block of the write (`list[n] = x`
+ * beside `n++`), or is the counter of the C-style loop whose body writes at it directly, without a `continue`.
+ */
+function markSequentialWrites(body: AstNode, context: LowerContext): void {
+  const keys = context.bindings;
+  const decremented = new Set<string>();
+  walkAst(body, (node) => {
+    if ((node.kind === "postfix" || node.kind === "prefix") && text(node.operator) === "--") {
+      const key = bindingKey(node.value, keys);
+      if (key !== null) decremented.add(key);
+    }
+  });
+  const isConstant = (node: AstNode | undefined, value: number): boolean =>
+    constantValue(node) === value;
+  const counts = (key: string): boolean =>
+    !decremented.has(key) &&
+    (context.assignedValues.get(key) ?? []).every(
+      (value) => isConstant(value, 0) || isNullConstant(value) || isEmptyGroovyExpression(value),
+    ) &&
+    (context.compoundValues.get(key) ?? []).every(
+      (value) => text(value.operator) === "+" && isConstant(asNode(value.right) ?? undefined, 1),
+    );
+  // The binding an expression counts up by one: `n++`, `++n`, `n += 1`, `n = n + 1`.
+  const countsUp = (expression: AstNode | null): string | null => {
+    if (expression === null) return null;
+    if (
+      (expression.kind === "postfix" || expression.kind === "prefix") &&
+      text(expression.operator) === "++"
+    )
+      return bindingKey(expression.value, keys);
+    if (expression.kind !== "binary") return null;
+    const operator = text(expression.operator);
+    const right = asNode(expression.right);
+    if (operator === "+=" && isConstant(right ?? undefined, 1))
+      return bindingKey(expression.left, keys);
+    const key = operator === "=" ? bindingKey(expression.left, keys) : null;
+    return key !== null &&
+      right?.kind === "binary" &&
+      text(right.operator) === "+" &&
+      bindingKey(right.left, keys) === key &&
+      isConstant(asNode(right.right) ?? undefined, 1)
+      ? key
+      : null;
+  };
+  const expressionOf = (statement: AstNode): AstNode | null =>
+    statement.kind === "expressionStatement" ? asNode(statement.expression) : null;
+  const mark = (statements: readonly AstNode[], counters: Set<string>): void => {
+    for (const statement of statements) {
+      const key = countsUp(expressionOf(statement));
+      if (key !== null) counters.add(key);
+    }
+    // The known lengths of lists in this straight-line block, for writes at literal positions: `a = []`, `a[0] = x`,
+    // `a[1] = y`.
+    const lengths = new Map<string, number>();
+    for (const statement of statements) {
+      const expression = expressionOf(statement);
+      const operator = expression?.kind === "binary" ? text(expression.operator) : null;
+      const assigned =
+        expression?.kind === "declaration" || operator === "=" ? asNode(expression!.right) : null;
+      const target =
+        expression?.kind === "declaration" || operator === "=" ? asNode(expression!.left) : null;
+      const left = target?.kind === "binary" && text(target.operator) === "[" ? target : null;
+      const listKey = left === null ? null : bindingKey(asNode(left.left), keys);
+      const position = left === null ? undefined : constantValue(asNode(left.right) ?? undefined);
+      if (left !== null) {
+        const key = bindingKey(asNode(left.right), keys);
+        if (key !== null && counters.has(key) && counts(key)) sequentialWrites.add(left);
+      }
+      if (listKey !== null && typeof position === "number" && lengths.has(listKey)) {
+        const length = lengths.get(listKey)!;
+        if (position <= length) {
+          (position === length ? literalAppends : literalSets).add(left!);
+          lengths.set(listKey, Math.max(length, position + 1));
+          continue;
+        }
+      }
+      // A list set to a literal has its length; any other statement that may change a list forgets it.
+      const variable = target === null || left !== null ? null : bindingKey(target, keys);
+      if (variable !== null && assigned?.kind === "list") {
+        lengths.set(variable, nodeArray(assigned.items).length);
+        continue;
+      }
+      let calls = false;
+      walkAst(statement, (child) => {
+        if (child.kind === "variable") {
+          const key = bindingKey(child, keys);
+          if (key !== null) lengths.delete(key);
+        } else if (child.kind === "methodCall" && callParts(child)?.inherited === true)
+          calls ||= legacyApiCall(child, context) === null;
+      });
+      if (calls) lengths.clear();
+    }
+  };
+  walkAst(body, (node) => {
+    if (node.kind === "block") mark(nodeArray(node.statements), new Set());
+    if (node.kind !== "for") return;
+    const parts = nodeArray(asNode(node.collection)?.items);
+    const loopBody = asNode(node.body);
+    const counter = parts.length === 3 ? countsUp(parts[2]!) : null;
+    if (counter === null || loopBody === null) return;
+    let skips = false;
+    walkAst(loopBody, (child) => {
+      if (child.kind === "continue") skips = true;
+    });
+    if (!skips)
+      mark(
+        loopBody.kind === "block" ? nodeArray(loopBody.statements) : [loopBody],
+        new Set([counter]),
+      );
+  });
+}
+
+/** Lists whose elements the code compares with null: `list[i] == null`, `list.contains(null)`, `any { e -> e == null }`. */
+function nullElementLists(body: AstNode, keys: BindingKeys): Set<string> {
+  const lists = new Set<string>();
+  const testsNull = (node: AstNode | null): boolean => {
+    let found = false;
+    walkAst(node, (child) => {
+      if (child.kind === "binary" && ["==", "!="].includes(text(child.operator) ?? "")) {
+        if (
+          isNullConstant(asNode(child.left) ?? undefined) ||
+          isNullConstant(asNode(child.right) ?? undefined)
+        )
+          found = true;
+      }
+    });
+    return found;
+  };
+  walkAst(body, (node) => {
+    if (node.kind === "binary" && ["==", "!="].includes(text(node.operator) ?? "")) {
+      for (const [side, other] of [
+        [asNode(node.left), asNode(node.right)],
+        [asNode(node.right), asNode(node.left)],
+      ] as const) {
+        if (
+          side?.kind === "binary" &&
+          text(side.operator) === "[" &&
+          isNullConstant(other ?? undefined)
+        ) {
+          const key = bindingKey(asNode(side.left), keys);
+          if (key !== null) lists.add(key);
+        }
+      }
+    }
+    if (node.kind !== "methodCall") return;
+    const call = callParts(node);
+    const key = bindingKey(asNode(node.object), keys);
+    if (call === null || key === null) return;
+    if (call.name === "contains" && call.arguments.some((argument) => isNullConstant(argument)))
+      lists.add(key);
+    if (
+      ["any", "every", "find", "findAll", "count"].includes(call.name) &&
+      call.arguments.some(testsNull)
+    )
+      lists.add(key);
+  });
+  return lists;
+}
+
+/**
+ * The padding value of a list whose elements have one plain type (0, "", or false), from its elements or else from the
+ * value written; null for any other list.
+ */
+function listPadding(
+  name: string,
+  valueNode: AstNode,
+  context: LowerContext,
+): number | string | boolean | null {
+  // A null among the elements, which nothing compares with null (nullElementLists), leaves the type's empty value.
+  const known = (context.types.listElements?.get(name) ?? UNKNOWN) & ~NULL;
+  const elements =
+    known === (UNKNOWN & ~NULL) ? inferType(valueNode, context.types) & ~NULL : known;
+  if (onlyOf(elements, NUMBER)) return 0;
+  if (onlyOf(elements, STRING)) return "";
+  if (onlyOf(elements, BOOLEAN)) return false;
+  return null;
+}
+
 /**
  * Whether a list write's position is a number: proven so, or arithmetic whose operands are numbers or of unknown type,
  * `join[i + offset]`, since Groovy failed on a list position of another type.
@@ -11670,6 +11862,7 @@ function listGrowthIndex(indexNode: AstNode, context: LowerContext): boolean {
  */
 function growingListWrite(
   targetNode: AstNode,
+  valueNode: AstNode,
   target: IrExpression,
   value: IrExpression,
   span: SourceSpan | null,
@@ -11704,6 +11897,61 @@ function growingListWrite(
     !listGrowthIndex(indexNode, context)
   )
     return null;
+  const list = target.target;
+  // A literal position known to be inside the list is a plain write; one known to be its length appends.
+  if (literalSets.has(targetNode)) return null;
+  if (literalAppends.has(targetNode))
+    return [
+      {
+        kind: "expression",
+        expression: { kind: "methodCall", target: list, name: "add", arguments: [value] },
+        span,
+      },
+    ];
+  // A position that may lie beyond the end, which Groovy padded up to: the list gets padding values first.
+  // A write at the end grows the list by appending where the position counts up with the writes, or is the length of
+  // the literal list the variable starts as.
+  const literalLengths = new Set(
+    literalLists.map((node) => (node.kind === "list" ? nodeArray(node.items).length : -1)),
+  );
+  const literalLength = literalLengths.size === 1 ? [...literalLengths][0]! : null;
+  const appends = sequentialWrites.has(targetNode) || (pastLiteral && position === literalLength);
+  // Padding is null where the code compares the list's elements with null, else the empty value of the elements'
+  // type; a list of elements of unknown type keeps growing by appending.
+  const nullPadding = name !== null && context.nullElementLists.has(key ?? name);
+  const neutral = nullPadding || name === null ? null : listPadding(name, valueNode, context);
+  if (!appends && (nullPadding || neutral !== null)) {
+    const padding: IrExpression = { kind: "literal", value: nullPadding ? null : neutral };
+    addDiagnostic(
+      context,
+      "SX_LIST_PADDING",
+      "warning",
+      nullPadding
+        ? "Groovy grew this list when writing past its end, padding it with null up to the position; the conversion pads it the same way."
+        : `Groovy grew this list when writing past its end, padding it with null up to the position; the conversion pads it with ${JSON.stringify(padding.value)}, which Groovy truth treats like null, since nothing compares its elements with null.`,
+      span,
+    );
+    return [
+      {
+        kind: "while",
+        condition: {
+          kind: "binary",
+          operator: "<=",
+          left: { kind: "property", target: list, name: "length" },
+          right: target.index,
+        },
+        body: [
+          {
+            kind: "expression",
+            expression: { kind: "methodCall", target: list, name: "add", arguments: [padding] },
+            span,
+          },
+        ],
+        span,
+      },
+      { kind: "assign", target, operator: "=", value, span },
+    ];
+  }
   addDiagnostic(
     context,
     "SX_LIST_GROWTH",
@@ -11711,7 +11959,6 @@ function growingListWrite(
     "Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.",
     span,
   );
-  const list = target.target;
   return [
     {
       kind: "if",
