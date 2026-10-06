@@ -151,7 +151,7 @@ test("askForm reports what the compiler can see is wrong", () => {
       'askForm fields: { on: { value: false, label: "On" } }',
       "askForm field 'on': unknown property 'label'.",
     ],
-    ["askForm fields: 5", "'fields:' takes an object of fields"],
+    ["askForm fields: 5", "'fields:' takes an object or dict of fields"],
     // An optional answer may be null, so it needs a place that takes null.
     [
       'askForm fields: { n: { type: "integer", optional: true } }\nlet m: integer = answers.n',
@@ -353,4 +353,166 @@ test("a form checks when it opens that each field answers within the type the co
     ).diagnostics.map((diagnostic) => diagnostic.message),
     ["askForm field 'x': an integer field starts with a whole number (integer), not a number."],
   );
+});
+
+test("a dict of fields keeps its keys and order, labels its buttons by text, and types its answers", () => {
+  const plan = compileValidPlan(
+    [
+      'let toyIds = ["12", "3", "x"]',
+      'let names = dict { "12": "Rope", "3": "Cuffs", "x": "Gag" }',
+      "let toys = dict {}",
+      "for id in toyIds {",
+      '  let owned: boolean = load "toys.${id}", default: false',
+      "  toys[id] = { value: owned, text: names[id] }",
+      "}",
+      'let selected = askForm "Which toys do you own?", fields: toys',
+      'let rope: boolean = selected["12"]',
+      "let levels = dict {}",
+      'for category in ["pain", "speed"] { levels[category] = { value: 5, min: 1, max: 10 } }',
+      'let ratings = askForm("Set levels", fields: levels)',
+      'let pain: integer = ratings["pain"]',
+      "exit",
+    ].join("\n"),
+  );
+  const first = opened(plan);
+  // The keys identify the fields, in the dict's order; `text:` only labels them.
+  assert.deepEqual(
+    first.ui.fields.map((field) => [field.id, field.text]),
+    [
+      ["12", "Rope"],
+      ["3", "Cuffs"],
+      ["x", "Gag"],
+    ],
+  );
+  const toys = submitted(plan, select(plan, first.snapshot, "3", 1)).finished.snapshot;
+  const binding = (snapshot: RuntimeSnapshot, name: string) =>
+    snapshot.frames[0]!.bindings.find((candidate) => candidate.name === name)?.value;
+  assert.deepEqual(binding(toys, "selected"), {
+    kind: "dict",
+    entries: [
+      { key: "12", value: false },
+      { key: "3", value: true },
+      { key: "x", value: false },
+    ],
+  });
+  // The compiler knows the dict's numbers are integers, so a level is a whole number within its bounds.
+  assert.deepEqual(edit(plan, toys, "pain", "2.5").refused, {
+    kind: "invalidPayload",
+    message: "That is wrong. I asked for a whole number.",
+  });
+  const rated = submitted(plan, edit(plan, toys, "pain", "7").snapshot).finished.snapshot;
+  assert.equal(binding(rated, "pain"), 7);
+});
+
+test("a dict of fields of different kinds says each type, and answers in the union to narrow", () => {
+  const menu = [
+    'let settingId = "impact"',
+    "let menu: object dict = dict {}",
+    'menu[settingId] = { type: "number", value: 2.5, min: 1, max: 10 }',
+    'menu["enabled"] = { type: "boolean", value: false, text: "Enabled" }',
+    'menu["intensity"] = { type: "cycle", options: ["Low", "High"] }',
+    'menu["day"] = { type: "date", optional: true }',
+  ];
+  const plan = compileValidPlan(
+    [
+      ...menu,
+      "let answers = askForm(fields: menu)",
+      "let answer = answers[settingId]",
+      "let next: number = 0",
+      "if answer is number { next = answer + 1 }",
+      "exit",
+    ].join("\n"),
+  );
+  const { snapshot, ui } = opened(plan);
+  assert.deepEqual(
+    ui.fields.map((field) => [field.id, field.kind]),
+    [
+      ["impact", "number"],
+      ["enabled", "boolean"],
+      ["intensity", "cycle"],
+      ["day", "date"],
+    ],
+  );
+  const { finished } = submitted(plan, snapshot);
+  assert.equal(
+    finished.snapshot.frames[0]!.bindings.find((binding) => binding.name === "next")?.value,
+    3.5,
+  );
+  // Values of different shapes in one dict do not prove one kind: a field may be a number or a cycle here.
+  const merged =
+    'let levels = dict {}\nlevels["a"] = { value: 5 }\nlevels["b"] = { options: ["x", "y"] }\nlet r = askForm fields: levels\n';
+  assert.deepEqual(compileSource(`${merged}exit`).diagnostics, []);
+  assert.deepEqual(
+    compileSource(`${merged}let n: integer = r["a"]\nexit`).diagnostics.map((diagnostic) => [
+      diagnostic.code,
+      diagnostic.span.start.line,
+    ]),
+    [["TSV041", 4]],
+  );
+  // Without the compiler's knowledge of a number's kind, a field must say its type.
+  const untyped = compileValidPlan(
+    [...menu, 'menu["level"] = { value: 5 }', "let answers = askForm(fields: menu)", "exit"].join(
+      "\n",
+    ),
+  );
+  const failed = run(untyped, createImmediatePacingRuntimeSnapshot(untyped)).snapshot;
+  assert.equal(
+    failed.failure?.message,
+    `askForm field 'level': add type: "integer" or type: "number" for its number.`,
+  );
+});
+
+test("a written dict of fields types each entry by what it shows", () => {
+  const diagnostics = (source: string) =>
+    compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);
+  // A written `optional: false` keeps the answers required, and a written type decides the kind.
+  assert.deepEqual(
+    diagnostics(
+      'let r = askForm fields: dict { "n": { value: 1, optional: false } }\nlet n: integer = r["n"]',
+    ),
+    [],
+  );
+  const plan = compileValidPlan(
+    'let r = askForm fields: dict { "n": { type: "number", value: 1 }, "m": { type: "number", value: 2 } }\nlet n: number = r["n"]\nexit',
+  );
+  assert.deepEqual(
+    opened(plan).ui.fields.map((field) => [field.id, field.kind]),
+    [
+      ["n", "number"],
+      ["m", "number"],
+    ],
+  );
+  // A cycle of numbers takes no number in the composer, so it does not share the dict's number kind.
+  assert.deepEqual(
+    diagnostics(
+      'let r = askForm fields: dict { "cycle": { options: [1.5, 2.5], value: 1.5 }, "level": { value: 2 } }',
+    ),
+    [],
+  );
+  // One dict has one number kind for fields without `type:`.
+  assert.deepEqual(diagnostics('let r = askForm fields: dict { "a": 1, "b": 2.5 }'), [
+    `askForm field 'a': its dict mixes whole and decimal numbers; add type: "integer" or type: "number".`,
+    `askForm field 'b': its dict mixes whole and decimal numbers; add type: "integer" or type: "number".`,
+  ]);
+});
+
+test("a dict of fields proves its answers only by metadata its values have when the form opens", () => {
+  const diagnostics = (source: string) =>
+    compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);
+  // A toggle and a cycle of text in one dict answer in the generic union.
+  assert.equal(
+    diagnostics(
+      'let d = dict {}\nd["a"] = { value: false }\nd["b"] = { options: ["x", "y"] }\nlet r = askForm fields: d\nlet n: boolean = r["b"]',
+    ).length,
+    1,
+  );
+  // A value with a type its dict's type does not show opens a field the compiler did not see, which fails at once.
+  const plan = compileValidPlan(
+    'let d = dict {}\nd["a"] = { value: 1 }\nfor i in [1, 2] {\n  let r = askForm fields: d\n  let n: integer = r["a"]\n  repeat n {}\n  d["a"] = { type: "number", value: 1 }\n}\nexit',
+  );
+  let current = run(plan, createImmediatePacingRuntimeSnapshot(plan)).snapshot;
+  while (current.status === "waiting" && current.foregroundAction?.kind === "interaction")
+    current = run(plan, submitted(plan, current).snapshot).snapshot;
+  assert.equal(current.status, "failed");
+  assert.equal(current.failure?.code, "TSR058");
 });
