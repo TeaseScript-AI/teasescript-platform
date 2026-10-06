@@ -15,3 +15,30 @@
  def target=4
  def targetwl=6
  
+@@ -566,21 +566,21 @@
+ 			switch(rand)
+ 			{
+ 			case 0:
+-				index2[nphr]=index2[0]
++				index2.add(index2[0])
+ 				index2[0]=nphr
+ 				break
+ 			case 1:
+-				index2[nphr]=index2[0]
++				index2.add(index2[0])
+ 				index2[0]=nphr+1
+ 				break
+ 			case 2:
+-				index2[nphr]=index2[0]
++				index2.add(index2[0])
+ 				index2[0]=nphr
+-				index2[nphr+1]=index2[1]
++				index2.add(index2[1])
+ 				index2[1]=nphr+1
+ 				break
+ 			case 3:
+-				index2[nphr]=index2[1]
++				index2.add(index2[1])
+ 				index2[1]=nphr+1
+ 				break
+ 			case 4:

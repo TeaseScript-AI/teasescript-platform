@@ -1,0 +1,64 @@
+--- a/scripts/ShockYourself.groovy
++++ b/scripts/ShockYourself.groovy
+@@ -76,37 +76,9 @@
+ }
+ 
+ def getEstimFileNames = {
+-    List<String> fileNames = []
+-    List<String> uniqueNames = []
+-    File dir = new File("sounds/" + SOUNDSDIR)
+-    dir.traverse(type: groovy.io.FileType.FILES, maxDepth: 0) { file ->
+-        if (file.name.endsWith(EXT)) fileNames.add(file.name)
+-        String name = file.name.split('\\.')[0]
+-
+-        List find = name.findAll('\\d+$')
+-        if (!find.isEmpty()) {
+-            if (find[0].isNumber()) {
+-                String uName = name.replaceAll('\\d+$', '')
+-                if (!(uName in uniqueNames)) uniqueNames.add(uName)
+-            }
+-        }
+-    }
+-    List<String> missingNames = []
+-    uniqueNames.each { uName ->
+-        for (int lvl = PAINLEVELRANGELIMIT.min(); lvl <= PAINLEVELRANGELIMIT.max(); lvl++) {
+-            String name = uName + lvl + EXT
+-            if (!(name in fileNames)) {
+-                if (!(uName in missingNames)) missingNames.add(name)
+-            }
+-        }
+-    }
+-    if (!missingNames.isEmpty()) {
+-        show("ERROR! Missing sound files: " + missingNames)
+-        showButton("Quit")
+-        exit()
+-    }
+-    Collections.sort(uniqueNames)
+-    return uniqueNames
++    // The sound sets of the package's sounds folder, each with every pain level, as the folder listing found them.
++    return ["burst_sawtooth_100hz_10sec_level", "burst_sine_100hz_10sec_level", "burst_square_100hz_10sec_level",
++            "sawtooth_100hz_10sec_level", "sine_100hz_10sec_level", "square_100hz_10sec_level"]
+ }
+ 
+ def getProgressBar = { def value, def colRange = [[255, 255, 255], [255, 255, 255]], def colBG = [80, 80, 80], int charLen = PAINLEVELRANGELIMIT.max(), int charWidth = 1 ->
+@@ -273,13 +245,13 @@
+     pauseTimeRange.clear()
+     delayTimeRange.clear()
+     for (int i = 0; i <= 1; i++) {
+-        applyShocksRange.add(loadInteger("ShockYourself.applyShocksRange." + i))
+-        applyTimeRange.add(loadFloat("ShockYourself.applyTimeRange." + i))
+-        painLevelRange.add(loadInteger("ShockYourself.painLevelRange." + i))
+-        shockTimeRange.add(loadFloat("ShockYourself.shockTimeRange." + i))
+-        pauseTimeRange.add(loadFloat("ShockYourself.pauseTimeRange." + i))
+-        delayTimeRange.add(loadFloat("ShockYourself.delayTimeRange." + i))
+-        finalPunishmentMultiRange.add(loadFloat("ShockYourself.finalPunishmentMultiRange." + i))
++        applyShocksRange.add(loadInteger("ShockYourself.applyShocksRange." + i) != null ? loadInteger("ShockYourself.applyShocksRange." + i) : APPLYSHOCKSRANGE[i])
++        applyTimeRange.add(loadFloat("ShockYourself.applyTimeRange." + i) != null ? loadFloat("ShockYourself.applyTimeRange." + i) : APPLYTIMERANGE[i])
++        painLevelRange.add(loadInteger("ShockYourself.painLevelRange." + i) != null ? loadInteger("ShockYourself.painLevelRange." + i) : PAINLEVELRANGE[i])
++        shockTimeRange.add(loadFloat("ShockYourself.shockTimeRange." + i) != null ? loadFloat("ShockYourself.shockTimeRange." + i) : SHOCKTIMERANGE[i])
++        pauseTimeRange.add(loadFloat("ShockYourself.pauseTimeRange." + i) != null ? loadFloat("ShockYourself.pauseTimeRange." + i) : PAUSETIMERANGE[i])
++        delayTimeRange.add(loadFloat("ShockYourself.delayTimeRange." + i) != null ? loadFloat("ShockYourself.delayTimeRange." + i) : DELAYTIMERANGE[i])
++        finalPunishmentMultiRange.add(loadFloat("ShockYourself.finalPunishmentMultiRange." + i) != null ? loadFloat("ShockYourself.finalPunishmentMultiRange." + i) : FINALPUNISHMENTMULTIRANGE[i])
+     }
+     applyShocksPenalty = loadInteger("ShockYourself.applyShocksPenalty")
+     penaltyShocks = loadInteger("ShockYourself.penaltyShocks")

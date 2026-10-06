@@ -1,0 +1,18 @@
+{
+  "patches": [
+    {
+      "id": "settings-ranges",
+      "layer": "source",
+      "category": "b",
+      "reason": "Two adaptations of the settings: (1) The seven range settings are loaded into the range lists one value at a time, and a list that got a missing value is replaced by its default afterwards; TeaseScript checks each value as it goes into a list of numbers, so a missing value stops the script first. Each missing value takes the default range's value at its position instead; the script saves both values of a range together, so the result is the same. (2) getEstimFileNames() listed the package's sounds folder and collected the sound sets that have numbered pain levels; TeaseScript cannot list a folder, so it returns the six sets the folder holds (each with levels 1 to 20), sorted as before.",
+      "diff": "settings-ranges.diff"
+    },
+    {
+      "id": "end-session",
+      "layer": "source",
+      "category": "b",
+      "reason": "The intro menu loops forever; the legacy player ended the script by closing it, and its only exit was the error for missing sound files, which the sound sets written out make unreachable. A TeaseScript session needs an end, so the menu also offers End session.",
+      "diff": "end-session.diff"
+    }
+  ]
+}
