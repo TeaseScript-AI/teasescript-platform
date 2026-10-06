@@ -90,6 +90,9 @@ const foreground = computed(() => {
 });
 // A form's answers change with each edit, unlike the rest of its presentation.
 const form = computed(() => (props.session ? playerRuntimeForm(props.session) : null));
+function playerRuntimeFormEditorText(): string | undefined {
+  return form.value?.editor?.text;
+}
 const pacing = computed(() => {
   const gate = props.session ? playerRuntimePacingGate(props.session) : null;
   return gate?.skippable ? gate : null;
@@ -242,8 +245,10 @@ watch(
     const keyboardNavigation = document.documentElement.dataset.playerKeyboardFocus === "true";
     // A default answer starts in the composer; the player submits it unchanged or edits it first.
     const presentedInput = foreground.value;
+    // A form field being edited, also one that resumes after an interruption, keeps the text the form holds for it.
     draft.value =
-      presentedInput !== null && "prefill" in presentedInput ? (presentedInput.prefill ?? "") : "";
+      playerRuntimeFormEditorText() ??
+      (presentedInput !== null && "prefill" in presentedInput ? (presentedInput.prefill ?? "") : "");
     clearFeedback();
     await nextTick();
     // Completion releases the disabled guard after publishing the session.

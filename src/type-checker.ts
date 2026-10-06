@@ -1,4 +1,5 @@
 import type {
+  ObjectLiteral,
   AssignmentStatement,
   Block,
   CallArgument,
@@ -706,6 +707,15 @@ class TypeChecker {
     }
   >();
 
+  /** The computed descriptors that forms typed their answers by, checked again once type checking ends. */
+  readonly #formDescriptors: {
+    readonly file: number;
+    readonly span: SourceSpan;
+    readonly name: string;
+    readonly properties: PropertyTable;
+    readonly seen: ReadonlySet<string>;
+  }[] = [];
+
   /** Stores of values the compiler cannot know, kept until every type they depend on is decided. */
   readonly #runtimeChecks: {
     readonly site: RuntimeCheckSite;
@@ -969,6 +979,7 @@ class TypeChecker {
       }
       this.#handlers.length = 0;
     }
+    this.#reportLaterFormMetadata();
   }
 
   #declareFunction(declaration: FunctionDeclaration, file: number, scope: Scope): FunctionType {
@@ -3032,7 +3043,12 @@ class TypeChecker {
     const result: PropertyTable = new Map();
     const recorded: { readonly name: string; readonly start: StaticType }[] = [];
     for (const [name, type] of container.properties ?? []) {
-      const field = this.#formField(name, type, written.get(name));
+      const field = this.#formField(
+        name,
+        type,
+        written.get(name),
+        written.get(name)?.span ?? fields.expression.span,
+      );
       result.set(name, field.result);
       if (field.start !== null) recorded.push({ name, start: field.start });
     }
@@ -3042,99 +3058,188 @@ class TypeChecker {
 
   /**
    * The answer type of one field of `askForm`, and the type of the number that decides its kind when it has no
-   * `type:`: its start, or its descriptor's `value:`, `min:`, or `max:`. A written descriptor is also checked for
-   * unknown properties and types.
+   * `type:`: its start, or its descriptor's `value:`, `min:`, or `max:`. Only what is written where the form is asked
+   * proves a descriptor's properties: a computed descriptor's type merges the properties of all its values, so one
+   * that may say `type:` or mix kinds answers in the generic union.
    */
   #formField(
     name: string,
     type: StaticType,
     written: Expression | undefined,
+    span: SourceSpan,
   ): { readonly result: StaticType; readonly start: StaticType | null } {
     const value = resolved(nonNullType(type));
-    let kind: FormFieldKind | null;
-    let nullable = false;
-    let start: StaticType | null = null;
-    let options: StaticType | undefined;
-    let writtenOptions: Expression | undefined;
-    if (value.kind === "object") {
-      const descriptor = written === undefined ? null : unwrap(written);
-      const properties = value.properties ?? new Map<string, StaticType>();
-      let tag: FormFieldKind | undefined;
-      if (descriptor?.kind === "objectLiteral") {
-        for (const property of descriptor.properties) {
-          if (!FORM_FIELD_PROPERTIES.includes(property.name.name))
-            this.#report(
-              typeCode.invalidOperand,
-              `askForm field '${name}': unknown property '${property.name.name}'. ${FORM_FIELD_PROPERTIES_TEXT}`,
-              property.name.span,
-            );
-          const text = staticText(property.value);
-          if (property.name.name === "type" && text !== undefined) {
-            if (isFormFieldKind(text)) tag = text;
-            else
-              this.#report(
-                typeCode.invalidOperand,
-                `askForm field '${name}': ${unknownFormTypeMessage(text)}`,
-                property.value.span,
-              );
-          }
-          // A written `optional: false` keeps the answer required; any other value may make it optional.
-          if (property.name.name === "optional")
-            nullable = property.value.kind !== "booleanLiteral" || property.value.value;
-          if (property.name.name === "options") writtenOptions = property.value;
-        }
-      } else nullable = properties.has("optional");
-      const valueType = properties.get("value");
-      options = properties.get("options");
-      start =
-        [valueType, properties.get("min"), properties.get("max")].find(
-          (part) => part !== undefined && isNumeric(resolved(nonNullType(part))),
-        ) ?? null;
-      kind =
-        tag !== undefined
-          ? tag
-          : properties.has("type")
-            ? null
-            : options !== undefined
-              ? valueType !== undefined && isScalar(resolved(nonNullType(valueType)), "boolean")
-                ? "boolean"
-                : "cycle"
-              : valueType === undefined
-                ? null
-                : formKindOfStart(resolved(nonNullType(valueType)));
-    } else {
-      kind = formKindOfStart(value);
-      if (value.kind === "list") {
-        options = value;
-        writtenOptions = written;
-      }
-      if (kind === "integer" || kind === "number") start = value;
+    const literal = written === undefined ? null : unwrap(written);
+    if (value.kind === "object")
+      return literal?.kind === "objectLiteral"
+        ? this.#writtenFormField(name, literal)
+        : this.#computedFormField(name, value, span);
+    const kind = formKindOfStart(value);
+    if (kind === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start: null };
+    return {
+      result:
+        kind === "cycle"
+          ? this.#cycleAnswerType(value, literal ?? undefined)
+          : kind === "boolean"
+            ? BOOLEAN_TYPE
+            : formAnswerType(kind),
+      start: kind === "integer" || kind === "number" ? value : null,
+    };
+  }
+
+  /** A descriptor written where the form is asked: its properties are exactly the written ones. */
+  #writtenFormField(
+    name: string,
+    descriptor: ObjectLiteral,
+  ): { readonly result: StaticType; readonly start: StaticType | null } {
+    const written = new Map(
+      descriptor.properties.map((property) => [property.name.name, property.value] as const),
+    );
+    for (const property of descriptor.properties)
+      if (!FORM_FIELD_PROPERTIES.includes(property.name.name))
+        this.#report(
+          typeCode.invalidOperand,
+          `askForm field '${name}': unknown property '${property.name.name}'. ${FORM_FIELD_PROPERTIES_TEXT}`,
+          property.name.span,
+        );
+    const typeOf = (property: string) => {
+      const expression = written.get(property);
+      return expression === undefined ? undefined : resolved(nonNullType(this.#typeOf(expression)));
+    };
+    let tag: FormFieldKind | null | undefined;
+    const typeExpression = written.get("type");
+    if (typeExpression !== undefined) {
+      const text = staticText(typeExpression);
+      tag = text !== undefined && isFormFieldKind(text) ? text : null;
+      if (text !== undefined && !isFormFieldKind(text))
+        this.#report(
+          typeCode.invalidOperand,
+          `askForm field '${name}': ${unknownFormTypeMessage(text)}`,
+          typeExpression.span,
+        );
     }
+    const valueType = typeOf("value");
+    const kind =
+      tag !== undefined
+        ? tag
+        : written.has("options")
+          ? valueType !== undefined && isScalar(valueType, "boolean")
+            ? "boolean"
+            : "cycle"
+          : valueType === undefined
+            ? null
+            : formKindOfStart(valueType);
+    // A written `optional: false` keeps the answer required; any other value may make it optional.
+    const optionalExpression = written.get("optional");
+    const optionalLiteral =
+      optionalExpression === undefined ? undefined : unwrap(optionalExpression);
+    const required =
+      optionalLiteral === undefined ||
+      (optionalLiteral.kind === "booleanLiteral" && !optionalLiteral.value);
+    // Only an integer turns into a number; a number does not start an integer field.
+    if (tag === "integer" && valueType !== undefined && isScalar(valueType, "number"))
+      this.#report(
+        typeCode.invalidOperand,
+        `askForm field '${name}': an integer field starts with a whole number (integer), not ${describeValue(valueType)}.`,
+        written.get("value")!.span,
+      );
+    // With a written type, the runtime needs no number kind.
+    const start =
+      tag !== undefined
+        ? null
+        : ([valueType, typeOf("min"), typeOf("max")].find(
+            (part) => part !== undefined && isNumeric(part),
+          ) ?? null);
     if (kind === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start };
     const result =
       kind === "cycle"
-        ? this.#cycleAnswerType(options, writtenOptions)
+        ? this.#cycleAnswerType(typeOf("options"), written.get("options"))
         : kind === "boolean"
           ? BOOLEAN_TYPE
           : formAnswerType(kind);
     return {
-      result: nullable && kind !== "boolean" && kind !== "cycle" ? optional(result) : result,
+      result: !required && kind !== "boolean" && kind !== "cycle" ? optional(result) : result,
       start,
     };
   }
 
   /**
+   * A computed descriptor: its type merges every value it may hold, so a property in it may be missing from some of
+   * them. It proves one kind only without `type:`, and with `options:` only when no `value:` other than a toggle's
+   * beside it can make some fields typed. The descriptor's properties are checked again when type checking ends,
+   * because a later assignment may still add `type:`, `options:`, or `optional:`.
+   */
+  #computedFormField(
+    name: string,
+    descriptor: Extract<StaticType, { kind: "object" }>,
+    span: SourceSpan,
+  ): { readonly result: StaticType; readonly start: StaticType | null } {
+    const properties = descriptor.properties;
+    if (properties === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start: null };
+    this.#formDescriptors.push({
+      file: this.#file,
+      span,
+      name,
+      properties,
+      seen: new Set(FORM_METADATA.filter((key) => properties.has(key))),
+    });
+    const part = (key: string) => {
+      const found = properties.get(key);
+      return found === undefined ? undefined : resolved(nonNullType(found));
+    };
+    const valueType = part("value");
+    const start =
+      [valueType, part("min"), part("max")].find((type) => type !== undefined && isNumeric(type)) ??
+      null;
+    const options = part("options");
+    let result: StaticType | null;
+    if (properties.has("type")) result = null;
+    else if (options !== undefined) {
+      const cycle = this.#cycleAnswerType(options, undefined);
+      // Toggles with options and cycles of booleans answer booleans alike; another `value:` may be any field's.
+      result =
+        valueType === undefined
+          ? cycle
+          : isScalar(valueType, "boolean") && isScalar(resolved(cycle), "boolean")
+            ? BOOLEAN_TYPE
+            : null;
+    } else {
+      const kind = valueType === undefined ? null : formKindOfStart(valueType);
+      result =
+        kind === null
+          ? null
+          : kind === "boolean"
+            ? BOOLEAN_TYPE
+            : kind === "cycle"
+              ? null
+              : properties.has("optional")
+                ? optional(formAnswerType(kind))
+                : formAnswerType(kind);
+    }
+    return { result: result ?? optional(GENERIC_FORM_ANSWER_TYPE), start };
+  }
+
+  /**
    * What a cycle returns: each option's value, or the text of a choice object without one, as a `choose` button
-   * returns it. Written options are read one by one; for computed choice objects, whether one has a `value` is not
+   * returns it. Written choice objects are read one by one; for a computed one, whether it has a `value` is not
    * known, so either may be returned.
    */
   #cycleAnswerType(type: StaticType | undefined, written: Expression | undefined): StaticType {
+    const computedOption = (member: StaticType): StaticType => {
+      const option = resolved(member);
+      if (option.kind !== "object") return plainType(option);
+      const returned = [option.properties?.get("value"), option.properties?.get("text")].filter(
+        (part): part is StaticType => part !== undefined,
+      );
+      return returned.length === 0 ? UNKNOWN_TYPE : union(returned.map(plainType));
+    };
     const list = written === undefined ? undefined : unwrap(written);
     if (list?.kind === "listLiteral")
       return union(
         list.elements.map((element) => {
           const option = unwrap(element);
-          if (option.kind !== "objectLiteral") return plainType(this.#typeOf(element));
+          if (option.kind !== "objectLiteral")
+            return union(members(this.#typeOf(element)).map(computedOption));
           const returned =
             option.properties.find((property) => property.name.name === "value") ??
             option.properties.find((property) => property.name.name === "text");
@@ -3143,16 +3248,27 @@ class TypeChecker {
       );
     const options = type === undefined ? undefined : resolved(nonNullType(type));
     if (options?.kind !== "list") return UNKNOWN_TYPE;
-    return union(
-      members(resolved(options.element)).map((member) => {
-        const option = resolved(member);
-        if (option.kind !== "object") return plainType(option);
-        const returned = [option.properties?.get("value"), option.properties?.get("text")].filter(
-          (part): part is StaticType => part !== undefined,
-        );
-        return returned.length === 0 ? UNKNOWN_TYPE : union(returned.map(plainType));
-      }),
-    );
+    return union(members(resolved(options.element)).map(computedOption));
+  }
+
+  /**
+   * A computed descriptor that a form relied on must not gain `type:`, `options:`, or `optional:` later: the form
+   * typed its answer without them.
+   */
+  #reportLaterFormMetadata(): void {
+    for (const descriptor of this.#formDescriptors) {
+      const added = FORM_METADATA.find(
+        (key) => descriptor.properties.has(key) && !descriptor.seen.has(key),
+      );
+      if (added === undefined) continue;
+      const previous = this.#enterFile(descriptor.file);
+      this.#report(
+        typeCode.invalidOperand,
+        `askForm field '${descriptor.name}': a later assignment gives its descriptor '${added}:', which this form cannot see when it opens. Write '${added}:' in the descriptor where it is first created, before the form is asked.`,
+        descriptor.span,
+      );
+      this.#enterFile(previous);
+    }
   }
 
   /**
@@ -7322,6 +7438,9 @@ function textResultType(member: TextMember): StaticType {
     ? { kind: "list", element: STRING_TYPE }
     : scalarType(member.result);
 }
+
+/** The descriptor properties that decide a form field's kind or whether its answer may be `null`. */
+const FORM_METADATA = ["type", "options", "optional"] as const;
 
 /** The answer of an `askForm` field whose kind only the runtime knows. */
 const GENERIC_FORM_ANSWER_TYPE = union([

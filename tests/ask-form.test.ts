@@ -283,3 +283,54 @@ test("a cycle answer has the type of every option it may return", () => {
     [],
   );
 });
+
+test("only what the form can see proves a field's answer type", () => {
+  const diagnostics = (source: string) =>
+    compileSource(`${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);
+  // A computed choice object in a written list may return its value or its text.
+  assert.deepEqual(
+    diagnostics(
+      'let option = { text: "One", value: 1 }\nlet answers = askForm fields: { x: [option] }\nlet n: integer | string = answers.x',
+    ),
+    [],
+  );
+  assert.equal(
+    diagnostics(
+      'let option = { text: "One", value: 1 }\nlet answers = askForm fields: { x: [option] }\nlet n: object = answers.x',
+    ).length,
+    1,
+  );
+  // A computed descriptor whose values may be a toggle or a cycle of text answers in the generic union.
+  assert.equal(
+    diagnostics(
+      'let f = { value: false }\nf = { options: ["x", "y"] }\nlet r = askForm fields: { a: f }\nlet n: boolean = r.a',
+    ).length,
+    1,
+  );
+  // Metadata added after the form reads a descriptor is an error at the form.
+  assert.deepEqual(
+    diagnostics(
+      'let observed: integer = 0\nlet d = { a: { value: 1 } }\nfor i in [1, 2] {\n  let r = askForm fields: d\n  observed = r.a\n  d.a = { type: "number", value: 1 }\n}',
+    ),
+    [
+      "askForm field 'a': a later assignment gives its descriptor 'type:', which this form cannot see when it opens. Write 'type:' in the descriptor where it is first created, before the form is asked.",
+    ],
+  );
+  // A computed descriptor that keeps its metadata from the start types its answer.
+  assert.deepEqual(
+    diagnostics(
+      'let f = { value: false, text: "Owned" }\nlet r = askForm fields: { a: f }\nlet n: boolean = r.a',
+    ),
+    [],
+  );
+  // A parenthesized `optional: false` is still false, and an integer field does not start with a decimal number.
+  assert.deepEqual(
+    diagnostics(
+      'let a = askForm fields: { x: { type: "text", value: "A", optional: (false) } }\nlet n: string = a.x',
+    ),
+    [],
+  );
+  assert.deepEqual(diagnostics('let a = askForm fields: { x: { type: "integer", value: 5.0 } }'), [
+    "askForm field 'x': an integer field starts with a whole number (integer), not a number.",
+  ]);
+});

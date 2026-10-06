@@ -4,6 +4,9 @@ title: "Your details"
 speaker mistress {
     displayName: "Mistress"
 }
+showPermanentButton "Pause" {
+    showButton "Resume"
+}
 let details = askForm as mistress "Your details", fields: {
     impact: { value: 5, min: 1, max: 10, text: "Impact", hint: "1 to 10", description: "How hard, from 1 to 10" },
     weight: { type: "number", optional: true, text: "Weight" },

@@ -3921,13 +3921,33 @@ async function formFieldsScenario(cdp, origin) {
   await physicalClick(cdp, '[data-form-field="weight"]');
   await waitFor(cdp, `document.activeElement === ${composer}`);
   await cdp.call("Input.insertText", { text: "2.5" });
+  // Opening another field commits this one; the text typed for that one survives a block that interrupts the form.
+  await physicalClick(cdp, '[data-form-field="name"]');
+  await waitFor(cdp, `${composer}.value === "Ada" && document.activeElement === ${composer}`);
+  await cdp.call("Input.insertText", { text: "Bea" });
+  await delay(600);
+  await physicalClick(cdp, "[data-permanent-button]");
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('button')].some((button) => button.textContent.trim() === "Resume")`,
+  );
+  await evaluate(
+    cdp,
+    `[...document.querySelectorAll('button')].find((button) => button.textContent.trim() === "Resume").click()`,
+  );
+  await waitFor(
+    cdp,
+    `!!${field("name")} && ${composer}.value === "Bea"`,
+    8_000,
+    "The text being typed was lost after the interruption",
+  );
   await evaluate(
     cdp,
     `[...document.querySelectorAll('[data-form-actions] button')].find((button) => button.textContent.trim() === "Continue").click()`,
   );
   await waitFor(
     cdp,
-    `document.body.innerText.includes("Impact 7, weight 2.5, Ada,")`,
+    `document.body.innerText.includes("Impact 7, weight 2.5, Bea,")`,
     15_000,
     "Submitting did not take the text being typed",
   );
