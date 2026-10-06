@@ -414,9 +414,10 @@ interface Witness {
  * - the clock: the player continues at other wall clock times before the witness step (`seeded`);
  * - a variable the code counts or sets: states closer to the comparison, by `distance`, take the first place.
  *
- * An attempt's states share the first place for {@link ATTEMPT_EXPANSIONS} expansions in all, until the target is
- * reached; states closer to a variable's comparison share it for {@link CLOSER_EXPANSIONS}. Directed work takes at
- * most {@link DIRECTED_SHARE} of all steps.
+ * A play attempt's states share the first place for {@link ATTEMPT_EXPANSIONS} expansions in all, until the target
+ * is reached, and play states closer to a variable's comparison share it for {@link CLOSER_EXPANSIONS}; seeded states
+ * take only their attempt's own steps and otherwise come after all play states. Directed work takes at most
+ * {@link DIRECTED_SHARE} of all steps.
  */
 export function explore(engine: Engine, plan: Data, options: ExploreOptions): ExploreResult {
   const started = performance.now();
@@ -656,7 +657,7 @@ export function explore(engine: Engine, plan: Data, options: ExploreOptions): Ex
       snapshot = snapshotOf(node);
     }
     for (const input of attempt.inputs) {
-      if (snapshot === null || snapshot.status !== "waiting") break;
+      if (snapshot === null || snapshot.status !== "waiting" || outOfBudget()) break;
       const next = step(node, snapshot, input);
       if (next === null) break;
       directedTransitions += 1;
