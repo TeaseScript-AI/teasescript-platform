@@ -594,38 +594,51 @@ export class TraceStore {
   }
 
   /**
-   * A change of runtime state outside variables, such as one property of a speaker or timer: a new version of the whole
-   * state, so it depends on the previous version as well as on the causes collected so far.
+   * A change of runtime state outside variables, such as a speaker or timer (`base`): one property, the timed
+   * properties that a timer or media method changes, or the whole state. The change sets what it covers, so it does not
+   * depend on the version it replaces, except for state that `accumulates`, such as the tagged photos.
    */
   writeState(
     kind: "declaration" | "assignment" | "mutation",
-    key: string,
+    base: string,
+    part: StatePart,
     target: string,
     value: SerializableRuntimeValue,
     span: TraceSpan | null = null,
+    accumulates = false,
   ): void {
     if (this.#failure !== null) return;
-    const previous = this.#versions.get(key);
-    if (previous !== undefined) this.#add(this.acc, previous);
+    const key = partKey(base, part);
+    if (accumulates) {
+      const previous = this.#versions.get(key);
+      if (previous !== undefined) this.#add(this.acc, previous);
+    }
     this.write(kind, key, target, value, span);
   }
 
   /**
-   * A read of runtime state outside variables, such as a speaker's or a timer's properties: its last recorded change,
-   * if any. With `unknown`, an unrecorded state reads as an unrecorded origin; otherwise it adds nothing, because the
-   * value naming the state already explains its creation.
+   * A read of runtime state outside variables, of one `property` or, with `null`, of the state as a whole: the newest
+   * recorded change that sets it. With `unknown`, an unrecorded state reads as an unrecorded origin; otherwise it adds
+   * nothing, because the value naming the state already explains its creation.
    */
   readState(
-    key: string,
+    base: string,
+    property: string | null,
     target: string | null,
     value: SerializableRuntimeValue,
     unknown: boolean,
   ): void {
     if (this.#failure !== null) return;
     try {
-      const id = this.#versions.get(key);
+      let id = this.#versions.get(base);
+      const newer = (key: string) => {
+        const candidate = this.#versions.get(key);
+        if (candidate !== undefined && (id === undefined || candidate > id)) id = candidate;
+      };
+      if (property !== null) newer(partKey(base, { property }));
+      if (property === null || TIMED_PROPERTIES.has(property)) newer(partKey(base, "timed"));
       if (id !== undefined) this.#add(this.acc, id);
-      else if (unknown) this.#add(this.acc, this.#unrecorded(key, target, value));
+      else if (unknown) this.#add(this.acc, this.#unrecorded(base, target, value));
     } catch (error) {
       this.#fail(error);
     }
@@ -1150,6 +1163,21 @@ export function stateKey(
   id = 0,
 ): string {
   return `x${kind}:${id}`;
+}
+
+/** The part of a state a change sets; see `TraceStore.writeState`. */
+export type StatePart = { readonly property: string } | "timed" | "whole";
+
+/** Properties of a timer or media handle that its pause, resume, and stop methods change. */
+const TIMED_PROPERTIES: ReadonlySet<string> = new Set([
+  "remaining",
+  "elapsed",
+  "state",
+  "position",
+]);
+
+function partKey(base: string, part: StatePart): string {
+  return part === "whole" ? base : part === "timed" ? `${base}#timed` : `${base}.${part.property}`;
 }
 
 export function loopKey(callFrameId: number, loopId: number): string {

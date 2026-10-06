@@ -220,9 +220,9 @@ function writeNotation(
       if (next.index === next.properties.length) continue;
       const property = next.properties[next.index]!;
       next.index += 1;
-      // Every part is cut to the limit before it is written, so no part is built in full.
+      // Whether to quote depends on the whole name; it is cut to the limit before it is written.
       const cut = prefix(property.name, limit);
-      const name = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(cut) ? cut : quotedText(cut);
+      const name = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(property.name) ? cut : quotedText(cut);
       work.push(
         next,
         { value: property.value },

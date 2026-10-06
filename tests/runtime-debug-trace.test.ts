@@ -601,15 +601,20 @@ test("speaker and handle properties are state that every name for them reads", (
       "let t = timer async 10 s",
       "let changed = 2 s",
       "t.remaining = changed",
+      "let beat = 5 s",
+      "t.repeatDuration = beat",
       "let same = t",
       "same.pause()",
       "speaker guide",
-      'say "${guide.firstName} ${speaker.firstName} ${t.remaining}"',
+      'say "${guide.firstName} ${speaker.firstName} ${t.remaining} ${t.repeatDuration}"',
       "exit",
     ].join("\n"),
   );
   assertComplete(played);
-  const [byName, contextual, remaining] = causes(played.trace, outputOf(played, "Bea Bea 2 s"));
+  const [byName, contextual, remaining, repeat] = causes(
+    played.trace,
+    outputOf(played, "Bea Bea 2 s 5 s"),
+  );
   for (const interpolation of [byName!, contextual!]) {
     const steps = lineage(played.trace, interpolation.id);
     assert.ok(
@@ -617,13 +622,51 @@ test("speaker and handle properties are state that every name for them reads", (
       "the alias's assignment explains the speaker's name",
     );
     assert.ok(steps.some((step) => step.target === "renamed"));
-    // A later change to another property keeps the earlier one's causes.
-    assert.ok(steps.some((step) => step.target === "guide.lastName"));
+    // Another property's later change is no cause of this one.
+    assert.ok(!steps.some((step) => step.target === "guide.lastName" || step.target === "family"));
   }
-  const timer = lineage(played.trace, remaining!.id);
-  assert.ok(timer.some((step) => step.kind === "assignment" && step.target === "timer.remaining"));
-  assert.ok(timer.some((step) => step.target === "changed"));
-  assert.ok(timer.some((step) => step.kind === "mutation" && step.target === "timer.pause()"));
+  // pause() through an alias set the timer's timed properties last; it does not touch repeatDuration.
+  const timed = lineage(played.trace, remaining!.id);
+  assert.ok(timed.some((step) => step.kind === "mutation" && step.target === "timer.pause()"));
+  const repeated = lineage(played.trace, repeat!.id);
+  assert.ok(repeated.some((step) => step.target === "timer.repeatDuration"));
+  assert.ok(repeated.some((step) => step.target === "beat"));
+  assert.ok(!repeated.some((step) => step.target === "timer.pause()"));
+});
+
+test("an overwritten property value is no cause of the value that replaced it", () => {
+  for (const viaAlias of [false, true]) {
+    const writer = viaAlias ? "other" : "guide";
+    const timer = viaAlias ? "otherTimer" : "t";
+    const played = traced(
+      [
+        "speaker guide {",
+        '    firstName: "Original"',
+        "}",
+        "let other = guide",
+        'let discarded = "Discarded"',
+        `${writer}.firstName = discarded`,
+        'let current = "Current"',
+        `${writer}.firstName = current`,
+        "let t = timer async 10 s",
+        "let otherTimer = t",
+        "let lost = 3 s",
+        `${timer}.remaining = lost`,
+        "let kept = 2 s",
+        `${timer}.remaining = kept`,
+        'say "${guide.firstName} ${t.remaining}"',
+        "exit",
+      ].join("\n"),
+    );
+    assertComplete(played);
+    const steps = lineage(played.trace, outputOf(played, "Current 2 s").id);
+    const values = steps.map((step) => step.preview);
+    assert.ok(steps.some((step) => step.target === "current"));
+    assert.ok(steps.some((step) => step.target === "kept"));
+    for (const overwritten of ['"Discarded"', '"Original"', "3 s"])
+      assert.ok(!values.includes(overwritten), `${overwritten} is no cause (alias: ${viaAlias})`);
+    assert.ok(!steps.some((step) => step.target === "discarded" || step.target === "lost"));
+  }
 });
 
 test("answers, loads, and saves explain values, and refused or repeated reports record nothing", () => {

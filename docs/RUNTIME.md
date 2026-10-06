@@ -1254,8 +1254,10 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   globals apart, so recursion, same-named variables, prepared references, and variables that blocks share keep their
   real target; temporaries by call frame and temporary ID; arguments by call frame and parameter; storage by key. The
   properties of a speaker, timer, media, permanent button, or the camera view, and the tagged photos, are state keyed by
-  its identity, so every name for it reads the latest declaration, assignment, or method call, each a new version that
-  depends on the one before. A compiled copy of one value shares that value's record.
+  its identity, so every name for it reads the same versions. A property read takes the newest change that sets that
+  property: its assignment, a timer or media method for the timed properties, or a declaration or `showCamera` for
+  all of it. A change does not depend on the version it replaces, except that each tagged photo joins the earlier
+  ones. A compiled copy of one value shares that value's record.
 - **Staging.** Records made while a `say` or a speaker declaration is staged commit or vanish with it, and they and the
   stage's rollback bookkeeping count toward the bounds meanwhile. A message that waits behind pacing keeps its text's causes until it is shown.
 - **Bounds.** At most 8,192 records or 8 MiB of accounted data (`RUNTIME_DEBUG_TRACE_LIMITS`), which drops the oldest

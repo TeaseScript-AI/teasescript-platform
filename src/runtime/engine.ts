@@ -967,7 +967,8 @@ function executePlannedInstruction(
     case "showCamera":
       // Shows the default camera's view, or moves it when it is shown already; the Player brings the camera, if any.
       snapshot.cameraView = { placement: instruction.placement, shown: true };
-      evaluator.trace?.writeState("assignment", stateKey("camera"), "camera", {
+      // Showing the view sets all of it, its placement too.
+      evaluator.trace?.writeState("assignment", stateKey("camera"), "whole", "camera", {
         kind: "cameraView",
       });
       if (instruction.destinationTemporary !== null) {
@@ -982,9 +983,14 @@ function executePlannedInstruction(
       return;
     case "hideCamera":
       if (snapshot.cameraView !== null) snapshot.cameraView.shown = false;
-      evaluator.trace?.writeState("assignment", stateKey("camera"), "camera", {
-        kind: "cameraView",
-      });
+      // Hiding it changes only whether it is shown.
+      evaluator.trace?.writeState(
+        "assignment",
+        stateKey("camera"),
+        { property: "shown" },
+        "camera.shown",
+        { kind: "cameraView" },
+      );
       advance(snapshot);
       return;
     case "showPermanentButton":
