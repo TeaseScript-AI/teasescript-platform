@@ -680,6 +680,7 @@ function askArguments(expression: Extract<IrExpression, { kind: "input" }>): str
   return [
     ...(expression.question === undefined ? [] : [emitExpression(expression.question)]),
     ...(expression.fields === undefined ? [] : [`fields: ${emitExpression(expression.fields)}`]),
+    ...(expression.submit === undefined ? [] : [`submit: ${emitExpression(expression.submit)}`]),
     ...(expression.defaultValue === undefined
       ? []
       : [`default: ${emitExpression(expression.defaultValue)}`]),

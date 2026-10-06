@@ -4,7 +4,7 @@ speaker system {
 // Accepted TeaseScript that main does not implement yet becomes a workaround in implemented TeaseScript.
 // getBooleans: a form of toggles; its Cancel, which gave null, where the script tests the answers for null.
 let toys = askBooleans(message: "Which toys do you have?", texts: ["Paddle", "Crop"], defaults: [true, false])
-let clothes = askBooleans(message: "What do you own?", texts: ["Collar"], defaults: [false], cancel: "Cancel")
+let clothes: boolean[]? = askBooleans(message: "What do you own?", texts: ["Collar"], defaults: [false], cancel: "Cancel")
 if clothes != null {
   save clothes[0] as "clothes.collar"
 }

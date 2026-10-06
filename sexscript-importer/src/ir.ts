@@ -264,6 +264,8 @@ export type IrExpression =
       defaultValue?: IrExpression;
       /** The fields of an `askForm` (V30 §20 Forms): an object or a dict of fields. */
       fields?: IrExpression;
+      /** The text of an `askForm`'s submit button. */
+      submit?: IrExpression;
       /** Asks `as` this speaker. */
       speaker?: string;
     }

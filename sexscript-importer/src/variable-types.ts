@@ -694,6 +694,22 @@ function analyse(
   };
   const nullFields = recordNullFields(statements);
   const typeOf = (value: IrExpression, scope: Scope): TeaseType => {
+    // The answer of a form field written where the form is asked has its descriptor's type (V30 §20 Forms).
+    if (value.kind === "property" && value.target.kind === "variable") {
+      const asked = scope.resolve(value.target.name)?.declaration?.value;
+      const fields =
+        asked?.kind === "input" && asked.input === "askForm" ? asked.fields : undefined;
+      const field =
+        fields?.kind === "object" && fields.dict !== true
+          ? fields.properties.find((property) => property.name === value.name)?.value
+          : undefined;
+      const kind =
+        field?.kind === "object"
+          ? field.properties.find((property) => property.name === "type")?.value
+          : undefined;
+      if (kind?.kind === "literal" && (kind.value === "boolean" || kind.value === "integer"))
+        return scalar(kind.value);
+    }
     const type = expressionType(
       value,
       (name) => {
@@ -1977,6 +1993,11 @@ export function expressionType(
       if (value.local === true) return UNKNOWN;
       const temporal = TEMPORAL_GETTERS.get(value.name);
       if (temporal !== undefined) return { kind: "temporal", name: temporal };
+      // askBooleans returns the toggles' states, or null when the player cancels a form that offers it (V30 §20).
+      if (value.name === "askBooleans") {
+        const states: TeaseType = { kind: "list", element: scalar("boolean") };
+        return value.named.cancel === undefined ? states : { kind: "optional", value: states };
+      }
       return CALL_RESULTS.get(value.name) ?? UNKNOWN;
     }
   }
@@ -2236,6 +2257,7 @@ export function mapChildren(
         ...value,
         ...(value.question === undefined ? {} : { question: map(value.question) }),
         ...(value.fields === undefined ? {} : { fields: map(value.fields) }),
+        ...(value.submit === undefined ? {} : { submit: map(value.submit) }),
         ...(value.defaultValue === undefined ? {} : { defaultValue: map(value.defaultValue) }),
       };
     case "range":
