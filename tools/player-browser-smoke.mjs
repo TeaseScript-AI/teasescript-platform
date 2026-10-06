@@ -1497,25 +1497,35 @@ async function debugStorageScenario(cdp, origin, profile) {
   await physicalClick(cdp, '[data-debug-tab="storage"]');
   await waitFor(
     cdp,
-    `document.querySelector('[data-debug-storage-summary]')?.textContent.replace(/\\s+/g, ' ').trim() === 'Saved data · 5 keys · 1 photo'`,
+    `document.querySelector('[data-debug-storage-summary]')?.textContent.replace(/\\s+/g, ' ').trim() === 'Saved data · 7 keys'`,
     5_000,
     "The Storage tab did not count the saved values",
   );
+  // Text shaped like a photo reference stays visible as text, the chosen photo's reference included.
+  const listed = (await value(cdp, rows)).map(([key, preview]) =>
+    key === '"player.photo"' && /^"captured-media:[0-9a-f-]+:1"$/.test(preview)
+      ? [key, "<photo reference>"]
+      : [key, preview],
+  );
   assertEqual(
-    JSON.stringify(await value(cdp, rows)),
+    JSON.stringify(listed),
     JSON.stringify([
       ['"album"', "2 items"],
+      ['"missing"', '"captured-media:00000000-0000-4000-8000-000000000000:1"'],
+      ['"note"', '"captured-media:note"'],
       ['"player.flags"', "2 properties"],
       ['"player.name"', '"Ada"'],
-      ['"player.photo"', "Captured or chosen image"],
+      ['"player.photo"', "<photo reference>"],
       ['"player.score"', "3"],
     ]),
     "The Storage tab did not list the saved values in key order",
   );
   // The saved photo once, used by two keys; each thumbnail loads from this browser's storage once it is in view.
+  const photoRow = `[...document.querySelectorAll('[data-debug-storage-row]')].find((row) => row.querySelector('[data-debug-storage-key]').textContent === '"player.photo"')`;
+  await evaluate(cdp, `${photoRow}.scrollIntoView()`);
   await waitFor(
     cdp,
-    `!!document.querySelector('[data-debug-storage-row] [data-storage-photo][data-state="ready"] img')`,
+    `!!${photoRow}.querySelector('[data-storage-photo][data-state="ready"] img')`,
     5_000,
     "The saved photo's row showed no thumbnail",
   );
@@ -1527,21 +1537,52 @@ async function debugStorageScenario(cdp, origin, profile) {
     5_000,
     "The Storage tab did not show the shared saved photo",
   );
+  // A well-formed reference the store does not have says so, and ordinary text gets no thumbnail.
+  await evaluate(cdp, `document.querySelectorAll('[data-debug-storage-row]')[1].scrollIntoView()`);
+  await waitFor(
+    cdp,
+    `(() => { const [missing, note] = [...document.querySelectorAll('[data-debug-storage-row]')].slice(1, 3);
+      return missing.querySelector('[data-storage-photo]')?.dataset.state === 'missing' &&
+        /No saved photo/.test(missing.textContent) && !note.querySelector('[data-storage-photo]'); })()`,
+    5_000,
+    "A reference without a saved photo or ordinary text was misshown",
+  );
+  await evaluate(cdp, `document.querySelector('[data-debug-storage-row]').scrollIntoView()`);
   await physicalClick(cdp, "[data-debug-storage-row] [data-storage-expand]");
   await waitFor(
     cdp,
-    `document.querySelectorAll('[data-debug-storage-row] ul [data-storage-photo]').length === 2`,
+    `document.querySelector('[data-debug-storage-row]').querySelectorAll('[data-storage-photo]').length === 2`,
     5_000,
     "The album did not expand to its two photos",
   );
-  // A later save of the script shows at once.
+  // A later save shows at once; the photo row's new reference, out of view, is not read until it comes into view.
+  await setViewport(cdp, 1440, 480);
+  await evaluate(cdp, `document.querySelector('[data-debug-active]').scrollIntoView()`);
   await physicalClick(cdp, "[data-foreground-controls] button");
   await waitFor(
     cdp,
-    `${rows}.some(([key, preview]) => key === '"player.score"' && preview === '4')`,
+    `${rows}.some(([key, preview]) => key === '"player.score"' && preview === '4') &&
+      /:2"$/.test(${photoRow}.querySelector('[data-storage-preview]').textContent)`,
     5_000,
     "A later save did not update the Storage tab",
   );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const row = ${photoRow}; const panel = row.closest('[data-tool]').getBoundingClientRect();
+        return row.getBoundingClientRect().top > panel.bottom && row.querySelector('[data-storage-photo]').dataset.state; })()`,
+    ),
+    "loading",
+    "An off-screen new photo reference was read before it came into view",
+  );
+  await evaluate(cdp, `${photoRow}.scrollIntoView()`);
+  await waitFor(
+    cdp,
+    `${photoRow}.querySelector('[data-storage-photo]').dataset.state === 'missing'`,
+    5_000,
+    "The new photo reference was not read once in view",
+  );
+  await setViewport(cdp, 1440, 900);
   await evaluate(cdp, `document.querySelector('[data-debug-active]').scrollIntoView()`);
   await physicalClick(cdp, "[data-debug-active]");
   await waitFor(

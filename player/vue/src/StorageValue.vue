@@ -1,44 +1,74 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { ChevronDown, ChevronUp } from "@lucide/vue";
+import { computed, ref, shallowRef } from "vue";
+import { ChevronDown, ChevronRight } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
-import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
-import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
 import type { SerializableRuntimeValue } from "../../../src/index.js";
-import { storageMembers, storagePreview } from "../../storage-preview.js";
+import { STORAGE_MEMBER_PAGE, storageOutline } from "../../storage-preview.js";
 import StoragePhoto from "./StoragePhoto.vue";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
-// One saved value in Debug's Storage tab: its type and a short preview, a saved photo's thumbnail, and for a list, set,
-// object or dict its members, rendered only once expanded.
+// One saved value in Debug's Storage tab, as a flat outline: its type and a short preview, and for each expanded list,
+// set, object or dict its members, a page at a time. The outline is one list without nested components, so a deep
+// value neither recurses while it renders nor when it goes. Text shaped like a photo reference shows the photo when the
+// media store has it, and says so when not; the text itself stays visible.
 const props = defineProps<{ value: SerializableRuntimeValue; player: PlayerSessionHost }>();
-const preview = computed(() => storagePreview(props.value));
+const expanded = shallowRef<ReadonlySet<string>>(new Set());
+const pages = ref(new Map<string, number>());
+const rows = computed(() => storageOutline(props.value, expanded.value, pages.value));
+// Depth shows as indentation up to a few levels, and as a number beyond them.
+const INDENT_LEVELS = 6;
+
+function toggle(path: string) {
+  const next = new Set(expanded.value);
+  if (!next.delete(path)) next.add(path);
+  expanded.value = next;
+}
+function showMore(path: string) {
+  pages.value = new Map(pages.value).set(path, (pages.value.get(path) ?? 1) + 1);
+}
 </script>
 
 <template>
-  <div class="grid min-w-0 gap-1">
-    <div class="flex min-w-0 flex-wrap items-center gap-2">
-      <Badge variant="outline">{{ preview.type }}</Badge>
-      <StoragePhoto v-if="preview.photo" :reference="preview.photo" :player="player" />
-      <span class="min-w-0 break-words font-mono" data-storage-preview>{{ preview.text }}</span>
-    </div>
-    <Collapsible v-if="preview.size" v-slot="{ open }" class="grid gap-1">
-      <CollapsibleTrigger as-child>
-        <Button variant="ghost" size="xs" class="justify-self-start" data-storage-expand>
-          {{ open ? "Hide" : "Show" }} members
-          <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
+  <ul class="grid min-w-0 gap-1">
+    <li
+      v-for="row in rows"
+      :key="`${row.kind}:${row.path}`"
+      class="grid min-w-0 gap-1"
+      :style="{ paddingInlineStart: `${Math.min(row.depth, INDENT_LEVELS) * 0.75}rem` }"
+    >
+      <template v-if="row.kind === 'value'">
+        <span v-if="row.label !== null" class="break-all font-mono text-muted-foreground">
+          <template v-if="row.depth > INDENT_LEVELS">{{ row.depth }} · </template>{{ row.label }}
+        </span>
+        <div class="flex min-w-0 flex-wrap items-center gap-2">
+          <Badge variant="outline">{{ row.preview.type }}</Badge>
+          <span class="min-w-0 break-words font-mono" data-storage-preview>{{ row.preview.text }}</span>
+          <StoragePhoto v-if="row.preview.photo" :key="row.preview.photo" :reference="row.preview.photo" :player="player" />
+        </div>
+        <Button
+          v-if="row.preview.size"
+          variant="ghost"
+          size="sm"
+          class="min-h-11 justify-self-start"
+          :aria-expanded="row.expanded"
+          data-storage-expand
+          @click="toggle(row.path)"
+        >
+          <component :is="row.expanded ? ChevronDown : ChevronRight" aria-hidden="true" />
+          {{ row.expanded ? "Hide members" : "Show members" }}
         </Button>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <ul class="grid gap-2 border-s ps-3">
-          <li v-for="(member, index) in storageMembers(value)" :key="index" class="grid min-w-0 gap-1">
-            <span class="break-all font-mono text-muted-foreground">{{ member.label }}</span>
-            <StorageValue :value="member.value" :player="player" />
-          </li>
-        </ul>
-      </CollapsibleContent>
-    </Collapsible>
-  </div>
+      </template>
+      <Button
+        v-else
+        variant="ghost"
+        size="sm"
+        class="min-h-11 justify-self-start"
+        data-storage-more
+        @click="showMore(row.path)"
+      >
+        Show {{ Math.min(STORAGE_MEMBER_PAGE, row.size - row.shown) }} more of {{ row.size }}
+      </Button>
+    </li>
+  </ul>
 </template>

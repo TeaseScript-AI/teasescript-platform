@@ -725,6 +725,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
         ? scriptStorage.load()
         : Promise.reject(new Error("This script keeps no saved data.")),
     savedDataRevision: computed(() => savedDataRevision.value),
+    /** The host's storage scope of this script's saved values, or `null` without script storage. */
+    savedDataScope: scriptStorage?.scope ?? null,
     /** A saved photo, loaded on first use: its URL once ready, or whether it still loads or is missing. */
     savedPhoto(reference: string) {
       void mediaRevision.value;

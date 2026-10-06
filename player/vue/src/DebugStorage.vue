@@ -3,6 +3,7 @@ import { computed, onMounted, ref, shallowRef, watch } from "vue";
 import { useEventListener } from "@vueuse/core";
 import { RefreshCw } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import { isWellFormedCapturedMediaReference } from "../../captured-media.js";
 import { capturedMediaReferences } from "../../captured-media-persistence.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../../../src/index.js";
 import StoragePhoto from "./StoragePhoto.vue";
@@ -34,16 +35,32 @@ async function refresh() {
 }
 onMounted(refresh);
 watch(props.player.savedDataRevision, refresh);
-// Another tab of this browser saved: its values are this script's too when they share the storage.
-useEventListener(window, "storage", refresh);
+// Another tab of this browser changed this script's saved values: its storage keys name the script's scope. Several
+// changes at once read once.
+const scope = props.player.savedDataScope === null ? null : JSON.stringify(props.player.savedDataScope);
+let refreshQueued = false;
+useEventListener(window, "storage", (event: StorageEvent) => {
+  if (scope === null || refreshQueued) return;
+  if (event.key !== null && !(event.key.startsWith("player-storage") && event.key.includes(scope))) return;
+  refreshQueued = true;
+  queueMicrotask(() => {
+    refreshQueued = false;
+    void refresh();
+  });
+});
 
-// Each saved photo once, with the keys whose values reference it.
+// Each text shaped like a photo reference once, with the keys whose values contain it; whether it names a saved photo,
+// the media store says when its thumbnail comes into view.
 const photos = computed(() => {
   if (saved.value.state !== "ready") return [];
   const keys = new Map<string, string[]>();
   for (const entry of saved.value.entries)
-    for (const reference of capturedMediaReferences(entry.value))
-      keys.set(reference, [...(keys.get(reference) ?? []), entry.key]);
+    for (const reference of capturedMediaReferences(entry.value)) {
+      if (!isWellFormedCapturedMediaReference(reference)) continue;
+      const usedBy = keys.get(reference);
+      if (usedBy) usedBy.push(entry.key);
+      else keys.set(reference, [entry.key]);
+    }
   return [...keys].map(([reference, usedBy]) => ({ reference, usedBy }));
 });
 const refreshing = ref(false);
@@ -62,13 +79,19 @@ async function refreshNow() {
     <div class="flex min-w-0 flex-wrap items-center justify-between gap-2">
       <p data-debug-storage-summary>
         <template v-if="saved.state === 'ready'">
-          Saved data · {{ saved.entries.length }} {{ saved.entries.length === 1 ? "key" : "keys" }} ·
-          {{ photos.length }} {{ photos.length === 1 ? "photo" : "photos" }}
+          Saved data · {{ saved.entries.length }} {{ saved.entries.length === 1 ? "key" : "keys" }}
         </template>
         <template v-else-if="saved.state === 'loading'">Reading saved data…</template>
         <template v-else>This browser's saved data cannot be read.</template>
       </p>
-      <Button variant="outline" size="sm" :disabled="refreshing" data-debug-storage-refresh @click="refreshNow">
+      <Button
+        variant="outline"
+        size="sm"
+        class="min-h-11"
+        :disabled="refreshing"
+        data-debug-storage-refresh
+        @click="refreshNow"
+      >
         <RefreshCw aria-hidden="true" />
         Refresh
       </Button>
@@ -86,10 +109,10 @@ async function refreshNow() {
     </ul>
     <p v-else-if="saved.state === 'ready'" class="text-muted-foreground">Nothing saved yet.</p>
     <section v-if="photos.length" aria-labelledby="debug-storage-photos" class="grid gap-2">
-      <h4 id="debug-storage-photos" class="font-semibold">Saved photos</h4>
+      <h4 id="debug-storage-photos" class="font-semibold">Photo references</h4>
       <ul class="grid gap-2" data-debug-storage-photos>
         <li v-for="photo in photos" :key="photo.reference" class="flex min-w-0 items-center gap-2">
-          <StoragePhoto :reference="photo.reference" :player="player" />
+          <StoragePhoto :key="photo.reference" :reference="photo.reference" :player="player" />
           <span class="min-w-0 break-all">Used by {{ photo.usedBy.map((key) => JSON.stringify(key)).join(", ") }}</span>
         </li>
       </ul>

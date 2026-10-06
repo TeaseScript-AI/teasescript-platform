@@ -55,11 +55,12 @@ auto-skip and ends a jump at its next yield. The time controls stand above the t
   - A collapsed **Timers** list shows every timer, hidden ones included: blocking or async, display, running, paused, or
     suspended behind a block, remaining time, and the statement that started it.
 - **Storage** lists what the script saved in this browser, read-only: every key in UTF-16 order, its value's type and a
-  short preview, and a list, set, object, or dict's members once expanded. A saved photo shows as a thumbnail, read from
-  this browser's storage only once it is in view or missing as Unavailable; each saved photo also appears once with the
-  keys whose values use it. The tab reads the saved values freshly when it opens, after this Player saved, cleared, or
-  imported them, after another tab of this browser changed them, and on Refresh. The running session keeps the copy it
-  loaded at Start.
+  short preview, and, once expanded, a list, set, object, or dict's members, 20 at a time, as one flat outline. Text
+  stays text: when it has the exact shape of a photo reference, a thumbnail beside it shows the photo this browser
+  saved under it, read only once it is in view, or says No saved photo. Each such reference also appears once under
+  Photo references with the keys whose values contain it. The tab reads the saved values freshly when it opens, after
+  this Player saved, cleared, or imported them, after another tab of this browser changed this script's values, and on
+  Refresh. The running session keeps the copy it loaded at Start.
 
 ## Debug export
 
