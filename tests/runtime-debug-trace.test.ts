@@ -30,8 +30,19 @@ import {
   playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
+  applyPlayerRuntimeStorageEdit,
+  completePlayerRuntimeStorageWrite,
+  continuePlayerRuntimeSession,
+  pendingPlayerRuntimeStorageWrite,
+  playerRuntimeForeground,
+  playerRuntimePermanentButtons,
+  pressPlayerRuntimePermanentButton,
+  selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
+  withPlayerRuntimeDebugTrace,
+  type PlayerRuntimeSession,
 } from "../player/runtime-adapter.js";
+import { TraceStore } from "../src/runtime/debug-trace.js";
 import { createImmediatePacingRuntimeSnapshot } from "./helpers/immediate-pacing-runtime.js";
 
 /*
@@ -556,13 +567,11 @@ test("a media block's own handle is its first variable", () => {
     debug,
   );
   const media = playerRuntimeMedia(session.snapshot).media[0]!;
-  session = reportPlayerRuntimeMediaLoad(
-    session,
-    media.mediaId,
-    { kind: "loaded", durationMs: 10_000 },
-    debug,
-  ).session;
-  session = advancePlayerRuntimeTime(session, 60_000, debug);
+  session = reportPlayerRuntimeMediaLoad(session, media.mediaId, {
+    kind: "loaded",
+    durationMs: 10_000,
+  }).session;
+  session = advancePlayerRuntimeTime(session, 60_000);
   assert.equal(session.snapshot.status, "halted");
   const said = session.events.find((event) => event.kind === "say")!;
   const steps = lineage(trace, trace.outputRecord(said.sequence));
@@ -772,7 +781,7 @@ test("a message held behind pacing keeps its causes until it is shown", () => {
     ),
     debug,
   );
-  session = advancePlayerRuntimeTime(session, 60_000, debug);
+  session = advancePlayerRuntimeTime(session, 60_000);
   assert.equal(session.snapshot.status, "halted");
   const outputs = trace.outputs().map((id) => record(trace, id));
   assert.deepEqual(
@@ -798,12 +807,12 @@ test("restore and attaching mid-run start a new epoch that names unrecorded hist
   assert.equal(trace.status().epoch, 1);
   const restorePoint = createPlayerRuntimeRestorePoint(waiting);
 
-  const restored = restorePlayerRuntimeSession(restorePoint, { debugTrace: trace });
+  const restored = restorePlayerRuntimeSession(restorePoint, null, trace);
   assert.deepEqual(
     [trace.status().epoch, trace.status().origin, trace.status().records],
     [2, "restore", 0],
   );
-  const answered = submitPlayerRuntimeComposer(restored, "Yes", { debugTrace: trace })!;
+  const answered = submitPlayerRuntimeComposer(restored, "Yes")!;
   const said = answered.session.events.findLast((event) => event.kind === "say")!;
   const restoredCauses = lineage(trace, trace.outputRecord(said.sequence)).filter(
     (step) => step.kind === "unrecorded",
@@ -813,11 +822,12 @@ test("restore and attaching mid-run start a new epoch that names unrecorded hist
     ["pick", { kind: "unrecorded", reason: "restored" }],
   ]);
 
-  // A context first used on a running session attaches to it.
+  // Debug turned on in a running session attaches to it.
   const attached = new RuntimeDebugContext();
-  const late = submitPlayerRuntimeComposer(restorePlayerRuntimeSession(restorePoint), "Yes", {
-    debugTrace: attached,
-  })!;
+  const late = submitPlayerRuntimeComposer(
+    withPlayerRuntimeDebugTrace(restorePlayerRuntimeSession(restorePoint), attached),
+    "Yes",
+  )!;
   assert.equal(attached.status().origin, "attach");
   const lateSaid = late.session.events.findLast((event) => event.kind === "say")!;
   assert.ok(
@@ -828,8 +838,122 @@ test("restore and attaching mid-run start a new epoch that names unrecorded hist
 
   // An operation on a snapshot that is not the last traced result cannot continue earlier links.
   const epoch = attached.status().epoch;
-  observePlayerRuntimeTime(restored, 0, [], { debugTrace: attached });
+  observePlayerRuntimeTime(withPlayerRuntimeDebugTrace(restored, attached), 0);
   assert.equal(attached.status().epoch, epoch + 1);
+});
+
+/** Drives a Player session through every adapter operation kind the script reaches, the same way each time. */
+function drivePlayer(debugTrace: RuntimeDebugContext | null): PlayerRuntimeSession {
+  let session = createPlayerRuntimeSession(
+    [
+      'let pick = choose a: "Apple", b: "Pear"',
+      'let name = askText "Name?"',
+      'save name as "who"',
+      'showPermanentButton "Bonus" {',
+      '    say "bonus"',
+      "}",
+      'let music = playAudio async "x.mp3"',
+      "wait 2",
+      'let saved = load "who"',
+      'say "${pick} ${name} ${saved} ${["x", "y"]}"',
+      "wait 1",
+      "exit",
+    ].join("\n"),
+    {
+      persistentScriptStorage: true,
+      wallClockMs: 1_790_942_400_000,
+      ...(debugTrace === null ? {} : { debugTrace }),
+    },
+  );
+  let edited = false;
+  let pressed = false;
+  let restored = false;
+  for (let guard = 0; session.snapshot.status === "waiting"; guard += 1) {
+    assert.ok(guard < 100, "the Player scenario must end");
+    const foreground = playerRuntimeForeground(session);
+    const write = pendingPlayerRuntimeStorageWrite(session.snapshot);
+    const unloaded = playerRuntimeMedia(session.snapshot).media.find((media) => !media.loaded);
+    if (foreground?.kind === "choose") {
+      session = selectPlayerRuntimeChoice(session, foreground.options[0]!.id)!.session;
+    } else if (foreground?.kind === "ask-text") {
+      session = submitPlayerRuntimeComposer(session, "Bo")!.session;
+    } else if (write !== null) {
+      session = completePlayerRuntimeStorageWrite(session, write.actionId, true).session;
+    } else if (!edited) {
+      edited = true;
+      session = applyPlayerRuntimeStorageEdit(session, { key: "who", value: "Cy" }).session;
+    } else if (unloaded !== undefined) {
+      session = reportPlayerRuntimeMediaLoad(session, unloaded.mediaId, {
+        kind: "loaded",
+        durationMs: 10_000,
+      }).session;
+    } else if (!pressed && playerRuntimePermanentButtons(session.snapshot).length > 0) {
+      pressed = true;
+      const [button] = playerRuntimePermanentButtons(session.snapshot);
+      session = pressPlayerRuntimePermanentButton(session, button!.buttonId).session;
+    } else if (!restored) {
+      restored = true;
+      session = restorePlayerRuntimeSession(
+        createPlayerRuntimeRestorePoint(session),
+        null,
+        debugTrace,
+      );
+      session = continuePlayerRuntimeSession(session, {
+        wallClockMs: 1_790_942_460_000,
+        temporalContext: session.snapshot.temporalCaptures[0]!.context,
+      }).session;
+    } else {
+      const next = nextPlayerRuntimeEventMs(session.snapshot);
+      assert.notEqual(next, null);
+      session = observePlayerRuntimeTime(session, next!).session;
+    }
+  }
+  assert.ok(edited && pressed && restored, "the scenario reaches every adapter operation");
+  return session;
+}
+
+test("Debug off leaves every Player adapter path unchanged and does no trace work", () => {
+  const calls: string[] = [];
+  // Every method of the trace's recorder is counted while Debug is off.
+  const originals = new Map<string, PropertyDescriptor>();
+  for (const name of Object.getOwnPropertyNames(TraceStore.prototype)) {
+    const descriptor = Object.getOwnPropertyDescriptor(TraceStore.prototype, name)!;
+    const method: unknown = descriptor.value;
+    if (name === "constructor" || typeof method !== "function") continue;
+    originals.set(name, descriptor);
+    Object.defineProperty(TraceStore.prototype, name, {
+      ...descriptor,
+      value(this: TraceStore, ...args: unknown[]) {
+        calls.push(name);
+        return method.apply(this, args);
+      },
+    });
+  }
+  let off: PlayerRuntimeSession;
+  try {
+    off = drivePlayer(null);
+    assert.deepEqual(calls, [], "no trace method runs while Debug is off");
+  } finally {
+    for (const [name, descriptor] of originals)
+      Object.defineProperty(TraceStore.prototype, name, descriptor);
+  }
+  const trace = new RuntimeDebugContext();
+  const on = drivePlayer(trace);
+  assert.equal(off.snapshot.status, "halted");
+  assert.deepEqual(on.snapshot, off.snapshot);
+  assert.deepEqual(on.events, off.events);
+  assert.deepEqual(on.transcriptEntries, off.transcriptEntries);
+  assert.equal(
+    createPlayerRuntimeRestorePoint(on).checkpointJson,
+    createPlayerRuntimeRestorePoint(off).checkpointJson,
+  );
+  assert.equal(on.debugTrace, trace);
+  assert.equal(off.debugTrace, null);
+  // The trace stays out of the checkpoint and the session's restore point.
+  assert.ok(!createPlayerRuntimeRestorePoint(on).checkpointJson.includes("debugTrace"));
+  assert.equal(trace.status().origin, "restore");
+  assert.ok(trace.status().records > 0);
+  assert.equal(withPlayerRuntimeDebugTrace(on, null).debugTrace, null);
 });
 
 test("bounded history drops the oldest records and says so", () => {

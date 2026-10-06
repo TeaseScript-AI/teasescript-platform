@@ -269,7 +269,9 @@ export function withPlayerRuntimeDebugTrace(
   session: PlayerRuntimeSession,
   context: RuntimeDebugContext | null,
 ): PlayerRuntimeSession {
-  return session.debugTrace === context ? session : Object.freeze({ ...session, debugTrace: context });
+  return session.debugTrace === context
+    ? session
+    : Object.freeze({ ...session, debugTrace: context });
 }
 
 export function playerRuntimeForeground(

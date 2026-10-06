@@ -1232,10 +1232,11 @@ The zero-state rule prevents the absorbing xorshift32 state in which every futur
 `RuntimeDebugContext` (`src/runtime/debug-trace.ts`) is an opt-in, host-owned record of why values have the values
 they have. A host passes the same context as `debugTrace` to each operation on a session's successive results: in the
 options of `run`, `stepToEvent`, `executeInstruction`, `runValidatedState`, `completeAction`, `observeTime`,
-`reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and `applyExternalStorageEdit`, and of every Player
-adapter session operation.
-The trace is not part of plans, snapshots, events, or checkpoints and changes no format: an operation returns the same
-snapshot, events, random state, and checkpoint with or without it, and without it execution records nothing.
+`reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and `applyExternalStorageEdit`. A Player session
+carries it as `debugTrace`, like its debug recorder: `createPlayerRuntimeSession` and `restorePlayerRuntimeSession`
+take it, `withPlayerRuntimeDebugTrace` turns it on or off, and every session operation passes it on. The trace is not
+part of plans, snapshots, events, checkpoints, restore points, or recorded calls and changes no format: an operation
+returns the same snapshot, events, random state, and checkpoint with or without it, and without it records nothing.
 
 - **Observation only.** Records take values that execution computed anyway. The trace never evaluates an expression
   again, draws a random number, or reads storage. A recording failure stops the trace, which `status()` reports; it
