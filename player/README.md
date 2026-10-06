@@ -130,11 +130,16 @@ playing audio seeks along, and browser video seeking waits for video playback. E
 closed; these lines are local UI state, never transcript entries, notices, or checkpoint data. The explanations of
 Auto-skip and the jumps open from their labels. While Debug runs, `playerRuntimeDebugCountdown` selects the foreground
 wait that the countdown line under the foreground controls shows, and the scene clock refreshes its display estimate
-for it. Automation finds the controls by role and name (the `Debug menu` switch in Player Settings, the Debug launcher,
+for it. The **Now** tab (`DebugNow.vue`) combines `playerRuntimeDebugNow` (next statement, waiting statement, calls,
+timers, and media with their start statements) with the Stage's load reports for its current image element
+(`stageImageObservation`, judged by `debugStageImageStatus`); it adds nothing to the session. Automation finds the
+controls by role and name (the `Debug menu` switch in Player Settings, the Debug launcher,
 the `Debug` and `Auto-skip` switches, the `Skip event`, `+10 s` and `+1 min` buttons) or by
 `[data-player-setting="debug-menu"]`, `[data-debug-active]` and `data-development-time-action` (`skip`, `advance-10s`,
-`advance-1min`), the countdown in `[data-debug-countdown]`, the log lines under `[data-debug-log]`, and the latest
-announcement in `[data-debug-announcement]`.
+`advance-1min`), the countdown in `[data-debug-countdown]`, the Now tab's `[data-debug-now]` with `-next`, `-waiting`,
+`-calls` (and `-calls-toggle`), `-image` (its badge's `data-status`), `-image-path`, `-media`, and `-timers` (and
+`-timers-toggle`), the log lines under `[data-debug-log]` in the Log tab, and the latest announcement in
+`[data-debug-announcement]`.
 
 Run retained presentation checks through `npm run test:player:preview -- <preview-url>`; see
 [`docs/TESTING.md`](../docs/TESTING.md#player-browser-and-visual-verification) for prerequisites and for the demo's

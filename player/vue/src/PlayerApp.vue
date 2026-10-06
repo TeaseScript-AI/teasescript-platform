@@ -194,6 +194,9 @@ async function toggleFullscreen() {
         v-model:active="debug.active.value"
         :time="debug.time.value"
         :log="debug.log.value"
+        :player="player"
+        :stage-covered="stageCamera !== null"
+        :stage-overridden="media !== undefined"
       >
         <template v-if="$slots['debug-storage']" #storage>
           <slot name="debug-storage" />
@@ -240,6 +243,7 @@ async function toggleFullscreen() {
             :media="stageMedia"
             :camera="stageCamera"
             @media-aspect="mediaAspect = $event"
+            @media-load="player.stageImageLoad"
             @media-failure="player.stageImageFailure"
           >
             <template v-if="capture && !captureInWindow" #camera>

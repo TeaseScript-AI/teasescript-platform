@@ -125,6 +125,7 @@ async function main() {
       await savedDataImportScenario(debugPort, origin, exported);
       await developmentTimeScenario(cdp, origin);
       await debugCountdownScenario(cdp, origin);
+      await debugNowScenario(cdp, origin);
       await missingMediaScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
@@ -132,7 +133,7 @@ async function main() {
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, development time controls, Debug countdowns, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, development time controls, Debug countdowns and Now, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -1455,6 +1456,98 @@ async function debugCountdownScenario(cdp, origin) {
     `!!document.querySelector(${JSON.stringify(launcher)})`,
     8_000,
     "?dev did not start with the Debug menu on",
+  );
+}
+
+/**
+ * Debug's Now tab on the `debug-now` package, shaped like the Domme3 case: from a nested folder, a called file's
+ * function shows an image reference the package lacks, then an image the browser cannot decode, then `hideImage`, then
+ * a valid image, while two sounds overlap and a hidden timer runs. The tab names each state with the authored paths,
+ * the call chain and the timers, and fits a narrow drawer.
+ */
+async function debugNowScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const text = (selector) =>
+    `document.querySelector(${JSON.stringify(selector)})?.textContent.replace(/\\s+/g, " ").trim() ?? null`;
+  const imageStatus = (status) =>
+    `document.querySelector('[data-debug-now-image] [data-status]')?.getAttribute('data-status') === ${JSON.stringify(status)}`;
+  const next = async (status, failure) => {
+    await physicalClick(cdp, "[data-foreground-controls] button");
+    await waitFor(cdp, imageStatus(status), 5_000, failure);
+  };
+  await navigate(cdp, `${origin}/player/?dev&package=debug-now`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+  await waitFor(cdp, imageStatus("unresolved"), 5_000, "The bad reference was not unresolved");
+  assertEqual(
+    await value(cdp, text("[data-debug-now-image-path]")),
+    "Domme/Domme43.jpg",
+    "Now did not name the authored image path",
+  );
+  assertEqual(
+    await value(cdp, text("[data-debug-now-waiting]")),
+    "Button · Domme3/spanking.tease:3",
+    "Now did not name the waiting statement with its nested path",
+  );
+  await physicalClick(cdp, "[data-debug-now-calls-toggle]");
+  await waitFor(cdp, `!!document.querySelector('[data-debug-now-calls]')`);
+  assertEqual(
+    JSON.stringify(
+      await value(
+        cdp,
+        `[...document.querySelectorAll('[data-debug-now-calls] li')].map((item) => item.textContent.replace(/\\s+/g, " ").trim())`,
+      ),
+    ),
+    JSON.stringify([
+      "punish() · Domme3/spanking.tease:8",
+      "call Domme3/spanking.tease · Domme3/maintenance.tease:2",
+    ]),
+    "Now did not list the call chain",
+  );
+  // Both sounds play at once; the hidden timer is listed.
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('[data-debug-now-media] li')].filter((item) => /Playing/.test(item.textContent)).length === 2`,
+    5_000,
+    "Now did not list both playing sounds",
+  );
+  await physicalClick(cdp, "[data-debug-now-timers-toggle]");
+  await waitFor(
+    cdp,
+    `/hidden · running/.test(document.querySelector('[data-debug-now-timers]')?.textContent ?? '')`,
+    2_000,
+    "Now did not list the hidden timer",
+  );
+  await next("failed", "The undecodable image was not a load failure");
+  await next("hidden", "hideImage did not hide the Stage image");
+  await next("displayed", "The valid image was not displayed");
+  assertEqual(
+    await value(cdp, text("[data-debug-now-image-path]")),
+    "Domme0/Domme44.svg",
+    "Now did not name the valid image",
+  );
+
+  // The narrow drawer shows the tab without horizontal overflow.
+  await setViewport(cdp, 390, 760);
+  await waitFor(
+    cdp,
+    `document.querySelector('#player-shell')?.dataset.playerHorizontal === 'constrained'`,
+  );
+  await physicalClick(cdp, '[data-player-top-bar] [data-sidebar="trigger"]');
+  await waitFor(
+    cdp,
+    `!!document.querySelector('.tools-drawer [data-debug-now]')`,
+    5_000,
+    "The drawer did not show Now",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const now = document.querySelector('.tools-drawer [data-debug-now]'); return now.scrollWidth <= now.clientWidth && now.getBoundingClientRect().right <= innerWidth; })()`,
+    ),
+    true,
+    "The Now tab overflows the narrow drawer",
   );
 }
 
