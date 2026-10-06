@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { isRecord } from "../src/ast.ts";
 import { explore, loadEngine, replay, type Engine } from "../src/explorer.ts";
 
 const engineResult = await loadEngine().then(
@@ -12,10 +13,13 @@ test(
   "the explorer finds both ends, the crash, the inescapable loop, and the missed branch of a package",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   async () => {
-    const { engine } = engineResult as { engine: Engine };
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
     const source = await readFile(new URL("fixtures/explorer/main.tease", import.meta.url), "utf8");
-    const compiled = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
-    const plan = (compiled as { plan: Readonly<Record<string, unknown>> }).plan;
+    const { plan } = engine.call("compileProject", [{ path: "main.tease", source }], {
+      builtins: [],
+    });
+    assert.ok(isRecord(plan));
     const result = explore(engine, plan, {
       seed: 1,
       budgetMs: 30_000,
@@ -62,20 +66,34 @@ test(
   "a runtime operation that throws is no crash, and its input list replays the throw",
   { skip: "reason" in engineResult ? engineResult.reason : false },
   async () => {
-    const { engine } = engineResult as { engine: Engine };
+    assert.ok("engine" in engineResult);
+    const { engine } = engineResult;
     // Stands in for a runtime that rejects its own snapshot (TSR101) when the player picks "Stay".
     const failing: Engine = {
       ...engine,
-      completeAction: (...args: unknown[]) => {
-        const request = args[2] as { payload?: { optionIndex?: number } };
-        if (request.payload?.optionIndex === 2) throw new Error("TSR101 Malformed runtime snapshot.");
-        return engine.completeAction(...args);
+      call: (name, ...args) => {
+        const request = args[2];
+        if (
+          name === "completeAction" &&
+          isRecord(request) &&
+          isRecord(request.payload) &&
+          request.payload.optionIndex === 2
+        )
+          throw new Error("TSR101 Malformed runtime snapshot.");
+        return engine.call(name, ...args);
       },
     };
     const source = await readFile(new URL("fixtures/explorer/main.tease", import.meta.url), "utf8");
-    const compiled = engine.compileProject([{ path: "main.tease", source }], { builtins: [] });
-    const plan = (compiled as { plan: Readonly<Record<string, unknown>> }).plan;
-    const result = explore(failing, plan, { seed: 1, budgetMs: 30_000, maxStates: 1000, sources: new Map() });
+    const { plan } = engine.call("compileProject", [{ path: "main.tease", source }], {
+      builtins: [],
+    });
+    assert.ok(isRecord(plan));
+    const result = explore(failing, plan, {
+      seed: 1,
+      budgetMs: 30_000,
+      maxStates: 1000,
+      sources: new Map(),
+    });
 
     assert.equal(result.search.engineErrors.count, 1);
     assert.equal(result.crashes.length, 1);
