@@ -106,22 +106,39 @@ export type PlayerForegroundPresentation =
     };
 
 /**
- * The controls of a pending form as its answers stand: each field by its ID, the submit button, and a status such as
- * `3 of 5 selected`. A toggle is `pressed` while on; a toggle with options and a cycle show their current option as
- * `state`, whose colour wins over the field's.
+ * The controls of a pending form as its answers stand: each field by its ID, the submit button, a status such as
+ * `3 of 5 selected`, and the field the composer edits. A toggle is `pressed` while on; a toggle with options and a cycle
+ * show their current option as `state`, whose colour wins over the field's; a typed field shows its value as `state`,
+ * or `null` without one.
  */
 export interface PlayerFormPresentation {
   readonly actionId: number;
   readonly fields: readonly PlayerFormFieldPresentation[];
   readonly submit: { readonly label: string; readonly authoredFill?: string };
   readonly status: string;
+  readonly editor: PlayerFormEditorPresentation | null;
 }
 
 export interface PlayerFormFieldPresentation {
   readonly id: string;
   readonly label: string;
-  readonly kind: "toggle" | "cycle";
+  readonly kind: "toggle" | "cycle" | "value";
   readonly pressed: boolean;
   readonly state: string | null;
+  /** A typed field the form may be submitted without. */
+  readonly optional: boolean;
+  /** The typed field the composer edits now. */
+  readonly editing: boolean;
   readonly authoredFill?: string;
+}
+
+/** The typed field the composer edits, with the text the form holds for it and how the composer takes its answer. */
+export interface PlayerFormEditorPresentation {
+  readonly fieldId: string;
+  readonly label: string;
+  readonly hint: string;
+  readonly optional: boolean;
+  readonly text: string;
+  readonly inputMode: "text" | "numeric" | "decimal";
+  readonly inputType: "text" | "date" | "time" | "datetime-local";
 }

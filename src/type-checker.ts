@@ -3032,7 +3032,7 @@ class TypeChecker {
     const result: PropertyTable = new Map();
     const recorded: { readonly name: string; readonly start: StaticType }[] = [];
     for (const [name, type] of container.properties ?? []) {
-      const field = this.#formField(name, type, written.get(name), fields.expression);
+      const field = this.#formField(name, type, written.get(name));
       result.set(name, field.result);
       if (field.start !== null) recorded.push({ name, start: field.start });
     }
@@ -3049,10 +3049,8 @@ class TypeChecker {
     name: string,
     type: StaticType,
     written: Expression | undefined,
-    fields: Expression,
   ): { readonly result: StaticType; readonly start: StaticType | null } {
     const value = resolved(nonNullType(type));
-    const at = written ?? fields;
     let kind: FormFieldKind | null;
     let nullable = false;
     let start: StaticType | null = null;
@@ -3107,12 +3105,6 @@ class TypeChecker {
       if (value.kind === "list") options = value;
       if (kind === "integer" || kind === "number") start = value;
     }
-    if (kind !== null && kind !== "boolean" && kind !== "cycle")
-      this.#report(
-        typeCode.invalidOperand,
-        `askForm field '${name}': fields typed in the composer are not supported yet; use toggles and cycles.`,
-        at.span,
-      );
     if (kind === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start };
     const result =
       kind === "cycle"

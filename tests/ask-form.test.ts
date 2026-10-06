@@ -152,9 +152,10 @@ test("askForm reports what the compiler can see is wrong", () => {
       "askForm field 'on': unknown property 'label'.",
     ],
     ["askForm fields: 5", "'fields:' takes an object of fields"],
+    // An optional answer may be null, so it needs a place that takes null.
     [
-      'askForm fields: { name: "Ada" }',
-      "askForm field 'name': fields typed in the composer are not supported yet",
+      'askForm fields: { n: { type: "integer", optional: true } }\nlet m: integer = answers.n',
+      "cannot start as a whole number (integer) or null",
     ],
     ['askForm fields: dict { "on": false }', "A dict of fields is not supported yet"],
     ['askForm fields: { on: false }, hint: ["a"]', "A list cannot be an input hint."],
@@ -166,4 +167,82 @@ test("askForm reports what the compiler can see is wrong", () => {
       `${form}: ${JSON.stringify(diagnostics.map((diagnostic) => diagnostic.message))}`,
     );
   }
+});
+
+/** Opens and commits typed fields through their editor, as the composer does. */
+function edit(plan: InstructionPlan, snapshot: RuntimeSnapshot, fieldId: string, text: string) {
+  let current = snapshot;
+  for (const update of [
+    { kind: "edit", fieldId },
+    { kind: "draft", fieldId, text },
+    { kind: "commit", fieldId },
+  ]) {
+    const result = updateInteraction(plan, current, {
+      actionId: current.foregroundAction!.actionId,
+      actionKind: "interaction",
+      interactionKind: "form",
+      update,
+    });
+    if (result.outcome.kind !== "updated" && result.outcome.kind !== "unchanged")
+      return { refused: result.outcome, snapshot: current };
+    current = result.snapshot;
+  }
+  return { refused: null, snapshot: current };
+}
+
+test("typed fields take their answers in the composer, with their numeric kind, bounds, and optional null", () => {
+  const plan = compileValidPlan(
+    [
+      "let level = 5",
+      "level = level + 0.5",
+      "let details = askForm fields: {",
+      '  impact: { value: 5, min: 1, max: 10, hint: "1 to 10" }, weight: 5.0, level: level,',
+      '  note: { type: "text", optional: true }, day: { type: "date" }',
+      "}",
+      "let impact: integer = details.impact",
+      "let weight: number = details.weight",
+      "let note: string? = details.note",
+      "let day: date = details.day",
+      "exit",
+    ].join("\n"),
+  );
+  const { snapshot, ui } = opened(plan);
+  // `5.0`, and a variable that a later assignment makes a number, give number fields.
+  assert.deepEqual(
+    ui.fields.map((field) => [field.id, field.kind]),
+    [
+      ["impact", "integer"],
+      ["weight", "number"],
+      ["level", "number"],
+      ["note", "text"],
+      ["day", "date"],
+    ],
+  );
+  assert.deepEqual(edit(plan, snapshot, "impact", "2.5").refused, {
+    kind: "invalidPayload",
+    message: "That is wrong. I asked for a whole number.",
+  });
+  assert.equal(edit(plan, snapshot, "impact", "11").refused?.kind, "invalidPayload");
+  let current = edit(plan, snapshot, "impact", "7").snapshot;
+  current = edit(plan, current, "weight", "2.5").snapshot;
+  current = edit(plan, current, "day", "2026-10-05").snapshot;
+  // A checkpoint taken while a field is edited keeps the unsent text, and the answer it gives after a restore.
+  const drafting = updateInteraction(plan, edit(plan, current, "note", "Later").snapshot, {
+    actionId: current.foregroundAction!.actionId,
+    actionKind: "interaction",
+    interactionKind: "form",
+    update: { kind: "edit", fieldId: "note" },
+  }).snapshot;
+  const restored = deserializeCheckpoint(
+    serializeCheckpoint(createCheckpoint(plan, drafting)),
+  ).snapshot;
+  assert.deepEqual(restored, drafting);
+  const { finished } = submitted(plan, restored);
+  const bindings = new Map(
+    finished.snapshot.frames[0]!.bindings.map((binding) => [binding.name, binding.value]),
+  );
+  assert.equal(bindings.get("impact"), 7);
+  assert.equal(bindings.get("weight"), 2.5);
+  assert.equal(bindings.get("note"), "Later");
+  assert.deepEqual(bindings.get("day"), { kind: "date", year: 2026, month: 10, day: 5 });
 });

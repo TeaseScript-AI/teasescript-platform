@@ -149,8 +149,9 @@ async function main() {
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       await formsScenario(cdp, origin);
+      await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, missing, late and overlapping media, and the camera, viewfinder, permanent buttons, and askForm scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, missing, late and overlapping media, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -3849,6 +3850,86 @@ async function formsScenario(cdp, origin) {
     `document.body.innerText.includes("Rope: true. Access: false. Intensity: Medium, pace Slow.")`,
     15_000,
     "The answers did not reach the script",
+  );
+}
+
+/**
+ * Typed `askForm` fields in the composer: a field opens with its value selected, so typing replaces it; a refused
+ * answer stays with the composer notice; Enter commits and returns focus to the field; a date field uses the date
+ * control; and submitting takes the text still being typed.
+ */
+async function formFieldsScenario(cdp, origin) {
+  await setViewport(cdp, 1100, 800);
+  await navigate(cdp, `${origin}/player/?package=forms-typed`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const field = (id) => `document.querySelector('[data-form-field="${id}"]')`;
+  const composer = `document.querySelector('[data-composer-input]')`;
+  const pressEnter = async () => {
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+      });
+  };
+  await waitFor(cdp, `!!${field("impact")}`, 15_000, "The typed form did not appear");
+  await physicalClick(cdp, '[data-form-field="impact"]');
+  await waitFor(
+    cdp,
+    `document.activeElement === ${composer} && ${composer}.value === "5" && ${composer}.selectionEnd === 1`,
+    8_000,
+    "The field did not open in the composer with its value selected",
+  );
+  await cdp.call("Input.insertText", { text: "11" });
+  await pressEnter();
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes("That is wrong. Impact must be from 1 to 10.")`,
+    8_000,
+    "An answer outside the bounds was not refused",
+  );
+  assertEqual(await value(cdp, `${composer}.value`), "11", "The refused text was not kept");
+  await evaluate(cdp, `${composer}.select()`);
+  await cdp.call("Input.insertText", { text: "7" });
+  await pressEnter();
+  await waitFor(
+    cdp,
+    `${field("impact")}.textContent.trim() === "Impact: 7" && document.activeElement === ${field("impact")}`,
+    8_000,
+    "Enter did not commit the answer and return focus to the field",
+  );
+  await physicalClick(cdp, '[data-form-field="day"]');
+  await waitFor(
+    cdp,
+    `document.activeElement?.type === "date"`,
+    8_000,
+    "The date field did not use the date control",
+  );
+  await evaluate(
+    cdp,
+    `const input = document.activeElement; input.value = "2026-10-05"; input.dispatchEvent(new Event("input", { bubbles: true }))`,
+  );
+  await pressEnter();
+  await waitFor(
+    cdp,
+    `!${field("day")}.textContent.includes("Set…")`,
+    8_000,
+    "The date was not committed",
+  );
+  await physicalClick(cdp, '[data-form-field="weight"]');
+  await waitFor(cdp, `document.activeElement === ${composer}`);
+  await cdp.call("Input.insertText", { text: "2.5" });
+  await evaluate(
+    cdp,
+    `[...document.querySelectorAll('[data-form-actions] button')].find((button) => button.textContent.trim() === "Continue").click()`,
+  );
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes("Impact 7, weight 2.5, Ada,")`,
+    15_000,
+    "Submitting did not take the text being typed",
   );
 }
 

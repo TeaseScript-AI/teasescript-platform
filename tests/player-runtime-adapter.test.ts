@@ -43,6 +43,9 @@ import {
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
   playerRuntimeForm,
+  clearPlayerRuntimeFormField,
+  dismissPlayerRuntimeFormField,
+  draftPlayerRuntimeForm,
 } from "../player/runtime-adapter.js";
 
 test("a Player session starts at main.tease of a project, or of a single source", () => {
@@ -1014,4 +1017,82 @@ test("a form presents its fields as their answers stand, takes edits, and surviv
     ],
   );
   assert.equal(playerRuntimeForm(done.session), null);
+});
+
+test("a typed form field opens in the composer, keeps its draft through a restore, and takes the composer's text", () => {
+  const session = createPlayerRuntimeSession(
+    [
+      "let details = askForm fields: {",
+      '  impact: { value: 5, min: 1, max: 10, text: "Impact" }, weight: { type: "number", optional: true },',
+      '  day: { type: "date", hint: "Pick a day" }',
+      "}",
+      'say "${details.impact} ${details.weight} ${details.day}", instant',
+      'showButton "Done"',
+      "exit",
+    ].join("\n"),
+  );
+  const form = playerRuntimeForm(session)!;
+  assert.deepEqual(
+    form.fields.map((field) => [field.id, field.kind, field.state, field.optional]),
+    [
+      ["impact", "value", "5", false],
+      ["weight", "value", null, true],
+      ["day", "value", null, false],
+    ],
+  );
+  assert.equal(form.editor, null);
+  const opened = stepPlayerRuntimeFormField(session, "impact")!;
+  assert.deepEqual(playerRuntimeForm(opened.session)!.editor, {
+    fieldId: "impact",
+    label: "Impact",
+    hint: "Impact…",
+    optional: false,
+    text: "5",
+    inputMode: "numeric",
+    inputType: "text",
+  });
+  // The composer's text reaches the form before a checkpoint, and a restore shows it again.
+  const drafted = draftPlayerRuntimeForm(opened.session, "1")!;
+  assert.equal(drafted.outcome.kind, "updated");
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(drafted.session));
+  assert.equal(playerRuntimeForm(restored)!.editor?.text, "1");
+  // Enter in the composer commits its text; a refused one stays, with the engine's message.
+  const refused = submitPlayerRuntimeComposer(restored, "12")!;
+  assert.deepEqual(refused.outcome, {
+    kind: "invalidPayload",
+    message: "That is wrong. Impact must be from 1 to 10.",
+  });
+  assert.equal(playerRuntimeForm(refused.session)!.editor?.text, "12");
+  const committed = submitPlayerRuntimeComposer(refused.session, "7")!;
+  assert.equal(committed.outcome.kind, "updated");
+  assert.equal(playerRuntimeForm(committed.session)!.fields[0]!.state, "7");
+  // A date field uses the date control and its own hint; Back drops the text.
+  const day = stepPlayerRuntimeFormField(committed.session, "day")!;
+  assert.deepEqual(
+    [
+      playerRuntimeForm(day.session)!.editor?.inputType,
+      playerRuntimeForm(day.session)!.editor?.hint,
+    ],
+    ["date", "Pick a day"],
+  );
+  const back = dismissPlayerRuntimeFormField(day.session)!;
+  assert.equal(playerRuntimeForm(back.session)!.editor, null);
+  // Opening another field commits the text typed for this one; Clear leaves an optional field without a value.
+  const weight = stepPlayerRuntimeFormField(back.session, "weight")!;
+  const switched = stepPlayerRuntimeFormField(weight.session, "day", "2.5")!;
+  assert.equal(playerRuntimeForm(switched.session)!.fields[1]!.state, "2.5");
+  const reopened = stepPlayerRuntimeFormField(
+    dismissPlayerRuntimeFormField(switched.session)!.session,
+    "weight",
+  )!;
+  const cleared = clearPlayerRuntimeFormField(reopened.session)!;
+  assert.equal(playerRuntimeForm(cleared.session)!.fields[1]!.state, null);
+  // Submitting takes the composer's text for the edited field first.
+  const day2 = stepPlayerRuntimeFormField(cleared.session, "day")!;
+  const done = submitPlayerRuntimeForm(day2.session, "2026-10-05")!;
+  assert.equal(done.outcome.kind, "completed");
+  assert.deepEqual(done.session.transcriptEntries.map((entry) => entry.text).slice(-2), [
+    "2 of 3 fields set",
+    "7 null 2026-10-05",
+  ]);
 });

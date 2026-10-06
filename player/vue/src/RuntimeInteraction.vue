@@ -12,6 +12,9 @@ import {
   playerRuntimePacingGate,
   selectPlayerRuntimeChoice,
   skipPlayerRuntimePacing,
+  clearPlayerRuntimeFormField,
+  dismissPlayerRuntimeFormField,
+  draftPlayerRuntimeForm,
   stepPlayerRuntimeFormField,
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
@@ -136,7 +139,7 @@ function presents(request: ImageRequestIdentity): boolean {
 const readingImage = ref(false);
 const root = ref<HTMLElement | null>(null);
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
-const composer = ref<{ focusInput(): void } | null>(null);
+const composer = ref<{ focusInput(): void; selectInput(): void } | null>(null);
 const draft = ref("");
 const feedback = ref("");
 const submitting = ref(false);
@@ -158,6 +161,51 @@ function showFeedback(message: string) {
 }
 
 watch(draft, clearFeedback);
+
+// The composer edits one form field at a time: it opens with the field's text selected, so typing replaces it and
+// Enter keeps it; after the field closes, focus returns to the field's button.
+const formEditor = computed(() => form.value?.editor ?? null);
+watch(
+  () => formEditor.value?.fieldId ?? null,
+  async (fieldId, previous) => {
+    if (fieldId !== null) {
+      draft.value = formEditor.value!.text;
+      composer.value?.selectInput();
+      return;
+    }
+    if (previous === null) return;
+    // The controls stay disabled until the edit that closed the field is published.
+    if (submitting.value)
+      await new Promise<void>((resolve) => {
+        const stop = watch(submitting, (busy) => {
+          if (busy) return;
+          stop();
+          resolve();
+        });
+      });
+    await nextTick();
+    root.value
+      ?.querySelector<HTMLElement>(`[data-form-field="${CSS.escape(previous)}"]`)
+      ?.focus({ preventScroll: true });
+  },
+);
+// The form holds the text being typed, shortly after typing pauses, so a checkpoint or debug export keeps it.
+let draftTimer: ReturnType<typeof setTimeout> | undefined;
+watch(draft, (text) => {
+  clearTimeout(draftTimer);
+  if (formEditor.value === null || text === formEditor.value.text) return;
+  const fieldId = formEditor.value.fieldId;
+  draftTimer = setTimeout(() => {
+    if (!props.session || submitting.value || formEditor.value?.fieldId !== fieldId) return;
+    const result = draftPlayerRuntimeForm(props.session, text);
+    if (result?.outcome.kind === "updated") emit("update:session", result.session);
+  }, 400);
+});
+onUnmounted(() => clearTimeout(draftTimer));
+/** The composer's text, which the edited form field takes before any other edit of its form. */
+function formDraft(): string | undefined {
+  return formEditor.value === null ? undefined : draft.value;
+}
 onUnmounted(clearFeedback);
 useEventListener(
   document,
@@ -261,12 +309,13 @@ async function complete(
       return;
     }
     emit("update:session", result.session);
-    // A form edit, also an unchanged one, succeeds without completing the form.
-    if (
-      result.outcome.kind === "completed" ||
-      result.outcome.kind === "updated" ||
-      result.outcome.kind === "unchanged"
-    ) {
+    clearTimeout(draftTimer);
+    // A form edit, also an unchanged one, succeeds without completing the form; the composer then shows the text of
+    // the field it edits, if any.
+    if (result.outcome.kind === "updated" || result.outcome.kind === "unchanged") {
+      draft.value = playerRuntimeForm(result.session)?.editor?.text ?? "";
+      clearFeedback();
+    } else if (result.outcome.kind === "completed") {
       draft.value = "";
       clearFeedback();
     } else {
@@ -416,8 +465,13 @@ function submit(source: "input" | "button") {
               :form="form"
               :accessible-name="foreground.accessibleName"
               :disabled="submitting"
-              @step="(fieldId) => complete((session) => stepPlayerRuntimeFormField(session, fieldId), false)"
-              @submit="complete(submitPlayerRuntimeForm)"
+              @step="
+                (fieldId) =>
+                  complete((session) => stepPlayerRuntimeFormField(session, fieldId, formDraft()), false)
+              "
+              @submit="complete((session) => submitPlayerRuntimeForm(session, formDraft()))"
+              @dismiss="complete(dismissPlayerRuntimeFormField, false)"
+              @clear="complete(clearPlayerRuntimeFormField, false)"
             />
             <ForegroundControls
               v-else
@@ -454,19 +508,29 @@ function submit(source: "input" | "button") {
           :pacing="!foreground && !!pacing"
           :submitting="submitting || readingImage"
           :placeholder="
-            imageRequest
-              ? imageRequest.hint || 'Add an image…'
-              : foreground && 'hint' in foreground
-                ? foreground.hint
-                : 'Type your response…'
+            formEditor
+              ? formEditor.hint
+              : imageRequest
+                ? imageRequest.hint || 'Add an image…'
+                : foreground && 'hint' in foreground
+                  ? foreground.hint
+                  : 'Type your response…'
           "
           :attach="attach"
-          :accessible-name="foreground?.accessibleName ?? 'Response'"
+          :accessible-name="formEditor?.label ?? foreground?.accessibleName ?? 'Response'"
           :input-mode="
-            foreground?.kind !== 'ask-number' ? 'text' : foreground.integer ? 'numeric' : 'decimal'
+            formEditor
+              ? formEditor.inputMode
+              : foreground?.kind !== 'ask-number'
+                ? 'text'
+                : foreground.integer
+                  ? 'numeric'
+                  : 'decimal'
           "
           :input-type="
-            foreground && 'isoText' in foreground && foreground.isoText
+            formEditor
+              ? formEditor.inputType
+              : foreground && 'isoText' in foreground && foreground.isoText
               ? 'text'
               : foreground?.kind === 'ask-date'
                 ? 'date'
@@ -479,6 +543,7 @@ function submit(source: "input" | "button") {
           :feedback="feedback"
           @submit="submit"
           @skip="skipPacing(true)"
+          @escape="formEditor && complete(dismissPlayerRuntimeFormField, false)"
           @files="submitImage"
         />
       </template>

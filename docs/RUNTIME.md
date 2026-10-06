@@ -1135,7 +1135,8 @@ Every edit is absolute, so a repeat changes nothing and returns `unchanged`. Ope
 field first commits the text being edited; invalid text, also blank text for a required field, refuses the edit. A
 refused or malformed edit returns `invalidPayload` with a message and changes nothing. An edit keeps the
 action, its continuation, and its destination; it publishes no event, records no settlement, uses no randomness, and
-does not run the script. A suspended form returns `suspendedAction`; otherwise the outcomes are those of
+does not run the script. The Player sends the composer's text as `draft` shortly after typing pauses and before any
+other edit of the form, so a checkpoint keeps the text being typed. A suspended form returns `suspendedAction`; otherwise the outcomes are those of
 `completeAction`. Focus, caret, and other browser state stay outside canonical
 state.
 

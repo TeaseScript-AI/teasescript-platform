@@ -799,7 +799,13 @@ viewport height (at most `24rem`), and the submit button and a polite status bad
 set` when not every field is a toggle) stay below it. A toggle is a Player action button with toggle semantics
 (`aria-pressed`), its label behind a check or cross mark, and pressed in while on; with authored options it shows
 `label: option` instead of the mark. A cycle shows `label: option` with a cycle mark, and a press shows the next option.
-The shown option's authored colour wins over the field's; the submit button takes its own. Every control keeps the
+The shown option's authored colour wins over the field's; the submit button takes its own. A typed field shows
+`label: value`, or `Set…` (`Not set` when optional) without one; activating it opens it in the composer, which takes the
+field's name, its `hint:` as the input hint (`label…` by default), and the numeric keyboard or the date or time control
+of its kind, with the field's text selected so typing replaces it and Enter keeps it. The edited field stays pressed in
+and is marked current. Enter commits it and returns focus to the field's button; a refused answer keeps the text with
+the composer notice. While a field is edited, **Back** (and Escape in the input) closes it and drops the text, and
+**Clear** leaves an optional field without a value; selecting another field or submitting first commits the text. Every control keeps the
 action button geometry above, also among 43 toggles on a phone. An edit keeps focus on its control and adds nothing to
 the transcript; submitting adds the summary line with the `›` response marker. Exact unambiguous text of one field
 label or of the submit button activates it from the composer, as for `choose`.
