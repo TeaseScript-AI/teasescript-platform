@@ -53,7 +53,7 @@ const tab = ref("now");
     <Button
       variant="outline"
       size="sm"
-      class="min-h-11 justify-self-start"
+      class="h-auto min-h-11 max-w-full justify-self-start whitespace-normal text-start"
       :disabled="!exportAvailable"
       data-debug-export-open
       @click="emit('export')"
