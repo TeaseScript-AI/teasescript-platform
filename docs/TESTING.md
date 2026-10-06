@@ -558,10 +558,11 @@ media and timers, cue blocks with self-handles, Stage replacement, pacing barrie
 checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state.
 `tests/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
 stand-ins: single load reports, stalls, range repetition and terminal stop, overlapping instances of one file that each
-play out once, also after a late seek completion or a rounding error at the range end, pause/resume/seek repositioning,
-refused playback and retry, failed video and unavailable sources, restore reconnection without repeated cues, and element
-reuse without stale listeners or late `play()` results reaching the next media. The preview
-browser checks cover Start activation, the runtime Stage image, refused-audio retry, and actually played audio.
+play out once, also after a late `seeked` notification or a rounding error at the range end, pause/resume/seek
+repositioning, refused playback and retry also within the end tolerance, failed video and unavailable sources, restore
+reconnection without repeated cues, and element reuse without stale listeners or late `play()` results reaching the
+next media. The preview browser checks cover Start activation, the runtime Stage image, refused-audio retry, and
+actually played audio.
 
 ## Local browser smoke and future host E2E gate
 
@@ -626,9 +627,9 @@ rows in IndexedDB; its sweep deletes the history databases of pages that ended, 
 and neither its own page's nor a database it did not name. With auto-skip, the `missing-media` package, which refers to a
 missing and an invalid image and sound, reaches its end at once, with one warning notice per path and a valid image
 restoring the Stage; in `late-image`, an invalid image that fails only after the script hid it and showed a valid one
-neither hides that image nor is reported. The `audio-overlap` package, whose seeks complete late as under load, plays
-one sound twice with overlap, another beside them, then a loop of 30 overlapping instances: each instance plays out
-once without restarting or stopping another, and finished instances release their elements for reuse.
+neither hides that image nor is reported. The `audio-overlap` package, whose `seeked` notifications arrive late as under
+load, plays one sound twice with overlap, another beside them, then a loop of 30 overlapping instances: each instance
+plays to its end once without rewinding or stopping another, and finished instances release their elements for reuse.
 With a Windows user agent, the editor opens a package served only as a catalog whose file paths a
 model URI could merge (a `\` in a name, `C:` and `c:` folders) and keeps every file apart. Development preview
 presentation is covered by the [Player browser verification route](#player-browser-and-visual-verification).

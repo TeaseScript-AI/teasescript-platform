@@ -1313,8 +1313,9 @@ async function missingMediaScenario(cdp, origin) {
 
 /**
  * The `audio-overlap` package plays one sound twice with overlap, then another sound, then the same sound in a loop of
- * 30 overlapping instances. Seeks complete late, as under load, after playback already began. Each instance plays out
- * once on its own element, without restarting or stopping another, and releases its element for reuse when it ends.
+ * 30 overlapping instances. `seeked` notifications arrive late, as under load, after playback already began. Each
+ * instance plays to its end once on its own element, without rewinding or stopping another, and releases its element
+ * for reuse when it ends.
  */
 async function audioOverlapScenario(cdp, origin) {
   const {
@@ -1323,6 +1324,7 @@ async function audioOverlapScenario(cdp, origin) {
     source: `window.__instances = [];
       window.__samples = [];
       window.__elements = new Set();
+      window.__lateSeeked = 0;
       const current = new Map();
       const prototype = HTMLMediaElement.prototype;
       const src = Object.getOwnPropertyDescriptor(prototype, 'src');
@@ -1332,7 +1334,7 @@ async function audioOverlapScenario(cdp, origin) {
           window.__elements.add(this);
           src.set.call(this, value);
           if (!String(value).includes('/dev-package/audio-overlap/')) return current.delete(this);
-          const instance = { file: String(value).split('/').pop(), plays: 0, reached: 0 };
+          const instance = { file: String(value).split('/').pop(), plays: 0, end: false, time: 0, rewound: false };
           window.__instances.push(instance);
           current.set(this, instance);
         },
@@ -1343,11 +1345,11 @@ async function audioOverlapScenario(cdp, origin) {
         if (instance && this.getAttribute('src')) instance.plays++;
         return play.call(this);
       };
-      // How far each instance played: the device pauses an instance at its end and before releasing its element.
+      // The device pauses an instance at its end and before releasing its element: record whether it reached the end.
       const pause = prototype.pause;
       prototype.pause = function () {
         const instance = current.get(this);
-        if (instance && this.getAttribute('src')) instance.reached = Math.max(instance.reached, this.currentTime);
+        if (instance && this.getAttribute('src') && this.currentTime >= this.duration) instance.end = true;
         return pause.call(this);
       };
       const late = new WeakMap();
@@ -1355,22 +1357,32 @@ async function audioOverlapScenario(cdp, origin) {
       const removeEventListener = prototype.removeEventListener;
       prototype.addEventListener = function (type, listener, options) {
         if (type !== 'seeked') return addEventListener.call(this, type, listener, options);
-        if (!late.has(listener)) late.set(listener, (event) => setTimeout(() => listener.call(this, event), 60));
+        if (!late.has(listener))
+          late.set(listener, (event) => setTimeout(() => {
+            if (!this.paused && this.currentTime > 0) window.__lateSeeked++;
+            listener.call(this, event);
+          }, 60));
         return addEventListener.call(this, type, late.get(listener), options);
       };
       prototype.removeEventListener = function (type, listener, options) {
         return removeEventListener.call(this, type, (type === 'seeked' && late.get(listener)) || listener, options);
       };
       setInterval(() => {
-        window.__samples.push(window.__instances.slice(0, 3).map((instance) => {
-          const element = [...current].find(([, candidate]) => candidate === instance)?.[0];
-          return element && element.getAttribute('src') ? { paused: element.paused, time: element.currentTime } : null;
-        }));
+        const playing = [];
+        for (const [element, instance] of current) {
+          if (!element.getAttribute('src')) continue;
+          if (element.currentTime < instance.time) instance.rewound = true;
+          instance.time = element.currentTime;
+          if (!element.paused) playing.push([window.__instances.indexOf(instance), element.currentTime]);
+        }
+        window.__samples.push(playing);
       }, 25);`,
   });
   try {
     const transcript = (text) =>
       `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes(${JSON.stringify(text)}))`;
+    // Each instance played once, to its end, without moving back.
+    const once = (instance) => instance.plays === 1 && instance.end && !instance.rewound;
     await navigate(cdp, `${origin}/player/?package=audio-overlap`);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
     await physicalClick(cdp, "[data-session-activation] button");
@@ -1378,21 +1390,14 @@ async function audioOverlapScenario(cdp, origin) {
     const overlap = await value(
       cdp,
       `(() => {
-        const [first, second, third] = window.__instances;
-        const both = window.__samples.some(([a, b]) => a && b && !a.paused && !b.paused && a.time > b.time + 0.2);
-        const all = window.__samples.some(([a, b, c]) => a && b && c && !a.paused && !b.paused && !c.paused);
-        let previous = 0;
-        const monotonic = window.__samples.every(([a]) => {
-          if (!a) return true;
-          const ok = a.time >= previous;
-          previous = a.time;
-          return ok;
-        });
+        const once = ${once};
+        const time = (sample, index) => sample.find(([candidate]) => candidate === index)?.[1];
         return JSON.stringify({
-          files: [first?.file, second?.file, third?.file],
-          plays: [first?.plays, second?.plays, third?.plays],
-          playedOut: [first, second, third].map((instance) => instance?.reached >= 0.95),
-          both, all, monotonic,
+          files: window.__instances.slice(0, 3).map((instance) => instance.file),
+          once: window.__instances.slice(0, 3).map(once),
+          both: window.__samples.some((sample) => time(sample, 0) > time(sample, 1) + 0.2),
+          all: window.__samples.some((sample) => [0, 1, 2].every((index) => time(sample, index) !== undefined)),
+          lateSeeked: window.__lateSeeked > 0,
         });
       })()`,
     );
@@ -1400,14 +1405,14 @@ async function audioOverlapScenario(cdp, origin) {
       overlap,
       JSON.stringify({
         files: ["tone.wav", "tone.wav", "chime.wav"],
-        plays: [1, 1, 1],
-        playedOut: [true, true, true],
+        once: [true, true, true],
         both: true,
         all: true,
-        monotonic: true,
+        lateSeeked: true,
       }),
       "Overlapping sounds did not each play out once while the others played",
     );
+    const loopStart = await value(cdp, "window.__samples.length");
     await waitFor(cdp, transcript("Loop done"), 15_000, "The sound loop did not finish");
     // Every finished instance released its element; the loop reused elements instead of creating one per instance.
     await waitFor(
@@ -1419,14 +1424,15 @@ async function audioOverlapScenario(cdp, origin) {
     const loop = await value(
       cdp,
       `JSON.stringify({
-        once: window.__instances.every((instance) => instance.plays === 1 && instance.reached >= 0.95),
+        once: window.__instances.every(${once}),
+        overlapped: window.__samples.slice(${loopStart}).some((sample) => sample.length > 1),
         reused: window.__elements.size < 30,
       })`,
     );
     assertEqual(
       loop,
-      JSON.stringify({ once: true, reused: true }),
-      "The sound loop restarted an instance or created an element per instance",
+      JSON.stringify({ once: true, overlapped: true, reused: true }),
+      "The sound loop did not play overlapping instances out once on reused elements",
     );
   } finally {
     await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });

@@ -11,7 +11,7 @@ for it in 1..=30 {
   playAudio async "sounds/tone.wav"
   wait 100 ms
 }
-wait 1500 ms
+wait 2000 ms
 say "Loop done", instant
 showButton "Finish"
 exit

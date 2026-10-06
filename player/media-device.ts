@@ -44,8 +44,9 @@ export const VIDEO_UNSUPPORTED_MESSAGE = "Video playback is not supported by thi
 export const SOURCE_UNAVAILABLE_MESSAGE = "This media source is not available to the Player.";
 const LOAD_FAILED_MESSAGE = "The Player could not load this media source.";
 /**
- * Positions and progress this close count as equal. Measured progress sums many floating-point steps, so it can end a
- * fraction of a millisecond short of the projected end, which must not replay the range as another pass.
+ * Positions this close count as equal. At the range end, progress this close to the terminal counts as reached:
+ * measured progress sums many floating-point steps, so it can end a fraction of a millisecond short, which must not
+ * replay the range as another pass.
  */
 const TOLERANCE_MS = 1;
 
@@ -302,7 +303,7 @@ export class MediaDevice {
     const endMs = projection.endMs ?? element.duration * 1000;
     if (element.ended || positionMs >= endMs) {
       entry.progressMs += Math.max(0, endMs - entry.lastPositionMs);
-      if (!this.#reachedTerminal(entry, element)) {
+      if (!this.#reachedTerminal(entry, element, TOLERANCE_MS)) {
         // Repeat within the requested range; the runtime counts passes from the cumulative progress.
         this.#position(entry, element, projection.startAtMs);
         if (element.paused) this.#play(entry, element);
@@ -314,9 +315,10 @@ export class MediaDevice {
     this.#reachedTerminal(entry, element);
   }
 
-  #reachedTerminal(entry: Entry, element: MediaDeviceElement): boolean {
+  /** Only the range end passes a tolerance: elsewhere, progress the element has not played never completes playback. */
+  #reachedTerminal(entry: Entry, element: MediaDeviceElement, toleranceMs = 0): boolean {
     const terminal = entry.projection.terminalProgressMs;
-    if (terminal === null || entry.progressMs < terminal - TOLERANCE_MS) return false;
+    if (terminal === null || entry.progressMs < terminal - toleranceMs) return false;
     // The runtime settles playback from this report; stop audible output at the projected end.
     entry.progressMs = terminal;
     entry.finished = true;

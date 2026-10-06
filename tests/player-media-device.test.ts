@@ -208,6 +208,25 @@ test("measured progress that ends a rounding error short of the projected end do
   );
 });
 
+test("refused playback within the end tolerance of a short range still waits for a retry", async () => {
+  const player = harness(
+    'playAudio(file: "tone.wav", repeat: 1 ms) {\n  finish {\n    say "finish", instant\n  }\n}\nsay "after", instant\nexit',
+  );
+  player.start();
+  const [element] = player.elements;
+  element!.refuse = true;
+  element!.metadata(1);
+  await settle();
+  player.tick(100, 0);
+  assert.deepEqual(player.texts(), [], "unplayed audio must not complete");
+  assert.equal(player.blocked, true);
+  element!.refuse = false;
+  player.device.retryBlocked();
+  await settle();
+  player.tick(100);
+  assert.deepEqual(player.texts(), ["finish", "after"]);
+});
+
 test("a stall reports unchanged progress, so a nearby cue waits for actual playback", () => {
   const player = harness(
     [
