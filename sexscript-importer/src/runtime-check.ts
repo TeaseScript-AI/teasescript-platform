@@ -407,6 +407,8 @@ const SMOKE_IMAGE = "smoke-image";
 function interactionAnswer(action: RuntimeData, visit: number) {
   if (isRecord(action.ui) && action.ui.kind === "image")
     return { kind: "image", reference: SMOKE_IMAGE };
+  // A form (askForm, askBooleans) is submitted with its starting values.
+  if (action.interactionKind === "form") return { kind: "submit" };
   switch (action.interactionKind) {
     case "button":
       return { kind: "activate" };

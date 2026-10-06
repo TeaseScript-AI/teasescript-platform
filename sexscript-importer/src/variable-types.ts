@@ -1946,6 +1946,10 @@ export function expressionType(
       return sharedValueType(values);
     }
     case "input":
+      if (value.input === "askForm")
+        return {
+          kind: value.fields?.kind === "object" && value.fields.dict !== true ? "object" : "dict",
+        };
       return scalar(
         value.input === "askText" ? "string" : value.input === "askInteger" ? "integer" : "number",
       );
@@ -2231,6 +2235,7 @@ export function mapChildren(
       return {
         ...value,
         ...(value.question === undefined ? {} : { question: map(value.question) }),
+        ...(value.fields === undefined ? {} : { fields: map(value.fields) }),
         ...(value.defaultValue === undefined ? {} : { defaultValue: map(value.defaultValue) }),
       };
     case "range":

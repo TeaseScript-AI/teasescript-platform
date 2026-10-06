@@ -69,7 +69,8 @@ itself: from `main.tease`, then each runnable script no run reached in isolation
 from `main.tease` left (setup that only a script no run reached saves can still be missing). A file runs where the
 project compiles it, also with unconverted statements kept as TODO comments; a file that does not compile becomes a
 stub in the run's project, and a run that reaches it ends as `blocked`. Answers are deterministic: buttons are pressed, each visit of a choice takes the next
-option, text and number inputs cycle through fixed values, `takePhoto()` returns null as in a Player without a camera,
+option, text and number inputs cycle through fixed values, forms are submitted with their starting values, `takePhoto()`
+returns null as in a Player without a camera,
 and time and media advance in simulation; the wall clock starts at 2026-10-02 12:00 UTC and follows that time. Accepted
 forms selected with `--accepted` use host stand-ins with the same answer rotation. A run proves one path executes;
 `stepLimit` is inconclusive (for example a loop that waits until the typed text matches), while `TSR037` means the work
@@ -77,9 +78,10 @@ between two events exceeds the product's instruction budget, which fails in the 
 With a single directory argument, the sibling `images/` folder holds the package's images.
 
 Accepted TeaseScript that `main` does not implement yet becomes a workaround in implemented TeaseScript, marked with a
-`// NOTE` at every site, so that converted packages play natively: `askBooleans` a menu of the items with their state
-marked, which a click switches until "Done", `showPopup` the message and an OK button, `openUrl` the link in the chat and a button, and an image
-composition its base image. `--accepted` (every form) or `--accepted=askBooleans,showPopup,openUrl,chooseFile,layeredScene`
+`// NOTE` at every site, so that converted packages play natively: `showPopup` the message and an OK button, `openUrl`
+the link in the chat and a button, and an image composition its base image. Legacy `getBooleans` becomes native
+`askBooleans(message:, texts:, defaults:)`, with `cancel:` where the script tests the answers for null, as the legacy
+dialog's Cancel gave null. `--accepted` (every form) or `--accepted=showPopup,openUrl,chooseFile,layeredScene`
 emits the accepted forms instead, for when `main` implements them; the report then compiles and runs them through host
 stand-ins.
 
@@ -244,7 +246,8 @@ node tools/explore.ts --replay <dir>/<unit>.json (--crash N | --trap N | --error
 
 `explore` plays each package headlessly in the real runtime (`src/explorer.ts`), without the Player, through every
 branch it can reach within the budget, and replaces playing converted packages by hand to find crashes. Each pending
-action is a branch point. The options are every button and choice option, and the default answer of a typed ask with
+action is a branch point. The options are every button and choice option, a form submitted with its starting values or
+cancelled where it offers that, and the default answer of a typed ask with
 boundary values of its type: `0`, `1`, `-1`, `1000000` (and `0.5` for `askNumber`), the text `x`, and dates and times
 at both ends of a day or year. Each constant that the code compares with near the ask adds a candidate, or `c - 1`,
 `c`, and `c + 1` for a number. A button whose result the script keeps (`(showButton …) / 1 s`) can also be pressed
@@ -300,7 +303,7 @@ node --test tests/*.test.ts
 `tests/fixtures/conversion/` pairs real Groovy inputs with the expected `.tease` output; that output must compile with
 the TeaseScript compiler, as the `main.tease` of a project with a stub for each file it transfers to.
 `tests/fixtures/conversion-accepted/` holds output converted with `--accepted`, which uses accepted but not yet
-implemented TeaseScript (`showPopup`, `askBooleans`, `openUrl`, `chooseFile`); it must compile once those capabilities
+implemented TeaseScript (`showPopup`, `openUrl`, `chooseFile`); it must compile once those capabilities
 are replaced by placeholder calls. Both groups must also run to the
 end in the runtime smoke run. These tests skip with a stated reason when Java/Groovy or the repository build is
 unavailable.

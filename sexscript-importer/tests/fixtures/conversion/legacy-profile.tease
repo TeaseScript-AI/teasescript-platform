@@ -1,36 +1,6 @@
 speaker system {
   title: "System"
 }
-function sexscriptLegacyAskBooleansSystem(message, texts, defaults) {
-  let selected = []
-  let index = 0
-  for text in texts {
-    selected.add(index < defaults.length and defaults[index] == true)
-    index += 1
-  }
-  say as system message
-  let done = false
-  while not done {
-    let buttons = []
-    index = 0
-    for text in texts {
-      let mark = "☐"
-      if selected[index] {
-        mark = "☑"
-      }
-      buttons.add({ value: index, text: "${mark} ${text}" })
-      index += 1
-    }
-    buttons.add({ value: texts.length, text: "Done" })
-    let picked = choose buttons
-    if picked == texts.length {
-      done = true
-    } else {
-      selected[picked] = not selected[picked]
-    }
-  }
-  return selected
-}
 function sexscriptLegacyAskProfile {
   if load("intro.name") == null {
     save (askText as system "What is your name?", default: "Slave") as "intro.name"
@@ -47,24 +17,18 @@ function sexscriptLegacyAskProfile {
       save true as "intro.likemale"
     }
   }
-  let profileToysKeys: string[] = []
-  let profileToysNames: string[] = []
-  let profileToysDefaults: boolean[] = []
+  let profileToysFields = dict{}
   let profileToysIndex = 0
   for profileToysKey in ["toys.dildo"] {
     if load(profileToysKey) == null {
-      profileToysKeys.add(profileToysKey)
-      profileToysNames.add(["dildo"][profileToysIndex])
-      profileToysDefaults.add(false)
+      profileToysFields[profileToysKey] = { value: false, text: ["dildo"][profileToysIndex] }
     }
     profileToysIndex += 1
   }
-  if profileToysKeys.length > 0 {
-    let profileToysAnswers = sexscriptLegacyAskBooleansSystem("What do you have in your toy chest ?", profileToysNames, profileToysDefaults)
-    profileToysIndex = 0
-    for profileToysKey in profileToysKeys {
-      save profileToysAnswers[profileToysIndex] as profileToysKey
-      profileToysIndex += 1
+  if profileToysFields.length > 0 {
+    let profileToysAnswers = askForm as system "What do you have in your toy chest ?", fields: profileToysFields
+    for profileToysKey in profileToysAnswers {
+      save profileToysAnswers[profileToysKey] as profileToysKey
     }
   }
 }

@@ -81,6 +81,8 @@ export type ExplorerInput =
   | { readonly kind: "button"; readonly label: string; readonly afterMs?: number }
   | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "image" }
+  /** A form submitted with its starting values, or cancelled where it offers that. */
+  | { readonly kind: "form"; readonly action: "submit" | "cancel" }
   | { readonly kind: "wait"; readonly untilMs: number }
   | { readonly kind: "press"; readonly buttonId: number; readonly label: string };
 
@@ -89,7 +91,9 @@ type InteractionPayload =
   | { readonly kind: "selectedOption"; readonly optionIndex: number }
   | { readonly kind: "activate" }
   | { readonly kind: "submittedText"; readonly submittedText: string }
-  | { readonly kind: "image"; readonly reference: string };
+  | { readonly kind: "image"; readonly reference: string }
+  | { readonly kind: "submit" }
+  | { readonly kind: "cancel" };
 
 /** The wall clock at session time 0: 2026-10-02 12:00 UTC, as in `runtime-check.ts`. */
 const EPOCH_MS = Date.UTC(2026, 9, 2, 12, 0, 0);
@@ -290,6 +294,10 @@ export class Session {
         break;
       case "image":
         result = completion({ kind: "image", reference: EXPLORER_IMAGE });
+        accepted = "completed";
+        break;
+      case "form":
+        result = completion({ kind: input.action });
         accepted = "completed";
         break;
       case "press":
@@ -607,6 +615,13 @@ function interactionOptions(ui: Data, literals: Literals): ExplorerInput[] {
       return typed(TEMPORAL_ANSWERS[String(ui.temporalKind)] ?? []);
     case "image":
       return [{ kind: "image" }];
+    case "form":
+      return [
+        { kind: "form", action: "submit" },
+        ...(ui.cancel === null || ui.cancel === undefined
+          ? []
+          : [{ kind: "form" as const, action: "cancel" as const }]),
+      ];
     default:
       return [];
   }

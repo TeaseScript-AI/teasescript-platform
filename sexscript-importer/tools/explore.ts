@@ -396,6 +396,10 @@ function parseInput(value: unknown): ExplorerInput | null {
       return typeof value.text === "string" ? { kind: "text", text: value.text } : null;
     case "image":
       return { kind: "image" };
+    case "form":
+      return value.action === "submit" || value.action === "cancel"
+        ? { kind: "form", action: value.action }
+        : null;
     case "wait":
       return typeof value.untilMs === "number" ? { kind: "wait", untilMs: value.untilMs } : null;
     case "press":
@@ -485,6 +489,8 @@ function describeInput(input: ExplorerInput): string {
       return `type ${JSON.stringify(input.text)}`;
     case "image":
       return "give an image";
+    case "form":
+      return input.action === "submit" ? "submit the form" : "cancel the form";
     case "wait":
       return `wait until ${input.untilMs / 1000} s`;
     case "press":

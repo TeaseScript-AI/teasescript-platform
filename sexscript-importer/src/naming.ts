@@ -367,6 +367,7 @@ function renameExpression(expression: IrExpression, scope: Scope, renamer: Renam
       return {
         ...expression,
         ...(expression.question === undefined ? {} : { question: child(expression.question) }),
+        ...(expression.fields === undefined ? {} : { fields: child(expression.fields) }),
         ...(expression.defaultValue === undefined
           ? {}
           : { defaultValue: child(expression.defaultValue) }),

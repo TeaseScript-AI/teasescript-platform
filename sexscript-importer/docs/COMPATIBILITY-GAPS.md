@@ -399,9 +399,10 @@ Concrete points the migration surfaced in TeaseScript itself:
   (ADR 0018; #548); the `union()` and nested `toString()` errors name a working fix (#546, #518); and V30 §18 shows
   `load "level", default: 1`. In the corpus the warning for impossible null tests found the importer's own null test
   of input questions, which it now leaves out where the question can never be null (41 sites), and 11 legacy null
-  tests that can never be true or false (8 distribution: `askBooleans` values tested for null, which TeaseScript never
-  returns, and a commented dead test; 2 Domme3; 1 DisciplineClinic); they stay as written, with the compiler's
-  warning.
+  tests that can never be true or false (8 distribution: `askBooleans` values tested for null, and a commented dead
+  test; 2 Domme3; 1 DisciplineClinic); they stay as written, with the compiler's warning. Since `askBooleans` is
+  native (#668), it offers the legacy dialog's Cancel, which returns null, where the script tests the answers for null,
+  so those tests are live again.
 
 ## Multi-file scripts (#570)
 
@@ -476,7 +477,8 @@ Emily persona; the code's default owner `ancilla` is not included.
 File transfers (`goto "file.tease"`, `goto script(...)`), `global function` and `global` (ADR 0022, #570), and `takePhoto()` (#475, camera in the runtime and the Player) are native on `main` now, as are `dict` (#555),
 date and time (#532), `switch` (#529, #557), the `showButton` timeout and elapsed result (#534), `askInteger` (#548),
 rounding and the conversions, text operations and `join` (#518), list `sort()` (#546), integer widening (#526),
-`load "key", default:` (#545), permanent buttons (#612), `for key, value in dict` (#639), and image tags with
+`load "key", default:` (#545), permanent buttons (#612), `for key, value in dict` (#639), forms with `askForm` and
+`askBooleans` (#661, #663, #665, #668, #669), and image tags with
 `findImages` (#572): a legacy count of an images folder becomes a query for one generated tag of the folder's full
 path, which an XMP sidecar gives each image (`SX_IMAGE_TAGS`, owner decision 2026-10-05), and a listing of the folder
 the package paths of its images, also where a name test keeps file names (`listing.findAll { f ->
@@ -492,13 +494,11 @@ form instead once `main` implements it:
 
 | Accepted form | Workaround | What it loses |
 | --- | --- | --- |
-| `askBooleans(message:, texts:, defaults:)` | the message once, then a `choose` of every item marked ☑ or ☐, starting from the defaults, where a click switches the item and shows the menu again, and "Done" returns the answers (`SX_ASK_BOOLEANS_WORKAROUND`) | one form with checkboxes; a click per change |
 | `showPopup` | the message in the chat and an OK button (`SX_POPUP_WORKAROUND`) | the popup presentation |
 | `openUrl(url)` | "Open this link: …" in the chat, where message markup makes an `http(s)` address a link, and a Continue button (`SX_OPEN_URL_WORKAROUND`) | opening the page itself |
 | layered scene (`showBackgroundImage`, `showOverlayImage`) for an image composed in memory and shown with `setImage(bytes, n)` | the base image the function read (`SX_IMAGE_COMPOSITION`); `--accepted=layeredScene` places the base as background and each drawn image as an overlay at percentages of the canvas (`SX_LAYERED_SCENE`, or `SX_LAYERED_SCENE_PARTIAL` for source rectangles, text, shapes, pixel edits, and transformations) | the composition |
 
-In the 210 selected units (2026-10-06) the workarounds stand at 63 `askBooleans` menus in 32 units, 419 popups in 23,
-and 403 links in 37. 24 functions that only compose an image fall back to their base image (12 units), and 28
+In the 210 selected units (2026-10-06) the workarounds stand at 419 popups in 23 units and 403 links in 37. 24 functions that only compose an image fall back to their base image (12 units), and 28
 `setImage(bytes)` sites stay TODOs (16 units) because their function also shows text, waits, saves, or changes outer
 variables. None of them maps cleanly to the layered scene: all 211 composing closures in the merged sources size their
 canvas from a loaded image's `getWidth()` and `getHeight()`, so overlay percentages are unknown at conversion time; 27
@@ -559,8 +559,9 @@ askImage does not); `chooseFile()` (#604) stays behind `--accepted=chooseFile`.
   (`system/...`, `welcome`, `exit`) ends the session (`SX_DESKTOP_SCRIPT`).
 - The legacy player profile: the distribution's intro saved the player's name and gender, and its options the toys and
   clothes the player owns; a package that reads such keys and never saves them asks the missing ones once at the start
-  of `main.tease`, with the distribution's questions, and saves them under the legacy keys; storage is per package, so
-  each package asks once (`SX_LEGACY_PROFILE`, 141 selected units).
+  of `main.tease`, with the distribution's questions (the owned items as one `askForm` of toggles keyed by their
+  storage keys, asked as the system speaker), and saves them under the legacy keys; storage is per package, so each
+  package asks once (`SX_LEGACY_PROFILE`, 141 selected units).
 - `show("")` only cleared the legacy text area and is dropped, as is any other empty text, such as a question in a
   variable that only ever holds `""` (`SX_BLANK_TEXT`, counted as `blankTexts`, 56 in 13 selected units); an empty or
   blank image path clears the image.

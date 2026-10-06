@@ -1251,7 +1251,7 @@ test("generates ordinary TeaseScript helpers for legacy loadFirstTrue and list i
   assert.match(output, /let key: string\? = sexscriptLegacyLoadFirstTrue\(\["a", "b"\]\)/);
 });
 
-test("maps legacy getBooleans to accepted askBooleans when that form is selected", () => {
+test("maps legacy getBooleans to native askBooleans", () => {
   const source = file([
     statement({
       kind: "declaration",
@@ -1267,7 +1267,7 @@ test("maps legacy getBooleans to accepted askBooleans when that form is selected
     }),
   ]);
 
-  const program = lowerParsedFile(source, { accepted: new Set(["askBooleans"]) });
+  const program = lowerParsedFile(source);
   assert.deepEqual(program.diagnostics, []);
   assert.equal(
     emitTease(program),

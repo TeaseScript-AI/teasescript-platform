@@ -675,10 +675,11 @@ function compactInput(expression: Extract<IrExpression, { kind: "input" }>): str
   return args.length === 0 ? asked : `${asked} ${args.join(", ")}`;
 }
 
-/** An ask's question and its `default:`, in that order. */
+/** An ask's question, a form's `fields:`, and an ask's `default:`, in that order. */
 function askArguments(expression: Extract<IrExpression, { kind: "input" }>): string[] {
   return [
     ...(expression.question === undefined ? [] : [emitExpression(expression.question)]),
+    ...(expression.fields === undefined ? [] : [`fields: ${emitExpression(expression.fields)}`]),
     ...(expression.defaultValue === undefined
       ? []
       : [`default: ${emitExpression(expression.defaultValue)}`]),

@@ -167,7 +167,6 @@ function withNestedBodies(
 export type HelperName =
   | "abs"
   | "array"
-  | "askBooleans"
   | "fixed"
   | "packagePath"
   | "pathTag"
@@ -176,7 +175,6 @@ export type HelperName =
   | "truth"
   | "text"
   | "systemSpeaker"
-  | "askBooleansSystem"
   | "deviceButtons"
   | "showDevice"
   | "openTray"
@@ -240,7 +238,6 @@ export function helperDefinitionOrder(statement: IrStatement): number {
 export function helperStatements(names: ReadonlySet<HelperName>): IrStatement[] {
   const needed = new Set(names);
   if (needed.has("switchButton")) needed.add("switchButtonId");
-  if (needed.has("askBooleansSystem")) needed.add("systemSpeaker");
   if (needed.has("showDevice") || needed.has("openTray")) needed.add("deviceButtons");
   if (needed.has("askOnce")) needed.add("systemSpeaker");
   if (needed.has("playBackgroundSound")) needed.add("stopBackgroundSounds");
@@ -275,7 +272,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "max",
   "min",
   "abs",
-  "askBooleans",
   "fixed",
   "packagePath",
   "pathTag",
@@ -283,7 +279,6 @@ const HELPER_ORDER: readonly HelperName[] = [
   "itemAt",
   "truth",
   "text",
-  "askBooleansSystem",
   "deviceButtons",
   "showDevice",
   "openTray",
@@ -468,88 +463,6 @@ function removeDeviceButton(device: IrExpression): IrStatement[] {
   ];
 }
 
-/**
- * A yes/no answer per text, from a menu of all texts with their state marked: choosing a text switches it, and "Done"
- * returns the answers. They start as the defaults, false where none is given. Legacy getBooleans() and the profile's
- * owned items.
- */
-function askBooleansHelper(name: string, speaker?: string): IrStatement {
-  const asSpeaker = speaker === undefined ? {} : { speaker };
-  const count = prop(v("texts"), "length");
-  return fn(
-    name,
-    ["message", "texts", "defaults"],
-    [
-      letS("selected", { kind: "list", items: [] }),
-      letS("index", lit(0)),
-      forS("text", v("texts"), [
-        add(
-          "selected",
-          bin(
-            "and",
-            bin("<", v("index"), prop(v("defaults"), "length")),
-            bin("==", at(v("defaults"), v("index")), lit(true)),
-          ),
-        ),
-        set(v("index"), lit(1), "+="),
-      ]),
-      { kind: "say", value: v("message"), ...asSpeaker, span: null },
-      // The loop ends at "Done", and the function returns the answers last, so its result is always the list.
-      letS("done", lit(false)),
-      {
-        kind: "while",
-        condition: { kind: "unary", operator: "not", value: v("done") },
-        body: [
-          letS("buttons", { kind: "list", items: [] }),
-          set(v("index"), lit(0)),
-          forS("text", v("texts"), [
-            letS("mark", lit("☐")),
-            ifS(at(v("selected"), v("index")), [set(v("mark"), lit("☑"))]),
-            add("buttons", {
-              kind: "object",
-              properties: [
-                { name: "value", value: v("index") },
-                {
-                  name: "text",
-                  value: {
-                    kind: "template",
-                    parts: [{ value: v("mark") }, { text: " " }, { value: v("text") }],
-                  },
-                },
-              ],
-            }),
-            set(v("index"), lit(1), "+="),
-          ]),
-          add("buttons", {
-            kind: "object",
-            properties: [
-              { name: "value", value: count },
-              { name: "text", value: lit("Done") },
-            ],
-          }),
-          letS("picked", {
-            kind: "listChoice",
-            options: [{ kind: "list", list: v("buttons"), records: true }],
-          }),
-          ifS(
-            bin("==", v("picked"), count),
-            [set(v("done"), lit(true))],
-            [
-              set(at(v("selected"), v("picked")), {
-                kind: "unary",
-                operator: "not",
-                value: at(v("selected"), v("picked")),
-              }),
-            ],
-          ),
-        ],
-        span: null,
-      },
-      ret(v("selected")),
-    ],
-  );
-}
-
 const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = {
   // Legacy background sounds overlapped and playBackgroundSound(null) stopped them all; TeaseScript stops async
   // media through its handle, so the handles are collected.
@@ -632,17 +545,6 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
           ret(lit(0)),
         ],
       ),
-  },
-  // Workaround for askBooleans(), which main does not implement yet (workarounds.ts): a menu of the items with their
-  // state marked, which a click switches until "Done".
-  askBooleans: {
-    name: "sexscriptLegacyAskBooleans",
-    build: () => askBooleansHelper("sexscriptLegacyAskBooleans"),
-  },
-  // The same questions asked as the system speaker, for the legacy player's profile.
-  askBooleansSystem: {
-    name: "sexscriptLegacyAskBooleansSystem",
-    build: () => askBooleansHelper("sexscriptLegacyAskBooleansSystem", SYSTEM_SPEAKER),
   },
   // Java %.Nf: the number rounded to `digits` decimals, written with exactly that many.
   fixed: {

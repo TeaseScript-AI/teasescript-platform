@@ -174,7 +174,7 @@ Legacy semantics below are verified against the API contract (`ss/IScript.java`)
 | `getString` / `getFloat` | `say text` + `askText default: d` / `askNumber default: d` | A null or blank default opens the input without a prefill (#618); legacy showed it. Cancel-to-null is lost. |
 | `getInteger(text, d)` | `say text` + `askInteger default: d` | Compact integer input (#548); a null default fails when the input opens. |
 | `getImage(text)` | `takePhoto()` | Camera only (V30 §33, not implemented yet); the legacy file-chooser fallback is dropped. |
-| `getBooleans(t, values, defaults)` | `askBooleans(message:, texts:, defaults:)` | Accepted, not implemented yet. |
+| `getBooleans(t, values, defaults)` | `askBooleans(message:, texts:, defaults:)` | Native (#668); with `cancel:` where the script tests the answers for null, as the dialog's Cancel gave null. |
 | `getRandom(max)` | `randomInteger(0..max)` | Exclusive upper bound; `list[getRandom(list.size())]` becomes `list.random`. |
 | `getTime()` | `getTimestamp().toSeconds()` | Unix seconds (#532); TeaseScript `getTime()` is a time-of-day value. |
 | `wait(s)`, `sleep(ms)` | `wait s`, `wait ms ms` | |

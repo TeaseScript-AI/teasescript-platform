@@ -852,7 +852,6 @@ export function lowerPackage(
   const scriptIndexes = noted.flatMap((program, index) =>
     files[index]?.root?.kind === "scriptBody" && program.module === undefined ? [index] : [],
   );
-  const accepted = options.accepted ?? new Set();
   const moduleFiles = withModuleFiles(noted, files);
   const withClasses = noted.map(
     (program, index) => moduleFiles.get(index) ?? classOutputs.get(index) ?? program,
@@ -862,7 +861,7 @@ export function lowerPackage(
     const entryIndex = scriptIndexes.length === 1 ? scriptIndexes[0]! : null;
     const programs = withNullableParameters(
       withClasses.map((program, index) =>
-        index === entryIndex ? withProfile(program, withClasses, accepted) : program,
+        index === entryIndex ? withProfile(program, withClasses) : program,
       ),
     );
     return {
@@ -879,7 +878,7 @@ export function lowerPackage(
     legacyMain !== null
       ? null
       : entryMenu(scripts, withClasses, internalScripts(files, options.internalScripts));
-  const mainProgram = withProfile(generated ?? withClasses[legacyMain!]!, withClasses, accepted);
+  const mainProgram = withProfile(generated ?? withClasses[legacyMain!]!, withClasses);
   const outputIndexes = [
     ...new Set([...scriptIndexes, ...classOutputs.keys(), ...moduleFiles.keys()]),
   ].filter((index) => index !== legacyMain);
@@ -1418,9 +1417,8 @@ function packageNonTextKeys(files: readonly ParsedGroovyFile[]): ReadonlySet<str
 function withProfile(
   menu: MigrationProgram,
   programs: readonly MigrationProgram[],
-  accepted: ReadonlySet<AcceptedForm>,
 ): MigrationProgram {
-  const profile = legacyProfilePrompt(programs, menu, accepted);
+  const profile = legacyProfilePrompt(programs, menu);
   return profile.length === 0
     ? menu
     : renameConflictingIdentifiers(

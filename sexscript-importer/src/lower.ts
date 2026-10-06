@@ -10407,6 +10407,21 @@ function isRandomIndexOf(index: AstNode, list: AstNode, context: LowerContext): 
   return receiver !== null && sameReference(receiver, list);
 }
 
+/** Whether the call's result is assigned to a variable that the code compares with null. */
+function nullTestedResult(node: AstNode, context: LowerContext): boolean {
+  const at = (other: AstNode): boolean =>
+    other === node ||
+    (other.span !== null &&
+      other.span !== undefined &&
+      node.span !== null &&
+      node.span !== undefined &&
+      other.span.line === node.span.line &&
+      other.span.column === node.span.column);
+  for (const [key, values] of context.assignedValues)
+    if (context.mapUses.nullTested.has(key) && values.some(at)) return true;
+  return false;
+}
+
 /** Whether `value` reads `list` at a position written the same way as `index`. */
 function readsPosition(value: AstNode, list: AstNode, index: AstNode): boolean {
   const same = (left: AstNode | null, right: AstNode | null): boolean => {
@@ -13756,21 +13771,20 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
           "SX_BOOLEANS_ARITY",
           "getBooleans() must have exactly three arguments.",
         );
-      if (context.accepted.has("askBooleans"))
-        return {
-          kind: "call",
-          name: "askBooleans",
-          positional: [],
-          named: { message: args[0]!, texts: args[1]!, defaults: args[2]! },
-        };
-      addDiagnostic(
-        context,
-        "SX_ASK_BOOLEANS_WORKAROUND",
-        "warning",
-        'Workaround for askBooleans(), which main does not implement yet: a menu of the items with their state marked, which a click switches until "Done". Switch back to askBooleans(message:, texts:, defaults:) when it is implemented.',
-        node.span,
-      );
-      return useHelper(context, "askBooleans", args);
+      // The legacy dialog's Cancel gave null; the form offers it where the script tests the answers for null.
+      return {
+        kind: "call",
+        name: "askBooleans",
+        positional: [],
+        named: {
+          message: args[0]!,
+          texts: args[1]!,
+          defaults: args[2]!,
+          ...(nullTestedResult(node, context)
+            ? { cancel: { kind: "literal", value: "Cancel" } }
+            : {}),
+        },
+      };
     case "showButton": {
       // Legacy returned the seconds until the click; TeaseScript returns the elapsed duration (V30 §21, #531).
       const legacyTimeout =

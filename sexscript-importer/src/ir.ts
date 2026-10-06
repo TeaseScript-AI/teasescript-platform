@@ -259,9 +259,11 @@ export type IrExpression =
    */
   | {
       kind: "input";
-      input: "askText" | "askNumber" | "askInteger";
+      input: "askText" | "askNumber" | "askInteger" | "askForm";
       question?: IrExpression;
       defaultValue?: IrExpression;
+      /** The fields of an `askForm` (V30 §20 Forms): an object or a dict of fields. */
+      fields?: IrExpression;
       /** Asks `as` this speaker. */
       speaker?: string;
     }
