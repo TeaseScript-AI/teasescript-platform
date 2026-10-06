@@ -67,7 +67,7 @@ test(
         "converted/broken/main.tease",
         '---\ntitle: "Broken"\n---\n// TODO CODE line 3: unsupported call\nsay missingName\nexit\n',
       );
-      // A check of other contents than the current files is stale.
+      // A check of other contents than the current files is stale: shown apart, as of an older conversion.
       await write("checks/broken/result.json", played("say 1\nexit\n", "plays"));
       await write("converted/popup/main.tease", '---\ntitle: "Popup"\n---\nshowPopup "Hi"\nexit\n');
       await write("converted/menu/rooms/hall.tease", "say 1\nexit\n");
@@ -136,7 +136,14 @@ test(
       // A report's compact catalog block counts before its full fields.
       await write("explore/popup.json", {
         ...explored('---\ntitle: "Popup"\n---\nshowPopup "Hi"\nexit\n', "2026-10-06T01:00:00.000Z"),
-        catalog: { coveragePercent: 75, crashes: 0, traps: 2, firstCrash: null },
+        catalog: {
+          coveragePercent: 75,
+          crashes: 0,
+          traps: 2,
+          firstCrash: null,
+          firstTrap: { location: "main.tease:4" },
+          reach: { play: 3, unknown: 1 },
+        },
       });
 
       // EVIDENCE: the test is skipped unless the tools loaded, so toolsResult holds them here.
@@ -181,7 +188,7 @@ test(
       );
       assert.ok(
         page.includes(
-          '<dl class="summary"><div><dt>Listed</dt><dd>8</dd></div><div><dt>Convert fully</dt><dd>7</dd></div><div><dt>Compile</dt><dd>5</dd></div><div><dt>Play to the end</dt><dd>3</dd></div><div><dt>Stop during play</dt><dd>0</dd></div><div><dt>Parked (step limit)</dt><dd>1</dd></div><div><dt>Do not start</dt><dd>1</dd></div><div><dt>Do not compile</dt><dd>2</dd></div><div><dt>Not played yet</dt><dd>0</dd></div><div><dt>Blocked by unbuilt commands</dt><dd>0</dd></div><div><dt>Verified</dt><dd>1</dd></div><div><dt>Owner-approved</dt><dd>1</dd></div><div><dt>Unfinished stubs</dt><dd>1</dd></div><div><dt>Explored</dt><dd>3</dd></div><div><dt>Explorer found crashes</dt><dd>1</dd></div><div><dt>Explorer found traps</dt><dd>2</dd></div><div><dt>Explorer result stale</dt><dd>1</dd></div></dl>',
+          '<dl class="summary"><div><dt>Listed</dt><dd>8</dd></div><div><dt>Convert fully</dt><dd>7</dd></div><div><dt>Compile</dt><dd>5</dd></div><div><dt>Play to the end</dt><dd>3</dd></div><div><dt>Played to the end on an older conversion</dt><dd>1</dd></div><div><dt>Stop during play</dt><dd>0</dd></div><div><dt>Parked (step limit)</dt><dd>1</dd></div><div><dt>Do not start</dt><dd>1</dd></div><div><dt>Do not compile</dt><dd>2</dd></div><div><dt>Not played in the Player</dt><dd>0</dd></div><div><dt>Blocked by unbuilt commands</dt><dd>0</dd></div><div><dt>Verified</dt><dd>1</dd></div><div><dt>Owner-approved</dt><dd>1</dd></div><div><dt>Unfinished stubs</dt><dd>1</dd></div><div><dt>Explored</dt><dd>3</dd></div><div><dt>Explorer found crashes</dt><dd>1</dd></div><div><dt>Explorer found traps</dt><dd>2</dd></div><div><dt>Explorer result stale</dt><dd>1</dd></div></dl>',
         ),
       );
       assert.ok(
@@ -195,7 +202,11 @@ test(
       );
       assert.match(
         page,
-        /<span class="status stops">75% &middot; 0 crashes &middot; 2 traps<\/span>/u,
+        /First trap at main\.tease:4\. Lines by reach: 3 reached by play, 1 of unknown reach\."><summary><span class="status stops">75% &middot; 0 crashes &middot; 2 traps<\/span>/u,
+      );
+      assert.match(
+        page,
+        /<details title="Checked in the Player on 2026-10-05, on files the importer has converted again since\. Every run ended normally\.[^"]*"><summary><span class="status older">older conversion: plays to the end<\/span>/u,
       );
       assert.match(
         page,

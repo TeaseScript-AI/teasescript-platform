@@ -39,6 +39,11 @@ export interface CatalogEntry {
   readonly status: Status;
   /** Set when the importer left parts unconverted. */
   readonly partial: Status | null;
+  /**
+   * The Player check of an older conversion of a converted package whose current files have none; the status column
+   * shows it greyed, and the summary counts it apart.
+   */
+  readonly older: Status | null;
   /** Legacy Groovy files, from the package's `scripts/` folder, and converted `.tease` files, by relative path. */
   readonly groovy: SourceFiles;
   readonly tease: SourceFiles;
@@ -173,8 +178,9 @@ export interface PlayCheck {
 
 /**
  * The fields of a headless `explore.ts` report the Explorer column uses. A report's `catalog` block, when present, is
- * read first: `{ coveragePercent, crashes, traps, firstCrash: { code, path, line, message } | null }`, the counts as
- * numbers; a field it lacks comes from the full report.
+ * read first: `{ coveragePercent, crashes, traps, firstCrash: { code, path, line, message } | null, firstTrap:
+ * { location } | null, reach }`, the counts as numbers and `reach` the number of lines per reach label; a field it
+ * lacks comes from the full report, except `reach`, which only the block gives.
  */
 export interface ExplorerReport {
   readonly contentHash: string;
@@ -206,7 +212,9 @@ export interface ExplorerReport {
     readonly where: string | null;
     readonly message: string;
   } | null;
-  readonly firstTrap: { readonly kind: string; readonly where: string | null } | null;
+  readonly firstTrap: { readonly kind: string | null; readonly where: string | null } | null;
+  /** Lines per reach label of `src/explorer.ts`, such as `play` or `unreachable`, when the catalog block gives them. */
+  readonly reach: Readonly<Record<string, number>> | null;
 }
 
 /** Where the status beyond the compiler comes from; see the module comment. */
@@ -228,6 +236,13 @@ export interface Measurement {
 const MAIN = "main.tease";
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg"]);
 const PIN_STORAGE_KEY = "sexscript-catalog-pins";
+/** How the explorer's reach labels read in the Explorer details; see `Reach` in `src/explorer.ts`. */
+const REACH_LABELS: Readonly<Record<string, string>> = {
+  play: "reached by play",
+  seededState: "reached only from a prepared state",
+  unreachable: "proven unreachable",
+  unknown: "of unknown reach",
+};
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));
 
@@ -517,14 +532,19 @@ async function readEntry(
     // A Player check of a newer conversion is of other contents than the frozen copy.
     const regression =
       play !== null && play.contentHash !== hash && play.verdict !== "plays"
-        ? ` A newer conversion does not play: ${playStatus(play, compileStatus).detail}`
+        ? ` A newer conversion does not play: ${playStatus(play, null).detail}`
         : "";
     status = {
       kind: "verified",
       label: regression === "" ? "verified" : "verified, newer conversion regresses",
       detail: `Played and checked on ${String(verifiedRecord?.date ?? "?")} with importer commit ${String(verifiedRecord?.importerCommit ?? "?")}; this frozen copy is served.${regression}`,
     };
-  } else status = current === null ? compileStatus : playStatus(current, compileStatus);
+  } else
+    status =
+      current === null
+        ? compileStatus
+        : playStatus(current, compileStatus.kind === "error" ? compileStatus.detail : null);
+  const olderPlay = isVerified || current !== null || play === null ? null : playStatus(play, null);
   const todos = sources.reduce(
     (sum, { source }) => sum + (source.match(/^\s*\/\/ TODO [A-Z0-9_]+ line \d+:/gmu)?.length ?? 0),
     0,
@@ -541,6 +561,14 @@ async function readEntry(
     converter: typeof conversion?.converter === "string" ? conversion.converter : null,
     status,
     partial: partialConversion(report, sources.length, todos),
+    older:
+      olderPlay === null || play === null
+        ? null
+        : {
+            kind: olderPlay.kind,
+            label: `older conversion: ${olderPlay.label}`,
+            detail: `Checked in the Player on ${play.checkedAt.slice(0, 10)}, on files the importer has converted again since. ${olderPlay.detail}`,
+          },
     groovy: { root: groovyRoot, paths: groovy },
     earlier,
     tease: { root: folder, paths: sources.map((file) => file.path).sort() },
@@ -710,7 +738,14 @@ export function parseExplorerReport(value: unknown): ExplorerReport | null {
   const failed = number(ends.failed);
   const stuck = number(ends.stuck);
   const open = number(ends.open);
-  const trap = record(traps[0]);
+  // A trap of the full report names its `locations`; the catalog block's first trap, its `location`.
+  const trap = (item: unknown): ExplorerReport["firstTrap"] => {
+    const fields = record(item);
+    const kind = text(fields.kind);
+    const where =
+      text(fields.location) ?? (Array.isArray(fields.locations) ? text(fields.locations[0]) : null);
+    return kind === null && where === null ? null : { kind, where };
+  };
   return {
     contentHash: value.contentHash,
     exploredAt: value.exploredAt,
@@ -735,15 +770,22 @@ export function parseExplorerReport(value: unknown): ExplorerReport | null {
     crashes: number(block.crashes) ?? crashes.length,
     traps: number(block.traps) ?? traps.length,
     firstCrash: block.firstCrash === undefined ? crash(crashes[0]) : crash(block.firstCrash),
-    firstTrap:
-      typeof trap.kind === "string"
-        ? { kind: trap.kind, where: Array.isArray(trap.locations) ? text(trap.locations[0]) : null }
-        : null,
+    firstTrap: block.firstTrap === undefined ? trap(traps[0]) : trap(block.firstTrap),
+    reach: isRecord(block.reach)
+      ? Object.fromEntries(
+          Object.entries(block.reach).filter(
+            (entry): entry is [string, number] => number(entry[1]) !== null,
+          ),
+        )
+      : null,
   };
 }
 
-/** The status from a Player check: how far the runs got, or why the package does not start. */
-function playStatus(play: PlayCheck, compileStatus: Status): Status {
+/**
+ * The status from a Player check: how far the runs got, or why the package does not start. `compileError` is the
+ * compiler's error for the checked files, when they are the current ones and do not compile.
+ */
+function playStatus(play: PlayCheck, compileError: string | null): Status {
   const { files, fileCount, sites, siteCount, choices } = play.coverage;
   const coverage = `${play.runs.length} runs reached ${files.length} of ${fileCount} files, ${sites} of ${siteCount} interactions, and ${choices} choices.`;
   const missing = [...play.missingImages, ...play.missingMedia];
@@ -756,8 +798,7 @@ function playStatus(play: PlayCheck, compileStatus: Status): Status {
     return {
       kind: "error",
       label: "does not compile",
-      detail:
-        compileStatus.kind === "error" ? compileStatus.detail : (play.runs[0]?.stop.detail ?? ""),
+      detail: compileError ?? play.runs[0]?.stop.detail ?? "",
     };
   const markup =
     play.rawMarkup.length === 0
@@ -969,11 +1010,15 @@ export function renderCatalogPage(
     ["Convert fully", entries.filter((entry) => entry.partial === null).length],
     ["Compile", entries.filter((entry) => entry.compiles).length],
     ["Play to the end", count("plays") + count("verified") + count("approved")],
+    [
+      "Played to the end on an older conversion",
+      entries.filter((entry) => entry.older?.kind === "plays").length,
+    ],
     ["Stop during play", count("stops")],
     ["Parked (step limit)", count("parked")],
     ["Do not start", count("nostart")],
     ["Do not compile", count("error")],
-    ["Not played yet", count("compiles") + count("unbuilt")],
+    ["Not played in the Player", count("compiles") + count("unbuilt")],
     ["Blocked by unbuilt commands", count("unbuilt")],
     ["Verified", count("verified")],
     ["Owner-approved", count("approved")],
@@ -1011,7 +1056,7 @@ dl.summary dd { margin: 0; font-size: 1.3em; font-weight: 600; }
 .status.stops, .status.partial { background: #fff1cc; color: #6b4e00; }
 .status.unbuilt { background: #e6e3fb; color: #3c2f86; }
 .status.parked { background: #e3eefb; color: #24508a; }
-.status.stub, .status.stale { background: #eee; color: #555; font-style: italic; }
+.status.stub, .status.stale, .status.older { background: #eee; color: #555; font-style: italic; }
 .status.error, .status.nostart { background: #fde2e1; color: #8a1c1c; }
 details summary { cursor: pointer; }
 td.status-cell details summary, td.explorer details summary { list-style: none; }
@@ -1037,7 +1082,9 @@ Player; click a status for its details.</p>
 <dl class="summary">${summary.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("")}</dl>
 <p class="meta">${measured}${measured === "" ? "" : ". "}"Play to the end" means that automated play in the real
 Player, on several paths through buttons, choices, and typed answers, with waits skipped, ended normally every time.
-"Verified" packages also passed a manual check and are served as frozen copies. "Explorer" is the headless explorer:
+A grey "older conversion" mark shows the Player check of files that the importer has converted again since; the counts
+above take only checks of the current files. "Verified" packages also passed a manual check and are served as frozen copies.
+"Explorer" is the headless explorer:
 it tries every button, choice, and answer it can within a time budget, and shows the share of script lines it reached,
 crashes (runtime failures), and traps (loops the player cannot leave). For a verified package it may show the newer
 conversion; "stale" results explored other files than the listed ones. MIDI music does not play.</p>
@@ -1086,12 +1133,13 @@ render();
 function renderRow(entry: CatalogEntry, playerOrigin: string): string {
   const id = escapeHtml(entry.id);
   const href = escapeHtml(`${playerOrigin}/player/?package=${encodeURIComponent(entry.id)}`);
-  const statuses = [entry.status, ...(entry.partial === null ? [] : [entry.partial])]
-    .map(
-      (status) =>
-        `<details title="${escapeHtml(status.detail)}"><summary><span class="status ${status.kind}">${escapeHtml(status.label)}</span></summary><p>${escapeHtml(status.detail)}</p></details>`,
-    )
-    .join("");
+  const badge = (status: Status, className: string) =>
+    `<details title="${escapeHtml(status.detail)}"><summary><span class="status ${className}">${escapeHtml(status.label)}</span></summary><p>${escapeHtml(status.detail)}</p></details>`;
+  const statuses = [
+    badge(entry.status, entry.status.kind),
+    ...(entry.partial === null ? [] : [badge(entry.partial, entry.partial.kind)]),
+    ...(entry.older === null ? [] : [badge(entry.older, "older")]),
+  ].join("");
   const cells = [
     ["pin", `<button type="button" data-pin="${id}">Pin</button>`],
     [
@@ -1152,7 +1200,14 @@ function renderExplorer(entry: CatalogEntry): string {
     ...(firstTrap === null
       ? []
       : [
-          `First trap: ${firstTrap.kind}${firstTrap.where === null ? "" : ` at ${firstTrap.where}`}.`,
+          `First trap${firstTrap.kind === null ? "" : `: ${firstTrap.kind}`}${firstTrap.where === null ? "" : ` at ${firstTrap.where}`}.`,
+        ]),
+    ...(report.reach === null || Object.keys(report.reach).length === 0
+      ? []
+      : [
+          `Lines by reach: ${Object.entries(report.reach)
+            .map(([label, lines]) => `${lines} ${REACH_LABELS[label] ?? label}`)
+            .join(", ")}.`,
         ]),
     ...(report.engineErrors === 0
       ? []
