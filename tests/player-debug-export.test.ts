@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
 
 import {
+  DEBUG_EXPORT_VERSION,
   debugBuildRevisions,
   debugExportFile,
   debugExportFileName,
@@ -20,6 +21,7 @@ import {
   type DebugSelection,
 } from "../player/debug-export.js";
 import {
+  applyExternalStorageEdit,
   compileProject,
   completeAction,
   createCheckpoint,
@@ -102,6 +104,11 @@ class Recording {
     this.snapshot = result.snapshot;
     if (result.outcome.kind === "completed") this.run();
   }
+  editStorage(request: unknown) {
+    const result = applyExternalStorageEdit(this.plan, this.snapshot, request);
+    this.add("applyExternalStorageEdit", [request], result.outcome.kind, result, []);
+    this.snapshot = result.snapshot;
+  }
   add(
     kind: DebugOperation["kind"],
     args: unknown[],
@@ -125,7 +132,7 @@ class Recording {
     const failure = this.snapshot.failure;
     return {
       format: "teasescript-debug-export",
-      version: 1,
+      version: DEBUG_EXPORT_VERSION,
       build: {
         commit: "abc123",
         dirty: false,
@@ -414,7 +421,7 @@ test("an export is validated as untrusted data, and another version is unsupport
     "invalid",
     /not a TeaseScript debug export/,
   );
-  invalid(changed(["version"], 2), "unsupported", /version 2/);
+  invalid(changed(["version"], 1), "unsupported", /version 1/);
   invalid(changed(["checkpoint", "version"], 1), "unsupported", /checkpoint of another revision/);
   invalid(changed(["extra"], 1), "invalid", /unknown field "extra"/);
   invalid(
@@ -706,4 +713,35 @@ test("deeply nested values a script can save are written, read, and replayed wit
     const read = await roundTrip(exported, gzip);
     assert.equal(replayDebugExport(read).kind, "reproduced");
   }
+});
+
+test("a Debug storage edit replays from its recorded request, refused ones included", async () => {
+  const compiled = compileProject([
+    {
+      path: "main.tease",
+      source: 'wait 1 s\nlet divisor = load("divisor", default: 1)\nlet result = 1 / divisor\nexit',
+    },
+  ]);
+  assert.ok(compiled.plan);
+  const recording = new Recording(compiled.plan);
+  recording.editStorage({ key: "divisor", value: "not a number", extra: true });
+  recording.editStorage({ key: "divisor", value: 0 });
+  recording.observe(1_000);
+  assert.equal(recording.snapshot.status, "failed");
+  assert.deepEqual(
+    recording.operations.map((operation) => [operation.kind, operation.outcome]),
+    [
+      ["run", "ran"],
+      ["applyExternalStorageEdit", "invalidEdit"],
+      ["applyExternalStorageEdit", "applied"],
+      ["observeTime", "observed"],
+      ["run", "ran"],
+    ],
+  );
+  const result = replayDebugExport(await roundTrip(recording.export()));
+  assert.equal(result.kind, "reproduced");
+  // Without the edit the session would not fail: the edit is part of what reproduces it.
+  const unedited = new Recording(compiled.plan);
+  unedited.observe(1_000);
+  assert.equal(unedited.snapshot.status, "halted");
 });

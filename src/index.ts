@@ -133,6 +133,7 @@ export type {
   PermanentButtonPressedEvent,
   RuntimeFailureEvent,
   SayEvent,
+  ScriptStorageEditedEvent,
 } from "./runtime/events.js";
 export {
   validateScriptStorageEntries,
@@ -159,6 +160,10 @@ export {
   recordContinueCapture,
   type ContinueCaptureOutcome,
 } from "./runtime/operations/continue-capture.js";
+export {
+  applyExternalStorageEdit,
+  type ExternalStorageEditOutcome,
+} from "./runtime/operations/external-storage-edit.js";
 export type { RuntimeTemporalCapture } from "./runtime/temporal-captures.js";
 export {
   reportMediaLoad,
