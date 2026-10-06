@@ -145,7 +145,10 @@ function textValue(tokens: readonly Token[]): IrExpression {
     } else parts.push({ text: token.char });
   }
   if (parts.every((part) => "text" in part))
-    return { kind: "literal", value: parts.map((part) => ("text" in part ? part.text : "")).join("") };
+    return {
+      kind: "literal",
+      value: parts.map((part) => ("text" in part ? part.text : "")).join(""),
+    };
   return { kind: "template", parts };
 }
 
@@ -194,7 +197,9 @@ function repeatedPart(
   const isSpace = (token: Token | undefined): boolean =>
     token !== undefined && "char" in token && SPACE.test(token.char);
   const isMark = (token: Token | undefined): boolean =>
-    token !== undefined && "char" in token && (SPACE.test(token.char) || PUNCTUATION.test(token.char));
+    token !== undefined &&
+    "char" in token &&
+    (SPACE.test(token.char) || PUNCTUATION.test(token.char));
   let end = earlier.length;
   while (end > 0 && isMark(earlier[end - 1])) end -= 1;
   let start = 0;
@@ -358,7 +363,9 @@ export function withoutRepeatedChainText<
     statement.kind === "comment" ||
     statement.kind === "blank" ||
     statement.kind === "hideImage" ||
-    ((statement.kind === "wait" || statement.kind === "showImage" || statement.kind === "playAudio") &&
+    ((statement.kind === "wait" ||
+      statement.kind === "showImage" ||
+      statement.kind === "playAudio") &&
       silent(statement));
   // The outputs a script shows first, before anything else that shows or asks.
   const leading = new Map<string, ChainItem[]>();
@@ -471,7 +478,8 @@ export function withAskQuestions(
       diagnostics.push({
         code: "SX_ASK_QUESTION",
         severity: "info",
-        message: "The text said right before this ask is its question, which the Player says before the field opens.",
+        message:
+          "The text said right before this ask is its question, which the Player says before the field opens.",
         span: statement.span,
       });
     }
@@ -602,7 +610,8 @@ export function withoutBlankText(
   const reads = (value: unknown): void => {
     if (Array.isArray(value)) value.forEach(reads);
     if (typeof value !== "object" || value === null) return;
-    if ("kind" in value && value.kind === "variable" && "name" in value) read.add(String(value.name));
+    if ("kind" in value && value.kind === "variable" && "name" in value)
+      read.add(String(value.name));
     Object.values(value).forEach(reads);
   };
   reads(kept);

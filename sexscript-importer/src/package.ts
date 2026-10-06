@@ -807,8 +807,7 @@ export function lowerPackage(
   );
   const scriptResults = functionResultTypes(
     scriptFunctions.filter(
-      (statement) =>
-        scriptFunctions.filter((other) => other.name === statement.name).length === 1,
+      (statement) => scriptFunctions.filter((other) => other.name === statement.name).length === 1,
     ),
   );
   const composed = lowered.map((program, index) => {

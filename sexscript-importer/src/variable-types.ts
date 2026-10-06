@@ -139,10 +139,7 @@ export function functionResultTypes(statements: IrStatement[]): Map<string, Teas
 function functionReturns(
   statements: IrStatement[],
   knownResults: ReadonlyMap<string, TeaseType> = new Map(),
-): {
-  results: Map<string, TeaseType>;
-  returned: Map<string, TeaseType[]>;
-} {
+): { results: Map<string, TeaseType>; returned: Map<string, TeaseType[]> } {
   const bindings = new Map<BindingKey, Binding>();
   let results = new Map(knownResults);
   let returned = new Map<string, TeaseType[]>();
@@ -1292,9 +1289,7 @@ function recordAdds(statements: readonly IrStatement[]): Map<string, IrExpressio
  * The fields of each list of records that some of its records hold null in and others a value: the records written in
  * its declaration and those added to it later (recordAdds).
  */
-function recordNullFields(
-  statements: readonly IrStatement[],
-): Map<string, Map<string, TeaseType>> {
+function recordNullFields(statements: readonly IrStatement[]): Map<string, Map<string, TeaseType>> {
   const added = recordAdds(statements);
   const result = new Map<string, Map<string, TeaseType>>();
   const visit = (value: unknown): void => {
@@ -1988,7 +1983,8 @@ function withIntegerIndexes<T extends IrStatement>(
       return negatedTest(copy.value) ?? copy;
     if (!indexes.has(value)) return copy;
     const truthType = plainTruths.get(value);
-    if (truthType !== undefined && copy.kind === "call") return plainTruth(copy.positional[0]!, truthType);
+    if (truthType !== undefined && copy.kind === "call")
+      return plainTruth(copy.positional[0]!, truthType);
     if (copy.kind === "index") return { ...copy, index: truncated(copy.index) };
     if (copy.kind === "methodCall") return { ...copy, arguments: [truncated(copy.arguments[0]!)] };
     return copy;

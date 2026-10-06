@@ -665,7 +665,9 @@ function emitValue(expression: IrExpression): string {
 /** `askText`, `askInteger default: 3`, `askText as system` (V30 §20). */
 function compactInput(expression: Extract<IrExpression, { kind: "input" }>): string {
   const asked =
-    expression.speaker === undefined ? expression.input : `${expression.input} as ${expression.speaker}`;
+    expression.speaker === undefined
+      ? expression.input
+      : `${expression.input} as ${expression.speaker}`;
   const args = askArguments(expression);
   // Without a question, `askInteger default: 3` has no comma (V30 §20).
   return args.length === 0 ? asked : `${asked} ${args.join(", ")}`;

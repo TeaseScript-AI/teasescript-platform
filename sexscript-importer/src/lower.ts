@@ -2788,7 +2788,8 @@ function repeatsLittle(
     statement.kind === "return" ||
     // `c ? show(a) : speak(b)` as a statement is an if with a call per branch.
     expression === deferred ||
-    (expression?.kind === "methodCall" && nodeArray(asNode(expression.arguments)?.items).length <= 1) ||
+    (expression?.kind === "methodCall" &&
+      nodeArray(asNode(expression.arguments)?.items).length <= 1) ||
     // `text += c ? a : b` updates one variable.
     (expression?.kind === "binary" &&
       ["=", "+=", "-=", "*=", "/="].includes(text(expression.operator) ?? "") &&
@@ -3263,7 +3264,8 @@ function lowerConditionalAssignment(
     if (
       !reassignsSelf &&
       isSimpleValue(fallback) &&
-      (plainTruth?.kind === "call" || (!declaration && (inferType(value, context.types) & NULL) !== 0))
+      (plainTruth?.kind === "call" ||
+        (!declaration && (inferType(value, context.types) & NULL) !== 0))
     ) {
       const temporary = freshName("elvisValue", context);
       const valueType = inferType(value, context.types);
@@ -3364,8 +3366,7 @@ function lowerConditionalAssignment(
   }
   // Both branches assign the variable, so it starts with its type's empty value where both give one plain type.
   const type = inferType(conditional, context.types);
-  const start =
-    type === BOOLEAN ? false : type === NUMBER ? 0 : type === STRING ? "" : null;
+  const start = type === BOOLEAN ? false : type === NUMBER ? 0 : type === STRING ? "" : null;
   return [
     ...lowerStatement(assign(syntheticConstant(start, span)), context),
     ...lowerStatement(syntheticIf(condition, update(whenTrue), update(whenFalse), span), context),
@@ -3656,7 +3657,10 @@ function syntheticNot(value: AstNode): AstNode {
   return { kind: "not", span: value.span, value };
 }
 
-function syntheticConstant(value: boolean | number | string | null, span: SourceSpan | null): AstNode {
+function syntheticConstant(
+  value: boolean | number | string | null,
+  span: SourceSpan | null,
+): AstNode {
   return { kind: "constant", span, value };
 }
 
@@ -4037,7 +4041,11 @@ function lowerClosureDeclaration(
         defaultValue?.kind === "literal" &&
         typeof defaultValue.value === "number" &&
         Number.isInteger(defaultValue.value);
-      parameters.push({ name: record.name, defaultValue, ...(fractional ? { type: "number" } : {}) });
+      parameters.push({
+        name: record.name,
+        defaultValue,
+        ...(fractional ? { type: "number" } : {}),
+      });
     }
   }
 
@@ -4178,7 +4186,11 @@ function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): Ir
         declared = value !== null && isLiteralData(value) ? value : null;
       }
       // An address the body assigns again has no one literal value.
-      if (child.kind === "binary" && child.operator === "=" && variableName(child.left) === addressName)
+      if (
+        child.kind === "binary" &&
+        child.operator === "=" &&
+        variableName(child.left) === addressName
+      )
         declared = null;
     });
   const url = declared === null ? null : lowerExpression(declared ?? address, context);
@@ -4200,7 +4212,11 @@ function onlineFunction(body: AstNode, node: AstNode, context: LowerContext): Ir
     systemSay(
       templateOrLiteral(
         shown === null
-          ? [{ text: `Online feature not available here. The original would have made a ${method} request.` }]
+          ? [
+              {
+                text: `Online feature not available here. The original would have made a ${method} request.`,
+              },
+            ]
           : [
               {
                 text: `Online feature not available here. The original would have requested: ${method} `,
@@ -4807,7 +4823,8 @@ function withDirectClosureCalls(statements: IrStatement[], context: LowerContext
         action === undefined ||
         target === undefined ||
         args.length > target.parameters.length ||
-        args.length < target.parameters.filter((parameter) => parameter.defaultValue === null).length
+        args.length <
+          target.parameters.filter((parameter) => parameter.defaultValue === null).length
       )
         return mapped;
       replacedActions.add(action);
@@ -8693,7 +8710,12 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       const start: IrExpression | null =
         negativeIndex !== null
           ? isRepeatableExpression(targetNode)
-            ? { kind: "binary", operator: "-", left: length, right: { kind: "literal", value: negativeIndex } }
+            ? {
+                kind: "binary",
+                operator: "-",
+                left: length,
+                right: { kind: "literal", value: negativeIndex },
+              }
             : null
           : isRepeatableExpression(indexNode)
             ? index
@@ -8705,7 +8727,12 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
             ? null
             : start.kind === "literal" && typeof start.value === "number"
               ? { kind: "literal", value: start.value + 1 }
-              : { kind: "binary", operator: "+", left: start, right: { kind: "literal", value: 1 } };
+              : {
+                  kind: "binary",
+                  operator: "+",
+                  left: start,
+                  right: { kind: "literal", value: 1 },
+                };
         return {
           kind: "methodCall",
           target,
@@ -12990,7 +13017,7 @@ function lowerMethodCallExpression(node: AstNode, context: LowerContext): IrExpr
         context,
         "SX_ASK_BOOLEANS_WORKAROUND",
         "warning",
-        "Workaround for askBooleans(), which main does not implement yet: a menu of the items with their state marked, which a click switches until \"Done\". Switch back to askBooleans(message:, texts:, defaults:) when it is implemented.",
+        'Workaround for askBooleans(), which main does not implement yet: a menu of the items with their state marked, which a click switches until "Done". Switch back to askBooleans(message:, texts:, defaults:) when it is implemented.',
         node.span,
       );
       return useHelper(context, "askBooleans", args);
@@ -13357,7 +13384,10 @@ function pushPrompt(
       argument !== messageNode &&
       argument !== evaluated &&
       !effects.includes(argument) &&
-      !(argument.kind === "list" && nodeArray(argument.items).every((item) => isPure(item, context) || effects.includes(item))),
+      !(
+        argument.kind === "list" &&
+        nodeArray(argument.items).every((item) => isPure(item, context) || effects.includes(item))
+      ),
   );
   const ordered =
     root !== null &&
@@ -13371,7 +13401,8 @@ function pushPrompt(
     };
     if (!isPure(messageNode, context)) message = temporary(message, "question");
     computed.nodes.forEach((node, index) => {
-      if (effects.includes(node)) computed.values[index] = temporary(computed.values[index]!, "option");
+      if (effects.includes(node))
+        computed.values[index] = temporary(computed.values[index]!, "option");
     });
   }
   if (!ordered) {
@@ -15276,14 +15307,12 @@ function bindingDeclarations(
       !context.packageFunctions.has(name) &&
       !isLegacyGetterProperty(name),
   );
-  return names.map(
-    (name): IrStatement => ({
-      kind: "let",
-      name,
-      value: neutralValue(context.types.variables.get(name) ?? UNKNOWN),
-      span: null,
-    }),
-  );
+  return names.map((name): IrStatement => ({
+    kind: "let",
+    name,
+    value: neutralValue(context.types.variables.get(name) ?? UNKNOWN),
+    span: null,
+  }));
 }
 
 /**
@@ -15298,13 +15327,17 @@ function withPlacedBindings(
 ): IrStatement[] {
   if (declarations.length === 0) return statements;
   type Found = { variables: Set<string>; calls: Set<string> };
-  const names = (value: unknown, found: Found = { variables: new Set(), calls: new Set() }): Found => {
+  const names = (
+    value: unknown,
+    found: Found = { variables: new Set(), calls: new Set() },
+  ): Found => {
     if (Array.isArray(value)) {
       for (const item of value) names(item, found);
       return found;
     }
     if (!isRecord(value)) return found;
-    if (value.kind === "variable" && typeof value.name === "string") found.variables.add(value.name);
+    if (value.kind === "variable" && typeof value.name === "string")
+      found.variables.add(value.name);
     if (value.kind === "call" && typeof value.name === "string") found.calls.add(value.name);
     if (value.kind === "literal" && value.action === true && typeof value.value === "string")
       found.calls.add(value.value);
@@ -15321,7 +15354,7 @@ function withPlacedBindings(
     const reaching = new Set(
       [...functions].flatMap(([fn, found]) => (found.variables.has(name) ? [fn] : [])),
     );
-    for (let grown = true; grown; ) {
+    for (let grown = true; grown;) {
       grown = false;
       const dispatched = [...reaching].some((fn) => context.actions.has(fn));
       for (const [fn, found] of functions) {
@@ -15372,9 +15405,19 @@ function bindingNote(declarations: IrStatement[], context: LowerContext): IrStat
   );
   if (names.length === 0) return [];
   const message = `Groovy kept ${names.join(", ")}, which functions assign without a declaration, in the script's binding that every function shares; ${names.length === 1 ? "it is" : "they are"} declared here, before the script first uses ${names.length === 1 ? "it" : "them"}, with an empty value.`;
-  context.diagnostics.push({ code: "SX_BINDING_VARIABLE", severity: "warning", message, span: null });
+  context.diagnostics.push({
+    code: "SX_BINDING_VARIABLE",
+    severity: "warning",
+    message,
+    span: null,
+  });
   return [
-    { kind: "comment", text: `// NOTE SX_BINDING_VARIABLE: ${message}`, trailing: false, span: null },
+    {
+      kind: "comment",
+      text: `// NOTE SX_BINDING_VARIABLE: ${message}`,
+      trailing: false,
+      span: null,
+    },
     ...declarations,
   ];
 }
@@ -15459,17 +15502,25 @@ function withScriptBindings(
     const empty = before.get(index) ?? [];
     if (empty.length === 0) return [replaced.get(index) ?? statement];
     const message = `Groovy kept ${empty.join(", ")}, which the script assigns without a declaration, in the script's binding; ${empty.length === 1 ? "it is" : "they are"} declared here with an empty value.`;
-    context.diagnostics.push({ code: "SX_BINDING_VARIABLE", severity: "warning", message, span: null });
+    context.diagnostics.push({
+      code: "SX_BINDING_VARIABLE",
+      severity: "warning",
+      message,
+      span: null,
+    });
     return [
-      { kind: "comment", text: `// NOTE SX_BINDING_VARIABLE: ${message}`, trailing: false, span: null },
-      ...empty.map(
-        (name): IrStatement => ({
-          kind: "let",
-          name,
-          value: neutralValue(context.types.variables.get(name) ?? UNKNOWN),
-          span: null,
-        }),
-      ),
+      {
+        kind: "comment",
+        text: `// NOTE SX_BINDING_VARIABLE: ${message}`,
+        trailing: false,
+        span: null,
+      },
+      ...empty.map((name): IrStatement => ({
+        kind: "let",
+        name,
+        value: neutralValue(context.types.variables.get(name) ?? UNKNOWN),
+        span: null,
+      })),
       replaced.get(index) ?? statement,
     ];
   });

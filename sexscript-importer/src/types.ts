@@ -278,7 +278,12 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   if (onlyOf(right, STRING | NULL) && right & STRING) return STRING;
   if (onlyOf(left, NUMBER) && onlyOf(right, NUMBER)) return NUMBER;
   // Groovy failed on a null number operand, so where the sum has a value it is a number.
-  if (onlyOf(left, NUMBER | NULL) && left & NUMBER && onlyOf(right, NUMBER | NULL) && right & NUMBER)
+  if (
+    onlyOf(left, NUMBER | NULL) &&
+    left & NUMBER &&
+    onlyOf(right, NUMBER | NULL) &&
+    right & NUMBER
+  )
     return NUMBER;
   if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
   return UNKNOWN;
@@ -981,7 +986,9 @@ function declaredType(type: unknown): ValueType | null {
     return LIST;
   // A primitive parameter holds its value; a boxed one may also be null.
   if (["int", "long", "short", "byte", "double", "float"].includes(name)) return NUMBER;
-  if (["Integer", "Long", "Short", "Byte", "Double", "Float", "BigDecimal", "Number"].includes(name))
+  if (
+    ["Integer", "Long", "Short", "Byte", "Double", "Float", "BigDecimal", "Number"].includes(name)
+  )
     return NUMBER | NULL;
   if (name === "boolean") return BOOLEAN;
   if (name === "Boolean") return BOOLEAN | NULL;

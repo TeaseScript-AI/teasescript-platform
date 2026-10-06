@@ -509,7 +509,10 @@ function askBooleansHelper(name: string, speaker?: string): IrStatement {
                 { name: "value", value: v("index") },
                 {
                   name: "text",
-                  value: { kind: "template", parts: [{ value: v("mark") }, { text: " " }, { value: v("text") }] },
+                  value: {
+                    kind: "template",
+                    parts: [{ value: v("mark") }, { text: " " }, { value: v("text") }],
+                  },
                 },
               ],
             }),
