@@ -172,6 +172,15 @@ import {
 } from "./operations/timer-lifecycle.js";
 import { removePermanentButtons, shownPermanentButton } from "./permanent-buttons.js";
 import { contextRootId, findRoot, findScope } from "./activations.js";
+import {
+  bindingKey,
+  emptyDependencies,
+  stateKey,
+  type DebugDependencies,
+  type StatePart,
+  type RuntimeDebugRandomOperation,
+  type TraceStore,
+} from "./debug-trace.js";
 import { isValidSessionTime } from "./actions/delay.js";
 import {
   booleanFromText,
@@ -214,6 +223,8 @@ export class RuntimeExecutionContext {
     private readonly snapshot: RuntimeSnapshot,
     private readonly capabilities: RuntimeCapabilities,
     private readonly plan: InstructionPlan,
+    /** The debug trace of the operation, or `null` when it is not traced. */
+    public readonly trace: TraceStore | null = null,
   ) {}
 
   public evaluator(): Evaluator {
@@ -221,7 +232,13 @@ export class RuntimeExecutionContext {
       this.#evaluator.refreshBuiltinRegistration();
       return this.#evaluator;
     }
-    this.#evaluator = new Evaluator(this.snapshot, this.capabilities, this.events, this.plan);
+    this.#evaluator = new Evaluator(
+      this.snapshot,
+      this.capabilities,
+      this.events,
+      this.plan,
+      this.trace,
+    );
     return this.#evaluator;
   }
 }
@@ -239,6 +256,8 @@ export class Evaluator {
     private readonly capabilities: RuntimeCapabilities,
     private readonly events: InterpreterEvent[],
     private readonly plan: InstructionPlan,
+    /** The debug trace that observes evaluation, or `null`. */
+    public readonly trace: TraceStore | null = null,
   ) {
     this.refreshBuiltinRegistration();
   }
@@ -249,7 +268,7 @@ export class Evaluator {
   }
 
   public forSnapshot(snapshot: RuntimeSnapshot, events: InterpreterEvent[]): Evaluator {
-    return new Evaluator(snapshot, this.capabilities, events, this.plan);
+    return new Evaluator(snapshot, this.capabilities, events, this.plan, this.trace);
   }
 
   public evaluate(expression: ExpressionPlan): SerializableRuntimeValue {
@@ -285,31 +304,164 @@ export class Evaluator {
       case "identifier": {
         if (expression.name === "speaker" && this.snapshot.contextualSpeaker !== null) {
           const speaker = this.speakerById(this.snapshot.contextualSpeaker, expression.span);
-          return {
+          const reference: SerializableRuntimeValue = {
             kind: "speakerReference",
             speakerId: speaker.id,
             identifier: speaker.identifier,
           };
+          if (this.trace !== null) this.#readState(reference, null);
+          return reference;
         }
-        const binding = this.binding(expression.name);
-        if (binding === undefined) throw this.#unknownName(expression.name, expression.span);
-        return binding.value;
+        const location = findBindingLocation(this.snapshot, this.plan, expression.name);
+        if (location === undefined) throw this.#unknownName(expression.name, expression.span);
+        this.trace?.readBinding(location.frame.id, expression.name, location.binding.value);
+        return location.binding.value;
       }
-      case "temporary":
-        return readTemporary(this.snapshot.temporaries, expression.temporaryId, expression.span);
-      case "preparedReference":
-        return this.#resolvePreparedReference(
-          readTemporary(this.snapshot.temporaries, expression.temporaryId, expression.span),
+      case "temporary": {
+        const value = readTemporary(
+          this.snapshot.temporaries,
+          expression.temporaryId,
           expression.span,
         );
+        this.trace?.readTemporary(this.callFrameId(), expression.temporaryId, value);
+        return value;
+      }
+      case "preparedReference": {
+        const serialized = readTemporary(
+          this.snapshot.temporaries,
+          expression.temporaryId,
+          expression.span,
+        );
+        const value = this.#resolvePreparedReference(serialized, expression.span);
+        if (this.trace !== null)
+          this.#tracePreparedReference(serialized, expression.temporaryId, value, expression.span);
+        return value;
+      }
     }
   }
 
+  /** The call frame whose temporaries execution sees now, or 0 outside every call. */
+  public callFrameId(): number {
+    return this.snapshot.callFrames.at(-1)?.id ?? 0;
+  }
+
+  /** The runtime state a speaker reference or handle names, or `null` for any other value. */
+  #stateKey(value: SerializableRuntimeValue): string | null {
+    if (isSpeakerReference(value)) return stateKey("speaker", value.speakerId);
+    if (isTimerHandle(value)) return stateKey("timer", value.timerId);
+    if (isMediaHandle(value)) return stateKey("media", value.mediaId);
+    if (isPermanentButton(value)) return stateKey("button", value.buttonId);
+    if (isCameraView(value)) return stateKey("camera");
+    return null;
+  }
+
+  /**
+   * A read of one `property` of the state `value` names, or of all of it with `null`. A speaker was declared by the
+   * script; a handle's creation explains itself.
+   */
+  #readState(value: SerializableRuntimeValue, property: string | null): void {
+    const key = this.#stateKey(value);
+    if (key === null) return;
+    this.trace!.readState(
+      key,
+      property,
+      isSpeakerReference(value) ? value.identifier : null,
+      value,
+      isSpeakerReference(value),
+    );
+  }
+
+  /**
+   * A change of the state `value` names, with the causes collected so far: an assignment sets one property, a timer or
+   * media method its timed properties, and removing a permanent button all of it.
+   */
+  #writeState(
+    value: SerializableRuntimeValue,
+    property: string,
+    assigned: SerializableRuntimeValue,
+    span: SourceSpan,
+    part: StatePart,
+  ): void {
+    const key = this.#stateKey(value);
+    if (key === null) return;
+    const owner = isSpeakerReference(value)
+      ? value.identifier
+      : isTimerHandle(value)
+        ? "timer"
+        : isMediaHandle(value)
+          ? "media"
+          : isCameraView(value)
+            ? "camera"
+            : "permanent button";
+    this.trace!.writeState(
+      part === "whole" || part === "timed" ? "mutation" : "assignment",
+      key,
+      part,
+      `${owner}.${property}`,
+      assigned,
+      span,
+    );
+  }
+
+  /** A collection method changed the variable its receiver names; the call's value comes from that change. */
+  #traceMutation(descriptor: PreparedReferenceDescriptor | null, span: SourceSpan): void {
+    this.trace!.replace(this.#traceVariableChange("mutation", descriptor, span));
+  }
+
+  /**
+   * Records the new version of the variable a change inside it reached, unless the change reached a copy, with the
+   * causes collected so far.
+   */
+  #traceVariableChange(
+    kind: "mutation" | "assignment",
+    descriptor: PreparedReferenceDescriptor | null,
+    span: SourceSpan,
+  ): number | null {
+    if (descriptor === null || descriptor.detached) return null;
+    const { rootFrameId, rootName } = descriptor;
+    if (rootFrameId === null || rootName === null) return null;
+    const root = scopeBindings(this.snapshot, rootFrameId)?.find(
+      (binding) => binding.name === rootName,
+    );
+    if (root === undefined) return null;
+    return this.trace!.write(kind, bindingKey(rootFrameId, rootName), rootName, root.value, span);
+  }
+
+  /** A prepared reference reads the variable it names, or, once detached, its own captured value. */
+  #tracePreparedReference(
+    serialized: SerializableRuntimeValue,
+    temporaryId: number,
+    value: SerializableRuntimeValue,
+    span: SourceSpan,
+  ): void {
+    const descriptor = readPreparedReference(serialized, span);
+    if (!descriptor.detached && descriptor.rootFrameId !== null && descriptor.rootName !== null)
+      this.trace!.readBinding(descriptor.rootFrameId, descriptor.rootName, value);
+    else this.trace!.readTemporary(this.callFrameId(), temporaryId, value);
+  }
+
   #evaluateMachine(root: ExpressionPlan, reference: boolean): EvaluatedExpression {
+    const trace = this.trace;
+    if (trace === null) return this.#runMachine(evaluationFrame(root, reference), null);
+    // Traced evaluation collects causes per frame; the root's join the collector it started from.
+    const outer = trace.acc;
+    const rootFrame = evaluationFrame(root, reference);
+    try {
+      return this.#runMachine(rootFrame, trace);
+    } finally {
+      trace.focus(outer, rootFrame.deps, true);
+    }
+  }
+
+  #runMachine(rootFrame: EvaluationFrame, trace: TraceStore | null): EvaluatedExpression {
     // Frames are consumed synchronously within one instruction; no continuation escapes
     // into a checkpoint. Collection calls invalidate cached reference cursors.
     this.#referenceEpoch = 0;
-    const pending: EvaluationFrame[] = [evaluationFrame(root, reference)];
+    const pending: EvaluationFrame[] = [rootFrame];
+    // With a trace, the frame that finished last, whose causes its parent takes over.
+    let previous: EvaluationFrame | null = null;
+    let previousDepth = 0;
+    let finished: EvaluationFrame | null = null;
     let result: EvaluatedExpression = {
       value: null,
       owned: false,
@@ -319,6 +471,17 @@ export class Evaluator {
     while (pending.length) {
       const frame = pending.at(-1)!;
       const expression = frame.expression;
+      if (trace !== null) {
+        finished = pending.length < previousDepth ? previous : null;
+        // A template keeps each placeholder's causes apart in an interpolation record.
+        trace.focus(
+          (frame.deps ??= emptyDependencies()),
+          finished?.deps ?? null,
+          expression.kind !== "template",
+        );
+        previous = frame;
+        previousDepth = pending.length;
+      }
       if (frame.reference) {
         if (expression.kind === "group") {
           if (frame.stage++ === 0) {
@@ -359,7 +522,11 @@ export class Evaluator {
                     ? 0
                     : expression.name === "last"
                       ? base.items.length - 1
-                      : Math.floor(this.#findRandom(expression.span) * base.items.length);
+                      : Math.floor(
+                          this.#findRandom(expression.span, "collectionRandom", base.items.length) *
+                            base.items.length,
+                        );
+                if (expression.name === "random") trace?.randomResult(base.items[index]!);
                 if (isSet(base)) {
                   // A set member is read as a copy: changing it must not change the set or its uniqueness.
                   const member = cloneCapturedSerializableValue(base.items[index]!);
@@ -424,6 +591,7 @@ export class Evaluator {
         if (expression.kind === "identifier") {
           const location = findBindingLocation(this.snapshot, this.plan, expression.name);
           if (location === undefined) throw this.#unknownName(expression.name, expression.span);
+          trace?.readBinding(location.frame.id, expression.name, location.binding.value);
           // Only the root of a prepared reference, reached through reference frames alone, keeps a copy: an index
           // read after it can remove an ancestor of the value it selects. The receiver of an immediate call resolves
           // through its binding, so it shares the root instead of copying it.
@@ -446,10 +614,19 @@ export class Evaluator {
           continue;
         }
         if (expression.kind === "preparedReference") {
-          const descriptor = readPreparedReference(
-            readTemporary(this.snapshot.temporaries, expression.temporaryId, expression.span),
+          const serialized = readTemporary(
+            this.snapshot.temporaries,
+            expression.temporaryId,
             expression.span,
           );
+          const descriptor = readPreparedReference(serialized, expression.span);
+          if (trace !== null)
+            this.#tracePreparedReference(
+              serialized,
+              expression.temporaryId,
+              descriptor.capturedRoot,
+              expression.span,
+            );
           result = {
             // A prepared-reference leaf only copies its descriptor. Its parent resolves
             // it at the receiver span; a root prepareReference does not read it.
@@ -576,8 +753,19 @@ export class Evaluator {
         case "template":
           if (frame.stage === 1) {
             const part = expression.parts[frame.index - 1]!;
-            if (part.kind === "expression")
-              frame.text += this.interpolationText(result.value, part.expression.span);
+            if (part.kind === "expression") {
+              if (trace === null)
+                frame.text += this.interpolationText(result.value, part.expression.span);
+              else {
+                // A list's selection draw belongs to the placeholder, whose text the string then depends on.
+                const placeholder = finished?.deps ?? emptyDependencies();
+                trace.focus(placeholder, null, false);
+                const text = this.interpolationText(result.value, part.expression.span);
+                trace.focus(frame.deps!, null, false);
+                trace.interpolation(placeholder, text, part.expression.span);
+                frame.text += text;
+              }
+            }
           }
           while (
             frame.index < expression.parts.length &&
@@ -720,12 +908,14 @@ export class Evaluator {
               pending.push(evaluationFrame(expression.callee.object, true));
               continue;
             }
-          } else if (frame.stage === 1 && expression.callee.kind === "property")
+          } else if (frame.stage === 1 && expression.callee.kind === "property") {
             frame.value =
               result.epoch === this.#referenceEpoch
                 ? result.value
                 : this.#resolveDescriptor(result.descriptor!, expression.callee.object.span);
-          else if (frame.stage === 2) {
+            // A traced call keeps the variable its receiver names, which a collection method may change.
+            if (trace !== null) frame.descriptor = result.descriptor;
+          } else if (frame.stage === 2) {
             const argument = expression.arguments[frame.index - 1]!;
             const captured = cloneCapturedSerializableValue(result.value);
             if (argument.kind === "positional") frame.positional!.push(captured);
@@ -745,6 +935,13 @@ export class Evaluator {
             continue;
           }
           value = this.#call(expression, frame.value, frame.positional!, frame.named!);
+          if (
+            trace !== null &&
+            expression.callee.kind === "property" &&
+            MUTATING_METHODS.has(expression.callee.name) &&
+            (isList(frame.value) || isSet(frame.value) || isDict(frame.value))
+          )
+            this.#traceMutation(frame.descriptor, expression.span);
           break;
         case "tagQuery":
           // Every bound and tag list is evaluated once, in written order, before any image is matched.
@@ -768,18 +965,25 @@ export class Evaluator {
             const entry = findScriptStorageEntry(this.snapshot, key);
             if (entry !== undefined) {
               value = entry.value;
+              if (trace !== null) {
+                trace.readStorage(key);
+                trace.load(key, true, false, value, expression.span);
+              }
               break;
             }
             if (expression.default === null) {
               value = null;
+              trace?.load(key, false, false, value, expression.span);
               break;
             }
             // The default is evaluated only for an absent key.
+            if (trace !== null) frame.key = key;
             frame.stage = 2;
             pending.push(evaluationFrame(expression.default));
             continue;
           }
           value = result.value;
+          trace?.load(frame.key!, false, true, value, expression.span);
           break;
       }
       result = { value, owned, descriptor: null, epoch: this.#referenceEpoch };
@@ -836,6 +1040,12 @@ export class Evaluator {
         path: [],
       });
       location.binding.value = cloneCapturedSerializableValue(value);
+      this.trace?.write(
+        "assignment",
+        bindingKey(location.frame.id, target.name),
+        target.name,
+        location.binding.value,
+      );
       return;
     }
     const object = this.evaluate(target.object);
@@ -860,8 +1070,11 @@ export class Evaluator {
       }
       if (isObject(object)) {
         setCapturedSerializableProperty(object, target.name, value);
+        if (this.trace !== null)
+          this.#traceVariableChange("assignment", receiverDescriptor, target.span);
         return;
       }
+      // A speaker, timer, media, or camera view keeps its properties as runtime state, which every name for it reads.
       if (isSpeakerReference(object)) {
         setSpeakerProperty(
           this.speakerById(object.speakerId, target.span),
@@ -869,18 +1082,26 @@ export class Evaluator {
           value,
           target.span,
         );
+        if (this.trace !== null)
+          this.#writeState(object, target.name, value, target.span, { property: target.name });
         return;
       }
       if (isTimerHandle(object)) {
         this.#assignTimerProperty(object, target.name, value, target.span);
+        if (this.trace !== null)
+          this.#writeState(object, target.name, value, target.span, { property: target.name });
         return;
       }
       if (isMediaHandle(object)) {
         this.#assignMediaProperty(object, target.name, value, target.span);
+        if (this.trace !== null)
+          this.#writeState(object, target.name, value, target.span, { property: target.name });
         return;
       }
       if (isCameraView(object)) {
         this.#assignCameraProperty(target.name, value, target.span);
+        if (this.trace !== null)
+          this.#writeState(object, target.name, value, target.span, { property: target.name });
         return;
       }
       throw fault(
@@ -905,6 +1126,8 @@ export class Evaluator {
         });
       }
       setCapturedSerializableDictValue(object, key, value);
+      if (this.trace !== null)
+        this.#traceVariableChange("assignment", receiverDescriptor, target.span);
       return;
     }
     if (!isList(object))
@@ -923,6 +1146,8 @@ export class Evaluator {
       });
     }
     object.items[index] = cloneCapturedSerializableValue(value);
+    if (this.trace !== null)
+      this.#traceVariableChange("assignment", receiverDescriptor, target.span);
   }
 
   public prepareReference(expression: ExpressionPlan): SerializableRuntimeObject {
@@ -1187,7 +1412,7 @@ export class Evaluator {
         span,
       );
     return visibleText(
-      this.#randomItem(value.items, span),
+      this.#randomItem(value.items, span, "interpolation"),
       span,
       currentTemporalContext(this.snapshot),
     );
@@ -1214,6 +1439,7 @@ export class Evaluator {
       | SerializableCameraViewHandle,
     span: SourceSpan,
   ): string {
+    if (this.trace !== null) this.#readState(handle, null);
     if (isCameraView(handle)) {
       const view = this.#cameraView();
       return view.shown ? `<camera ${view.placement}>` : "<camera, hidden>";
@@ -1439,8 +1665,12 @@ export class Evaluator {
       if (MIN_MAX_BUILTINS.has(name))
         return this.#minMaxBuiltin(name, positional, named, expression.span);
       if (name === "script") return scriptReference(positional, named, expression.span);
-      if (name === "removePermanentButton")
-        return this.#removePermanentButton(positional, named, expression.span);
+      if (name === "removePermanentButton") {
+        const removed = this.#removePermanentButton(positional, named, expression.span);
+        if (this.trace !== null && isPermanentButton(positional[0]!))
+          this.#writeState(positional[0], "removed", null, expression.span, "whole");
+        return removed;
+      }
       const coreBuiltin = CORE_RUNTIME_BUILTINS.some((builtin) => builtin === name);
       const platformPrelude = name === "escapeMarkup";
       const builtin = Object.hasOwn(this.#builtins, name) ? this.#builtins[name] : undefined;
@@ -1515,10 +1745,28 @@ export class Evaluator {
       return copied;
     }
     if (expression.callee.kind === "property" && isTimerHandle(receiver)) {
-      return this.#callTimer(receiver, expression.callee.name, positional, named, expression.span);
+      const called = this.#callTimer(
+        receiver,
+        expression.callee.name,
+        positional,
+        named,
+        expression.span,
+      );
+      if (this.trace !== null)
+        this.#writeState(receiver, `${expression.callee.name}()`, null, expression.span, "timed");
+      return called;
     }
     if (expression.callee.kind === "property" && isMediaHandle(receiver)) {
-      return this.#callMedia(receiver, expression.callee.name, positional, named, expression.span);
+      const called = this.#callMedia(
+        receiver,
+        expression.callee.name,
+        positional,
+        named,
+        expression.span,
+      );
+      if (this.trace !== null)
+        this.#writeState(receiver, `${expression.callee.name}()`, null, expression.span, "timed");
+      return called;
     }
     if (expression.callee.kind === "property" && typeof receiver === "string") {
       const name = Object.keys(named)[0];
@@ -1845,7 +2093,7 @@ export class Evaluator {
     if (warning !== null) this.#warn(warning.code, warning.message, span);
     // A round that is already due while its expiry work waits behind a block ends now, like `remaining = 0`.
     if (action !== undefined && timer.state === "paused" && timer.remainingMs === 0) {
-      expireTimerAction(this.snapshot, action, now, span, this.events);
+      expireTimerAction(this.snapshot, action, now, span, this.events, this.trace);
     }
     return null;
   }
@@ -1900,6 +2148,7 @@ export class Evaluator {
         now,
         span,
         this.events,
+        this.trace,
       );
     } else if (warning !== null) {
       this.#warn(warning.code, warning.message, span);
@@ -2030,7 +2279,7 @@ export class Evaluator {
         throw fault("TSR018", `Cannot read '.${name}' from an empty collection.`, span);
       return value.items[name === "first" ? 0 : value.items.length - 1]!;
     }
-    if (name === "random") return this.#randomItem(value.items, span);
+    if (name === "random") return this.#randomItem(value.items, span, "collectionRandom");
     throw fault("TSR017", `Unknown collection property '${name}'.`, span);
   }
 
@@ -2114,6 +2363,8 @@ export class Evaluator {
       for (const image of this.snapshot.capturedImages) {
         if (matches(imageTags(image))) found.push(image.reference);
       }
+      // Tagged photos come from accepted captures.
+      this.trace?.readState(stateKey("photos"), null, null, null, false);
     }
     if (query.select === "list") return { kind: "list", items: found };
     if (found.length === 0)
@@ -2122,7 +2373,10 @@ export class Evaluator {
         query.catalog === "scripts" ? "No file has these tags." : "No image has these tags.",
         query.span,
       );
-    return found[Math.floor(this.#findRandom(query.span) * found.length)]!;
+    const picked =
+      found[Math.floor(this.#findRandom(query.span, "tagQuery", found.length) * found.length)]!;
+    this.trace?.randomResult(picked);
+    return picked;
   }
 
   #tagBound(value: SerializableRuntimeValue, span: SourceSpan): number {
@@ -2136,7 +2390,26 @@ export class Evaluator {
     return value;
   }
 
-  #findRandom(span: SourceSpan): number {
+  /** One draw for `operation`, which a debug trace records with the generator state around it. */
+  #findRandom(
+    span: SourceSpan,
+    operation: RuntimeDebugRandomOperation,
+    choices: number | null,
+    range: SerializableRuntimeRange | null = null,
+  ): number {
+    const trace = this.trace;
+    const before = trace === null ? null : this.#randomState();
+    const random = this.#drawRandom(span);
+    trace?.random(operation, span, choices, range, before, this.#randomState());
+    return random;
+  }
+
+  /** The session generator's state, or `null` when the host injected the random source. */
+  #randomState(): number | null {
+    return this.capabilities.random === undefined ? this.snapshot.rng.state : null;
+  }
+
+  #drawRandom(span: SourceSpan): number {
     if (this.#startValue)
       throw fault(
         "TSR067",
@@ -2155,7 +2428,9 @@ export class Evaluator {
 
   #randomBuiltin(call: RuntimeCapabilityCall): number {
     this.#expectBuiltinArguments("random", call, 0);
-    return this.#findRandom(call.span);
+    const random = this.#findRandom(call.span, "random", null);
+    this.trace?.randomResult(random);
+    return random;
   }
 
   #chanceBuiltin(call: RuntimeCapabilityCall): boolean {
@@ -2168,7 +2443,9 @@ export class Evaluator {
         call.span,
       );
     }
-    return this.#findRandom(call.span) * 100 < percent;
+    const chosen = this.#findRandom(call.span, "chance", null) * 100 < percent;
+    this.trace?.randomResult(chosen);
+    return chosen;
   }
 
   #randomIntegerBuiltin(call: RuntimeCapabilityCall): number {
@@ -2177,7 +2454,7 @@ export class Evaluator {
     if (!isRange(range)) {
       throw fault("TSR040", "randomInteger(range) requires a range value.", call.span);
     }
-    return this.randomIntegerInRange(range, call.span, "randomInteger(range)");
+    return this.randomIntegerInRange(range, call.span, "randomInteger(range)", "randomInteger");
   }
 
   /** Draws one whole number from a non-empty integer range with the session RNG. */
@@ -2185,13 +2462,17 @@ export class Evaluator {
     range: SerializableRuntimeRange,
     span: SourceSpan,
     subject: string,
+    operation: RuntimeDebugRandomOperation,
   ): number {
     assertIntegerRange(range, span);
     const length = rangeLength(range);
     if (length < 1) {
       throw fault("TSR041", `${subject} requires a non-empty range.`, span);
     }
-    return range.start + Math.floor(this.#findRandom(span) * length);
+    const drawn =
+      range.start + Math.floor(this.#findRandom(span, operation, length, range) * length);
+    this.trace?.randomResult(drawn);
+    return drawn;
   }
 
   /** `toString`, `toNumber`, `toInteger`, or `toBoolean` (V30 §13), with the optional `default:` fallback. */
@@ -2391,10 +2672,14 @@ export class Evaluator {
    */
   #shuffleOrder(length: number, span: SourceSpan): number[] {
     const order = Array.from({ length }, (_, index) => index);
+    // A trace records the whole shuffle as one record of its draws, not each swap.
+    const before = this.trace === null ? null : this.#randomState();
     for (let index = length - 1; index > 0; index -= 1) {
-      const other = Math.floor(this.#findRandom(span) * (index + 1));
+      const other = Math.floor(this.#drawRandom(span) * (index + 1));
       [order[index], order[other]] = [order[other]!, order[index]!];
     }
+    if (length > 1)
+      this.trace?.random("shuffle", span, length, null, before, this.#randomState(), length - 1);
     return order;
   }
 
@@ -2425,10 +2710,13 @@ export class Evaluator {
   #randomItem(
     items: readonly SerializableRuntimeValue[],
     span: SourceSpan,
+    operation: RuntimeDebugRandomOperation,
   ): SerializableRuntimeValue {
     if (items.length === 0)
       throw fault("TSR019", "Cannot select '.random' from an empty collection.", span);
-    return items[Math.floor(this.#findRandom(span) * items.length)]!;
+    const item = items[Math.floor(this.#findRandom(span, operation, items.length) * items.length)]!;
+    this.trace?.randomResult(item);
+    return item;
   }
 
   #getProperty(
@@ -2437,6 +2725,7 @@ export class Evaluator {
     span: SourceSpan,
   ): SerializableRuntimeValue {
     if (isObject(value)) return this.#getObjectProperty(value, name, span);
+    if (this.trace !== null) this.#readState(value, name);
     if (isSpeakerReference(value)) {
       return this.#getSpeakerProperty(this.speakerById(value.speakerId, span), name, span);
     }
@@ -2588,6 +2877,19 @@ export class Evaluator {
 }
 
 const DICT_METHODS: ReadonlySet<string> = new Set(["contains", "remove", "clear", "get"]);
+
+/** List, set, and dict methods that change their receiver in place. */
+const MUTATING_METHODS: ReadonlySet<string> = new Set([
+  "add",
+  "addAll",
+  "remove",
+  "removeAt",
+  "removeFirst",
+  "removeLast",
+  "clear",
+  "sort",
+  "shuffle",
+]);
 
 const DICT_TEXT_MESSAGE =
   '"${...}" cannot show a dict. Select one value with dict[key], or show every value with dict.values.join().';
@@ -2860,6 +3162,8 @@ interface EvaluationFrame {
   key: string | null;
   positional: SerializableRuntimeValue[] | null;
   named: Record<string, SerializableRuntimeValue> | null;
+  /** With a debug trace, the causes collected for this frame's value. */
+  deps: DebugDependencies | null;
 }
 const callingExpressions = new WeakMap<ExpressionPlan, boolean>();
 
@@ -2947,6 +3251,7 @@ function evaluationFrame(expression: ExpressionPlan, reference = false): Evaluat
     key: null,
     positional: expression.kind === "call" ? [] : null,
     named: expression.kind === "call" ? Object.create(null) : null,
+    deps: null,
   };
 }
 

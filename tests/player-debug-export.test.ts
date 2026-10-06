@@ -149,6 +149,8 @@ class Recording {
         column: failure === null ? null : failure.span.start.column + 1,
         hostError: null,
       },
+      editedWhileDebugging: null,
+      rewoundWhileDebugging: null,
       selection: allSelected,
       omissions: [],
       checkpoint: createCheckpoint(this.plan, this.snapshot),
@@ -425,6 +427,26 @@ test("an export is validated as untrusted data, and another version is unsupport
   invalid(changed(["checkpoint", "version"], 1), "unsupported", /checkpoint of another revision/);
   invalid(changed(["extra"], 1), "invalid", /unknown field "extra"/);
   invalid(
+    changed(["editedWhileDebugging"], { firstEditSceneTimeMs: 0, editCount: 0 }),
+    "invalid",
+    /editCount/,
+  );
+  invalid(
+    changed(["editedWhileDebugging"], { firstEditSceneTimeMs: -1, editCount: 1 }),
+    "invalid",
+    /firstEditSceneTimeMs/,
+  );
+  invalid(
+    changed(["rewoundWhileDebugging"], { restoredSceneTimeMs: 0, rewindCount: 0 }),
+    "invalid",
+    /rewindCount/,
+  );
+  invalid(
+    changed(["rewoundWhileDebugging"], { restoredSceneTimeMs: 0, rewindCount: 1, extra: 1 }),
+    "invalid",
+    /extra/,
+  );
+  invalid(
     changed(["checkpoint", "snapshot", "nextInstruction"], -5),
     "invalid",
     /\$\.checkpoint is not a valid checkpoint/,
@@ -525,12 +547,31 @@ test("the offline tool inspects without values, replays in a worker, and refuses
     const inspected = cli("inspect", failed);
     assert.equal(inspected.status, 0, inspected.stderr);
     assert.match(inspected.stdout, /incident: runtimeFailure TSR036 at fault\.tease:1:/);
+    assert.match(inspected.stdout, /edited while debugging: no/);
+    assert.match(inspected.stdout, /rewound while debugging: no/);
     assert.match(
       inspected.stdout,
       /replay: 7 call\(s\) \[run 4, observeTime 2, completeAction 1\]/,
     );
     assert.doesNotMatch(inspected.stdout, /submittedText/, "recorded arguments only with --values");
     assert.match(cli("inspect", failed, "--values").stdout, /"submittedText":"0"/);
+    const marked = await write(
+      "marked.teasedebug.json.gz",
+      failedRecording("0").export({
+        editedWhileDebugging: { firstEditSceneTimeMs: 123.5, editCount: 2 },
+        rewoundWhileDebugging: { restoredSceneTimeMs: 40.5, rewindCount: 3 },
+      }),
+    );
+    const markedInspected = cli("inspect", marked);
+    assert.equal(markedInspected.status, 0, markedInspected.stderr);
+    assert.match(
+      markedInspected.stdout,
+      /edited while debugging: yes, 2 saved-value edit\(s\) from scene time 123\.5 ms/,
+    );
+    assert.match(
+      markedInspected.stdout,
+      /rewound while debugging: yes, 3 rewind\(s\), the latest to scene time 40\.5 ms/,
+    );
 
     const reproduced = cli("replay", failed);
     assert.equal(reproduced.status, 0, reproduced.stderr + reproduced.stdout);
@@ -738,7 +779,13 @@ test("a Debug storage edit replays from its recorded request, refused ones inclu
       ["run", "ran"],
     ],
   );
-  const result = replayDebugExport(await roundTrip(recording.export()));
+  // The mark says the session was edited, also for edits before the anchor, which the calls cannot show.
+  // Scene time may have a fraction of a millisecond, as the Player's clock observes it.
+  const marked = await roundTrip(
+    recording.export({ editedWhileDebugging: { firstEditSceneTimeMs: 123.5, editCount: 1 } }),
+  );
+  assert.deepEqual(marked.editedWhileDebugging, { firstEditSceneTimeMs: 123.5, editCount: 1 });
+  const result = replayDebugExport(marked);
   assert.equal(result.kind, "reproduced");
   // Without the edit the session would not fail: the edit is part of what reproduces it.
   const unedited = new Recording(compiled.plan);

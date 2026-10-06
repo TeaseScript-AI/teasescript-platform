@@ -10,6 +10,7 @@ import {
   recordContinueCapture,
   applyExternalStorageEdit,
   reportMediaLoad,
+  updateInteraction,
   restoreCheckpoint,
   run,
   RUNTIME_SNAPSHOT_VERSION,
@@ -22,7 +23,12 @@ import {
 import { instructionSourcePath } from "../src/plan/model.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import { isWellFormedCapturedMediaReference } from "./captured-media.js";
-import { base64urlSlices, decodeBase64url, jsonFile } from "./transfer-encoding.js";
+import {
+  base64urlSlices,
+  decodeBase64url,
+  jsonFile,
+  measuredJsonFile,
+} from "./transfer-encoding.js";
 
 /**
  * A debug export: what a developer needs to find why a Player session failed, gathered with the player's consent. The
@@ -37,6 +43,18 @@ export interface DebugExport {
   readonly build: DebugBuild;
   readonly package: DebugPackage;
   readonly incident: DebugIncident;
+  /**
+   * Whether Debug's storage editor changed the session's saved values (DEBUGGER.md "Player Debug"), which makes it a
+   * diagnostic fork: the scene time of the first edit and how many there were; `null` when none. An edit before the
+   * replay anchor is not among the recorded calls, so only this says so.
+   */
+  readonly editedWhileDebugging: DebugEditedWhileDebugging | null;
+  /**
+   * Whether Debug's rewind (DEBUGGER.md "Rewind") restored an earlier state of the session, which makes it a
+   * diagnostic fork: the scene time of the state the latest rewind restored and how many rewinds led to the session;
+   * `null` when none. The replay anchor is at or after that restored state.
+   */
+  readonly rewoundWhileDebugging: DebugRewoundWhileDebugging | null;
   /** The player's choices; `replay` requires `savedValues`, `answers`, and `sessionText`, because state copies them. */
   readonly selection: DebugSelection;
   /** Why parts are missing, in words for the developer. */
@@ -69,6 +87,16 @@ export interface DebugPackage {
   readonly id: string | null;
   readonly version: string | null;
   readonly contentHash: string | null;
+}
+
+export interface DebugEditedWhileDebugging {
+  readonly firstEditSceneTimeMs: number;
+  readonly editCount: number;
+}
+
+export interface DebugRewoundWhileDebugging {
+  readonly restoredSceneTimeMs: number;
+  readonly rewindCount: number;
 }
 
 export interface DebugIncident {
@@ -106,7 +134,8 @@ export type DebugOperationKind = (typeof OPERATION_KINDS)[number];
 /**
  * One engine call the Player made, with the plain arguments it passed after the plan and snapshot: `run` takes its run
  * options; `observeTime` the time and media reports; `completeAction` the request; `reportMediaLoad` the media and
- * report; `pressPermanentButton` the button; `recordContinueCapture` the capture; `applyExternalStorageEdit` the edit.
+ * report; `pressPermanentButton` the button; `recordContinueCapture` the capture; `applyExternalStorageEdit` the edit;
+ * `updateInteraction` the form edit.
  */
 export interface DebugOperation {
   readonly seq: number;
@@ -160,8 +189,8 @@ export class DebugExportError extends Error {
 }
 
 export const DEBUG_EXPORT_FORMAT = "teasescript-debug-export";
-// 2: adds the `applyExternalStorageEdit` call.
-export const DEBUG_EXPORT_VERSION = 2;
+// 2: adds the `applyExternalStorageEdit` call. 3: adds the `updateInteraction` call.
+export const DEBUG_EXPORT_VERSION = 3;
 /** The most JSON a reader decompresses or parses; a diagnostic-tool limit, not a TeaseScript one. */
 export const DEBUG_EXPORT_MAX_JSON_BYTES = 64 * 1024 * 1024;
 
@@ -173,6 +202,7 @@ const OPERATION_KINDS = [
   "pressPermanentButton",
   "recordContinueCapture",
   "applyExternalStorageEdit",
+  "updateInteraction",
 ] as const;
 const ARITY: Readonly<Record<DebugOperationKind, number>> = {
   run: 1,
@@ -182,6 +212,7 @@ const ARITY: Readonly<Record<DebugOperationKind, number>> = {
   pressPermanentButton: 1,
   recordContinueCapture: 1,
   applyExternalStorageEdit: 1,
+  updateInteraction: 1,
 };
 const STATUSES = ["ready", "running", "waiting", "halted", "failed"] as const;
 const SELECTION_FIELDS = [
@@ -230,11 +261,27 @@ export function debugExportFile(exported: DebugExport, gzip: boolean): Promise<B
   return jsonFile(pieces(exported), gzip);
 }
 
+/** `debugExportFile`, with the size of the uncompressed JSON in UTF-8 bytes. */
+export function measuredDebugExportFile(
+  exported: DebugExport,
+  gzip: boolean,
+): Promise<{ readonly file: Blob; readonly jsonBytes: number }> {
+  return measuredJsonFile(pieces(exported), gzip);
+}
+
 /** The document in pieces: deep runtime state is written without recursion, photo data slice by slice. */
 function* pieces(exported: DebugExport): Generator<string> {
   const { checkpoint, replay, photos, sections } = exported;
   yield `{"format":${JSON.stringify(DEBUG_EXPORT_FORMAT)},"version":${DEBUG_EXPORT_VERSION},`;
-  for (const field of ["build", "package", "incident", "selection", "omissions"] as const)
+  for (const field of [
+    "build",
+    "package",
+    "incident",
+    "editedWhileDebugging",
+    "rewoundWhileDebugging",
+    "selection",
+    "omissions",
+  ] as const)
     yield `\n${JSON.stringify(field)}:${JSON.stringify(exported[field])},`;
   yield `\n"checkpoint":${checkpoint === null ? "null" : serializeCheckpoint(checkpoint)},`;
   yield `\n"checkpointRole":${JSON.stringify(exported.checkpointRole)},`;
@@ -305,6 +352,8 @@ function parseDocument(json: string): DebugExport {
     "build",
     "package",
     "incident",
+    "editedWhileDebugging",
+    "rewoundWhileDebugging",
     "selection",
     "omissions",
     "checkpoint",
@@ -339,6 +388,8 @@ function parseDocument(json: string): DebugExport {
     build,
     package: parsePackage(root["package"]),
     incident: parseIncident(root["incident"]),
+    editedWhileDebugging: parseEditedWhileDebugging(root["editedWhileDebugging"]),
+    rewoundWhileDebugging: parseRewoundWhileDebugging(root["rewoundWhileDebugging"]),
     selection,
     omissions: strings(root["omissions"], "$.omissions"),
     checkpoint,
@@ -378,6 +429,32 @@ function parsePackage(value: unknown): DebugPackage {
     id: nullableString(found["id"], "$.package.id"),
     version: nullableString(found["version"], "$.package.version"),
     contentHash: nullableString(found["contentHash"], "$.package.contentHash"),
+  };
+}
+
+function parseEditedWhileDebugging(value: unknown): DebugEditedWhileDebugging | null {
+  if (value === null) return null;
+  const edited = record(value, "$.editedWhileDebugging");
+  exactly(edited, "$.editedWhileDebugging", ["firstEditSceneTimeMs", "editCount"]);
+  return {
+    firstEditSceneTimeMs: sceneTime(
+      edited["firstEditSceneTimeMs"],
+      "$.editedWhileDebugging.firstEditSceneTimeMs",
+    ),
+    editCount: count(edited["editCount"], "$.editedWhileDebugging.editCount"),
+  };
+}
+
+function parseRewoundWhileDebugging(value: unknown): DebugRewoundWhileDebugging | null {
+  if (value === null) return null;
+  const rewound = record(value, "$.rewoundWhileDebugging");
+  exactly(rewound, "$.rewoundWhileDebugging", ["restoredSceneTimeMs", "rewindCount"]);
+  return {
+    restoredSceneTimeMs: sceneTime(
+      rewound["restoredSceneTimeMs"],
+      "$.rewoundWhileDebugging.restoredSceneTimeMs",
+    ),
+    rewindCount: count(rewound["rewindCount"], "$.rewoundWhileDebugging.rewindCount"),
   };
 }
 
@@ -757,6 +834,8 @@ function dispatch(
       return withOutcome(recordContinueCapture(plan, snapshot, first));
     case "applyExternalStorageEdit":
       return withOutcome(applyExternalStorageEdit(plan, snapshot, first));
+    case "updateInteraction":
+      return withOutcome(updateInteraction(plan, snapshot, first));
   }
 }
 
@@ -844,6 +923,13 @@ function strings(value: unknown, path: string): string[] {
 
 function boolean(value: unknown, path: string): boolean {
   if (typeof value !== "boolean") fail(path, "must be true or false");
+  return value;
+}
+
+/** A scene time in milliseconds: finite and not negative, fractions included, as the Player's clock observes it. */
+function sceneTime(value: unknown, path: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+    fail(path, "must be a finite, non-negative number of milliseconds");
   return value;
 }
 

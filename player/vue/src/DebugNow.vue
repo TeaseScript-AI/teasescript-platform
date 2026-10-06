@@ -7,14 +7,13 @@ import { Button } from "@/components/ui/button";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
 import CollapsibleContent from "@/components/ui/collapsible/CollapsibleContent.vue";
 import CollapsibleTrigger from "@/components/ui/collapsible/CollapsibleTrigger.vue";
-import { isCapturedMediaReference } from "../../captured-media.js";
-import { debugStageImageStatus, type DebugStageImageStatus } from "../../presentation.js";
+import type { DebugStageImageStatus } from "../../presentation.js";
 import {
   playerRuntimeDebugNow,
-  playerRuntimeMedia,
   type PlayerDebugSourceLocation,
   type PlayerDebugWaitKind,
 } from "../../runtime-adapter.js";
+import { debugStageImage } from "./debugStageImage";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 // Debug's Now view (DEBUGGER.md "Player Debug"): where the script is, what the Stage and media show, and every timer,
@@ -67,25 +66,15 @@ const imageLabels: Record<DebugStageImageStatus, string> = {
   loading: "Loading",
 };
 
-const stageVideo = computed(() => {
-  const session = props.player.session.value;
-  return session === null ? null : playerRuntimeMedia(session.snapshot).stage.videoMediaId;
-});
 const stage = computed(() => {
-  const image = props.player.stageImage.value;
-  const observed = props.player.stageImageObservation.value;
-  const status = debugStageImageStatus({
-    image,
-    source: image === null ? null : props.player.resolveAsset(image),
+  const image = debugStageImage(props.player, {
+    covered: props.stageCovered,
     overridden: props.stageOverridden,
-    covered: props.stageCovered || stageVideo.value !== null,
-    loaded: observed.loaded,
-    failed: observed.failed,
   });
   return {
-    path: image === null ? null : isCapturedMediaReference(image) ? "Captured or chosen image" : image,
-    status,
-    problem: status === "unresolved" || status === "failed",
+    path: image.captured ? "Captured or chosen image" : image.path,
+    status: image.status,
+    problem: image.status === "unresolved" || image.status === "failed",
   };
 });
 const media = computed(() =>
@@ -99,6 +88,16 @@ const media = computed(() =>
   })),
 );
 const seconds = (milliseconds: number) => `${Math.ceil(milliseconds / 1000)} s`;
+// The statement that set the Stage image, from the value trace; unknown when it ran before the trace began or was
+// dropped from its history.
+const imageOrigin = computed(() => {
+  const trace = props.player.debugTrace.value;
+  if (trace === null || props.player.session.value === null) return null;
+  const id = trace.stageImageRecord();
+  const location = id === null ? null : (trace.record(id)?.location ?? null);
+  if (location === null && stage.value.path === null) return null;
+  return { location: location === null ? null : `${location.path}:${location.line}` };
+});
 </script>
 
 <template>
@@ -108,13 +107,16 @@ const seconds = (milliseconds: number) => `${Math.ceil(milliseconds / 1000)} s`;
       <dl class="grid gap-1">
         <div class="flex min-w-0 gap-2">
           <dt class="text-muted-foreground">Next</dt>
-          <dd class="min-w-0 break-all font-mono" data-debug-now-next>{{ now.next ? at(now.next) : "Ended" }}</dd>
+          <dd class="min-w-0 break-all font-mono" data-debug-now-next>
+            {{ now.next ? at(now.next) : "Ended" }}
+          </dd>
         </div>
         <div class="flex min-w-0 gap-2">
           <dt class="shrink-0 text-muted-foreground">Waiting at</dt>
           <dd class="min-w-0 break-words" data-debug-now-waiting>
             <template v-if="now.waitingAt">
-              {{ waitLabels[now.waitingAt.kind] }} · <span class="break-all font-mono">{{ at(now.waitingAt.at) }}</span>
+              {{ waitLabels[now.waitingAt.kind] }} ·
+              <span class="break-all font-mono">{{ at(now.waitingAt.at) }}</span>
             </template>
             <template v-else>Nothing</template>
           </dd>
@@ -140,12 +142,18 @@ const seconds = (milliseconds: number) => `${Math.ceil(milliseconds / 1000)} s`;
       <section aria-labelledby="debug-now-stage" class="grid gap-1" data-debug-now-image>
         <h4 id="debug-now-stage" class="font-semibold">Stage image</h4>
         <div class="flex min-w-0 flex-wrap items-center gap-2">
-          <span v-if="stage.path" class="min-w-0 break-all font-mono" data-debug-now-image-path>{{ stage.path }}</span>
+          <span v-if="stage.path" class="min-w-0 break-all font-mono" data-debug-now-image-path>{{
+            stage.path
+          }}</span>
           <Badge :variant="stage.problem ? 'destructive' : 'outline'" :data-status="stage.status">
             {{ imageLabels[stage.status] }}
           </Badge>
         </div>
-        <p v-if="stage.path" class="text-muted-foreground">Set by: not recorded yet</p>
+        <p v-if="imageOrigin" class="text-muted-foreground" data-debug-now-image-origin>
+          Set by
+          <span v-if="imageOrigin.location" class="break-all font-mono">{{ imageOrigin.location }}</span>
+          <template v-else>: earlier history unavailable</template>
+        </p>
       </section>
 
       <section aria-labelledby="debug-now-media" class="grid gap-1">
@@ -178,9 +186,10 @@ const seconds = (milliseconds: number) => `${Math.ceil(milliseconds / 1000)} s`;
         <CollapsibleContent>
           <ul class="grid gap-1 ps-2" data-debug-now-timers>
             <li v-for="timer in now.timers" :key="timer.actionId" class="min-w-0 break-words">
-              {{ timer.blocking ? "Blocking timer" : "Async timer" }}<template v-if="timer.label">
-                “{{ timer.label }}”</template> · {{ timer.display }} ·
-              {{ timer.state }}{{ timer.repeat ? " · repeats" : "" }} · {{ seconds(timer.remainingMs) }} left
+              {{ timer.blocking ? "Blocking timer" : "Async timer"
+              }}<template v-if="timer.label"> “{{ timer.label }}”</template> · {{ timer.display }} ·
+              {{ timer.state }}{{ timer.repeat ? " · repeats" : "" }} ·
+              {{ seconds(timer.remainingMs) }} left
               <span class="block text-muted-foreground">
                 from <span class="font-mono">{{ at(timer.startedAt) }}</span>
               </span>

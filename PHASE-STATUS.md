@@ -56,7 +56,9 @@ accept syntax, architecture, or implementation details.
   authored runtime timers render in its timer rail on a session-owned scene clock (#444), and permanent buttons below
   them, inactive while their block runs (#610).
   It also has the tools framework, browser-local Player Settings, and the Debug panel that Settings' Debug menu offers,
-  with time controls, countdowns, and a Now view (`docs/DEBUGGER.md#player-debug`). It shows the runtime Stage image and plays authored
+  with time controls, countdowns, and a Now view (`docs/DEBUGGER.md#player-debug`), and a debug export a player
+  downloads with their consent from the failure card, Settings, or the Debug panel, which `tools/debug-export.mjs`
+  inspects and replays offline (`docs/DEBUGGER.md#debug-export`). It shows the runtime Stage image and plays authored
   audio through `player/media-device.ts` after the explicit Start activation (#446). The default build plays the
   repository demo `examples/demo/demo.tease` (#448), or with `?package=<id>` a package of the playground's development
   package root as one project, listing its diagnostics when it does not compile (#570); the development server or

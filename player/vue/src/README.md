@@ -49,9 +49,12 @@ specification.
   too, the development preview plays that package instead of a scenario. `hostedScript.ts` compiles the script before
   Start; one that does not compile shows `ScriptProblems.vue` with its diagnostics instead of Start. `PlayerApp.vue`
   composes the Debug panel: `usePlayerDebug.ts` owns the Debug menu and Debug switches, the countdown line that
-  `RuntimeInteraction.vue` shows, and the scopes of `useDebugLog.ts` and of the time controls that
-  `useDevelopmentTime.ts` drives through the session host's `publishJump`; `DebugPanel.vue` and `DebugStatus.vue`
-  present them. The preview only passes the initial `?dev` and `time=skip` state.
+  `RuntimeInteraction.vue` shows, and the scopes of `useDebugLog.ts`, of the time controls that
+  `useDevelopmentTime.ts` drives through the session host's `publishJump`, and of `useDebugRewind.ts`, which restores
+  states through the host's `rewind`; `DebugPanel.vue` and `DebugStatus.vue` present them. In the chat,
+  `TranscriptMessage.vue` offers Back to here through `rewindPresentation.ts`, `Transcript.vue` shows the grey future
+  `PlayerApp.vue` appends while a state is inspected, and `RewindInspection.vue` is the bar above the composer.
+  The preview only passes the initial `?dev` and `time=skip` state.
 - `PlayerToolsShell.vue` receives its tool list from the root and owns tool selection, pinning, order, resizing, retained content and dock/drawer focus.
   Its tool slot supplies content; its default slot supplies the Player. Closing a visited panel retains its content.
   Tool bodies scroll vertically; the outer carousel handles overflow between panels. Shared shadcn-vue/Reka

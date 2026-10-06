@@ -1,4 +1,5 @@
 import type {
+  ObjectLiteral,
   AssignmentStatement,
   Block,
   CallArgument,
@@ -46,9 +47,23 @@ import {
   isValidInteractionPrefill,
   numberAnswerText,
 } from "./interaction-answers.js";
-import type { PlanImage, PlanTag, TypeCheckPlan } from "./plan/model.js";
+import type {
+  FormFieldKind,
+  FormNumericKind,
+  PlanImage,
+  PlanTag,
+  PreparedFormShape,
+  TypeCheckPlan,
+  TypePlan,
+} from "./plan/model.js";
+import {
+  FORM_FIELD_PROPERTIES,
+  FORM_FIELD_PROPERTIES_TEXT,
+  isFormFieldKind,
+  unknownFormTypeMessage,
+} from "./form-fields.js";
 import type { VariableSite } from "./semantic.js";
-import { isAskImageCall, isTakePhotoCall } from "./capture-call.js";
+import { isAskBooleansCall, isAskImageCall, isTakePhotoCall } from "./capture-call.js";
 import {
   emptyImageFilterMessage,
   IMAGE_NO_SOURCE_MESSAGE,
@@ -191,6 +206,8 @@ export interface TypeCheckResult {
   readonly diagnostics: readonly (readonly Diagnostic[])[];
   /** The runtime checks of values the compiler cannot know, by the source of the instruction that stores them. */
   readonly runtimeChecks: ReadonlyMap<RuntimeCheckSite, TypeCheckPlan>;
+  /** The result shape the runtime needs for each `askForm`. */
+  readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape>;
   /** Whether a file of the project has an `exit` that execution can reach; a project needs one (ADR 0022). */
   readonly reachesExit: boolean;
   /** Which statements run, for the checks that follow this flow. */
@@ -280,6 +297,7 @@ export function checkTypes(
           ),
         ),
         runtimeChecks: checker.runtimeChecks(),
+        formShapes: checker.formShapes(),
         reachesExit: checker.reachesExit,
         flow: Object.freeze({ unreachable: checker.unreachable, continuing: checker.continuing }),
       });
@@ -678,6 +696,23 @@ class TypeChecker {
   /** The variable names of unannotated `let` statements by initializer, for messages that suggest a declaration. */
   readonly #declaredBy = new Map<Expression, string>();
 
+  /**
+   * The fields of each `askForm` with the type of the number that decides a field's kind, kept until every type is
+   * decided, as for the runtime checks below.
+   */
+  readonly #forms = new Map<
+    InteractionExpression,
+    | {
+        readonly kind: "object";
+        readonly fields: readonly {
+          readonly name: string;
+          readonly start: StaticType | null;
+          readonly answer: StaticType;
+        }[];
+      }
+    | { readonly kind: "dict"; readonly start: StaticType | null; readonly answer: StaticType }
+  >();
+
   /** Stores of values the compiler cannot know, kept until every type they depend on is decided. */
   readonly #runtimeChecks: {
     readonly site: RuntimeCheckSite;
@@ -1021,6 +1056,42 @@ class TypeChecker {
    * The recorded runtime checks in plan form. Call it after {@link check}: a place can still be decided after a store
    * into it was checked, as by a later first value or a property that assignment adds.
    */
+  /** The result shape of each `askForm`, with whether each numeric field is an integer or a number field. */
+  public formShapes(): ReadonlyMap<InteractionExpression, PreparedFormShape> {
+    const shapes = new Map<InteractionExpression, PreparedFormShape>();
+    const numericKind = (start: StaticType | null): FormNumericKind | null => {
+      const type = start === null ? null : resolved(nonNullType(start));
+      return type === null
+        ? null
+        : isScalar(type, "integer")
+          ? "integer"
+          : isScalar(type, "number")
+            ? "number"
+            : null;
+    };
+    for (const [expression, form] of this.#forms) {
+      if (form.kind === "dict") {
+        shapes.set(expression, {
+          kind: "dict",
+          numericKind: numericKind(form.start),
+          answer: typePlan(form.answer),
+        });
+        continue;
+      }
+      const numericKinds: { readonly name: string; readonly numericKind: FormNumericKind }[] = [];
+      const answers: { readonly name: string; readonly type: TypePlan }[] = [];
+      for (const { name, start, answer } of form.fields) {
+        const kind = numericKind(start);
+        if (kind !== null) numericKinds.push({ name, numericKind: kind });
+        // The form checks when it opens that each field answers within the type given here.
+        const checked = typePlan(answer);
+        if (checked !== null) answers.push({ name, type: checked });
+      }
+      shapes.set(expression, { kind: "object", numericKinds, answers });
+    }
+    return shapes;
+  }
+
   public runtimeChecks(): ReadonlyMap<RuntimeCheckSite, TypeCheckPlan> {
     const checks = new Map<RuntimeCheckSite, TypeCheckPlan>();
     for (const check of this.#runtimeChecks) {
@@ -2936,6 +3007,441 @@ class TypeChecker {
   }
 
   /**
+   * `askForm` (V30 §20): the question, `hint:`, and `outro:` are shown text, `submit:` is text or a button object, and
+   * `fields:` is an object of fields. The result has a property per field, typed as the field's kind gives it, and the
+   * shape the runtime needs is recorded for the lowering.
+   */
+  *#formTask(expression: InteractionExpression, scope: Scope): CompileTask<StaticType> {
+    const answers = yield* compileChild(this.#formAnswersTask(expression, scope));
+    const argument = (name: string) =>
+      expression.formArguments.find((candidate) => candidate.name.name === name)?.value;
+    const timeout = argument("timeout");
+    const onTimeout = argument("onTimeout");
+    if ((timeout === undefined) !== (onTimeout === undefined))
+      this.#report(
+        typeCode.invalidOperand,
+        timeout === undefined
+          ? "askForm onTimeout: needs timeout:, such as 'timeout: 30 s'."
+          : 'askForm timeout: needs onTimeout: "submit" or onTimeout: "cancel".',
+        expression.span,
+      );
+    const action = onTimeout === undefined ? undefined : staticText(onTimeout);
+    if (action !== undefined && action !== "submit" && action !== "cancel")
+      this.#report(
+        typeCode.invalidOperand,
+        `askForm onTimeout: takes "submit" or "cancel", not ${JSON.stringify(action)}.`,
+        onTimeout!.span,
+      );
+    if (action === "submit") this.#checkFormStarts(expression);
+    // With `cancel:`, or a time limit that may cancel, the whole form may return `null`.
+    const cancellable =
+      argument("cancel") !== undefined || (onTimeout !== undefined && action !== "submit");
+    return cancellable && isKnown(answers) ? optional(answers) : answers;
+  }
+
+  /**
+   * `onTimeout: "submit"` returns the answers as they stand, so every field needs a value from the start. Fields written
+   * where the form is asked are checked here; others are checked when the form opens.
+   */
+  #checkFormStarts(expression: InteractionExpression): void {
+    const fields = expression.formArguments.find((argument) => argument.name.name === "fields");
+    const literal = fields === undefined ? undefined : unwrap(fields.value);
+    const written =
+      literal?.kind === "objectLiteral"
+        ? literal.properties.map((property) => ({
+            name: property.name.name,
+            value: property.value,
+          }))
+        : literal?.kind === "dictLiteral"
+          ? literal.entries.map((entry) => ({
+              name: staticText(entry.key) ?? "?",
+              value: entry.value,
+            }))
+          : [];
+    for (const property of written) {
+      const descriptor = unwrap(property.value);
+      if (descriptor.kind === "nullLiteral" || descriptor.kind === "objectLiteral") {
+        const start =
+          descriptor.kind === "objectLiteral"
+            ? descriptor.properties.find((candidate) => candidate.name.name === "value")?.value
+            : descriptor;
+        const finite =
+          descriptor.kind === "objectLiteral" &&
+          descriptor.properties.some((candidate) => candidate.name.name === "options");
+        const tag =
+          descriptor.kind === "objectLiteral"
+            ? descriptor.properties.find((candidate) => candidate.name.name === "type")
+            : undefined;
+        const toggle = tag !== undefined && staticText(tag.value) === "boolean";
+        if (!finite && !toggle && (start === undefined || unwrap(start).kind === "nullLiteral"))
+          this.#report(
+            typeCode.invalidOperand,
+            `askForm field '${property.name}': onTimeout: "submit" needs a value in every field; give it value:.`,
+            property.value.span,
+          );
+      }
+    }
+  }
+
+  *#formAnswersTask(expression: InteractionExpression, scope: Scope): CompileTask<StaticType> {
+    if (expression.question !== null) {
+      const type = yield* compileChild(this.#expressionTask(expression.question, scope));
+      this.#checkShownText(expression.question, type, "an ask question");
+    }
+    let fields: { readonly expression: Expression; readonly type: StaticType } | null = null;
+    for (const { name, value } of expression.formArguments) {
+      const type = yield* compileChild(this.#expressionTask(value, scope));
+      if (name.name === "fields") fields = { expression: value, type };
+      else if (name.name === "submit" || name.name === "cancel") {
+        if (unwrap(value).kind !== "objectLiteral")
+          this.#reportUnless(
+            type,
+            (member) => isShowable(member) || resolved(member).kind === "object",
+            value,
+            `'${name.name}:' takes text or a button object { text, background? }`,
+          );
+      } else if (name.name === "timeout")
+        this.#reportUnless(
+          type,
+          (member) => isNumeric(member) || isScalar(member, "duration"),
+          value,
+          "'timeout:' takes a number of seconds or a duration, such as 30 s",
+        );
+      else if (name.name === "onTimeout")
+        this.#reportUnless(
+          type,
+          (member) => isScalar(member, "string"),
+          value,
+          `'onTimeout:' takes "submit" or "cancel"`,
+        );
+      else
+        this.#checkShownText(value, type, name.name === "hint" ? "an input hint" : "a form outro");
+    }
+    if (fields === null) return UNKNOWN_TYPE;
+    const container = resolved(nonNullType(fields.type));
+    if (container.kind === "dict") {
+      // A written dict shows every field, so its answers are typed field by field.
+      const literal = unwrap(fields.expression);
+      if (literal.kind === "dictLiteral" && literal.entries.length > 0) {
+        const entries = literal.entries.map((entry) => ({
+          entry,
+          field: this.#formField(
+            staticText(entry.key) ?? "?",
+            this.#typeOf(entry.value),
+            entry.value,
+          ),
+        }));
+        // The form has one number kind for the dict's fields without `type:`.
+        const starts = entries.filter(({ field }) => field.start !== null);
+        const kinds = new Set(
+          starts.map(({ field }) =>
+            isScalar(resolved(nonNullType(field.start!)), "integer") ? "integer" : "number",
+          ),
+        );
+        if (kinds.size > 1)
+          for (const { entry } of starts)
+            this.#report(
+              typeCode.invalidOperand,
+              `askForm field '${staticText(entry.key) ?? "?"}': its dict mixes whole and decimal numbers; add type: "integer" or type: "number".`,
+              entry.value.span,
+            );
+        const element = union(entries.map(({ field }) => field.result));
+        this.#forms.set(expression, {
+          kind: "dict",
+          start: kinds.size === 1 ? starts[0]!.field.start : null,
+          answer: element,
+        });
+        return { kind: "dict", element };
+      }
+      // Otherwise every field has the type of the dict's values.
+      const field = this.#formField("?", container.element, undefined);
+      this.#forms.set(expression, { kind: "dict", start: field.start, answer: field.result });
+      return { kind: "dict", element: field.result };
+    }
+    if (container.kind !== "object") {
+      if (isKnown(container))
+        this.#report(
+          typeCode.invalidOperand,
+          `'fields:' takes an object or dict of fields, such as 'fields: { enabled: false }', not ${describeValue(container)}.`,
+          fields.expression.span,
+        );
+      this.#forms.set(expression, { kind: "object", fields: [] });
+      return UNKNOWN_TYPE;
+    }
+    const literal = unwrap(fields.expression);
+    const written = new Map(
+      literal.kind === "objectLiteral"
+        ? literal.properties.map((property) => [property.name.name, property.value] as const)
+        : [],
+    );
+    const result: PropertyTable = new Map();
+    const recorded: {
+      readonly name: string;
+      readonly start: StaticType | null;
+      readonly answer: StaticType;
+    }[] = [];
+    for (const [name, type] of container.properties ?? []) {
+      const field = this.#formField(name, type, written.get(name));
+      result.set(name, field.result);
+      recorded.push({ name, start: field.start, answer: field.result });
+    }
+    this.#forms.set(expression, { kind: "object", fields: recorded });
+    return container.properties === null ? UNKNOWN_TYPE : { kind: "object", properties: result };
+  }
+
+  /**
+   * The answer type of one field of `askForm`, and the type of the number that decides its kind when it has no
+   * `type:`: its start, or its descriptor's `value:`, `min:`, or `max:`. Only what is written where the form is asked
+   * proves a descriptor's properties: a computed descriptor's type merges the properties of all its values, so one
+   * that may say `type:` or mix kinds answers in the generic union.
+   */
+  #formField(
+    name: string,
+    type: StaticType,
+    written: Expression | undefined,
+  ): { readonly result: StaticType; readonly start: StaticType | null } {
+    const value = resolved(nonNullType(type));
+    const literal = written === undefined ? null : unwrap(written);
+    if (value.kind === "object")
+      return literal?.kind === "objectLiteral"
+        ? this.#writtenFormField(name, literal)
+        : this.#computedFormField(value);
+    const kind = formKindOfStart(value);
+    if (kind === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start: null };
+    return {
+      result:
+        kind === "cycle"
+          ? this.#cycleAnswerType(value, literal ?? undefined)
+          : kind === "boolean"
+            ? BOOLEAN_TYPE
+            : formAnswerType(kind),
+      start: kind === "integer" || kind === "number" ? value : null,
+    };
+  }
+
+  /** A descriptor written where the form is asked: its properties are exactly the written ones. */
+  #writtenFormField(
+    name: string,
+    descriptor: ObjectLiteral,
+  ): { readonly result: StaticType; readonly start: StaticType | null } {
+    const written = new Map(
+      descriptor.properties.map((property) => [property.name.name, property.value] as const),
+    );
+    for (const property of descriptor.properties)
+      if (!FORM_FIELD_PROPERTIES.includes(property.name.name))
+        this.#report(
+          typeCode.invalidOperand,
+          `askForm field '${name}': unknown property '${property.name.name}'. ${FORM_FIELD_PROPERTIES_TEXT}`,
+          property.name.span,
+        );
+    const typeOf = (property: string) => {
+      const expression = written.get(property);
+      return expression === undefined ? undefined : resolved(nonNullType(this.#typeOf(expression)));
+    };
+    let tag: FormFieldKind | null | undefined;
+    const typeExpression = written.get("type");
+    if (typeExpression !== undefined) {
+      const text = staticText(typeExpression);
+      tag = text !== undefined && isFormFieldKind(text) ? text : null;
+      if (text !== undefined && !isFormFieldKind(text))
+        this.#report(
+          typeCode.invalidOperand,
+          `askForm field '${name}': ${unknownFormTypeMessage(text)}`,
+          typeExpression.span,
+        );
+    }
+    const valueType = typeOf("value");
+    const kind =
+      tag !== undefined
+        ? tag
+        : written.has("options")
+          ? valueType !== undefined && isScalar(valueType, "boolean")
+            ? "boolean"
+            : "cycle"
+          : valueType === undefined
+            ? null
+            : formKindOfStart(valueType);
+    // A written `optional: false` keeps the answer required; any other value may make it optional.
+    const optionalExpression = written.get("optional");
+    const optionalLiteral =
+      optionalExpression === undefined ? undefined : unwrap(optionalExpression);
+    const required =
+      optionalLiteral === undefined ||
+      (optionalLiteral.kind === "booleanLiteral" && !optionalLiteral.value);
+    // Only an integer turns into a number; a number does not start an integer field.
+    if (tag === "integer" && valueType !== undefined && isScalar(valueType, "number"))
+      this.#report(
+        typeCode.invalidOperand,
+        `askForm field '${name}': an integer field starts with a whole number (integer), not ${describeValue(valueType)}.`,
+        written.get("value")!.span,
+      );
+    // With a written type, the runtime needs no number kind.
+    const start =
+      tag !== undefined
+        ? null
+        : ([valueType, typeOf("min"), typeOf("max")].find(
+            (part) => part !== undefined && isNumeric(part),
+          ) ?? null);
+    if (kind === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start };
+    const result =
+      kind === "cycle"
+        ? this.#cycleAnswerType(typeOf("options"), written.get("options"))
+        : kind === "boolean"
+          ? BOOLEAN_TYPE
+          : formAnswerType(kind);
+    return {
+      result: !required && kind !== "boolean" && kind !== "cycle" ? optional(result) : result,
+      // Only a number typed in the composer needs the form's number kind.
+      start: kind === "integer" || kind === "number" ? start : null,
+    };
+  }
+
+  /**
+   * A computed descriptor: its type merges every value it may hold, so a property in it may be missing from some of
+   * them, and a value may also hold properties its type does not show. It gives one kind only without `type:`, and with
+   * `options:` only when no `value:` other than a toggle's beside it can make some fields typed. The form checks when
+   * it opens that each field answers within the type given here.
+   */
+  #computedFormField(descriptor: Extract<StaticType, { kind: "object" }>): {
+    readonly result: StaticType;
+    readonly start: StaticType | null;
+  } {
+    const properties = descriptor.properties;
+    if (properties === null) return { result: optional(GENERIC_FORM_ANSWER_TYPE), start: null };
+    const part = (key: string) => {
+      const found = properties.get(key);
+      return found === undefined ? undefined : resolved(nonNullType(found));
+    };
+    const valueType = part("value");
+    const start =
+      [valueType, part("min"), part("max")].find((type) => type !== undefined && isNumeric(type)) ??
+      null;
+    const options = part("options");
+    let result: StaticType | null;
+    if (properties.has("type")) result = null;
+    else if (options !== undefined) {
+      const cycle = this.#cycleAnswerType(options, undefined);
+      // Toggles with options and cycles of booleans answer booleans alike; another `value:` may be any field's.
+      result =
+        valueType === undefined
+          ? cycle
+          : isScalar(valueType, "boolean") && isScalar(resolved(cycle), "boolean")
+            ? BOOLEAN_TYPE
+            : null;
+    } else {
+      const kind = valueType === undefined ? null : formKindOfStart(valueType);
+      result =
+        kind === null
+          ? null
+          : kind === "boolean"
+            ? BOOLEAN_TYPE
+            : kind === "cycle"
+              ? null
+              : properties.has("optional")
+                ? optional(formAnswerType(kind))
+                : formAnswerType(kind);
+    }
+    // A toggle or a cycle does not take a number in the composer, so it needs no number kind.
+    const finite =
+      options !== undefined || (valueType !== undefined && isScalar(valueType, "boolean"));
+    return {
+      result: result ?? optional(GENERIC_FORM_ANSWER_TYPE),
+      start: result !== null && finite ? null : start,
+    };
+  }
+
+  /**
+   * What a cycle returns: each option's value, or the text of a choice object without one, as a `choose` button
+   * returns it. Written choice objects are read one by one; for a computed one, whether it has a `value` is not
+   * known, so either may be returned.
+   */
+  #cycleAnswerType(type: StaticType | undefined, written: Expression | undefined): StaticType {
+    const computedOption = (member: StaticType): StaticType => {
+      const option = resolved(member);
+      if (option.kind !== "object") return plainType(option);
+      const returned = [option.properties?.get("value"), option.properties?.get("text")].filter(
+        (part): part is StaticType => part !== undefined,
+      );
+      return returned.length === 0 ? UNKNOWN_TYPE : union(returned.map(plainType));
+    };
+    const list = written === undefined ? undefined : unwrap(written);
+    if (list?.kind === "listLiteral")
+      return union(
+        list.elements.map((element) => {
+          const option = unwrap(element);
+          if (option.kind !== "objectLiteral")
+            return union(members(this.#typeOf(element)).map(computedOption));
+          const returned =
+            option.properties.find((property) => property.name.name === "value") ??
+            option.properties.find((property) => property.name.name === "text");
+          return returned === undefined ? UNKNOWN_TYPE : plainType(this.#typeOf(returned.value));
+        }),
+      );
+    const options = type === undefined ? undefined : resolved(nonNullType(type));
+    if (options?.kind !== "list") return UNKNOWN_TYPE;
+    return union(members(resolved(options.element)).map(computedOption));
+  }
+
+  /**
+   * `askBooleans(...)`: the message is shown text, `texts:` a list of texts, `defaults:` a list of booleans of the same
+   * length when both are written, and `cancel:` a button. Returns whether the form may be cancelled.
+   */
+  *#askBooleansTask(expression: CallExpression, scope: Scope): CompileTask<boolean> {
+    let cancellable = false;
+    const written = new Map<string, Expression>();
+    for (const argument of expression.arguments) {
+      const type = yield* compileChild(this.#expressionTask(argument.value, scope));
+      const name = argument.kind === "namedArgument" ? argument.name.name : "message";
+      written.set(name, argument.value);
+      if (name === "message") this.#checkShownText(argument.value, type, "an ask question");
+      else if (name === "texts")
+        this.#reportUnless(
+          type,
+          (member) =>
+            member.kind === "list" && (!isKnown(member.element) || isShowable(member.element)),
+          argument.value,
+          "'texts:' takes a list of texts",
+        );
+      else if (name === "defaults")
+        this.#reportUnless(
+          type,
+          (member) =>
+            member.kind === "list" &&
+            (!isKnown(member.element) || isScalar(member.element, "boolean")),
+          argument.value,
+          "'defaults:' takes a list of true or false",
+        );
+      else if (name === "cancel") {
+        cancellable = true;
+        if (unwrap(argument.value).kind !== "objectLiteral")
+          this.#reportUnless(
+            type,
+            (member) => isShowable(member) || resolved(member).kind === "object",
+            argument.value,
+            "'cancel:' takes text or a button object { text, background? }",
+          );
+      }
+    }
+    const texts = written.get("texts");
+    const defaults = written.get("defaults");
+    const textsList = texts === undefined ? undefined : unwrap(texts);
+    const defaultsList = defaults === undefined ? undefined : unwrap(defaults);
+    if (textsList?.kind === "listLiteral" && textsList.elements.length === 0)
+      this.#report(typeCode.invalidOperand, "askBooleans needs at least one text.", textsList.span);
+    else if (
+      textsList?.kind === "listLiteral" &&
+      defaultsList?.kind === "listLiteral" &&
+      textsList.elements.length !== defaultsList.elements.length
+    )
+      this.#report(
+        typeCode.invalidOperand,
+        `askBooleans has ${textsList.elements.length} texts but ${defaultsList.elements.length} defaults; give one default for each text.`,
+        defaultsList.span,
+      );
+    return cancellable;
+  }
+
+  /**
    * The message (question) and hint of `askImage` are shown text, the sources are booleans, and `types:` and `mime:` are lists of texts. Written
    * values must be valid, and written sources must leave the player a way to answer.
    */
@@ -3685,6 +4191,13 @@ class TypeChecker {
       // A capture waits for the Player like an interaction, and gives a photo reference, or null without a camera.
       this.#suspend();
       return optional(STRING_TYPE);
+    }
+    if (isAskBooleansCall(expression)) {
+      const cancellable = yield* compileChild(this.#askBooleansTask(expression, scope));
+      // A form of toggles: one boolean per text, or `null` when the player cancels it.
+      this.#suspend();
+      const answers: StaticType = { kind: "list", element: BOOLEAN_TYPE };
+      return cancellable ? optional(answers) : answers;
     }
     if (isAskImageCall(expression)) {
       yield* compileChild(this.#askImageTask(expression, scope));
@@ -4449,6 +4962,8 @@ class TypeChecker {
     expression: Extract<Expression, { kind: "interactionExpression" }>,
     scope: Scope,
   ): CompileTask<StaticType> {
+    if (expression.interactionKind === "form")
+      return yield* compileChild(this.#formTask(expression, scope));
     if (expression.interactionKind !== "choice") {
       for (const operand of askOperands(expression)) {
         const type = yield* compileChild(this.#expressionTask(operand, scope));
@@ -7101,9 +7616,54 @@ function textResultType(member: TextMember): StaticType {
     : scalarType(member.result);
 }
 
+/** The answer of an `askForm` field whose kind only the runtime knows. */
+const GENERIC_FORM_ANSWER_TYPE = union([
+  BOOLEAN_TYPE,
+  NUMBER_TYPE,
+  STRING_TYPE,
+  DATE_TYPE,
+  TIME_TYPE,
+  DATETIME_TYPE,
+  // A cycle may return any choice value but `null`.
+  DURATION_TYPE,
+  TIMESTAMP_TYPE,
+]);
+
+/** The kind of an `askForm` field that starts with a value of `type`, or `null` when its kind is not known. */
+function formKindOfStart(type: StaticType): FormFieldKind | null {
+  if (type.kind === "list") return "cycle";
+  if (type.kind !== "scalar") return null;
+  switch (type.name) {
+    case "boolean":
+      return "boolean";
+    case "integer":
+    case "number":
+    case "date":
+    case "time":
+    case "datetime":
+      return type.name;
+    case "string":
+      return "text";
+    default:
+      return null;
+  }
+}
+
+function formAnswerType(kind: Exclude<FormFieldKind, "boolean" | "cycle">): StaticType {
+  return kind === "text" ? STRING_TYPE : interactionResultType(kind);
+}
+
+/** The text of a string literal without interpolation, or `undefined`. */
+function staticText(expression: Expression): string | undefined {
+  const literal = unwrap(expression);
+  if (literal.kind !== "stringLiteral" || literal.parts.some((part) => part.kind !== "stringText"))
+    return undefined;
+  return literal.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("");
+}
+
 /** The type of the answer an `ask...` interaction returns. */
 function interactionResultType(
-  kind: Exclude<InteractionExpression["interactionKind"], "choice">,
+  kind: Exclude<InteractionExpression["interactionKind"], "choice" | "form">,
 ): StaticType {
   switch (kind) {
     case "number":

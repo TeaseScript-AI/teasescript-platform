@@ -43,6 +43,8 @@ const emit = defineEmits<{
   "update:modelValue": [value: string];
   submit: [source: "input" | "button"];
   skip: [];
+  /** Escape in the input, which closes an edited form field. */
+  escape: [];
   /** Files the player chose or dropped, with the `attach.request` offered when the picker opened or at the drop. */
   files: [files: readonly File[], request: Request];
 }>();
@@ -74,6 +76,10 @@ function handleKeydown(event: KeyboardEvent): void {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     emit("submit", "input");
+    return;
+  }
+  if (event.key === "Escape") {
+    emit("escape");
     return;
   }
   const element = input.value;
@@ -182,7 +188,16 @@ watch(
   },
 );
 
-defineExpose({ focusInput });
+/** Focuses the input with its text selected, so typing replaces a prefilled value and Enter keeps it. */
+function selectInput(): void {
+  void nextTick(() => {
+    const element = input.value;
+    element?.focus({ preventScroll: true });
+    if (element instanceof HTMLTextAreaElement) element.select();
+  });
+}
+
+defineExpose({ focusInput, selectInput });
 </script>
 
 <template>

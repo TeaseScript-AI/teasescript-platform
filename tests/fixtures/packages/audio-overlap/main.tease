@@ -1,0 +1,17 @@
+// Two instances of one file overlap, then another file joins them.
+playAudio async "sounds/tone.wav"
+wait 400 ms
+playAudio async "sounds/tone.wav"
+wait 300 ms
+playAudio async "sounds/chime.wav"
+wait 1500 ms
+say "Overlap done", instant
+// A long loop of overlapping instances, each releasing its element when it ends.
+for it in 1..=30 {
+  playAudio async "sounds/tone.wav"
+  wait 100 ms
+}
+wait 2000 ms
+say "Loop done", instant
+showButton "Finish"
+exit

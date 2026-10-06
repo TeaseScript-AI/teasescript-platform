@@ -9,6 +9,7 @@ import type {
 import { isValidSessionTime } from "../actions/delay.js";
 import type { ActionCompletedEvent, InterpreterEvent } from "../events.js";
 import { nextXorShift32 } from "../random.js";
+import type { TraceStore } from "../debug-trace.js";
 import type { RuntimeSnapshot } from "../state.js";
 import {
   expireTimerRound,
@@ -124,9 +125,10 @@ export function expireTimerAction(
   endedAtMs: number,
   span: SourceSpan | PlanSourceLocation,
   events: InterpreterEvent[],
+  trace: TraceStore | null = null,
 ): void {
   const timer = action.timer;
-  expireTimerRound(timer, endedAtMs, (range) => drawWholeSeconds(snapshot, range));
+  expireTimerRound(timer, endedAtMs, (range) => drawWholeSeconds(snapshot, range, trace));
   // A next deadline outside the session range, an exhausted anchored round index, or an unanchored round that cannot
   // advance would loop forever; the timer finishes instead. Anchored rounds always advance their index, so rounds
   // shorter than the deadline's resolution may end at the same time without looping.
@@ -215,9 +217,26 @@ function queueTimerHandler(
 }
 
 /** Draws a repeat round from the persisted session RNG. */
-function drawWholeSeconds(snapshot: RuntimeSnapshot, range: RuntimeTimerRangeSnapshot): number {
+function drawWholeSeconds(
+  snapshot: RuntimeSnapshot,
+  range: RuntimeTimerRangeSnapshot,
+  trace: TraceStore | null,
+): number {
   const length = range.end - range.start + (range.inclusive ? 1 : 0);
-  return range.start + Math.floor(nextXorShift32(snapshot.rng) * length);
+  const before = snapshot.rng.state;
+  const seconds = range.start + Math.floor(nextXorShift32(snapshot.rng) * length);
+  if (trace !== null) {
+    trace.random(
+      "timerRepeat",
+      null,
+      length,
+      { kind: "range", ...range },
+      before,
+      snapshot.rng.state,
+    );
+    trace.randomResult(seconds);
+  }
+  return seconds;
 }
 
 export function timerSpan(plan: InstructionPlan, owningInstruction: number): SourceSpan {

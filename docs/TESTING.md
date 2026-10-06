@@ -557,10 +557,12 @@ blocking and asynchronous waits including terminal ones, bounded and indefinite 
 media and timers, cue blocks with self-handles, Stage replacement, pacing barriers, playback projections, JSON
 checkpoint/restore equivalence with a simulated Player, and rejection of malformed media state.
 `tests/player-media-device.test.ts` drives the Player's media device against real sessions with deterministic element
-stand-ins: single load reports, stalls, range repetition and terminal stop, pause/resume/seek repositioning, refused
-playback and retry, failed video and unavailable sources, restore reconnection without repeated cues, and element reuse
-without stale listeners or late `play()` results reaching the next media. The preview
-browser checks cover Start activation, the runtime Stage image, refused-audio retry, and actually played audio.
+stand-ins: single load reports, stalls, range repetition and terminal stop, overlapping instances of one file that each
+play out once, also after a late `seeked` notification or a rounding error at the range end, pause/resume/seek
+repositioning, refused playback and retry also within the end tolerance, failed video and unavailable sources, restore
+reconnection without repeated cues, and element reuse without stale listeners or late `play()` results reaching the
+next media. The preview browser checks cover Start activation, the runtime Stage image, refused-audio retry, and
+actually played audio.
 
 ## Local browser smoke and future host E2E gate
 
@@ -597,11 +599,15 @@ its `picture-camera` and `picture-camera-view` packages check that the camera op
 script's camera window, take a photo of the fake camera's test card after the countdown, with Retake before Use this, check that the camera
 the request opened turns off after a photo or a file answered, and that a busy camera offers Try again while the
 paperclip stays. Its `saved-photo` package exports saved data from Player Settings without Debug while the session
-waits: the downloaded gzip file and the text hold the same document with the saved photo's exact bytes and not the
-unsaved one, a refused copy selects the text, closing releases the file, and the narrow dialog fits with touch-sized
-controls. In a fresh browser profile it imports that export: a chosen file is reviewed and Cancel keeps the running
-session; a dropped file's confirmation ends the session, and the next Start shows the imported photo; pasted text
-replaces the data before Start; and another package refuses the text. On the
+waits: every script with saved data is listed and ticked, the downloaded gzip file and the text hold the same document
+with the saved photo's exact bytes and not the unsaved one, a refused copy selects the text, closing releases the file,
+and the narrow dialog fits with touch-sized controls. In a fresh browser profile it imports that export: a chosen file
+lists every script as new and Cancel keeps the running session; a dropped file's confirmation ends the session, puts
+every script into its own scope, and the next Start shows the imported photo; pasted text replaces the data before
+Start; and, while another script runs, only the ticked script is replaced and the session continues. Its `debug-failure`
+package stops with TSR036 after an answer and a photo: the failure card names the error and line, the debug export with
+nothing chosen holds no answer or photo reference, the export with replay data and the photo chosen holds the photo's
+exact bytes and the offline tool reproduces the failure, and the narrow dialog fits with touch-sized rows. On the
 importer's route `/player/?dev&package=waiting&time=skip`, auto-skip ends that package's 15 s wait right after a
 physical Start, and +10 s at its button reaches the button's elapsed time; without `time=skip`, Skip event ends the
 wait, and the default build starts with the Debug menu off. In the default build, Settings' Debug menu shows the
@@ -613,10 +619,21 @@ timer, and the Stage image as unresolved, failed, hidden, and displayed in turn,
 tab on the `debug-storage` package lists the saved values in key order with typed previews, keeps reference-shaped text
 visible and says when it names no saved photo, shows the saved photo once with both keys that use it and expands a list
 to it, updates after a later save without reading a changed photo reference before it is in view, hides with Debug
-off, and fits the narrow drawer. With auto-skip, the `missing-media` package, which refers to a
+off, and fits the narrow drawer. Its editor on the `debug-storage-edit` package refuses a malformed number inline and
+stores nothing, stores an added value that the running session's next load returns while the earlier load stays,
+marks the session edited, changes the value to text and deletes it, fits a narrow screen, and after the session ended
+stores a deletion for the next Start. The spill store of Debug's rewind history, loaded into the page, keeps and deletes
+rows in IndexedDB; its sweep deletes the history databases of pages that ended, a live one only once its page closes it,
+and neither its own page's nor a database it did not name. On the `debug-rewind` package, Back to here on an answer
+shows the earlier choice with the later messages grey and the earlier answer in the inspection bar; Forward restores the
+later state and Return the session; a different answer adopts the earlier state with its saved data; an inspected failed
+state shows its failure above the bar, which fits a narrow screen with 44 px controls. With auto-skip, the
+`missing-media` package, which refers to a
 missing and an invalid image and sound, reaches its end at once, with one warning notice per path and a valid image
 restoring the Stage; in `late-image`, an invalid image that fails only after the script hid it and showed a valid one
-neither hides that image nor is reported.
+neither hides that image nor is reported. The `audio-overlap` package, whose `seeked` notifications arrive late as under
+load, plays one sound twice with overlap, another beside them, then a loop of 30 overlapping instances: each instance
+plays to its end once without rewinding or stopping another, and finished instances release their elements for reuse.
 With a Windows user agent, the editor opens a package served only as a catalog whose file paths a
 model URI could merge (a `\` in a name, `C:` and `c:` folders) and keeps every file apart. Development preview
 presentation is covered by the [Player browser verification route](#player-browser-and-visual-verification).

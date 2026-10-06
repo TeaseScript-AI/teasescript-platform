@@ -6,11 +6,13 @@ import { createServer } from "vite";
 import {
   answerPlayerRuntimeImage,
   createPlayerRuntimeSession,
+  submitPlayerRuntimeComposer,
   observePlayerRuntimeTime,
   playerRuntimeForeground,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../player/runtime-adapter.js";
+import type { DebugExportCandidate } from "../player/debug-export-assembly.js";
 import type { ScriptStorageProvider } from "../player/script-storage.js";
 import type { CapturedMediaAdmission, SerializableRuntimeValue } from "../src/index.js";
 import { FakeMediaRepository } from "./helpers/fake-media-repository.js";
@@ -31,7 +33,10 @@ interface ImageHost {
   };
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
-  prepare(create: () => PlayerRuntimeSession): void;
+  prepare(create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
+  debugExportCandidate(
+    shown: Pick<DebugExportCandidate, "player" | "host">,
+  ): Promise<DebugExportCandidate>;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
 }
@@ -176,6 +181,42 @@ test("a chosen image is session media: kept durably only when saved, and release
   );
   assert.equal(host.images.admission.holds(second, "image"), false);
   assert.deepEqual(await repository.listReferences("images"), [second]);
+});
+
+test("a debug export candidate is the state when it was asked for, while play continues during its photo reads", async (context) => {
+  stubBrowser(context);
+  const scope = effectScope();
+  const host = scope.run(() =>
+    usePlayerSession({ decodeImage: async () => ({ width: 1, height: 1 }) }),
+  );
+  assert.ok(host);
+  context.after(() => scope.stop());
+  host.prepare((options) =>
+    createPlayerRuntimeSession(
+      'let pick = askImage("Picture")\nlet name = askText "Name"\nsay "After ${name}"\nexit',
+      options,
+    ),
+  );
+  await host.activate();
+  answer(host, await chosen(host, "used.png"));
+  const asked = host.session.value!;
+  // The Player's event and transcript lists grow with play, so the state asked for is their length then.
+  const events = [...asked.events];
+  const transcriptEntries = [...asked.transcriptEntries];
+  const pending = host.debugExportCandidate({
+    player: {},
+    host: { stage: { status: "hidden", path: null }, media: [], notices: [], debugLog: null },
+  });
+  // The player answers before the candidate has read the photo the session used.
+  host.update(submitPlayerRuntimeComposer(asked, "later answer")!.session);
+  assert.equal(host.session.value?.snapshot.status, "halted");
+  const candidate = await pending;
+  assert.equal(candidate.session?.snapshot, asked.snapshot);
+  assert.notEqual(asked.events.length, events.length, "play continued");
+  assert.deepEqual(candidate.session?.events, events);
+  assert.deepEqual(candidate.session?.transcriptEntries, transcriptEntries);
+  assert.equal(candidate.recording?.endSnapshot, asked.snapshot);
+  assert.equal(candidate.photos.length, 1);
 });
 
 test("an image that never answered can be dropped, and the runtime admits only stored images", async (context) => {

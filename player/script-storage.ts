@@ -141,6 +141,31 @@ function payload(value: SerializableRuntimeValue): string {
   return serializeValidatedRuntimeJson({ v: PAYLOAD_VERSION, value });
 }
 
+/**
+ * The scopes whose items browser local storage holds, in name order: every script this browser keeps saved data for,
+ * though some may hold no values now. Rejects when the browser denies storage.
+ */
+export function listLocalScriptStorageScopes(storage: Storage | undefined): readonly string[] {
+  if (!storage) throw new Error("Browser storage is unavailable.");
+  const scopes = new Set<string>();
+  for (let index = 0; index < storage.length; index += 1) {
+    const name = storage.key(index);
+    if (name === null) continue;
+    const item = parseItemName(name);
+    if (item !== null) scopes.add(item.scope);
+    else if (name.startsWith(HEAD_PREFIX)) {
+      try {
+        const scope: unknown = JSON.parse(name.slice(HEAD_PREFIX.length));
+        if (typeof scope === "string" && name === HEAD_PREFIX + JSON.stringify(scope))
+          scopes.add(scope);
+      } catch {
+        // Not an item of this provider.
+      }
+    }
+  }
+  return [...scopes].sort();
+}
+
 function randomGeneration(): string {
   // `crypto.randomUUID()` exists only in secure contexts; `crypto.getRandomValues()` exists everywhere.
   return [...crypto.getRandomValues(new Uint8Array(16))]

@@ -4,6 +4,7 @@ import { effectScope, nextTick, type Ref } from "vue";
 import { createServer } from "vite";
 
 import {
+  activatePlayerRuntimeButton,
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   pendingPlayerRuntimeStorageWrite,
@@ -19,6 +20,8 @@ import {
   createCheckpoint,
   createFreshRuntimeSnapshot,
   serializeCheckpoint,
+  type InterpreterEvent,
+  type SerializableRuntimeValue,
 } from "../src/index.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../src/temporal.js";
 import { AMSTERDAM, utc } from "./helpers/temporal-fixtures.js";
@@ -47,6 +50,23 @@ interface StorageHost {
   activate(): void;
   update(session: PlayerRuntimeSession): void;
   temporalCapture(): { temporalContext: TemporalContext; wallClockMs: number };
+  editSavedData(edit: {
+    key: string;
+    value: SerializableRuntimeValue;
+    expected: SerializableRuntimeValue | undefined;
+  }): Promise<
+    | { kind: "saved"; live: boolean }
+    | { kind: "busy" }
+    | { kind: "overtaken" }
+    | { kind: "changed" }
+    | { kind: "failed"; message: string }
+  >;
+  readonly debugEdits: Readonly<Ref<{ firstEditSceneTimeMs: number; editCount: number } | null>>;
+  debugExportCandidate(
+    player: Record<string, never>,
+  ): Promise<{
+    readonly editedWhileDebugging: { firstEditSceneTimeMs: number; editCount: number } | null;
+  }>;
 }
 let usePlayerSession: (options: {
   scriptStorage: ScriptStorageProvider;
@@ -608,4 +628,290 @@ test("Vue host records every session from Start and from Continue for a debug ex
     ["recordContinueCapture", "run"],
     "a Continue starts a new recording from the restored state",
   );
+});
+
+/** Script storage in memory, as the browser provider keeps it; `writing` may hold or fail a write. */
+function memoryStorage(
+  initial: Record<string, SerializableRuntimeValue>,
+  writing: (key: string, value: SerializableRuntimeValue) => Promise<void> = async () => {},
+  loading: () => Promise<void> = async () => {},
+) {
+  const entries = new Map(Object.entries(initial));
+  const writes: [string, SerializableRuntimeValue][] = [];
+  const provider: ScriptStorageProvider = {
+    scope: "test",
+    load: async () => {
+      await loading();
+      return [...entries].map(([key, value]) => ({ key, value }));
+    },
+    write: async (key, value) => {
+      writes.push([key, value]);
+      await writing(key, value);
+      if (value === null) entries.delete(key);
+      else entries.set(key, value);
+    },
+    replace: async () => {},
+    clear: async () => entries.clear(),
+  };
+  return { provider, entries, writes };
+}
+
+function said(session: PlayerRuntimeSession | null): string[] {
+  return (session?.events ?? []).flatMap((event: InterpreterEvent) =>
+    event.kind === "say" ? [event.text] : [],
+  );
+}
+
+const loadsAroundButton =
+  'let first = load("k", default: 0)\nlet go = showButton "Go"\nlet second = load("k", default: 0)\nsay "${first} ${second}", instant\nexit';
+
+test("a Debug edit is stored first, and the running session's next load returns it", async (context) => {
+  const storage = memoryStorage({ k: 1 });
+  const { host } = createHost(context, storage.provider);
+  await start(host, loadsAroundButton);
+  assert.deepEqual(await host.editSavedData({ key: "k", value: 2, expected: 1 }), {
+    kind: "saved",
+    live: true,
+  });
+  assert.deepEqual([...storage.entries], [["k", 2]]);
+  assert.deepEqual(host.session.value?.snapshot.scriptStorage, [{ key: "k", value: 2 }]);
+  assert.deepEqual(host.debugEdits.value, { firstEditSceneTimeMs: 0, editCount: 1 });
+  // A debug export of this session carries the mark.
+  assert.deepEqual((await host.debugExportCandidate({})).editedWhileDebugging, {
+    firstEditSceneTimeMs: 0,
+    editCount: 1,
+  });
+  host.update(activatePlayerRuntimeButton(host.session.value!)!.session);
+  assert.deepEqual(said(host.session.value), ["1 2"]);
+});
+
+test("a value changed meanwhile is reported, and an edit that cannot be stored changes nothing", async (context) => {
+  const storage = memoryStorage({ k: 1 }, async (key) => {
+    if (key === "k") throw new Error("quota");
+  });
+  const { host } = createHost(context, storage.provider);
+  const session = await start(host, loadsAroundButton);
+  assert.deepEqual(await host.editSavedData({ key: "k", value: 2, expected: 5 }), {
+    kind: "changed",
+  });
+  assert.deepEqual(storage.writes, []);
+  const failed = await host.editSavedData({ key: "k", value: 2, expected: 1 });
+  assert.equal(failed.kind, "failed");
+  assert.deepEqual([...storage.entries], [["k", 1]]);
+  assert.equal(host.session.value, session);
+  assert.equal(host.debugEdits.value, null);
+});
+
+test("without a running session, an edit is stored for the next Start", async (context) => {
+  const storage = memoryStorage({ k: 1 });
+  const { host } = createHost(context, storage.provider);
+  await host.loadScriptStorage();
+  assert.deepEqual(await host.editSavedData({ key: "k", value: null, expected: 1 }), {
+    kind: "saved",
+    live: false,
+  });
+  assert.deepEqual([...storage.entries], []);
+  await start(host, 'let k = load("k", default: 9)\nsay "${k}", instant\nexit');
+  assert.deepEqual(said(host.session.value), ["9"]);
+  assert.equal(host.debugEdits.value, null);
+});
+
+/** Lets every pending promise reaction and the write report's later task run. */
+async function settleTasks(context: TestContext) {
+  for (let turn = 0; turn < 5; turn += 1) await nextTick();
+  context.mock.timers.tick(0);
+  for (let turn = 0; turn < 5; turn += 1) await nextTick();
+}
+
+test("an edit of a session that was replaced or unmounted meanwhile changes neither", async (context) => {
+  const firstRead = deferred();
+  let reads = 0;
+  const storage = memoryStorage(
+    { k: 1 },
+    async () => {},
+    async () => {
+      reads += 1;
+      if (reads === 2) await firstRead.promise;
+    },
+  );
+  const { host } = createHost(context, storage.provider);
+  await start(host, loadsAroundButton);
+  // The edit reads the stored values while a new run replaces the session.
+  const edit = host.editSavedData({ key: "k", value: 2, expected: 1 });
+  // A new run starts from the values already read; its Start does not wait for storage.
+  host.prepare(() => createPlayerRuntimeSession(loadsAroundButton, host.scriptStorageOptions()));
+  host.activate();
+  const replaced = host.session.value!;
+  firstRead.resolve();
+  assert.equal((await edit).kind, "failed");
+  assert.deepEqual(storage.writes, []);
+  assert.equal(host.session.value?.snapshot, replaced.snapshot);
+  assert.equal(host.debugEdits.value, null);
+});
+
+test("an edit stored while Start is prepared is what that Start loads", async (context) => {
+  const storage = memoryStorage({ k: 1 });
+  const { host } = createHost(context, storage.provider);
+  await host.loadScriptStorage();
+  host.prepare(() =>
+    createPlayerRuntimeSession(
+      'let k = load("k", default: 0)\nsay "${k}", instant\nexit',
+      host.scriptStorageOptions(),
+    ),
+  );
+  assert.deepEqual(await host.editSavedData({ key: "k", value: 2, expected: 1 }), {
+    kind: "saved",
+    live: false,
+  });
+  host.activate();
+  assert.deepEqual(said(host.session.value), ["2"]);
+});
+
+test("while the script's own write waits for the host, an edit is not taken and stores nothing", async (context) => {
+  const scriptWrite = deferred();
+  const storage = memoryStorage({}, async (_key, value) => {
+    if (value === 1) await scriptWrite.promise;
+  });
+  const { host } = createHost(context, storage.provider);
+  const pending = await start(
+    host,
+    'save 1 as "k"\nlet loaded = load("k")\nsay "${loaded}", instant\nexit',
+  );
+  assert.deepEqual(await host.editSavedData({ key: "k", value: 2, expected: undefined }), {
+    kind: "busy",
+  });
+  assert.deepEqual(storage.writes, [["k", 1]]);
+  assert.equal(host.session.value, pending);
+  scriptWrite.resolve();
+  await settleTasks(context);
+  assert.deepEqual(said(host.session.value), ["1"]);
+});
+
+test("a write the script issues while an edit is stored settles first: another key's edit follows, the same key's yields unless it failed", async (context) => {
+  for (const [scriptKey, scriptStores] of [
+    ["other", true],
+    ["k", true],
+    ["k", false],
+  ] as const) {
+    await context.test(`${scriptKey}, ${scriptStores ? "stored" : "failed"}`, async (subtest) => {
+      const editWrite = deferred();
+      const storage = memoryStorage({ k: 0 }, async (key, value) => {
+        if (key === "k" && value === 2) await editWrite.promise;
+        if (value === 1 && !scriptStores) throw new Error("quota");
+      });
+      // Like the Player's providers, this one stores writes in the order they were issued.
+      let queue = Promise.resolve();
+      const ordered: ScriptStorageProvider = {
+        ...storage.provider,
+        write: (key, value) => (queue = queue.then(() => storage.provider.write(key, value))),
+      };
+      const { host } = createHost(subtest, ordered);
+      await start(
+        host,
+        `let go = showButton "Go"\nsave 1 as "${scriptKey}"\nlet again = showButton "Again"\nlet loaded = load("k")\nsay "\${loaded}", instant\nexit`,
+      );
+      const edit = host.editSavedData({ key: "k", value: 2, expected: 0 });
+      for (let turn = 0; turn < 5; turn += 1) await nextTick();
+      // The script goes on and saves while the edit is being stored.
+      host.update(activatePlayerRuntimeButton(host.session.value!)!.session);
+      assert.ok(pendingPlayerRuntimeStorageWrite(host.session.value!.snapshot));
+      editWrite.resolve();
+      let result: unknown;
+      void edit.then((settled) => (result = settled));
+      for (let turn = 0; turn < 5 && result === undefined; turn += 1) await settleTasks(subtest);
+      host.update(activatePlayerRuntimeButton(host.session.value!)!.session);
+      if (scriptKey === "other" || !scriptStores) {
+        assert.deepEqual(result, { kind: "saved", live: true });
+        assert.deepEqual(said(host.session.value), ["2"]);
+        assert.equal(storage.entries.get("k"), 2);
+      } else {
+        assert.deepEqual(result, { kind: "overtaken" });
+        assert.deepEqual(said(host.session.value), ["1"]);
+        assert.equal(storage.entries.get("k"), 1);
+      }
+    });
+  }
+});
+
+test("an unmounted Player never publishes an edit it was storing", async (context) => {
+  for (const outcome of ["stored", "failed"] as const) {
+    await context.test(outcome, async (subtest) => {
+      const editWrite = deferred();
+      const storage = memoryStorage({ k: 1 }, async (_key, value) => {
+        if (value === 2) await editWrite.promise;
+      });
+      const { host, scope } = createHost(subtest, storage.provider);
+      const waiting = await start(host, loadsAroundButton);
+      const edit = host.editSavedData({ key: "k", value: 2, expected: 1 });
+      for (let turn = 0; turn < 5; turn += 1) await nextTick();
+      scope.stop();
+      if (outcome === "stored") editWrite.resolve();
+      else editWrite.reject(new Error("quota"));
+      await edit;
+      assert.equal(host.session.value, waiting, outcome);
+      assert.equal(host.debugEdits.value, null, outcome);
+    });
+  }
+});
+
+test("a new run releases an edit that waits for the old run's write, also while the new run saves", async (context) => {
+  const holds = new Map([2, 1, 3].map((value) => [value, deferred()]));
+  const storage = memoryStorage({ k: 0 }, async (_key, value) => {
+    if (typeof value === "number") await holds.get(value)?.promise;
+  });
+  let queue = Promise.resolve();
+  const ordered: ScriptStorageProvider = {
+    ...storage.provider,
+    write: (key, value) => (queue = queue.then(() => storage.provider.write(key, value))),
+  };
+  const { host } = createHost(context, ordered);
+  await start(
+    host,
+    'let go = showButton "Go"\nsave 1 as "other"\nlet again = showButton "Again"\nexit',
+  );
+  let result: unknown;
+  void host
+    .editSavedData({ key: "k", value: 2, expected: 0 })
+    .then((settled) => (result = settled));
+  for (let turn = 0; turn < 5; turn += 1) await nextTick();
+  host.update(activatePlayerRuntimeButton(host.session.value!)!.session);
+  holds.get(2)!.resolve();
+  await settleTasks(context);
+  assert.equal(result, undefined);
+  host.prepare(() =>
+    createPlayerRuntimeSession('save 3 as "newer"\nexit', host.scriptStorageOptions()),
+  );
+  host.activate();
+  for (let turn = 0; turn < 5 && result === undefined; turn += 1) await settleTasks(context);
+  assert.deepEqual(result, { kind: "saved", live: false });
+  assert.deepEqual(await host.editSavedData({ key: "k", value: 4, expected: 2 }), { kind: "busy" });
+  // Neither edit wrote again; the new run's own write waits behind the old run's in the provider.
+  assert.deepEqual(storage.writes, [
+    ["k", 2],
+    ["other", 1],
+  ]);
+});
+
+test("a stored edit reaches the session even when storage cannot be read afterwards", async (context) => {
+  let reads = 0;
+  const storage = memoryStorage(
+    { k: 0 },
+    async () => {},
+    async () => {
+      reads += 1;
+      if (reads > 2) throw new Error("unreadable");
+    },
+  );
+  const { host } = createHost(context, storage.provider);
+  await start(
+    host,
+    'let go = showButton "Go"\nlet loaded = load("k")\nsay "${loaded}", instant\nexit',
+  );
+  assert.deepEqual(await host.editSavedData({ key: "k", value: 2, expected: 0 }), {
+    kind: "saved",
+    live: true,
+  });
+  host.update(activatePlayerRuntimeButton(host.session.value!)!.session);
+  assert.deepEqual(said(host.session.value), ["2"]);
+  assert.equal(storage.entries.get("k"), 2);
 });

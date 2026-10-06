@@ -58,6 +58,8 @@ export const playerNoticeKeys = {
   storageUnavailable: "storage-unavailable",
   storageWriteFailed: "storage-write-failed",
   imageNeedsCamera: "image-needs-camera",
+  sessionError: "session-error",
+  rewindNotAdopted: "rewind-not-adopted",
 } as const;
 
 const mediaNames = { image: "Image", audio: "Audio", video: "Video" } as const;
@@ -84,10 +86,27 @@ export const playerNotices = {
     level: "warning",
     message: "Some progress could not be saved in this browser.",
   }),
+  /** Debug's rewind could not adopt the inspected state: its saved data could not replace the browser's. */
+  rewindNotAdopted: (): PlayerNotice => ({
+    key: playerNoticeKeys.rewindNotAdopted,
+    level: "warning",
+    message:
+      "The saved data of this earlier state could not be restored in this browser, so the session did not go on from it.",
+  }),
   imageNeedsCamera: (): PlayerNotice => ({
     key: playerNoticeKeys.imageNeedsCamera,
     level: "warning",
     message: "This image request needs a camera, which cannot be used here.",
+  }),
+  /** The session stopped because of a script error, or the Player itself failed; the action offers a debug export. */
+  sessionError: (cause: "script" | "player", exportDebug: () => void): PlayerNotice => ({
+    key: playerNoticeKeys.sessionError,
+    level: "error",
+    message:
+      cause === "script"
+        ? "The session stopped because of an error."
+        : "The Player ran into an error.",
+    action: { label: "Download debug export", run: exportDebug },
   }),
   /**
    * A media file the script refers to is not in the package (`missing`), or the browser cannot load or decode it

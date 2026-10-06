@@ -155,6 +155,78 @@ test("restore reconnects a fresh element at the saved playhead without reloading
   assert.deepEqual(player.texts(), ["cue", "done"], "the cue ran once across restore");
 });
 
+test("overlapping instances of one file each play out once, also when a seek completes after playback began", () => {
+  const player = harness(
+    [
+      'playAudio async "swat.wav"',
+      "wait 400 ms",
+      'playAudio async "swat.wav"',
+      "wait 2",
+      'say "after", instant',
+      "exit",
+    ].join("\n"),
+  );
+  player.start();
+  const [first] = player.elements;
+  first!.deferSeeked = true;
+  first!.metadata(0.7);
+  // The browser reports the seek done only after the element already played on from its target.
+  first!.advance(0.1);
+  first!.completeSeek();
+  player.tick(100, 0);
+  player.tick(300);
+  const second = player.elements[1]!;
+  assert.notEqual(second, first, "each instance has its own element");
+  second.metadata(0.7);
+  player.tick(200);
+  assert.equal(first!.paused, false, "the second instance does not stop the first");
+  assert.equal(second.paused, false);
+  player.tick(200);
+  // The first instance reached its end: it releases its element instead of replaying as another pass.
+  assert.equal(first!.src, "");
+  assert.equal(first!.plays, 1);
+  assert.equal(second.paused, false);
+  player.tick(2000);
+  assert.deepEqual(player.texts(), ["after"]);
+  assert.equal(second.plays, 1);
+  assert.equal(second.src, "");
+});
+
+test("measured progress that ends a rounding error short of the projected end does not replay the range", () => {
+  const player = harness('playAudio "tone.wav"\nsay "after", instant\nexit');
+  player.start();
+  const [element] = player.elements;
+  element!.metadata(1);
+  // Browser-like positions whose summed steps reach the end as 999.9999999999999 ms.
+  for (const played of [0.042796, 0.067988, 0.07439, 0.066488, 0.071681]) player.tick(100, played);
+  player.tick(700);
+  assert.deepEqual(player.texts(), ["after"]);
+  assert.equal(
+    element!.src,
+    "",
+    "the ended instance released its element instead of starting another pass",
+  );
+});
+
+test("refused playback within the end tolerance of a short range still waits for a retry", async () => {
+  const player = harness(
+    'playAudio(file: "tone.wav", repeat: 1 ms) {\n  finish {\n    say "finish", instant\n  }\n}\nsay "after", instant\nexit',
+  );
+  player.start();
+  const [element] = player.elements;
+  element!.refuse = true;
+  element!.metadata(1);
+  await settle();
+  player.tick(100, 0);
+  assert.deepEqual(player.texts(), [], "unplayed audio must not complete");
+  assert.equal(player.blocked, true);
+  element!.refuse = false;
+  player.device.retryBlocked();
+  await settle();
+  player.tick(100);
+  assert.deepEqual(player.texts(), ["finish", "after"]);
+});
+
 test("a stall reports unchanged progress, so a nearby cue waits for actual playback", () => {
   const player = harness(
     [

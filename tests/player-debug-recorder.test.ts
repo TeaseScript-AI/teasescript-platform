@@ -27,6 +27,8 @@ import {
   restorePlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
+  stepPlayerRuntimeFormField,
+  submitPlayerRuntimeForm,
 } from "../player/runtime-adapter.js";
 import {
   createCheckpoint,
@@ -43,7 +45,7 @@ async function replay(recorder: DebugRecorder): Promise<DebugReplayResult> {
   assert.ok(recording);
   const exported: DebugExport = {
     format: "teasescript-debug-export",
-    version: 2,
+    version: 3,
     build: { commit: null, dirty: null, mode: null, appVersion: null, ...debugBuildRevisions() },
     package: { id: null, version: null, contentHash: null },
     incident: {
@@ -54,6 +56,8 @@ async function replay(recorder: DebugRecorder): Promise<DebugReplayResult> {
       column: null,
       hostError: null,
     },
+    editedWhileDebugging: null,
+    rewoundWhileDebugging: null,
     selection: {
       savedValues: true,
       answers: true,
@@ -88,6 +92,7 @@ function playEverySeam(recorder: DebugRecorder | undefined): PlayerRuntimeSessio
       '    save "pressed" as "button"',
       "}",
       'let name = askText "Name"',
+      'let flags = askForm fields: { a: false, b: ["x", "y"] }',
       'let picture = askImage("Picture", allowCamera: false)',
       "let photo = takePhoto()",
       "let draw = random()",
@@ -118,6 +123,9 @@ function playEverySeam(recorder: DebugRecorder | undefined): PlayerRuntimeSessio
   // A refused and then an accepted answer.
   assert.equal(answerPlayerRuntimeImage(session, reference, store), null, "no image request yet");
   session = submitPlayerRuntimeComposer(session, "Ada")!.session;
+  session = stepPlayerRuntimeFormField(session, "a")!.session;
+  session = stepPlayerRuntimeFormField(session, "b")!.session;
+  session = submitPlayerRuntimeForm(session)!.session;
   const refused = answerPlayerRuntimeImage(session, reference.replace(":1", ":2"), store)!;
   assert.equal(refused.outcome.kind, "invalidPayload");
   session = answerPlayerRuntimeImage(refused.session, reference, store)!.session;
@@ -148,6 +156,7 @@ test("the recorder records every Player engine seam so that a replay reproduces 
     "pressPermanentButton",
     "reportMediaLoad",
     "run",
+    "updateInteraction",
   ]);
   assert.equal(await replay(recorder).then((result) => result.kind), "reproduced");
 
@@ -296,7 +305,7 @@ test("a call the recorder cannot copy still runs exactly as without it", () => {
   assert.deepEqual(withRecorder.session.snapshot, without.session.snapshot);
   assert.deepEqual(
     [recorder.recording()!.complete, recorder.recording()!.reason],
-    [false, "The recorder could not copy a call."],
+    [false, "A call's arguments could not be copied exactly."],
   );
 });
 
@@ -335,4 +344,45 @@ test("a debugging tool's storage edit is recorded, so a replay applies it again"
     ["run", "applyExternalStorageEdit", "completeAction", "run"],
   );
   assert.equal((await replay(recorder)).kind, "reproduced");
+});
+
+test("an argument JSON cannot copy exactly leaves the recording incomplete instead of recording another call", async () => {
+  const cyclic: { readonly name: string; self: unknown } = { name: "loop", self: null };
+  cyclic.self = cyclic;
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: test: values JSON cannot copy, which the engine refuses as invalid edits.
+  const values = [Number.NaN, cyclic as unknown as number];
+  for (const value of values) {
+    const recorder = new DebugRecorder();
+    const session = createPlayerRuntimeSession('let name = askText "Name"\nexit', { recorder });
+    const refused = applyPlayerRuntimeStorageEdit(session, { key: "k", value });
+    assert.equal(refused.outcome.kind, "invalidEdit");
+    assert.deepEqual(
+      [recorder.recording()!.complete, recorder.recording()!.reason],
+      [false, "A call's arguments could not be copied exactly."],
+    );
+    assert.equal((await replay(recorder)).kind, "incomplete");
+  }
+});
+
+test("a value the engine produced, such as a saved list, is recorded as an argument and replays", async () => {
+  const recorder = new DebugRecorder();
+  let session = createPlayerRuntimeSession(
+    'save [1, null] as "a"\nlet name = askText "Name"\nlet copy = load("b", default: [])\nlet zero = 0\nlet result = 1 / zero\nexit',
+    { recorder, persistentScriptStorage: true, scriptStorage: [] },
+  );
+  session = completePlayerRuntimeStorageWrite(
+    session,
+    pendingPlayerRuntimeStorageWrite(session.snapshot)!.actionId,
+    true,
+  ).session;
+  const saved = createCheckpoint(session.plan, session.snapshot).snapshot.scriptStorage[0]!.value;
+  const edited = applyPlayerRuntimeStorageEdit(session, { key: "b", value: saved });
+  assert.equal(edited.outcome.kind, "applied");
+  session = submitPlayerRuntimeComposer(edited.session, "Ada")!.session;
+  assert.equal(session.snapshot.status, "failed");
+  assert.equal(recorder.recording()!.complete, true);
+  const result = await replay(recorder);
+  assert.ok(
+    result.kind === "reproduced" && result.failure?.code === session.snapshot.failure?.code,
+  );
 });

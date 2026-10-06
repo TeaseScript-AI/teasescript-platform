@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createLocalScriptStorage } from "../player/script-storage.js";
+import {
+  createLocalScriptStorage,
+  listLocalScriptStorageScopes,
+} from "../player/script-storage.js";
 import { serializeValidatedRuntimeJson } from "../src/runtime/checkpoint.js";
 import type { SerializableRuntimeValue } from "../src/index.js";
 
@@ -408,4 +411,17 @@ test("a value nested deeper than native JSON recursion allows is saved, replaced
     json(await createLocalScriptStorage(storage, "demo").load()),
     json([{ key: "replaced", value }]),
   );
+});
+
+test("the scopes local storage keeps saved data for are listed in name order, each once", async () => {
+  const storage = new MemoryStorage();
+  // Both layouts, a name item, and unrelated items.
+  await createLocalScriptStorage(storage, "b").write("k", 1);
+  await createLocalScriptStorage(storage, "a").replace([{ key: "k", value: 2 }]);
+  await createLocalScriptStorage(storage, "a").write("other", 3);
+  await createLocalScriptStorage(storage, "c").clear();
+  storage.setItem('player-storage-name:"b"', "Bee");
+  storage.setItem("player-menu-label-mode", "icons");
+  assert.deepEqual(listLocalScriptStorageScopes(storage), ["a", "b", "c"]);
+  assert.throws(() => listLocalScriptStorageScopes(undefined));
 });

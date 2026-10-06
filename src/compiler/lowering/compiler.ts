@@ -45,12 +45,13 @@ import type {
   TypeCheckPlan,
   InteractionUiPayload,
   PreparedInteractionUiPayload,
+  PreparedFormShape,
   PlanSourceLocation,
   PlanLabel,
   TagQueryExpressionPlan,
 } from "../../plan/model.js";
 import { sourceSpanToPlanLocation } from "../../plan/source-location.js";
-import { isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
+import { isAskBooleansCall, isAskImageCall, isTakePhotoCall } from "../../capture-call.js";
 import { numberAnswerText } from "../../interaction-answers.js";
 import { staticChoiceValue, staticVisibleText } from "../../static-evaluation.js";
 import { durationLiteralParts, storedDuration } from "../../duration.js";
@@ -195,6 +196,8 @@ export class InstructionCompiler {
     private readonly picks: ReadonlyMap<FileTarget, readonly string[]> = new Map(),
     /** The variables each timer, media, or button block shares with the code that created it. */
     private readonly captures: ReadonlyMap<Block, readonly string[]> = new Map(),
+    /** The result shape of each `askForm`, from the type check. */
+    private readonly formShapes: ReadonlyMap<InteractionExpression, PreparedFormShape> = new Map(),
   ) {
     this.#functionIdBase = functions.length;
     const functionByName = new Map<
@@ -1299,6 +1302,9 @@ export class InstructionCompiler {
     if (isAskImageCall(expression) && expression.kind === "callExpression") {
       return yield* compileChild(this.#lowerAskImageTask(expression));
     }
+    if (isAskBooleansCall(expression) && expression.kind === "callExpression") {
+      return yield* compileChild(this.#lowerAskBooleansTask(expression));
+    }
     if (isTakePhotoCall(expression)) {
       // `takePhoto(tags: …)`: the tags are evaluated first; the capture reads them before it asks the Player.
       const tagsArgument =
@@ -1658,6 +1664,8 @@ export class InstructionCompiler {
    * comes first. The question is said by the requesting speaker, captured before any operand.
    */
   *#lowerInteractionTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
+    if (expression.interactionKind === "form")
+      return yield* compileChild(this.#lowerFormTask(expression));
     const values =
       expression.interactionKind === "choice"
         ? expression.options.map((option) => option.expression)
@@ -1826,6 +1834,193 @@ export class InstructionCompiler {
       expression.span,
     );
     this.#emitTemporaryCleanup(preparedTemporaryIds, expression.span);
+    return lowered;
+  }
+
+  /**
+   * `askForm`: after the requesting speaker, the question and the named arguments are evaluated once, in written order,
+   * into one object that the form reads when it opens. Like a basic ask, it then says its question, read from that
+   * object, and the form opens with the shape the type check found.
+   */
+  *#lowerFormTask(expression: InteractionExpression): CompileTask<LoweredExpression> {
+    const speaker = expression.speaker?.name ?? null;
+    const speakerSpan = expression.asSpan ?? expression.commandSpan;
+    const speakerTemporary = this.#prepareInteractionSpeaker(speaker, speakerSpan);
+    const sayTemporaries =
+      expression.question === null ? null : this.#prepareQuestionSpeaker(speaker, speakerSpan);
+    const named = [
+      ...(expression.question === null ? [] : [{ name: "message", value: expression.question }]),
+      ...expression.formArguments.map((argument) => ({
+        name: argument.name.name,
+        value: argument.value,
+      })),
+    ];
+    const values = yield* compileChild(
+      this.#lowerInteractionPayloadsTask(
+        named.map((argument) => argument.value),
+        speakerTemporary,
+      ),
+    );
+    const requestTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: requestTemporary,
+      value: {
+        kind: "object",
+        properties: named.map((argument, index) => ({
+          name: argument.name,
+          value: values[index]!.plan,
+          span: copySpan(argument.value.span),
+        })),
+        span: copySpan(expression.span),
+      },
+      expectBoolean: false,
+      span: copySpan(expression.span),
+    });
+    this.#emitTemporaryCleanup(
+      values.flatMap((value) => value.temporaryIds),
+      expression.span,
+    );
+    if (sayTemporaries !== null) {
+      const question: ExpressionPlan = {
+        kind: "property",
+        object: {
+          kind: "temporary",
+          temporaryId: requestTemporary,
+          span: copySpan(expression.span),
+        },
+        name: "message",
+        span: copySpan(expression.span),
+      };
+      const textTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "prepareSayText",
+        value: question,
+        destinationTemporary: textTemporary,
+        field: true,
+        span: copySpan(expression.span),
+      });
+      this.instructions.push({
+        kind: "say",
+        presentation: null,
+        speaker,
+        value: question,
+        ...sayTemporaries,
+        textTemporary,
+        skipPolicy: null,
+        pacing: "smart",
+        span: copySpan(expression.span),
+      });
+      this.#emitTemporaryCleanup(
+        [sayTemporaries.speakerTemporary, sayTemporaries.contextualSpeakerTemporary, textTemporary],
+        expression.span,
+      );
+    }
+    const lowered = this.#emitPreparedResultInteraction(
+      "form",
+      "form",
+      speakerTemporary,
+      {
+        kind: "form",
+        requestTemporary,
+        shape: this.formShapes.get(expression) ?? { kind: "object", numericKinds: [], answers: [] },
+        accessibleName: { kind: "localizedDefault", key: "answer" },
+      },
+      expression.span,
+    );
+    this.#emitTemporaryCleanup([speakerTemporary, requestTemporary], expression.span);
+    return lowered;
+  }
+
+  /**
+   * `askBooleans(...)`: a form of one toggle per text that returns their states as a list. Like `askImage(...)`, its
+   * written arguments are evaluated once, in source order, into one object, from which it says its message as the
+   * question; the form reads its texts, defaults, and cancel button when it opens.
+   */
+  *#lowerAskBooleansTask(
+    expression: Extract<Expression, { kind: "callExpression" }>,
+  ): CompileTask<LoweredExpression> {
+    const speakerTemporary = this.#prepareInteractionSpeaker(null, expression.span);
+    const asksQuestion = expression.arguments.some(
+      (argument) => argument.kind === "positionalArgument" || argument.name.name === "message",
+    );
+    const sayTemporaries = asksQuestion
+      ? this.#prepareQuestionSpeaker(null, expression.span)
+      : null;
+    const values = yield* compileChild(
+      this.#lowerInteractionPayloadsTask(
+        expression.arguments.map((argument) => argument.value),
+        speakerTemporary,
+      ),
+    );
+    const requestTemporary = this.#allocateTemporary();
+    this.instructions.push({
+      kind: "storeTemporary",
+      temporaryId: requestTemporary,
+      value: {
+        kind: "object",
+        properties: expression.arguments.map((argument, index) => ({
+          name: argument.kind === "namedArgument" ? argument.name.name : "message",
+          value: values[index]!.plan,
+          span: copySpan(argument.span),
+        })),
+        span: copySpan(expression.span),
+      },
+      expectBoolean: false,
+      span: copySpan(expression.span),
+    });
+    this.#emitTemporaryCleanup(
+      values.flatMap((value) => value.temporaryIds),
+      expression.span,
+    );
+    if (sayTemporaries !== null) {
+      const question: ExpressionPlan = {
+        kind: "property",
+        object: {
+          kind: "temporary",
+          temporaryId: requestTemporary,
+          span: copySpan(expression.span),
+        },
+        name: "message",
+        span: copySpan(expression.span),
+      };
+      const textTemporary = this.#allocateTemporary();
+      this.instructions.push({
+        kind: "prepareSayText",
+        value: question,
+        destinationTemporary: textTemporary,
+        field: true,
+        span: copySpan(expression.span),
+      });
+      this.instructions.push({
+        kind: "say",
+        presentation: null,
+        speaker: null,
+        value: question,
+        ...sayTemporaries,
+        textTemporary,
+        skipPolicy: null,
+        pacing: "smart",
+        span: copySpan(expression.span),
+      });
+      this.#emitTemporaryCleanup(
+        [sayTemporaries.speakerTemporary, sayTemporaries.contextualSpeakerTemporary, textTemporary],
+        expression.span,
+      );
+    }
+    const lowered = this.#emitPreparedResultInteraction(
+      "form",
+      "form",
+      speakerTemporary,
+      {
+        kind: "form",
+        requestTemporary,
+        shape: { kind: "booleanList" },
+        accessibleName: { kind: "localizedDefault", key: "answer" },
+      },
+      expression.span,
+    );
+    this.#emitTemporaryCleanup([speakerTemporary, requestTemporary], expression.span);
     return lowered;
   }
 
@@ -2444,6 +2639,7 @@ export class InstructionCompiler {
       if (
         isTakePhotoCall(current.expression) ||
         isAskImageCall(current.expression) ||
+        isAskBooleansCall(current.expression) ||
         (current.expression.kind === "callExpression" &&
           current.expression.callee.kind === "identifier" &&
           this.#functionByName.has(current.expression.callee.name))
@@ -2603,6 +2799,8 @@ function planInteractionKind(expression: InteractionExpression): InteractionKind
 
 /** The UI of an interaction whose hint, values, and default answer are all known at compile time. */
 function staticInteractionUi(expression: InteractionExpression): InteractionUiPayload | undefined {
+  // A form reads its fields when it opens.
+  if (expression.interactionKind === "form") return undefined;
   if (expression.interactionKind !== "choice") {
     const hint = expression.hint === null ? null : staticVisibleText(expression.hint);
     const prefill = expression.defaultValue === null ? null : staticInteractionPrefill(expression);
@@ -2757,6 +2955,8 @@ function assembleExpression(
         throw new TypeError("takePhoto() reached pure expression assembly.");
       if (isAskImageCall(expression))
         throw new TypeError("askImage() reached pure expression assembly.");
+      if (isAskBooleansCall(expression))
+        throw new TypeError("askBooleans() reached pure expression assembly.");
       return {
         kind: "call",
         callee: child(expression.callee),

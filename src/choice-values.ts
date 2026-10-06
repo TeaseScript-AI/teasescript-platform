@@ -1,5 +1,7 @@
 import type { InteractionChoiceValue } from "./plan/model.js";
+import type { InteractionResultValue } from "./runtime/actions/model.js";
 import {
+  cloneCapturedSerializableValue,
   validateCapturedSerializableValue,
   type SerializableRuntimeValue,
 } from "./runtime/serializable-values.js";
@@ -28,4 +30,13 @@ export function isInteractionChoiceValue(value: unknown): value is InteractionCh
 
 export function cloneInteractionChoiceValue(value: InteractionChoiceValue): InteractionChoiceValue {
   return typeof value === "object" && value !== null ? { ...value } : value;
+}
+
+/** A copy of an interaction result: a choice value, or a form's object, dict, or list of answers. */
+export function cloneInteractionResult(value: InteractionResultValue): InteractionResultValue {
+  if (typeof value !== "object" || value === null) return value;
+  if (value.kind === "object" || value.kind === "dict" || value.kind === "list")
+    // EVIDENCE: invariant: a copy of a form's answers keeps its object, dict, or list kind.
+    return cloneCapturedSerializableValue(value) as InteractionResultValue;
+  return { ...value };
 }

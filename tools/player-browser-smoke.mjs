@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { crc32, deflateSync, gunzipSync } from "node:zlib";
@@ -37,6 +37,8 @@ const MODEL_PATHS_CATALOG = {
 const LAN_HOST = "player-lan.test";
 // The late-image scenario holds the first response for this image until the scenario releases it.
 const LATE_IMAGE_URL = "/dev-package/late-image/files/images/late.png";
+// The compiled spill store of Debug's rewind history, which the smoke runs against the browser's real IndexedDB.
+const DEBUG_HISTORY_MODULE_URL = "/smoke/debug-history-indexeddb.js";
 const lateImage = { hold: false, release: null };
 
 await main();
@@ -59,6 +61,15 @@ async function main() {
     if (request.url === LATE_IMAGE_URL && lateImage.hold) {
       lateImage.hold = false;
       lateImage.release = () => handleRequest(request, response);
+      return;
+    }
+    if (request.url === DEBUG_HISTORY_MODULE_URL) {
+      void readFile(new URL("../dist/player/debug-history-indexeddb.js", import.meta.url)).then(
+        (module) => {
+          response.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
+          response.end(module);
+        },
+      );
       return;
     }
     if (request.url !== "/dev-package/model-paths/catalog.json")
@@ -123,18 +134,25 @@ async function main() {
       await askImageScenario(cdp, origin, profile);
       const exported = await savedDataExportScenario(cdp, origin, profile);
       await savedDataImportScenario(debugPort, origin, exported);
+      await debugExportScenario(cdp, origin, profile);
       await developmentTimeScenario(cdp, origin);
       await debugCountdownScenario(cdp, origin);
       await debugNowScenario(cdp, origin);
       await debugStorageScenario(cdp, origin, profile);
+      await debugStorageEditScenario(cdp, origin);
+      await debugHistoryStorageScenario(cdp, origin);
+      await debugRewindScenario(cdp, origin);
       await missingMediaScenario(cdp, origin);
+      await audioOverlapScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
       await cameraScenario(cdp, origin);
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
+      await formsScenario(cdp, origin);
+      await formFieldsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, development time controls, Debug countdowns, Now and Storage, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, the debug export after a script error, development time controls, Debug countdowns, Now and Storage with its editor, the rewind history's IndexedDB store, rewinding the chat, missing, late and overlapping media, and the camera, viewfinder, permanent buttons, and askForm toggle, cycle, and typed-field scenarios",
       );
     } finally {
       cdp.close();
@@ -536,7 +554,7 @@ async function scriptStorageScenario(cdp, origin) {
       `(() => {
         const names = Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index));
         const head = localStorage.getItem('player-storage-head:"repository-demo"') !== null;
-        const values = names.filter((name) => name.includes('"repository-demo"') && !name.startsWith('player-storage-head:'));
+        const values = names.filter((name) => name.includes('"repository-demo"') && !name.startsWith('player-storage-head:') && !name.startsWith('player-storage-name:'));
         return head + ' head, ' + values.length + ' values';
       })()`,
     ),
@@ -1297,6 +1315,134 @@ async function missingMediaScenario(cdp, origin) {
 }
 
 /**
+ * The `audio-overlap` package plays one sound twice with overlap, then another sound, then the same sound in a loop of
+ * 30 overlapping instances. `seeked` notifications arrive late, as under load, after playback already began. Each
+ * instance plays to its end once on its own element, without rewinding or stopping another, and releases its element
+ * for reuse when it ends.
+ */
+async function audioOverlapScenario(cdp, origin) {
+  const {
+    result: { identifier },
+  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
+    source: `window.__instances = [];
+      window.__samples = [];
+      window.__elements = new Set();
+      window.__lateSeeked = 0;
+      const current = new Map();
+      const prototype = HTMLMediaElement.prototype;
+      const src = Object.getOwnPropertyDescriptor(prototype, 'src');
+      Object.defineProperty(prototype, 'src', {
+        ...src,
+        set(value) {
+          window.__elements.add(this);
+          src.set.call(this, value);
+          if (!String(value).includes('/dev-package/audio-overlap/')) return current.delete(this);
+          const instance = { file: String(value).split('/').pop(), plays: 0, end: false, time: 0, rewound: false };
+          window.__instances.push(instance);
+          current.set(this, instance);
+        },
+      });
+      const play = prototype.play;
+      prototype.play = function () {
+        const instance = current.get(this);
+        if (instance && this.getAttribute('src')) instance.plays++;
+        return play.call(this);
+      };
+      // The device pauses an instance at its end and before releasing its element: record whether it reached the end.
+      const pause = prototype.pause;
+      prototype.pause = function () {
+        const instance = current.get(this);
+        if (instance && this.getAttribute('src') && this.currentTime >= this.duration) instance.end = true;
+        return pause.call(this);
+      };
+      const late = new WeakMap();
+      const addEventListener = prototype.addEventListener;
+      const removeEventListener = prototype.removeEventListener;
+      prototype.addEventListener = function (type, listener, options) {
+        if (type !== 'seeked') return addEventListener.call(this, type, listener, options);
+        if (!late.has(listener))
+          late.set(listener, (event) => setTimeout(() => {
+            if (!this.paused && this.currentTime > 0) window.__lateSeeked++;
+            listener.call(this, event);
+          }, 60));
+        return addEventListener.call(this, type, late.get(listener), options);
+      };
+      prototype.removeEventListener = function (type, listener, options) {
+        return removeEventListener.call(this, type, (type === 'seeked' && late.get(listener)) || listener, options);
+      };
+      setInterval(() => {
+        const playing = [];
+        for (const [element, instance] of current) {
+          if (!element.getAttribute('src')) continue;
+          if (element.currentTime < instance.time) instance.rewound = true;
+          instance.time = element.currentTime;
+          if (!element.paused) playing.push([window.__instances.indexOf(instance), element.currentTime]);
+        }
+        window.__samples.push(playing);
+      }, 25);`,
+  });
+  try {
+    const transcript = (text) =>
+      `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes(${JSON.stringify(text)}))`;
+    // Each instance played once, to its end, without moving back.
+    const once = (instance) => instance.plays === 1 && instance.end && !instance.rewound;
+    await navigate(cdp, `${origin}/player/?package=audio-overlap`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await physicalClick(cdp, "[data-session-activation] button");
+    await waitFor(cdp, transcript("Overlap done"), 10_000, "The overlapping sounds did not finish");
+    const overlap = await value(
+      cdp,
+      `(() => {
+        const once = ${once};
+        const time = (sample, index) => sample.find(([candidate]) => candidate === index)?.[1];
+        return JSON.stringify({
+          files: window.__instances.slice(0, 3).map((instance) => instance.file),
+          once: window.__instances.slice(0, 3).map(once),
+          both: window.__samples.some((sample) => time(sample, 0) > time(sample, 1) + 0.2),
+          all: window.__samples.some((sample) => [0, 1, 2].every((index) => time(sample, index) !== undefined)),
+          lateSeeked: window.__lateSeeked > 0,
+        });
+      })()`,
+    );
+    assertEqual(
+      overlap,
+      JSON.stringify({
+        files: ["tone.wav", "tone.wav", "chime.wav"],
+        once: [true, true, true],
+        both: true,
+        all: true,
+        lateSeeked: true,
+      }),
+      "Overlapping sounds did not each play out once while the others played",
+    );
+    const loopStart = await value(cdp, "window.__samples.length");
+    await waitFor(cdp, transcript("Loop done"), 15_000, "The sound loop did not finish");
+    // Every finished instance released its element; the loop reused elements instead of creating one per instance.
+    await waitFor(
+      cdp,
+      `window.__instances.length === 33 && [...window.__elements].every((element) => !element.getAttribute('src'))`,
+      5_000,
+      "Finished sounds kept their elements",
+    );
+    const loop = await value(
+      cdp,
+      `JSON.stringify({
+        once: window.__instances.every(${once}),
+        overlapped: window.__samples.slice(${loopStart}).some((sample) => sample.length > 1),
+        reused: window.__elements.size < 30,
+      })`,
+    );
+    assertEqual(
+      loop,
+      JSON.stringify({ once: true, overlapped: true, reused: true }),
+      "The sound loop did not play overlapping instances out once on reused elements",
+    );
+  } finally {
+    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  }
+}
+
+/**
  * The `late-image` package shows an invalid image, hides it, then shows a valid one. The invalid image's response arrives
  * only after that: its late failure belongs to an element no longer on the Stage, so the valid image stays and nothing
  * is reported.
@@ -1467,6 +1613,162 @@ async function debugCountdownScenario(cdp, origin) {
  * the call chain and the timers, and fits a narrow drawer.
  */
 /**
+ * Debug's Storage editor on the `debug-storage-edit` package: a malformed value is refused inline and stores nothing;
+ * an added value is stored and the running session's next load returns it, while the value loaded before stays; it can
+ * be changed to another type and deleted; the editor fits a narrow screen; and after the session ends an edit is
+ * stored for the next Start.
+ */
+async function debugStorageEditScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  const entry = (text) =>
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes(${JSON.stringify(text)}))`;
+  const rows = `[...document.querySelectorAll('[data-debug-storage-row]')].map((row) => [row.querySelector('[data-debug-storage-key]').textContent, row.querySelector('[data-storage-preview]').textContent.trim()])`;
+  const setField = async (selector, text) => {
+    await evaluate(
+      cdp,
+      `const field = document.querySelector(${JSON.stringify(selector)}); field.value = ''; field.dispatchEvent(new Event('input', { bubbles: true }));`,
+    );
+    await physicalClick(cdp, selector);
+    await cdp.call("Input.insertText", { text });
+  };
+  const choose = (type) =>
+    evaluate(
+      cdp,
+      `const select = document.querySelector('[data-storage-editor-type]'); select.value = ${JSON.stringify(type)}; select.dispatchEvent(new Event('change', { bubbles: true }));`,
+    );
+  const save = async (expected, failure) => {
+    await physicalClick(cdp, "[data-storage-editor-save]");
+    await waitFor(cdp, expected, 5_000, failure);
+  };
+  // A closed editor leaves the page before the next control is pressed.
+  const closed = () => waitFor(cdp, `!document.querySelector('[data-storage-editor]')`);
+  await navigate(cdp, `${origin}/player/?dev&package=debug-storage-edit`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(cdp, entry("first 0"));
+  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+  await physicalClick(cdp, '[data-debug-tab="storage"]');
+  await waitFor(
+    cdp,
+    `/Nothing saved yet/.test(document.querySelector('[data-debug-storage]')?.textContent ?? '')`,
+  );
+
+  // A malformed number is refused in the editor, and nothing is stored.
+  await physicalClick(cdp, "[data-debug-storage-add]");
+  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
+  await setField("[data-storage-editor-key]", "k");
+  await choose("integer");
+  await setField("[data-storage-editor-value]", "5x");
+  await save(
+    `/Enter a number/.test(document.querySelector('[data-storage-editor-problem]')?.textContent ?? '')`,
+    "A malformed number was not refused",
+  );
+  assertEqual(
+    await value(cdp, `document.querySelectorAll('[data-debug-storage-row]').length`),
+    0,
+    "A refused value was stored",
+  );
+  // A valid value is stored, and the session's next load returns it; the value loaded before stays.
+  await setField("[data-storage-editor-value]", "5");
+  await save(
+    `!document.querySelector('[data-storage-editor]') && /next load returns it/.test(document.querySelector('[data-debug-storage-saved]')?.textContent ?? '')`,
+    "The added value was not saved for the running session",
+  );
+  await waitFor(cdp, `JSON.stringify(${rows}) === JSON.stringify([['"k"', '5']])`);
+  await closed();
+  assertEqual(
+    await value(cdp, `!!document.querySelector('[data-debug-storage-edited]')`),
+    true,
+    "The session was not marked edited while debugging",
+  );
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, entry("second 5"), 5_000, "The next load did not return the edit");
+  assertEqual(await value(cdp, entry("first 0")), true, "An earlier load changed");
+
+  // Another type, then deletion.
+  await physicalClick(cdp, "[data-debug-storage-edit]");
+  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
+  await choose("text");
+  await setField("[data-storage-editor-value]", "hi");
+  await save(
+    `JSON.stringify(${rows}) === JSON.stringify([['"k"', '"hi"']])`,
+    "The edit to text was not shown",
+  );
+  await closed();
+  await physicalClick(cdp, "[data-debug-storage-delete]");
+  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
+  await save(
+    `document.querySelectorAll('[data-debug-storage-row]').length === 0 && /Deleted "k"; the running session's next load gets its default/.test(document.querySelector('[data-debug-storage-saved]')?.textContent ?? '')`,
+    "The deleted value was still listed",
+  );
+  await closed();
+
+  // The editor fits a narrow, short screen: within the viewport, scrolling to reach Save.
+  await setViewport(cdp, 390, 480);
+  await waitFor(
+    cdp,
+    `document.querySelector('#player-shell')?.dataset.playerHorizontal === 'constrained'`,
+  );
+  if (
+    await value(cdp, `!!document.querySelector('[data-player-top-bar] [data-sidebar="trigger"]')`)
+  )
+    await physicalClick(cdp, '[data-player-top-bar] [data-sidebar="trigger"]');
+  // The drawer may open on its tools menu; Debug then shows its panel.
+  await delay(400);
+  if (await value(cdp, visible('.tools-drawer [data-launcher] button[aria-label="Debug"]')))
+    await physicalClick(cdp, '.tools-drawer [data-launcher] button[aria-label="Debug"]');
+  await waitFor(cdp, `!!document.querySelector('.tools-drawer [data-debug-storage-add]')`);
+  await evaluate(
+    cdp,
+    `document.querySelector('.tools-drawer [data-debug-storage-add]').scrollIntoView()`,
+  );
+  // The drawer may still slide in.
+  await waitFor(cdp, visible(".tools-drawer [data-debug-storage-add]"));
+  await delay(400);
+  await physicalClick(cdp, ".tools-drawer [data-debug-storage-add]");
+  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const box = document.querySelector('[data-storage-editor]').getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight; })()`,
+    ),
+    true,
+    "The editor overflows a narrow, short screen",
+  );
+  await choose("advanced");
+  await evaluate(
+    cdp,
+    `document.querySelector('[data-storage-editor-save]').scrollIntoView({ block: "nearest" })`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const save = document.querySelector('[data-storage-editor-save]').getBoundingClientRect(); return save.top >= 0 && save.bottom <= innerHeight; })()`,
+    ),
+    true,
+    "Save is out of reach on a short screen",
+  );
+  await choose("text");
+  await setField("[data-storage-editor-key]", "after");
+  await setField("[data-storage-editor-value]", "later");
+  await save(
+    `/Saved "after"; the running session's next load returns it/.test(document.querySelector('[data-debug-storage-saved]')?.textContent ?? '')`,
+    "The value added in the narrow layout was not saved",
+  );
+  await closed();
+  // With the session ended, an edit is stored for the next Start.
+  await setViewport(cdp, 1440, 900);
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(cdp, `!document.querySelector('[data-foreground-controls] button')`);
+  await physicalClick(cdp, "[data-debug-storage-delete]");
+  await waitFor(cdp, `!!document.querySelector('[data-storage-editor]')`);
+  await save(
+    `/Deleted "after" for the next Start/.test(document.querySelector('[data-debug-storage-saved]')?.textContent ?? '')`,
+    "An edit after the session ended was not stored for the next Start",
+  );
+}
+
+/**
  * Debug's Storage tab on the `debug-storage` package: it lists the script's saved values in key order with typed
  * previews and the saved photo, once per photo with the keys that use it; a member list expands to the shared photo;
  * a later save updates it; Debug off hides it; and it fits the narrow drawer.
@@ -1557,7 +1859,18 @@ async function debugStorageScenario(cdp, origin, profile) {
   );
   // A later save shows at once; the photo row's new reference, out of view, is not read until it comes into view.
   await setViewport(cdp, 1440, 480);
+  // The Player lays out the new size a moment later; a physical click needs the button on screen.
+  await waitFor(
+    cdp,
+    `(() => { const rect = document.querySelector('[data-foreground-controls] button')?.getBoundingClientRect();
+      return !!rect && rect.top >= 0 && rect.bottom <= innerHeight; })()`,
+    5_000,
+    "The button did not come into view at the short height",
+  );
   await evaluate(cdp, `document.querySelector('[data-debug-active]').scrollIntoView()`);
+  // The resized Player settles before its button is pressed.
+  await waitFor(cdp, visible("[data-foreground-controls] button"));
+  await delay(300);
   await physicalClick(cdp, "[data-foreground-controls] button");
   await waitFor(
     cdp,
@@ -1640,6 +1953,55 @@ async function debugNowScenario(cdp, origin) {
     "Domme/Domme43.jpg",
     "Now did not name the authored image path",
   );
+  // The debug export from the Debug panel reports what Now shows: the state always, the path with session text only.
+  const exportPreview = async (categories = []) => {
+    await physicalClick(cdp, "[data-debug-export-open]");
+    await waitFor(cdp, `!!document.querySelector('[data-debug-export-download]')`);
+    const into = (selector) =>
+      evaluate(
+        cdp,
+        `document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: 'center', behavior: 'instant' })`,
+      );
+    for (const category of categories) {
+      await into(`[data-debug-export-category="${category}"]`);
+      await physicalClick(cdp, `[data-debug-export-category="${category}"] [role=switch]`);
+      await waitFor(
+        cdp,
+        `document.querySelector('[data-debug-export-category="${category}"] [role=switch]')?.getAttribute('aria-checked') === 'true' && !!document.querySelector('[data-debug-export-download]')`,
+      );
+    }
+    await into("[data-debug-export-preview-toggle]");
+    await physicalClick(cdp, "[data-debug-export-preview-toggle]");
+    await waitFor(cdp, `!!document.querySelector('[data-debug-export-preview]')`);
+    const preview = JSON.parse(
+      await value(cdp, `document.querySelector('[data-debug-export-preview]').textContent`),
+    );
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+      });
+    await waitFor(
+      cdp,
+      `!document.querySelector('[data-debug-export]') && document.activeElement?.matches('[data-debug-export-open]')`,
+      5_000,
+      "Closing the debug export did not return to the Debug panel",
+    );
+    return preview;
+  };
+  const structural = await exportPreview();
+  assertEqual(
+    JSON.stringify(structural.media.stage),
+    JSON.stringify({ status: "unresolved" }),
+    "The debug export's Stage state",
+  );
+  assertEqual(
+    (await exportPreview(["sessionText"])).media.stage.path,
+    "Domme/Domme43.jpg",
+    "The debug export's Stage path with session text",
+  );
   assertEqual(
     await value(cdp, text("[data-debug-now-waiting]")),
     "Button · Domme3/spanking.tease:3",
@@ -1675,6 +2037,11 @@ async function debugNowScenario(cdp, origin) {
     "Now did not list the hidden timer",
   );
   await next("failed", "The undecodable image was not a load failure");
+  assertEqual(
+    (await exportPreview()).media.stage.status,
+    "failed",
+    "The debug export did not report the load failure",
+  );
   await next("hidden", "hideImage did not hide the Stage image");
   await next("displayed", "The valid image was not displayed");
   assertEqual(
@@ -2334,9 +2701,10 @@ async function savedDataExportScenario(cdp, origin, profile) {
     await physicalClick(cdp, "[data-export-saved-data]");
     await waitFor(
       cdp,
-      `document.querySelector('[data-export-summary]')?.textContent.replace(/\\s+/g, ' ').trim() === '2 saved values · 1 photo'`,
+      `document.querySelector('[data-export-script="development-package:saved-photo"]')?.textContent.replace(/\\s+/g, ' ').includes('2 values · 1 photo') === true &&
+        !!document.querySelector('[data-export-download]')`,
       8_000,
-      "The export did not count the saved values and only the saved photo",
+      "The export did not list the script with its saved values and only its saved photo",
     );
   };
   const closeDialog = async (selector) => {
@@ -2361,15 +2729,28 @@ async function savedDataExportScenario(cdp, origin, profile) {
     true,
     "Clearing was offered during the session",
   );
+  // Every script this browser keeps is listed and ticked; Select none leaves nothing to download.
+  const listedScripts = await value(
+    cdp,
+    `[...document.querySelectorAll('[data-export-script]')].map((row) => [row.dataset.exportScript, row.querySelector('[role=checkbox]').getAttribute('aria-checked')])`,
+  );
+  assertEqual(
+    listedScripts.length >= 2 && listedScripts.every(([, checked]) => checked === "true"),
+    true,
+    `Every script with saved data is listed and ticked: ${JSON.stringify(listedScripts)}`,
+  );
+  await physicalClick(cdp, "[data-export-none]");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-export-download]') && document.body.innerText.includes('Tick at least one script')`,
+  );
+  await physicalClick(cdp, "[data-export-all]");
+  await waitFor(cdp, `!!document.querySelector('[data-export-download]')`);
   const download = await value(
     cdp,
     `(() => { const link = document.querySelector('[data-export-download]'); return { href: link.href, name: link.download }; })()`,
   );
-  assertEqual(
-    download.name,
-    "development-package-saved-photo-saved-data.teasestorage.json.gz",
-    "Export file name",
-  );
+  assertEqual(download.name, "teasescript-saved-data.teasestorage.json.gz", "Export file name");
   await physicalClick(cdp, "[data-export-download]");
   let downloaded = null;
   const deadline = Date.now() + 8_000;
@@ -2381,18 +2762,27 @@ async function savedDataExportScenario(cdp, origin, profile) {
   if (downloaded === null) throw new Error("The export file was not downloaded");
   const document = JSON.parse(gunzipSync(downloaded).toString("utf8"));
   assertEqual(document.format, "teasescript-script-storage", "Downloaded export format");
-  assertEqual(document.scope, "development-package:saved-photo", "Downloaded export scope");
   assertEqual(
-    JSON.stringify(document.entries.map((entry) => entry.key).sort()),
+    JSON.stringify(document.scripts.map((script) => script.scope)),
+    JSON.stringify(listedScripts.map(([scope]) => scope)),
+    "Downloaded export scripts",
+  );
+  const savedPhotoScript = document.scripts.find(
+    (script) => script.scope === "development-package:saved-photo",
+  );
+  assertEqual(savedPhotoScript.name, "Saved photo", "The script's title names it");
+  assertEqual(
+    JSON.stringify(savedPhotoScript.entries.map((entry) => entry.key).sort()),
     JSON.stringify(["photo", "score"]),
     "Downloaded export values",
   );
-  assertEqual(document.images.length, 1, "Downloaded export photos");
+  const savedPhotoImage = document.images.find(
+    (image) =>
+      image.reference === savedPhotoScript.entries.find((entry) => entry.key === "photo").value,
+  );
   assertEqual(
-    Buffer.from(document.images[0].data, "base64url").equals(photoBytes) &&
-      document.images[0].byteLength === photoBytes.length &&
-      document.entries.find((entry) => entry.key === "photo").value ===
-        document.images[0].reference,
+    Buffer.from(savedPhotoImage.data, "base64url").equals(photoBytes) &&
+      savedPhotoImage.byteLength === photoBytes.length,
     true,
     "The downloaded photo is not the saved photo's exact bytes",
   );
@@ -2495,7 +2885,8 @@ async function savedDataExportScenario(cdp, origin, profile) {
 
 // Imports the export into a fresh browser profile, as on another device: a file chosen and reviewed, whose Cancel keeps
 // the running session; then a dropped file whose confirmation ends that session, after which Start shows the saved photo
-// again; pasted text into a reloaded Player; and text of this script refused by another script.
+// again with every other script of the bundle in its own scope; pasted text into a reloaded Player; and, while another
+// script runs, only the ticked script of the bundle replaced.
 async function savedDataImportScenario(debugPort, origin, exported) {
   const browser = await connectCdp(
     (await (await fetch(`http://127.0.0.1:${debugPort}/json/version`)).json()).webSocketDebuggerUrl,
@@ -2533,14 +2924,13 @@ async function savedDataImportScenario(debugPort, origin, exported) {
         });
       await waitFor(cdp, `!document.querySelector(${JSON.stringify(selector)})`);
     };
-    const summary = `document.querySelector('[data-import-summary]')?.textContent.replace(/\\s+/g, ' ').trim()`;
 
     await navigate(cdp, `${origin}/player/?package=saved-photo`);
     await waitFor(cdp, `!!document.querySelector('${start}')`);
     assertEqual(
       await value(
         cdp,
-        `Object.keys(localStorage).filter((name) => name.includes('saved-photo')).length`,
+        `Object.keys(localStorage).filter((name) => name.includes('saved-photo') && !name.startsWith('player-storage-name:')).length`,
       ),
       0,
       "The import profile starts without saved data",
@@ -2567,10 +2957,25 @@ async function savedDataImportScenario(debugPort, origin, exported) {
       8_000,
       "The chosen file was not reviewed",
     );
+    // Every script of the bundle is listed, ticked, and new here; the shown one is marked.
+    const bundledScopes = JSON.parse(
+      gunzipSync(await readFile(exported.file)).toString("utf8"),
+    ).scripts.map((script) => script.scope);
     assertEqual(
-      await value(cdp, summary),
-      "Imports 2 saved values · 1 photo, replacing 0 saved values.",
-      "Import review summary",
+      await value(
+        cdp,
+        `JSON.stringify([...document.querySelectorAll('[data-import-script]')].map((row) => [row.dataset.importScript, row.querySelector('[role=checkbox]').getAttribute('aria-checked'), row.querySelector('[data-import-status]').textContent.trim()]))`,
+      ),
+      JSON.stringify(bundledScopes.map((scope) => [scope, "true", "New"])),
+      "Import review lists the bundle's scripts",
+    );
+    assertEqual(
+      await value(
+        cdp,
+        `document.querySelector('[data-import-script="development-package:saved-photo"]').textContent.includes('This script')`,
+      ),
+      true,
+      "The shown script is marked",
     );
     assertEqual(
       await value(cdp, `document.querySelector('[data-import-confirm]').textContent.trim()`),
@@ -2585,7 +2990,8 @@ async function savedDataImportScenario(debugPort, origin, exported) {
     assertEqual(
       await value(
         cdp,
-        `[...document.querySelectorAll('[data-saved-data-import] button:not([data-slot="dialog-close"])')].filter((button) => button.offsetParent && button.getBoundingClientRect().height < 44).map((button) => button.textContent.trim() + ' ' + button.getBoundingClientRect().height).join('; ')`,
+        // A checkbox's touch target is its whole labelled row.
+        `[...document.querySelectorAll('[data-saved-data-import] button:not([data-slot="dialog-close"]):not([role=checkbox]), [data-saved-data-import] [data-import-script]')].filter((control) => control.offsetParent && control.getBoundingClientRect().height < 44).map((control) => control.textContent.trim() + ' ' + control.getBoundingClientRect().height).join('; ')`,
       ),
       "",
       "The import review's controls are not touch-sized",
@@ -2602,7 +3008,7 @@ async function savedDataImportScenario(debugPort, origin, exported) {
     assertEqual(
       await value(
         cdp,
-        `Object.keys(localStorage).filter((name) => name.includes('saved-photo')).length`,
+        `Object.keys(localStorage).filter((name) => name.includes('saved-photo') && !name.startsWith('player-storage-name:')).length`,
       ),
       0,
       "Cancel changed the saved data",
@@ -2653,10 +3059,14 @@ async function savedDataImportScenario(debugPort, origin, exported) {
       8_000,
       "The dropped file was not reviewed",
     );
+    await evaluate(
+      cdp,
+      `document.querySelector('[data-import-confirm]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
+    );
     await physicalClick(cdp, "[data-import-confirm]");
     await waitFor(
       cdp,
-      text("Saved data imported. Start to use it."),
+      text("Saved data imported. Each script uses it from its next Start."),
       8_000,
       "The import did not finish",
     );
@@ -2712,13 +3122,26 @@ async function savedDataImportScenario(debugPort, origin, exported) {
       "Without a session, confirming only replaces the data",
     );
     await physicalClick(cdp, "[data-import-confirm]");
-    await waitFor(cdp, text("Saved data imported. Start to use it."));
+    await waitFor(cdp, text("Saved data imported. Each script uses it from its next Start."));
     await escape("[data-saved-data-import]");
     await escape("[data-player-settings]");
+    // Every other script of the bundle went into its own saved data.
+    assertEqual(
+      await value(
+        cdp,
+        `${JSON.stringify(bundledScopes)}.every((scope) => localStorage.getItem('player-storage-head:' + JSON.stringify(scope)) !== null)`,
+      ),
+      true,
+      "Every script of the bundle was imported into its own scope",
+    );
 
-    // Another script refuses this script's data and keeps its own.
+    // While another script runs, ticking only one script of the bundle replaces just that one and keeps the session.
+    const heads = `JSON.stringify(Object.fromEntries(${JSON.stringify(bundledScopes)}.map((scope) => [scope, localStorage.getItem('player-storage-head:' + JSON.stringify(scope))])))`;
+    const before = JSON.parse(await value(cdp, heads));
     await navigate(cdp, `${origin}/player/?package=pictures`);
     await waitFor(cdp, `!!document.querySelector('${start}')`);
+    await physicalClick(cdp, start);
+    await waitFor(cdp, visible("[data-composer-attach]"), 8_000, "The other script did not start");
     await openImport();
     await physicalClick(cdp, '[data-import-tab="text"]');
     await evaluate(
@@ -2730,17 +3153,60 @@ async function savedDataImportScenario(debugPort, origin, exported) {
     await physicalClick(cdp, "[data-import-review]");
     await waitFor(
       cdp,
-      `document.querySelector('[data-import-problem]')?.textContent.includes('belongs to another script') === true`,
+      `!!document.querySelector('[data-import-confirm]')`,
       8_000,
-      "Another script's data was not refused",
+      "The text was not reviewed",
     );
+    assertEqual(
+      await value(cdp, `document.body.innerText.includes('This script')`),
+      false,
+      "The running script is not in the bundle",
+    );
+    for (const scope of bundledScopes)
+      if (scope !== "development-package:saved-photo") {
+        const box = `[data-import-script="${scope}"] [role=checkbox]`;
+        await evaluate(
+          cdp,
+          `document.querySelector(${JSON.stringify(box)}).scrollIntoView({ block: 'center', behavior: 'instant' })`,
+        );
+        await physicalClick(cdp, box);
+        await waitFor(
+          cdp,
+          `document.querySelector(${JSON.stringify(box)}).getAttribute('aria-checked') === 'false'`,
+        );
+      }
+    assertEqual(
+      await value(cdp, `document.querySelector('[data-import-confirm]').textContent.trim()`),
+      "Replace saved data",
+      "Importing scripts other than the running one keeps its session",
+    );
+    await evaluate(
+      cdp,
+      `document.querySelector('[data-import-confirm]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
+    );
+    await physicalClick(cdp, "[data-import-confirm]");
+    await waitFor(cdp, text("Saved data imported. Each script uses it from its next Start."));
+    await escape("[data-saved-data-import]");
+    await escape("[data-player-settings]");
+    assertEqual(
+      await value(cdp, visible("[data-composer-attach]")),
+      true,
+      "The running script's session ended",
+    );
+    const after = JSON.parse(await value(cdp, heads));
+    for (const scope of bundledScopes)
+      assertEqual(
+        after[scope] === before[scope],
+        scope !== "development-package:saved-photo",
+        `Only the ticked script was replaced (${scope})`,
+      );
     assertEqual(
       await value(
         cdp,
-        `Object.keys(localStorage).some((name) => name.includes('development-package:pictures'))`,
+        `Object.keys(localStorage).some((name) => name.includes('development-package:pictures') && !name.startsWith('player-storage-name:'))`,
       ),
       false,
-      "The refused import changed the other script's data",
+      "The running script's saved data was changed",
     );
   } finally {
     cdp?.close();
@@ -2749,6 +3215,267 @@ async function savedDataImportScenario(debugPort, origin, exported) {
     });
     browser.close();
   }
+}
+
+// A script error in the default build, without Debug: the failure card names the error, and its debug export holds no
+// personal content until the player chooses it; with replay data chosen, the offline tool reproduces the failure.
+async function debugExportScenario(cdp, origin, profile) {
+  const downloads = join(profile, "debug-downloads");
+  await mkdir(downloads, { recursive: true });
+  await cdp.call("Page.setDownloadBehavior", { behavior: "allow", downloadPath: downloads });
+  const picture = join(profile, "debug-picture.png");
+  const pictureBytes = solidPng(20, 10, [40, 90, 200]);
+  await writeFile(picture, pictureBytes);
+  const answer = "Ada-private-answer";
+  await setViewport(cdp, 1440, 900);
+  await navigate(cdp, `${origin}/player/?package=debug-failure`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-composer-input]')?.placeholder === 'Your name'`,
+  );
+  await evaluate(cdp, `document.querySelector('[data-composer-input]').focus()`);
+  await cdp.call("Input.insertText", { text: answer });
+  await physicalClick(cdp, ".composer-send");
+  await waitFor(
+    cdp,
+    visible("[data-composer-attach]"),
+    8_000,
+    "The image request offered no paperclip",
+  );
+  await openPicker(cdp);
+  await setInputFiles(cdp, "[data-composer-file]", [picture]);
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-runtime-failure]')`,
+    8_000,
+    "No failure card",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.querySelector('[data-runtime-failure-location]').textContent.trim()`,
+    ),
+    "TSR036 · main.tease, line 10",
+    "The failure card names the error and where it happened",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `document.body.innerText.includes('The session stopped because of an error.')`,
+    ),
+    true,
+    "The failure is said",
+  );
+
+  const download = async (expectedName) => {
+    const before = new Set(await readdir(downloads));
+    // The dialog scrolls when its content is taller than the screen.
+    await evaluate(
+      cdp,
+      `document.querySelector('[data-debug-export-download]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
+    );
+    await physicalClick(cdp, "[data-debug-export-download]");
+    const deadline = Date.now() + 8_000;
+    while (Date.now() < deadline) {
+      const added = (await readdir(downloads)).filter(
+        (name) => !before.has(name) && !name.endsWith(".crdownload"),
+      );
+      if (added.length === 1) {
+        assertEqual(added[0], expectedName, "Debug export file name");
+        const path = join(downloads, added[0]);
+        const bytes = await readFile(path);
+        await rm(path);
+        return bytes;
+      }
+      await delay(50);
+    }
+    throw new Error("The debug export was not downloaded");
+  };
+  const fileName = "development-package-debug-failure-debug.teasedebug.json.gz";
+  const ready = `!!document.querySelector('[data-debug-export-download]')`;
+
+  // Nothing personal is chosen at first.
+  await physicalClick(cdp, "[data-runtime-failure-export]");
+  await waitFor(cdp, ready, 8_000, "The debug export was not prepared");
+  assertEqual(
+    await value(
+      cdp,
+      `[...document.querySelectorAll('[data-debug-export] [role=switch]')].every((item) => item.getAttribute('aria-checked') === 'false')`,
+    ),
+    true,
+    "Personal content is off by default",
+  );
+  const structural = gunzipSync(await download(fileName)).toString("utf8");
+  assertEqual(structural.includes(answer), false, "The default export contains the answer");
+  assertEqual(
+    structural.includes("captured-media:"),
+    false,
+    "The default export contains a photo reference",
+  );
+  assertEqual(JSON.parse(structural).incident.code, "TSR036", "The default export names the error");
+
+  // With replay data and its prerequisites, the offline tool reproduces the failure; the chosen photo is included.
+  for (const category of ["savedValues", "answers", "sessionText", "replay", "photos"]) {
+    await evaluate(
+      cdp,
+      `document.querySelector('[data-debug-export-category="${category}"]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
+    );
+    await physicalClick(cdp, `[data-debug-export-category="${category}"] [role=switch]`);
+    await waitFor(
+      cdp,
+      `document.querySelector('[data-debug-export-category="${category}"] [role=switch]')?.getAttribute('aria-checked') === 'true'`,
+    );
+  }
+  // The last choice prepares the file again; Download is offered once that preparation is done.
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-debug-export-photo] [role=checkbox]')?.getAttribute('aria-checked') === 'true' &&
+      !!document.querySelector('[data-debug-export-download]') &&
+      document.querySelector('[data-debug-export-summary]')?.textContent.includes('replay the error exactly')`,
+    8_000,
+    "Replay data and the photo were not prepared",
+  );
+  const replayable = join(downloads, "replayable.teasedebug.json.gz");
+  await writeFile(replayable, await download(fileName));
+  const replayed = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL("./debug-export.mjs", import.meta.url)), "replay", replayable],
+    { encoding: "utf8" },
+  );
+  assertEqual(
+    replayed.status,
+    0,
+    `The offline replay failed: ${replayed.stdout}${replayed.stderr}`,
+  );
+  assertEqual(
+    replayed.stdout.startsWith("reproduced engine failure TSR036 at main.tease:10:"),
+    true,
+    "The offline replay",
+  );
+  const document = JSON.parse(gunzipSync(await readFile(replayable)).toString("utf8"));
+  assertEqual(document.photos.length, 1, "The chosen photo is included");
+  assertEqual(
+    Buffer.from(document.photos[0].data, "base64url").equals(pictureBytes),
+    true,
+    "The photo's original bytes",
+  );
+
+  // The dialog fits a narrow screen with touch-sized rows.
+  await cdp.call("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27,
+  });
+  await cdp.call("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "Escape",
+    code: "Escape",
+    windowsVirtualKeyCode: 27,
+  });
+  await waitFor(cdp, `!document.querySelector('[data-debug-export]')`);
+  await setViewport(cdp, 390, 844);
+  // At the transcript's end, its last message is clear of the failure card above the composer.
+  await waitFor(
+    cdp,
+    `(() => {
+      const scroller = document.querySelector('.transcript-scroll');
+      scroller.scrollTop = scroller.scrollHeight;
+      const entries = document.querySelectorAll('.transcript-entry');
+      const last = entries[entries.length - 1].getBoundingClientRect();
+      const card = document.querySelector('[data-runtime-failure]').getBoundingClientRect();
+      return last.bottom <= card.top && document.getAnimations().every((animation) => animation.playState !== 'running');
+    })()`,
+    8_000,
+    "The failure card covers the transcript's last message",
+  );
+  await physicalClick(cdp, "[data-runtime-failure-export]");
+  await waitFor(cdp, ready);
+  await waitFor(
+    cdp,
+    `document.getAnimations().every((animation) => animation.playState !== 'running')`,
+  );
+  const fit = await value(
+    cdp,
+    `(() => {
+      const dialog = document.querySelector('[data-debug-export]').getBoundingClientRect();
+      const problems = [];
+      if (dialog.left < 0 || dialog.right > innerWidth || dialog.top < 0 || dialog.bottom > innerHeight) problems.push('dialog outside the screen');
+      for (const row of document.querySelectorAll('[data-debug-export-category]'))
+        if (row.getBoundingClientRect().height < 44) problems.push(row.dataset.debugExportCategory + ' row');
+      return problems.join('; ') || 'fits';
+    })()`,
+  );
+  assertEqual(fit, "fits", "The debug export dialog on a narrow screen");
+  const escape = async () => {
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+      });
+  };
+  await escape();
+  await waitFor(cdp, `!document.querySelector('[data-debug-export]')`);
+
+  // From Settings in the narrow tools drawer, the dialog is above Settings and takes input; closing it returns there.
+  await physicalClick(cdp, "[data-player-top-bar] [data-sidebar=trigger]");
+  const settled = `document.getAnimations().every((animation) => animation.playState !== 'running' || animation.effect?.getComputedTiming().iterations === Infinity)`;
+  await waitFor(
+    cdp,
+    `(() => {
+      const rect = document.querySelector('[data-settings-trigger]')?.getBoundingClientRect();
+      return !!rect && rect.width > 0 && rect.left >= 0 && rect.right <= innerWidth && ${settled};
+    })()`,
+  );
+  await physicalClick(cdp, "[data-settings-trigger]");
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-player-setting="debug-export"]') && ${settled}`,
+  );
+  await evaluate(
+    cdp,
+    `document.querySelector('[data-player-setting="debug-export"]').scrollIntoView({ block: 'center', behavior: 'instant' })`,
+  );
+  await physicalClick(cdp, '[data-player-setting="debug-export"]');
+  await waitFor(
+    cdp,
+    `${ready} && ${settled}`,
+    8_000,
+    "The debug export did not open from Settings",
+  );
+  const row = '[data-debug-export-category="player"]';
+  assertEqual(
+    await value(
+      cdp,
+      `(() => {
+        const rect = document.querySelector('${row}').getBoundingClientRect();
+        return !!document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-debug-export]');
+      })()`,
+    ),
+    true,
+    "The debug export opened from Settings is above Settings",
+  );
+  await physicalClick(cdp, `${row} [role=switch]`);
+  await waitFor(
+    cdp,
+    `document.querySelector('${row} [role=switch]')?.getAttribute('aria-checked') === 'true'`,
+    8_000,
+    "A choice in the debug export opened from Settings did not take input",
+  );
+  await escape();
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-debug-export]') && document.activeElement?.matches('[data-player-setting="debug-export"]')`,
+    8_000,
+    "Closing the debug export did not return to Settings",
+  );
+  await escape();
+  await waitFor(cdp, `!document.querySelector('[data-player-settings]')`);
+  await setViewport(cdp, 1440, 900);
 }
 
 async function askImageCameraScenario(cdp, origin, profile) {
@@ -3053,6 +3780,211 @@ async function permanentButtonsScenario(cdp, origin) {
   await waitFor(cdp, `${rail} === ""`, 8_000, "exit did not remove the persistent button");
 }
 
+/**
+ * `askForm` on a phone: 43 toggles wrap and scroll inside the form, so its submit button stays on screen above the
+ * composer; a toggle is a pressed button with a polite status count, a cycle steps through authored colours, and
+ * submitting adds one summary line.
+ */
+async function formsScenario(cdp, origin) {
+  await setViewport(cdp, 390, 700);
+  await navigate(cdp, `${origin}/player/?package=forms`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const fields = `[...document.querySelectorAll('[data-form-fields] button')]`;
+  const status = `document.querySelector('[data-form-controls] [role=status]')?.textContent.trim()`;
+  await waitFor(cdp, `${fields}.length === 43`, 15_000, "The 43 toggles did not appear");
+  assertEqual(await value(cdp, status), "1 of 43 selected", "The status does not count the start");
+  // Every control keeps its touch height; following the latest content shows the submit button above the composer
+  // while the fields scroll.
+  assertEqual(
+    await value(cdp, `${fields}.every((button) => button.getBoundingClientRect().height >= 44)`),
+    true,
+    "A toggle is shorter than a touch target",
+  );
+  const submit = `[...document.querySelectorAll('[data-form-actions] button')].find((button) => button.textContent.trim() === "OK")`;
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const rect = ${submit}.getBoundingClientRect(); const composer = document.querySelector('[data-composer-input]').getBoundingClientRect(); return rect.top >= 0 && rect.bottom <= composer.top; })()`,
+    ),
+    true,
+    "The submit button is not visible above the composer",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const viewport = document.querySelector('[data-form-fields] [data-reka-scroll-area-viewport]'); return viewport.scrollHeight > viewport.clientHeight; })()`,
+    ),
+    true,
+    "The fields do not scroll inside the form",
+  );
+  // The last toggle scrolls into reach and turns on.
+  await evaluate(cdp, `${fields}.at(-1).scrollIntoView({ block: "center" })`);
+  await evaluate(cdp, `${fields}.at(-1).setAttribute("data-smoke-last", "")`);
+  await physicalClick(cdp, "[data-smoke-last]");
+  await waitFor(cdp, `${status} === "2 of 43 selected"`, 8_000, "The toggle did not turn on");
+  assertEqual(
+    await value(cdp, `document.querySelector('[data-smoke-last]').getAttribute('aria-pressed')`),
+    "true",
+    "The toggle is not pressed",
+  );
+  await evaluate(cdp, `${submit}.click()`);
+  await waitFor(cdp, `document.body.innerText.includes("2 of 43 selected")`);
+  await waitFor(cdp, `${fields}.length === 3`, 15_000, "The second form did not appear");
+  assertEqual(
+    await value(
+      cdp,
+      `[...document.querySelectorAll('[data-form-actions] button')].map((button) => button.textContent.trim()).join("|")`,
+    ),
+    "Continue|Skip",
+    "The form written with cancel: shows no cancel button",
+  );
+  const intensity = `${fields}.find((button) => button.textContent.includes("Intensity"))`;
+  const fill = `getComputedStyle(${intensity}).backgroundImage`;
+  const low = await value(cdp, fill);
+  await evaluate(cdp, `${intensity}.click()`);
+  await waitFor(
+    cdp,
+    `${intensity}.textContent.includes("Medium")`,
+    8_000,
+    "The cycle did not step",
+  );
+  assertEqual((await value(cdp, fill)) !== low, true, "The cycle did not take its option's colour");
+  await evaluate(
+    cdp,
+    `[...document.querySelectorAll('[data-form-actions] button')].find((button) => button.textContent.trim() === "Continue").click()`,
+  );
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes("Rope: true. Access: false. Intensity: Medium, pace Slow.")`,
+    15_000,
+    "The answers did not reach the script",
+  );
+}
+
+/**
+ * Typed `askForm` fields in the composer: a field opens with its value selected, so typing replaces it; a refused
+ * answer stays with the composer notice; Enter commits and returns focus to the field; a date field uses the date
+ * control; and submitting takes the text still being typed.
+ */
+async function formFieldsScenario(cdp, origin) {
+  await setViewport(cdp, 1100, 800);
+  await navigate(cdp, `${origin}/player/?package=forms-typed`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const field = (id) => `document.querySelector('[data-form-field="${id}"]')`;
+  const composer = `document.querySelector('[data-composer-input]')`;
+  const pressEnter = async () => {
+    for (const type of ["keyDown", "keyUp"])
+      await cdp.call("Input.dispatchKeyEvent", {
+        type,
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+      });
+  };
+  await waitFor(cdp, `!!${field("impact")}`, 15_000, "The typed form did not appear");
+  await physicalClick(cdp, '[data-form-field="impact"]');
+  await waitFor(
+    cdp,
+    `document.activeElement === ${composer} && ${composer}.value === "5" && ${composer}.selectionEnd === 1`,
+    8_000,
+    "The field did not open in the composer with its value selected",
+  );
+  await cdp.call("Input.insertText", { text: "11" });
+  await pressEnter();
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes("That is wrong. Impact must be from 1 to 10.")`,
+    8_000,
+    "An answer outside the bounds was not refused",
+  );
+  assertEqual(await value(cdp, `${composer}.value`), "11", "The refused text was not kept");
+  await evaluate(cdp, `${composer}.select()`);
+  await cdp.call("Input.insertText", { text: "7" });
+  await pressEnter();
+  await waitFor(
+    cdp,
+    `${field("impact")}.textContent.trim() === "Impact: 7" && document.activeElement === ${field("impact")}`,
+    8_000,
+    "Enter did not commit the answer and return focus to the field",
+  );
+  await physicalClick(cdp, '[data-form-field="day"]');
+  await waitFor(
+    cdp,
+    `document.activeElement?.type === "date"`,
+    8_000,
+    "The date field did not use the date control",
+  );
+  await evaluate(
+    cdp,
+    `const input = document.activeElement; input.value = "2026-10-05"; input.dispatchEvent(new Event("input", { bubbles: true }))`,
+  );
+  await pressEnter();
+  await waitFor(
+    cdp,
+    `!${field("day")}.textContent.includes("Set…")`,
+    8_000,
+    "The date was not committed",
+  );
+  await physicalClick(cdp, '[data-form-field="weight"]');
+  await waitFor(cdp, `document.activeElement === ${composer}`);
+  await cdp.call("Input.insertText", { text: "2.5" });
+  const pressButton = (scope, text) =>
+    evaluate(
+      cdp,
+      `[...document.querySelectorAll(${JSON.stringify(scope)})].find((button) => button.textContent.trim() === ${JSON.stringify(text)}).click()`,
+    );
+  const buttonShown = (scope, text) =>
+    `[...document.querySelectorAll(${JSON.stringify(scope)})].some((button) => button.textContent.trim() === ${JSON.stringify(text)})`;
+  const pressPermanentButton = async (text) => {
+    const id = await value(
+      cdp,
+      `[...document.querySelectorAll('[data-permanent-button]')].find((button) => button.textContent.trim() === ${JSON.stringify(text)})?.dataset.permanentButton`,
+    );
+    await physicalClick(cdp, `[data-permanent-button="${id}"]`);
+  };
+  // Opening another field commits this one; the text typed for that one survives a block that interrupts the form,
+  // also one that asks a form of its own.
+  await physicalClick(cdp, '[data-form-field="name"]');
+  await waitFor(cdp, `${composer}.value === "Ada" && document.activeElement === ${composer}`);
+  await cdp.call("Input.insertText", { text: "Bea" });
+  // Sooner than the form takes the text from the composer.
+  await delay(100);
+  await pressPermanentButton("Check");
+  // The block's form has a typed field of the same name, submitted while it is edited.
+  await waitFor(cdp, `!!${field("ready")} && ${buttonShown("[data-form-actions] button", "OK")}`);
+  await physicalClick(cdp, '[data-form-field="name"]');
+  await waitFor(cdp, `${composer}.value === "Inner" && document.activeElement === ${composer}`);
+  await cdp.call("Input.insertText", { text: "Zed" });
+  await pressButton("[data-form-actions] button", "OK");
+  await waitFor(
+    cdp,
+    `!${field("ready")} && !!${field("name")} && ${composer}.value === "Bea" && document.activeElement === ${composer}`,
+    8_000,
+    "The text being typed was lost, or not focused, after a block asked a form",
+  );
+  await evaluate(cdp, `${composer}.select()`);
+  await cdp.call("Input.insertText", { text: "Cy" });
+  await delay(100);
+  await pressPermanentButton("Pause");
+  await waitFor(cdp, buttonShown("button", "Resume"));
+  await pressButton("button", "Resume");
+  await waitFor(
+    cdp,
+    `!!${field("name")} && ${composer}.value === "Cy"`,
+    8_000,
+    "The text being typed was lost after the interruption",
+  );
+  await pressButton("[data-form-actions] button", "Continue");
+  await waitFor(
+    cdp,
+    `document.body.innerText.includes("Impact 7, weight 2.5, Cy,")`,
+    15_000,
+    "Submitting did not take the text being typed",
+  );
+}
+
 async function click(cdp, selector) {
   await evaluate(cdp, `document.querySelector(${JSON.stringify(selector)}).click()`);
 }
@@ -3064,6 +3996,220 @@ async function setViewport(cdp, width, height) {
     deviceScaleFactor: 1,
     mobile: width < 600,
   });
+}
+
+/**
+ * The spill store of Debug's rewind history in the browser's IndexedDB: it keeps and deletes rows, and a sweep removes
+ * the history databases of pages that ended without deleting theirs and, once its page closes it, a live one, but never
+ * its own page's, a live database's rows meanwhile, or a database it did not name.
+ */
+async function debugHistoryStorageScenario(cdp, origin) {
+  await navigate(cdp, `${origin}/`);
+  const result = await evaluate(
+    cdp,
+    `return (async () => {
+      const spill = await import(${JSON.stringify(`${origin}${DEBUG_HISTORY_MODULE_URL}`)});
+      const prefix = "teasescript-debug-history-";
+      const names = async () =>
+        (await indexedDB.databases()).map((info) => info.name).filter((name) => name.startsWith(prefix));
+      const open = (name) =>
+        new Promise((resolve, reject) => {
+          const request = indexedDB.open(name, 1);
+          request.onupgradeneeded = () => request.result.createObjectStore("snapshots");
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+      const pause = () => new Promise((resolve) => setTimeout(resolve, 300));
+      const crashed = prefix + crypto.randomUUID();
+      (await open(crashed)).close();
+      const live = prefix + crypto.randomUUID();
+      const liveConnection = await open(live);
+      const unnamed = prefix + "not-a-history";
+      (await open(unnamed)).close();
+      // Earlier scenarios left Player pages without unmounting them, which leaves their histories as a crash does.
+      const before = await names();
+      const store = await spill.openDebugHistorySpill();
+      await store.put(1, "one");
+      await store.put(2, "two");
+      await store.delete([1]);
+      const rows = [(await store.get(1)) ?? null, await store.get(2)];
+      const own = (await names()).filter((name) => !before.includes(name));
+      await spill.sweepDebugHistories();
+      await pause();
+      const afterSweep = await names();
+      const liveWrites = await new Promise((resolve) => {
+        const transaction = liveConnection.transaction("snapshots", "readwrite");
+        transaction.objectStore("snapshots").put("kept", 1);
+        transaction.oncomplete = () => resolve(true);
+        transaction.onerror = transaction.onabort = () => resolve(false);
+      });
+      const ownReads = (await store.get(2)) === "two";
+      liveConnection.close();
+      await pause();
+      const afterLiveClosed = await names();
+      await store.destroy();
+      const afterDestroy = await names();
+      indexedDB.deleteDatabase(unnamed);
+      return { rows, own, crashed, live, unnamed, afterSweep, liveWrites, ownReads, afterLiveClosed, afterDestroy };
+    })()`,
+  );
+  const { rows, own, crashed, live, unnamed } = result;
+  const sorted = (names) => [...names].sort();
+  if (
+    JSON.stringify(rows) !== JSON.stringify([null, "two"]) ||
+    own.length !== 1 ||
+    JSON.stringify(sorted(result.afterSweep)) !== JSON.stringify(sorted([own[0], live, unnamed])) ||
+    !result.liveWrites ||
+    !result.ownReads ||
+    JSON.stringify(sorted(result.afterLiveClosed)) !== JSON.stringify(sorted([own[0], unnamed])) ||
+    JSON.stringify(result.afterDestroy) !== JSON.stringify([unnamed]) ||
+    result.afterSweep.includes(crashed)
+  )
+    throw new Error(`Debug history IndexedDB store: ${JSON.stringify(result)}`);
+}
+
+/**
+ * Debug's rewind in the chat, on the `debug-rewind` package: Back to here on an answer shows the earlier state with its
+ * later messages grey and the inspection bar; Forward restores the later state and Return the session; a different
+ * answer adopts the earlier state, with its saved data, and discards the grey messages. A failed state that is
+ * inspected shows its failure above the bar, and the bar fits a narrow screen.
+ */
+async function debugRewindScenario(cdp, origin) {
+  await setViewport(cdp, 1440, 900);
+  // The text of each message itself, without its speaker header, choice marker, or text for screen readers only.
+  const texts = (selector) =>
+    `[...document.querySelectorAll(${JSON.stringify(selector)})].map((element) => { const copy = element.cloneNode(true); copy.querySelectorAll('[data-slot="message-header"], .choice-marker, .sr-only').forEach((part) => part.remove()); return copy.textContent.trim(); })`;
+  // A narrator's message is prose, the player's a bubble.
+  const message = ":is([data-slot='bubble-content'], .prose)";
+  const activeText = texts(`.transcript-entry:not([data-future]) ${message}`);
+  const futureText = texts(`.transcript-entry[data-future] ${message}`);
+  const options = texts("[data-foreground-controls] button");
+  const answer = async (label) => {
+    await waitFor(cdp, `${options}.includes(${JSON.stringify(label)})`);
+    await evaluate(
+      cdp,
+      `[...document.querySelectorAll('[data-foreground-controls] button')].find((button) => button.textContent.trim() === ${JSON.stringify(label)}).setAttribute('data-smoke-answer', '')`,
+    );
+    await physicalClick(cdp, "[data-smoke-answer]");
+  };
+  // Back to here on the player's answer with this text, scrolled into view first.
+  const backToHere = async (text) => {
+    await waitFor(
+      cdp,
+      `[...document.querySelectorAll('.transcript-entry:not([data-future])')].some((entry) => entry.querySelector('[data-slot="bubble-content"]')?.textContent.includes(${JSON.stringify(text)}) && entry.querySelector('[data-back-to-here]'))`,
+      5_000,
+      `No Back to here on ${text}`,
+    );
+    await evaluate(
+      cdp,
+      `document.querySelectorAll('[data-smoke-back]').forEach((button) => button.removeAttribute('data-smoke-back')); const button = [...document.querySelectorAll('.transcript-entry:not([data-future])')].find((entry) => entry.querySelector('[data-slot="bubble-content"]')?.textContent.includes(${JSON.stringify(text)}) && entry.querySelector('[data-back-to-here]')).querySelector('[data-back-to-here]'); button.setAttribute('data-smoke-back', ''); button.scrollIntoView({ block: 'center' });`,
+    );
+    await physicalClick(cdp, "[data-smoke-back]");
+    await waitFor(cdp, `!!document.querySelector('[data-rewind-inspection]')`);
+  };
+  const json = (expression) => `JSON.stringify(${expression})`;
+
+  await navigate(cdp, `${origin}/player/?dev&package=debug-rewind`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await answer("One");
+  await waitFor(cdp, `${activeText}.includes('first One')`);
+
+  // Back: the earlier choice again, the later messages grey, and what was answered before.
+  await backToHere("One");
+  await waitFor(
+    cdp,
+    `${json(futureText)} === ${JSON.stringify(JSON.stringify(["One", "first One"]))} && !${activeText}.includes('first One') && ${json(options)} === ${JSON.stringify(JSON.stringify(["One", "Two"]))}`,
+    5_000,
+    "Back did not show the earlier choice with a grey future",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `JSON.stringify([!!document.querySelector('[data-future-label]'), document.querySelector('[data-rewind-earlier]')?.textContent.trim(), document.querySelectorAll('.transcript-entry[data-future] [data-back-to-here], .transcript-entry[data-future] [data-explain-values]').length])`,
+    ),
+    JSON.stringify([true, "Answered before: One", 0]),
+    "The grey future, its label, or the earlier answer",
+  );
+  // Forward restores the later state, still inspected; Return reinstates the session.
+  await physicalClick(cdp, "[data-rewind-forward]");
+  await waitFor(
+    cdp,
+    `${futureText}.length === 0 && ${activeText}.includes('first One') && ${json(options)} === ${JSON.stringify(JSON.stringify(["Red", "Fail"]))} && !!document.querySelector('[data-rewind-inspection]') && document.querySelector('[data-rewind-forward]').disabled`,
+    5_000,
+    "Forward did not restore the later state",
+  );
+  await physicalClick(cdp, "[data-rewind-return]");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-rewind-inspection]') && ${activeText}.includes('first One')`,
+    5_000,
+    "Return did not reinstate the session",
+  );
+
+  // A different answer adopts the earlier state: the grey messages go, and the saved data follow the new branch.
+  await backToHere("One");
+  await answer("Two");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-rewind-inspection]') && ${futureText}.length === 0 && ${activeText}.includes('first Two') && !${activeText}.includes('first One')`,
+    5_000,
+    "A different answer did not adopt the earlier state",
+  );
+  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+  await physicalClick(cdp, '[data-debug-tab="storage"]');
+  await waitFor(
+    cdp,
+    `JSON.stringify([...document.querySelectorAll('[data-debug-storage-row]')].map((row) => [row.querySelector('[data-debug-storage-key]').textContent, row.querySelector('[data-storage-preview]').textContent.trim()])) === ${JSON.stringify(
+      JSON.stringify([
+        ['"k"', "1"],
+        ['"pick"', '"Two"'],
+      ]),
+    )}`,
+    5_000,
+    "The adopted branch's saved data",
+  );
+
+  // A failed state that is inspected shows its failure, then the bar closest to the composer.
+  await answer("Fail");
+  await waitFor(cdp, `!!document.querySelector('[data-runtime-failure]')`);
+  await backToHere("Fail");
+  await physicalClick(cdp, "[data-rewind-forward]");
+  await waitFor(
+    cdp,
+    `!!document.querySelector('[data-runtime-failure]') && !!document.querySelector('[data-rewind-inspection]')`,
+    5_000,
+    "The inspected failed state lost its failure or the bar",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `!!(document.querySelector('[data-runtime-failure]').compareDocumentPosition(document.querySelector('[data-rewind-inspection]')) & Node.DOCUMENT_POSITION_FOLLOWING)`,
+    ),
+    true,
+    "The bar does not follow the failure",
+  );
+  // On a narrow screen, the bar fits and its controls stay touch-sized.
+  await setViewport(cdp, 390, 844);
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-rewind-inspection]').getBoundingClientRect().width > 0`,
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const bar = document.querySelector('[data-rewind-inspection]').getBoundingClientRect(); const buttons = [...document.querySelectorAll('[data-rewind-inspection] button')]; return JSON.stringify([bar.left >= 0 && bar.right <= window.innerWidth, buttons.length, buttons.every((button) => button.getBoundingClientRect().height >= 44)]); })()`,
+    ),
+    JSON.stringify([true, 3, true]),
+    "The bar on a narrow screen",
+  );
+  // The narrow tools drawer may cover the chat, so this press goes to the control itself.
+  await evaluate(cdp, `document.querySelector('[data-rewind-return]').click()`);
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-rewind-inspection]') && !!document.querySelector('[data-runtime-failure]')`,
+  );
+  await setViewport(cdp, 1440, 900);
 }
 
 async function navigate(cdp, url) {

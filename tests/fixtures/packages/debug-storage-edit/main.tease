@@ -1,0 +1,7 @@
+let first = load("k", default: 0)
+say "first ${first}", instant
+let go = showButton "Go"
+let second = load("k", default: 0)
+say "second ${second}", instant
+let done = showButton "Done"
+exit

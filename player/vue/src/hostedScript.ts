@@ -7,6 +7,9 @@ import {
 } from "../../runtime-adapter.js";
 import type { ScriptFailure } from "./ScriptProblems.vue";
 import type { PlayerSessionHost } from "./usePlayerSession";
+import { MAIN_FILE_PATH } from "../../../src/index.js";
+import { lex } from "../../../src/lexer.js";
+import { readScriptHeader } from "../../../src/script-header.js";
 
 /** The trusted host of one script: its storage scope, how its references resolve, and how its project loads. */
 export interface ScriptHost {
@@ -30,6 +33,9 @@ export function prepareHostedScript(
   const failure = shallowRef<ScriptFailure | null>(null);
   void Promise.all([host.load(), player.loadScriptStorage()]).then(
     ([{ project, problems }]) => {
+      // The title names the script where saved data of several scripts is listed.
+      const title = scriptTitle(project);
+      if (title !== null) player.rememberScriptName(title);
       const compilation = compilePlayerProject(project);
       const plan = compilation.plan;
       if (plan === null) {
@@ -56,4 +62,15 @@ export function prepareHostedScript(
     },
   );
   return failure;
+}
+
+/** The `title` of `main.tease`'s header, or `null`. */
+function scriptTitle(project: string | PlayerProject): string | null {
+  const source =
+    typeof project === "string"
+      ? project
+      : project.files.find((file) => file.path === MAIN_FILE_PATH)?.source;
+  if (source === undefined) return null;
+  const title = readScriptHeader(lex(source)).header?.title ?? null;
+  return title === null || title.trim() === "" ? null : title.trim();
 }
