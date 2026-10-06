@@ -2,28 +2,23 @@ import { createHash } from "node:crypto";
 import { isRecord } from "./ast.ts";
 
 /**
- * Headless branch explorer: plays a compiled TeaseScript project in the real runtime through every branch it can
- * reach within a budget, without the Player. Each pending action is a branch point; its options are the buttons and
- * choice options, typed answers ({@link interactionOptions}), thinking before a timed button, permanent buttons, and
- * letting time pass to the next deadline. Media loads succeed with one second per pass, `takePhoto` finds no camera,
- * and `askImage` gets one stored image. When letting time pass is the only thing the player can do, the explorer does
- * it as part of the previous step (at most {@link MAX_AUTO_WAITS} times in a row).
+ * The session layer of the headless branch explorer: it runs a compiled TeaseScript project in the real runtime,
+ * without the Player, applies one input at a time, and records what each step executed. The search over these steps
+ * lives in `explorer-search.ts`.
  *
- * Execution is deterministic: a state is reproduced by the seed and its input list from the start ({@link replay}).
+ * Each pending action is a branch point; its options are the buttons and choice options, typed answers
+ * ({@link interactionOptions}), form answers, thinking before a timed button, permanent buttons, and letting time
+ * pass to the next deadline. Directed search adds answers per ask and two seeded inputs: a stored value set from
+ * outside, and a later wall clock. Media loads succeed with one second per pass, `takePhoto` finds no camera, and
+ * `askImage` gets one stored image. When letting time pass is the only thing the player can do, the explorer does it
+ * as part of the previous step (at most {@link MAX_AUTO_WAITS} times in a row).
  *
- * - Coverage: instructions are executed one by one with `executeInstruction`, so every executed instruction is
- *   recorded; once {@link TRACE_PATIENCE} instructions in a row were all reached before, the step finishes with `run`
- *   and the rest of the product's instruction budget, which keeps `TSR037` where the Player has it; what it executes
- *   after that point is not recorded. Every operation copies and checks the whole snapshot, so recording is what limits
- *   the speed on large packages.
- * - States are deduplicated by {@link stateKeys}: a hash of the snapshot without what a script cannot observe.
- * - Search order: states whose step reached new instructions first, then states that differ from every explored one
- *   in more than clock, random state, and settled handles (their loop key), then the rest, least repeated first.
- * - Traps are described at {@link findTraps}.
+ * Execution is deterministic: a state is reproduced by the seed, the start {@link Setup}, and its input list
+ * ({@link replay}).
  */
 
 /** A runtime operation result read field by field; plans and snapshots inside it are passed back unchanged. */
-type Data = Readonly<Record<string, unknown>>;
+export type Data = Readonly<Record<string, unknown>>;
 
 const ENGINE_OPERATIONS = [
   "compileProject",
@@ -31,9 +26,12 @@ const ENGINE_OPERATIONS = [
   "run",
   "executeInstruction",
   "completeAction",
+  "updateInteraction",
   "observeTime",
   "reportMediaLoad",
   "pressPermanentButton",
+  "applyExternalStorageEdit",
+  "recordContinueCapture",
 ] as const;
 const ENGINE_PROJECTIONS = ["mediaPlaybackProjection", "permanentButtonProjection"] as const;
 
@@ -51,7 +49,8 @@ export async function loadEngine(): Promise<Engine> {
   const module: unknown = await import(repositoryIndexUrl.href);
   const exported = (name: string) => {
     const value = isRecord(module) ? module[name] : undefined;
-    if (typeof value !== "function") throw new Error(`Repository build does not export ${name}().`);
+    if (typeof value !== "function")
+      throw new Error(`Repository build does not export ${name}().`);
     return value;
   };
   const functions = new Map(
@@ -74,6 +73,9 @@ export async function loadEngine(): Promise<Engine> {
   };
 }
 
+/** A value to store: a scalar, or a composite value as the runtime keeps it in script storage. */
+export type StoredValue = string | number | boolean | Data;
+
 /** One input of a path from the start; `label` fields only explain the input to a reader. */
 export type ExplorerInput =
   | { readonly kind: "option"; readonly index: number; readonly label: string }
@@ -81,10 +83,39 @@ export type ExplorerInput =
   | { readonly kind: "button"; readonly label: string; readonly afterMs?: number }
   | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "image" }
-  /** A form submitted with its starting values, or cancelled where it offers that. */
-  | { readonly kind: "form"; readonly action: "submit" | "cancel" }
+  /**
+   * A form, submitted or cancelled; before a submit, `fields` sets fields by ID: a toggle or cycle to an option index,
+   * a typed field to text. Fields not named keep their starting values.
+   */
+  | {
+      readonly kind: "form";
+      readonly action: "submit" | "cancel";
+      readonly fields?: Readonly<Record<string, number | string>>;
+    }
   | { readonly kind: "wait"; readonly untilMs: number }
-  | { readonly kind: "press"; readonly buttonId: number; readonly label: string };
+  | { readonly kind: "press"; readonly buttonId: number; readonly label: string }
+  /** Seeded: a stored value set from outside, as an earlier session would have left it; `null` removes the key. */
+  | { readonly kind: "storage"; readonly key: string; readonly value: StoredValue | null }
+  /** Seeded: the player continues at another wall clock time (epoch milliseconds). */
+  | { readonly kind: "clock"; readonly wallClockMs: number };
+
+/** Whether an input prepares state the player cannot make by playing: a seeded input. */
+export function isSeeding(input: ExplorerInput): boolean {
+  return input.kind === "storage" || input.kind === "clock";
+}
+
+/**
+ * How a session starts: the storage an earlier session left, and the wall clock. Play starts with empty storage at
+ * {@link EPOCH_MS}; any other start is seeded.
+ */
+export interface Setup {
+  readonly storage: readonly { readonly key: string; readonly value: StoredValue }[];
+  readonly wallClockMs: number;
+}
+
+/** The wall clock at session time 0: 2026-10-02 12:00 UTC, as in `runtime-check.ts`. */
+export const EPOCH_MS = Date.UTC(2026, 9, 2, 12, 0, 0);
+export const PLAY_SETUP: Setup = { storage: [], wallClockMs: EPOCH_MS };
 
 /** The answers the explorer gives to an interaction, as `completeAction` takes them. */
 type InteractionPayload =
@@ -95,8 +126,6 @@ type InteractionPayload =
   | { readonly kind: "submit" }
   | { readonly kind: "cancel" };
 
-/** The wall clock at session time 0: 2026-10-02 12:00 UTC, as in `runtime-check.ts`. */
-const EPOCH_MS = Date.UTC(2026, 9, 2, 12, 0, 0);
 /** Duration of one pass of every media file. */
 const MEDIA_PASS_MS = 1000;
 /** The stored image that answers `askImage`. */
@@ -117,9 +146,11 @@ const MAX_AUTO_OPERATIONS = 1000;
 /** Said texts kept per step and per text, for trap samples and replay transcripts. */
 const KEPT_TEXTS = 3;
 const TEXT_LENGTH = 120;
+/** Form answers tried per form. */
+const MAX_FORM_OPTIONS = 16;
 
 /** What the player can see and do in a state, in short, for reports. */
-interface Prompt {
+export interface Prompt {
   readonly text: string;
   /** The instruction that asked, or null without a foreground interaction. */
   readonly instruction: number | null;
@@ -128,10 +159,15 @@ interface Prompt {
 /** The result of one input and everything that follows from it until the player is asked again. */
 export interface Step {
   readonly snapshot: Data;
-  /** Instructions this step executed for the first time in the session. */
+  /** Instructions this step executed for the first time, for its kind of coverage (see {@link Session}). */
   readonly newInstructions: number;
   /** The last texts said during the step. */
   readonly texts: readonly string[];
+  /**
+   * The condition ways the step took, each as `instruction * 2 + way`: way 0 continues with the next instruction (a
+   * condition was true, a loop entered), way 1 goes to the instruction's target.
+   */
+  readonly ways: readonly number[];
 }
 
 function record(value: unknown): Data {
@@ -142,56 +178,149 @@ function list(value: unknown): Data[] {
   return Array.isArray(value) ? value.filter(isRecord) : [];
 }
 
-function short(text: string): string {
+export function short(text: string): string {
   const line = text.replace(/\s+/gu, " ").trim();
   return line.length > TEXT_LENGTH ? `${line.slice(0, TEXT_LENGTH - 1)}…` : line;
 }
 
+/** What one execution ran, until nothing was runnable, as one `run` would have. */
+interface Execution {
+  readonly snapshot: Data;
+  readonly events: readonly Data[];
+  /** The instructions it recorded as executed, each once. */
+  readonly instructions: readonly number[];
+  /** The instruction transitions it recorded: from an instruction to the next one executed. */
+  readonly edges: readonly (readonly [number, number])[];
+}
+
 /**
- * The project's plan with the engine, which runs inputs and records the instructions and branch edges they execute.
- * Coverage accumulates over every step of the session object.
+ * Records an execution instruction by instruction with `executeInstruction`; once {@link TRACE_PATIENCE}
+ * instructions in a row were known (reached before, or earlier in this execution), it finishes with `run` and the rest
+ * of the product's instruction budget, which keeps `TSR037` where the Player has it, and records nothing more. Every
+ * operation copies and checks the whole snapshot, so this is what limits the speed on large packages.
+ *
+ * The runtime's instruction trace replaces this recorder through the same `execute`: one `run` with the trace option,
+ * whose visited instructions and branch edges become {@link Execution.instructions} and {@link Execution.edges}.
  */
-export class Session {
-  readonly visited: Uint8Array;
-  /** Per conditional instruction: 1 when it continued with the next instruction, 2 when it went to its target. */
-  readonly branches: Uint8Array;
+class StepRecorder {
   /** Runs finished with `run`, without recording their instructions, after {@link TRACE_PATIENCE} known ones. */
   untracedRuns = 0;
   readonly #engine: Engine;
   readonly #plan: Data;
+
+  constructor(engine: Engine, plan: Data) {
+    this.#engine = engine;
+    this.#plan = plan;
+  }
+
+  /** An instruction boundary that only starts a queued timer, cue, or button block executes no instruction of its own. */
+  execute(start: Data, known: (index: number) => boolean): Execution {
+    const events: Data[] = [];
+    const executed = new Set<number>();
+    const edges: (readonly [number, number])[] = [];
+    let snapshot = start;
+    let quiet = 0;
+    for (let steps = 0; ; ) {
+      // What `run` would find runnable; a waiting session runs only to start a queued block.
+      const runnable =
+        snapshot.status === "ready" ||
+        snapshot.status === "running" ||
+        (snapshot.status === "waiting" && list(snapshot.pendingTimerHandlers).length > 0);
+      if (!runnable) break;
+      if (quiet >= TRACE_PATIENCE) {
+        this.untracedRuns += 1;
+        const result = this.#engine.call(
+          "run",
+          this.#plan,
+          snapshot,
+          {},
+          { instructionBudget: INSTRUCTION_BUDGET - steps },
+        );
+        events.push(...list(result.events));
+        snapshot = record(result.snapshot);
+        break;
+      }
+      const before = typeof snapshot.nextInstruction === "number" ? snapshot.nextInstruction : -1;
+      const interrupts = interruptFrames(snapshot);
+      const result = this.#engine.call("executeInstruction", this.#plan, snapshot, {});
+      const count = typeof result.instructionsExecuted === "number" ? result.instructionsExecuted : 0;
+      // Nothing was runnable; `run` would not have executed this boundary, nor settled due work after it.
+      if (count === 0 || !isRecord(result.snapshot)) break;
+      const after = result.snapshot;
+      events.push(...list(result.events));
+      if (before >= 0 && interruptFrames(after) <= interrupts) {
+        if (known(before) || executed.has(before)) quiet += 1;
+        else quiet = 0;
+        executed.add(before);
+        if (after.status !== "failed" && typeof after.nextInstruction === "number")
+          edges.push([before, after.nextInstruction]);
+      }
+      snapshot = after;
+      steps += count;
+    }
+    return { snapshot, events, instructions: [...executed], edges };
+  }
+}
+
+/**
+ * The project's plan with the engine, which runs inputs and records the instructions and condition ways they execute.
+ * Coverage accumulates over every step of the session object, apart for play and for seeded steps: a seeded step
+ * starts from a seeded {@link Setup} or follows a seeded input.
+ */
+export class Session {
+  /** Instructions play executed. */
+  readonly visited: Uint8Array;
+  /** Instructions seeded steps executed. */
+  readonly seededVisited: Uint8Array;
+  /** Per conditional instruction, the ways play took: 1 for the next instruction, 2 for its target. */
+  readonly branches: Uint8Array;
+  readonly seededBranches: Uint8Array;
+  /** Answers directed search adds to the candidates of a typed ask, by the ask's instruction. */
+  readonly directedAnswers = new Map<number, string[]>();
+  readonly #engine: Engine;
+  readonly #plan: Data;
   readonly #instructions: Data[];
   readonly #seed: number;
+  readonly #recorder: StepRecorder;
   /** Per instruction, the constants it compares with; computed at the first ask. */
   #literals: Literals[] | undefined;
-  /** Instructions the current step executed since it last reached one for the first time. */
-  #known = 0;
 
   constructor(engine: Engine, plan: Data, seed: number) {
     this.#engine = engine;
     this.#plan = plan;
     this.#instructions = list(plan.instructions);
     this.#seed = seed;
+    this.#recorder = new StepRecorder(engine, plan);
     this.visited = new Uint8Array(this.#instructions.length);
+    this.seededVisited = new Uint8Array(this.#instructions.length);
     this.branches = new Uint8Array(this.#instructions.length);
+    this.seededBranches = new Uint8Array(this.#instructions.length);
   }
 
-  /** The fresh session, run until the player is first asked. */
-  start(): Step {
+  get untracedRuns(): number {
+    return this.#recorder.untracedRuns;
+  }
+
+  /** A fresh session, run until the player is first asked; seeded unless `setup` is the play setup. */
+  start(setup: Setup = PLAY_SETUP): Step {
     const fresh = this.#engine.call("createFreshRuntimeSnapshot", this.#plan, {
       seed: this.#seed,
       baseDelayMs: 0,
       delayPerWordMs: 0,
       delayPerCharacterMs: 0,
-      scriptStorage: [],
-      wallClockMs: EPOCH_MS,
+      // The runtime keeps storage sorted by key.
+      scriptStorage: [...setup.storage].sort((left, right) =>
+        left.key < right.key ? -1 : left.key > right.key ? 1 : 0,
+      ),
+      wallClockMs: setup.wallClockMs,
     });
-    return this.#settle(fresh);
+    return this.#settle(fresh, setup !== PLAY_SETUP);
   }
 
   /** Applies one input to a waiting state; null when the runtime rejects it. */
-  apply(snapshot: Data, input: ExplorerInput): Step | null {
+  apply(snapshot: Data, input: ExplorerInput, seeded: boolean): Step | null {
     const next = this.#input(snapshot, input);
-    return next === null ? null : this.#settle(next);
+    return next === null ? null : this.#settle(next, seeded || isSeeding(input));
   }
 
   /** The inputs the player has in a waiting state; none in an ended state. */
@@ -203,7 +332,11 @@ export class Session {
     if (action.kind === "interaction") {
       const ui = record(action.ui);
       const literals = this.#nearbyLiterals(snapshot, action);
-      options.push(...interactionOptions(ui, literals));
+      const directed =
+        typeof action.owningInstruction === "number"
+          ? (this.directedAnswers.get(action.owningInstruction) ?? [])
+          : [];
+      options.push(...interactionOptions(ui, literals, directed, record(action.form)));
       // A button whose result the script keeps is timed: the player may also think first, as long as nothing else
       // happens meanwhile.
       if (
@@ -239,6 +372,10 @@ export class Session {
     if (ui.kind === "choice") {
       const labels = list(ui.options).map((option) => `[${String(option.text)}]`);
       return { text: short(labels.join(" ")), instruction };
+    }
+    if (ui.kind === "form") {
+      const labels = list(ui.fields).map((field) => `[${String(field.text)}]`);
+      return { text: short(`(form) ${labels.join(" ")}`), instruction };
     }
     return {
       text: `(ask ${String(ui.kind)}${ui.integer === true ? " integer" : ""})`,
@@ -296,10 +433,14 @@ export class Session {
         result = completion({ kind: "image", reference: EXPLORER_IMAGE });
         accepted = "completed";
         break;
-      case "form":
-        result = completion({ kind: input.action });
+      case "form": {
+        const filled =
+          input.action === "submit" ? this.#fill(snapshot, action, input.fields ?? {}) : snapshot;
+        if (filled === null) return null;
+        result = completion({ kind: input.action }, filled);
         accepted = "completed";
         break;
+      }
       case "press":
         result = this.#engine.call("pressPermanentButton", plan, snapshot, input.buttonId);
         accepted = "pressed";
@@ -314,23 +455,75 @@ export class Session {
         );
         accepted = "observed";
         break;
+      case "storage":
+        result = this.#engine.call("applyExternalStorageEdit", plan, snapshot, {
+          key: input.key,
+          value: input.value,
+        });
+        accepted = "applied";
+        break;
+      case "clock":
+        result = this.#engine.call("recordContinueCapture", plan, snapshot, {
+          wallClockMs: input.wallClockMs,
+        });
+        accepted = "recorded";
+        break;
     }
     return record(result.outcome).kind === accepted && isRecord(result.snapshot)
       ? result.snapshot
       : null;
   }
 
-  /** Runs until the player is asked: answers camera requests, loads media, and lets time pass while nothing else can happen. */
-  #settle(start: Data): Step {
+  /** Sets the named fields of the pending form: a toggle or cycle by option index, a typed field by its text. */
+  #fill(
+    snapshot: Data,
+    action: Data,
+    fields: Readonly<Record<string, number | string>>,
+  ): Data | null {
+    let current = snapshot;
+    const update = (edit: Data): boolean => {
+      const result = this.#engine.call("updateInteraction", this.#plan, current, {
+        actionId: action.actionId,
+        actionKind: "interaction",
+        interactionKind: "form",
+        update: edit,
+      });
+      const outcome = record(result.outcome).kind;
+      if ((outcome !== "updated" && outcome !== "unchanged") || !isRecord(result.snapshot))
+        return false;
+      current = result.snapshot;
+      return true;
+    };
+    for (const [fieldId, value] of Object.entries(fields)) {
+      const done =
+        typeof value === "number"
+          ? update({ kind: "select", fieldId, optionIndex: value })
+          : update({ kind: "edit", fieldId }) &&
+            update({ kind: "draft", fieldId, text: value }) &&
+            update({ kind: "commit", fieldId });
+      if (!done) return null;
+    }
+    return current;
+  }
+
+  /**
+   * Runs until the player is asked: answers camera requests, loads media, and lets time pass while nothing else can
+   * happen. Records what ran as play or as seeded coverage.
+   */
+  #settle(start: Data, seeded: boolean): Step {
     const texts: string[] = [];
+    const ways = new Set<number>();
     let newInstructions = 0;
     let snapshot = start;
     let waits = 0;
-    this.#known = 0;
     for (let operations = 0; ; operations += 1) {
-      const executed = this.#execute(snapshot, texts);
-      snapshot = executed.snapshot;
-      newInstructions += executed.newInstructions;
+      const execution = this.#recorder.execute(
+        snapshot,
+        (index) => this.visited[index] === 1 || this.seededVisited[index] === 1,
+      );
+      snapshot = execution.snapshot;
+      collectTexts(execution.events, texts);
+      newInstructions += this.#record(execution, seeded, ways);
       if (snapshot.status !== "waiting" || operations >= MAX_AUTO_OPERATIONS) break;
       const action = record(snapshot.foregroundAction);
       if (action.kind === "capture") {
@@ -365,55 +558,31 @@ export class Session {
       snapshot = next;
       waits += 1;
     }
-    return { snapshot, newInstructions, texts: texts.slice(-KEPT_TEXTS) };
+    return { snapshot, newInstructions, texts: texts.slice(-KEPT_TEXTS), ways: [...ways] };
   }
 
   /**
-   * Executes what is runnable, as one `run` would, instruction by instruction to record coverage. An instruction
-   * boundary that only starts a queued timer, cue, or button block executes no instruction of its own.
+   * Marks an execution's instructions and condition ways as play or seeded coverage, and counts the instructions new
+   * to it: new to play for a play step, new to both for a seeded one.
    */
-  #execute(start: Data, texts: string[]): { snapshot: Data; newInstructions: number } {
-    let snapshot = start;
-    let newInstructions = 0;
-    for (let steps = 0; ;) {
-      // What `run` would find runnable; a waiting session runs only to start a queued block.
-      const runnable =
-        snapshot.status === "ready" ||
-        snapshot.status === "running" ||
-        (snapshot.status === "waiting" && list(snapshot.pendingTimerHandlers).length > 0);
-      if (!runnable) return { snapshot, newInstructions };
-      if (this.#known >= TRACE_PATIENCE) {
-        this.untracedRuns += 1;
-        const result = this.#engine.call(
-          "run",
-          this.#plan,
-          snapshot,
-          {},
-          { instructionBudget: INSTRUCTION_BUDGET - steps },
-        );
-        collectTexts(result.events, texts);
-        return { snapshot: record(result.snapshot), newInstructions };
-      }
-      const before = typeof snapshot.nextInstruction === "number" ? snapshot.nextInstruction : -1;
-      const interrupts = interruptFrames(snapshot);
-      const result = this.#engine.call("executeInstruction", this.#plan, snapshot, {});
-      const executed =
-        typeof result.instructionsExecuted === "number" ? result.instructionsExecuted : 0;
-      // Nothing was runnable; `run` would not have executed this boundary, nor settled due work after it.
-      if (executed === 0 || !isRecord(result.snapshot)) return { snapshot, newInstructions };
-      const after = result.snapshot;
-      collectTexts(result.events, texts);
-      if (before >= 0 && before < this.visited.length && interruptFrames(after) <= interrupts) {
-        if (this.visited[before] === 0) {
-          this.visited[before] = 1;
-          newInstructions += 1;
-          this.#known = 0;
-        } else this.#known += 1;
-        this.#recordBranch(before, after);
-      }
-      snapshot = after;
-      steps += executed;
+  #record(execution: Execution, seeded: boolean, ways: Set<number>): number {
+    const visited = seeded ? this.seededVisited : this.visited;
+    const branches = seeded ? this.seededBranches : this.branches;
+    let fresh = 0;
+    for (const index of execution.instructions) {
+      if (index < 0 || index >= visited.length) continue;
+      if (visited[index] === 0 && (!seeded || this.visited[index] === 0)) fresh += 1;
+      visited[index] = 1;
     }
+    for (const [from, to] of execution.edges) {
+      const instruction = this.#instructions[from];
+      if (instruction?.kind !== "jumpIfFalse" && instruction?.kind !== "loopStart") continue;
+      const way = to === from + 1 ? 0 : to === instruction.target ? 1 : -1;
+      if (way < 0) continue;
+      branches[from]! |= way === 0 ? 1 : 2;
+      ways.add(from * 2 + way);
+    }
+    return fresh;
   }
 
   /**
@@ -447,14 +616,6 @@ export class Session {
       numbers: found.numbers.slice(0, MAX_LITERALS),
       strings: found.strings.slice(0, MAX_LITERALS),
     };
-  }
-
-  #recordBranch(index: number, after: Data): void {
-    const instruction = this.#instructions[index]!;
-    if (instruction.kind !== "jumpIfFalse" && instruction.kind !== "loopStart") return;
-    if (after.status === "failed" || typeof after.nextInstruction !== "number") return;
-    if (after.nextInstruction === instruction.target) this.branches[index]! |= 2;
-    else if (after.nextInstruction === index + 1) this.branches[index]! |= 1;
   }
 
   /** The earliest time at which something happens without the player, or null when nothing will. */
@@ -493,7 +654,10 @@ export class Session {
   }
 
   /** Progress of every running media until `until`, which plays on in real time. */
-  #mediaReports(snapshot: Data, until: number): object[] {
+  #mediaReports(
+    snapshot: Data,
+    until: number,
+  ): { mediaId: unknown; segment: unknown; progressMs: number }[] {
     const now =
       typeof snapshot.observedSessionTimeMs === "number" ? snapshot.observedSessionTimeMs : 0;
     return this.#engine
@@ -514,8 +678,8 @@ function interruptFrames(snapshot: Data): number {
   return list(snapshot.callFrames).filter((frame) => isRecord(frame.timerInterruption)).length;
 }
 
-function collectTexts(events: unknown, texts: string[]): void {
-  for (const event of list(events)) {
+function collectTexts(events: readonly Data[], texts: string[]): void {
+  for (const event of events) {
     if (event.kind === "say" && typeof event.text === "string" && event.text.trim() !== "") {
       texts.push(short(event.text));
       if (texts.length > KEPT_TEXTS * 2) texts.splice(0, texts.length - KEPT_TEXTS);
@@ -582,14 +746,23 @@ function thinkTimes(literals: Literals): number[] {
 
 /**
  * The answers tried for an interaction: every button and option; for typed asks the default (the prefilled answer),
- * boundary values of the field type, and the constants the code compares with nearby (for a number `c`: `c - 1`, `c`,
- * and `c + 1`). Blank text is never an answer, so it is not tried.
+ * boundary values of the field type, the constants the code compares with nearby (for a number `c`: `c - 1`, `c`, and
+ * `c + 1`), and the answers directed search added for this ask. Blank text is never an answer, so it is not tried.
  */
-function interactionOptions(ui: Data, literals: Literals): ExplorerInput[] {
+function interactionOptions(
+  ui: Data,
+  literals: Literals,
+  directed: readonly string[],
+  form: Data,
+): ExplorerInput[] {
   const typed = (candidates: readonly string[]): ExplorerInput[] =>
-    [...new Set([...(typeof ui.prefill === "string" ? [ui.prefill] : []), ...candidates])].map(
-      (text) => ({ kind: "text", text }),
-    );
+    [
+      ...new Set([
+        ...(typeof ui.prefill === "string" ? [ui.prefill] : []),
+        ...candidates,
+        ...directed,
+      ]),
+    ].map((text) => ({ kind: "text", text }));
   const near = (integer: boolean) =>
     literals.numbers
       .filter((value) => !integer || Number.isSafeInteger(value))
@@ -616,15 +789,78 @@ function interactionOptions(ui: Data, literals: Literals): ExplorerInput[] {
     case "image":
       return [{ kind: "image" }];
     case "form":
-      return [
-        { kind: "form", action: "submit" },
-        ...(ui.cancel === null || ui.cancel === undefined
-          ? []
-          : [{ kind: "form" as const, action: "cancel" as const }]),
-      ];
+      return formOptions(ui, form);
     default:
       return [];
   }
+}
+
+/**
+ * The answers tried for a form: its starting values; each toggle switched, and all toggles on and all off; each other
+ * option of a cycle; each typed field at its boundaries (`min`, `max`, or the candidates of its type); and cancel
+ * where the form offers it. A required typed field without a starting value gets its first candidate in every answer.
+ */
+function formOptions(ui: Data, form: Data): ExplorerInput[] {
+  const fields = list(ui.fields);
+  const values: unknown[] = Array.isArray(form.values) ? form.values : [];
+  const optionIndex = (field: Data, wanted: unknown): number => {
+    const options = list(field.options);
+    if (field.kind === "boolean" && options.length === 0) return wanted === true ? 1 : 0;
+    return options.findIndex((option) => option.value === wanted);
+  };
+  const candidatesOf = (field: Data): readonly string[] => {
+    const bounded = [field.min, field.max].filter((value) => typeof value === "number").map(String);
+    switch (field.kind) {
+      case "integer":
+        return [...bounded, ...INTEGER_ANSWERS];
+      case "number":
+        return [...bounded, ...NUMBER_ANSWERS];
+      case "text":
+        return TEXT_ANSWERS;
+      default:
+        return TEMPORAL_ANSWERS[String(field.kind)] ?? [];
+    }
+  };
+  const base: Record<string, number | string> = {};
+  fields.forEach((field, index) => {
+    const typed = field.kind !== "boolean" && field.kind !== "cycle";
+    if (typed && field.optional !== true && (values[index] ?? null) === null) {
+      const first = candidatesOf(field)[0];
+      if (first !== undefined) base[String(field.id)] = first;
+    }
+  });
+  const answers: Record<string, number | string>[] = [{ ...base }];
+  const toggles = fields.filter((field) => field.kind === "boolean");
+  fields.forEach((field, index) => {
+    const id = String(field.id);
+    if (field.kind === "boolean") {
+      const flipped = optionIndex(field, values[index] !== true);
+      if (flipped >= 0) answers.push({ ...base, [id]: flipped });
+    } else if (field.kind === "cycle") {
+      list(field.options).forEach((_, option) => {
+        if (option !== optionIndex(field, values[index])) answers.push({ ...base, [id]: option });
+      });
+    } else {
+      for (const candidate of candidatesOf(field)) answers.push({ ...base, [id]: candidate });
+    }
+  });
+  if (toggles.length > 1) {
+    for (const wanted of [true, false]) {
+      const all: Record<string, number | string> = { ...base };
+      for (const field of toggles) all[String(field.id)] = optionIndex(field, wanted);
+      answers.push(all);
+    }
+  }
+  const unique = new Map(answers.map((fields) => [JSON.stringify(fields), fields]));
+  const options: ExplorerInput[] = [...unique.values()]
+    .slice(0, MAX_FORM_OPTIONS - 1)
+    .map((fields) =>
+      Object.keys(fields).length === 0
+        ? { kind: "form", action: "submit" }
+        : { kind: "form", action: "submit", fields },
+    );
+  if (isRecord(ui.cancel)) options.push({ kind: "form", action: "cancel" });
+  return options;
 }
 
 /** Counters and records no script can observe: event sequence numbers, the next free IDs, and the last settlement. */
@@ -710,299 +946,8 @@ export function stateKeys(snapshot: Data): { state: string; loop: string } {
   return { state: key(false), loop: key(true) };
 }
 
-type NodeStatus = "open" | "expanded" | "partial" | "completed" | "failed" | "stuck";
-
-interface Node {
-  readonly id: number;
-  readonly parent: number | null;
-  readonly input: ExplorerInput | null;
-  readonly depth: number;
-  readonly loop: string;
-  status: NodeStatus;
-  /** Kept until the state is expanded. */
-  snapshot: Data | null;
-  readonly edges: number[];
-  readonly texts: readonly string[];
-  readonly prompt: Prompt;
-}
-
-export interface ExploreOptions {
-  readonly seed: number;
-  readonly budgetMs: number;
-  readonly maxStates: number;
-  /** Project sources by path, for the source text of conditions. */
-  readonly sources: ReadonlyMap<string, string>;
-}
-
-/** A crash: one entry per runtime failure code and source span. */
-export interface CrashReport {
-  code: string;
-  message: string;
-  path: string;
-  line: number;
-  column: number;
-  endLine: number;
-  endColumn: number;
-  /** States that ended in this failure. */
-  states: number;
-  /** The shortest input list found from the start to the failure. */
-  inputs: ExplorerInput[];
-  texts: readonly string[];
-}
-
-/** Line coverage of one file; `unvisited` ranges carry what is known about them besides real play. */
-export interface FileCoverage {
-  path: string;
-  coverableLines: number;
-  visitedLines: number;
-  percent: number;
-  unvisited: { lines: string; reach: Reach }[];
-}
-
-/**
- * How a line was reached: `play` by inputs alone from a fresh session, `seededState` only from a prepared state (such
- * as storage set directly), `unreachable` proven so by a static reason, `unknown` otherwise. This version only plays,
- * so unvisited lines are `unknown`.
- */
-export type Reach = "play" | "seededState" | "unreachable" | "unknown";
-
-/** A conditional instruction that real play reached but left only one way: targets for a directed search. */
-export interface UnvisitedBranch {
-  instruction: number;
-  kind: "if" | "loop";
-  path: string;
-  line: number;
-  condition: {
-    line: number;
-    column: number;
-    endLine: number;
-    endColumn: number;
-    text: string;
-  } | null;
-  /** The missed way: `true`/`false` for a condition, `enter`/`exit` for a loop. */
-  missed: "true" | "false" | "enter" | "exit";
-  /** The first instruction and line of the missed way. */
-  targetInstruction: number;
-  targetLine: number | null;
-  reach: Reach;
-}
-
-export interface TrapReport {
-  /** `loop`: the explored states repeat; `stuck`: a state where the player can do nothing and nothing happens. */
-  kind: "loop" | "stuck";
-  /** Explored states in the trap, and those outside it from which every explored path leads into it. */
-  states: number;
-  feederStates: number;
-  /** Where the player is asked inside the trap, as `path:line`. */
-  locations: string[];
-  sampleTexts: string[];
-  samplePrompts: string[];
-  /** The shortest input list found from the start into the trap. */
-  inputs: ExplorerInput[];
-}
-
-export interface ExploreResult {
-  search: {
-    states: number;
-    transitions: number;
-    expanded: number;
-    /** Inputs the runtime did not accept, such as an answer to an interaction inside a running timer block. */
-    rejectedInputs: number;
-    /**
-     * Inputs whose operation threw, such as a runtime that rejects a snapshot it produced itself (`TSR101`): a problem
-     * of the explorer or the runtime, not of the package. `first` has the input list from the start that throws.
-     */
-    engineErrors: { count: number; first: { message: string; inputs: ExplorerInput[] } | null };
-    untracedRuns: number;
-    stoppedBy: "exhausted" | "budget" | "maxStates";
-    elapsedMs: number;
-  };
-  endStates: { completed: number; failed: number; stuck: number; open: number };
-  coverage: {
-    coverableLines: number;
-    visitedLines: number;
-    percent: number;
-    instructions: number;
-    visitedInstructions: number;
-    files: FileCoverage[];
-    unvisitedBranches: UnvisitedBranch[];
-  };
-  crashes: CrashReport[];
-  traps: TrapReport[];
-}
-
-/** A binary heap of open states by (tier, repeats, newest first). */
-class Frontier {
-  readonly #items: { node: number; rank: [number, number, number] }[] = [];
-
-  get size(): number {
-    return this.#items.length;
-  }
-
-  push(node: number, tier: number, repeats: number): void {
-    const items = this.#items;
-    items.push({ node, rank: [tier, repeats, -node] });
-    for (let index = items.length - 1; index > 0;) {
-      const parent = (index - 1) >> 1;
-      if (!before(items[index]!.rank, items[parent]!.rank)) break;
-      [items[index], items[parent]] = [items[parent]!, items[index]!];
-      index = parent;
-    }
-  }
-
-  pop(): number | undefined {
-    const items = this.#items;
-    const top = items[0];
-    const last = items.pop();
-    if (top === undefined || last === undefined || items.length === 0) return top?.node;
-    items[0] = last;
-    for (let index = 0; ;) {
-      const left = index * 2 + 1;
-      const right = left + 1;
-      let best = index;
-      if (left < items.length && before(items[left]!.rank, items[best]!.rank)) best = left;
-      if (right < items.length && before(items[right]!.rank, items[best]!.rank)) best = right;
-      if (best === index) break;
-      [items[index], items[best]] = [items[best]!, items[index]!];
-      index = best;
-    }
-    return top.node;
-  }
-}
-
-function before(left: readonly number[], right: readonly number[]): boolean {
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return left[index]! < right[index]!;
-  }
-  return false;
-}
-
-/** Explores a compiled project's plan from a fresh session until every state is expanded or a limit is reached. */
-export function explore(engine: Engine, plan: Data, options: ExploreOptions): ExploreResult {
-  const started = performance.now();
-  const session = new Session(engine, plan, options.seed);
-  const nodes: Node[] = [];
-  const byState = new Map<string, number>();
-  const loopSeen = new Map<string, number>();
-  const frontier = new Frontier();
-  const crashes = new Map<string, CrashReport>();
-  let transitions = 0;
-  let expanded = 0;
-  let rejectedInputs = 0;
-  const engineErrors: ExploreResult["search"]["engineErrors"] = { count: 0, first: null };
-
-  const add = (step: Step, parent: Node | null, input: ExplorerInput | null): number => {
-    const keys = stateKeys(step.snapshot);
-    const known = byState.get(keys.state);
-    if (known !== undefined) return known;
-    const status = step.snapshot.status;
-    const node: Node = {
-      id: nodes.length,
-      parent: parent?.id ?? null,
-      input,
-      depth: parent === null ? 0 : parent.depth + 1,
-      loop: keys.loop,
-      status: status === "halted" ? "completed" : status === "failed" ? "failed" : "open",
-      snapshot: status === "waiting" ? step.snapshot : null,
-      edges: [],
-      texts: step.texts,
-      prompt: session.prompt(step.snapshot),
-    };
-    nodes.push(node);
-    byState.set(keys.state, node.id);
-    if (node.status === "failed") recordCrash(crashes, step, pathTo(nodes, node));
-    if (node.status === "open") {
-      const repeats = loopSeen.get(keys.loop) ?? 0;
-      frontier.push(node.id, step.newInstructions > 0 ? 0 : repeats === 0 ? 1 : 2, repeats);
-    }
-    loopSeen.set(keys.loop, (loopSeen.get(keys.loop) ?? 0) + 1);
-    return node.id;
-  };
-
-  add(session.start(), null, null);
-  let stoppedBy: ExploreResult["search"]["stoppedBy"] = "exhausted";
-  const outOfBudget = () => performance.now() - started >= options.budgetMs;
-  search: while (frontier.size > 0) {
-    if (outOfBudget()) {
-      stoppedBy = "budget";
-      break;
-    }
-    if (nodes.length >= options.maxStates) {
-      stoppedBy = "maxStates";
-      break;
-    }
-    const node = nodes[frontier.pop()!]!;
-    const snapshot = node.snapshot!;
-    const inputs = session.options(snapshot);
-    if (inputs.length === 0) {
-      node.status = "stuck";
-      node.snapshot = null;
-      continue;
-    }
-    expanded += 1;
-    node.status = "partial";
-    for (const input of inputs) {
-      if (outOfBudget()) {
-        stoppedBy = "budget";
-        break search;
-      }
-      let step: Step | null;
-      try {
-        step = session.apply(snapshot, input);
-      } catch (error) {
-        // The runtime refused data it was given (RuntimeDataError): a harness problem, not a script failure.
-        engineErrors.count += 1;
-        engineErrors.first ??= { message: String(error), inputs: [...pathTo(nodes, node), input] };
-        continue;
-      }
-      if (step === null) {
-        rejectedInputs += 1;
-        continue;
-      }
-      transitions += 1;
-      const child = add(step, node, input);
-      if (!node.edges.includes(child)) node.edges.push(child);
-    }
-    node.status = "expanded";
-    node.snapshot = null;
-  }
-
-  const visitedInstructions = session.visited.reduce((sum, value) => sum + value, 0);
-  const coverage = lineCoverage(plan, session, options.sources);
-  const count = (status: NodeStatus) => nodes.filter((node) => node.status === status).length;
-  return {
-    search: {
-      states: nodes.length,
-      transitions,
-      expanded,
-      rejectedInputs,
-      engineErrors,
-      untracedRuns: session.untracedRuns,
-      stoppedBy,
-      elapsedMs: Math.round(performance.now() - started),
-    },
-    endStates: {
-      completed: count("completed"),
-      failed: count("failed"),
-      stuck: count("stuck"),
-      open: count("open") + count("partial"),
-    },
-    coverage: { ...coverage, instructions: session.visited.length, visitedInstructions },
-    crashes: [...crashes.values()],
-    traps: findTraps(nodes, plan),
-  };
-}
-
-function pathTo(nodes: readonly Node[], node: Node): ExplorerInput[] {
-  const inputs: ExplorerInput[] = [];
-  for (let current: Node | undefined = node; current?.input;) {
-    inputs.push(current.input);
-    current = current.parent === null ? undefined : nodes[current.parent];
-  }
-  return inputs.reverse();
-}
-
-function failureOf(snapshot: Data) {
+/** A runtime failure as a report shows it, with one-based lines and columns. */
+export function failureOf(snapshot: Data) {
   const failure = record(snapshot.failure);
   const span = record(failure.span);
   const start = record(span.start);
@@ -1019,319 +964,6 @@ function failureOf(snapshot: Data) {
   };
 }
 
-function recordCrash(crashes: Map<string, CrashReport>, step: Step, inputs: ExplorerInput[]): void {
-  const failure = failureOf(step.snapshot);
-  const key = `${failure.code}@${failure.path}:${failure.line}:${failure.column}-${failure.endLine}:${failure.endColumn}`;
-  const known = crashes.get(key);
-  if (known === undefined) {
-    crashes.set(key, { ...failure, states: 1, inputs, texts: step.texts });
-    return;
-  }
-  known.states += 1;
-  if (inputs.length < known.inputs.length) {
-    known.inputs = inputs;
-    known.texts = step.texts;
-  }
-}
-
-/** Plan spans are compact: zero-based start/end line and column, and offsets into the file's source. */
-function compactSpan(value: unknown) {
-  const span = record(value);
-  return typeof span.sl === "number" && typeof span.el === "number"
-    ? {
-        line: span.sl + 1,
-        column: Number(span.sc) + 1,
-        endLine: span.el + 1,
-        endColumn: Number(span.ec) + 1,
-        start: Number(span.so),
-        end: Number(span.eo),
-      }
-    : null;
-}
-
-/** The file an instruction belongs to, as the runtime reports a failure's path (`instructionSourcePath`). */
-function instructionFiles(plan: Data): string[] {
-  const files = list(plan.files);
-  return list(plan.instructions).map((instruction, index) => {
-    if (
-      (instruction.kind === "declareGlobal" || instruction.kind === "declareSpeaker") &&
-      typeof instruction.file === "number"
-    )
-      return String(files[instruction.file]?.path);
-    const file =
-      files.find(
-        (candidate) =>
-          index >= Number(candidate.startInstruction) && index < Number(candidate.endInstruction),
-      ) ?? files[0];
-    return String(file?.path);
-  });
-}
-
-function lineCoverage(plan: Data, session: Session, sources: ReadonlyMap<string, string>) {
-  const instructions = list(plan.instructions);
-  const files = instructionFiles(plan);
-  // Per file, per line: whether some instruction starting on it ran.
-  const lines = new Map<string, Map<number, boolean>>();
-  const lineOf = instructions.map((instruction) => compactSpan(instruction.span)?.line ?? null);
-  instructions.forEach((_, index) => {
-    const line = lineOf[index];
-    if (line == null) return;
-    const file = lines.get(files[index]!) ?? new Map<number, boolean>();
-    file.set(line, (file.get(line) ?? false) || session.visited[index] === 1);
-    lines.set(files[index]!, file);
-  });
-  const percent = (part: number, whole: number) =>
-    whole === 0 ? 100 : Math.round((part / whole) * 1000) / 10;
-  const fileCoverage: FileCoverage[] = [...lines]
-    .sort(([left], [right]) => (left < right ? -1 : 1))
-    .map(([path, fileLines]) => {
-      const sorted = [...fileLines].sort(([left], [right]) => left - right);
-      const visited = sorted.filter(([, seen]) => seen).length;
-      // Unvisited lines with no visited line between them form one range.
-      const ranges: [number, number][] = [];
-      let open: [number, number] | null = null;
-      for (const [line, seen] of sorted) {
-        if (seen) open = null;
-        else if (open === null) ranges.push((open = [line, line]));
-        else open[1] = line;
-      }
-      return {
-        path,
-        coverableLines: sorted.length,
-        visitedLines: visited,
-        percent: percent(visited, sorted.length),
-        unvisited: ranges.map(([from, to]) => ({
-          lines: from === to ? `${from}` : `${from}-${to}`,
-          reach: "unknown" as const,
-        })),
-      };
-    });
-  const coverable = fileCoverage.reduce((sum, file) => sum + file.coverableLines, 0);
-  const visited = fileCoverage.reduce((sum, file) => sum + file.visitedLines, 0);
-  const unvisitedBranches: UnvisitedBranch[] = [];
-  instructions.forEach((instruction, index) => {
-    const taken = session.branches[index]!;
-    if (session.visited[index] !== 1 || taken === 0 || taken === 3) return;
-    if (instruction.kind !== "jumpIfFalse" && instruction.kind !== "loopStart") return;
-    const target = Number(instruction.target);
-    const condition = record(instruction.condition ?? instruction.expression);
-    // A constant condition, such as `while true`, has only one way.
-    if (target === index + 1 || condition.kind === "literal") return;
-    const missedTarget = taken === 1;
-    const span = compactSpan(condition.span);
-    const source = sources.get(files[index]!);
-    const isIf = instruction.kind === "jumpIfFalse";
-    unvisitedBranches.push({
-      instruction: index,
-      kind: isIf ? "if" : "loop",
-      path: files[index]!,
-      line: lineOf[index] ?? 0,
-      condition:
-        span === null
-          ? null
-          : {
-              line: span.line,
-              column: span.column,
-              endLine: span.endLine,
-              endColumn: span.endColumn,
-              text: source === undefined ? "" : short(source.slice(span.start, span.end)),
-            },
-      missed: isIf ? (missedTarget ? "false" : "true") : missedTarget ? "exit" : "enter",
-      targetInstruction: missedTarget ? target : index + 1,
-      targetLine: lineOf[firstStatement(instructions, missedTarget ? target : index + 1)] ?? null,
-      reach: "unknown",
-    });
-  });
-  return {
-    coverableLines: coverable,
-    visitedLines: visited,
-    percent: percent(visited, coverable),
-    files: fileCoverage,
-    unvisitedBranches,
-  };
-}
-
-/** Instructions that only open or close a block, which a way's first line should skip. */
-const STRUCTURAL = new Set([
-  "enterScope",
-  "leaveScope",
-  "clearTemporary",
-  "clearTemporaries",
-  "jump",
-]);
-
-/** The first instruction at or after `index` that is not structural, within a few steps. */
-function firstStatement(instructions: readonly Data[], index: number): number {
-  for (let current = index; current < Math.min(instructions.length, index + 5); current += 1) {
-    if (!STRUCTURAL.has(String(instructions[current]?.kind))) return current;
-  }
-  return index;
-}
-
-/**
- * Traps: loops the player cannot leave. Explored states are grouped by loop key (the state without clock, random
- * state, and settled handles), with an edge wherever an explored input leads from one group to another. A group
- * escapes when one of its states ended (completed or failed), or when none of its states was fully expanded, so its
- * future is unknown; so does every group with an edge to an escaping group. The remaining groups form the trapped
- * part: every explored input from them leads back into it. Each strongly connected part of it that no explored input
- * leaves is one trap; trapped groups outside such a part lead into one and are counted as its feeders. A state where
- * the player can do nothing and nothing will happen is a `stuck` trap of its own.
- *
- * The verdict covers only the inputs tried: a loop that waits for a typed word the candidates do not contain, or for
- * a clock time the explorer does not try, is reported as a trap.
- */
-export function findTraps(nodes: readonly Node[], plan: Data): TrapReport[] {
-  const groups = new Map<string, Node[]>();
-  for (const node of nodes) {
-    const members = groups.get(node.loop);
-    if (members === undefined) groups.set(node.loop, [node]);
-    else members.push(node);
-  }
-  const successors = new Map<string, Set<string>>();
-  for (const [loop, members] of groups) {
-    successors.set(
-      loop,
-      new Set(members.flatMap((member) => member.edges.map((edge) => nodes[edge]!.loop))),
-    );
-  }
-  const escaping = new Set<string>();
-  for (const [loop, members] of groups) {
-    const ended = members.some((node) => node.status === "completed" || node.status === "failed");
-    const explored = members.some((node) => node.status === "expanded" || node.status === "stuck");
-    if (ended || !explored) escaping.add(loop);
-  }
-  const predecessors = new Map<string, string[]>();
-  for (const [loop, next] of successors) {
-    for (const target of next) {
-      const previous = predecessors.get(target);
-      if (previous === undefined) predecessors.set(target, [loop]);
-      else previous.push(loop);
-    }
-  }
-  const queue = [...escaping];
-  while (queue.length > 0) {
-    for (const previous of predecessors.get(queue.pop()!) ?? []) {
-      if (!escaping.has(previous)) {
-        escaping.add(previous);
-        queue.push(previous);
-      }
-    }
-  }
-  const trapped = [...groups.keys()].filter((loop) => !escaping.has(loop));
-  const components = stronglyConnected(trapped, (loop) => [...successors.get(loop)!]);
-  const componentOf = new Map<string, number>();
-  components.forEach((component, index) => {
-    for (const loop of component) componentOf.set(loop, index);
-  });
-  const bottom = components
-    .map((component, index) => ({ component, index }))
-    .filter(({ component, index }) =>
-      component.every((loop) =>
-        [...successors.get(loop)!].every((next) => componentOf.get(next) === index),
-      ),
-    );
-  // Feeders: trapped groups outside the bottom components, each counted for the first one a backward search from the
-  // bottom components reaches it from.
-  const feeders = new Map<number, number>();
-  const owner = new Map<string, number>();
-  const pending: string[] = [];
-  for (const { component, index } of bottom) {
-    for (const loop of component) {
-      owner.set(loop, index);
-      pending.push(loop);
-    }
-  }
-  for (let next = 0; next < pending.length; next += 1) {
-    const loop = pending[next]!;
-    for (const previous of predecessors.get(loop) ?? []) {
-      if (owner.has(previous) || escaping.has(previous)) continue;
-      const index = owner.get(loop)!;
-      owner.set(previous, index);
-      feeders.set(index, (feeders.get(index) ?? 0) + groups.get(previous)!.length);
-      pending.push(previous);
-    }
-  }
-  const files = instructionFiles(plan);
-  const instructions = list(plan.instructions);
-  return bottom.map(({ component, index }) => {
-    const members = component.flatMap((loop) => groups.get(loop)!);
-    const cyclic = component.length > 1 || successors.get(component[0]!)!.has(component[0]!);
-    const entry = members.reduce((best, node) => (node.depth < best.depth ? node : best));
-    const locations = new Set<string>();
-    for (const node of members) {
-      const at = node.prompt.instruction;
-      const span = at === null ? null : compactSpan(instructions[at]?.span);
-      if (at !== null && span !== null) locations.add(`${files[at]}:${span.line}`);
-    }
-    return {
-      kind: cyclic ? ("loop" as const) : ("stuck" as const),
-      states: members.length,
-      feederStates: feeders.get(index) ?? 0,
-      locations: [...locations].slice(0, 10),
-      sampleTexts: [...new Set(members.flatMap((node) => node.texts))].slice(0, 8),
-      samplePrompts: [
-        ...new Set(members.map((node) => node.prompt.text).filter((text) => text !== "")),
-      ].slice(0, 8),
-      inputs: pathTo(nodes, entry),
-    };
-  });
-}
-
-/** Tarjan's strongly connected components, iteratively. */
-function stronglyConnected(
-  vertices: readonly string[],
-  next: (vertex: string) => string[],
-): string[][] {
-  const inside = new Set(vertices);
-  const index = new Map<string, number>();
-  const low = new Map<string, number>();
-  const stack: string[] = [];
-  const onStack = new Set<string>();
-  const components: string[][] = [];
-  let counter = 0;
-  for (const root of vertices) {
-    if (index.has(root)) continue;
-    const work: { vertex: string; edges: string[]; position: number }[] = [];
-    const open = (vertex: string) => {
-      index.set(vertex, counter);
-      low.set(vertex, counter);
-      counter += 1;
-      stack.push(vertex);
-      onStack.add(vertex);
-      work.push({
-        vertex,
-        edges: next(vertex).filter((target) => inside.has(target)),
-        position: 0,
-      });
-    };
-    open(root);
-    while (work.length > 0) {
-      const frame = work.at(-1)!;
-      if (frame.position < frame.edges.length) {
-        const target = frame.edges[frame.position++]!;
-        if (!index.has(target)) open(target);
-        else if (onStack.has(target))
-          low.set(frame.vertex, Math.min(low.get(frame.vertex)!, index.get(target)!));
-        continue;
-      }
-      work.pop();
-      const parent = work.at(-1);
-      if (parent !== undefined)
-        low.set(parent.vertex, Math.min(low.get(parent.vertex)!, low.get(frame.vertex)!));
-      if (low.get(frame.vertex) === index.get(frame.vertex)) {
-        const component: string[] = [];
-        for (let vertex: string | undefined; vertex !== frame.vertex;) {
-          vertex = stack.pop()!;
-          onStack.delete(vertex);
-          component.push(vertex);
-        }
-        components.push(component);
-      }
-    }
-  }
-  return components;
-}
-
 /** One step of a replayed path, for a transcript. */
 export interface ReplayStep {
   readonly input: ExplorerInput | null;
@@ -1341,14 +973,15 @@ export interface ReplayStep {
 }
 
 /**
- * Replays an input list from a fresh session; the last step holds the final state. An operation that throws ends the
- * replay with its `error`.
+ * Replays an input list from a fresh session that starts with `setup`; the last step holds the final state. An
+ * operation that throws ends the replay with its `error`.
  */
 export function replay(
   engine: Engine,
   plan: Data,
   seed: number,
   inputs: readonly ExplorerInput[],
+  setup: Setup = PLAY_SETUP,
 ): {
   steps: ReplayStep[];
   snapshot: Data;
@@ -1356,7 +989,8 @@ export function replay(
   error: string | null;
 } {
   const session = new Session(engine, plan, seed);
-  let step = session.start();
+  let step = session.start(setup);
+  let seeded = setup !== PLAY_SETUP;
   const describe = (input: ExplorerInput | null, current: Step): ReplayStep => ({
     input,
     texts: current.texts,
@@ -1368,7 +1002,7 @@ export function replay(
   for (const input of inputs) {
     let next: Step | null;
     try {
-      next = session.apply(step.snapshot, input);
+      next = session.apply(step.snapshot, input, seeded);
     } catch (thrown) {
       error = String(thrown);
       break;
@@ -1377,6 +1011,7 @@ export function replay(
       throw new Error(
         `The runtime rejected input ${JSON.stringify(input)} at step ${steps.length}.`,
       );
+    seeded ||= isSeeding(input);
     step = next;
     steps.push(describe(input, step));
   }

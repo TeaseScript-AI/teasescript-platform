@@ -1,5 +1,5 @@
 say "Welcome."
-let pick = choose left: "Left", right: "Right", stay: "Stay"
+let pick = choose left: "Left", right: "Right", stay: "Stay", count: "Count"
 if pick == "left" {
   say "You went left."
   exit
@@ -10,6 +10,76 @@ if pick == "never" {
 if pick == "right" {
   let items = [1, 2]
   say "Item ${items[5]}"
+}
+if pick == "count" {
+  let n = askInteger default: 0
+  say "Counting 1."
+  say "Counting 2."
+  say "Counting 3."
+  say "Counting 4."
+  say "Counting 5."
+  say "Counting 6."
+  say "Counting 7."
+  say "Counting 8."
+  say "Counting 9."
+  say "Counting 10."
+  say "Counting 11."
+  say "Counting 12."
+  say "Counting 13."
+  say "Counting 14."
+  say "Counting 15."
+  say "Counting 16."
+  say "Counting 17."
+  say "Counting 18."
+  say "Counting 19."
+  say "Counting 20."
+  say "Counting 21."
+  say "Counting 22."
+  say "Counting 23."
+  say "Counting 24."
+  say "Counting 25."
+  say "Counting 26."
+  say "Counting 27."
+  say "Counting 28."
+  say "Counting 29."
+  say "Counting 30."
+  say "Counting 31."
+  say "Counting 32."
+  say "Counting 33."
+  say "Counting 34."
+  say "Counting 35."
+  say "Counting 36."
+  say "Counting 37."
+  say "Counting 38."
+  say "Counting 39."
+  say "Counting 40."
+  say "Counting 41."
+  say "Counting 42."
+  say "Counting 43."
+  say "Counting 44."
+  say "Counting 45."
+  say "Counting 46."
+  say "Counting 47."
+  say "Counting 48."
+  say "Counting 49."
+  say "Counting 50."
+  say "Counting 51."
+  say "Counting 52."
+  say "Counting 53."
+  say "Counting 54."
+  say "Counting 55."
+  say "Counting 56."
+  say "Counting 57."
+  say "Counting 58."
+  say "Counting 59."
+  say "Counting 60."
+  if n == 1234 {
+    say "Secret number."
+  }
+  if (load "fixture.visited") == true {
+    say "Welcome back."
+  }
+  exit
 }
 while true {
   say "You are stuck."

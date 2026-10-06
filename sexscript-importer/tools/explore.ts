@@ -1,18 +1,19 @@
 /**
  * Explores packages headlessly: plays each package in the real runtime through every branch it can reach within a
- * budget, and reports crashes, line coverage, and loops the player cannot leave. The search is described in
- * `src/explorer.ts`.
+ * budget, with a directed search toward conditions left one way, and reports crashes, line coverage by reach label, and
+ * loops the player cannot leave. The search is described in `src/explorer-search.ts`.
  *
  * Usage: node tools/explore.ts [--budget-seconds N] [--max-states N] [--seed N] [--workers 1|2] <unit-dir>... --out <dir>
- *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --error)
+ *        node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)
  *
  * Each unit folder is a package with `main.tease`, read as the Player reads it. The explorer writes `<out>/<unit>.json`
  * per unit and `<out>/summary.md` over the units of the run. Defaults: 60 seconds and 20000 states per unit, seed 1,
  * one worker; two workers explore two units at a time in separate processes.
  *
- * Every crash and trap has the input list from the start that reaches it, and so does the first input whose runtime
- * operation threw (an explorer or runtime problem, not a script failure). `--replay` plays it again with the seed of
- * the run, prints the transcript, and for a crash or error exits 0 only when the same failure or error comes back.
+ * Every crash, trap, and way directed search reached has the input list from the start that reaches it (with the
+ * seeded start, if any), and so does the first input whose runtime operation threw (an explorer or runtime problem,
+ * not a script failure). `--replay` plays it again with the seed of the run, prints the transcript, and for a crash or
+ * error exits 0 only when the same failure or error comes back. Each report also has a compact `catalog` block.
  * Needs the repository build (`npm run build:typescript` in the repository root).
  */
 import { execFileSync, spawn } from "node:child_process";
@@ -22,13 +23,16 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { isRecord } from "../src/ast.ts";
 import { loadRepositoryPackageScanner } from "../src/compile-check.ts";
+import type { PlanDiagnostic } from "../src/explorer-analysis.ts";
+import { explore, type ExploreResult } from "../src/explorer-search.ts";
 import {
-  explore,
+  EPOCH_MS,
   loadEngine,
   replay,
   type Engine,
-  type ExploreResult,
   type ExplorerInput,
+  type Setup,
+  type StoredValue,
 } from "../src/explorer.ts";
 import { packageContentHash } from "./catalog.ts";
 
@@ -64,11 +68,17 @@ async function main(args: string[]): Promise<void> {
       crash: { type: "string" },
       trap: { type: "string" },
       error: { type: "boolean", default: false },
+      way: { type: "string" },
       "no-summary": { type: "boolean", default: false },
     },
   });
   if (values.replay !== undefined) {
-    process.exitCode = await replayCommand(values.replay, values.crash, values.trap, values.error);
+    process.exitCode = await replayCommand(values.replay, {
+      crash: values.crash,
+      trap: values.trap,
+      way: values.way,
+      error: values.error,
+    });
     return;
   }
   const budgetSeconds = Number(values["budget-seconds"]);
@@ -86,7 +96,7 @@ async function main(args: string[]): Promise<void> {
   ) {
     process.stderr.write(
       "Usage: node tools/explore.ts [--budget-seconds N] [--max-states N] [--seed N] [--workers 1|2] <unit-dir>... --out <dir>\n" +
-        "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --error)\n",
+        "       node tools/explore.ts --replay <out>/<unit>.json (--crash N | --trap N | --way N | --error)\n",
     );
     process.exit(2);
   }
@@ -127,7 +137,11 @@ async function main(args: string[]): Promise<void> {
       const settings = { budgetSeconds, maxStates, seed, explorer };
       const { header, result } = await exploreUnit(engine, scan, dir, settings);
       const file = path.join(out, `${header.unit}.json`);
-      const report = { ...header, ...(result === null ? {} : withReplayCommands(result, file)) };
+      const report = {
+        ...header,
+        catalog: catalogBlock(header, result),
+        ...(result === null ? {} : withReplayCommands(result, file)),
+      };
       await writeFile(file, `${JSON.stringify(report, null, 2)}\n`);
       const seconds = Math.round((performance.now() - started) / 1000);
       process.stderr.write(`  ${oneLine(header, result)} (${seconds} s)\n`);
@@ -150,6 +164,8 @@ interface LoadedUnit {
   sources: { path: string; source: string }[];
   plan: Readonly<Record<string, unknown>> | null;
   errors: string[];
+  /** Every diagnostic with its source offsets, for the constant conditions the compiler proves. */
+  diagnostics: PlanDiagnostic[];
   contentHash: string;
 }
 
@@ -166,10 +182,21 @@ async function loadUnit(engine: Engine, scan: Scanner, dir: string): Promise<Loa
       const line = typeof span.line === "number" ? span.line + 1 : 0;
       return `${String(entry.path ?? "")}:${line} ${String(entry.code ?? "")} ${String(entry.message ?? "")}`;
     });
+  const diagnostics = records(compiled.diagnostics).map((entry) => {
+    const span = fields(entry.span);
+    return {
+      path: text(entry.path),
+      start: count(fields(span.start).offset),
+      end: count(fields(span.end).offset),
+      code: text(entry.code),
+      message: text(entry.message),
+    };
+  });
   return {
     sources: folder.sources,
     plan: isRecord(compiled.plan) ? compiled.plan : null,
     errors,
+    diagnostics,
     contentHash: packageContentHash(folder.sources),
   };
 }
@@ -201,6 +228,7 @@ async function exploreUnit(
       budgetMs: settings.budgetSeconds * 1000,
       maxStates: settings.maxStates,
       sources: new Map(unit.sources.map((file) => [file.path, file.source])),
+      diagnostics: unit.diagnostics,
     }),
   };
 }
@@ -242,18 +270,60 @@ function withReplayCommands(result: ExploreResult, file: string) {
           engineErrors.first === null ? null : { ...engineErrors.first, replay: command("error") },
       },
     },
+    directed: {
+      ...result.directed,
+      ways: result.directed.ways.map((way, index) => ({ ...way, replay: command("way", index) })),
+    },
     crashes: result.crashes.map((crash, index) => ({ ...crash, replay: command("crash", index) })),
     traps: result.traps.map((trap, index) => ({ ...trap, replay: command("trap", index) })),
   };
 }
 
+/**
+ * The compact view of a unit that the importer catalog shows in its own column: coverage by play, the coverable lines
+ * by reach label, crashes (with how many need seeded state, and the first, a play one when there is), traps, completed
+ * paths, why the search stopped, and what was explored with what.
+ */
+function catalogBlock(header: ReportHeader, result: ExploreResult | null) {
+  const crashes = result?.crashes ?? [];
+  const first = crashes.find((crash) => !crash.seeded) ?? crashes[0];
+  const traps = result?.traps ?? [];
+  return {
+    compiled: result !== null,
+    coverage: result?.coverage.percent ?? null,
+    reach: result?.coverage.reach ?? null,
+    crashes: {
+      count: crashes.length,
+      seeded: crashes.filter((crash) => crash.seeded).length,
+      first:
+        first === undefined
+          ? null
+          : {
+              code: first.code,
+              path: first.path,
+              line: first.line,
+              column: first.column,
+              endLine: first.endLine,
+              endColumn: first.endColumn,
+            },
+    },
+    traps: { count: traps.length, first: traps[0]?.locations[0] ?? null },
+    completed: result?.endStates.completed ?? 0,
+    stoppedBy: result?.search.stoppedBy ?? null,
+    converter: header.converter,
+    explorer: header.explorer,
+    contentHash: header.contentHash,
+  };
+}
+
 function oneLine(header: ReportHeader, result: ExploreResult | null): string {
   if (result === null) return `does not compile (${header.compile.errors.length} errors)`;
-  const { coverage, search, endStates, crashes, traps } = result;
+  const { coverage, search, endStates, crashes, traps, directed } = result;
   return (
     `${coverage.percent}% of ${coverage.coverableLines} lines, ${search.states} states (${search.stoppedBy}), ` +
     `${crashes.length} crashes, ${traps.length} traps, ` +
-    `${endStates.completed} completed / ${endStates.failed} failed / ${endStates.stuck} stuck / ${endStates.open} open`
+    `${endStates.completed} completed / ${endStates.failed} failed / ${endStates.stuck} stuck / ${endStates.open} open, ` +
+    `directed ${directed.reached.play} play + ${directed.reached.seeded} seeded of ${directed.targets}`
   );
 }
 
@@ -323,8 +393,8 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
     for (const crash of records(report.crashes)) {
       lines.push(
         `- Crash \`${text(crash.code)}\` at \`${text(crash.path)}:${count(crash.line)}:${count(crash.column)}\`: ` +
-          `${text(crash.message)} (${count(crash.states)} states, ${records(crash.inputs).length} inputs; ` +
-          `\`${text(crash.replay)}\`)`,
+          `${text(crash.message)} (${count(crash.states)} states, ${records(crash.inputs).length} inputs` +
+          `${crash.seeded === true ? ", needs seeded state" : ""}; \`${text(crash.replay)}\`)`,
       );
     }
     for (const trap of records(report.traps)) {
@@ -355,8 +425,21 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
           .join(", ")}`,
       );
     }
+    const reach = fields(coverage.reach);
     lines.push(
-      `- Branches reached but left only one way: ${records(coverage.unvisitedBranches).length}`,
+      `- Lines: ${count(reach.play)} play, ${count(reach.seeded)} seeded, ${count(reach.unreachable)} unreachable, ` +
+        `${count(reach.unknown)} unknown`,
+    );
+    const directed = fields(report.directed);
+    const reached = fields(directed.reached);
+    const bySource = Object.entries(fields(directed.bySource))
+      .filter(([, value]) => count(fields(value).targets) > 0)
+      .map(([kind, value]) => `${kind} ${count(fields(value).reached)}/${count(fields(value).targets)}`)
+      .join(", ");
+    lines.push(
+      `- Directed search: ${count(reached.play)} play and ${count(reached.seeded)} seeded of ` +
+        `${count(directed.targets)} ways left one way${bySource === "" ? "" : ` (${bySource})`}; ` +
+        `${records(coverage.unvisitedBranches).length} still missed by play`,
     );
     const engineErrors = fields(fields(report.search).engineErrors);
     const firstError = fields(engineErrors.first);
@@ -367,6 +450,32 @@ function summary(reports: readonly Readonly<Record<string, unknown>>[], out: str
       );
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** A stored value read back from a report: a scalar or a runtime composite; undefined when malformed. */
+function parseStored(value: unknown): StoredValue | undefined {
+  return typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    isRecord(value)
+    ? value
+    : undefined;
+}
+
+/** A seeded start read back from a report: undefined for none (a play start), null when malformed. */
+function parseSetup(value: unknown): Setup | undefined | null {
+  if (value === undefined) return undefined;
+  if (!isRecord(value) || !Array.isArray(value.storage)) return null;
+  const storage: { key: string; value: StoredValue }[] = [];
+  for (const entry of value.storage) {
+    const stored = isRecord(entry) ? parseStored(entry.value) : undefined;
+    if (!isRecord(entry) || typeof entry.key !== "string" || stored === undefined) return null;
+    storage.push({ key: entry.key, value: stored });
+  }
+  return {
+    storage,
+    wallClockMs: typeof value.wallClockMs === "number" ? value.wallClockMs : EPOCH_MS,
+  };
 }
 
 /** An input list read back from a report, or null when an input is malformed. */
@@ -396,9 +505,26 @@ function parseInput(value: unknown): ExplorerInput | null {
       return typeof value.text === "string" ? { kind: "text", text: value.text } : null;
     case "image":
       return { kind: "image" };
-    case "form":
-      return value.action === "submit" || value.action === "cancel"
-        ? { kind: "form", action: value.action }
+    case "form": {
+      if (value.action !== "submit" && value.action !== "cancel") return null;
+      if (value.fields === undefined) return { kind: "form", action: value.action };
+      if (!isRecord(value.fields)) return null;
+      const formFields: Record<string, number | string> = {};
+      for (const [id, field] of Object.entries(value.fields)) {
+        if (typeof field !== "number" && typeof field !== "string") return null;
+        formFields[id] = field;
+      }
+      return { kind: "form", action: value.action, fields: formFields };
+    }
+    case "storage": {
+      const stored = value.value === null ? null : parseStored(value.value);
+      return typeof value.key === "string" && stored !== undefined
+        ? { kind: "storage", key: value.key, value: stored }
+        : null;
+    }
+    case "clock":
+      return typeof value.wallClockMs === "number"
+        ? { kind: "clock", wallClockMs: value.wallClockMs }
         : null;
     case "wait":
       return typeof value.untilMs === "number" ? { kind: "wait", untilMs: value.untilMs } : null;
@@ -411,33 +537,50 @@ function parseInput(value: unknown): ExplorerInput | null {
   }
 }
 
-async function replayCommand(
-  file: string,
-  crash: string | undefined,
-  trap: string | undefined,
-  error: boolean,
-): Promise<number> {
+/** Which repro of a report to replay: one crash, trap, or reached way by index, or the first operation that threw. */
+interface ReplayChoice {
+  crash: string | undefined;
+  trap: string | undefined;
+  way: string | undefined;
+  error: boolean;
+}
+
+async function replayCommand(file: string, choice: ReplayChoice): Promise<number> {
+  const { crash, trap, way, error } = choice;
   const value: unknown = JSON.parse(await readFile(file, "utf8"));
   const report = fields(value);
-  const index = Number(crash ?? trap);
+  const index = Number(crash ?? trap ?? way);
   const thrown = fields(report.search).engineErrors;
   const target =
     crash !== undefined
       ? records(report.crashes)[index]
       : trap !== undefined
         ? records(report.traps)[index]
-        : error && isRecord(fields(thrown).first)
-          ? fields(fields(thrown).first)
-          : undefined;
+        : way !== undefined
+          ? records(fields(report.directed).ways)[index]
+          : error && isRecord(fields(thrown).first)
+            ? fields(fields(thrown).first)
+            : undefined;
   if (
-    [crash !== undefined, trap !== undefined, error].filter(Boolean).length !== 1 ||
+    [crash !== undefined, trap !== undefined, way !== undefined, error].filter(Boolean).length !==
+      1 ||
     target === undefined
   ) {
-    process.stderr.write("Name one existing --crash N, --trap N, or --error of the report.\n");
+    process.stderr.write(
+      "Name one existing --crash N, --trap N, --way N, or --error of the report.\n",
+    );
     return 2;
   }
-  const inputs = parseInputs(target.inputs);
-  if (inputs === null || typeof report.seed !== "number" || typeof report.dir !== "string") {
+  // A reached way keeps its repro apart; a crash or trap has its inputs and setup at the top.
+  const repro = isRecord(target.repro) ? target.repro : target;
+  const inputs = parseInputs(repro.inputs);
+  const setup = parseSetup(repro.setup);
+  if (
+    inputs === null ||
+    setup === null ||
+    typeof report.seed !== "number" ||
+    typeof report.dir !== "string"
+  ) {
     process.stderr.write(
       "The report has no valid seed, unit folder, or input list for this replay.\n",
     );
@@ -451,7 +594,11 @@ async function replayCommand(
   }
   if (unit.contentHash !== report.contentHash)
     process.stderr.write("Warning: the package's .tease files changed since the report.\n");
-  const replayed = replay(engine, unit.plan, report.seed, inputs);
+  if (setup !== undefined)
+    process.stdout.write(
+      `Seeded start: wall clock ${new Date(setup.wallClockMs).toISOString()}, storage ${JSON.stringify(setup.storage)}\n`,
+    );
+  const replayed = replay(engine, unit.plan, report.seed, inputs, setup);
   const { steps, failure } = replayed;
   for (const step of steps) {
     if (step.input !== null) process.stdout.write(`> ${describeInput(step.input)}\n`);
@@ -490,7 +637,13 @@ function describeInput(input: ExplorerInput): string {
     case "image":
       return "give an image";
     case "form":
-      return input.action === "submit" ? "submit the form" : "cancel the form";
+      return input.action === "cancel"
+        ? "cancel the form"
+        : `submit the form${input.fields === undefined ? "" : ` with ${JSON.stringify(input.fields)}`}`;
+    case "storage":
+      return `(seeded) store ${JSON.stringify(input.value)} as ${JSON.stringify(input.key)}`;
+    case "clock":
+      return `(seeded) continue at ${new Date(input.wallClockMs).toISOString()}`;
     case "wait":
       return `wait until ${input.untilMs / 1000} s`;
     case "press":
