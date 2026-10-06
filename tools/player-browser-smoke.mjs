@@ -126,6 +126,7 @@ async function main() {
       await developmentTimeScenario(cdp, origin);
       await debugCountdownScenario(cdp, origin);
       await debugNowScenario(cdp, origin);
+      await debugStorageScenario(cdp, origin, profile);
       await missingMediaScenario(cdp, origin);
       await lateImageScenario(cdp, origin);
       await askImageCameraScenario(cdp, origin, profile);
@@ -133,7 +134,7 @@ async function main() {
       await viewfinderScenario(cdp, origin);
       await permanentButtonsScenario(cdp, origin);
       console.log(
-        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, development time controls, Debug countdowns and Now, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
+        "player-browser-smoke: PASS technical playground, the repository demo on /player/, packages opened by URL, askImage by picker, drop, and camera, saved-data export and import from Settings, development time controls, Debug countdowns, Now and Storage, missing and late media, and the camera, viewfinder, and permanent buttons scenarios",
       );
     } finally {
       cdp.close();
@@ -1465,6 +1466,160 @@ async function debugCountdownScenario(cdp, origin) {
  * a valid image, while two sounds overlap and a hidden timer runs. The tab names each state with the authored paths,
  * the call chain and the timers, and fits a narrow drawer.
  */
+/**
+ * Debug's Storage tab on the `debug-storage` package: it lists the script's saved values in key order with typed
+ * previews and the saved photo, once per photo with the keys that use it; a member list expands to the shared photo;
+ * a later save updates it; Debug off hides it; and it fits the narrow drawer.
+ */
+async function debugStorageScenario(cdp, origin, profile) {
+  await setViewport(cdp, 1440, 900);
+  const chosen = join(profile, "debug-storage.png");
+  await writeFile(chosen, solidPng(24, 16, [40, 90, 200]));
+  const rows = `[...document.querySelectorAll('[data-debug-storage-row]')].map((row) => [row.querySelector('[data-debug-storage-key]').textContent, row.querySelector('[data-storage-preview]').textContent.trim()])`;
+  await navigate(cdp, `${origin}/player/?dev&package=debug-storage`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  await waitFor(
+    cdp,
+    visible("[data-composer-attach]"),
+    8_000,
+    "The image request offered no paperclip",
+  );
+  await openPicker(cdp);
+  await setInputFiles(cdp, "[data-composer-file]", [chosen]);
+  await waitFor(
+    cdp,
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.includes('Saved.'))`,
+    8_000,
+    "The script did not save",
+  );
+  await physicalClick(cdp, '[data-launcher] button[aria-label="Debug"]');
+  await physicalClick(cdp, '[data-debug-tab="storage"]');
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-debug-storage-summary]')?.textContent.replace(/\\s+/g, ' ').trim() === 'Saved data · 7 keys'`,
+    5_000,
+    "The Storage tab did not count the saved values",
+  );
+  // Text shaped like a photo reference stays visible as text, the chosen photo's reference included.
+  const listed = (await value(cdp, rows)).map(([key, preview]) =>
+    key === '"player.photo"' && /^"captured-media:[0-9a-f-]+:1"$/.test(preview)
+      ? [key, "<photo reference>"]
+      : [key, preview],
+  );
+  assertEqual(
+    JSON.stringify(listed),
+    JSON.stringify([
+      ['"album"', "2 items"],
+      ['"missing"', '"captured-media:00000000-0000-4000-8000-000000000000:1"'],
+      ['"note"', '"captured-media:note"'],
+      ['"player.flags"', "2 properties"],
+      ['"player.name"', '"Ada"'],
+      ['"player.photo"', "<photo reference>"],
+      ['"player.score"', "3"],
+    ]),
+    "The Storage tab did not list the saved values in key order",
+  );
+  // The saved photo once, used by two keys; each thumbnail loads from this browser's storage once it is in view.
+  const photoRow = `[...document.querySelectorAll('[data-debug-storage-row]')].find((row) => row.querySelector('[data-debug-storage-key]').textContent === '"player.photo"')`;
+  await evaluate(cdp, `${photoRow}.scrollIntoView()`);
+  await waitFor(
+    cdp,
+    `!!${photoRow}.querySelector('[data-storage-photo][data-state="ready"] img')`,
+    5_000,
+    "The saved photo's row showed no thumbnail",
+  );
+  await evaluate(cdp, `document.querySelector('[data-debug-storage-photos]').scrollIntoView()`);
+  await waitFor(
+    cdp,
+    `/Used by "album", "player.photo"/.test(document.querySelector('[data-debug-storage-photos]').textContent) &&
+      !!document.querySelector('[data-debug-storage-photos] [data-storage-photo][data-state="ready"] img')`,
+    5_000,
+    "The Storage tab did not show the shared saved photo",
+  );
+  // A well-formed reference the store does not have says so, and ordinary text gets no thumbnail.
+  await evaluate(cdp, `document.querySelectorAll('[data-debug-storage-row]')[1].scrollIntoView()`);
+  await waitFor(
+    cdp,
+    `(() => { const [missing, note] = [...document.querySelectorAll('[data-debug-storage-row]')].slice(1, 3);
+      return missing.querySelector('[data-storage-photo]')?.dataset.state === 'missing' &&
+        /No saved photo/.test(missing.textContent) && !note.querySelector('[data-storage-photo]'); })()`,
+    5_000,
+    "A reference without a saved photo or ordinary text was misshown",
+  );
+  await evaluate(cdp, `document.querySelector('[data-debug-storage-row]').scrollIntoView()`);
+  await physicalClick(cdp, "[data-debug-storage-row] [data-storage-expand]");
+  await waitFor(
+    cdp,
+    `document.querySelector('[data-debug-storage-row]').querySelectorAll('[data-storage-photo]').length === 2`,
+    5_000,
+    "The album did not expand to its two photos",
+  );
+  // A later save shows at once; the photo row's new reference, out of view, is not read until it comes into view.
+  await setViewport(cdp, 1440, 480);
+  await evaluate(cdp, `document.querySelector('[data-debug-active]').scrollIntoView()`);
+  await physicalClick(cdp, "[data-foreground-controls] button");
+  await waitFor(
+    cdp,
+    `${rows}.some(([key, preview]) => key === '"player.score"' && preview === '4') &&
+      /:2"$/.test(${photoRow}.querySelector('[data-storage-preview]').textContent)`,
+    5_000,
+    "A later save did not update the Storage tab",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const row = ${photoRow}; const panel = row.closest('[data-tool]').getBoundingClientRect();
+        return row.getBoundingClientRect().top > panel.bottom && row.querySelector('[data-storage-photo]').dataset.state; })()`,
+    ),
+    "loading",
+    "An off-screen new photo reference was read before it came into view",
+  );
+  await evaluate(cdp, `${photoRow}.scrollIntoView()`);
+  await waitFor(
+    cdp,
+    `${photoRow}.querySelector('[data-storage-photo]').dataset.state === 'missing'`,
+    5_000,
+    "The new photo reference was not read once in view",
+  );
+  await setViewport(cdp, 1440, 900);
+  await evaluate(cdp, `document.querySelector('[data-debug-active]').scrollIntoView()`);
+  await physicalClick(cdp, "[data-debug-active]");
+  await waitFor(
+    cdp,
+    `!document.querySelector('[data-debug-storage]') && /Debug is off/.test(document.querySelector('[data-debug-panel]')?.textContent ?? '')`,
+    2_000,
+    "Debug off left the Storage overview",
+  );
+  await physicalClick(cdp, "[data-debug-active]");
+  await waitFor(cdp, `!!document.querySelector('[data-debug-storage]')`);
+
+  await setViewport(cdp, 390, 760);
+  await waitFor(
+    cdp,
+    `document.querySelector('#player-shell')?.dataset.playerHorizontal === 'constrained'`,
+  );
+  // Focus in the tools keeps them open as the drawer; otherwise open it.
+  if (
+    await value(cdp, `!!document.querySelector('[data-player-top-bar] [data-sidebar="trigger"]')`)
+  )
+    await physicalClick(cdp, '[data-player-top-bar] [data-sidebar="trigger"]');
+  await waitFor(
+    cdp,
+    `!!document.querySelector('.tools-drawer [data-debug-storage]')`,
+    5_000,
+    "The drawer did not show Storage",
+  );
+  assertEqual(
+    await value(
+      cdp,
+      `(() => { const storage = document.querySelector('.tools-drawer [data-debug-storage]'); return storage.scrollWidth <= storage.clientWidth && storage.getBoundingClientRect().right <= innerWidth && [...storage.querySelectorAll('[data-debug-storage-row]')].every((row) => row.scrollWidth <= row.clientWidth); })()`,
+    ),
+    true,
+    "The Storage tab overflows the narrow drawer",
+  );
+}
+
 async function debugNowScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
   const text = (selector) =>

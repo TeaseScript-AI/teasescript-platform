@@ -13,7 +13,7 @@ import type { DevelopmentTime } from "./useDevelopmentTime";
 import type { PlayerSessionHost } from "./usePlayerSession";
 
 // The Debug panel (DEBUGGER.md "Player Debug"): its Debug switch and, while Debug is on, the time controls (#615) above
-// the tabs: Now, the Debug log, newest line first, and the saved-data tools when a host supplies them. An explanation
+// the tabs: Now, the Debug log, newest line first, and Storage when the host persists script storage. An explanation
 // opens from its label, by click, tap or keyboard; any number may be open.
 defineProps<{
   time: DevelopmentTime | null;
@@ -107,9 +107,9 @@ const active = defineModel<boolean>("active", { required: true });
     </section>
     <Tabs default-value="now">
       <TabsList class="h-auto w-full">
-        <TabsTrigger value="now" class="min-h-11">Now</TabsTrigger>
-        <TabsTrigger value="log" class="min-h-11">Log</TabsTrigger>
-        <TabsTrigger v-if="$slots.storage" value="storage" class="min-h-11">Storage</TabsTrigger>
+        <TabsTrigger value="now" class="min-h-11" data-debug-tab="now">Now</TabsTrigger>
+        <TabsTrigger value="log" class="min-h-11" data-debug-tab="log">Log</TabsTrigger>
+        <TabsTrigger v-if="$slots.storage" value="storage" class="min-h-11" data-debug-tab="storage">Storage</TabsTrigger>
       </TabsList>
       <TabsContent value="now">
         <DebugNow
@@ -137,9 +137,9 @@ const active = defineModel<boolean>("active", { required: true });
           </div>
         </section>
       </TabsContent>
-      <!-- Reserved for the saved-data overview and editor, which a host supplies. -->
       <TabsContent v-if="$slots.storage" value="storage">
-        <slot name="storage" />
+        <slot v-if="time" name="storage" />
+        <p v-else class="text-muted-foreground">Debug is off.</p>
       </TabsContent>
     </Tabs>
   </div>

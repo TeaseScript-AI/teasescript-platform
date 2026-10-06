@@ -609,7 +609,11 @@ wait, and the default build starts with the Debug menu off. In the default build
 its pacing and its timed button after Skip event; the panel's Debug switch and the Debug menu hide and show it, an untimed
 button has none, and the transcript stays free of Debug text; `?dev` starts with the menu on. Its Now tab on the
 `debug-now` package, shaped like the Domme3 case, names a nested call chain and two overlapping sounds and the hidden
-timer, and the Stage image as unresolved, failed, hidden, and displayed in turn, and fits the narrow drawer. With auto-skip, the `missing-media` package, which refers to a
+timer, and the Stage image as unresolved, failed, hidden, and displayed in turn, and fits the narrow drawer. Its Storage
+tab on the `debug-storage` package lists the saved values in key order with typed previews, keeps reference-shaped text
+visible and says when it names no saved photo, shows the saved photo once with both keys that use it and expands a list
+to it, updates after a later save without reading a changed photo reference before it is in view, hides with Debug
+off, and fits the narrow drawer. With auto-skip, the `missing-media` package, which refers to a
 missing and an invalid image and sound, reaches its end at once, with one warning notice per path and a valid image
 restoring the Stage; in `late-image`, an invalid image that fails only after the script hid it and showed a valid one
 neither hides that image nor is reported.
