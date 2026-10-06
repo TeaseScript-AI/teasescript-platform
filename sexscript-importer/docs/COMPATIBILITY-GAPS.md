@@ -370,9 +370,8 @@ Concrete points the migration surfaced in TeaseScript itself:
 
 - **Storage** matches the owner decision on `main` (#484): `load` never writes, and `save null` removes the key.
 - **Prefill if available.** 27 of the corpus's 62 input defaults come from settings loaded from storage, which may be
-  null (`askInteger default: playerLevel`). TeaseScript rejects a null default when the input opens, so a
-  faithful conversion would need an `if` around two inputs; the output keeps one input with a note. A form that
-  prefills only when the value is present would fit these settings dialogs.
+  null (`askInteger default: playerLevel`). TeaseScript rejected a null default when the input opened; since #618 a
+  null or blank default at runtime opens the input without a prefill, so these defaults convert as written.
 - **Two kinds of time (#532).** Local `date`, `time`, and `datetime` values have no zone and follow the player; a
   `timestamp` from `getTimestamp()` is the fixed moment for "how long ago". Legacy code measured elapsed time in Unix
   seconds (`getTime()`, 18 scripts), so it uses `getTimestamp().toSeconds()`, while fields and formats keep the local
@@ -584,8 +583,8 @@ Measured on the selected large corpus on 2026-10-06, at importer `05f83665` with
   title.
   - The largest revision, checked by hand, is the package. Earlier revisions are listed in the catalog as earlier
     versions and are not converted.
-  - Three units whose revisions carry two titles are split into two units each: Toy and ToyExpanded, jewell and
-    JewellMistressMiley, and Lines and LinesV2.
+  - Two units whose revisions carry two titles are split into two units each: Toy and ToyExpanded, and jewell and
+    JewellMistressMiley. Lines v2 counts as a revision of Lines.
 - **Script-specific fixes** are unit patches (32 units), not converter rules.
 
 | Result | Units of 210 |
