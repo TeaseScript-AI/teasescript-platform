@@ -412,9 +412,9 @@ the stage-shape goal remain provisional visual inputs, not additional device mod
 the Standard Player's platform Debugger tool ([DEBUGGER.md](../DEBUGGER.md#player-debug)); it appears first in the
 tools menu while Player Settings' Debug menu is on, and turning that menu off removes it from every panel state. Its
 time controls stand above its tabs (shadcn-vue Tabs): Now, Variables, Log, and Storage, with its saved-value editor in
-a Dialog, when the host persists script storage; Now, Variables, and Storage wrap long paths, keys, and values so they
-fit the narrow drawer. Variables rows open with full-height (44 px) toggles that name what they open; a long value shows
-three lines until **Show all**.
+a Dialog, when the host persists script storage; Now, Variables, and Storage wrap long paths, keys, names, and values
+so they fit the Small dock and the narrow drawer. Variables rows open with full-height (44 px) toggles that name what
+they open; a long value shows three lines until **Show all**.
 
 ## Session start and user activation
 

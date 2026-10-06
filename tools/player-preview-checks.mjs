@@ -2205,10 +2205,13 @@ async function debugVariablesChecks(page) {
     "let low = 10",
     "let spanks = randomInteger(low..=30)",
     `let tools = ["paddle", "cane", ${JSON.stringify(longTool)}]`,
-    'say "You get ${spanks} spanks", instant',
+    `let variable_${"verylong".repeat(24)} = 7`,
+    `say "You get \${spanks} spanks, \${spanks} in all, \${variable_${"verylong".repeat(24)}}", instant`,
     'let pick = choose a: "Apple", b: "Pear"',
     'say "You picked ${pick}", instant',
     'let done = showButton "Done"',
+    `say "Done with \${spanks} and \${variable_${"verylong".repeat(24)}}", instant`,
+    'let after = askText "Anything else?"',
     "exit",
   ].join("\n");
   await page.route("**/src/runtimeScenario.ts*", (route) => {
@@ -2244,7 +2247,12 @@ async function debugVariablesChecks(page) {
     "A Debug session from Start must say so",
   );
   // Two levels by default: the newest message and the value it shows; that value's causes stay closed.
-  const spanks = panel.locator('[data-trace-depth="1"]').filter({ hasText: "let spanks" });
+  const spanks = panel
+    .locator('[data-trace-depth="1"]')
+    .filter({ has: page.locator('[data-trace-kind="record"]') })
+    .filter({ hasText: "let spanks" });
+  // The repeated value links to its first row.
+  await panel.locator('[data-trace-depth="1"] [data-trace-kind="reference"]').first().waitFor();
   await spanks.waitFor();
   check((await depth(2).count()) === 0, "Causes beyond the message's values opened by default");
   const toggle = spanks.locator("[data-trace-toggle]");
@@ -2283,9 +2291,15 @@ async function debugVariablesChecks(page) {
   await panel.getByRole("button", { name: "Show causes of let pick", exact: true }).click();
   await depth(2).filter({ hasText: "Answer" }).waitFor();
 
-  // Long values wrap inside the panel and show in full on request.
+  // Long values wrap inside the panel and show in full on request; the view keeps its state across tabs.
   await panel.locator("[data-debug-background-toggle]").click();
   await panel.getByLabel("Filter variables by name").fill("tools");
+  await page.getByRole("tab", { name: "Now", exact: true }).click();
+  await variablesTab.click();
+  check(
+    (await panel.getByLabel("Filter variables by name").inputValue()) === "tools",
+    "Another tab reset the Variables view",
+  );
   const tools = panel.locator("[data-debug-variable]").filter({ hasText: "let tools" });
   await tools.waitFor();
   await tools.getByRole("button", { name: "Show all", exact: true }).click();
@@ -2304,7 +2318,37 @@ async function debugVariablesChecks(page) {
   await variablesTab.click();
   await panel.getByText("Recording since Debug was turned on").waitFor();
   check((await rows.count()) === 0, "A new trace showed messages from before it began");
-  return "PASS Debug Now image origin, Variables two-level view, click, key and tap expansion, hidden-panel recording, long values, Debug off and on";
+
+  // Everything fits the Small dock and the narrowest drawer: long names, unknown origins, and links to rows above.
+  await page.locator("[data-foreground-controls] button").filter({ hasText: "Done" }).click();
+  // The question that follows is the newest message; values from before Debug was turned on say so.
+  await rows.filter({ hasText: "Done with" }).locator("[data-trace-toggle]").click();
+  await panel.locator("[data-trace-unknown]").first().waitFor();
+  await panel.locator("[data-debug-background-toggle]").click();
+  await panel.getByLabel("Filter variables by name").fill("");
+  const fits = async (where) => {
+    const sizes = await body.evaluate((element) => [element.scrollWidth, element.clientWidth]);
+    check(
+      sizes[0] <= sizes[1] + 1,
+      `The Variables tab overflows ${where}: ${JSON.stringify(sizes)}`,
+    );
+  };
+  await fits("the default dock");
+  await panel.getByRole("button", { name: "Panel settings", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Width", exact: true }).hover();
+  await page.getByRole("menuitemradio", { name: "Small", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await fits("the Small dock");
+  await page.setViewportSize({ width: 320, height: 700 });
+  // The narrow drawer opens the panel from its launcher.
+  const show = page.getByRole("button", { name: "Show sidebar", exact: true });
+  if (await show.isVisible()) await show.click();
+  if (!(await variablesTab.isVisible()))
+    await page.locator('[data-launcher] button[aria-label="Debug"]').click();
+  await variablesTab.click();
+  await panel.locator("[data-debug-variables]").waitFor();
+  await fits("the narrow drawer");
+  return "PASS Debug Now image origin, Variables two-level view, click, key and tap expansion, hidden-panel recording, long values, state across tabs, Debug off and on, fit in Small dock and narrow drawer";
 }
 
 async function developmentTimeChecks(page) {

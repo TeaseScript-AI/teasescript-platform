@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, reactive, ref, shallowRef, watch } from "vue";
 import { ChevronDown, ChevronUp } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,10 +18,19 @@ import type { PlayerSessionHost } from "./usePlayerSession";
 // Debug's Variables view (DEBUGGER.md "Player Debug"): why values have their values, from the session's value trace.
 // Recent chat messages come first, newest first, each with the values it shows and their immediate causes; every live
 // variable is under the collapsed background section. Nothing here is computed while the tab is not shown.
-const props = defineProps<{ player: PlayerSessionHost }>();
+const props = defineProps<{
+  player: PlayerSessionHost;
+  /** Whether the tab is shown; while hidden it keeps its state and computes nothing. */
+  active: boolean;
+}>();
 
 const trace = computed(() => props.player.debugTrace.value);
-const session = computed(() => props.player.session.value);
+// The session the view shows: the published one while the tab is shown, else the last one shown.
+const session = shallowRef(props.player.session.value);
+watch(
+  () => (props.active ? props.player.session.value : session.value),
+  (shown) => (session.value = shown),
+);
 const live = computed(() =>
   session.value === null ? null : playerDebugLiveValue(session.value.snapshot),
 );
@@ -69,9 +78,10 @@ const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ??
         <Badge v-if="status.truncated" variant="outline" data-debug-trace-truncated>
           Earlier history unavailable
         </Badge>
-        <Badge v-if="!status.recording" variant="destructive"
-          >Recording stopped: {{ status.failure }}</Badge
-        >
+        <Badge v-if="!status.recording" variant="destructive">Recording stopped</Badge>
+        <span v-if="!status.recording" class="min-w-0 text-muted-foreground wrap-anywhere">{{
+          status.failure
+        }}</span>
       </div>
 
       <section aria-labelledby="debug-variables-chat" class="grid gap-1">
@@ -100,16 +110,13 @@ const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ??
       </section>
 
       <Collapsible v-model:open="background" v-slot="{ open }" class="grid gap-2">
-        <CollapsibleTrigger as-child>
-          <Button
-            variant="ghost"
-            size="sm"
-            class="min-h-11 justify-self-start"
-            data-debug-background-toggle
-          >
-            Background / all live variables
-            <component :is="open ? ChevronUp : ChevronDown" aria-hidden="true" />
-          </Button>
+        <!-- A full-row trigger whose label wraps in the narrowest dock. -->
+        <CollapsibleTrigger
+          class="flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-2 text-start text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          data-debug-background-toggle
+        >
+          <span class="min-w-0 wrap-anywhere">Background / all live variables</span>
+          <component :is="open ? ChevronUp : ChevronDown" class="size-4 shrink-0" aria-hidden="true" />
         </CollapsibleTrigger>
         <CollapsibleContent class="grid gap-3">
           <Input
@@ -147,7 +154,7 @@ const shown = (key: string) => PLAYER_DEBUG_TRACE_PAGE * (groupPages.get(key) ??
                   :label="`Origin of ${variable.name}`"
                 />
                 <div v-else class="flex min-w-0 flex-wrap items-baseline gap-2 py-2 ps-12">
-                  <span class="font-medium">{{ variable.name }}</span>
+                  <span class="min-w-0 font-medium wrap-anywhere">{{ variable.name }}</span>
                   <code class="min-w-0 break-all"
                     >{{ variable.value }}{{ variable.truncated ? "…" : "" }}</code
                   >

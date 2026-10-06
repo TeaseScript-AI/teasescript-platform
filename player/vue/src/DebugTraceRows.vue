@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
-import { ChevronDown, ChevronRight } from "@lucide/vue";
+import { ArrowUp, ChevronDown, ChevronRight } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { RuntimeDebugContext } from "../../../src/index.js";
@@ -99,17 +99,30 @@ const indent = (depth: number) => ({ paddingInlineStart: `${Math.min(depth, 6) *
           >
             <component :is="row.expanded ? ChevronDown : ChevronRight" aria-hidden="true" />
           </Button>
+          <Button
+            v-else-if="row.kind === 'reference'"
+            variant="ghost"
+            size="icon"
+            class="size-11 shrink-0"
+            :aria-label="`Go to the first ${row.text.title}`"
+            data-trace-reference
+            @click="reveal(row.target)"
+          >
+            <ArrowUp aria-hidden="true" />
+          </Button>
           <span v-else class="size-11 shrink-0" aria-hidden="true" />
           <div class="grid min-w-0 flex-1 gap-0.5 py-2">
             <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-              <span class="font-medium break-words">{{ row.text.title }}</span>
-              <Badge v-if="row.text.unknown" variant="outline" data-trace-unknown>{{
-                row.text.note
-              }}</Badge>
-              <span v-else-if="row.text.note" class="text-muted-foreground">{{
+              <!-- Every part wraps anywhere: names, statements and notes may be one long word. -->
+              <span class="min-w-0 font-medium wrap-anywhere">{{ row.text.title }}</span>
+              <Badge v-if="row.text.unknown" variant="outline" data-trace-unknown>Unknown origin</Badge>
+              <span v-if="row.text.note" class="min-w-0 text-muted-foreground wrap-anywhere">{{
                 row.text.note
               }}</span>
-              <span v-if="row.text.location" class="break-all font-mono text-muted-foreground">
+              <span
+                v-if="row.text.location"
+                class="min-w-0 font-mono text-muted-foreground wrap-anywhere"
+              >
                 {{ row.text.location }}
               </span>
             </div>
@@ -147,16 +160,9 @@ const indent = (depth: number) => ({ paddingInlineStart: `${Math.min(depth, 6) *
             >
               Now: <code>{{ row.text.now }}</code>
             </span>
-            <Button
-              v-if="row.kind === 'reference'"
-              variant="link"
-              size="sm"
-              class="min-h-11 justify-self-start"
-              data-trace-reference
-              @click="reveal(row.target)"
-            >
-              Same as above · go to it
-            </Button>
+            <span v-if="row.kind === 'reference'" class="text-muted-foreground wrap-anywhere">
+              Same as above
+            </span>
           </div>
         </div>
       </template>
@@ -166,11 +172,11 @@ const indent = (depth: number) => ({ paddingInlineStart: `${Math.min(depth, 6) *
         data-trace-expired
       >
         <Badge variant="outline">Expired</Badge>
-        <span class="text-muted-foreground">Older history was dropped</span>
+        <span class="min-w-0 text-muted-foreground wrap-anywhere">Older history was dropped</span>
       </div>
       <p
         v-else-if="row.kind === 'omitted'"
-        class="flex min-h-11 items-center ps-12 text-muted-foreground"
+        class="flex min-h-11 items-center ps-12 text-muted-foreground wrap-anywhere"
       >
         {{ row.count }} more {{ row.count === 1 ? "cause was" : "causes were" }} not kept
       </p>

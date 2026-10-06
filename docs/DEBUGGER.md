@@ -65,7 +65,7 @@ tabs **Now** (first), **Variables**, **Log**, and **Storage**, which appears whe
   its value then, its statement, and, for an earlier version of a variable, its value now; a record that appears again
   in the same tree links to its first row. Unknown origins say why (supplied by the host, Not recorded before Debug,
   Restored value, or no longer retained), a dropped cause reads **Expired**, and causes beyond the trace's limit are
-  counted. The collapsed **Background / all live variables** section filters by name and groups live variables by
+  counted. The tab keeps its opened rows, filter, and pages while another tab shows, and computes nothing meanwhile. The collapsed **Background / all live variables** section filters by name and groups live variables by
   globals, file, function or block call, and variables kept for blocks, 20 at a time, each opening to its origin. Branch
   conditions are not causes yet.
 - **Storage** lists what the script saved in this browser: every key in UTF-16 order, its value's type and a

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import { ChevronDown, ChevronUp, Download } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import Collapsible from "@/components/ui/collapsible/Collapsible.vue";
@@ -29,6 +30,7 @@ defineProps<{
 }>();
 const emit = defineEmits<{ export: [] }>();
 const active = defineModel<boolean>("active", { required: true });
+const tab = ref("now");
 </script>
 
 <template>
@@ -129,7 +131,7 @@ const active = defineModel<boolean>("active", { required: true });
         </Button>
       </div>
     </section>
-    <Tabs default-value="now">
+    <Tabs v-model="tab">
       <TabsList class="h-auto w-full">
         <TabsTrigger value="now" class="min-h-11" data-debug-tab="now">Now</TabsTrigger>
         <TabsTrigger value="variables" class="min-h-11" data-debug-tab="variables">Variables</TabsTrigger>
@@ -147,8 +149,9 @@ const active = defineModel<boolean>("active", { required: true });
         />
         <p v-else class="text-muted-foreground">Debug is off.</p>
       </TabsContent>
-      <TabsContent value="variables">
-        <DebugVariables v-if="time" :player="player" />
+      <!-- Kept mounted, so opened rows, the filter, and pages survive another tab; it computes only while shown. -->
+      <TabsContent value="variables" force-mount class="data-[state=inactive]:hidden">
+        <DebugVariables v-if="time" :player="player" :active="tab === 'variables'" />
         <p v-else class="text-muted-foreground">Debug is off.</p>
       </TabsContent>
       <!-- Kept mounted, so new lines arrive while another tab shows. -->
