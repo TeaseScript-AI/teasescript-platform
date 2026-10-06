@@ -8876,8 +8876,12 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
     }
     const index = lowerExpression(indexNode, context);
     if (index === null) return null;
-    // Groovy read null past the end of a list, which code that picks `getRandom(size) + 1` relies on.
-    if (!context.writeTargets.has(node) && mayIndexPastEnd(indexNode, context)) {
+    // Groovy read null past the end of a list, which code that picks `getRandom(size) + 1` relies on, or that tests a
+    // position for null.
+    if (
+      !context.writeTargets.has(node) &&
+      (mayIndexPastEnd(indexNode, context) || nullComparedReads.has(node))
+    ) {
       addDiagnostic(
         context,
         "SX_INDEX_PAST_END",
@@ -9011,6 +9015,14 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
         ? { kind: "binary", operator: "and", left: lookup, right: compared }
         : { kind: "binary", operator: "or", left: missing, right: compared };
     }
+    // A list position compared with null was tested for being past the end, where Groovy read null.
+    if (
+      isNullConstant(other) &&
+      lookupNode.kind === "binary" &&
+      lookupNode.operator === "[" &&
+      onlyOf(inferType(asNode(lookupNode.right)!, context.types), NUMBER)
+    )
+      nullComparedReads.add(lookupNode);
     // A dict never equals an object (#536): a map literal compared with a dict is a dict, and other maps are reported.
     const dictSide = isDictionary(leftNode, context) || isDictionary(rightNode, context);
     const otherNode = isDictionary(leftNode, context) ? rightNode : leftNode;
@@ -9713,6 +9725,28 @@ function isRepeatableIndex(node: AstNode): boolean {
 }
 
 /** Expressions that may be evaluated twice without changing behavior or readability much. */
+/** List positions that the code compares with null, which read past the end as null (see lowerIndex). */
+const nullComparedReads = new WeakSet<AstNode>();
+
+/** Arithmetic of plain values, such as `i * 52 + j`, which can be evaluated twice with the same result. */
+function isPlainArithmetic(node: AstNode): boolean {
+  if (isRepeatableExpression(node)) return true;
+  if (node.kind === "unaryMinus") {
+    const value = asNode(node.value);
+    return value !== null && isPlainArithmetic(value);
+  }
+  const left = asNode(node.left);
+  const right = asNode(node.right);
+  return (
+    node.kind === "binary" &&
+    ["+", "-", "*", "/", "%"].includes(text(node.operator) ?? "") &&
+    left !== null &&
+    right !== null &&
+    isPlainArithmetic(left) &&
+    isPlainArithmetic(right)
+  );
+}
+
 function isRepeatableExpression(node: AstNode): boolean {
   if (node.kind === "variable" || node.kind === "constant") return true;
   if (node.kind === "property") {
@@ -11522,13 +11556,19 @@ function growingListWrite(
   const indexNode = asNode(targetNode.right);
   const name = variableName(listNode);
   const initializer = name === null ? undefined : context.constantInitializers.get(name);
+  // A list that only ever starts empty, also where the script empties it again, `cards = []`.
+  const key = listNode === null ? null : bindingKey(listNode, context.bindings);
+  const assigned = key === null ? [] : (context.assignedValues.get(key) ?? []);
+  const isEmptyList = (node: AstNode | undefined): boolean =>
+    node?.kind === "list" && nodeArray(node.items).length === 0;
+  const startsEmpty =
+    isEmptyList(initializer) || (assigned.length > 0 && assigned.every(isEmptyList));
   if (
     target.kind !== "index" ||
     target.dict === true ||
     indexNode === null ||
-    !isRepeatableExpression(indexNode) ||
-    initializer?.kind !== "list" ||
-    nodeArray(initializer.items).length !== 0 ||
+    !(isRepeatableExpression(indexNode) || isPlainArithmetic(indexNode)) ||
+    !startsEmpty ||
     !onlyOf(inferType(indexNode, context.types), NUMBER)
   )
     return null;

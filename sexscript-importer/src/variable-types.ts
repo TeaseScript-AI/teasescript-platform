@@ -1599,6 +1599,18 @@ function arithmeticType(
 ): TeaseType | undefined {
   const left = nonNull(leftType);
   const right = nonNull(rightType);
+  // A Groovy division of values not proven numbers gave a number too (legacy code has no durations), so a variable
+  // it sets holds fractions.
+  const plain = (type: TeaseType): boolean =>
+    type.kind === "unknown" ||
+    (type.kind === "scalar" && (type.name === "integer" || type.name === "number"));
+  if (
+    operator === "/" &&
+    plain(left) &&
+    plain(right) &&
+    (left.kind === "unknown" || right.kind === "unknown")
+  )
+    return scalar("number");
   if (left.kind !== "scalar" || right.kind !== "scalar") return undefined;
   const numeric = (name: ScalarName): boolean => name === "integer" || name === "number";
   if (numeric(left.name) && numeric(right.name)) {

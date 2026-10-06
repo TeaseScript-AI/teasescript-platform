@@ -28,6 +28,15 @@ function sexscriptLegacyMax(first, second) {
   }
   return second
 }
+function sexscriptLegacyItemAt(listValue, position) {
+  if position < 0 {
+    return listValue[listValue.length + position]
+  }
+  if position >= listValue.length {
+    return null
+  }
+  return listValue[position]
+}
 let items = ["kneel", "wait", "count"]
 let upper = []
 for it in items {
@@ -97,4 +106,34 @@ for it in 0..rounds {
   say "Round"
 }
 say "Second ${[1, 2, 3][[1, 2, 3].length - 2]}"
+// A position compared with null reads null past the end, as Groovy did.
+let hand = ["Ace", "King"]
+// NOTE SX_INDEX_PAST_END line 28: This position can be one past the end of the list, where Groovy read null; a helper reads null there too.
+if sexscriptLegacyItemAt(hand, 2) != null {
+  say "Third card"
+} else {
+  say "Two cards"
+}
+// A list that only ever starts empty grows at its end, also by a computed position.
+let shoe = []
+let d = 0
+while d < 2 {
+  let c = 0
+  while c < 2 {
+    // NOTE SX_LIST_GROWTH line 31: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+    if d * 2 + c < shoe.length {
+      shoe[d * 2 + c] = c
+    } else {
+      shoe.add(c)
+    }
+    c += 1
+  }
+  d += 1
+}
+say "Shoe ${shoe.length}"
+// A division of values not proven numbers sets a number.
+let odds: number = 0
+let parts = [3, 4]
+odds = parts[0] / parts[1]
+say "Odds ${odds}"
 exit
