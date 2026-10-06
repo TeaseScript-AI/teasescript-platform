@@ -17,8 +17,16 @@ function sexscriptLegacyPlainText(value) {
   }
   return text.replace("*", "")
 }
+function sexscriptLegacyTextMinus(text, part) {
+  let position = text.indexOf(part)
+  if position < 0 {
+    return text
+  }
+  return "${text.substring(0, position)}${text.substring(position + part.length)}"
+}
 let name = "Anna"
 let count = 3
+// NOTE SX_PLUS_OPERAND_TYPE line 3: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
 say "Hello ${name}, you have ${count + 1} tasks."
 say "Literal \${not interpolated} and \"quotes\""
 say "Path C:\\temp\tTab"
@@ -51,4 +59,12 @@ dialog += """
 
 """
 say dialog
+// A text read by a range is the part from its first through its last position, also counted from the end; text minus a
+// part drops its first occurrence; text times a count of unknown type repeats it.
+let code = "ABCDOEFO"
+let cut = 3
+function stars(countValue) {
+  return "*".repeat(toInteger(countValue))
+}
+say "${code.substring(0, 3)}${code.substring(code.length - 2)}${code.substring(1, cut)}${code.substring(cut)}${sexscriptLegacyTextMinus(code, "O")}${stars(cut)}"
 exit

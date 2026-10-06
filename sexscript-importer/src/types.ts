@@ -234,6 +234,9 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
   const operator = typeof node.operator === "string" ? node.operator : "";
   if (operator === "[" && isCalendarConstant(asNode(node.right))) return NUMBER;
   if (operator === "[") {
+    // A text read by a position or a range is text.
+    const target = inferType(asNode(node.left), environment);
+    if (onlyOf(target, STRING) && target !== 0) return STRING;
     if (environment.elementsPending === true) return 0;
     const name = variableName(node.left);
     const element = name === null ? undefined : environment.listElements?.get(name);
@@ -245,10 +248,11 @@ function binaryType(node: AstNode, environment: TypeEnvironment): ValueType {
     const left = inferType(asNode(node.left), environment);
     if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
   }
-  // Groovy list - value is a list without the value.
+  // Groovy list - value is a list without the value, and text - part text without the part.
   if (operator === "-") {
     const left = inferType(asNode(node.left), environment);
     if (onlyOf(left, LIST | NULL) && left & LIST) return LIST;
+    if (onlyOf(left, STRING) && left !== 0) return STRING;
   }
   if (operator === "*") {
     // Groovy `text * n` and `list * n` repeat the text or the list's elements.

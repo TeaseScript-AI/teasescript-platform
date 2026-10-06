@@ -188,6 +188,7 @@ export type HelperName =
   | "plainText"
   | "listPart"
   | "listMinus"
+  | "textMinus"
   | "repeatList"
   | "compare"
   | "replaceChars"
@@ -294,6 +295,7 @@ const HELPER_ORDER: readonly HelperName[] = [
   "plainText",
   "listPart",
   "listMinus",
+  "textMinus",
   "repeatList",
   "compare",
   "replaceChars",
@@ -1197,6 +1199,40 @@ const HELPERS: Record<HelperName, { name: string; build: () => IrStatement }> = 
         [
           ifS({ kind: "typeTest", value: v("value"), type: "list" }, [ret(v("value"))]),
           ret({ kind: "list", items: [v("value")] }),
+        ],
+      ),
+  },
+  // Groovy `text - part`: the text without the first occurrence of the part.
+  textMinus: {
+    name: "sexscriptLegacyTextMinus",
+    build: () =>
+      fn(
+        "sexscriptLegacyTextMinus",
+        ["text", "part"],
+        [
+          letS("position", {
+            kind: "methodCall",
+            target: v("text"),
+            name: "indexOf",
+            arguments: [v("part")],
+          }),
+          ifS(bin("<", v("position"), lit(0)), [ret(v("text"))]),
+          ret(
+            template(
+              {
+                kind: "methodCall",
+                target: v("text"),
+                name: "substring",
+                arguments: [lit(0), v("position")],
+              },
+              {
+                kind: "methodCall",
+                target: v("text"),
+                name: "substring",
+                arguments: [bin("+", v("position"), prop(v("part"), "length"))],
+              },
+            ),
+          ),
         ],
       ),
   },

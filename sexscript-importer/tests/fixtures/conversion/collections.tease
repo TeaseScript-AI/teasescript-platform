@@ -151,11 +151,12 @@ function joinDecks(first, second, offset) {
   i = 0
   while i < 2 {
     // NOTE SX_PLUS_OPERAND_TYPE line 42: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
-    // NOTE SX_LIST_PADDING line 42: Groovy grew this list when writing past its end, padding it with null up to the position; the conversion pads it the same way.
-    while joined.length <= i + offset {
-      joined.add(null)
+    // NOTE SX_LIST_GROWTH line 42: Groovy grew this list when writing at or past its end, padding with null; a TeaseScript position must exist, so a write at the end appends, which differs only for a position beyond the end.
+    if i + offset < joined.length {
+      joined[i + offset] = second[i]
+    } else {
+      joined.add(second[i])
     }
-    joined[i + offset] = second[i]
     i += 1
   }
   return joined

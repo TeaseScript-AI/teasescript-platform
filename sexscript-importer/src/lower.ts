@@ -8720,8 +8720,10 @@ function repetition(node: AstNode, context: LowerContext): IrExpression | null |
   const left = inferType(leftNode, context.types);
   const text = onlyOf(left, STRING) && left !== 0;
   const list = onlyOf(left, LIST) && left !== 0;
+  // Groovy repeated text only by a number, so a text repeated by a count of unknown type takes it as a number.
   const count = inferType(rightNode, context.types);
-  if ((!text && !list) || !onlyOf(count, NUMBER) || count === 0) return undefined;
+  if ((!text && !list) || !(onlyOf(count, NUMBER) || (text && count === UNKNOWN)) || count === 0)
+    return undefined;
   const value = lowerExpression(leftNode, context);
   const times = lowerExpression(rightNode, context);
   if (value === null || times === null) return null;
@@ -8793,6 +8795,17 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
       return key === null ? null : { kind: "index", target, index: key, dict: true };
     }
     const negativeIndex = negativeConstantIndex(indexNode);
+    // Groovy `text[a..b]` is the text from a through b, also counted from the end; TeaseScript text takes `substring`.
+    if (
+      targetNode !== null &&
+      indexNode.kind === "range" &&
+      !context.writeTargets.has(node) &&
+      onlyOf(inferType(targetNode, context.types), STRING | NULL) &&
+      (inferType(targetNode, context.types) & STRING) !== 0
+    ) {
+      const range = textRange(targetNode, target, indexNode, context);
+      if (range !== undefined) return range;
+    }
     // Groovy `text[i]` is the character at i, also counted from the end; TeaseScript text takes `substring`.
     if (
       targetNode !== null &&
@@ -8960,6 +8973,10 @@ function lowerBinaryExpression(node: AstNode, context: LowerContext): IrExpressi
   if (context.elementRemovals.has(node)) return lowerListDifference(node, context, true);
   if (operator === "-" && isListType(inferType(asNode(node.left), context.types)))
     return lowerListDifference(node, context);
+  if (operator === "-") {
+    const removed = textRemoval(node, context);
+    if (removed !== undefined) return removed;
+  }
   if (operator === "in") return lowerMembership(node, context);
   if ((operator === "&" || operator === "|") && isBooleanOperation(node, context)) {
     // Groovy & and | on booleans evaluate both sides; with a side-effect-free right side that equals and/or.
@@ -9946,6 +9963,22 @@ function elementRemovals(body: AstNode): Set<AstNode> {
   return removals;
 }
 
+/** Groovy `text - part`, which drops the first occurrence of the part's text; undefined where the left is no text. */
+function textRemoval(node: AstNode, context: LowerContext): IrExpression | null | undefined {
+  const leftNode = asNode(node.left);
+  const rightNode = asNode(node.right);
+  if (leftNode === null || rightNode === null) return undefined;
+  const left = inferType(leftNode, context.types);
+  if (!onlyOf(left, STRING) || left === 0) return undefined;
+  const text = lowerExpression(leftNode, context);
+  const part = lowerExpression(rightNode, context);
+  if (text === null || part === null) return null;
+  const partText: IrExpression = onlyOf(inferType(rightNode, context.types), STRING)
+    ? part
+    : { kind: "template", parts: [{ value: part }] };
+  return useHelper(context, "textMinus", [text, partText]);
+}
+
 /**
  * Groovy `list - value` and `list - otherList` drop every element equal to the value or to an element of the other
  * list, as `difference` does (V30 §16); `difference` also keeps each remaining element once.
@@ -10155,6 +10188,69 @@ function lowerMembership(node: AstNode, context: LowerContext): IrExpression | n
 }
 
 /** `-n` as an index literal (Groovy parses it as unary minus applied to a constant). */
+/**
+ * `text[a..b]` and `text[a..<b]` as `substring`, with negative bounds counted from the end. Undefined where a bound
+ * counted from the end needs the text twice and the text is no variable, or a range of literals runs backwards, which
+ * Groovy read reversed.
+ */
+function textRange(
+  targetNode: AstNode,
+  target: IrExpression,
+  range: AstNode,
+  context: LowerContext,
+): IrExpression | null | undefined {
+  const fromNode = asNode(range.from);
+  const toNode = asNode(range.to);
+  if (fromNode === null || toNode === null) return undefined;
+  const length: IrExpression = { kind: "property", target, name: "length" };
+  const fromEnd = (node: AstNode): number | null => negativeConstantIndex(node);
+  if (
+    (fromEnd(fromNode) !== null || fromEnd(toNode) !== null) &&
+    !isRepeatableExpression(targetNode)
+  )
+    return undefined;
+  const first = constantValue(fromNode);
+  const last = constantValue(toNode);
+  if (
+    typeof first === "number" &&
+    typeof last === "number" &&
+    first >= 0 &&
+    last >= 0 &&
+    last < first
+  )
+    return undefined;
+  const bound = (node: AstNode, offset: number): IrExpression | null => {
+    const back = fromEnd(node);
+    if (back !== null)
+      return back === offset
+        ? length
+        : {
+            kind: "binary",
+            operator: "-",
+            left: length,
+            right: { kind: "literal", value: back - offset },
+          };
+    const value = constantValue(node);
+    if (typeof value === "number") return { kind: "literal", value: value + offset };
+    const lowered = lowerExpression(node, context);
+    if (lowered === null) return null;
+    return offset === 0
+      ? lowered
+      : { kind: "binary", operator: "+", left: lowered, right: { kind: "literal", value: offset } };
+  };
+  const start = bound(fromNode, 0);
+  const end = bound(toNode, range.inclusive === true ? 1 : 0);
+  if (start === null || end === null) return null;
+  // The end of the text needs no end position.
+  const toEnd = end === length;
+  return {
+    kind: "methodCall",
+    target,
+    name: "substring",
+    arguments: toEnd ? [start] : [start, end],
+  };
+}
+
 function negativeConstantIndex(node: AstNode): number | null {
   const value = node.kind === "unaryMinus" ? asNode(node.value) : null;
   if (value?.kind === "constant" && typeof value.value === "number" && value.value > 0)
