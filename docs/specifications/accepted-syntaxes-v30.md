@@ -968,7 +968,8 @@ picks.add("three")    // compile error
   `let b = a`, `a.toSet()`, or a property read into a variable, holds what the source held then, so it shares the
   source's type: after `let a = []` and `let b = a.toSet()`, a later `a.add(1)` makes `b.add("x")` a compile error.
 - A value whose type the compiler cannot know, such as untyped storage, host data, or a parameter of unknown type,
-  decides nothing and is not rejected at compile time.
+  decides nothing and is not rejected at compile time. Where a place of known type takes it, also through a place that
+  no other value decided, such as `let box = { t: null }` set only from such a parameter, it is checked when it runs.
 
 ### Global variables
 
