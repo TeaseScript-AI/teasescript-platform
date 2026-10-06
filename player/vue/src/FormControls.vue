@@ -8,7 +8,13 @@ import type { PlayerFormPresentation } from "../../model.js";
 // One form stays in place while the player edits it: its fields wrap and scroll in a bounded region, and the submit
 // button and the status stay visible below them.
 defineProps<{ form: PlayerFormPresentation; accessibleName: string; disabled: boolean }>();
-const emit = defineEmits<{ step: [fieldId: string]; submit: []; dismiss: []; clear: [] }>();
+const emit = defineEmits<{
+  step: [fieldId: string];
+  submit: [];
+  cancel: [];
+  dismiss: [];
+  clear: [];
+}>();
 </script>
 
 <template>
@@ -63,6 +69,13 @@ const emit = defineEmits<{ step: [fieldId: string]; submit: []; dismiss: []; cle
         :disabled="disabled"
         :label="form.submit.label"
         @click="emit('submit')"
+      />
+      <PlayerActionButton
+        v-if="form.cancel"
+        :authored-fill="form.cancel.authoredFill"
+        :disabled="disabled"
+        :label="form.cancel.label"
+        @click="emit('cancel')"
       />
       <Badge variant="outline" role="status" aria-live="polite">{{ form.status }}</Badge>
     </div>

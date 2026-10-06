@@ -516,3 +516,33 @@ test("a dict of fields proves its answers only by metadata its values have when 
   assert.equal(current.status, "failed");
   assert.equal(current.failure?.code, "TSR058");
 });
+
+test("askForm with cancel: may return null, which the script checks before reading an answer", () => {
+  const plan = compileValidPlan(
+    [
+      'let answers = askForm "Settings?", fields: { on: false }, cancel: "Back"',
+      'let state = "cancelled"',
+      'if answers != null { state = "${answers.on}" }',
+      "exit",
+    ].join("\n"),
+  );
+  const { snapshot, actionId, ui } = opened(plan);
+  assert.deepEqual(ui.cancel, { text: "Back" });
+  const cancelled = completeAction(plan, snapshot, {
+    actionId,
+    actionKind: "interaction",
+    interactionKind: "form",
+    payload: { kind: "cancel" },
+  });
+  const finished = runUntilExit(plan, cancelled.snapshot).snapshot;
+  assert.equal(
+    finished.frames[0]!.bindings.find((binding) => binding.name === "state")?.value,
+    "cancelled",
+  );
+  assert.deepEqual(
+    compileSource(
+      'let a = askForm fields: { on: false }, cancel: "Back"\nlet b: boolean = a.on\nexit',
+    ).diagnostics.map((diagnostic) => diagnostic.message),
+    ["'a' may be null. Check it first: if a != null { ... }"],
+  );
+});

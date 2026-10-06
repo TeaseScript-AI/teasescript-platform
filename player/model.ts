@@ -117,6 +117,8 @@ export interface PlayerFormPresentation {
   readonly actionId: number;
   readonly fields: readonly PlayerFormFieldPresentation[];
   readonly submit: { readonly label: string; readonly authoredFill?: string };
+  /** The button that cancels the whole form, or `null` when the form must be submitted. */
+  readonly cancel: { readonly label: string; readonly authoredFill?: string } | null;
   readonly status: string;
   readonly editor: PlayerFormEditorPresentation | null;
 }

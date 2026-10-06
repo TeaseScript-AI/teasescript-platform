@@ -803,8 +803,8 @@ used, such as on a page that is not a secure context, a request that allows only
 
 `askForm` presents one group of controls after the latest message that stays in place while the player edits it, named
 by the form's accessible name. Its field buttons wrap in authored order inside a scroll region bounded to a third of the
-viewport height (at most `24rem`), and the submit button and a polite status badge (`3 of 43 selected`, or `5 of 6
-set` when not every field is a toggle) stay below it. A toggle is a Player action button with toggle semantics
+viewport height (at most `24rem`), and the submit button, the cancel button of a form written with `cancel:`, and a
+polite status badge (`3 of 43 selected`, or `5 of 6 set` when not every field is a toggle) stay below it. A toggle is a Player action button with toggle semantics
 (`aria-pressed`), its label behind a check or cross mark, and pressed in while on; with authored options it shows
 `label: option` instead of the mark. A cycle shows `label: option` with a cycle mark, and a press shows the next option.
 The shown option's authored colour wins over the field's; the submit button takes its own. A typed field shows
@@ -816,7 +816,7 @@ the composer notice. While a field is edited, **Back** (and Escape in the input)
 **Clear** leaves an optional field without a value; selecting another field or submitting first commits the text. Every control keeps the
 action button geometry above, also among 43 toggles on a phone. An edit keeps focus on its control and adds nothing to
 the transcript; submitting adds the summary line with the `›` response marker. Exact unambiguous text of one field
-label or of the submit button activates it from the composer, as for `choose`.
+label or of the submit or cancel button activates it from the composer, as for `choose`.
 
 This is distinct from a skippable `say` pacing gate: when no foreground interactive control owns the input, a primary
 click/tap on Player background/unused space or Space with the empty focused composer may settle that gate under ADR 0018.

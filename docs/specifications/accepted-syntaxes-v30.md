@@ -1941,7 +1941,7 @@ button is chosen.
 ### Forms
 
 **Status:** Accepted (Owner decisions on #512, 2026-10-06). `askForm` is implemented for an object or a dict of fields of
-every kind, with descriptions and `outro:` ([RUNTIME.md](../RUNTIME.md#forms)); `cancel:`, `askBooleans`, and
+every kind, with descriptions, `outro:`, and `cancel:` ([RUNTIME.md](../RUNTIME.md#forms)); `askBooleans` and
 `timeout:` are not yet, and the compiler reports them.
 
 `askForm` asks for several values at once. Its buttons stay in place while the player changes them, and nothing is
