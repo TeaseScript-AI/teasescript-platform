@@ -11,6 +11,7 @@ import {
   playerDebugMessageOrigin,
   playerDebugVariables,
 } from "../../debug-variables.js";
+import { playerRuntimeTranscriptMessage } from "../../runtime-adapter.js";
 import DebugTraceRows from "./DebugTraceRows.vue";
 import type { PlayerDebugExplained } from "./usePlayerDebug";
 import type { PlayerSessionHost } from "./usePlayerSession";
@@ -56,12 +57,15 @@ const selected = computed(() => {
   if (explained.request === dismissed.value) return null;
   void session.value;
   if (current.status().epoch !== explained.epoch) return null;
-  // Found by the entry's identity, for its text when the trace has no record of it.
-  const entry = session.value?.transcriptEntries.find((item) => item.id === explained.entryId);
+  // Found by the entry's identity: the content it shows now, and its text when the trace has no record of that.
+  const entry =
+    session.value === null
+      ? null
+      : playerRuntimeTranscriptMessage(session.value, explained.entryId);
   return {
     request: explained.request,
-    origin: playerDebugMessageOrigin(current, explained.sequence),
-    text: entry?.kind === "message" ? entry.text : null,
+    origin: playerDebugMessageOrigin(current, entry?.contentSequence ?? explained.sequence),
+    text: entry?.text ?? null,
   };
 });
 const selectedSection = ref<HTMLElement | null>(null);

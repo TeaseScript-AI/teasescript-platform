@@ -16,6 +16,7 @@ import {
   createPlayerRuntimeRestorePoint,
   createPlayerRuntimeSession,
   playerRuntimeTranscriptEventSequence,
+  playerRuntimeTranscriptMessage,
   restorePlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   withPlayerRuntimeDebugTrace,
@@ -233,9 +234,11 @@ test("Explain values finds a message by its event, through parameters and for an
     (entry) => entry.kind === "message" && entry.speakerId !== "user",
   );
   const explained = messages.map((entry) => {
-    const sequence = playerRuntimeTranscriptEventSequence(entry.id);
-    assert.ok(sequence !== null);
-    const origin = playerDebugMessageOrigin(trace, sequence);
+    // Found as Explain values finds it, by the entry's identity, for the content it shows.
+    const message = playerRuntimeTranscriptMessage(session, entry.id);
+    assert.equal(message, entry);
+    assert.ok(message?.contentSequence !== undefined);
+    const origin = playerDebugMessageOrigin(trace, message.contentSequence);
     assert.equal(origin.kind, "record");
     return summary(
       playerDebugTraceRows(trace, [origin.kind === "record" ? origin.id : 0], defaults()),
@@ -259,6 +262,13 @@ test("Explain values finds a message by its event, through parameters and for an
   ]);
   assert.equal(playerRuntimeTranscriptEventSequence("fixture-1"), null);
   assert.equal(playerRuntimeTranscriptEventSequence("runtime-event-01"), null);
+  // A restored session finds the same messages.
+  const restored = restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(session));
+  assert.deepEqual(
+    messages.map((entry) => playerRuntimeTranscriptMessage(restored, entry.id)),
+    messages,
+  );
+  assert.equal(playerRuntimeTranscriptMessage(restored, "fixture-1"), null);
 });
 
 test("a message the trace cannot explain says why", () => {
