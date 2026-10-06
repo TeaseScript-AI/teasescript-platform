@@ -1227,6 +1227,54 @@ The `xorshift32-v1` seed and serialized state must be non-zero unsigned 32-bit i
 
 The zero-state rule prevents the absorbing xorshift32 state in which every future state and output remains zero. It does not change the plan, runtime-snapshot, or checkpoint format version.
 
+## Debug trace
+
+`RuntimeDebugContext` (`src/runtime/debug-trace.ts`) is an opt-in, host-owned record of why values have the values
+they have. A host passes the same context as `debugTrace` to each operation on a session's successive results: in the
+options of `run`, `stepToEvent`, `executeInstruction`, `runValidatedState`, `completeAction`, `observeTime`,
+`reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, and `applyExternalStorageEdit`. A Player session
+carries it as `debugTrace`, like its debug recorder: `createPlayerRuntimeSession` and `restorePlayerRuntimeSession`
+take it, `withPlayerRuntimeDebugTrace` turns it on or off, and every session operation passes it on. The trace is not
+part of plans, snapshots, events, checkpoints, restore points, or recorded calls and changes no format: an operation
+returns the same snapshot, events, random state, and checkpoint with or without it, and without it records nothing.
+
+- **Observation only.** Records take values that execution computed anyway. The trace never evaluates an expression
+  again, draws a random number, or reads storage. A recording failure stops the trace, which `status()` reports; it
+  never reaches the script's execution.
+- **Records.** Each has an ID, kind, target, source location from the plan's spans, scene time, value preview,
+  dependencies, and detail. They cover declarations; assignments, including to a property, index, or dict key and
+  compound ones, as a new version of the whole variable; collection methods that change their receiver; arguments,
+  supplied and defaulted parameters, and returns; loop sources and loop variables; intermediate values the compiled
+  code keeps; accepted answers and button timeouts, only on settlement, so refused and repeated reports record
+  nothing; loads, with whether the key was stored and whether a default ran; storage writes, a persistent one once the
+  host reports it stored, and a debugging tool's storage edits, which have no causes; random draws, with operation, choices, range, draw numbers, and generator state before and
+  after (one record for all draws of a shuffle; no state for an injected random source); the text of each `${...}`;
+  each `say` message, by its event sequence; and Stage image changes.
+- **Identity.** A dependency names the record of the version actually read. Variables are keyed by scope ID and name,
+  globals apart, so recursion, same-named variables, prepared references, and variables that blocks share keep their
+  real target; temporaries by call frame and temporary ID; arguments by call frame and parameter; storage by key. The
+  properties of a speaker, timer, media, permanent button, or the camera view, and the tagged photos, are state keyed by
+  its identity, so every name for it reads the same versions. A property read takes the newest change that sets that
+  property: its assignment, a timer or media method for the timed properties, or a declaration or `showCamera` for
+  all of it. A change does not depend on the version it replaces, except that each tagged photo joins the earlier
+  ones. A compiled copy of one value shares that value's record.
+- **Staging.** Records made while a `say` or a speaker declaration is staged commit or vanish with it, and they and the
+  stage's rollback bookkeeping count toward the bounds meanwhile. A message that waits behind pacing keeps its text's causes until it is shown.
+- **Bounds.** At most 8,192 records or 8 MiB of accounted data (`RUNTIME_DEBUG_TRACE_LIMITS`), which drops the oldest
+  records with their index entries, a record larger than the budget at once; a dependency on a dropped record reads as
+  not retained. Previews and labels stop at 1,024 characters while they are written, a longer storage key is not
+  indexed, and a record keeps at most 32 dependencies and counts the others as omitted.
+  These are debugger tuning values, not language limits.
+- **Epochs.** `reset("start")` and `reset("restore")` begin a new epoch and drop every record. So does an operation
+  whose plan or input snapshot is not the context's last result: its origin is `start` for a fresh snapshot, otherwise
+  `attach`. A value read without a recorded origin gets an `unrecorded` record: `external` after Start (a host value),
+  `beforeDebug` after attaching, `restored` after a restore, and `unavailable` once older records were dropped.
+  `status()` reports the epoch, its origin, its draws, and the generator state it began with, the seed after Start.
+- **Queries.** `record(id)` gives a detached JSON-safe view; `outputRecord(eventSequence)`, `outputs(limit)`,
+  `variableRecord(scopeId | "global", name)`, `storageRecord(key)`, and `stageImageRecord()` give record IDs.
+- **Not linked yet.** The condition of an `if`, `while`, or other branch is not a cause of the values set inside it;
+  each record's location shows its statement.
+
 ## Checkpoint boundary
 
 Runtime state must be serializable at every instruction boundary, but normal execution does not need to stringify or persist after every instruction. A production runner may execute many instructions in memory until an event, wait, input, timer, explicit save point, page lifecycle boundary, or configured checkpoint interval.

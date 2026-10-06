@@ -55,7 +55,17 @@ import {
   executeTransfer,
 } from "./operations/transfers.js";
 import { activeFunctionFrame, contextRootId, interruptRunning } from "./activations.js";
-import { detachPreparedReferencesForMutation } from "./prepared-references.js";
+import {
+  bindingKey,
+  closeDebugTrace,
+  loopKey,
+  stateKey,
+  openDebugTrace,
+  type DebugDependencies,
+  type RuntimeDebugContext,
+  type TraceStore,
+} from "./debug-trace.js";
+import { detachPreparedReferencesForMutation, GLOBAL_SCOPE_ID } from "./prepared-references.js";
 export type {
   ActionCompletionOutcome,
   PendingActionOperationResult,
@@ -167,21 +177,32 @@ type SourceSpan = RichSourceSpan | PlanSourceLocation;
 
 export interface RuntimeRunOptions {
   readonly instructionBudget?: number;
+  /** An opt-in debug trace that observes the operation (`docs/RUNTIME.md#debug-trace`). */
+  readonly debugTrace?: RuntimeDebugContext;
 }
 
 export function executeInstruction(
   plan: InstructionPlan,
   inputSnapshot: RuntimeSnapshot,
   capabilities: RuntimeCapabilities = {},
+  options: Pick<RuntimeRunOptions, "debugTrace"> = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, inputSnapshot);
-  const context = new RuntimeExecutionContext(captured.snapshot, capabilities, captured.plan);
+  const trace = openDebugTrace(options.debugTrace, captured.plan, inputSnapshot);
+  const context = new RuntimeExecutionContext(
+    captured.snapshot,
+    capabilities,
+    captured.plan,
+    trace,
+  );
   const instructionsExecuted = executeCapturedInstruction(
     captured.plan,
     captured.snapshot,
     context,
   );
-  return result(captured.snapshot, context.events, instructionsExecuted);
+  const executed = result(captured.snapshot, context.events, instructionsExecuted);
+  closeDebugTrace(trace, executed);
+  return executed;
 }
 
 /**
@@ -200,7 +221,7 @@ function executeCapturedInstruction(
     snapshot.currentSessionTimeMs <= snapshot.observedSessionTimeMs &&
     !executionRunnable(snapshot)
   ) {
-    processDueWork(plan, snapshot, context.events);
+    processDueWork(plan, snapshot, context.events, context.trace);
   }
   return executed;
 }
@@ -215,7 +236,7 @@ function executeInstructionBoundary(
   }
   // A queued expiry block interrupts at this boundary, even while the main path waits.
   if (timerHandlerDispatchable(snapshot)) {
-    startTimerHandler(plan, snapshot);
+    startTimerHandler(plan, snapshot, context.trace);
     return 1;
   }
   if (snapshot.status === "waiting") return 0;
@@ -225,6 +246,7 @@ function executeInstructionBoundary(
 
   snapshot.status = "running";
   const evaluator = context.evaluator();
+  context.trace?.at(instructionIndex, snapshot.currentSessionTimeMs);
   try {
     executePlannedInstruction(plan, instruction, snapshot, evaluator, context.events);
     if (snapshot.interactionResultHandoff?.continuationInstruction === instructionIndex) {
@@ -251,7 +273,16 @@ export function stepToEvent(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
-  return stepValidatedStateToEvent(captured.plan, captured.snapshot, capabilities, options);
+  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
+  const stepped = stepCapturedToEvent(
+    captured.plan,
+    captured.snapshot,
+    capabilities,
+    options,
+    trace,
+  );
+  closeDebugTrace(trace, stepped);
+  return stepped;
 }
 
 /** Steps engine-owned plan/state that already passed complete validation. */
@@ -261,8 +292,21 @@ export function stepValidatedStateToEvent(
   capabilities: RuntimeCapabilities = {},
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
+  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
+  const stepped = stepCapturedToEvent(plan, snapshot, capabilities, options, trace);
+  closeDebugTrace(trace, stepped);
+  return stepped;
+}
+
+function stepCapturedToEvent(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  capabilities: RuntimeCapabilities,
+  options: RuntimeRunOptions,
+  trace: TraceStore | null,
+): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  const context = new RuntimeExecutionContext(snapshot, capabilities, plan);
+  const context = new RuntimeExecutionContext(snapshot, capabilities, plan, trace);
   let instructionsExecuted = 0;
   while (executionRunnable(snapshot) && context.events.length === 0) {
     if (instructionsExecuted >= budget) {
@@ -281,7 +325,10 @@ export function run(
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
   const captured = captureExecutableData(plan, snapshot);
-  return runValidatedState(captured.plan, captured.snapshot, capabilities, options);
+  const trace = openDebugTrace(options.debugTrace, captured.plan, snapshot);
+  const ran = runCaptured(captured.plan, captured.snapshot, capabilities, options, trace);
+  closeDebugTrace(trace, ran);
+  return ran;
 }
 
 /** Runs engine-owned plan/state that already passed complete validation. */
@@ -291,8 +338,21 @@ export function runValidatedState(
   capabilities: RuntimeCapabilities = {},
   options: RuntimeRunOptions = {},
 ): RuntimeOperationResult {
+  const trace = openDebugTrace(options.debugTrace, plan, snapshot);
+  const ran = runCaptured(plan, snapshot, capabilities, options, trace);
+  closeDebugTrace(trace, ran);
+  return ran;
+}
+
+function runCaptured(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  capabilities: RuntimeCapabilities,
+  options: RuntimeRunOptions,
+  trace: TraceStore | null,
+): RuntimeOperationResult {
   const budget = instructionBudget(options.instructionBudget);
-  const context = new RuntimeExecutionContext(snapshot, capabilities, plan);
+  const context = new RuntimeExecutionContext(snapshot, capabilities, plan, trace);
   let instructionsExecuted = 0;
   while (executionRunnable(snapshot)) {
     if (instructionsExecuted >= budget) {
@@ -323,6 +383,7 @@ function executePlannedInstruction(
         name: instruction.name,
         value: cloneCapturedSerializableValue(value),
       });
+      evaluator.trace?.writeBinding("declaration", GLOBAL_SCOPE_ID, instruction.name, value);
       advance(snapshot);
       return;
     }
@@ -364,6 +425,17 @@ function executePlannedInstruction(
           }
           speaker.properties.push({ name: property.name, value: propertyValue });
         }
+        // The speaker's properties are its state; its global names that state.
+        const trace = stagedEvaluator.trace;
+        if (trace !== null)
+          trace.alias(
+            bindingKey(GLOBAL_SCOPE_ID, instruction.name),
+            trace.write("declaration", stateKey("speaker", speaker.id), instruction.name, {
+              kind: "speakerReference",
+              speakerId: speaker.id,
+              identifier: instruction.name,
+            }),
+          );
         advance(stagedSnapshot);
       });
       return;
@@ -415,17 +487,26 @@ function executePlannedInstruction(
           value: cloneCapturedSerializableValue(value),
         });
       }
-      advance(snapshot);
-      return;
-    }
-    case "prepareReference":
-      setCapturedTemporary(
-        snapshot.temporaries,
-        instruction.destinationTemporary,
-        evaluator.prepareReference(instruction.expression),
+      evaluator.trace?.writeBinding(
+        "declaration",
+        currentFrame(snapshot).id,
+        instruction.name,
+        value,
       );
       advance(snapshot);
       return;
+    }
+    case "prepareReference": {
+      const reference = evaluator.prepareReference(instruction.expression);
+      setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, reference);
+      evaluator.trace?.writeTemporary(
+        evaluator.callFrameId(),
+        instruction.destinationTemporary,
+        reference,
+      );
+      advance(snapshot);
+      return;
+    }
     case "validateAssignmentTarget":
       evaluator.validateAssignmentTarget(instruction.target);
       advance(snapshot);
@@ -473,6 +554,14 @@ function executePlannedInstruction(
         throw fault("TSR026", "Expected a boolean value.", instruction.value.span);
       }
       setCapturedTemporary(snapshot.temporaries, instruction.temporaryId, value);
+      if (evaluator.trace !== null) {
+        const copied =
+          instruction.value.kind === "temporary" || instruction.value.kind === "identifier";
+        if (copied)
+          evaluator.trace.copyTemporary(evaluator.callFrameId(), instruction.temporaryId, value);
+        else
+          evaluator.trace.writeTemporary(evaluator.callFrameId(), instruction.temporaryId, value);
+      }
       advance(snapshot);
       return;
     }
@@ -504,12 +593,15 @@ function executePlannedInstruction(
     }
     case "prepareSayText": {
       const value = evaluator.evaluate(instruction.value);
-      setCapturedTemporary(
-        snapshot.temporaries,
-        instruction.destinationTemporary,
+      const text =
         instruction.field === true
           ? fieldText(value, instruction.value.span, currentTemporalContext(snapshot))
-          : evaluator.sayText(value, instruction.value.span),
+          : evaluator.sayText(value, instruction.value.span);
+      setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, text);
+      evaluator.trace?.writeTemporary(
+        evaluator.callFrameId(),
+        instruction.destinationTemporary,
+        text,
       );
       advance(snapshot);
       return;
@@ -578,7 +670,7 @@ function executePlannedInstruction(
       enterFunction(plan, instruction, snapshot, evaluator);
       return;
     case "bindSuppliedParameter":
-      bindSuppliedParameter(plan, instruction, snapshot);
+      bindSuppliedParameter(plan, instruction, snapshot, evaluator.trace);
       return;
     case "beginFunctionDefaults":
       beginFunctionDefaults(plan, instruction.functionId, snapshot, instruction.span);
@@ -596,11 +688,11 @@ function executePlannedInstruction(
       const value = evaluator.evaluate(instruction.value);
       if (instruction.typeCheck !== undefined)
         assertValueType(value, instruction.typeCheck, instruction.value.span);
-      returnFromFunction(plan, snapshot, value, instruction.span, events);
+      returnFromFunction(plan, snapshot, value, instruction.span, events, evaluator.trace);
       return;
     }
     case "returnVoid":
-      returnFromFunction(plan, snapshot, null, instruction.span, events);
+      returnFromFunction(plan, snapshot, null, instruction.span, events, evaluator.trace);
       return;
     case "say": {
       executeSayAtomically(plan, instruction, snapshot, evaluator, events);
@@ -875,14 +967,30 @@ function executePlannedInstruction(
     case "showCamera":
       // Shows the default camera's view, or moves it when it is shown already; the Player brings the camera, if any.
       snapshot.cameraView = { placement: instruction.placement, shown: true };
-      if (instruction.destinationTemporary !== null)
+      // Showing the view sets all of it, its placement too.
+      evaluator.trace?.writeState("assignment", stateKey("camera"), "whole", "camera", {
+        kind: "cameraView",
+      });
+      if (instruction.destinationTemporary !== null) {
         setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, {
           kind: "cameraView",
         });
+        evaluator.trace?.writeTemporary(evaluator.callFrameId(), instruction.destinationTemporary, {
+          kind: "cameraView",
+        });
+      }
       advance(snapshot);
       return;
     case "hideCamera":
       if (snapshot.cameraView !== null) snapshot.cameraView.shown = false;
+      // Hiding it changes only whether it is shown.
+      evaluator.trace?.writeState(
+        "assignment",
+        stateKey("camera"),
+        { property: "shown" },
+        "camera.shown",
+        { kind: "cameraView" },
+      );
       advance(snapshot);
       return;
     case "showPermanentButton":
@@ -901,7 +1009,7 @@ function executePlannedInstruction(
       executeTransfer(plan, instruction, snapshot, evaluator, events);
       return;
     case "end":
-      executeEnd(instruction, snapshot, events);
+      executeEnd(plan, instruction, snapshot, events, evaluator.trace);
       return;
     case "setFallback":
       executeSetFallback(plan, instruction, snapshot, evaluator);
@@ -1236,11 +1344,16 @@ function enterFunction(
   evaluator: Evaluator,
 ): void {
   const definition = functionDefinition(plan, instruction.functionId, instruction.span);
+  const trace = evaluator.trace;
+  // A trace keeps each argument's causes apart, in source order.
+  const argumentCauses: DebugDependencies[] | null = trace === null ? null : [];
   const supplied = new Map(
-    instruction.arguments.map((argument) => [
-      argument.parameterName,
-      cloneCapturedSerializableValue(evaluator.evaluate(argument.value)),
-    ]),
+    instruction.arguments.map((argument) => {
+      const outer = trace?.push() ?? null;
+      const value = cloneCapturedSerializableValue(evaluator.evaluate(argument.value));
+      if (outer !== null) argumentCauses!.push(trace!.pop(outer));
+      return [argument.parameterName, value];
+    }),
   );
   // Parameters are bound only after every argument is evaluated, so the arguments are checked then too.
   for (const argument of instruction.arguments)
@@ -1285,6 +1398,16 @@ function enterFunction(
   };
   snapshot.nextCallFrameId += 1;
   snapshot.callFrames.push(frame);
+  if (trace !== null)
+    instruction.arguments.forEach((argument, index) =>
+      trace.argument(
+        frame.id,
+        definition.name,
+        argument.parameterName,
+        supplied.get(argument.parameterName)!,
+        argumentCauses![index]!,
+      ),
+    );
   snapshot.temporaries.length = 0;
   snapshot.frames.push({ id: snapshot.nextScopeId, file: null, entry: null, bindings: [] });
   snapshot.nextScopeId += 1;
@@ -1295,6 +1418,7 @@ function bindSuppliedParameter(
   plan: InstructionPlan,
   instruction: Extract<Instruction, { kind: "bindSuppliedParameter" }>,
   snapshot: RuntimeSnapshot,
+  trace: TraceStore | null,
 ): void {
   const { frame, definition } = activeFunction(plan, snapshot, instruction.span);
   if (
@@ -1311,6 +1435,13 @@ function bindSuppliedParameter(
   }
   if (argument.supplied) {
     declareFunctionBinding(plan, snapshot, parameter.name, argument.value, instruction.span);
+    trace?.suppliedParameter(
+      frame.id,
+      currentFrame(snapshot).id,
+      definition.name,
+      parameter.name,
+      argument.value,
+    );
   }
   frame.parameterState.parameterIndex += 1;
   advance(snapshot);
@@ -1389,6 +1520,18 @@ function bindDefaultParameter(
   if (instruction.typeCheck !== undefined)
     assertValueType(value, instruction.typeCheck, instruction.value.span);
   declareFunctionBinding(plan, snapshot, parameter.name, value, instruction.span);
+  evaluator.trace?.writeBinding(
+    "parameter",
+    currentFrame(snapshot).id,
+    parameter.name,
+    value,
+    Object.freeze({
+      kind: "call",
+      functionName: definition.name,
+      parameter: parameter.name,
+      defaulted: true,
+    }),
+  );
   frame.parameterState.parameterIndex += 1;
   advance(snapshot);
 }
@@ -1417,10 +1560,11 @@ function returnFromFunction(
   value: SerializableRuntimeValue,
   span: SourceSpan,
   events: InterpreterEvent[],
+  trace: TraceStore | null,
 ): void {
   const { frame } = activeFunction(plan, snapshot, span);
   if (frame.timerInterruption !== null) {
-    returnFromTimerHandler(plan, snapshot, frame, events);
+    returnFromTimerHandler(plan, snapshot, frame, events, trace);
     return;
   }
   const returned = cloneCapturedSerializableValue(value);
@@ -1437,6 +1581,18 @@ function returnFromFunction(
     throw fault("TSR050", "Function result destination is already occupied.", span);
   }
   snapshot.temporaries.push({ id: destinationTemporary, value: returned });
+  trace?.writeTemporary(
+    currentCallFrameId(snapshot) ?? 0,
+    destinationTemporary,
+    returned,
+    "return",
+    Object.freeze({
+      kind: "call",
+      functionName: frame.functionName,
+      parameter: null,
+      defaulted: false,
+    }),
+  );
   snapshot.nextInstruction = frame.returnInstruction;
 }
 
@@ -1561,6 +1717,12 @@ function executeLoopStart(
         position: 0,
         callFrameId: currentCallFrameId(snapshot),
       };
+      evaluator.trace?.write(
+        "loopSource",
+        loopKey(owner ?? 0, instruction.loopId),
+        instruction.variable,
+        frame.source,
+      );
     }
     snapshot.loopFrames.push(frame);
   }
@@ -1616,6 +1778,12 @@ function executeLoopStart(
       { name: frame.variable, value: entry.key },
       { name: frame.valueVariable!, value: cloneCapturedSerializableValue(entry.value) },
     ]);
+    if (evaluator.trace !== null) {
+      const scopeId = currentFrame(snapshot).id;
+      const source = loopKey(owner ?? 0, instruction.loopId);
+      evaluator.trace.loopValue(source, frame.source, scopeId, frame.variable, entry.key);
+      evaluator.trace.loopValue(source, frame.source, scopeId, frame.valueVariable!, entry.value);
+    }
     advance(snapshot);
     return;
   }
@@ -1624,6 +1792,13 @@ function executeLoopStart(
   pushIterationScope(snapshot, [
     { name: frame.variable, value: cloneCapturedSerializableValue(value) },
   ]);
+  evaluator.trace?.loopValue(
+    loopKey(owner ?? 0, instruction.loopId),
+    frame.source,
+    currentFrame(snapshot).id,
+    frame.variable,
+    value,
+  );
   advance(snapshot);
 }
 
@@ -1835,7 +2010,15 @@ function executeSayAtomically(
   const stagedEvents: InterpreterEvent[] = [];
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
 
-  executeSay(plan, instruction, stagedSnapshot, stagedEvaluator, stagedEvents);
+  // Trace records made while staging commit or vanish with the staged state.
+  const stage = evaluator.trace?.stage() ?? null;
+  try {
+    executeSay(plan, instruction, stagedSnapshot, stagedEvaluator, stagedEvents);
+  } catch (error) {
+    evaluator.trace?.rollback(stage);
+    throw error;
+  }
+  evaluator.trace?.commit(stage);
   Object.assign(snapshot, stagedSnapshot);
   events.push(...stagedEvents);
 }
@@ -1933,7 +2116,14 @@ function executeSpeakerAtomically(
   const stagedEvents: InterpreterEvent[] = [];
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
 
-  operation(stagedSnapshot, stagedEvaluator);
+  const stage = evaluator.trace?.stage() ?? null;
+  try {
+    operation(stagedSnapshot, stagedEvaluator);
+  } catch (error) {
+    evaluator.trace?.rollback(stage);
+    throw error;
+  }
+  evaluator.trace?.commit(stage);
   Object.assign(snapshot, stagedSnapshot);
   events.push(...stagedEvents);
 }
@@ -1949,7 +2139,7 @@ function executeSay(
   if (prepared !== null && prepared.owningInstruction === snapshot.nextInstruction) {
     validatePacingCreation(snapshot, instruction.span, prepared.durationMs);
     snapshot.preparedSayOutput = null;
-    emitSay(
+    const sequence = emitSay(
       snapshot,
       events,
       instruction.span,
@@ -1959,6 +2149,7 @@ function executeSay(
       prepared.text,
       prepared.presentation,
     );
+    evaluator.trace?.releaseOutput(sequence, prepared.owningInstruction, prepared.text);
     establishPacingAfterSay(
       snapshot,
       events,
@@ -1997,10 +2188,24 @@ function executeSay(
     speaker,
     copySpan(instruction.span),
   );
-  const authoredText =
-    instruction.textTemporary === undefined
-      ? evaluator.sayText(evaluator.evaluate(instruction.value), instruction.value.span)
-      : preparedSayText(snapshot.temporaries, instruction.textTemporary, instruction.span);
+  // A trace keeps the causes of the text apart from those of speaker, presentation, and pacing.
+  const outer = evaluator.trace?.push() ?? null;
+  let authoredText: string;
+  if (instruction.textTemporary === undefined)
+    authoredText = evaluator.sayText(evaluator.evaluate(instruction.value), instruction.value.span);
+  else {
+    authoredText = preparedSayText(
+      snapshot.temporaries,
+      instruction.textTemporary,
+      instruction.span,
+    );
+    evaluator.trace?.readTemporary(
+      evaluator.callFrameId(),
+      instruction.textTemporary,
+      authoredText,
+    );
+  }
+  const textCauses = outer === null ? null : evaluator.trace!.pop(outer);
   const content = parseMessageMarkup(authoredText);
   const text = content.visibleText;
   const pacingValue =
@@ -2016,7 +2221,16 @@ function executeSay(
     if (durationMs === 0) {
       assertEventSequenceCapacity(snapshot, 2, instruction.span);
       settleBackgroundPacingGate(plan, snapshot, activeGate, "supersededByInstantOutput", events);
-      emitSay(snapshot, events, instruction.span, output, content, text, presentation);
+      const sequence = emitSay(
+        snapshot,
+        events,
+        instruction.span,
+        output,
+        content,
+        text,
+        presentation,
+      );
+      if (textCauses !== null) evaluator.trace!.output(sequence, text, textCauses);
       advance(snapshot);
       return;
     }
@@ -2034,10 +2248,12 @@ function executeSay(
     snapshot.backgroundActions.splice(index, 1);
     snapshot.foregroundAction = Object.freeze({ ...activeGate, preparedOutput });
     snapshot.status = "waiting";
+    if (textCauses !== null) evaluator.trace!.holdOutput(snapshot.nextInstruction, textCauses);
     return;
   }
   if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs);
-  emitSay(snapshot, events, instruction.span, output, content, text, presentation);
+  const sequence = emitSay(snapshot, events, instruction.span, output, content, text, presentation);
+  if (textCauses !== null) evaluator.trace!.output(sequence, text, textCauses);
   if (durationMs > 0)
     establishPacingAfterSay(snapshot, events, instruction.span, durationMs, skippable);
   advance(snapshot);
@@ -2127,18 +2343,20 @@ function emitSay(
   content: MessageMarkup,
   text: string,
   presentation: MessagePresentation,
-): void {
+): number {
+  const sequence = takeSequence(snapshot);
   events.push(
     Object.freeze({
       kind: "say",
       presentation,
-      sequence: takeSequence(snapshot),
+      sequence,
       speaker,
       content,
       text,
       span: copySpan(span),
     } satisfies SayEvent),
   );
+  return sequence;
 }
 
 function establishPacingAfterSay(
@@ -2313,7 +2531,7 @@ export function timerDurationMs(
   const drawn =
     range === null || range.start < 0
       ? value
-      : evaluator.randomIntegerInRange(range, span, "timer");
+      : evaluator.randomIntegerInRange(range, span, "timer", "duration");
   const amount =
     isDuration(drawn) && unit === null
       ? exactDurationMilliseconds(drawn, command === "timer" ? "A timer" : "wait", span)
@@ -2467,10 +2685,13 @@ function startTimer(
   snapshot.nextTimerId += 1;
   snapshot.backgroundActions.push(action);
   if (instruction.destinationTemporary !== null) {
-    setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, {
-      kind: "timerHandle",
-      timerId,
-    });
+    const handle = { kind: "timerHandle" as const, timerId };
+    setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, handle);
+    evaluator.trace?.writeTemporary(
+      evaluator.callFrameId(),
+      instruction.destinationTemporary,
+      handle,
+    );
   }
   events.push(
     Object.freeze({
@@ -2487,6 +2708,7 @@ function startTimer(
       snapshot.currentSessionTimeMs,
       copySpan(instruction.span),
       events,
+      evaluator.trace,
     );
   }
   advance(snapshot);
@@ -2518,6 +2740,7 @@ function showImage(
   }
   stopStageVideo(plan, snapshot, events, instruction.span);
   snapshot.stageImage = image;
+  evaluator.trace?.image(image);
   advance(snapshot);
 }
 
@@ -2544,6 +2767,7 @@ function writeStorage(
   assertPersistable(value, instruction.span);
   if (!snapshot.scriptStoragePersistent) {
     writeScriptStorage(snapshot, key, value);
+    evaluator.trace?.storage(key, value);
     advance(snapshot);
     return;
   }
@@ -2576,6 +2800,7 @@ function writeStorage(
   snapshot.nextActionId += 1;
   snapshot.foregroundAction = write;
   snapshot.status = "waiting";
+  evaluator.trace?.awaitStorage(write.actionId, key, value);
   events.push(
     Object.freeze({
       kind: "actionRequested",
@@ -2756,10 +2981,13 @@ function startMedia(
   snapshot.nextMediaId += 1;
   snapshot.backgroundActions.push(action);
   if (instruction.destinationTemporary !== null) {
-    setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, {
-      kind: "mediaHandle",
-      mediaId,
-    });
+    const handle = { kind: "mediaHandle" as const, mediaId };
+    setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, handle);
+    evaluator.trace?.writeTemporary(
+      evaluator.callFrameId(),
+      instruction.destinationTemporary,
+      handle,
+    );
   }
   events.push(
     Object.freeze({
@@ -2885,11 +3113,15 @@ function showPermanentButton(
   snapshot.nextActionId += 1;
   snapshot.nextPermanentButtonId += 1;
   snapshot.backgroundActions.push(action);
-  if (instruction.destinationTemporary !== null)
-    setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, {
-      kind: "permanentButtonHandle",
-      buttonId,
-    });
+  if (instruction.destinationTemporary !== null) {
+    const handle = { kind: "permanentButtonHandle" as const, buttonId };
+    setCapturedTemporary(snapshot.temporaries, instruction.destinationTemporary, handle);
+    evaluator.trace?.writeTemporary(
+      evaluator.callFrameId(),
+      instruction.destinationTemporary,
+      handle,
+    );
+  }
   events.push(
     Object.freeze({
       kind: "actionRequested",

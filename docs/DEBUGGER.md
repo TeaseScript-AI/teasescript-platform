@@ -9,7 +9,8 @@ preserve surprises.
 
 The Debugger should expose the current source file and execution position, variables and values, foreground/background
 actions, visible and hidden timers, current media/audio/video state, and provenance that explains selected media or
-branches. Exact UI and source mapping remain presentation/tooling work.
+branches. Exact UI and source mapping remain presentation/tooling work. Value provenance comes from the runtime's opt-in
+[debug trace](RUNTIME.md#debug-trace), which owns its recording, identity, history bounds, and restore behavior.
 
 ## Execution modes
 

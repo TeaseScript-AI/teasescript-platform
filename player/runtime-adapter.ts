@@ -55,6 +55,7 @@ import {
 } from "../src/runtime/media.js";
 import type { RuntimeTimerSnapshot } from "../src/runtime/timers.js";
 import type { DebugRecorder } from "./debug-recorder.js";
+import type { RuntimeDebugContext } from "../src/runtime/debug-trace.js";
 import type {
   PlayerForegroundPresentation,
   PlayerPermanentButtonPresentation,
@@ -82,6 +83,11 @@ export interface PlayerRuntimeSession {
   readonly speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   /** Records the session's engine calls for a debug export; it never changes them. */
   readonly recorder: DebugRecorder | null;
+  /**
+   * The host's opt-in value trace, which every engine call of the session receives (`docs/RUNTIME.md#debug-trace`); it
+   * never changes them and is in no snapshot, checkpoint, restore point, or recorded call. `null` when Debug is off.
+   */
+  readonly debugTrace: RuntimeDebugContext | null;
 }
 
 export interface PlayerRuntimeSessionOptions {
@@ -98,6 +104,8 @@ export interface PlayerRuntimeSessionOptions {
   readonly wallClockMs?: number;
   /** Records the session's engine calls, from before its first run, for a debug export. */
   readonly recorder?: DebugRecorder;
+  /** Traces the session from Start; the trace begins a new epoch. */
+  readonly debugTrace?: RuntimeDebugContext;
 }
 
 /**
@@ -199,9 +207,13 @@ export function createPlayerRuntimeSession(
   });
   const recorder = options.recorder ?? null;
   recorder?.begin(plan, snapshot);
-  const operation = recorded(recorder, "run", snapshot, [{}], () => run(plan, snapshot));
+  const debugTrace = options.debugTrace ?? null;
+  debugTrace?.reset("start");
+  const operation = recorded(recorder, "run", snapshot, [{}], () =>
+    run(plan, snapshot, {}, traceOptions(debugTrace)),
+  );
   return applyOperation(
-    emptySession(plan, snapshot, recorder),
+    emptySession(plan, snapshot, recorder, debugTrace),
     operation.snapshot,
     operation.events,
     false,
@@ -237,13 +249,29 @@ export function createPlayerRuntimeRestorePoint(
 export function restorePlayerRuntimeSession(
   restorePoint: PlayerRuntimeRestorePoint,
   recorder: DebugRecorder | null = null,
+  debugTrace: RuntimeDebugContext | null = null,
 ): PlayerRuntimeSession {
   const checkpoint = deserializeCheckpoint(restorePoint.checkpointJson);
   recorder?.begin(checkpoint.plan, checkpoint.snapshot);
+  // Restored values are trustworthy, but their history is not part of the checkpoint.
+  debugTrace?.reset("restore");
   return appendRuntimeEvents(
-    emptySession(checkpoint.plan, checkpoint.snapshot, recorder),
+    emptySession(checkpoint.plan, checkpoint.snapshot, recorder, debugTrace),
     restorePoint.events,
   );
+}
+
+/**
+ * The session with Debug's value trace turned on (`context`) or off (`null`). A trace turned on mid-session attaches
+ * at its next operation, so values from before read as not recorded.
+ */
+export function withPlayerRuntimeDebugTrace(
+  session: PlayerRuntimeSession,
+  context: RuntimeDebugContext | null,
+): PlayerRuntimeSession {
+  return session.debugTrace === context
+    ? session
+    : Object.freeze({ ...session, debugTrace: context });
 }
 
 export function playerRuntimeForeground(
@@ -707,7 +735,9 @@ export function answerPlayerRuntimeCapture(
         session.plan,
         session.snapshot,
         request,
-        capturedMedia === undefined ? {} : { capturedMedia: admission(capturedMedia) },
+        capturedMedia === undefined
+          ? traceOptions(session.debugTrace)
+          : { ...traceOptions(session.debugTrace), capturedMedia: admission(capturedMedia) },
       ),
   );
   return Object.freeze({
@@ -788,6 +818,7 @@ export function answerPlayerRuntimeImage(
     [request],
     (admission) =>
       completeAction(session.plan, session.snapshot, request, {
+        ...traceOptions(session.debugTrace),
         capturedMedia: admission(capturedMedia),
       }),
   );
@@ -845,7 +876,13 @@ export function continuePlayerRuntimeSession(
     "recordContinueCapture",
     session.snapshot,
     [capture],
-    () => recordContinueCapture(session.plan, session.snapshot, capture),
+    () =>
+      recordContinueCapture(
+        session.plan,
+        session.snapshot,
+        capture,
+        traceOptions(session.debugTrace),
+      ),
   );
   return Object.freeze({
     session: applyOperation(
@@ -872,7 +909,14 @@ export function observePlayerRuntimeTime(
     "observeTime",
     session.snapshot,
     [currentSessionTimeMs, mediaReports],
-    () => observeTime(session.plan, session.snapshot, currentSessionTimeMs, mediaReports),
+    () =>
+      observeTime(
+        session.plan,
+        session.snapshot,
+        currentSessionTimeMs,
+        mediaReports,
+        traceOptions(session.debugTrace),
+      ),
   );
   // A settlement or a queued timer expiry block may make execution eligible; `run` returns at once otherwise.
   return Object.freeze({
@@ -997,7 +1041,14 @@ export function reportPlayerRuntimeMediaLoad(
     "reportMediaLoad",
     session.snapshot,
     [mediaId, report],
-    () => reportMediaLoad(session.plan, session.snapshot, mediaId, report),
+    () =>
+      reportMediaLoad(
+        session.plan,
+        session.snapshot,
+        mediaId,
+        report,
+        traceOptions(session.debugTrace),
+      ),
   );
   return Object.freeze({
     session: applyOperation(
@@ -1035,7 +1086,13 @@ export function applyPlayerRuntimeStorageEdit(
     "applyExternalStorageEdit",
     session.snapshot,
     [edit],
-    () => applyExternalStorageEdit(session.plan, session.snapshot, edit),
+    () =>
+      applyExternalStorageEdit(
+        session.plan,
+        session.snapshot,
+        edit,
+        traceOptions(session.debugTrace),
+      ),
   );
   return Object.freeze({
     session: applyOperation(session, operation.snapshot, operation.events, false),
@@ -1053,7 +1110,13 @@ export function pressPlayerRuntimePermanentButton(
     "pressPermanentButton",
     session.snapshot,
     [buttonId],
-    () => pressPermanentButton(session.plan, session.snapshot, buttonId),
+    () =>
+      pressPermanentButton(
+        session.plan,
+        session.snapshot,
+        buttonId,
+        traceOptions(session.debugTrace),
+      ),
   );
   return Object.freeze({
     session: applyOperation(
@@ -1116,7 +1179,7 @@ function completePlayerAction(
 ): PlayerRuntimeControlResult<ActionCompletionOutcome> {
   const request = actionRequest(action, payload);
   const operation = recorded(session.recorder, "completeAction", session.snapshot, [request], () =>
-    completeAction(session.plan, session.snapshot, request),
+    completeAction(session.plan, session.snapshot, request, traceOptions(session.debugTrace)),
   );
   return Object.freeze({
     session: applyOperation(
@@ -1152,7 +1215,7 @@ export function completePlayerRuntimeStorageWrite(
     payload: { kind: stored ? "stored" : "failed" },
   };
   const operation = recorded(session.recorder, "completeAction", session.snapshot, [request], () =>
-    completeAction(session.plan, session.snapshot, request),
+    completeAction(session.plan, session.snapshot, request, traceOptions(session.debugTrace)),
   );
   return Object.freeze({
     session: applyOperation(
@@ -1181,7 +1244,7 @@ function applyOperation(
     "run",
     next.snapshot,
     [{}],
-    () => runValidatedState(next.plan, next.snapshot),
+    () => runValidatedState(next.plan, next.snapshot, {}, traceOptions(session.debugTrace)),
     true,
   );
   return appendRuntimeEvents({ ...next, snapshot: continuation.snapshot }, continuation.events);
@@ -1191,11 +1254,13 @@ function emptySession(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot,
   recorder: DebugRecorder | null,
+  debugTrace: RuntimeDebugContext | null,
 ): PlayerRuntimeSession {
   return Object.freeze({
     plan,
     snapshot,
     recorder,
+    debugTrace,
     events: [],
     transcriptEntries: [],
     transcriptRevision: 0,
@@ -1262,6 +1327,15 @@ function appendRuntimeEvents(
     transcriptRevision: session.transcriptRevision + 1,
     speakers,
   });
+}
+
+const NO_TRACE = Object.freeze({});
+
+/** The engine options that pass the session's value trace, or none while Debug is off. */
+function traceOptions(debugTrace: RuntimeDebugContext | null): {
+  readonly debugTrace?: RuntimeDebugContext;
+} {
+  return debugTrace === null ? NO_TRACE : { debugTrace };
 }
 
 /** Makes an engine call through the session's recorder, or directly without one. */
