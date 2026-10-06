@@ -139,7 +139,7 @@ export function materializeForm(
       const start = defaults.items[index]!;
       if (typeof start !== "boolean")
         throw fault(
-          `askBooleans takes true or false as each default, not ${describeRuntimeValue(start)}.`,
+          `askBooleans default ${index} (${JSON.stringify(fieldText(text, span, context))}): takes true or false, not ${describeRuntimeValue(start)}.`,
           span,
         );
       add(

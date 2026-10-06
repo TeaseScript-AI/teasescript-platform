@@ -2007,7 +2007,7 @@ Rules:
 - Edits add nothing to the transcript. Submitting adds one player line: `12 of 43 selected` when every field is a
   toggle, otherwise `5 of 6 fields set`, which does not count an optional field without a value.
 - With `cancel:` the player may cancel the whole form, which returns `null`, so the form's type is optional. A field's
-  `null` is not a cancelled form. Without `cancel:` the form must be submitted.
+  `null` is not a cancelled form. Without `cancel:` the player cannot cancel the form.
 - A timer, media, or permanent-button block may interrupt a form; the form then resumes with its answers and the text
   being edited.
 
