@@ -222,7 +222,9 @@ export function playerDebugTraceRows(
       continue;
     }
     shown.set(id, key);
-    const causes = record.dependencies;
+    // Data causes first, then the branch decision the record happened under.
+    const causes =
+      record.control === null ? record.dependencies : [...record.dependencies, record.control];
     const expandable = causes.length > 0 || record.omittedDependencies > 0;
     const expanded = expandable && view.expanded(key, record, depth, carried);
     rows.push({ kind: "record", key, depth, id, text, expandable, expanded });
@@ -418,6 +420,9 @@ export function playerDebugRecordText(
     }
     case "image":
       title = record.preview === "null" ? "hideImage" : "showImage";
+      break;
+    case "decision":
+      title = "Branch condition";
       break;
     case "unrecorded":
       title = target;

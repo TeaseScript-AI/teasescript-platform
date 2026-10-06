@@ -312,3 +312,22 @@ test("a message the trace cannot explain says why", () => {
     ["Expired: older history was dropped", "recorded"],
   );
 });
+
+test("a message shown inside a branch shows the decision that took it", () => {
+  const { session, trace } = traced(
+    ['let mood = "calm"', 'if mood == "calm" {', '    say "Stay ${mood}"', "}", "exit"].join("\n"),
+  );
+  const [output] = trace.outputs();
+  const rows = playerDebugTraceRows(trace, [output!], defaults());
+  assert.deepEqual(summary(rows), [
+    'Message "Stay calm"',
+    '  let mood "calm"',
+    "  Branch condition true",
+  ]);
+  const condition = rows.at(-1)!;
+  assert.equal(condition.kind === "record" && condition.text.location, "main.tease:2");
+  // The decision opens to its condition's causes, the one shown above.
+  const opened = playerDebugTraceRows(trace, [output!], defaults(new Set([condition.key])));
+  assert.equal(summary(opened).at(-1), '    ↑ let mood "calm"');
+  assert.equal(session.snapshot.status, "halted");
+});

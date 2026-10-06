@@ -70,8 +70,10 @@ tabs **Now** (first), **Variables**, **Log**, and **Storage**, which appears whe
   in the same tree links to its first row. Unknown origins say why (supplied by the host, Not recorded before Debug,
   Restored value, or no longer retained), a dropped cause reads **Expired**, and causes beyond the trace's limit are
   counted. The tab keeps its opened rows, filter, and pages while another tab shows, and computes nothing meanwhile. The collapsed **Background / all live variables** section filters by name and groups live variables by
-  globals, file, function or block call, and variables kept for blocks, 20 at a time, each opening to its origin. Branch
-  conditions are not causes yet.
+  globals, file, function or block call, and variables kept for blocks, 20 at a time, each opening to its origin. A
+  value set, or a message shown, inside an `if`, `switch`, `while`, or similar branch lists the **Branch condition**
+  that took that branch after its other causes, with the condition's value and statement; it opens to the condition's
+  own causes.
 - **Storage** lists what the script saved in this browser: every key in UTF-16 order, its value's type and a
   short preview, and, once expanded, a list, set, object, or dict's members, 20 at a time, as one flat outline. Text
   stays text: when it has the exact shape of a photo reference, a thumbnail beside it shows the photo this browser
