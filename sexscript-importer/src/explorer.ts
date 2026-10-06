@@ -13,8 +13,9 @@ import { isRecord } from "./ast.ts";
  *
  * - Coverage: instructions are executed one by one with `executeInstruction`, so every executed instruction is
  *   recorded; once {@link TRACE_PATIENCE} instructions in a row were all reached before, the step finishes with `run`
- *   and the rest of the product's instruction budget, which keeps `TSR037` where the Player has it. Every operation
- *   copies and checks the whole snapshot, so recording is what limits the speed on large packages.
+ *   and the rest of the product's instruction budget, which keeps `TSR037` where the Player has it; what it executes
+ *   after that point is not recorded. Every operation copies and checks the whole snapshot, so recording is what limits
+ *   the speed on large packages.
  * - States are deduplicated by {@link stateKeys}: a hash of the snapshot without what a script cannot observe.
  * - Search order: states whose step reached new instructions first, then states that differ from every explored one
  *   in more than clock, random state, and settled handles (their loop key), then the rest, least repeated first.

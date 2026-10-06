@@ -262,8 +262,10 @@ the newest state goes first. It stops when every state is expanded, or at the ti
 
 Coverage counts executed plan instructions and maps them to the lines they start on. Steps run instruction by
 instruction with `executeInstruction` to record them. After 200 instructions in a row that were all reached before,
-a step finishes with `run` and the rest of the product's instruction budget. Each operation copies and checks the
-whole snapshot, so this recording is what limits the speed on large packages.
+a step finishes with `run` and the rest of the product's instruction budget. What the step executes after that point
+is not recorded: its lines can show as unvisited, and its conditions as left only one way although play took both
+(for example the code after a long setup loop). Each operation copies and checks the whole snapshot, so this
+recording is what limits the speed on large packages, and on packages with large lists or dicts in their state.
 
 The report `<out>/<unit>.json` has these parts:
 
